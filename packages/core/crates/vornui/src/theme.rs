@@ -46,6 +46,7 @@ pub mod rgb {
     pub const AMBER_500: u32 = 0xfe9a00;
     pub const BLUE_400: u32 = 0x54a2ff;
     pub const BLUE_500: u32 = 0x2b7fff;
+    pub const SKY_400: u32 = 0x00bcff;
 }
 
 /// Colours from `theme.css` and Tailwind, ready to paint.
@@ -192,14 +193,22 @@ pub const fn space(units: f32) -> f32 {
     units * 4.0
 }
 
-/// Tailwind's shadows, as (y offset, blur, spread, alpha) of black layers.
+/// Tailwind's `box-shadow` scale and the glass panels' shadow, as
+/// (y offset, blur, spread, alpha) of black layers, for what floats over
+/// the page (menus, popovers, dialogs, tooltips).
 pub mod shadow {
+    /// `shadow-sm`.
+    pub const SM: [(f32, f32, f32, f32); 2] = [(1.0, 3.0, 0.0, 0.1), (1.0, 2.0, -1.0, 0.1)];
+    /// `shadow-md`.
+    pub const MD: [(f32, f32, f32, f32); 2] = [(4.0, 6.0, -1.0, 0.1), (2.0, 4.0, -2.0, 0.1)];
     /// `shadow-lg`.
     pub const LG: [(f32, f32, f32, f32); 2] = [(10.0, 15.0, -3.0, 0.1), (4.0, 6.0, -4.0, 0.1)];
     /// `shadow-xl`.
     pub const XL: [(f32, f32, f32, f32); 2] = [(20.0, 25.0, -5.0, 0.1), (8.0, 10.0, -6.0, 0.1)];
     /// `shadow-2xl`.
     pub const XL2: [(f32, f32, f32, f32); 1] = [(25.0, 50.0, -12.0, 0.25)];
+    /// `--glass-shadow`'s outer part.
+    pub const GLASS: [(f32, f32, f32, f32); 1] = [(0.0, 25.0, 0.0, 0.15)];
 }
 
 /// Tailwind's radii, logical pixels.
@@ -252,6 +261,14 @@ pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
         }
     }
     curve(y1, y2, (lo + hi) / 2.0)
+}
+
+/// `backdrop-filter: blur()` standard deviations, logical pixels.
+pub mod blur {
+    /// `backdrop-blur-sm`.
+    pub const SM: f32 = 4.0;
+    /// `--glass-blur`.
+    pub const GLASS: f32 = 16.0;
 }
 
 /// `:focus-visible` from `global.css`: a 1px outline, 1px out, and the

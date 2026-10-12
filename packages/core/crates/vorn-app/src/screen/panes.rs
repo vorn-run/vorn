@@ -1,338 +1,324 @@
-//! The panes beside a session's terminal (`PaneColumn`, `SplitDivider`,
-//! `PaneCard`, `PaneTabStrip`), its Files pane (`FilesCard`,
-//! `FileTreeExplorer`) and Terminals panel (`TerminalsCard`), an open file
-//! (`FilePanel`, `CodeEditor`), and a file popped out into a card of its
-//! own (`EditorCard`).
+//! The panes beside a session's terminal (`PaneColumn`): the browser
+//! (`BrowserCard`) with its artifact bar, banner, design canvas, doc editor
+//! and comment rail; the device (`DeviceCard`) with its frame and controls;
+//! and the simulator picker (`DevicePicker`). Pages and the device's screen
+//! are native web views the app seats in the custom boxes left for them.
 
-use super::cards;
-use super::{c, ico, truncate, white, Screen};
-use crate::act::Act;
+use super::{c, ico, white, Screen};
+use crate::act::{Act, Acts};
+use crate::artifact::{self, Anchor, Comment, Tweak};
+use crate::browser::{self, Pane};
 use crate::client::Session;
-use crate::editor::{self, Buffer, EditAct, ReadOnly, LINE_HEIGHT};
-use crate::git::GitAct;
+use crate::components::card::{card_button, CardButton, CardVariant};
 use crate::look;
-use crate::panes::{pane_id, tab_key, PaneAct, PaneKind, TreeRow};
-use crate::state::State;
+use crate::panes::{
+    board_key, canvas_id, compare_key, device_key, note_id, page_key, rail_text_id, stage_id, Live,
+    PaneAct, PaneKind,
+};
 use crate::ui::{
-    code, custom, div, field, icon, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle,
+    custom, div, field, text, textarea, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
+    TextStyle,
 };
 
-const AMBER_300: u32 = 0xffd230;
-/// The pane grey (`PANE_SURFACE`).
-fn pane_bg() -> Rgba {
-    c(look::SURFACE_PANEL)
+fn ink() -> Rgba {
+    c(look::INK)
+}
+
+fn ink2() -> Rgba {
+    Rgba::hexa(look::INK, look::INK_SECONDARY)
+}
+
+fn faint() -> Rgba {
+    Rgba::hexa(look::INK, look::INK_FAINT)
 }
 
 fn pane(a: PaneAct) -> Act {
     Act::Pane(a)
 }
 
-fn edit(a: EditAct) -> Act {
-    Act::Edit(a)
-}
-
-pub fn editor_id(key: &str) -> Id {
-    Id::new("editor").child(key)
-}
-
-pub fn find_id(key: &str) -> Id {
-    Id::new("editor-find").child(key)
-}
-
-pub fn scroller_id(key: &str) -> Id {
-    Id::new("editor-scroll").child(key)
-}
-
-pub fn files_body_id(owner: &str) -> Id {
-    Id::new("files-body").child(owner)
-}
-
-pub fn filter_id(owner: &str) -> Id {
-    Id::new("files-filter").child(owner)
-}
-
-fn card_divider_id(owner: &str) -> Id {
-    Id::new("card-divider").child(owner)
-}
-
-fn column_divider_id(owner: &str, i: usize) -> Id {
-    Id::new("pane-divider").child((owner, i))
-}
-
-fn tree_divider_id(owner: &str) -> Id {
-    Id::new("tree-divider").child(owner)
-}
-
-/// What a dragged divider resizes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PaneDivider {
-    /// The terminal against `owner`'s pane column.
-    Card(String),
-    /// Between pane `i` and the next in `owner`'s column.
-    Column(String, usize),
-    /// A Files pane's tree against its file.
-    Tree,
-    /// The Changes panel's width.
-    Changes,
-}
-
-/// Which divider `id` is.
-pub fn divider_of(st: &State, id: Id) -> Option<PaneDivider> {
-    if id == super::git::changes_resize_id() {
-        return Some(PaneDivider::Changes);
-    }
-    for owner in st
-        .panes
-        .saved
-        .files
-        .keys()
-        .chain(st.panes.saved.panels.keys())
-    {
-        if id == card_divider_id(owner) {
-            return Some(PaneDivider::Card(owner.clone()));
-        }
-        if id == tree_divider_id(owner) {
-            return Some(PaneDivider::Tree);
-        }
-        for i in 0..2 {
-            if id == column_divider_id(owner, i) {
-                return Some(PaneDivider::Column(owner.clone(), i));
-            }
-        }
-    }
-    None
-}
-
-/// `SplitDivider`: a 1px seam with a 3px grab either side.
-fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
-    let hot = if s.ui.pressed(id) {
-        1.0
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
     } else {
-        s.ui.hover(id)
-    };
-    let line = div()
-        .id(id)
-        .shrink0()
-        .sense(Sense::DRAG)
-        .bg(white(0.06).mix(Rgba::hexa(0x2b7fff, 0.4), hot))
-        .role(Role::Splitter, label)
-        .vertical(side_by_side);
-    if side_by_side {
-        line.w(1.0).h_full().hit_slop(3.0, 0.0)
+        "s"
+    }
+}
+
+/// A number as JavaScript prints it: no `.0` on a whole one.
+fn js_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
     } else {
-        line.h(1.0).w_full().hit_slop(0.0, 3.0)
+        n.to_string()
     }
 }
 
-/// `FileTypeIcon`: a file's Seti glyph in its colour.
-pub(crate) fn file_icon(name: &str, size: f32) -> El {
-    let (ch, color) = crate::file_icons::resolve(name);
-    match crate::file_icons::svg(ch) {
-        Some(svg) => icon(svg, size, c(color)),
-        None => div().size(size, size),
-    }
-}
-
-/// `ICON_BUTTON`: `p-1 rounded hover:bg-white/10 text-ink`.
-fn icon_button(s: &Screen<'_>, place: &str, act: Act, name: &str, label: &str, on: bool) -> El {
-    let id = s.acts.on(place, act);
+/// `ICON_BUTTON`: `p-1 rounded hover:bg-white/10 text-ink`, `on` holding
+/// the hover look, and `disabled:opacity-25`.
+fn icon_btn(
+    s: &Screen<'_>,
+    act: PaneAct,
+    name: &str,
+    label: &str,
+    tip: Option<&str>,
+    on: Option<Rgba>,
+    enabled: bool,
+) -> El {
+    let id = s.acts.on("pane", pane(act));
+    let hot = if enabled { s.ui.hover(id) } else { 0.0 };
+    let bg = on.unwrap_or_else(|| white(0.0).mix(white(0.10), hot));
     let b = div()
         .id(id)
         .on(Action::Click)
         .p(4.0)
         .rounded(4.0)
         .shrink0()
-        .bg(white(0.10 * s.ui.hover(id).max(if on { 1.0 } else { 0.0 })))
+        .bg(bg)
         .role(Role::Button, label)
-        .child(ico(name, 14.0, 2.0, c(look::INK)));
-    tooltip(s.ui, b, id, label, None)
-}
-
-/// `PaneControls`: pop out, maximize or restore, close.
-fn controls(s: &Screen<'_>, kind: PaneKind, owner: &str, pop: Option<Act>) -> El {
-    let id = pane_id(kind, owner);
-    let max = s.st.panes.saved.maximized.as_deref() == Some(id.as_str());
-    let mut row = div().row().items_center().gap(2.0).shrink0();
-    if let Some(p) = pop {
-        row = row.child(icon_button(
-            s,
-            "pane-pop",
-            p,
-            "square-arrow-out-up-right",
-            "Open as its own card",
-            false,
-        ));
-    }
-    let (glyph, label) = if max {
-        ("minimize-2", "Restore")
+        .child(ico(name, 14.0, 2.0, ink()));
+    let b = if enabled {
+        b
     } else {
-        ("maximize-2", "Maximize")
+        b.disabled(true).opacity(0.25)
     };
-    row.child(icon_button(
-        s,
-        "pane-max",
-        pane(PaneAct::Maximize(id)),
-        glyph,
-        label,
-        false,
-    ))
-    .child(icon_button(
-        s,
-        "pane-close",
-        pane(PaneAct::Close(kind, owner.to_owned())),
-        "x",
-        "Close",
-        false,
-    ))
+    match tip {
+        Some(t) if enabled => tooltip(s.ui, b, id, t, None),
+        _ => b,
+    }
 }
 
-/// One tab of a `PaneTabStrip`.
-struct Tab {
-    name: String,
-    /// The parent folder, when another tab has the same name.
-    parent: Option<String>,
-    icon: Option<El>,
-    italic: bool,
-    dirty: bool,
-    active: bool,
-    select: Act,
-    close: Act,
-    double: Option<Act>,
-    extract: Option<Act>,
+/// `h-6 px-2.5 rounded border-white/12 text-[12px]`: the bar's text buttons.
+fn text_btn(s: &Screen<'_>, act: PaneAct, label: El, name: &str, enabled: bool) -> (El, Id) {
+    let id = s.acts.on("pane", pane(act));
+    let hot = if enabled { s.ui.hover(id) } else { 0.0 };
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .h(24.0)
+        .px(10.0)
+        .rounded(4.0)
+        .shrink0()
+        .border(1.0, white(0.12))
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::Button, name)
+        .child(label);
+    let b = if enabled {
+        b
+    } else {
+        b.disabled(true).opacity(0.4)
+    };
+    (b, id)
 }
 
-/// `PaneTabStrip`: the pane's title bar.
-/// What a strip carries besides its tabs.
-struct Strip<'a> {
-    leading: Option<El>,
-    /// The title shown while there are no tabs.
-    empty: Option<&'a str>,
-    add: Option<(Act, &'a str)>,
-    overflow: Option<Act>,
-    trailing: El,
+/// `PaneControls`: maximize or restore, and close.
+fn controls(s: &Screen<'_>, sid: &str, kind: PaneKind, title: &str) -> El {
+    let maxed = s.st.bench.maximized.get(sid) == Some(&kind);
+    let (icon, tip, aria) = if maxed {
+        ("minimize-2", "Restore", format!("Restore {title}"))
+    } else {
+        ("maximize-2", "Maximize", format!("Maximize {title}"))
+    };
+    div()
+        .row()
+        .items_center()
+        .gap(2.0)
+        .shrink0()
+        .child(icon_btn(
+            s,
+            PaneAct::Maximize(sid.to_owned(), kind),
+            icon,
+            &aria,
+            Some(tip),
+            None,
+            true,
+        ))
+        .child(icon_btn(
+            s,
+            PaneAct::Close(sid.to_owned(), kind),
+            "x",
+            &format!("Close {title}"),
+            Some("Close"),
+            None,
+            true,
+        ))
 }
 
-fn tab_strip(s: &Screen<'_>, place: &str, tabs: Vec<Tab>, strip_: Strip<'_>) -> El {
-    let Strip {
-        leading,
-        empty,
-        add,
-        overflow,
-        trailing,
-    } = strip_;
-    let mut list = div()
+/// `PaneColumn`: the browser over the device, or the maximized one alone.
+pub(super) fn column(s: &Screen<'_>, session: &Session) -> Option<El> {
+    let sid = session.info.id.as_str();
+    let bench = &s.st.bench;
+    let mut kinds = bench.kinds(sid);
+    if let Some(m) = bench.maximized.get(sid) {
+        kinds.retain(|k| k == m);
+    }
+    if kinds.is_empty() {
+        return None;
+    }
+    let mut col = div().col().grow().min_h(0.0).min_w0().gap(1.0);
+    for (n, kind) in kinds.iter().enumerate() {
+        if n > 0 {
+            col = col.child(div().h(1.0).w_full().shrink0().bg(white(0.06)));
+        }
+        col = col.child(match kind {
+            PaneKind::Browser => browser_pane(s, session),
+            PaneKind::Device => device_pane(s, session),
+        });
+    }
+    Some(col)
+}
+
+/// Whether a session has a pane maximized over its terminal.
+pub(super) fn maximized(s: &Screen<'_>, sid: &str) -> bool {
+    s.st.bench
+        .maximized
+        .get(sid)
+        .is_some_and(|k| s.st.bench.kinds(sid).contains(k))
+}
+
+/// A web view's box, or the pane's own words where none can show.
+fn web_box(s: &Screen<'_>, key: &str) -> El {
+    match s.st.bench.slot_id(key) {
+        Some(id) => custom(id).grow().min_h(0.0).min_w0(),
+        None => {
+            let mut el = div().grow().min_h(0.0).min_w0().center();
+            if let Some(why) = &s.st.bench.unavailable {
+                el = el.p(16.0).child(
+                    text(why.as_str(), 11.0, c(look::GRAY_500))
+                        .wrapping()
+                        .min_w0()
+                        .role(Role::Status, why.as_str()),
+                );
+            }
+            el
+        }
+    }
+}
+
+// ---- browser ------------------------------------------------------------
+
+fn browser_pane(s: &Screen<'_>, session: &Session) -> El {
+    let sid = session.info.id.as_str();
+    let bench = &s.st.bench;
+    let Some(p) = bench.browsers.get(sid) else {
+        return div();
+    };
+    let live = bench.live(sid);
+    let url = p.active().map_or("", |t| t.current());
+    let host = browser::display_host(url);
+    let agent = session.info.agent_type.as_str();
+    div()
+        .col()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .clip()
+        .bg(c(look::SURFACE_PANEL))
+        .role(Role::Region, "Browser")
+        .child(tab_strip(s, sid, p, live, &host))
+        .child(header(s, sid, live, url, agent))
+        .child_if(banner(s, sid, live))
+        .child_if(live.and_then(|l| l.failed.as_deref()).map(|f| {
+            div().px(8.0).py(4.0).shrink0().child(
+                text(f, 10.0, Rgba::hexa(look::AMBER_400, 0.9))
+                    .wrapping()
+                    .min_w0()
+                    .role(Role::Alert, f),
+            )
+        }))
+        .child(page_body(s, sid, live, agent))
+}
+
+/// `PaneTabStrip`: the tabs, a new one, and the pane's controls.
+fn tab_strip(s: &Screen<'_>, sid: &str, p: &Pane, live: Option<&Live>, host: &str) -> El {
+    let manifest = live.and_then(|l| l.manifest.as_ref());
+    let mut tabs = div()
         .row()
         .gap(2.0)
         .grow()
         .min_w0()
         .clip()
-        .role(Role::TabList, place);
-    if tabs.is_empty() {
-        if let Some(t) = empty {
-            list = list.child(
-                div().pl(4.0).row().items_center().child(
-                    text(t, 12.0, c(look::INK))
-                        .weight(500)
-                        .line_height(16.0)
-                        .silent(),
-                ),
-            );
-        }
-    }
-    for t in tabs {
-        let id = s.acts.on(&format!("{place}-tab"), t.select.clone());
-        if let Some(d) = &t.double {
-            s.acts.double(id, d.clone());
-        }
-        let close_id = Acts_id(&format!("{place}-tab-close"), &t.close);
-        let hot = s.ui.hovered(id) || s.ui.hovered(close_id);
-        let fg = if t.active {
-            c(look::GRAY_200)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), s.ui.hover(id))
-        };
-        let mut name = text(truncate(&t.name, 22), 11.0, fg)
-            .line_height(16.0)
-            .silent();
-        if t.italic {
-            name = name.italic();
-        }
-        let mut tab = div()
-            .id(id)
-            .on(Action::Click)
-            .sense(Sense::DOUBLE)
-            .row()
-            .items_center()
-            .gap(4.0)
-            .pl(10.0)
-            .pr(4.0)
-            .py(4.0)
-            .rounded(4.0)
-            .max_w(170.0)
-            .shrink0()
-            .bg(if t.active {
-                white(0.06)
-            } else {
-                white(0.03 * s.ui.hover(id))
+        .role(Role::TabList, "Browser tabs");
+    for (i, tab) in p.tabs.iter().enumerate() {
+        let active = i == p.active_tab;
+        let shown = browser::display_host(tab.current());
+        let label = tab
+            .artifact
+            .as_ref()
+            .map(|a| a.title.clone())
+            .filter(|t| !t.is_empty())
+            .or_else(|| {
+                manifest
+                    .filter(|_| active)
+                    .and_then(|m| m.title.clone())
+                    .filter(|t| !t.is_empty())
             })
-            .role(Role::Tab, &t.name)
-            .selected(t.active)
-            .child_if(t.icon)
-            .child(name);
-        if let Some(p) = &t.parent {
-            tab = tab.child(
-                text(p, 11.0, c(look::INK).alpha(look::INK_FAINT))
-                    .line_height(16.0)
-                    .silent(),
-            );
-        }
-        if let Some(x) = t.extract {
-            let xid = s.acts.on(&format!("{place}-tab-extract"), x);
-            tab = tab.child(tooltip(
-                s.ui,
-                div()
-                    .id(xid)
-                    .on(Action::Click)
-                    .p(2.0)
-                    .rounded(4.0)
-                    .bg(white(0.08 * s.ui.hover(xid)))
-                    .role(Role::Button, format!("Open {} as its own terminal", t.name))
-                    .child(ico(
-                        "square-arrow-out-up-right",
-                        10.0,
-                        2.5,
-                        c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(xid)),
-                    )),
-                xid,
-                "Open as its own terminal",
-                None,
-            ));
-        }
-        let close_id = s.acts.on(&format!("{place}-tab-close"), t.close);
-        let slot = if t.dirty && !hot {
-            div()
-                .size(14.0, 14.0)
-                .center()
-                .role(Role::Image, "Unsaved changes")
-                .child(div().size(6.0, 6.0).rounded(3.0).bg(c(look::AMBER_400)))
+            .unwrap_or_else(|| shown.clone());
+        let id = s
+            .acts
+            .on("pane-tab", pane(PaneAct::SelectTab(sid.to_owned(), i)));
+        let close_id = s
+            .acts
+            .on("pane-tab", pane(PaneAct::CloseTab(sid.to_owned(), i)));
+        let hot = s.ui.hovered(id) || s.ui.hovered(close_id) || s.ui.focused(close_id);
+        let (fg, bg) = if active {
+            (c(look::GRAY_200), white(0.06))
         } else {
-            div()
-                .id(close_id)
-                .on(Action::Click)
-                .p(2.0)
-                .rounded(4.0)
-                .opacity(if hot { 1.0 } else { 0.0 })
-                .role(Role::Button, format!("Close {}", t.name))
-                .child(ico(
-                    "x",
-                    10.0,
-                    2.5,
-                    c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(close_id)),
-                ))
+            let h = s.ui.hover(id).max(s.ui.hover(close_id));
+            (
+                c(look::GRAY_500).mix(c(look::GRAY_300), h),
+                white(0.0).mix(white(0.03), h),
+            )
         };
-        list = list.child(tab.child(slot));
+        let icon = match tab.artifact.as_ref().map(|a| a.kind.as_str()) {
+            Some("doc") => Some(ico("align-left", 11.0, 2.0, ink())),
+            Some("design") => Some(ico("shapes", 11.0, 2.0, ink())),
+            Some(_) => Some(ico("file-text", 11.0, 2.0, ink())),
+            None if active && manifest.is_some_and(|m| m.kind == "design") => {
+                Some(ico("shapes", 11.0, 2.0, c(look::BRONZO)))
+            }
+            None => None,
+        };
+        let close = div()
+            .id(close_id)
+            .on(Action::Click)
+            .p(2.0)
+            .rounded(4.0)
+            .shrink0()
+            .opacity(if hot { 1.0 } else { 0.0 })
+            .role(Role::Button, format!("Close tab {shown}"))
+            .child(ico(
+                "x",
+                10.0,
+                2.5,
+                c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(close_id)),
+            ));
+        tabs = tabs.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(4.0)
+                .pl(10.0)
+                .pr(4.0)
+                .py(4.0)
+                .rounded(4.0)
+                .max_w(170.0)
+                .shrink0()
+                .bg(bg)
+                .role(Role::Tab, label.as_str())
+                .selected(active)
+                .child_if(icon.map(El::shrink0))
+                .child(text(label.as_str(), 11.0, fg).truncate().silent())
+                .child(close),
+        );
     }
-    let mut strip = div()
+    let add = s.acts.on("pane", pane(PaneAct::AddTab(sid.to_owned())));
+    let add_hot = s.ui.hover(add);
+    div()
         .row()
         .items_center()
         .gap(4.0)
@@ -340,1252 +326,1778 @@ fn tab_strip(s: &Screen<'_>, place: &str, tabs: Vec<Tab>, strip_: Strip<'_>) -> 
         .pr(4.0)
         .pt(4.0)
         .shrink0()
-        .child_if(leading)
-        .child(list);
-    if let Some((act, label)) = add {
-        let id = s.acts.on(&format!("{place}-add"), act);
-        strip = strip.child(tooltip(
-            s.ui,
+        .child(tabs)
+        .child(
             div()
-                .id(id)
+                .id(add)
                 .on(Action::Click)
                 .p(4.0)
                 .rounded(4.0)
-                .bg(white(0.06 * s.ui.hover(id)))
-                .role(Role::Button, label)
+                .shrink0()
+                .bg(white(0.0).mix(white(0.06), add_hot))
+                .role(Role::Button, "New tab")
                 .child(ico(
                     "plus",
                     13.0,
                     2.0,
-                    c(look::GRAY_600).mix(c(look::GRAY_200), s.ui.hover(id)),
+                    c(look::GRAY_600).mix(c(look::GRAY_200), add_hot),
                 )),
-            id,
-            label,
-            None,
-        ));
-    }
-    if let Some(act) = overflow {
-        strip = strip.child(icon_button(
-            s,
-            &format!("{place}-all"),
-            act,
-            "chevron-down",
-            "All open tabs",
-            false,
-        ));
-    }
-    strip.child(trailing)
-}
-
-#[allow(non_snake_case)]
-fn Acts_id(place: &str, act: &Act) -> Id {
-    crate::act::Acts::id(place, act)
-}
-
-/// The base name of a path.
-fn base(path: &str) -> &str {
-    crate::state::basename(path)
-}
-
-fn parent(path: &str) -> String {
-    let t = path.trim_end_matches(['/', '\\']);
-    let dir = t.rsplit_once(['/', '\\']).map_or("", |(d, _)| d);
-    base(dir).to_owned()
-}
-
-/// Whether `tabs` would overflow a strip `w` wide, as the strip measures.
-fn overflows(names: &[&str], w: f32) -> bool {
-    let need: f32 = names
-        .iter()
-        .map(|n| (n.chars().count().min(22) as f32 * 6.2 + 44.0).min(170.0) + 2.0)
-        .sum();
-    need > (w - 120.0).max(0.0)
-}
-
-/// `FilesCard`: the tree and the open files as tabs.
-fn files_card(s: &Screen<'_>, owner: &str, session: &Session) -> El {
-    let Some(fp) = s.st.panes.saved.files.get(owner) else {
-        return div();
-    };
-    let names: Vec<&str> = fp.tabs.iter().map(|p| base(p)).collect();
-    let tabs: Vec<Tab> = fp
-        .tabs
-        .iter()
-        .map(|p| {
-            let n = base(p);
-            let shared = names.iter().filter(|x| **x == n).count() > 1;
-            Tab {
-                name: n.to_owned(),
-                parent: shared.then(|| parent(p)),
-                icon: Some(file_icon(n, 12.0)),
-                italic: fp.preview.as_deref() == Some(p.as_str()),
-                dirty: s.st.editors.dirty(&tab_key(owner, p)),
-                active: fp.active.as_deref() == Some(p.as_str()),
-                select: pane(PaneAct::Tab(owner.to_owned(), p.clone())),
-                close: pane(PaneAct::CloseTab(owner.to_owned(), p.clone())),
-                double: Some(pane(PaneAct::PinTab(owner.to_owned(), p.clone()))),
-                extract: None,
-            }
-        })
-        .collect();
-    let has_tabs = !fp.tabs.is_empty();
-    let narrow = s.st.panes.narrow.contains(owner);
-    let tree_shown = !has_tabs || fp.tree_visible;
-    let file_shown = has_tabs && !(narrow && fp.tree_visible);
-    let toggle_label = if tree_shown {
-        "Hide file tree"
-    } else {
-        "Show file tree"
-    };
-    let toggle = icon_button(
-        s,
-        "files-tree",
-        pane(PaneAct::ToggleTree(owner.to_owned())),
-        "list-tree",
-        toggle_label,
-        tree_shown,
-    );
-    let width = s.ui.rect_of(files_body_id(owner)).map_or(400.0, |r| r.w);
-    let overflow =
-        (has_tabs && overflows(&names, width)).then(|| pane(PaneAct::TabsMenu(owner.to_owned())));
-    let pop = fp
-        .active
-        .is_some()
-        .then(|| pane(PaneAct::PopOutActive(owner.to_owned())));
-    let strip = tab_strip(
-        s,
-        "files",
-        tabs,
-        Strip {
-            leading: Some(toggle),
-            empty: Some("Files"),
-            add: None,
-            overflow,
-            trailing: controls(s, PaneKind::Files, owner, pop),
-        },
-    );
-    let ratio = s.st.panes.tree_ratio();
-    let mut body = div()
-        .id(files_body_id(owner))
-        .sense(Sense::HOVER)
-        .row()
-        .grow()
-        .min_h(0.0)
-        .pt(2.0);
-    if tree_shown {
-        let col = tree(s, owner);
-        body = body.child(if file_shown {
-            col.flex(ratio)
-        } else {
-            col.flex(1.0)
-        });
-    }
-    if tree_shown && file_shown {
-        body = body.child(divider(s, tree_divider_id(owner), true, "Resize file tree"));
-    }
-    if file_shown {
-        if let Some(path) = &fp.active {
-            let key = tab_key(owner, path);
-            let cwd = crate::git::session_cwd(&session.info);
-            let panel = file_panel(s, &key, &cwd, None);
-            body = body.child(if tree_shown {
-                panel.flex(1.0 - ratio)
-            } else {
-                panel.flex(1.0)
-            });
-        }
-    }
-    div()
-        .col()
-        .grow()
-        .min_h(0.0)
-        .min_w0()
-        .bg(pane_bg())
-        .role(Role::Group, "Files")
-        .child(strip)
-        .child(body)
-}
-
-/// `FileTreePane` and its filter.
-fn tree(s: &Screen<'_>, owner: &str) -> El {
-    let col = div().col().min_w0().min_h(0.0);
-    let Some(t) = s.st.panes.trees.get(owner) else {
-        return col;
-    };
-    if t.loading {
-        return col
-            .center()
-            .child(ico("loader-circle", 20.0, 2.0, c(look::GRAY_500)));
-    }
-    if t.root.as_ref().is_none_or(Vec::is_empty) {
-        return col.center().child(
-            text("Empty directory", 14.0, c(look::GRAY_500))
-                .line_height(20.0)
-                .silent(),
-        );
-    }
-    let fid = filter_id(owner);
-    let focus = s.ui.focused(fid);
-    let mut search = div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .grow()
-        .min_w0()
-        .px(8.0)
-        .py(4.0)
-        .rounded(4.0)
-        .bg(white(if focus { 0.13 } else { 0.09 }))
-        .child(ico("search", 13.0, 2.0, c(look::GRAY_600)))
-        .child(
-            div().grow().min_w0().child(
-                field(
-                    fid,
-                    "Filter files",
-                    "Filter files\u{2026}",
-                    TextStyle::ui(13.0),
-                    c(look::GRAY_200),
-                )
-                .w_full(),
-            ),
-        );
-    if !t.filter.is_empty() {
-        let id = s.acts.on(
-            "files-filter-clear",
-            pane(PaneAct::ClearFilter(owner.to_owned())),
-        );
-        search = search.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .p(2.0)
-                .role(Role::Button, "Clear filter")
-                .child(ico(
-                    "x",
-                    11.0,
-                    2.0,
-                    c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(id)),
-                )),
-        );
-    }
-    let selected =
-        s.st.panes
-            .saved
-            .files
-            .get(owner)
-            .and_then(|f| f.active.as_deref());
-    let mut list = div()
-        .id(Id::new("files-tree").child(owner))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .py(2.0)
-        .scroll_y();
-    for row in t.rows() {
-        list = list.child(tree_row(s, owner, &row, selected));
-    }
-    if t.no_match() {
-        list = list.child(
-            div().px(12.0).py(8.0).child(
-                text("No matching files loaded", 11.0, c(look::GRAY_600))
-                    .italic()
-                    .line_height(16.0)
-                    .silent(),
-            ),
-        );
-    }
-    col.child(div().row().px(6.0).py(6.0).shrink0().child(search))
-        .child(list)
-}
-
-const ROW_H: f32 = 22.0;
-const INDENT: f32 = 16.0;
-const BASE_LEFT: f32 = 8.0;
-
-/// The indent guides of a row at `depth`.
-fn guides(depth: usize) -> Vec<El> {
-    (0..depth)
-        .map(|i| {
-            div()
-                .absolute(BASE_LEFT + 7.0 + i as f32 * INDENT, 0.0)
-                .w(1.0)
-                .h(ROW_H)
-                .bg(white(0.06))
-        })
-        .collect()
-}
-
-fn tree_row(s: &Screen<'_>, owner: &str, row: &TreeRow, selected: Option<&str>) -> El {
-    match row {
-        TreeRow::Empty { depth } => {
-            let mut r = div()
-                .row()
-                .items_center()
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT + 16.0)
-                .child(
-                    text("empty", 11.0, c(look::GRAY_600))
-                        .italic()
-                        .line_height(14.0)
-                        .silent(),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-        TreeRow::Dir {
-            entry,
-            depth,
-            open,
-            loading,
-        } => {
-            let id = s.acts.on(
-                "tree-dir",
-                pane(PaneAct::Dir(owner.to_owned(), entry.path.clone())),
-            );
-            let glyph = if *loading {
-                ico("loader-circle", 14.0, 2.0, c(look::GRAY_600))
-            } else {
-                ico(
-                    if *open {
-                        "chevron-down"
-                    } else {
-                        "chevron-right"
-                    },
-                    14.0,
-                    2.0,
-                    c(look::GRAY_500),
-                )
-            };
-            let mut r = div()
-                .id(id)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(5.0)
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT)
-                .pr(8.0)
-                .bg(white(0.05 * s.ui.hover(id)))
-                .role(Role::TreeItem, &entry.name)
-                .expanded(*open)
-                .child(glyph)
-                .child(
-                    text(&entry.name, 13.5, c(look::GRAY_300))
-                        .line_height(16.0)
-                        .truncate()
-                        .silent(),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-        TreeRow::File { entry, depth } => {
-            let act = pane(PaneAct::File(owner.to_owned(), entry.path.clone()));
-            let id = s.acts.on("tree-file", act);
-            s.acts.double(
-                id,
-                pane(PaneAct::PinFile(owner.to_owned(), entry.path.clone())),
-            );
-            let on = selected == Some(entry.path.as_str());
-            let pop = s.acts.on(
-                "tree-pop",
-                pane(PaneAct::PopOut(owner.to_owned(), entry.path.clone())),
-            );
-            let hot = s.ui.hovered(id) || s.ui.hovered(pop);
-            let fg = if on {
-                c(look::GRAY_200)
-            } else if hot {
-                c(look::GRAY_300)
-            } else {
-                c(look::GRAY_400)
-            };
-            let mut r = div()
-                .id(id)
-                .on(Action::Click)
-                .sense(Sense::DOUBLE)
-                .row()
-                .items_center()
-                .gap(5.0)
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT + 16.0)
-                .pr(4.0)
-                .bg(if on {
-                    white(0.10)
-                } else {
-                    white(0.05 * s.ui.hover(id))
-                })
-                .role(Role::TreeItem, &entry.name)
-                .selected(on)
-                .child(file_icon(&entry.name, 16.0))
-                .child(
-                    div().grow().min_w0().child(
-                        text(&entry.name, 13.5, fg)
-                            .line_height(16.0)
-                            .truncate()
-                            .silent(),
-                    ),
-                )
-                .child(
-                    div()
-                        .id(pop)
-                        .on(Action::Click)
-                        .p(2.0)
-                        .rounded(4.0)
-                        .opacity(if hot { 1.0 } else { 0.0 })
-                        .bg(white(0.08 * s.ui.hover(pop)))
-                        .role(Role::Button, format!("Open {} as its own card", entry.name))
-                        .child(ico(
-                            "square-arrow-out-up-right",
-                            11.0,
-                            2.0,
-                            c(look::INK).alpha(0.2).mix(c(look::WHITE), s.ui.hover(pop)),
-                        )),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-    }
-}
-
-/// `ToolbarBtn`.
-fn toolbar_btn(s: &Screen<'_>, act: Act, glyph: &str, label: &str, on: bool, off: bool) -> El {
-    let id = s.acts.on("editor-tool", act);
-    let mut b = div()
-        .id(id)
-        .p(4.0)
-        .rounded(4.0)
-        .shrink0()
-        .bg(white(0.10 * if on { 1.0 } else { s.ui.hover(id) }))
-        .role(Role::Button, label)
-        .disabled(off)
-        .opacity(if off { 0.4 } else { 1.0 })
-        .child(ico(glyph, 14.0, 2.0, c(look::INK)));
-    if !off {
-        b = b.on(Action::Click);
-    }
-    tooltip(s.ui, b, id, label, None)
-}
-
-/// The path cut from the left, as `dir="rtl"` truncates it.
-fn tail(path: &str, max: usize) -> String {
-    let n = path.chars().count();
-    if n <= max {
-        return path.to_owned();
-    }
-    let rest: String = path.chars().skip(n - max + 1).collect();
-    format!("\u{2026}{rest}")
-}
-
-/// `FilePanel`: the path strip, the find bar, the notices and the body.
-pub(super) fn file_panel(s: &Screen<'_>, key: &str, cwd: &str, extra: Option<El>) -> El {
-    let col = div().col().min_w0().min_h(0.0).bg(pane_bg());
-    let Some(b) = s.st.editors.buffers.get(key) else {
-        return col;
-    };
-    let name = base(&b.path);
-    let rel = editor::rel_path(cwd, &b.path);
-    let dirty = b.dirty();
-    let can_find = b.content.is_some() && !b.loading;
-    let mut strip = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .pl(8.0)
-        .pr(4.0)
-        .py(2.0)
-        .shrink0()
-        .bg(pane_bg())
-        .child(file_icon(name, 12.0))
-        .child(
-            div().row().justify_end().grow().min_w0().ml(4.0).child(
-                text(tail(rel, 48), 11.0, c(look::GRAY_400))
-                    .mono()
-                    .line_height(16.0)
-                    .truncate()
-                    .role(Role::Label, &b.path),
-            ),
-        );
-    if dirty {
-        strip = strip.child(
-            div()
-                .mx(4.0)
-                .size(6.0, 6.0)
-                .rounded(3.0)
-                .bg(c(look::AMBER_400))
-                .role(Role::Image, "Unsaved changes"),
-        );
-    }
-    strip = strip.child(toolbar_btn(
-        s,
-        edit(EditAct::ToggleFind(key.to_owned())),
-        "search",
-        "Find in file",
-        b.find.is_some(),
-        !can_find,
-    ));
-    if dirty {
-        strip = strip
-            .child(toolbar_btn(
-                s,
-                edit(EditAct::Save(key.to_owned())),
-                "save",
-                if b.saving { "Saving\u{2026}" } else { "Save" },
-                false,
-                b.saving,
-            ))
-            .child(toolbar_btn(
-                s,
-                edit(EditAct::Discard(key.to_owned())),
-                "undo-2",
-                "Discard changes",
-                false,
-                false,
-            ));
-    }
-    let mut col = col.child(strip.child_if(extra));
-    if let (Some(f), true) = (&b.find, can_find) {
-        col = col.child(find_bar(s, key, b, f));
-    }
-    if b.conflict {
-        col = col.child(conflict(s, key));
-    }
-    if b.read_only == Some(ReadOnly::Truncated) {
-        col = col.child(
-            div()
-                .px(12.0)
-                .py(4.0)
-                .border_top(1.0, white(0.06))
-                .shrink0()
-                .child(
-                    text(
-                        "Too large to edit here. Showing the first part, read-only.",
-                        11.0,
-                        c(look::INK).alpha(look::INK_FAINT),
-                    )
-                    .line_height(16.0)
-                    .silent(),
-                ),
-        );
-    }
-    let body = if b.loading {
-        div()
-            .col()
-            .center()
-            .grow()
-            .child(ico("loader-circle", 16.0, 2.0, c(look::GRAY_500)))
-    } else if matches!(b.read_only, Some(ReadOnly::Binary | ReadOnly::Unreadable)) {
-        let msg = if b.read_only == Some(ReadOnly::Binary) {
-            "Binary file \u{2014} preview unavailable"
-        } else {
-            "This file could not be read"
-        };
-        div().col().center().grow().child(
-            text(msg, 13.0, c(look::GRAY_600))
-                .line_height(18.0)
-                .silent(),
         )
-    } else if b.ready {
-        editor_view(key, b)
-    } else if b.content.is_some() {
-        read_view(key, b)
-    } else {
-        div().grow()
-    };
-    col = col.child(body);
-    if let Some(e) = &b.error {
-        col = col.child(
-            div()
-                .px(12.0)
-                .py(4.0)
-                .bg(c(look::DANGER).alpha(0.1))
-                .border_top(1.0, white(0.06))
-                .shrink0()
-                .child(text(e, 11.0, c(look::DANGER)).line_height(16.0).wrapping()),
-        );
-    }
-    col
+        .child(controls(s, sid, PaneKind::Browser, host))
 }
 
-fn find_bar(s: &Screen<'_>, key: &str, b: &Buffer, f: &editor::Find) -> El {
-    let n = b.matches().len();
-    let count = if n == 0 {
-        "0/0".to_owned()
-    } else {
-        format!("{}/{n}", f.index % n + 1)
-    };
-    let arrow = |place: &str, d: i32, glyph: &str, label: &str| {
-        let id = s.acts.on(place, edit(EditAct::FindStep(key.to_owned(), d)));
-        let off = n == 0;
-        let mut el = div()
-            .id(id)
-            .px(4.0)
-            .role(Role::Button, label)
-            .disabled(off)
-            .opacity(if off { 0.4 } else { 1.0 })
-            .child(
-                text(
-                    glyph,
-                    11.0,
-                    c(look::GRAY_500).mix(c(look::WHITE), s.ui.hover(id)),
-                )
-                .line_height(16.0)
-                .silent(),
-            );
-        if !off {
-            el = el.on(Action::Click);
-        }
-        tooltip(s.ui, el, id, label, None)
-    };
-    let close = s
-        .acts
-        .on("find-close", edit(EditAct::CloseFind(key.to_owned())));
-    div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .px(12.0)
-        .py(4.0)
-        .shrink0()
-        .bg(pane_bg())
-        .child(ico("search", 12.0, 2.0, c(look::GRAY_500)))
-        .child(
-            div().grow().min_w0().child(
-                field(
-                    find_id(key),
-                    "Find in file",
-                    "Find in file",
-                    TextStyle::mono(13.0),
-                    c(look::GRAY_200),
-                )
-                .w_full(),
-            ),
-        )
-        .child(
-            text(count, 11.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-        )
-        .child(arrow("find-prev", -1, "\u{2191}", "Previous (Shift+Enter)"))
-        .child(arrow("find-next", 1, "\u{2193}", "Next (Enter)"))
-        .child(tooltip(
-            s.ui,
-            div()
-                .id(close)
-                .on(Action::Click)
-                .p(2.0)
-                .role(Role::Button, "Close (Esc)")
-                .child(ico(
-                    "x",
-                    12.0,
-                    2.0,
-                    c(look::GRAY_500).mix(c(look::WHITE), s.ui.hover(close)),
-                )),
-            close,
-            "Close (Esc)",
-            None,
-        ))
-}
-
-/// The moved-file banner's three ways out.
-fn conflict(s: &Screen<'_>, key: &str) -> El {
-    let link = |place: &str, label: &str, act: Act| {
-        let id = s.acts.on(place, act);
-        div()
-            .id(id)
-            .on(Action::Click)
-            .role(Role::Button, label)
-            .child(
-                text(
-                    label,
-                    11.0,
-                    c(look::GRAY_300).mix(c(0xf3f4f6), s.ui.hover(id)),
-                )
-                .line_height(16.0)
-                .silent(),
-            )
-            .child(div().h(1.0).w_full().bg(c(look::GRAY_300).alpha(0.6)))
-    };
-    div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .px(12.0)
-        .py(6.0)
-        .bg(c(look::BRONZO).alpha(0.1))
-        .border_top(1.0, white(0.06))
-        .shrink0()
-        .child(
-            div().grow().min_w0().child(
-                text(
-                    "This file changed on disk while your edit was open.",
-                    11.0,
-                    c(look::BRONZO),
-                )
-                .line_height(16.0)
-                .wrapping(),
-            ),
-        )
-        .child(link(
-            "conflict-save",
-            "Save mine anyway",
-            edit(EditAct::SaveAnyway(key.to_owned())),
-        ))
-        .child(link(
-            "conflict-disk",
-            "Discard mine",
-            edit(EditAct::TakeDisk(key.to_owned())),
-        ))
-        .child(link(
-            "conflict-keep",
-            "Keep editing",
-            edit(EditAct::KeepEditing(key.to_owned())),
-        ))
-}
-
-/// Right-aligned line numbers in a mono column, one per line.
-fn gutter(lines: usize, from_top: f32) -> El {
-    let w = lines.max(1).to_string().len();
-    let numbers: Vec<String> = (1..=lines.max(1)).map(|n| format!("{n:>w$}")).collect();
-    div()
-        .pl(8.0)
-        .pr(12.0)
-        .pt(from_top)
-        .shrink0()
-        .bg(pane_bg())
-        .child(
-            text(numbers.join("\n"), 12.0, c(look::GRAY_600))
-                .mono()
-                .line_height(LINE_HEIGHT)
-                .silent(),
-        )
-}
-
-/// A span list with `range` laid over it in `color`, still sorted and
-/// apart (the active find match's text).
-fn overlay(
-    spans: &[(std::ops::Range<usize>, Rgba)],
-    range: std::ops::Range<usize>,
-    color: Rgba,
-) -> Vec<(std::ops::Range<usize>, Rgba)> {
-    let mut out = Vec::with_capacity(spans.len() + 2);
-    for (r, col) in spans {
-        if r.end <= range.start || r.start >= range.end {
-            out.push((r.clone(), *col));
-            continue;
-        }
-        if r.start < range.start {
-            out.push((r.start..range.start, *col));
-        }
-        if r.end > range.end {
-            out.push((range.end..r.end, *col));
-        }
-    }
-    out.push((range, color));
-    out.sort_by_key(|(r, _)| r.start);
-    out
-}
-
-/// `CodeEditor`: the gutter beside the coloured, editable text, with the
-/// find marks.
-fn editor_view(key: &str, b: &Buffer) -> El {
-    let text_ = b.text();
-    let lines = text_.split('\n').count();
-    let mut spans: Vec<(std::ops::Range<usize>, Rgba)> = b
-        .coloured
-        .as_ref()
-        .filter(|(t, _)| t == text_)
-        .map(|(_, sp)| {
-            sp.iter()
-                .map(|(r, (rgb, a))| (r.clone(), Rgba::hexa(*rgb, f32::from(*a) / 255.0)))
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut marks = Vec::new();
-    if let Some(f) = &b.find {
-        let m = b.matches();
-        let active = (!m.is_empty()).then(|| f.index % m.len());
-        for (i, hit) in m.iter().enumerate() {
-            let on = Some(i) == active;
-            marks.push((
-                hit.range.0..hit.range.1,
-                c(AMBER_300).alpha(if on { 0.7 } else { 0.25 }),
-            ));
-            spans = overlay(
-                &spans,
-                hit.range.0..hit.range.1,
-                if on { c(0x000000) } else { c(0xf3f4f6) },
-            );
-        }
-    }
-    let style = TextStyle {
-        line_height: LINE_HEIGHT,
-        ..TextStyle::mono(13.0)
-    };
-    let field = code(
-        editor_id(key),
-        &format!("Edit {}", base(&b.path)),
-        style,
-        c(look::GRAY_300),
-    )
-    .edit_colors(spans, marks)
-    .w_full()
-    .h(lines as f32 * LINE_HEIGHT);
-    div()
-        .id(scroller_id(key))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .scroll_y()
-        .child(
-            div()
-                .row()
-                .child(gutter(lines, 4.0))
-                .child(div().grow().min_w0().pt(4.0).pb(4.0).pr(12.0).child(field)),
-        )
-}
-
-/// `ReadView`: a file shown but not editable, capped at 2000 lines.
-fn read_view(key: &str, b: &Buffer) -> El {
-    let all: Vec<&str> = b.text().split('\n').collect();
-    let capped = all.len() > editor::MAX_HIGHLIGHT_LINES;
-    let shown = &all[..all.len().min(editor::MAX_HIGHLIGHT_LINES)];
-    let mut col = div()
-        .id(scroller_id(key))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .scroll_y()
-        .child(
-            div().row().child(gutter(shown.len(), 0.0)).child(
-                div().grow().min_w0().px(4.0).child(
-                    text(shown.join("\n"), 13.0, c(look::GRAY_400))
-                        .mono()
-                        .line_height(LINE_HEIGHT)
-                        .silent(),
-                ),
-            ),
-        );
-    if capped {
-        col = col.child(
-            div().px(12.0).py(8.0).child(
-                text(
-                    format!(
-                        "Showing first {} of {} lines",
-                        editor::MAX_HIGHLIGHT_LINES,
-                        all.len()
-                    ),
-                    11.0,
-                    c(look::GRAY_600),
-                )
-                .italic()
-                .line_height(16.0)
-                .silent(),
-            ),
-        );
-    }
-    col
-}
-
-/// `TerminalsCard`: the shells a session holds, one in front.
-fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
-    let Some(panel) = s.st.panes.saved.panels.get(owner) else {
-        return div();
-    };
-    let active = panel.active();
-    let tabs: Vec<Tab> = panel
-        .terminals
-        .iter()
-        .enumerate()
-        .map(|(i, id)| {
-            let name = s
-                .store
-                .session(id)
-                .map_or_else(|| id.clone(), Session::title);
-            Tab {
-                name,
-                parent: None,
-                icon: None,
-                italic: false,
-                dirty: false,
-                active: i == active,
-                select: pane(PaneAct::PanelTab(owner.to_owned(), i)),
-                close: pane(PaneAct::CloseTerminal(id.clone())),
-                double: None,
-                extract: Some(pane(PaneAct::Extract(owner.to_owned(), id.clone()))),
-            }
-        })
-        .collect();
-    let strip = tab_strip(
-        s,
-        "terminals",
-        tabs,
-        Strip {
-            leading: None,
-            empty: None,
-            add: Some((
-                pane(PaneAct::AddTerminal(owner.to_owned())),
-                "New terminal in this session",
-            )),
-            overflow: None,
-            trailing: controls(s, PaneKind::Terminals, owner, None),
-        },
-    );
-    let shell = panel.terminals.get(active).and_then(|id| {
-        s.store
-            .sessions
-            .iter()
-            .enumerate()
-            .find(|(_, x)| x.info.id == *id)
-    });
-    let mut col = div()
-        .col()
-        .grow()
-        .min_h(0.0)
-        .min_w0()
-        .bg(pane_bg())
-        .role(Role::Group, "Terminals")
-        .child(strip);
-    if let Some((i, session)) = shell {
-        let sid = session.info.id.as_str();
-        let id = cards::term_id(sid);
-        let surface = div()
-            .row()
-            .grow()
-            .min_h(0.0)
-            .pt(2.0)
-            .bg(c(look::SURFACE_SUNKEN))
-            .child(div().w(8.0).shrink0())
-            .child(custom(cards::CARD_ID_BASE + i as u64).grow());
-        s.acts
-            .bind(id, pane(PaneAct::FocusTerminal(sid.to_owned())));
-        let surface = s
-            .acts
-            .context(
-                surface,
-                id,
-                Act::Open(crate::state::MenuKind::Terminal(sid.to_owned())),
-            )
-            .on(Action::Click)
-            .sense(Sense::WHEEL);
-        col = col
-            .child(surface)
-            .child_if(cards::composer(s, session, true));
-    }
-    col
-}
-
-/// `PaneColumn`: `owner`'s panes stacked, resizable, one maximized over
-/// the rest.
-fn column(s: &Screen<'_>, owner: &str, session: &Session) -> Option<El> {
-    let entries = s.st.panes.entries(owner);
-    if entries.is_empty() {
-        return None;
-    }
-    let max = s.st.panes.maximized_in(owner);
-    let weights = s.st.panes.weights(owner);
-    let mut col = div().col().grow().min_h(0.0).min_w0();
-    for (i, kind) in entries.iter().enumerate() {
-        if max.is_some_and(|m| m != *kind) {
-            continue;
-        }
-        if i > 0 && max.is_none() {
-            col = col.child(divider(
-                s,
-                column_divider_id(owner, i - 1),
-                false,
-                &format!("Resize {} panel", kind.key()),
-            ));
-        }
-        let el = match kind {
-            PaneKind::Files => files_card(s, owner, session),
-            PaneKind::Terminals => terminals_card(s, owner),
-        };
-        let share = if max.is_some() {
-            1.0
-        } else {
-            weights.get(i).copied().unwrap_or(1.0)
-        };
-        col = col.child(div().col().flex(share).min_h(0.0).min_w0().child(el));
-    }
-    Some(col)
-}
-
-/// A session's card body: its terminal column (header, terminal, status
-/// bar) beside its pane column, split by the stored ratio; a maximized
-/// pane takes the body and the header and status bar span the card.
-pub(super) fn frame(
-    s: &Screen<'_>,
-    session: &Session,
-    header: Option<El>,
-    term: El,
-    status: El,
-) -> El {
-    let owner = session.info.id.as_str();
-    let Some(panes) = column(s, owner, session) else {
-        return div()
-            .col()
-            .grow()
-            .min_h(0.0)
-            .child_if(header)
-            .child(term)
-            .child(status);
-    };
-    if s.st.panes.maximized_in(owner).is_some() {
-        return div()
-            .col()
-            .grow()
-            .min_h(0.0)
-            .child_if(header)
-            .child(div().row().grow().min_h(0.0).child(panes))
-            .child(status);
-    }
-    let r = s.st.panes.terminal_ratio(owner);
-    let left = div()
-        .col()
-        .flex(r)
-        .min_w0()
-        .min_h(0.0)
-        .child_if(header)
-        .child(term)
-        .child(status);
-    div()
-        .row()
-        .grow()
-        .min_h(0.0)
-        .child(left)
-        .child(divider(
-            s,
-            card_divider_id(owner),
-            true,
-            "Resize terminal and panels",
-        ))
-        .child(div().row().flex(1.0 - r).min_w0().min_h(0.0).child(panes))
-}
-
-/// `EditorCard`: a file popped out of a session, as a cell of its own.
-pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
-    let Some(cd) = s.st.panes.saved.cards.get(card) else {
-        return div();
-    };
-    let Some(owner) = s.store.session(&cd.session_id) else {
-        return div();
-    };
-    let selected = s.st.selected.as_deref() == Some(card);
-    let name = base(&cd.file_path);
-    let label = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .min_w0()
-        .child(
-            text("\u{b7}", 11.0, c(look::INK).alpha(0.2))
-                .line_height(16.0)
-                .silent(),
-        )
-        .child(
-            text(
-                truncate(&owner.info.project_name, 20),
-                11.0,
-                c(look::INK).alpha(look::INK_SECONDARY),
-            )
-            .line_height(16.0)
-            .silent(),
-        )
-        .child_if(cards::branch_chip(s, owner, 1.0));
-    let ctl = div()
+/// The row under the tabs: the doc's edit bar, the artifact bar, a
+/// design's tweaks, or the address bar; then pick and draw.
+fn header(s: &Screen<'_>, sid: &str, live: Option<&Live>, url: &str, agent: &str) -> El {
+    let bench = &s.st.bench;
+    let art = bench.artifact(sid);
+    let editing = live.and_then(|l| l.editing.as_ref()).is_some();
+    let boards = bench.boards(sid).is_some();
+    let manifest = live.and_then(|l| l.manifest.as_ref());
+    let mut row = div()
         .row()
         .items_center()
         .gap(2.0)
-        .shrink0()
-        .child(icon_button(
-            s,
-            "card-return",
-            pane(PaneAct::ReturnCard(card.to_owned())),
-            "corner-down-left",
-            "Put back in its session card",
-            false,
-        ))
-        .child(icon_button(
-            s,
-            "card-close",
-            pane(PaneAct::CloseCard(card.to_owned())),
-            "x",
-            "Close",
-            false,
-        ));
-    let extra = div().row().items_center().gap(4.0).child(label).child(ctl);
-    let cwd = crate::git::session_cwd(&owner.info);
-    let id = crate::act::Acts::id("editor-card", &pane(PaneAct::SelectCard(card.to_owned())));
-    let el = div()
-        .col()
-        .grow()
-        .min_w0()
-        .min_h(0.0)
-        .bg(c(look::SURFACE_RAISED))
-        .border(
-            1.0,
-            if selected {
-                white(0.4)
-            } else {
-                white(0.06).mix(white(0.12), s.ui.hover(id))
-            },
-        )
-        .role(Role::Group, name)
-        .selected(selected)
-        .child(file_panel(s, card, &cwd, Some(extra)).grow());
-    s.acts
-        .click(
-            el,
-            "editor-card",
-            pane(PaneAct::SelectCard(card.to_owned())),
-        )
-        .sense(Sense::HOVER)
-}
-
-/// The Files pane's overflow list of its tabs.
-pub(super) fn tab_items(s: &Screen<'_>, owner: &str) -> Vec<super::menus::Item> {
-    let Some(fp) = s.st.panes.saved.files.get(owner) else {
-        return Vec::new();
-    };
-    let mut out: Vec<super::menus::Item> = fp
-        .tabs
-        .iter()
-        .map(|p| {
-            let mut it = super::menus::Item::option(
-                base(p),
-                fp.active.as_deref() == Some(p.as_str()),
-                pane(PaneAct::Tab(owner.to_owned(), p.clone())),
+        .px(6.0)
+        .py(4.0)
+        .shrink0();
+    match art {
+        Some((a, _)) if editing => {
+            row = row
+                .child(
+                    div()
+                        .row()
+                        .items_center()
+                        .h(24.0)
+                        .px(8.0)
+                        .rounded(4.0)
+                        .shrink0()
+                        .border(1.0, white(0.08))
+                        .child(
+                            text(format!("v{}", a.version), 11.0, ink2())
+                                .mono()
+                                .silent(),
+                        ),
+                )
+                .child(
+                    text("doc \u{b7} you are editing", 11.0, faint())
+                        .mono()
+                        .truncate()
+                        .ml(6.0),
+                )
+                .child(div().grow());
+            let id = s.acts.on("pane", pane(PaneAct::Discard(sid.to_owned())));
+            row = row.child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .row()
+                    .items_center()
+                    .h(24.0)
+                    .px(10.0)
+                    .rounded(4.0)
+                    .shrink0()
+                    .bg(white(0.0).mix(white(0.06), s.ui.hover(id)))
+                    .role(Role::Button, "Discard")
+                    .child(text("Discard", 12.0, ink2()).silent()),
+            );
+        }
+        Some((a, state)) => {
+            row = artifact_bar(s, row, sid, a, state, live, agent);
+            if !boards {
+                row = row.child_if(manifest.and_then(|m| tweak_row(s, sid, m, live)));
+            }
+        }
+        None if manifest.is_some_and(|m| m.kind == "design") => {
+            if !boards {
+                row = row.child_if(manifest.and_then(|m| tweak_row(s, sid, m, live)));
+            }
+            row = row.child(div().grow());
+        }
+        None => row = address_bar(s, row, sid, live, url),
+    }
+    if !editing && !boards {
+        let picking = live.is_some_and(|l| l.picking);
+        row = row
+            .child(
+                icon_btn(
+                    s,
+                    PaneAct::Pick(sid.to_owned()),
+                    "mouse-pointer-click",
+                    "Pick an element for the agent",
+                    Some("Point at an element to describe it to this session's agent"),
+                    picking.then(|| white(0.10)),
+                    true,
+                )
+                .toggled(picking)
+                .ml(4.0),
             )
-            .mark(file_icon(base(p), 12.0));
-            it.picker = true;
-            it
-        })
-        .collect();
-    out.push(
-        super::menus::Item::option(
-            "Close saved tabs",
-            false,
-            pane(PaneAct::CloseSavedTabs(owner.to_owned())),
-        )
-        .sep(),
-    );
-    out
+            .child(icon_btn(
+                s,
+                PaneAct::Ink(sid.to_owned()),
+                "pencil",
+                "Draw on the page for the agent",
+                Some("Draw over the page, then click again to send it to this session's agent"),
+                None,
+                true,
+            ));
+    }
+    row
 }
 
-/// "Discard unsaved changes?", as `window.confirm` asks it.
-pub(super) fn discard(s: &Screen<'_>) -> El {
-    let cancel = s.acts.on("discard-cancel", edit(EditAct::CancelDiscard));
-    let ok = s.acts.on("discard-ok", edit(EditAct::ConfirmDiscard));
-    let button = |id: Id, label: &str, strong: bool| {
+/// `AddressBar`: back, forward, reload or stop, and the address.
+fn address_bar(s: &Screen<'_>, row: El, sid: &str, live: Option<&Live>, url: &str) -> El {
+    let (back, forward) = live.map_or((false, false), |l| l.nav);
+    let loading = live.is_some_and(|l| l.loading);
+    let id = Acts::id("address", &pane(PaneAct::Address(sid.to_owned())));
+    let shown = if url == "about:blank" { "" } else { url };
+    let value = live
+        .and_then(|l| l.draft.clone())
+        .unwrap_or_else(|| shown.to_owned());
+    s.acts
+        .text(id, pane(PaneAct::Address(sid.to_owned())), value);
+    let focused = s.ui.focused(id);
+    let bg = if focused {
+        white(0.07)
+    } else {
+        white(0.04).mix(white(0.06), s.ui.hover(id))
+    };
+    let style = if focused {
+        TextStyle::mono(11.0)
+    } else {
+        TextStyle::ui(11.0)
+    };
+    let mut input = field(id, "Address", "Type a URL", style, c(look::GRAY_300));
+    if !focused {
+        input = input.text_center();
+    }
+    row.child(icon_btn(
+        s,
+        PaneAct::Back(sid.to_owned()),
+        "arrow-left",
+        "Go back",
+        None,
+        None,
+        back,
+    ))
+    .child(icon_btn(
+        s,
+        PaneAct::Forward(sid.to_owned()),
+        "arrow-right",
+        "Go forward",
+        None,
+        None,
+        forward,
+    ))
+    .child(icon_btn(
+        s,
+        PaneAct::ReloadOrStop(sid.to_owned()),
+        if loading { "x" } else { "rotate-cw" },
+        if loading { "Stop loading" } else { "Reload" },
+        None,
+        None,
+        true,
+    ))
+    .child(
+        div()
+            .ml(4.0)
+            .grow()
+            .min_w0()
+            .rounded(999.0)
+            .px(12.0)
+            .py(4.0)
+            .bg(bg)
+            .child(input.w_full()),
+    )
+}
+
+/// `ArtifactBar`: the version and its menu, who made it, and editing,
+/// commenting and sending.
+fn artifact_bar(
+    s: &Screen<'_>,
+    mut row: El,
+    sid: &str,
+    a: &browser::TabArtifact,
+    state: Option<&artifact::State>,
+    live: Option<&Live>,
+    agent: &str,
+) -> El {
+    let versions = state.map_or(&[][..], |st| st.versions.as_slice());
+    let comments = state.map_or(&[][..], |st| st.comments.as_slice());
+    let drafts = comments.iter().filter(|c| c.is_draft()).count();
+    let open = live.is_some_and(|l| l.versions);
+    let commenting = live.is_some_and(|l| l.commenting);
+    let sending = live.is_some_and(|l| l.sending);
+    let queued = state.is_some_and(|st| st.queued);
+    let now = crate::state::now_ms();
+    let byline = |v: &artifact::Version| {
+        format!(
+            "{} \u{b7} {}",
+            if v.author == "user" { "you" } else { agent },
+            crate::runs::relative(&v.created_at, now).to_lowercase()
+        )
+    };
+
+    let vid = s.acts.on("pane", pane(PaneAct::Versions(sid.to_owned())));
+    let mut chip = div()
+        .id(vid)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .h(24.0)
+        .px(8.0)
+        .rounded(4.0)
+        .shrink0()
+        .border(1.0, white(0.08))
+        .bg(white(0.0).mix(white(0.06), s.ui.hover(vid)))
+        .role(
+            Role::Button,
+            format!("Version {}, choose another", a.version),
+        )
+        .has_popup()
+        .expanded(open)
+        .child(
+            text(format!("v{}", a.version), 11.0, ink2())
+                .mono()
+                .silent(),
+        )
+        .child(ico("chevron-down", 11.0, 2.0, ink2()));
+    if open {
+        let mut newest: Vec<&artifact::Version> = versions.iter().collect();
+        newest.sort_by_key(|x| std::cmp::Reverse(x.version));
+        let mut menu = div()
+            .col()
+            .w(240.0)
+            .p(4.0)
+            .rounded(4.0)
+            .border(1.0, white(0.08))
+            .bg(c(look::SURFACE_OVERLAY))
+            .role(Role::Menu, "Versions");
+        for v in newest {
+            let count = comments.iter().filter(|c| c.version == v.version).count();
+            let mut words = format!(
+                "v{} \u{b7} {}",
+                v.version,
+                if v.author == "user" { "you" } else { agent }
+            );
+            if count > 0 {
+                words.push_str(&format!(" \u{b7} {count} comment{}", plural(count)));
+            }
+            let current = v.version == a.version;
+            let id = s
+                .acts
+                .on("pane", pane(PaneAct::Version(sid.to_owned(), v.version)));
+            let bg = if current {
+                white(0.08)
+            } else {
+                white(0.0).mix(white(0.05), s.ui.hover(id))
+            };
+            menu = menu.child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .row()
+                    .items_center()
+                    .gap(8.0)
+                    .px(8.0)
+                    .h(26.0)
+                    .rounded(4.0)
+                    .bg(bg)
+                    .role(Role::MenuItem, words.as_str())
+                    .child(
+                        text(words.as_str(), 12.0, if current { ink() } else { ink2() })
+                            .truncate()
+                            .grow()
+                            .silent(),
+                    )
+                    .child(
+                        text(
+                            crate::runs::relative(&v.created_at, now).to_lowercase(),
+                            11.0,
+                            faint(),
+                        )
+                        .mono()
+                        .shrink0()
+                        .silent(),
+                    ),
+            );
+        }
+        chip = chip.overlay(menu, Place::BelowStart, 4.0);
+    }
+    row = row
+        .child(chip)
+        .child(
+            text(
+                state
+                    .and_then(|st| st.version(a.version))
+                    .map(byline)
+                    .unwrap_or_default(),
+                11.0,
+                faint(),
+            )
+            .mono()
+            .truncate()
+            .ml(6.0),
+        )
+        .child(div().grow());
+
+    if a.kind == "doc" {
+        let latest = state.is_some_and(|st| st.artifact.latest_version == a.version);
+        let (b, id) = text_btn(
+            s,
+            PaneAct::Edit(sid.to_owned()),
+            text("Edit", 12.0, ink()).silent(),
+            "Edit",
+            latest,
+        );
+        let tip = if latest {
+            "Edit the words yourself"
+        } else {
+            "Open the latest version to edit it"
+        };
+        row = row
+            .child(tooltip(s.ui, b, id, tip, None))
+            .child(div().w(4.0).shrink0());
+    }
+    let comment_tip = if commenting {
+        "Stop commenting"
+    } else {
+        "Comment on the page"
+    };
+    row = row.child(
+        icon_btn(
+            s,
+            PaneAct::Comments(sid.to_owned()),
+            "message-square-plus",
+            comment_tip,
+            Some(comment_tip),
+            commenting.then(|| white(0.10)),
+            true,
+        )
+        .toggled(commenting),
+    );
+    let pill = div()
+        .row()
+        .center()
+        .min_w(16.0)
+        .h(16.0)
+        .px(4.0)
+        .rounded(8.0)
+        .bg(white(0.12))
+        .child(
+            text(drafts.to_string(), 10.0, ink())
+                .mono()
+                .weight(600)
+                .silent(),
+        );
+    let label = if queued { "Queued" } else { "Send to agent" };
+    let (b, id) = text_btn(
+        s,
+        PaneAct::Send(sid.to_owned()),
+        div()
+            .row()
+            .items_center()
+            .gap(6.0)
+            .child(text(label, 12.0, ink()).silent())
+            .child(pill),
+        label,
+        drafts > 0 && !sending,
+    );
+    let tip = if queued {
+        format!("Queued: goes when {agent} is at its prompt")
+    } else if drafts > 0 {
+        format!("Send {drafts} to {agent}")
+    } else {
+        "Comment on the page first".to_owned()
+    };
+    row.child(tooltip(s.ui, b.ml(4.0), id, &tip, None))
+}
+
+/// `TweakBar` as a row in the header.
+fn tweak_row(s: &Screen<'_>, sid: &str, m: &artifact::Manifest, live: Option<&Live>) -> Option<El> {
+    if m.tweaks.is_empty() {
+        return None;
+    }
+    let mut row = div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .px(8.0)
+        .py(4.0)
+        .shrink0()
+        .wrap_children()
+        .role(Role::Group, "Design controls");
+    for (key, t) in &m.tweaks {
+        row = row.child(
+            div()
+                .row()
+                .items_center()
+                .gap(6.0)
+                .child(tweak_label(key, t))
+                .child(tweak_control(s, sid, key, t, live)),
+        );
+    }
+    Some(row)
+}
+
+fn tweak_label(key: &str, t: &Tweak) -> El {
+    text(t.label().unwrap_or(key), 10.5, faint()).silent()
+}
+
+/// One tweak's control: a switch, a number, a choice or swatches.
+fn tweak_control(s: &Screen<'_>, sid: &str, key: &str, t: &Tweak, live: Option<&Live>) -> El {
+    let label = t.label().unwrap_or(key);
+    let current = live
+        .and_then(|l| l.values.get(key))
+        .filter(|v| {
+            std::mem::discriminant(*v) == std::mem::discriminant(&t.default_value())
+                || (v.is_number() && t.default_value().is_number())
+        })
+        .cloned()
+        .unwrap_or_else(|| t.default_value());
+    let set = |value: String| {
+        pane(PaneAct::Tweak {
+            session: sid.to_owned(),
+            key: key.to_owned(),
+            value,
+        })
+    };
+    match t {
+        Tweak::Boolean { .. } => {
+            let on = current.as_bool().unwrap_or(false);
+            let id = s.acts.on("pane-tweak", set((!on).to_string()));
+            div()
+                .id(id)
+                .on(Action::Click)
+                .w(28.0)
+                .h(16.0)
+                .rounded(8.0)
+                .shrink0()
+                .bg(if on { c(look::BRONZO) } else { white(0.12) })
+                .role(Role::Switch, label)
+                .toggled(on)
+                .ring(8.0)
+                .child(
+                    div()
+                        .size(10.0, 10.0)
+                        .rounded(5.0)
+                        .bg(c(look::WHITE))
+                        .absolute(if on { 15.0 } else { 3.0 }, 3.0),
+                )
+        }
+        Tweak::Number { unit, .. } => {
+            let act = pane(PaneAct::TweakText(sid.to_owned(), key.to_owned()));
+            let id = Acts::id("pane-tweak", &act);
+            s.acts
+                .text(id, act, current.as_f64().map(js_number).unwrap_or_default());
+            div()
+                .row()
+                .items_center()
+                .gap(4.0)
+                .child(
+                    div()
+                        .w(68.0)
+                        .px(6.0)
+                        .py(2.0)
+                        .rounded(4.0)
+                        .bg(white(0.04))
+                        .border(
+                            1.0,
+                            if s.ui.focused(id) {
+                                white(0.25)
+                            } else {
+                                white(0.08)
+                            },
+                        )
+                        .child(field(id, label, "", TextStyle::ui(11.0), ink()).w_full()),
+                )
+                .child_if(unit.as_deref().map(|u| text(u, 10.5, faint()).silent()))
+        }
+        Tweak::Select { options, .. } => {
+            let picked = current
+                .as_str()
+                .filter(|p| options.iter().any(|o| o == p))
+                .or(options.first().map(String::as_str))
+                .unwrap_or_default();
+            let at = options.iter().position(|o| o == picked).unwrap_or(0);
+            let next = options
+                .get((at + 1) % options.len().max(1))
+                .cloned()
+                .unwrap_or_default();
+            let id = s.acts.on("pane-tweak", set(next));
+            // In a row, so the select is as wide as its value, not the column.
+            div().row().child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .row()
+                    .items_center()
+                    .gap(4.0)
+                    .px(6.0)
+                    .py(2.0)
+                    .rounded(4.0)
+                    .bg(white(0.04).mix(white(0.06), s.ui.hover(id)))
+                    .border(1.0, white(0.08))
+                    .role(Role::ComboBox, label)
+                    .value(picked)
+                    .child(text(picked, 11.0, ink()).silent())
+                    .child(ico("chevron-down", 10.0, 2.0, faint())),
+            )
+        }
+        Tweak::Color { options, .. } => {
+            let colour = current.as_str().unwrap_or_default().to_owned();
+            let swatch = |css: &str| {
+                let fill = artifact::hex_color(css).map_or(white(0.0), c);
+                div()
+                    .size(16.0, 16.0)
+                    .rounded(2.0)
+                    .shrink0()
+                    .bg(fill)
+                    .border(1.0, white(0.2))
+            };
+            match options.as_deref() {
+                Some(opts) if !opts.is_empty() => {
+                    let mut group = div().row().items_center().gap(4.0).role(Role::Group, label);
+                    for o in opts {
+                        let id = s.acts.on("pane-tweak", set(o.clone()));
+                        let picked = *o == colour;
+                        let mut sw = swatch(o)
+                            .id(id)
+                            .on(Action::Click)
+                            .role(Role::Button, o.as_str())
+                            .toggled(picked)
+                            .ring(2.0);
+                        if picked {
+                            sw = div().p(1.0).rounded(3.0).border(1.0, white(0.7)).child(sw);
+                        }
+                        group = group.child(sw);
+                    }
+                    group
+                }
+                _ => swatch(&colour).role(Role::Image, label),
+            }
+        }
+    }
+}
+
+/// `ArtifactBanner`: a newer version is out, or this one answers comments.
+fn banner(s: &Screen<'_>, sid: &str, live: Option<&Live>) -> Option<El> {
+    let (a, Some(state)) = s.st.bench.artifact(sid)? else {
+        return None;
+    };
+    let key = format!("{}:{}", a.id, a.version);
+    if live.and_then(|l| l.dismissed.as_deref()) == Some(key.as_str()) {
+        return None;
+    }
+    let latest = state.artifact.latest_version;
+    let behind = a.version < latest;
+    let (answered, on) = state.answered(a.version);
+    if !behind && answered.is_empty() {
+        return None;
+    }
+    let comparing = live.is_some_and(|l| l.comparing);
+    let words = if behind {
+        format!("v{latest} is out; you are reading v{}.", a.version)
+    } else {
+        let n = answered.len();
+        let on_v = on.map(|v| format!(" on v{v}")).unwrap_or_default();
+        format!(
+            "v{} answers your {n} comment{}{on_v}.",
+            a.version,
+            plural(n)
+        )
+    };
+    let small = |act: PaneAct, label: String, pressed: bool| {
+        let id = s.acts.on("pane", pane(act));
+        let bg = if pressed {
+            white(0.08)
+        } else {
+            white(0.0).mix(white(0.06), s.ui.hover(id))
+        };
         div()
             .id(id)
             .on(Action::Click)
-            .px(14.0)
-            .py(6.0)
-            .rounded(6.0)
-            .bg(if strong {
-                c(look::BLUE_400).alpha(0.85 + 0.15 * s.ui.hover(id))
-            } else {
-                white(0.06).mix(white(0.10), s.ui.hover(id))
-            })
-            .role(Role::Button, label)
-            .child(
-                text(
-                    label,
-                    13.0,
-                    if strong {
-                        c(look::WHITE)
-                    } else {
-                        c(look::GRAY_200)
-                    },
-                )
-                .line_height(18.0)
-                .silent(),
-            )
+            .row()
+            .items_center()
+            .h(24.0)
+            .px(8.0)
+            .rounded(4.0)
+            .shrink0()
+            .bg(bg)
+            .role(Role::Button, label.as_str())
+            .child(text(label.as_str(), 12.0, ink()).silent())
     };
-    let panel = div()
-        .col()
-        .w(300.0)
-        .p(16.0)
-        .gap(16.0)
-        .rounded(10.0)
-        .border(1.0, white(0.1))
-        .bg(c(look::SURFACE_OVERLAY))
-        .role(Role::AlertDialog, "Discard unsaved changes?")
+    let action = if behind {
+        Some(small(
+            PaneAct::OpenLatest(sid.to_owned()),
+            format!("Open v{latest}"),
+            false,
+        ))
+    } else {
+        on.map(|v| {
+            let label = if comparing {
+                "Close compare".to_owned()
+            } else {
+                format!("Compare with v{v}")
+            };
+            small(PaneAct::Compare(sid.to_owned()), label, comparing).toggled(comparing)
+        })
+    };
+    let dismiss = s.acts.on("pane", pane(PaneAct::Dismiss(sid.to_owned())));
+    let x = div()
+        .id(dismiss)
+        .on(Action::Click)
+        .p(4.0)
+        .rounded(4.0)
+        .shrink0()
+        .bg(white(0.0).mix(white(0.10), s.ui.hover(dismiss)))
+        .role(Role::Button, "Dismiss")
+        .child(ico("x", 12.0, 2.0, ink()));
+    Some(
+        div()
+            .row()
+            .items_center()
+            .gap(8.0)
+            .px(10.0)
+            .h(32.0)
+            .shrink0()
+            .border_top(1.0, white(0.04))
+            .bg(c(look::SURFACE_SUNKEN))
+            .child(text(words.as_str(), 12.0, ink2()).truncate())
+            .child(div().grow())
+            .child_if(action)
+            .child(tooltip(s.ui, x, dismiss, "Dismiss", None)),
+    )
+}
+
+/// The page, its compare page, the canvas or the doc editor, and the
+/// tweaks and comments beside them.
+fn page_body(s: &Screen<'_>, sid: &str, live: Option<&Live>, agent: &str) -> El {
+    let bench = &s.st.bench;
+    let art = bench.artifact(sid);
+    let editing = live.and_then(|l| l.editing.as_ref());
+    let comparing =
+        live.is_some_and(|l| l.comparing && l.compare_url.is_some()) && editing.is_none();
+    let mut body = div()
+        .row()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .bg(c(look::SURFACE_PANEL));
+    let answered_on = art
+        .and_then(|(a, st)| st.map(|st| st.answered(a.version).1))
+        .flatten();
+    if comparing {
+        body = body.child(
+            div()
+                .col()
+                .grow()
+                .min_w0()
+                .border_right(1.0, white(0.06))
+                .child(version_header(answered_on.unwrap_or_default()))
+                .child(web_box(s, &compare_key(sid))),
+        );
+    }
+    let mut main = div().col().grow().min_w0().min_h(0.0);
+    if comparing {
+        main = main.child(version_header(art.map_or(0, |(a, _)| a.version)));
+    }
+    main = main.child(match (editing, bench.boards(sid)) {
+        (Some(draft), _) => doc_editor(s, sid, draft, art, agent),
+        (None, Some(boards)) => canvas(s, sid, boards),
+        (None, None) => web_box(s, &page_key(sid)),
+    });
+    body = body.child(main);
+    if let (Some(board), Some(m), None) = (
+        bench.board(sid),
+        live.and_then(|l| l.manifest.as_ref())
+            .filter(|m| !m.tweaks.is_empty()),
+        editing,
+    ) {
+        body = body.child(tweak_aside(s, sid, &board.label, m, live));
+    }
+    if let (true, Some((a, state)), None) = (live.is_some_and(|l| l.commenting), art, editing) {
+        body = body.child(rail(s, sid, a.version, state, live, agent));
+    }
+    body
+}
+
+fn version_header(v: u32) -> El {
+    div()
+        .row()
+        .items_center()
+        .px(10.0)
+        .h(24.0)
+        .shrink0()
+        .child(text(format!("v{v}"), 11.0, faint()).mono().silent())
+}
+
+/// `h4`: the asides' mono uppercase heading.
+fn heading(words: &str, count: Option<usize>) -> El {
+    let t = |w: String| {
+        text(w, 11.0, faint())
+            .mono()
+            .weight(600)
+            .tracking(0.05)
+            .silent()
+    };
+    div()
+        .row()
+        .justify_between()
+        .px(12.0)
+        .py(8.0)
+        .shrink0()
+        .border_bottom(1.0, white(0.04))
+        .role(Role::Heading, words)
+        .child(t(words.to_uppercase()).truncate())
+        .child_if(count.map(|n| t(n.to_string())))
+}
+
+/// `bg-ink text-surface-base h-7`, the asides' main button.
+fn solid_btn(s: &Screen<'_>, act: PaneAct, label: &str, enabled: bool) -> El {
+    let id = s.acts.on("pane", pane(act));
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .center()
+        .h(28.0)
+        .px(8.0)
+        .rounded(4.0)
+        .bg(ink())
+        .role(Role::Button, label)
         .child(
-            text("Discard unsaved changes?", 13.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(18.0)
+            text(label, 12.0, c(look::SURFACE_BASE))
+                .weight(600)
+                .truncate()
                 .silent(),
+        );
+    if enabled {
+        b
+    } else {
+        b.disabled(true).opacity(0.4)
+    }
+}
+
+/// `h-6`, the asides' quiet button.
+fn quiet_btn(
+    s: &Screen<'_>,
+    act: PaneAct,
+    label: &str,
+    color: Rgba,
+    border: bool,
+    enabled: bool,
+) -> El {
+    let id = s.acts.on("pane", pane(act));
+    let hot = if enabled { s.ui.hover(id) } else { 0.0 };
+    let mut b = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .center()
+        .h(24.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::Button, label)
+        .child(text(label, 12.0, color).truncate().silent());
+    if border {
+        b = b.border(1.0, white(0.12));
+    }
+    if enabled {
+        b
+    } else {
+        b.disabled(true).opacity(0.4)
+    }
+}
+
+/// `DocEditor`: the markdown, and the edits it makes beside it.
+fn doc_editor(
+    s: &Screen<'_>,
+    sid: &str,
+    draft: &crate::panes::DocDraft,
+    art: Option<(&browser::TabArtifact, Option<&artifact::State>)>,
+    agent: &str,
+) -> El {
+    let (_, edits) = artifact::merge_doc_edit(&draft.original, &draft.edited);
+    let drafts = s.st.bench.comments(sid).0.len();
+    let total = edits.len() + drafts;
+    let next = art.map_or(1, |(a, st)| {
+        st.map_or(a.version, |st| st.artifact.latest_version) + 1
+    });
+    let saving = s.st.bench.live(sid).is_some_and(|l| l.saving);
+    let act = pane(PaneAct::DocText(sid.to_owned()));
+    let id = Acts::id("doc-text", &act);
+    s.acts.text(id, act, draft.edited.as_str());
+    let mut list = div().col();
+    if edits.is_empty() {
+        list = list.child(
+            div().px(12.0).py(12.0).child(
+                text(
+                    "Change the words; each changed paragraph goes as its own edit.",
+                    12.0,
+                    faint(),
+                )
+                .wrapping()
+                .min_w0(),
+            ),
+        );
+    }
+    for e in &edits {
+        let mut item = div()
+            .col()
+            .gap(4.0)
+            .px(12.0)
+            .py(10.0)
+            .border_bottom(1.0, white(0.04))
+            .child(text("Your edit", 11.0, faint()).mono());
+        if !e.before.is_empty() {
+            item = item.child(
+                text(super::truncate(&e.before, 240), 12.0, faint())
+                    .wrapping()
+                    .min_w0()
+                    .role(Role::Paragraph, format!("Removed: {}", e.before)),
+            );
+        }
+        if !e.after.is_empty() {
+            item = item.child(
+                text(super::truncate(&e.after, 240), 12.0, ink())
+                    .wrapping()
+                    .min_w0(),
+            );
+        }
+        list = list.child(item);
+    }
+    if drafts > 0 {
+        list = list.child(
+            div().px(12.0).py(10.0).child(
+                text(
+                    format!("And {drafts} comment{} already waiting.", plural(drafts)),
+                    12.0,
+                    faint(),
+                )
+                .wrapping()
+                .min_w0(),
+            ),
+        );
+    }
+    let can = !edits.is_empty() && !saving;
+    div()
+        .row()
+        .grow()
+        .min_h(0.0)
+        .bg(c(look::SURFACE_BASE))
+        .child(
+            div().grow().min_w0().min_h(0.0).p(16.0).child(
+                textarea(id, "Document", "", TextStyle::ui(13.0), ink())
+                    .w_full()
+                    .h_full(),
+            ),
         )
         .child(
             div()
-                .row()
-                .justify_end()
-                .gap(8.0)
-                .child(button(cancel, "Cancel", false))
-                .child(button(ok, "OK", true)),
-        );
-    let panel = s.acts.click(panel, "discard", Act::Nothing);
-    let bg = s.acts.on("discard-backdrop", edit(EditAct::CancelDiscard));
-    div()
-        .id(bg)
-        .on(Action::Click)
-        .absolute(0.0, 0.0)
-        .size(s.size.0, s.size.1)
-        .bg(Rgba::hexa(0, 0.3))
-        .layered()
-        .center()
-        .child(panel)
+                .col()
+                .w(260.0)
+                .shrink0()
+                .min_h(0.0)
+                .border_left(1.0, white(0.06))
+                .bg(c(look::SURFACE_PANEL))
+                .role(Role::Complementary, "Your edits")
+                .child(
+                    div()
+                        .id(Id::new("doc-edits").child(sid))
+                        .col()
+                        .grow()
+                        .min_h(0.0)
+                        .scroll_y()
+                        .child(heading("To send", Some(total)))
+                        .child(list),
+                )
+                .child(
+                    div()
+                        .col()
+                        .gap(8.0)
+                        .p(12.0)
+                        .border_top(1.0, white(0.06))
+                        .child(solid_btn(
+                            s,
+                            PaneAct::SaveDoc(sid.to_owned(), true),
+                            &format!("Save v{next} and send {total} to {agent}"),
+                            can,
+                        ))
+                        .child(quiet_btn(
+                            s,
+                            PaneAct::SaveDoc(sid.to_owned(), false),
+                            &format!("Save v{next} without sending"),
+                            ink2(),
+                            false,
+                            can,
+                        )),
+                ),
+        )
 }
 
-/// The card header's pane buttons: Browse files, and the terminals panel
-/// for an agent (or a shell that has one open), as act, icon and label.
-pub(super) fn header_buttons(
+/// `DesignCanvas`: every artboard side by side, and the zoom.
+fn canvas(s: &Screen<'_>, sid: &str, boards: &[artifact::Artboard]) -> El {
+    let bench = &s.st.bench;
+    let area = s.ui.rect_of(canvas_id(sid)).map(|r| (r.w, r.h));
+    let zoom = bench.canvas_zoom(sid, area);
+    let selected = bench.board(sid).map(|b| b.id.as_str());
+    let (placed, _, _) = artifact::place_artboards(boards, zoom);
+    let mut el = div()
+        .id(canvas_id(sid))
+        // Sensed so the box has a measured rect to fit the zoom against.
+        .sense(Sense::HOVER)
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .clip()
+        .bg(c(look::SURFACE_SUNKEN))
+        .role(Role::Group, "Design canvas");
+    for (b, at) in boards.iter().zip(&placed) {
+        let (left, top) = (at.left as f32, at.top as f32);
+        let w = (f64::from(b.width) * zoom).round() as f32;
+        let h = (f64::from(b.height) * zoom).round() as f32;
+        let id = s.acts.on(
+            "pane-board",
+            pane(PaneAct::Board(sid.to_owned(), b.id.clone())),
+        );
+        let hot = s.ui.hover(id);
+        let chosen = selected == Some(b.id.as_str());
+        el = el.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_end()
+                .gap(6.0)
+                .h(artifact::LABEL_HEIGHT as f32 - 4.0)
+                .absolute(left, top - artifact::LABEL_HEIGHT as f32)
+                .role(Role::Button, b.label.as_str())
+                .selected(chosen)
+                .child(
+                    text(b.label.as_str(), 11.0, if chosen { ink() } else { ink2() })
+                        .mono()
+                        .silent(),
+                )
+                .child(
+                    text(
+                        format!("{} \u{d7} {}", b.width, b.height),
+                        11.0,
+                        faint().mix(ink2(), hot),
+                    )
+                    .mono()
+                    .silent(),
+                ),
+        );
+        if chosen {
+            el = el.child(
+                div()
+                    .size(w + 8.0, h + 8.0)
+                    .absolute(left - 4.0, top - 4.0)
+                    .border(2.0, c(look::STATUS_BLUE)),
+            );
+        }
+        let board = match bench.slot_id(&board_key(sid, &b.id)) {
+            Some(cid) => custom(cid),
+            None => div(),
+        };
+        el = el.child(board.bg(c(look::WHITE)).size(w, h).absolute(left, top));
+    }
+    let zoom_btn = |act: PaneAct, name: &str, label: &str| {
+        let id = s.acts.on("pane", pane(act));
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .size(24.0, 24.0)
+            .center()
+            .rounded(4.0)
+            .bg(white(0.0).mix(white(0.06), s.ui.hover(id)))
+            .role(Role::Button, label)
+            .child(ico(name, 12.0, 2.0, ink2()));
+        tooltip(s.ui, b, id, label, None)
+    };
+    let pct = format!("{}%", (zoom * 100.0).round());
+    let bottom = area.map_or(0.0, |(_, h)| (h - 10.0 - 30.0).max(0.0));
+    el.child(
+        div()
+            .row()
+            .items_center()
+            .gap(2.0)
+            .p(2.0)
+            .rounded(4.0)
+            .border(1.0, white(0.12))
+            .bg(c(look::SURFACE_OVERLAY))
+            .absolute(10.0, bottom)
+            .role(Role::Toolbar, "Zoom")
+            .child(zoom_btn(
+                PaneAct::Zoom(sid.to_owned(), -1),
+                "minus",
+                "Zoom out",
+            ))
+            .child(
+                div().px(6.0).child(
+                    text(pct.as_str(), 11.5, ink())
+                        .mono()
+                        .role(Role::Label, format!("Zoom {pct}")),
+                ),
+            )
+            .child(zoom_btn(
+                PaneAct::Zoom(sid.to_owned(), 1),
+                "plus",
+                "Zoom in",
+            ))
+            .child(zoom_btn(
+                PaneAct::Zoom(sid.to_owned(), 0),
+                "maximize",
+                "Fit every artboard",
+            )),
+    )
+}
+
+/// The canvas's tweaks, in a column beside it.
+fn tweak_aside(
     s: &Screen<'_>,
-    session: &Session,
-) -> Vec<(Act, &'static str, &'static str)> {
-    let sid = session.info.id.clone();
-    let mut out = vec![(
-        pane(PaneAct::ToggleFiles(sid.clone())),
-        "folder-open",
-        "Browse files",
-    )];
-    let has = s.st.panes.saved.panels.contains_key(&sid);
-    if !session.is_shell() || has {
-        out.push((
-            pane(PaneAct::ToggleTerminals(sid)),
-            "square-terminal",
-            if has {
-                "Close terminals"
-            } else {
-                "Add a terminal"
-            },
+    sid: &str,
+    board: &str,
+    m: &artifact::Manifest,
+    live: Option<&Live>,
+) -> El {
+    let mut col = div()
+        .id(Id::new("pane-tweaks").child(sid))
+        .col()
+        .w(220.0)
+        .shrink0()
+        .min_h(0.0)
+        .scroll_y()
+        .border_left(1.0, white(0.06))
+        .bg(c(look::SURFACE_PANEL))
+        .role(Role::Complementary, "Tweaks")
+        .child(heading(&format!("Tweaks \u{b7} {board}"), None));
+    for (key, t) in &m.tweaks {
+        col = col.child(
+            div()
+                .col()
+                .gap(6.0)
+                .px(12.0)
+                .py(10.0)
+                .border_bottom(1.0, white(0.04))
+                .child(tweak_label(key, t))
+                .child(tweak_control(s, sid, key, t, live)),
+        );
+    }
+    col.child(div().grow()).child(
+        div().px(12.0).py(10.0).child(
+            text("Every artboard takes the same values.", 11.5, faint())
+                .wrapping()
+                .min_w0(),
+        ),
+    )
+}
+
+/// The quote a rail item points at: `border-l-2 border-status-blue`.
+fn target(s: &Screen<'_>, sid: &str, comment: &Comment) -> El {
+    let id = s.acts.on(
+        "pane-rail",
+        pane(PaneAct::RailReveal(sid.to_owned(), comment.id.clone())),
+    );
+    div()
+        .id(id)
+        .on(Action::Click)
+        .pl(8.0)
+        .border_left(2.0, c(look::STATUS_BLUE))
+        .role(Role::Button, "Show on the page")
+        .child(
+            text(super::truncate(&comment.target(), 90), 11.5, faint())
+                .mono()
+                .wrapping()
+                .min_w0()
+                .silent(),
+        )
+}
+
+/// A rail's `edit`, `delete`, `save` or `cancel`.
+fn link(s: &Screen<'_>, act: PaneAct, label: &str, hover: Rgba) -> El {
+    let id = s.acts.on("pane-rail", pane(act));
+    div()
+        .id(id)
+        .on(Action::Click)
+        .role(Role::Button, label)
+        .child(
+            text(label, 11.0, faint().mix(hover, s.ui.hover(id)))
+                .mono()
+                .silent(),
+        )
+}
+
+/// `ArtifactRail`: the comments to send, the last ones sent, a note and
+/// the send button.
+fn rail(
+    s: &Screen<'_>,
+    sid: &str,
+    version: u32,
+    state: Option<&artifact::State>,
+    live: Option<&Live>,
+    agent: &str,
+) -> El {
+    let (drafts, sent) = s.st.bench.comments(sid);
+    let found = |c: &Comment| {
+        live.and_then(|l| l.found.get(&c.id)).copied() != Some(false)
+            || !matches!(c.anchor, Some(Anchor::Quote { .. }))
+    };
+    let editing = live.and_then(|l| l.rail_edit.as_deref());
+    let mut list = div()
+        .id(Id::new("pane-rail").child(sid))
+        .col()
+        .grow()
+        .min_h(0.0)
+        .scroll_y()
+        .child(heading("To send", Some(drafts.len())));
+    if drafts.is_empty() {
+        let hint = if s.st.bench.boards(sid).is_some() {
+            "Click an artboard to pin a comment there."
+        } else {
+            "Select words on the page to comment on them."
+        };
+        list = list.child(
+            div()
+                .px(12.0)
+                .py(12.0)
+                .child(text(hint, 12.0, faint()).wrapping().min_w0()),
+        );
+    }
+    for c in &drafts {
+        let mut item = div()
+            .col()
+            .gap(6.0)
+            .px(12.0)
+            .py(10.0)
+            .border_bottom(1.0, white(0.04))
+            .child(target(s, sid, c));
+        let mut links = div().row().items_center().gap(8.0);
+        if !found(c) {
+            links = links.child(
+                text("words changed", 11.0, crate::screen::c(look::DANGER))
+                    .mono()
+                    .silent(),
+            );
+        }
+        if editing == Some(c.id.as_str()) {
+            let id = rail_text_id(sid);
+            s.acts.text(
+                id,
+                pane(PaneAct::RailText(sid.to_owned())),
+                s.ui.edit_text(id).to_owned(),
+            );
+            item = item.child(rail_field(s, id, "Edit comment", ""));
+            links = links
+                .child(link(s, PaneAct::RailSave(sid.to_owned()), "save", ink()))
+                .child(link(
+                    s,
+                    PaneAct::RailCancel(sid.to_owned()),
+                    "cancel",
+                    ink(),
+                ));
+        } else {
+            item = item.child(text(c.body.as_str(), 12.0, ink()).wrapping().min_w0());
+            links = links
+                .child(link(
+                    s,
+                    PaneAct::RailEdit(sid.to_owned(), c.id.clone()),
+                    "edit",
+                    ink(),
+                ))
+                .child(link(
+                    s,
+                    PaneAct::RailDelete(sid.to_owned(), c.id.clone()),
+                    "delete",
+                    crate::screen::c(look::DANGER),
+                ));
+        }
+        list = list.child(item.child(links));
+    }
+    if !sent.is_empty() {
+        let on = sent.iter().map(|c| c.version).max().unwrap_or_default();
+        list = list.child(heading(&format!("Sent with v{on}"), None));
+        for c in &sent {
+            let moved = version > c.version;
+            let lost = !found(c);
+            let (status, color) = match (moved, lost) {
+                (false, _) => ("sent".to_owned(), faint()),
+                (true, true) => (
+                    format!("words changed in v{version}"),
+                    crate::screen::c(look::DANGER),
+                ),
+                (true, false) => ("still anchored".to_owned(), faint()),
+            };
+            list = list.child(
+                div()
+                    .col()
+                    .gap(6.0)
+                    .px(12.0)
+                    .py(10.0)
+                    .border_bottom(1.0, white(0.04))
+                    .child(target(s, sid, c))
+                    .child(text(c.body.as_str(), 12.0, ink2()).wrapping().min_w0())
+                    .child(text(status, 11.0, color).mono()),
+            );
+        }
+    }
+    let note = note_id(sid);
+    let typed = s.ui.edit_text(note).to_owned();
+    s.acts
+        .text(note, pane(PaneAct::Note(sid.to_owned())), typed.clone());
+    let sending = live.is_some_and(|l| l.sending);
+    let queued = state.is_some_and(|st| st.queued);
+    let n = drafts.len();
+    let send_label = if n > 0 {
+        format!("Send {n} comment{} to {agent}", plural(n))
+    } else {
+        "Nothing to send yet".to_owned()
+    };
+    let mut footer = div()
+        .col()
+        .gap(8.0)
+        .p(12.0)
+        .border_top(1.0, white(0.06))
+        .child(rail_field(
+            s,
+            note,
+            "Note about the whole version",
+            "A note about the whole version",
+        ));
+    if !typed.trim().is_empty() {
+        footer = footer.child(quiet_btn(
+            s,
+            PaneAct::AddNote(sid.to_owned()),
+            "Add note",
+            ink(),
+            true,
+            true,
         ));
     }
-    out
+    footer = footer.child(solid_btn(
+        s,
+        PaneAct::Send(sid.to_owned()),
+        &send_label,
+        n > 0 && !sending,
+    ));
+    if queued {
+        footer = footer.child(
+            text(
+                format!("Queued. It goes once {agent} is back at its prompt."),
+                11.5,
+                faint(),
+            )
+            .wrapping()
+            .min_w0(),
+        );
+    }
+    div()
+        .col()
+        .w(260.0)
+        .shrink0()
+        .min_h(0.0)
+        .border_left(1.0, white(0.06))
+        .bg(c(look::SURFACE_PANEL))
+        .role(Role::Complementary, "Comments")
+        .child(list)
+        .child(footer)
 }
 
-/// The git chips of a card's status bar: changes, and Open in.
-pub(super) fn status_items(s: &Screen<'_>, session: &Session, dim: f32) -> Vec<El> {
+/// The rail's textareas: `rounded border-white/12 bg-surface-sunken`.
+fn rail_field(s: &Screen<'_>, id: Id, name: &str, placeholder: &str) -> El {
+    let border = if s.ui.focused(id) {
+        white(0.24)
+    } else {
+        white(0.12)
+    };
+    div()
+        .px(8.0)
+        .py(6.0)
+        .min_h(48.0)
+        .rounded(4.0)
+        .border(1.0, border)
+        .bg(c(look::SURFACE_SUNKEN))
+        .child(textarea(id, name, placeholder, TextStyle::ui(12.0), ink()).w_full())
+}
+
+// ---- device -------------------------------------------------------------
+
+fn device_pane(s: &Screen<'_>, session: &Session) -> El {
+    let sid = session.info.id.as_str();
+    let bench = &s.st.bench;
+    let dev = bench.devices.get(sid).cloned().unwrap_or_default();
+    let claim = bench.claims.get(sid);
+    let name = claim.map_or("Simulator", |c| c.name.as_str());
+    let claiming = bench.claiming.contains(sid);
+
+    let nid = s
+        .acts
+        .on("pane", pane(PaneAct::SwitchDevice(sid.to_owned())));
+    let picker_here = bench
+        .picker
+        .as_ref()
+        .is_some_and(|p| p.session == sid && p.from_pane);
+    let mut name_btn = div()
+        .id(nid)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .min_w0()
+        .px(4.0)
+        .py(2.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.06), s.ui.hover(nid)))
+        .role(Role::Button, format!("Switch simulator, currently {name}"))
+        .has_popup()
+        .expanded(picker_here)
+        .child(
+            text(name, 11.0, c(look::GRAY_300))
+                .weight(500)
+                .truncate()
+                .silent(),
+        )
+        .child(if claiming {
+            ico("loader-circle", 10.0, 2.5, c(look::GRAY_300))
+        } else {
+            ico("chevron-down", 10.0, 2.5, c(look::GRAY_500))
+        });
+    if picker_here {
+        name_btn = name_btn.overlay(picker(s), Place::BelowStart, 4.0);
+    }
+    let name_btn = tooltip(s.ui, name_btn, nid, "Switch simulator", None);
+    let sky_on = |on: bool| on.then(|| white(0.06));
+    let header = div()
+        .row()
+        .items_center()
+        .gap(6.0)
+        .px(8.0)
+        .py(4.0)
+        .shrink0()
+        .child(ico("smartphone", 12.0, 2.0, c(look::GRAY_500)))
+        .child(name_btn)
+        .child(div().grow())
+        .child(
+            icon_btn(
+                s,
+                PaneAct::Device(sid.to_owned(), "pick"),
+                "mouse-pointer-click",
+                "Point at an element for the agent",
+                Some("Point at an element to describe it to this session's agent"),
+                sky_on(dev.picking),
+                true,
+            )
+            .toggled(dev.picking),
+        )
+        .child(icon_btn(
+            s,
+            PaneAct::Device(sid.to_owned(), "draw"),
+            "pencil",
+            "Draw on the screen for the agent",
+            Some("Draw over the screen, then click again to send it to this session's agent"),
+            None,
+            true,
+        ))
+        .child(controls(s, sid, PaneKind::Device, name));
+
+    let error = dev
+        .error
+        .as_deref()
+        .filter(|e| dev.dismissed.as_deref() != Some(*e));
+    let error_row = error.map(|e| {
+        let id = s
+            .acts
+            .on("pane", pane(PaneAct::DismissDeviceError(sid.to_owned())));
+        div()
+            .row()
+            .gap(4.0)
+            .px(8.0)
+            .py(4.0)
+            .shrink0()
+            .child(
+                text(e, 10.0, Rgba::hexa(look::AMBER_400, 0.9))
+                    .wrapping()
+                    .min_w0()
+                    .grow()
+                    .role(Role::Alert, e),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .p(2.0)
+                    .rounded(4.0)
+                    .shrink0()
+                    .role(Role::Button, "Dismiss error")
+                    .child(ico(
+                        "x",
+                        10.0,
+                        2.5,
+                        c(look::GRAY_500).mix(c(look::GRAY_200), s.ui.hover(id)),
+                    )),
+            )
+    });
+
+    let area = s.ui.rect_of(stage_id(sid)).map(|r| (r.w, r.h));
+    let (scale, points) = bench.device_scale(sid, area);
+    let mut stage = div()
+        .id(stage_id(sid))
+        // Sensed so the box has a measured rect to fit the zoom against.
+        .sense(Sense::HOVER)
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .clip()
+        .center()
+        .p(8.0)
+        .bg(c(look::SURFACE_PANEL));
+    let shown = bench.slot_id(&device_key(sid));
+    stage = match shown {
+        Some(cid) if points.0 > 0.0 => {
+            let (w, h) = (
+                (points.0 * scale).round() as f32,
+                (points.1 * scale).round() as f32,
+            );
+            let inset = area.map_or(8.0, |(aw, ah)| {
+                crate::device::bezel_thickness((f64::from(aw), f64::from(ah)), points) as f32
+            });
+            let outer = crate::device::outer_radius((f64::from(w), f64::from(h)), points) as f32;
+            let inner = (outer - inset).max(2.0);
+            stage.child(
+                div()
+                    .p(inset)
+                    .shrink0()
+                    .rounded(outer)
+                    .bg(c(look::SURFACE_OVERLAY))
+                    .border(1.0, white(0.07))
+                    .role(Role::Image, format!("Screen of {name}"))
+                    .child(
+                        div()
+                            .size(w, h)
+                            .rounded(inner)
+                            .clip()
+                            .opacity(if dev.error.is_some() { 0.4 } else { 1.0 })
+                            .child(custom(cid).w_full().h_full()),
+                    ),
+            )
+        }
+        _ => {
+            let words = match (&bench.unavailable, dev.error.is_some()) {
+                (Some(why), _) => why.as_str(),
+                (None, true) => "No frame",
+                (None, false) => "Waiting for the device\u{2026}",
+            };
+            stage.child(text(words, 11.0, c(look::GRAY_500)).wrapping().min_w0())
+        }
+    };
+    let typing = dev.typing.then(|| {
+        div().px(8.0).py(2.0).shrink0().child(
+            text(
+                format!("Typing goes to {name} \u{2014} Esc gives the keyboard back"),
+                10.0,
+                Rgba::hexa(look::SKY_400, 0.9),
+            )
+            .silent(),
+        )
+    });
+    div()
+        .col()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .clip()
+        .bg(c(look::SURFACE_PANEL))
+        .role(Role::Region, name)
+        .child(header)
+        .child_if(error_row)
+        .child(stage)
+        .child_if(typing)
+        .child(control_bar(s, sid, &dev, scale))
+}
+
+/// `DeviceControlBar`.
+fn control_bar(s: &Screen<'_>, sid: &str, dev: &crate::panes::DevicePane, scale: f64) -> El {
+    let op = |name: &'static str| PaneAct::Device(sid.to_owned(), name);
+    let divider = || div().w(1.0).h(14.0).mx(4.0).bg(white(0.08));
+    let sky = |on: bool| on.then(|| white(0.06));
+    let btn = |act: PaneAct, icon: &str, label: &str, tip: &str, on: Option<Rgba>, dim: bool| {
+        let b = icon_btn(s, act, icon, label, Some(tip), on, true);
+        if dim {
+            b.opacity(0.4)
+        } else {
+            b
+        }
+    };
+    let can_in = scale < crate::device::ZOOM_MAX;
+    let can_out = scale > crate::device::ZOOM_MIN;
+    let actual = s.acts.on("pane", pane(op("actual")));
+    let one = div()
+        .id(actual)
+        .on(Action::Click)
+        .p(4.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.10), s.ui.hover(actual)))
+        .role(Role::Button, "Show the device at actual size")
+        .child(
+            text("1:1", 10.0, ink())
+                .weight(500)
+                .line_height(14.0)
+                .silent(),
+        );
+    div()
+        .row()
+        .wrap_children()
+        .items_center()
+        .justify_center()
+        .gap(2.0)
+        .px(8.0)
+        .py(4.0)
+        .shrink0()
+        .border_top(1.0, white(0.06))
+        .role(Role::Toolbar, "Device controls")
+        .child(btn(op("home"), "house", "Press Home", "Home", None, false))
+        .child(btn(op("lock"), "lock", "Press Lock", "Lock", None, false))
+        .child(divider())
+        .child(btn(
+            op("save"),
+            if dev.saving {
+                "loader-circle"
+            } else {
+                "image-down"
+            },
+            "Save a screenshot",
+            "Save a screenshot",
+            None,
+            dev.saving,
+        ))
+        .child(
+            btn(
+                op("keyboard"),
+                "keyboard",
+                if dev.typing {
+                    "Stop typing on the device"
+                } else {
+                    "Type on the device"
+                },
+                if dev.typing {
+                    "Stop typing on the device (Esc)"
+                } else {
+                    "Type on the device"
+                },
+                sky(dev.typing),
+                false,
+            )
+            .toggled(dev.typing),
+        )
+        .child(btn(
+            op("rotate"),
+            "rotate-cw",
+            "Rotate the device",
+            "Rotate",
+            None,
+            false,
+        ))
+        .child(divider())
+        .child(btn(
+            op("zoom-out"),
+            "minus",
+            "Zoom out",
+            "Zoom out",
+            None,
+            !can_out,
+        ))
+        .child(
+            div().w(36.0).row().justify_center().child(
+                text(
+                    format!("{}%", (scale * 100.0).round()),
+                    10.0,
+                    c(look::GRAY_500),
+                )
+                .silent(),
+            ),
+        )
+        .child(btn(
+            op("zoom-in"),
+            "plus",
+            "Zoom in",
+            "Zoom in",
+            None,
+            !can_in,
+        ))
+        .child(
+            btn(
+                op("fit"),
+                "scan",
+                "Fit the device to the pane",
+                "Fit the device to the pane",
+                sky(dev.zoom.is_none()),
+                false,
+            )
+            .toggled(dev.zoom.is_none()),
+        )
+        .child(tooltip(s.ui, one, actual, "One pixel per point", None))
+}
+
+/// `DevicePicker`: the simulators this session may take.
+pub(super) fn picker(s: &Screen<'_>) -> El {
+    let Some(p) = &s.st.bench.picker else {
+        return div();
+    };
+    let list = div()
+        .col()
+        .min_w(240.0)
+        .max_h(280.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .clip()
+        .role(Role::ListBox, "Simulators")
+        .child(
+            div()
+                .px(12.0)
+                .py(8.0)
+                .border_bottom(1.0, white(0.06))
+                .child(
+                    text("SIMULATORS", 10.0, c(look::GRAY_500))
+                        .tracking(0.05)
+                        .silent(),
+                ),
+        );
+    let state = |el: El| div().px(12.0).py(12.0).row().center().child(el);
+    if p.loading {
+        return list.child(state(ico("loader-circle", 14.0, 2.0, c(look::GRAY_500))));
+    }
+    if let Some(e) = &p.error {
+        return list.child(state(
+            text(e.as_str(), 11.0, Rgba::hexa(look::RED_400, 0.8))
+                .wrapping()
+                .min_w0()
+                .role(Role::Alert, e.as_str()),
+        ));
+    }
+    if p.devices.is_empty() {
+        return list.child(state(text("No simulators found", 12.0, c(look::GRAY_500))));
+    }
+    let mut rows = div()
+        .id(Id::new("device-picker"))
+        .col()
+        .scroll_y()
+        .min_h(0.0);
+    for l in &p.devices {
+        let d = &l.device;
+        let act = pane(PaneAct::PickDevice {
+            session: p.session.clone(),
+            udid: d.udid.clone(),
+        });
+        let id = s.acts.on("picker", act);
+        let fg = if l.selectable {
+            c(look::GRAY_300)
+        } else {
+            c(look::GRAY_600)
+        };
+        let dot = if d.booted {
+            Rgba::hexa(look::GREEN_400, 0.7)
+        } else {
+            c(look::GRAY_600)
+        };
+        let tag = if !l.selectable {
+            Some(text("in use", 9.0, Rgba::hexa(look::AMBER_400, 0.6)))
+        } else if d.booted {
+            Some(text("booted", 9.0, Rgba::hexa(look::GREEN_400, 0.6)))
+        } else {
+            None
+        };
+        let mut row = div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(8.0)
+            .px(12.0)
+            .py(6.0)
+            .bg(white(0.0).mix(white(0.06), s.ui.hover(id)))
+            .role(Role::ListBoxOption, d.name.as_str())
+            .child(ico("smartphone", 11.0, 2.0, dot))
+            .child(
+                div()
+                    .col()
+                    .grow()
+                    .min_w0()
+                    .child(text(d.name.as_str(), 12.0, fg).truncate().silent())
+                    .child_if(
+                        l.subtitle
+                            .as_deref()
+                            .map(|t| text(t, 9.0, c(look::GRAY_500)).truncate().silent()),
+                    ),
+            )
+            .child_if(tag.map(El::silent));
+        if !l.selectable {
+            row = row.disabled(true);
+        }
+        rows = rows.child(row);
+    }
+    list.child(rows)
+}
+
+/// The card's globe and phone, after its More button.
+pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVariant) -> Vec<El> {
+    let button = |act: Act, icon: &str, label: &str, tip: &str| {
+        let b = CardButton {
+            id: s.acts.on("card", act),
+            icon,
+            label,
+            tip,
+            shortcut: None,
+            danger: false,
+        };
+        card_button(s.ui, &b, variant.tip_place())
+    };
+    let sid = session.info.id.as_str();
+    let bench = &s.st.bench;
     let mut out = Vec::new();
-    if let Some(i) = super::git::indicator(s, session, dim) {
-        out.push(i);
+    if !session.is_shell() || bench.browsers.get(sid).is_some() {
+        out.push(button(
+            Act::Pane(PaneAct::ToggleBrowser(sid.to_owned())),
+            "globe",
+            "Open browser",
+            "Open browser",
+        ));
     }
-    if let Some(o) = super::git::open_in(s, session, dim) {
-        out.push(o);
+    let has = bench.devices.contains_key(sid);
+    let mobile = bench.mobile.get(&session.info.project_path).copied();
+    if crate::device::should_show_button(mobile, has, session.is_shell()) {
+        let claiming = bench.claiming.contains(sid);
+        let (label, tip) = match (has, claiming) {
+            (true, _) => ("Hide device", "Hide device"),
+            (false, true) => ("Opening device", "Booting the simulator\u{2026}"),
+            (false, false) => ("Open device", "Open device"),
+        };
+        let icon = if claiming {
+            "loader-circle"
+        } else {
+            "smartphone"
+        };
+        let mut b = button(
+            Act::Pane(PaneAct::DeviceButton(sid.to_owned())),
+            icon,
+            label,
+            tip,
+        );
+        if claiming {
+            b = b.disabled(true).opacity(0.5);
+        }
+        if bench
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.session == sid && !p.from_pane)
+        {
+            b = b.overlay(picker(s), Place::BelowStart, 4.0);
+        }
+        out.push(b);
     }
     out
-}
-
-/// What a Git act on a branch chip looks like, for the cards.
-pub(super) fn branch_act(session: &Session) -> Act {
-    Act::Git(GitAct::Branches(session.info.id.clone()))
 }
 
 #[cfg(test)]
@@ -1593,30 +2105,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_active_match_is_laid_over_the_colours() {
-        let a = Rgba::hex(0x111111);
-        let b = Rgba::hex(0x222222);
-        let m = Rgba::hex(0);
-        let out = overlay(&[(0..4, a), (4..8, b)], 2..6, m);
-        let ranges: Vec<_> = out.iter().map(|(r, _)| r.clone()).collect();
-        assert_eq!(ranges, vec![0..2, 2..6, 6..8]);
-        assert!(out.windows(2).all(|w| w[0].0.end <= w[1].0.start));
-    }
-
-    #[test]
-    fn long_paths_keep_their_ends() {
-        assert_eq!(tail("src/app.ts", 48), "src/app.ts");
-        let t = tail(
-            "a/very/long/path/that/goes/on/and/on/and/on/to/the/file.ts",
-            20,
-        );
-        assert!(t.starts_with('\u{2026}') && t.ends_with("file.ts"));
-        assert_eq!(t.chars().count(), 20);
-    }
-
-    #[test]
-    fn tabs_overflow_by_their_names() {
-        assert!(!overflows(&["a.ts"], 400.0));
-        assert!(overflows(&["a-long-file-name.ts"; 6], 400.0));
+    fn numbers_print_as_javascript_does() {
+        assert_eq!(js_number(6000.0), "6000");
+        assert_eq!(js_number(1.5), "1.5");
+        assert_eq!(js_number(-2.0), "-2");
     }
 }

@@ -69,6 +69,14 @@ pub trait App: 'static {
     fn background(&self) -> Rgba {
         crate::theme::color::SURFACE_BASE
     }
+    /// The window exists, before it is first shown: for an app that seats
+    /// native views (a web view) in it.
+    fn opened(&mut self, _window: &Arc<Window>) {}
+    /// Runs each time the loop is about to sleep, for work a native view's
+    /// toolkit needs pumped; returns when it wants to run again.
+    fn tick(&mut self) -> Option<Instant> {
+        None
+    }
 }
 
 pub enum UserEvent {
@@ -280,7 +288,8 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         if let Some(at) = o.inset_title {
             crate::macos::place_traffic_lights(&window, at);
         }
-        let app = make(&mut ui, Waker(self.proxy.clone()));
+        let mut app = make(&mut ui, Waker(self.proxy.clone()));
+        app.opened(&window);
         window.set_visible(true);
         Ok(Live {
             window,
@@ -452,14 +461,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
+        let tick = l.app.tick();
         match wake {
             Some(t) if t <= now => {
                 l.pending = None;
                 l.window.request_redraw();
-                el.set_control_flow(ControlFlow::Wait);
+                el.set_control_flow(tick.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
             }
-            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(t)),
-            None => el.set_control_flow(ControlFlow::Wait),
+            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(tick.map_or(t, |k| k.min(t)))),
+            None => el.set_control_flow(tick.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)),
         }
     }
 }
@@ -611,8 +621,12 @@ fn configure(
         wgpu::PresentMode::Fifo
     };
     let px = window.inner_size();
+    // Copying from the frame is what backdrop blur reads; without it blurs
+    // are skipped.
+    let usage =
+        wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
     let config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage,
         format,
         width: px.width.max(1),
         height: px.height.max(1),

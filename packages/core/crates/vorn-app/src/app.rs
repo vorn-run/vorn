@@ -29,12 +29,13 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+mod browser;
 pub mod canvas;
 pub mod forms;
 mod gates;
 mod git;
-mod panes;
 mod settings;
+mod side;
 mod tasks;
 mod workflows;
 
@@ -174,9 +175,10 @@ enum Call {
     Workflow(workflows::WfCall),
     Set(settings::SetCall),
     Git(git::GitCall),
-    Pane(panes::PaneCall),
+    Side(side::SideCall),
     /// Nothing to do with the answer, an error included.
     Ignore,
+    Pane(browser::PaneCall),
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -230,6 +232,8 @@ pub struct App {
     removals: Vec<git::Pending>,
     /// A discard the person agreed to is being run.
     discarding: bool,
+    /// The browser and device panes' web views and calls in flight.
+    web: browser::Web,
 }
 
 impl App {
@@ -238,6 +242,7 @@ impl App {
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
         let store = Store::load(&rpc)?;
+        let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
         let (grid, grid_error) = match Grid::connect(&ep.grid, wake) {
             Ok(g) => (Some(g), None),
@@ -276,6 +281,7 @@ impl App {
             last_focus: None,
             removals: Vec::new(),
             discarding: false,
+            web,
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
@@ -287,7 +293,7 @@ impl App {
     /// there, and this app keeps its own view of it (open panes, drafts)
     /// beside them.
     pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
-        self.st.panes = crate::panes::Panes::load(Some(crate::panes::view_file(&dir)));
+        self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
         self.st.editors.drafts =
             crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
         self.data_dir = Some(dir);
@@ -333,6 +339,7 @@ impl App {
                         self.task_run_updated(&params);
                         self.wf_run_updated(&params);
                     }
+                    self.pane_notified(&method, &params);
                     if method == "server:identity" {
                         self.st.server_version = params
                             .get("appVersion")
@@ -350,6 +357,7 @@ impl App {
                     }
                     self.store.apply(&method, params);
                 }
+                Event::Request { id, method, params } => self.bridge(id, &method, params),
                 Event::Closed => self.closed = true,
             }
         }
@@ -376,6 +384,8 @@ impl App {
                 }
             }
         }
+        self.pump_web();
+        self.detect_mobile();
         let now = std::time::Instant::now();
         self.st.toasts.retain(|t| t.until > now);
         let gone = |id: &Option<String>, store: &Store| {
@@ -423,8 +433,9 @@ impl App {
             Call::Workflow(c) => self.wf_answered(c, answer),
             Call::Set(c) => self.set_answered(c, answer),
             Call::Git(c) => self.git_answered(c, answer),
-            Call::Pane(c) => self.pane_answered(c, answer),
+            Call::Side(c) => self.side_answered(c, answer),
             Call::Ignore => {}
+            Call::Pane(c) => self.pane_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -609,8 +620,8 @@ impl App {
     /// owner is the current card, else the current card.
     fn typing_target(&self) -> Option<String> {
         let current = self.current();
-        if let Some(t) = &self.st.panes.focus {
-            if current.as_deref().is_some() && self.st.panes.holder(t) == current.as_deref() {
+        if let Some(t) = &self.st.side.focus {
+            if current.as_deref().is_some() && self.st.side.holder(t) == current.as_deref() {
                 return Some(t.clone());
             }
         }
@@ -834,11 +845,11 @@ impl App {
             Act::Select(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
-                self.st.panes.focus = None;
+                self.st.side.focus = None;
                 ui.set_focus(None);
             }
             Act::Git(a) => self.run_git(ui, a, src),
-            Act::Pane(a) => self.run_pane(ui, a, src),
+            Act::Side(a) => self.run_side(ui, a, src),
             Act::Edit(a) => self.run_edit(ui, a),
             Act::Expand(id) => {
                 self.st.view = MainView::Sessions;
@@ -1011,6 +1022,7 @@ impl App {
             }
             Act::Shortcuts => self.run_shortcut(ui, Shortcut::Shortcuts),
             Act::Task(a) => self.run_task(ui, a),
+            Act::Pane(a) => self.run_pane(ui, a),
             Act::Run(a) => self.run_run(a),
             Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
@@ -1201,6 +1213,7 @@ impl App {
             || self.form_event(ui, &event)
             || self.task_event(ui, &event)
             || self.wf_event(ui, &event)
+            || self.pane_event(ui, &event)
         {
             return;
         }
@@ -1462,6 +1475,7 @@ impl App {
             ui.set_focus(None);
         } else if self.st.confirm_close.is_some() {
             self.st.confirm_close = None;
+        } else if self.pane_escape() {
         } else if self.st.composer_overlay(&self.store) {
             self.st.composer_open = false;
         } else {
@@ -1706,6 +1720,7 @@ impl App {
         if let Some(id) = self.st.wf.open_next.take() {
             self.run_wf(ui, crate::workflows::WfAct::Edit(id), Src::default());
         }
+        self.web_slots(ui);
         self.acts.clear();
         let root = self.screen(ui).build();
         self.seed_texts(ui);
@@ -1751,6 +1766,7 @@ impl App {
                 ui.scene.pop_clip();
             }
         }
+        self.paint_web(ui, laid);
     }
 }
 

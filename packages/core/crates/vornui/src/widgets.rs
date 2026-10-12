@@ -534,6 +534,7 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         nowrap: false,
         spans: Vec::new(),
         marks: Vec::new(),
+        centered: false,
     }))
 }
 

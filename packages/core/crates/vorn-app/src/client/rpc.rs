@@ -57,6 +57,13 @@ pub enum Event {
         method: String,
         params: Value,
     },
+    /// vornd asks the app something only it can answer (see
+    /// [`answers_for_vornd`]); [`Rpc::respond`] settles it by `id`.
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
     /// The connection ended; no more events follow.
     Closed,
 }
@@ -74,6 +81,19 @@ enum Out {
         method: String,
         params: Value,
     },
+    Respond {
+        id: Value,
+        result: Result<Value, String>,
+    },
+}
+
+/// The calls vornd makes of the desktop's main process once it holds the
+/// bridge: the browser pane and the device pane.
+pub fn answers_for_vornd(method: &str) -> bool {
+    matches!(
+        method.split_once(':').map(|(g, _)| g),
+        Some("browser" | "device")
+    )
 }
 
 /// A call on its way: wait for its answer or poll it from a frame loop.
@@ -185,6 +205,27 @@ impl Rpc {
             params,
         });
     }
+
+    /// Answers vornd's [`Event::Request`] `id`: its result, or an error
+    /// message it hands to whoever asked.
+    pub fn respond(&self, id: Value, result: Result<Value, String>) {
+        let _ = self.out.send(Out::Respond { id, result });
+    }
+
+    /// A handle that answers vornd's requests from another thread.
+    pub fn responder(&self) -> Responder {
+        Responder(self.out.clone())
+    }
+}
+
+/// [`Rpc::respond`] for work that finishes off the UI thread.
+#[derive(Clone)]
+pub struct Responder(mpsc::UnboundedSender<Out>);
+
+impl Responder {
+    pub fn respond(&self, id: Value, result: Result<Value, String>) {
+        let _ = self.0.send(Out::Respond { id, result });
+    }
 }
 
 /// A result read as `T`.
@@ -207,6 +248,7 @@ enum Incoming {
     Call {
         id: Value,
         method: String,
+        params: Value,
     },
     Ignored,
 }
@@ -220,7 +262,14 @@ fn classify(text: &str) -> Incoming {
         .and_then(Value::as_str)
         .map(str::to_owned);
     match (frame.get("id").cloned(), method) {
-        (Some(id), Some(method)) if !id.is_null() => Incoming::Call { id, method },
+        (Some(id), Some(method)) if !id.is_null() => Incoming::Call {
+            id,
+            method,
+            params: frame
+                .get_mut("params")
+                .map(Value::take)
+                .unwrap_or(Value::Null),
+        },
         (None | Some(Value::Null), Some(method)) => Incoming::Notification {
             method,
             params: frame
@@ -282,7 +331,12 @@ async fn io(
                             wake();
                         }
                     }
-                    Incoming::Call { id, method } => {
+                    Incoming::Call { id, method, params } if answers_for_vornd(&method) => {
+                        if events.send(Event::Request { id, method, params }).is_ok() {
+                            wake();
+                        }
+                    }
+                    Incoming::Call { id, method, .. } => {
                         let refusal = json!({"jsonrpc": "2.0", "id": id,
                             "error": {"code": -32601, "message": format!("Method not found: {method}")}});
                         if ws.send(Message::text(refusal.to_string())).await.is_err() {
@@ -304,6 +358,12 @@ async fn io(
                     }
                     Out::Notify { method, params } => {
                         json!({"jsonrpc": "2.0", "method": method, "params": params})
+                    }
+                    Out::Respond { id, result: Ok(result) } => {
+                        json!({"jsonrpc": "2.0", "id": id, "result": result})
+                    }
+                    Out::Respond { id, result: Err(message) } => {
+                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})
                     }
                 };
                 if ws.send(Message::text(frame.to_string())).await.is_err() {
@@ -371,9 +431,13 @@ mod tests {
             classify(r#"{"jsonrpc":"2.0","id":"x","method":"bridge:ask"}"#),
             Incoming::Call {
                 id: json!("x"),
-                method: "bridge:ask".into()
+                method: "bridge:ask".into(),
+                params: Value::Null,
             }
         );
+        assert!(answers_for_vornd("browser:readPage"));
+        assert!(answers_for_vornd("device:list"));
+        assert!(!answers_for_vornd("session:fetch"));
         assert_eq!(classify("not json"), Incoming::Ignored);
         assert_eq!(classify(r#"{"id":"str"}"#), Incoming::Ignored);
     }

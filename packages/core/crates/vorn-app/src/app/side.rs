@@ -14,13 +14,13 @@ use super::{App, Call, Src};
 use crate::act::Act;
 use crate::client::rpc::{decode, RpcError};
 use crate::editor::{self, Buffer, EditAct, Stamp, DRAFT_SETTLE_MS, HIGHLIGHT_SETTLE_MS};
-use crate::panes::{tab_key, Entry, PaneAct, PaneKind, Tree};
-use crate::screen::panes::{editor_id, files_body_id, filter_id, find_id, PaneDivider};
+use crate::screen::side::{editor_id, files_body_id, filter_id, find_id, PaneDivider};
+use crate::side::{tab_key, Entry, SideAct, SideKind, Tree};
 use crate::state::{Dialog, MenuKind};
 use crate::ui::{Id, Ui};
 
 /// A file or pane call whose answer changes the screen.
-pub(super) enum PaneCall {
+pub(super) enum SideCall {
     /// A shell for `owner`'s panel.
     Shell(String),
     /// A directory of `owner`'s tree.
@@ -48,7 +48,7 @@ pub(super) enum PaneCall {
 impl App {
     /// The key of every buffer on screen: each open tab and card.
     fn open_keys(&self) -> Vec<(String, String, String)> {
-        let p = &self.st.panes.saved;
+        let p = &self.st.side.saved;
         let tabs = p.files.iter().flat_map(|(owner, f)| {
             f.tabs
                 .iter()
@@ -75,24 +75,16 @@ impl App {
             .iter()
             .map(|s| s.info.id.as_str())
             .collect();
-        if self.st.panes.prune(&live) {
-            self.st.panes.save();
+        if self.st.side.prune(&live) {
+            self.st.side.save();
         }
-        for owner in self
-            .st
-            .panes
-            .saved
-            .files
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
-        {
+        for owner in self.st.side.saved.files.keys().cloned().collect::<Vec<_>>() {
             let Some(cwd) = self.owner_cwd(&owner) else {
                 continue;
             };
-            let stale = self.st.panes.trees.get(&owner).is_none_or(|t| t.cwd != cwd);
+            let stale = self.st.side.trees.get(&owner).is_none_or(|t| t.cwd != cwd);
             if stale {
-                self.st.panes.trees.insert(
+                self.st.side.trees.insert(
                     owner.clone(),
                     Tree {
                         cwd: cwd.clone(),
@@ -101,7 +93,7 @@ impl App {
                     },
                 );
                 self.call(
-                    Call::Pane(PaneCall::Listed {
+                    Call::Side(SideCall::Listed {
                         owner: owner.clone(),
                         dir: cwd.clone(),
                     }),
@@ -110,11 +102,11 @@ impl App {
                 );
             }
             if let Some(r) = ui.rect_of(files_body_id(&owner)) {
-                let narrow = r.w > 0.0 && r.w < crate::panes::SIDE_BY_SIDE_MIN;
+                let narrow = r.w > 0.0 && r.w < crate::side::SIDE_BY_SIDE_MIN;
                 if narrow {
-                    self.st.panes.narrow.insert(owner.clone());
+                    self.st.side.narrow.insert(owner.clone());
                 } else {
-                    self.st.panes.narrow.remove(&owner);
+                    self.st.side.narrow.remove(&owner);
                 }
             }
         }
@@ -137,7 +129,7 @@ impl App {
                     .buffers
                     .insert(key.clone(), Buffer::new(path));
                 self.call(
-                    Call::Pane(PaneCall::Read(key.clone())),
+                    Call::Side(SideCall::Read(key.clone())),
                     "file:readContent",
                     json!({ "filePath": path }),
                 );
@@ -181,7 +173,7 @@ impl App {
         // An edited preview tab is kept, or the next click would replace it.
         let pins: Vec<(String, String)> = self
             .st
-            .panes
+            .side
             .saved
             .files
             .iter()
@@ -189,27 +181,27 @@ impl App {
             .filter(|(o, p)| self.st.editors.dirty(&tab_key(o, p)))
             .collect();
         for (o, p) in pins {
-            self.st.panes.pin_tab(&o, &p);
-            self.st.panes.save();
+            self.st.side.pin_tab(&o, &p);
+            self.st.side.save();
         }
     }
 
-    pub(super) fn pane_answered(&mut self, call: PaneCall, answer: Result<Value, RpcError>) {
+    pub(super) fn side_answered(&mut self, call: SideCall, answer: Result<Value, RpcError>) {
         match call {
-            PaneCall::Shell(owner) => match answer.and_then(decode::<TerminalSession>) {
+            SideCall::Shell(owner) => match answer.and_then(decode::<TerminalSession>) {
                 Ok(info) => {
                     let id = info.id.clone();
                     self.store.upsert(info);
-                    self.st.panes.open_panel(&owner, &id);
-                    self.st.panes.focus = Some(id);
-                    self.st.panes.save();
+                    self.st.side.open_panel(&owner, &id);
+                    self.st.side.focus = Some(id);
+                    self.st.side.save();
                 }
                 Err(e) => self
                     .st
                     .toast(format!("Failed to start terminal: {e}"), true),
             },
-            PaneCall::Listed { owner, dir } => {
-                let Some(t) = self.st.panes.trees.get_mut(&owner) else {
+            SideCall::Listed { owner, dir } => {
+                let Some(t) = self.st.side.trees.get_mut(&owner) else {
                     return;
                 };
                 let entries: Vec<Entry> = super::list(answer)
@@ -224,7 +216,7 @@ impl App {
                     t.dirs.entry(dir).or_insert(entries);
                 }
             }
-            PaneCall::Read(key) => {
+            SideCall::Read(key) => {
                 let Some(b) = self.st.editors.buffers.get_mut(&key) else {
                     return;
                 };
@@ -236,31 +228,31 @@ impl App {
                     None => {
                         let path = b.path.clone();
                         self.call(
-                            Call::Pane(PaneCall::Unread(key)),
+                            Call::Side(SideCall::Unread(key)),
                             "file:stamp",
                             json!({ "filePath": path }),
                         );
                     }
                 }
             }
-            PaneCall::Unread(key) => {
+            SideCall::Unread(key) => {
                 let known = answer.ok().is_some_and(|v| !v.is_null());
                 if let Some(b) = self.st.editors.buffers.get_mut(&key) {
                     b.loaded(None, known);
                 }
             }
-            PaneCall::Base(key) => {
+            SideCall::Base(key) => {
                 if let Some(b) = self.st.editors.buffers.get_mut(&key) {
                     b.base = answer.ok().as_ref().and_then(Stamp::from_value);
                 }
             }
-            PaneCall::DraftCheck(key) => {
+            SideCall::DraftCheck(key) => {
                 if let Some(b) = self.st.editors.buffers.get_mut(&key) {
                     let now = answer.ok().as_ref().and_then(Stamp::from_value);
                     b.conflict = editor::has_moved(b.base, now);
                 }
             }
-            PaneCall::PreSave(key) => {
+            SideCall::PreSave(key) => {
                 let Some(b) = self.st.editors.buffers.get_mut(&key) else {
                     return;
                 };
@@ -272,7 +264,7 @@ impl App {
                 }
                 self.write_file(&key);
             }
-            PaneCall::Wrote { key, text } => {
+            SideCall::Wrote { key, text } => {
                 let ok = match &answer {
                     Ok(v) => v.get("success").and_then(Value::as_bool) == Some(true),
                     Err(_) => false,
@@ -297,7 +289,7 @@ impl App {
                 self.st.editors.drafts.forget(&key);
                 self.stamp_base(&key, &path);
             }
-            PaneCall::Disk(key) => {
+            SideCall::Disk(key) => {
                 let Some(b) = self.st.editors.buffers.get_mut(&key) else {
                     return;
                 };
@@ -317,7 +309,7 @@ impl App {
 
     fn stamp_base(&mut self, key: &str, path: &str) {
         self.call(
-            Call::Pane(PaneCall::Base(key.to_owned())),
+            Call::Side(SideCall::Base(key.to_owned())),
             "file:stamp",
             json!({ "filePath": path }),
         );
@@ -333,7 +325,7 @@ impl App {
         let kept = ed.drafts.read(key, &path).cloned();
         if b.take(kept.as_ref()) {
             self.call(
-                Call::Pane(PaneCall::DraftCheck(key.to_owned())),
+                Call::Side(SideCall::DraftCheck(key.to_owned())),
                 "file:stamp",
                 json!({ "filePath": path }),
             );
@@ -353,7 +345,7 @@ impl App {
         };
         let (path, text) = (b.path.clone(), b.draft.clone());
         self.call(
-            Call::Pane(PaneCall::Wrote {
+            Call::Side(SideCall::Wrote {
                 key: key.to_owned(),
                 text: text.clone(),
             }),
@@ -378,7 +370,7 @@ impl App {
         }
         let path = b.path.clone();
         self.call(
-            Call::Pane(PaneCall::PreSave(key.to_owned())),
+            Call::Side(SideCall::PreSave(key.to_owned())),
             "file:stamp",
             json!({ "filePath": path }),
         );
@@ -408,7 +400,7 @@ impl App {
             return;
         };
         self.call(
-            Call::Pane(PaneCall::Shell(owner.to_owned())),
+            Call::Side(SideCall::Shell(owner.to_owned())),
             "shell:create",
             json!(cwd),
         );
@@ -425,93 +417,93 @@ impl App {
         }
     }
 
-    pub(super) fn run_pane(&mut self, ui: &mut Ui, act: PaneAct, src: Src) {
+    pub(super) fn run_side(&mut self, ui: &mut Ui, act: SideAct, src: Src) {
         match act {
-            PaneAct::ToggleFiles(owner) => {
-                match self.st.panes.saved.files.get(&owner) {
-                    None => self.st.panes.open_files(&owner),
+            SideAct::ToggleFiles(owner) => {
+                match self.st.side.saved.files.get(&owner) {
+                    None => self.st.side.open_files(&owner),
                     Some(f) => {
                         let keys: Vec<String> = f.tabs.iter().map(|t| tab_key(&owner, t)).collect();
-                        if !self.may_discard(&keys, Act::Pane(PaneAct::ToggleFiles(owner.clone())))
+                        if !self.may_discard(&keys, Act::Side(SideAct::ToggleFiles(owner.clone())))
                         {
                             return;
                         }
-                        let gone = self.st.panes.close_files(&owner);
+                        let gone = self.st.side.close_files(&owner);
                         self.forget(&gone);
                     }
                 }
-                self.st.panes.save();
+                self.st.side.save();
             }
-            PaneAct::ToggleTerminals(owner) => {
-                if self.st.panes.saved.panels.contains_key(&owner) {
-                    let held = self.st.panes.close_panel(&owner);
+            SideAct::ToggleTerminals(owner) => {
+                if self.st.side.saved.panels.contains_key(&owner) {
+                    let held = self.st.side.close_panel(&owner);
                     self.kill_shells(held);
-                    self.st.panes.save();
+                    self.st.side.save();
                 } else {
                     self.panel_shell(&owner);
                 }
             }
-            PaneAct::AddTerminal(owner) => self.panel_shell(&owner),
-            PaneAct::Maximize(pane) => {
-                self.st.panes.saved.maximized =
-                    if self.st.panes.saved.maximized.as_deref() == Some(pane.as_str()) {
+            SideAct::AddTerminal(owner) => self.panel_shell(&owner),
+            SideAct::Maximize(pane) => {
+                self.st.side.saved.maximized =
+                    if self.st.side.saved.maximized.as_deref() == Some(pane.as_str()) {
                         None
                     } else {
                         Some(pane)
                     };
-                self.st.panes.save();
+                self.st.side.save();
             }
-            PaneAct::Close(kind, owner) => match kind {
-                PaneKind::Files => {
+            SideAct::Close(kind, owner) => match kind {
+                SideKind::Files => {
                     let keys: Vec<String> = self
                         .st
-                        .panes
+                        .side
                         .saved
                         .files
                         .get(&owner)
                         .map(|f| f.tabs.iter().map(|t| tab_key(&owner, t)).collect())
                         .unwrap_or_default();
-                    if !self.may_discard(&keys, Act::Pane(PaneAct::Close(kind, owner.clone()))) {
+                    if !self.may_discard(&keys, Act::Side(SideAct::Close(kind, owner.clone()))) {
                         return;
                     }
-                    let gone = self.st.panes.close_files(&owner);
+                    let gone = self.st.side.close_files(&owner);
                     self.forget(&gone);
-                    self.st.panes.save();
+                    self.st.side.save();
                 }
-                PaneKind::Terminals => {
-                    let held = self.st.panes.close_panel(&owner);
+                SideKind::Terminals => {
+                    let held = self.st.side.close_panel(&owner);
                     self.kill_shells(held);
-                    self.st.panes.save();
+                    self.st.side.save();
                 }
             },
-            PaneAct::Tab(owner, path) => {
-                self.st.panes.set_active_tab(&owner, &path);
-                if self.st.panes.narrow.contains(&owner) {
-                    self.st.panes.set_tree_visible(&owner, false);
+            SideAct::Tab(owner, path) => {
+                self.st.side.set_active_tab(&owner, &path);
+                if self.st.side.narrow.contains(&owner) {
+                    self.st.side.set_tree_visible(&owner, false);
                 }
-                self.st.panes.save();
+                self.st.side.save();
             }
-            PaneAct::PinTab(owner, path) => {
-                self.st.panes.pin_tab(&owner, &path);
-                self.st.panes.save();
+            SideAct::PinTab(owner, path) => {
+                self.st.side.pin_tab(&owner, &path);
+                self.st.side.save();
             }
-            PaneAct::CloseTab(owner, path) => {
+            SideAct::CloseTab(owner, path) => {
                 let key = tab_key(&owner, &path);
                 if !self.may_discard(
                     std::slice::from_ref(&key),
-                    Act::Pane(PaneAct::CloseTab(owner.clone(), path.clone())),
+                    Act::Side(SideAct::CloseTab(owner.clone(), path.clone())),
                 ) {
                     return;
                 }
-                self.st.panes.close_tab(&owner, &path);
+                self.st.side.close_tab(&owner, &path);
                 self.forget(&[key]);
-                self.st.panes.save();
+                self.st.side.save();
             }
-            PaneAct::CloseSavedTabs(owner) => {
+            SideAct::CloseSavedTabs(owner) => {
                 let ed = &self.st.editors;
                 let gone: Vec<String> = self
                     .st
-                    .panes
+                    .side
                     .saved
                     .files
                     .get(&owner)
@@ -524,18 +516,18 @@ impl App {
                     })
                     .unwrap_or_default();
                 self.st
-                    .panes
+                    .side
                     .close_saved_tabs(&owner, |t| ed.dirty(&tab_key(&owner, t)));
-                self.st.panes.save();
+                self.st.side.save();
                 self.forget(&gone);
             }
-            PaneAct::TabsMenu(owner) => self.open_menu(ui, MenuKind::FileTabs(owner), src),
-            PaneAct::ToggleTree(owner) => {
-                self.st.panes.toggle_tree(&owner);
-                self.st.panes.save();
+            SideAct::TabsMenu(owner) => self.open_menu(ui, MenuKind::FileTabs(owner), src),
+            SideAct::ToggleTree(owner) => {
+                self.st.side.toggle_tree(&owner);
+                self.st.side.save();
             }
-            PaneAct::Dir(owner, dir) => {
-                let Some(t) = self.st.panes.trees.get_mut(&owner) else {
+            SideAct::Dir(owner, dir) => {
+                let Some(t) = self.st.side.trees.get_mut(&owner) else {
                     return;
                 };
                 if t.expanded.remove(&dir) {
@@ -544,7 +536,7 @@ impl App {
                 t.expanded.insert(dir.clone());
                 if !t.dirs.contains_key(&dir) && t.pending.insert(dir.clone()) {
                     self.call(
-                        Call::Pane(PaneCall::Listed {
+                        Call::Side(SideCall::Listed {
                             owner,
                             dir: dir.clone(),
                         }),
@@ -553,17 +545,17 @@ impl App {
                     );
                 }
             }
-            PaneAct::File(owner, path) => self.open_file(&owner, &path, false),
-            PaneAct::PinFile(owner, path) => self.open_file(&owner, &path, true),
-            PaneAct::PopOut(owner, path) => {
-                let card = self.st.panes.promote(&owner, &path);
-                self.st.panes.save();
+            SideAct::File(owner, path) => self.open_file(&owner, &path, false),
+            SideAct::PinFile(owner, path) => self.open_file(&owner, &path, true),
+            SideAct::PopOut(owner, path) => {
+                let card = self.st.side.promote(&owner, &path);
+                self.st.side.save();
                 self.st.selected = Some(card);
             }
-            PaneAct::PopOutActive(owner) => {
+            SideAct::PopOutActive(owner) => {
                 let Some(path) = self
                     .st
-                    .panes
+                    .side
                     .saved
                     .files
                     .get(&owner)
@@ -574,55 +566,55 @@ impl App {
                 let key = tab_key(&owner, &path);
                 if !self.may_discard(
                     std::slice::from_ref(&key),
-                    Act::Pane(PaneAct::PopOutActive(owner.clone())),
+                    Act::Side(SideAct::PopOutActive(owner.clone())),
                 ) {
                     return;
                 }
-                let p = &mut self.st.panes;
+                let p = &mut self.st.side;
                 let card = p.promote(&owner, &path);
                 p.close_tab(&owner, &path);
                 p.save();
                 self.forget(&[key]);
                 self.st.selected = Some(card);
             }
-            PaneAct::PanelTab(owner, i) => {
-                self.st.panes.set_active_panel(&owner, i);
-                self.st.panes.focus = self
+            SideAct::PanelTab(owner, i) => {
+                self.st.side.set_active_panel(&owner, i);
+                self.st.side.focus = self
                     .st
-                    .panes
+                    .side
                     .saved
                     .panels
                     .get(&owner)
                     .and_then(|x| x.terminals.get(i))
                     .cloned();
                 self.st.selected = Some(owner);
-                self.st.panes.save();
+                self.st.side.save();
             }
-            PaneAct::Extract(_, id) => {
-                self.st.panes.release(&id);
-                self.st.panes.save();
+            SideAct::Extract(_, id) => {
+                self.st.side.release(&id);
+                self.st.side.save();
                 self.st.selected = Some(id);
             }
-            PaneAct::CloseTerminal(id) => {
-                self.st.panes.release(&id);
-                self.st.panes.save();
+            SideAct::CloseTerminal(id) => {
+                self.st.side.release(&id);
+                self.st.side.save();
                 self.kill_shells(vec![id]);
             }
-            PaneAct::FocusTerminal(id) => {
-                if let Some(owner) = self.st.panes.holder(&id).map(str::to_owned) {
-                    self.st.panes.focus = Some(id);
+            SideAct::FocusTerminal(id) => {
+                if let Some(owner) = self.st.side.holder(&id).map(str::to_owned) {
+                    self.st.side.focus = Some(id);
                     self.st.selected = Some(owner);
                     ui.set_focus(None);
                 }
             }
-            PaneAct::ReturnCard(card) => {
+            SideAct::ReturnCard(card) => {
                 if !self.may_discard(
                     std::slice::from_ref(&card),
-                    Act::Pane(PaneAct::ReturnCard(card.clone())),
+                    Act::Side(SideAct::ReturnCard(card.clone())),
                 ) {
                     return;
                 }
-                let p = &mut self.st.panes;
+                let p = &mut self.st.side;
                 let Some(c) = p.saved.cards.remove(&card) else {
                     return;
                 };
@@ -631,23 +623,23 @@ impl App {
                 self.forget(&[card]);
                 self.st.selected = Some(c.session_id);
             }
-            PaneAct::CloseCard(card) => {
+            SideAct::CloseCard(card) => {
                 if !self.may_discard(
                     std::slice::from_ref(&card),
-                    Act::Pane(PaneAct::CloseCard(card.clone())),
+                    Act::Side(SideAct::CloseCard(card.clone())),
                 ) {
                     return;
                 }
-                self.st.panes.saved.cards.remove(&card);
-                self.st.panes.save();
+                self.st.side.saved.cards.remove(&card);
+                self.st.side.save();
                 self.forget(&[card]);
             }
-            PaneAct::SelectCard(card) => {
+            SideAct::SelectCard(card) => {
                 self.st.selected = Some(card);
-                self.st.panes.focus = None;
+                self.st.side.focus = None;
             }
-            PaneAct::ClearFilter(owner) => {
-                if let Some(t) = self.st.panes.trees.get_mut(&owner) {
+            SideAct::ClearFilter(owner) => {
+                if let Some(t) = self.st.side.trees.get_mut(&owner) {
                     t.filter.clear();
                 }
                 ui.set_edit_text(filter_id(&owner), "");
@@ -660,13 +652,13 @@ impl App {
     fn open_file(&mut self, owner: &str, path: &str, pin: bool) {
         let preview_dirty = self
             .st
-            .panes
+            .side
             .saved
             .files
             .get(owner)
             .and_then(|f| f.preview.as_deref())
             .is_some_and(|pv| self.st.editors.dirty(&tab_key(owner, pv)));
-        let p = &mut self.st.panes;
+        let p = &mut self.st.side;
         p.open_tab(owner, path, pin, preview_dirty);
         if p.narrow.contains(owner) {
             p.set_tree_visible(owner, false);
@@ -732,7 +724,7 @@ impl App {
                     return;
                 };
                 self.call(
-                    Call::Pane(PaneCall::Disk(key)),
+                    Call::Side(SideCall::Disk(key)),
                     "file:readContent",
                     json!({ "filePath": path }),
                 );
@@ -767,7 +759,7 @@ impl App {
         let Some(hit) = m.get(f.index % m.len().max(1)) else {
             return;
         };
-        let scroller = crate::screen::panes::scroller_id(key);
+        let scroller = crate::screen::side::scroller_id(key);
         let h = ui.rect_of(scroller).map_or(0.0, |r| r.h);
         let y = hit.line as f32 * editor::LINE_HEIGHT - h / 2.0;
         ui.set_scroll_offset(scroller, y.max(0.0));
@@ -781,7 +773,7 @@ impl App {
         };
         let text = ui.edit_text(id);
         let line = text[..caret.min(text.len())].matches('\n').count() as f32;
-        let scroller = crate::screen::panes::scroller_id(key);
+        let scroller = crate::screen::side::scroller_id(key);
         let Some(r) = ui.rect_of(scroller) else {
             return;
         };
@@ -829,14 +821,14 @@ impl App {
         }
         let owner = self
             .st
-            .panes
+            .side
             .trees
             .keys()
             .find(|o| filter_id(o) == id)
             .cloned();
         if let Some(owner) = owner {
             let text = ui.edit_text(id).to_owned();
-            if let Some(t) = self.st.panes.trees.get_mut(&owner) {
+            if let Some(t) = self.st.side.trees.get_mut(&owner) {
                 t.filter = text;
             }
             return true;
@@ -873,13 +865,13 @@ impl App {
         }
         let owner = self
             .st
-            .panes
+            .side
             .trees
             .keys()
             .find(|o| filter_id(o) == focus)
             .cloned();
         if let (Some(owner), "Escape") = (owner, code) {
-            self.run_pane(ui, PaneAct::ClearFilter(owner), Src::default());
+            self.run_side(ui, SideAct::ClearFilter(owner), Src::default());
             return true;
         }
         false
@@ -888,10 +880,10 @@ impl App {
     /// A divider moved: the card's split, a column's weights, a Files
     /// pane's tree, or the Changes panel's width. Saved when it ends.
     pub(super) fn pane_resized(&mut self, ui: &Ui, id: Id, ratio: f32, end: bool) -> bool {
-        let Some(which) = crate::screen::panes::divider_of(&self.st, id) else {
+        let Some(which) = crate::screen::side::divider_of(&self.st, id) else {
             return false;
         };
-        let p = &mut self.st.panes;
+        let p = &mut self.st.side;
         match which {
             PaneDivider::Card(owner) => {
                 if end {
@@ -903,7 +895,7 @@ impl App {
                 }
             }
             PaneDivider::Column(owner, i) => {
-                let w = crate::panes::resize_weights(&p.weights(&owner), i, ratio);
+                let w = crate::side::resize_weights(&p.weights(&owner), i, ratio);
                 if end {
                     p.drag_panes = None;
                     p.set_weights(&owner, w);
@@ -915,7 +907,7 @@ impl App {
             PaneDivider::Tree => {
                 if end {
                     p.drag_tree = None;
-                    p.saved.tree_ratio = Some(crate::panes::clamp_split(ratio));
+                    p.saved.tree_ratio = Some(crate::side::clamp_split(ratio));
                     p.save();
                 } else {
                     p.drag_tree = Some(ratio);

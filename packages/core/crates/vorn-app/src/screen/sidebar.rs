@@ -396,7 +396,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         .store
         .sessions
         .iter()
-        .filter(|x| x.info.project_name == p.name && s.st.panes.holder(&x.info.id).is_none())
+        .filter(|x| x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none())
         .collect();
     let worktrees: Vec<&crate::state::Worktree> =
         s.st.worktrees

@@ -90,7 +90,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
         MenuKind::SetSelect(key) => super::settings::select_items(s, key),
         MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
-        MenuKind::FileTabs(owner) => super::panes::tab_items(s, owner),
+        MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
         MenuKind::Branch(_) | MenuKind::OpenIn(_) => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter

@@ -385,10 +385,11 @@ pub struct State {
     pub wf: crate::workflows::Workflows,
     pub settings: crate::settings::Settings,
     pub git: crate::git::Git,
-    pub panes: crate::panes::Panes,
+    pub side: crate::side::Side,
     pub editors: crate::editor::Editors,
     /// The build of the vornd this app talks to, from `server:identity`.
     pub server_version: Option<String>,
+    pub bench: crate::panes::Workbench,
 }
 
 impl State {
@@ -404,7 +405,7 @@ impl State {
                     .as_deref()
                     .is_none_or(|p| s.info.project_name == p)
                     && self.filter.keeps(s)
-                    && self.panes.holder(&s.info.id).is_none()
+                    && self.side.holder(&s.info.id).is_none()
             })
             .map(|(i, _)| i)
             .collect();

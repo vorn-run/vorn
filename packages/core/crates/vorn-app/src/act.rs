@@ -101,8 +101,9 @@ pub enum Act {
     /// The settings page's controls.
     Set(crate::settings::SetAct),
     Git(crate::git::GitAct),
-    Pane(crate::panes::PaneAct),
+    Side(crate::side::SideAct),
     Edit(crate::editor::EditAct),
+    Pane(crate::panes::PaneAct),
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.

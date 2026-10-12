@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use accesskit::Role;
 use taffy::prelude::*;
 
-use crate::scene::Rgba;
+use crate::scene::{Rgba, Shadow};
 use crate::text::TextStyle;
 
 /// A stable name for an element across frames: what hover, focus, scroll
@@ -201,6 +201,8 @@ pub struct EditLook {
     pub spans: Vec<(std::ops::Range<usize>, Rgba)>,
     /// Backgrounds under byte ranges (find matches).
     pub marks: Vec<(std::ops::Range<usize>, Rgba)>,
+    /// One line drawn mid-field (`text-center`) rather than from the left.
+    pub centered: bool,
 }
 
 /// Accessibility facts beyond role and label.
@@ -249,8 +251,11 @@ pub struct El {
     pub(crate) layered: bool,
     /// The border drawn in dashes (`border-dashed`).
     pub(crate) dashed: bool,
-    /// Box-shadow layers drawn behind it (`theme::shadow`).
-    pub(crate) shadow: Option<&'static [(f32, f32, f32, f32)]>,
+    /// Soft shadows under the box, first drawn lowest (`box-shadow`).
+    pub(crate) shadows: Vec<Shadow>,
+    /// Blur what is drawn under the box by this standard deviation, in
+    /// logical pixels (`backdrop-filter: blur()`).
+    pub(crate) backdrop_blur: Option<f32>,
 }
 
 pub fn div() -> El {
@@ -277,7 +282,8 @@ pub fn div() -> El {
         slop: (0.0, 0.0),
         layered: false,
         dashed: false,
-        shadow: None,
+        shadows: Vec::new(),
+        backdrop_blur: None,
     }
 }
 
@@ -348,6 +354,13 @@ impl El {
     pub fn placeholder_color(mut self, c: Rgba) -> El {
         if let Content::Edit(l) = &mut self.content {
             l.placeholder_color = c;
+        }
+        self
+    }
+    /// An edit field's line centred, as `text-center` does.
+    pub fn text_center(mut self) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.centered = true;
         }
         self
     }
@@ -566,10 +579,16 @@ impl El {
         self.dashed = true;
         self
     }
-    /// A box shadow behind it: black layers of (y offset, blur, spread,
-    /// alpha), as `theme::shadow` lists them.
-    pub fn shadow(mut self, layers: &'static [(f32, f32, f32, f32)]) -> El {
-        self.shadow = Some(layers);
+    /// A box shadow behind it, replacing any before: black layers of
+    /// (y offset, blur, spread, alpha) in CSS order, as `theme::shadow`
+    /// lists them.
+    pub fn shadow(mut self, layers: &[(f32, f32, f32, f32)]) -> El {
+        self.shadows.clear();
+        let black = |a: f32| Rgba::rgba_const(0, 0, 0, a);
+        for &(y, blur, spread, a) in layers {
+            self.shadows
+                .insert(0, Shadow::new(0.0, y, blur, spread, black(a)));
+        }
         self
     }
     /// A top border only (`border-t`).
@@ -737,6 +756,21 @@ impl El {
         self.ring = Some(r);
         self
     }
+    /// Adds soft shadows of any colour and offset under the box, following
+    /// its corner radius, in CSS `box-shadow` order (first on top).
+    pub fn shadows(mut self, list: &[Shadow]) -> El {
+        for s in list {
+            self.shadows.insert(0, *s);
+        }
+        self
+    }
+    /// Blurs whatever is drawn under the box, within its rounded corners,
+    /// by standard deviation `sigma` logical pixels: frosted glass under a
+    /// translucent background.
+    pub fn backdrop_blur(mut self, sigma: f32) -> El {
+        self.backdrop_blur = (sigma > 0.0).then_some(sigma);
+        self
+    }
     pub fn overlay(mut self, el: El, place: Place, gap: f32) -> El {
         self.overlays.push(Overlay {
             el,
@@ -847,5 +881,14 @@ mod tests {
         let d = div().on(Action::Click).disabled(true);
         assert_eq!(d.sense, Sense::NONE);
         assert!(d.action.is_none());
+    }
+
+    #[test]
+    fn shadows_paint_the_first_listed_on_top() {
+        let s = |blur| Shadow::new(0.0, 2.0, blur, -1.0, Rgba::rgba_const(0, 0, 0, 0.1));
+        let layers = div().shadow(&[(2.0, 1.0, -1.0, 0.1), (2.0, 2.0, -1.0, 0.1)]);
+        let listed = div().shadows(&[s(1.0), s(2.0)]);
+        assert_eq!(listed.shadows, layers.shadows);
+        assert_eq!(listed.shadows.last(), Some(&s(1.0)), "drawn last");
     }
 }

@@ -316,7 +316,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Commit => super::tasks::commit(s, super::tasks::diff::Scope::Task),
         Dialog::GitCommit => super::tasks::commit(s, super::tasks::diff::Scope::Session),
         Dialog::RemoveWorktree => super::git::removal(s),
-        Dialog::Discard => super::panes::discard(s),
+        Dialog::Discard => super::side::discard(s),
         Dialog::Output => super::tasks::output(s),
         Dialog::RunPrompt | Dialog::Missed | Dialog::WfFile => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,

@@ -4,6 +4,7 @@
 //! (`FocusedStage`) and the tabs layout (`TabView`), which show one card.
 
 use super::chrome::{self, divider, draggable};
+use super::panes;
 use super::{c, ico, truncate, white, Screen, MOD_LABEL};
 use crate::act::{Act, Acts};
 use crate::client::Session;
@@ -99,7 +100,7 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
 /// CardActionCluster: more actions, minimize on a grid card, expand or
 /// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions, CardActions, CardButton, CardVariant};
+    use crate::components::card::{card_actions_with, CardActions, CardButton, CardVariant};
     let sid = session.info.id.clone();
     let (variant, toggle, key) = if focused {
         (CardVariant::Focused, Act::Collapse, 'W')
@@ -112,8 +113,8 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             s.acts.on("confirm", Act::AskClose(String::new())),
         )
     });
-    let specs = super::panes::header_buttons(s, session);
-    let panes: Vec<CardButton<'_>> = specs
+    let specs = super::side::header_buttons(s, session);
+    let side: Vec<CardButton<'_>> = specs
         .iter()
         .map(|(act, icon, label)| CardButton {
             id: s.acts.on("card", act.clone()),
@@ -124,18 +125,19 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             danger: false,
         })
         .collect();
-    card_actions(
+    card_actions_with(
         s.ui,
         &CardActions {
             variant,
             more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
-            panes: &panes,
+            panes: &side,
             minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
             toggle: s.acts.on("card", toggle),
             close: s.acts.on("card", Act::AskClose(sid)),
             toggle_key: &format!("{MOD_LABEL}{key}"),
             confirming,
         },
+        panes::card_buttons(s, session, variant),
     )
 }
 
@@ -350,7 +352,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
 /// opens the branch switcher.
 pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> {
     let branch = s.info.branch.as_deref()?;
-    let id = sc.acts.on("branch-chip", super::panes::branch_act(s));
+    let id = sc.acts.on("branch-chip", super::side::branch_act(s));
     let open = sc
         .st
         .menu
@@ -451,7 +453,7 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         bar = bar.child(chip);
     }
     bar = bar.child(div().grow());
-    for item in super::panes::status_items(s, session, dim) {
+    for item in super::side::status_items(s, session, dim) {
         bar = bar.child(item);
     }
     div()
@@ -703,7 +705,7 @@ fn term_body(s: &Screen<'_>, i: usize, session: &Session, compact: bool) -> El {
 
 /// The terminal with its status bar, beside the session's panes.
 fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
-    super::panes::frame(
+    super::side::frame(
         s,
         session,
         None,
@@ -730,7 +732,7 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
         .border(1.0, white(0.06).mix(white(0.12), s.ui.hover(card_id)))
         .role(Role::Group, session.title())
         .selected(selected)
-        .child(super::panes::frame(
+        .child(super::side::frame(
             s,
             session,
             Some(header(s, session, pos, dim, hot)),
@@ -779,7 +781,7 @@ fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
     let mut out = Vec::new();
     for i in s.st.gridded(s.store) {
         out.push(Cell::Session(i));
-        for card in s.st.panes.cards_of(&s.store.sessions[i].info.id) {
+        for card in s.st.side.cards_of(&s.store.sessions[i].info.id) {
             out.push(Cell::Card(card));
         }
     }
@@ -806,7 +808,7 @@ pub(super) fn grid(s: &Screen<'_>) -> El {
             let n = r * l.cols + col;
             row = row.child(match cells.get(n) {
                 Some(Cell::Session(i)) => card(s, *i, n, &s.store.sessions[*i]).flex(1.0),
-                Some(Cell::Card(c)) => super::panes::editor_card(s, c).flex(1.0),
+                Some(Cell::Card(c)) => super::side::editor_card(s, c).flex(1.0),
                 None => div().grow(),
             });
         }
