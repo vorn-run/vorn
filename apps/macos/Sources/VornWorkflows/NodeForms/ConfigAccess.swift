@@ -45,7 +45,27 @@ extension JSONValue {
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes, .prettyPrinted]
         guard let data = try? enc.encode(self), let s = String(data: data, encoding: .utf8) else { return "" }
-        return s.replacingOccurrences(of: "    ", with: "  ")
+        // Halve only the leading indentation and write `"key": v` like JSON.stringify, not `"key" : v`.
+        return s.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let indent = line.prefix { $0 == " " }.count
+            var rest = String(line.dropFirst(indent))
+            if rest.hasPrefix("\"") {
+                var escaped = false
+                var i = rest.index(after: rest.startIndex)
+                while i < rest.endIndex {
+                    let ch = rest[i]
+                    if escaped { escaped = false } else if ch == "\\" { escaped = true } else if ch == "\"" { break }
+                    i = rest.index(after: i)
+                }
+                if i < rest.endIndex {
+                    let after = rest.index(after: i)
+                    if rest[after...].hasPrefix(" : ") {
+                        rest.replaceSubrange(after..<rest.index(after, offsetBy: 3), with: ": ")
+                    }
+                }
+            }
+            return String(repeating: " ", count: indent / 2) + rest
+        }.joined(separator: "\n")
     }
 
     /// Parses JSON text; nil when it is not valid JSON.

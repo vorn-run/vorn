@@ -100,6 +100,11 @@ public struct ConnectorInfo: Decodable, Hashable, Sendable {
     public struct Trigger: Decodable, Hashable, Sendable {
         public var type: String
         public var label: String
+
+        public init(type: String, label: String) {
+            self.type = type
+            self.label = label
+        }
     }
 
     public var id: String
@@ -130,6 +135,11 @@ public struct ConnectorInfo: Decodable, Hashable, Sendable {
 public struct ConnectorKeyInfo: Decodable, Hashable, Sendable {
     public var connectionId: String
     public var name: String
+
+    public init(connectionId: String, name: String) {
+        self.connectionId = connectionId
+        self.name = name
+    }
 }
 
 /// The models an agent offers (`AgentModelCatalog`).
@@ -138,18 +148,71 @@ public struct AgentModelCatalog: Decodable, Hashable, Sendable {
         public var id: String
         public var label: String
         public var description: String?
+
+        public init(id: String, label: String, description: String? = nil) {
+            self.id = id
+            self.label = label
+            self.description = description
+        }
     }
 
     public var choices: [Choice]
     public var status: String
     public var fetchedAt: Double?
     public var error: String?
+
+    public init(choices: [Choice], status: String = "fresh", fetchedAt: Double? = nil, error: String? = nil) {
+        self.choices = choices
+        self.status = status
+        self.fetchedAt = fetchedAt
+        self.error = error
+    }
 }
 
 /// A todo task a prompt can come from (`task:list`).
 public struct FormTask: Decodable, Hashable, Sendable {
     public var id: String
     public var title: String
+
+    public init(id: String, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
+/// What `config.defaults` holds for the step forms.
+public struct FormDefaults: Hashable, Sendable {
+    /// workflow-graph.ts DEFAULT_STEP_TIMEOUT_MINUTES.
+    public static let stepTimeoutMinutes: Double = 60
+
+    public var defaultAgent: String
+    public var headlessStepTimeoutMinutes: Double
+
+    public init(defaultAgent: String = "claude", headlessStepTimeoutMinutes: Double = stepTimeoutMinutes) {
+        self.defaultAgent = defaultAgent
+        self.headlessStepTimeoutMinutes = headlessStepTimeoutMinutes
+    }
+}
+
+extension ConnectorConfigField {
+    /// types.ts actionInputField: a select keeps its choices, json becomes a textarea, the rest text.
+    static func catalogInput(_ input: JSONValue) -> ConnectorConfigField? {
+        guard let key = input.str("key") else { return nil }
+        let label = input.str("label") ?? key
+        let required = input.bool("required") ?? false
+        let description = input.str("description").flatMap { $0.isEmpty ? nil : $0 }
+        let options = (input["options"]?.arrayValue ?? []).compactMap { o in
+            o.str("value").map { Option(value: $0, label: o.str("label") ?? $0) }
+        }
+        switch input.str("type") {
+        case "select" where !options.isEmpty:
+            return .init(key: key, label: label, type: "select", required: required, description: description, options: options)
+        case "json":
+            return .init(key: key, label: label, type: "textarea", required: required, placeholder: "{} or []", description: description)
+        default:
+            return .init(key: key, label: label, type: "text", required: required, description: description)
+        }
+    }
 }
 
 /// Typed vornd calls the step forms make.
@@ -198,6 +261,30 @@ extension WorkflowsBackend {
     public func listTodoTasks(projectName: String) async throws -> [FormTask] {
         try await rpc(
             "task:list", ["projectName": .string(projectName), "status": "todo"], as: [FormTask].self)
+    }
+
+    /// The `defaults` the step forms read from `config:load`: the default agent and the headless timeout.
+    public func formDefaults() async throws -> FormDefaults {
+        let defaults = try await rpc("config:load", nil)["defaults"]
+        return FormDefaults(
+            defaultAgent: defaults?.str("defaultAgent") ?? "claude",
+            headlessStepTimeoutMinutes: defaults?.num("headlessStepTimeoutMinutes") ?? FormDefaults.stepTimeoutMinutes)
+    }
+
+    /// use-connector-catalog.ts: each published connector's actions, as argument fields (`actionInputField`).
+    public func connectorCatalogActions() async throws -> [String: [ConnectorActionDef]] {
+        let items = try await rpc("connector:catalog", nil)["items"]?.arrayValue ?? []
+        var out: [String: [ConnectorActionDef]] = [:]
+        for item in items {
+            guard let id = item.str("id") else { continue }
+            out[id] = (item["actions"]?.arrayValue ?? []).compactMap { a in
+                guard let type = a.str("type") else { return nil }
+                let fields = (a["inputs"]?.arrayValue ?? []).compactMap(ConnectorConfigField.catalogInput)
+                return ConnectorActionDef(
+                    type: type, label: a.str("label") ?? type, description: a.str("description"), configFields: fields)
+            }
+        }
+        return out
     }
 
     public func getWorkflow(_ id: String) async throws -> WorkflowDefinition? {
