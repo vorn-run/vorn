@@ -172,6 +172,8 @@ struct WorkflowCanvasView: View {
         var samples: [CGPoint]
         var text: String?
         var data: EditorLayout.EdgeData?
+        /// Inside a loop's frame, so drawn over it.
+        var inBody = false
     }
 
     private func drawnEdges(_ elements: EditorLayout.Elements, _ pos: [String: CGPoint]) -> [DrawnEdge] {
@@ -182,7 +184,8 @@ struct WorkflowCanvasView: View {
             let s = sourcePoint(sc, sp, body: e.fromBodyHandle)
             let t = CGPoint(x: tp.x + tc.width / 2, y: tp.y - 3.5)
             let g = EdgeGeometry.path(s, t)
-            out.append(DrawnEdge(id: e.id, path: g.path, label: g.label, samples: g.samples, text: e.label, data: e.data))
+            out.append(DrawnEdge(id: e.id, path: g.path, label: g.label, samples: g.samples, text: e.label, data: e.data,
+                                 inBody: tc.parentId != nil))
         }
         for add in elements.addSteps {
             guard let sc = elements.card(add.afterNodeId), let sp = pos[add.afterNodeId] else { continue }
@@ -199,11 +202,14 @@ struct WorkflowCanvasView: View {
         let bodyMembers = Set(GraphOps.loopBodyOwners(nodes).keys)
         let anchor = editor.pendingInsert
         return ZStack(alignment: .topLeading) {
-            ForEach(edges) { e in
+            ForEach(edges.filter { !$0.inBody }) { e in
                 e.path.stroke(Theme.white(0.16), lineWidth: 1.5)
             }
             ForEach(elements.cards.filter { $0.parentId == nil && $0.isLoop }) { card in
                 loopView(card, elements: elements, at: pos[card.id] ?? card.absolute, status: status?[card.id], anchor: anchor)
+            }
+            ForEach(edges.filter(\.inBody)) { e in
+                e.path.stroke(Theme.white(0.16), lineWidth: 1.5)
             }
             ForEach(elements.cards.filter { !$0.isLoop }) { card in
                 stepView(card, at: pos[card.id] ?? card.absolute, status: status?[card.id], inBody: bodyMembers.contains(card.id))
@@ -269,8 +275,7 @@ struct WorkflowCanvasView: View {
         }
         .fixedSize()
         .onHover { h in if h { enterEdge(e.id) } else { leaveEdge() } }
-        .alignmentGuide(.leading) { d in d.width / 2 }
-        .alignmentGuide(.top) { d in d.height / 2 }
+        .frame(width: 0, height: 0)
         .offset(x: e.label.x, y: e.label.y)
     }
 
