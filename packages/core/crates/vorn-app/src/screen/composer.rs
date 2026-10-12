@@ -1,8 +1,8 @@
 //! The empty grid's composer (`PromptLauncher` inline): the logo, the
 //! prompt box with its pickers and send button, and the line under it.
 
-use super::menus::agent_name;
-use super::{c, ico, truncate, white, Screen, MOD_LABEL};
+use super::menus::launch_name;
+use super::{agent_icon, c, ico, truncate, white, Screen, MOD_LABEL};
 use crate::act::Act;
 use crate::look;
 use crate::state::{basename, MenuKind};
@@ -22,10 +22,19 @@ fn chip(
     tint: Option<Rgba>,
 ) -> El {
     let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let glyph = if kind == MenuKind::LaunchAgent {
+        agent_icon(s, name, size)
+    } else {
+        ico(
+            name,
+            size,
+            if name == "folder-git-2" { 1.5 } else { 2.0 },
+            c(color),
+        )
+    };
     let id = s.acts.on("composer", Act::Open(kind));
     let hot = if open { 1.0 } else { s.ui.hover(id) };
     let color = c(color);
-    let stroke = if name == "folder-git-2" { 1.5 } else { 2.0 };
     let bg = tint.unwrap_or(white(0.0).mix(white(0.06), hot));
     let mut e = div()
         .id(id)
@@ -40,7 +49,7 @@ fn chip(
         .role(Role::Button, a11y)
         .has_popup()
         .expanded(open)
-        .child(ico(name, size, stroke, color));
+        .child(glyph);
     if !label.is_empty() {
         e = e.child(text(label, 12.0, color).line_height(16.0).silent());
     }
@@ -109,8 +118,8 @@ fn prompt_box(s: &Screen<'_>) -> El {
         .child(chip(
             s,
             MenuKind::LaunchAgent,
-            "bot",
-            agent_name(agent),
+            agent,
+            launch_name(agent),
             14.0,
             look::GRAY_400,
             "Agent",

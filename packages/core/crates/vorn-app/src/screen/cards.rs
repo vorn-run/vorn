@@ -425,11 +425,84 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
     if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
     }
+    if let Some(open) = open_in(s, session) {
+        bar = bar.child(div().grow()).child(open);
+    }
     div()
         .col()
         .shrink0()
         .child(div().h(1.0).w_full().bg(white(0.04)))
         .child(bar)
+}
+
+/// The glyph an editor's entry draws: the brand marks are not shipped.
+pub(super) fn ide_glyph(id: &str) -> &'static str {
+    match id {
+        "terminal" => "square-terminal",
+        "finder" => "folder-open",
+        _ => "code-xml",
+    }
+}
+
+/// `OpenInButton` (upward): Open in the first editor found, and a chevron
+/// listing them all. Nothing when none was found.
+fn open_in(s: &Screen<'_>, session: &Session) -> Option<El> {
+    let (ide, name) = s.st.ides.first()?;
+    let sid = session.info.id.as_str();
+    let open = Id::new("open-in").child(sid);
+    s.acts.bind(
+        open,
+        Act::OpenIde {
+            ide: ide.clone(),
+            path: session.info.project_path.clone(),
+        },
+    );
+    let choose = s
+        .acts
+        .on("open-in", Act::Open(MenuKind::OpenIn(sid.to_owned())));
+    let shown =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::OpenIn(sid.to_owned()));
+    let tone = |id: Id, on: bool| {
+        let hot = s.ui.hover(id).max(if on { 1.0 } else { 0.0 });
+        (
+            c(look::GRAY_500).mix(c(look::GRAY_300), hot),
+            white(0.0).mix(white(0.06), hot),
+        )
+    };
+    let (fg, bg) = tone(open, false);
+    let main = div()
+        .id(open)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .px(4.0)
+        .py(2.0)
+        .rounded(4.0)
+        .bg(bg)
+        .role(Role::Button, format!("Open in {name}"))
+        .child(ico(ide_glyph(ide), 11.0, 1.5, fg))
+        .child(text("Open", 10.0, fg).line_height(12.0).silent());
+    let (fg, bg) = tone(choose, shown);
+    let chevron = div()
+        .id(choose)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .px(2.0)
+        .rounded(4.0)
+        .bg(bg)
+        .role(Role::Button, "Choose IDE")
+        .child(ico("chevron-down", 9.0, 2.0, fg));
+    Some(
+        div()
+            .row()
+            .items_stretch()
+            .child(tooltip(s.ui, main, open, &format!("Open in {name}"), None))
+            .child(chevron),
+    )
 }
 
 /// CommandSpine: an 8 px gutter with its hairline and a mark per command
@@ -719,7 +792,8 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
         .role(Role::Group, session.title())
         .selected(selected)
         .child(header(s, session, pos, dim, hot))
-        .child(body(s, i, session, true, dim));
+        .child(body(s, i, session, true, dim))
+        .child(div().h(look::CARD_FOOT_H).shrink0());
     s.acts
         .click(el, "card-box", Act::Select(sid.to_owned()))
         .sense(Sense::HOVER)

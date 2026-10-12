@@ -6,7 +6,8 @@
 use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
-use crate::state::{Filter, LayoutMode, MenuKind, Sort};
+use crate::state::{Filter, LayoutMode, MenuKind, SidebarMode, Sort};
+use crate::ui::menu::Inset;
 use crate::ui::{div, text, Action, El, Id, Role, Ui};
 
 /// The open menu's choice group; entries report `Select` in it.
@@ -27,6 +28,9 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Terminal(_) => 180.0,
         MenuKind::ViewOptions => 200.0,
         MenuKind::Project(_) => 140.0,
+        MenuKind::Group(_) | MenuKind::SessionGroups(_) => 176.0,
+        MenuKind::GroupIcon(_) => 248.0,
+        MenuKind::OpenIn(_) => 180.0,
         MenuKind::LaunchAgent => 160.0,
         MenuKind::LaunchProject | MenuKind::LaunchWorktree => 240.0,
         MenuKind::LaunchBranch => 220.0,
@@ -53,7 +57,10 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     // These menus are `OptionRow`s under small uppercase section titles.
     if matches!(
         kind,
-        MenuKind::ViewOptions | MenuKind::TaskOptions | MenuKind::WorkflowFilter
+        MenuKind::ViewOptions
+            | MenuKind::TaskOptions
+            | MenuKind::WorkflowFilter
+            | MenuKind::SidebarOptions
     ) {
         for it in &mut items {
             it.option_row = true;
@@ -78,6 +85,11 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::Terminal(id) => terminal(s, id),
         MenuKind::ViewOptions => view_options(s),
         MenuKind::Project(name) => project(s, name),
+        MenuKind::SidebarOptions => sidebar_options(s),
+        MenuKind::Group(id) => group(s, id),
+        MenuKind::SessionGroups(id) => session_groups(s, id),
+        MenuKind::GroupIcon(_) => Vec::new(),
+        MenuKind::OpenIn(sid) => open_in(s, sid),
         MenuKind::LaunchProject => launch_projects(s),
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
@@ -106,6 +118,15 @@ pub const AGENTS: [(&str, &str); 5] = [
     ("opencode", "OpenCode"),
     ("gemini", "Gemini"),
 ];
+
+/// The launcher's name for an agent (`AGENT_LIST`'s `displayName`).
+pub fn launch_name(agent: &str) -> &str {
+    match agent {
+        "codex" => "Codex CLI",
+        "gemini" => "Gemini CLI",
+        _ => agent_name(agent),
+    }
+}
 
 pub fn agent_name(agent: &str) -> &str {
     AGENTS
@@ -408,26 +429,150 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
     items
 }
 
-fn project(s: &Screen<'_>, name: &str) -> Vec<Item> {
-    let confirm = s.st.confirm_delete.as_deref() == Some(name);
-    let mut del = if confirm {
-        Item::new(
-            "trash-2",
-            "Confirm delete?",
-            Act::DeleteProject(name.to_owned()),
-        )
+/// A delete entry that arms on the first choice: "Confirm delete?" on the
+/// danger wash until chosen again.
+fn delete_item(armed: bool, label: &str, ask: Act, delete: Act) -> Item {
+    let mut del = if armed {
+        Item::new("trash-2", "Confirm delete?", delete)
     } else {
-        Item::new(
-            "trash-2",
-            "Delete Project",
-            Act::AskDeleteProject(name.to_owned()),
-        )
+        Item::new("trash-2", label, ask)
     };
     del.danger = true;
+    del.checked = armed;
+    del.side(Inset::MENU)
+}
+
+/// `ProjectContextMenu`.
+fn project(s: &Screen<'_>, name: &str) -> Vec<Item> {
+    let armed = s.st.confirm_delete.as_deref() == Some(name);
     vec![
-        Item::new("pencil", "Edit Project", Act::EditProject(name.to_owned())),
-        del,
+        Item::new("pencil", "Edit Project", Act::EditProject(name.to_owned())).side(Inset::MENU),
+        delete_item(
+            armed,
+            "Delete Project",
+            Act::AskDeleteProject(name.to_owned()),
+            Act::DeleteProject(name.to_owned()),
+        ),
     ]
+}
+
+/// `ProjectsSectionToolbar`'s Show section; the worktree levels are not
+/// drawn by this sidebar, so their modes are not offered.
+fn sidebar_options(s: &Screen<'_>) -> Vec<Item> {
+    let mut items = vec![Item::header("Show")];
+    for m in SidebarMode::ALL {
+        items.push(Item::option(
+            m.label(),
+            s.st.sidebar_mode == m,
+            Act::SidebarMode(m),
+        ));
+    }
+    items
+}
+
+/// `GroupContextMenu`.
+fn group(s: &Screen<'_>, id: &str) -> Vec<Item> {
+    let armed = s.st.confirm_delete.as_deref() == Some(id);
+    let id = id.to_owned();
+    vec![
+        Item::new("pencil", "Rename group", Act::RenameGroup(id.clone())).side(Inset::MENU),
+        Item::new("palette", "Change icon", Act::GroupIcon(id.clone())).side(Inset::MENU),
+        Item::new(
+            "ungroup",
+            "Remove all sessions",
+            Act::UngroupAll(id.clone()),
+        )
+        .side(Inset::MENU),
+        delete_item(
+            armed,
+            "Delete group",
+            Act::AskDeleteGroup(id.clone()),
+            Act::DeleteGroup(id),
+        ),
+    ]
+}
+
+/// `OpenInButton`'s list: the editors found, under "Open in".
+fn open_in(s: &Screen<'_>, sid: &str) -> Vec<Item> {
+    let Some(session) = s.store.session(sid) else {
+        return Vec::new();
+    };
+    let header = div().px(12.0).py(6.0).child(
+        text("Open in", 11.0, c(look::GRAY_500))
+            .weight(500)
+            .line_height(16.5)
+            .role(Role::Label, "Open in"),
+    );
+    let mut items = vec![Item {
+        row: Some(header),
+        header: true,
+        ..Item::default()
+    }];
+    for (id, name) in &s.st.ides {
+        let act = Act::OpenIde {
+            ide: id.clone(),
+            path: session.info.project_path.clone(),
+        };
+        items.push(
+            Item::option(name.as_str(), false, act)
+                .side(Inset { left: 12.0, y: 6.0 })
+                .mark(ico(
+                    super::cards::ide_glyph(id),
+                    14.0,
+                    1.5,
+                    c(look::GRAY_300),
+                )),
+        );
+    }
+    items
+}
+
+/// `SessionContextMenu`: the groups a session can move to, choosing its
+/// own taking it out.
+fn session_groups(s: &Screen<'_>, sid: &str) -> Vec<Item> {
+    let current = s.store.session(sid).and_then(|x| x.info.group_id.clone());
+    let mut items = vec![Item::header("Move to group").side(Inset::MENU)];
+    for g in &s.store.groups {
+        let on = current.as_deref() == Some(g.id.as_str());
+        let mut it = Item::option(
+            g.name.as_str(),
+            on,
+            Act::MoveToGroup {
+                session: sid.to_owned(),
+                group: (!on).then(|| g.id.clone()),
+            },
+        )
+        .side(Inset::NESTED)
+        .mark(super::sidebar::stored_icon(
+            g.icon.as_deref(),
+            g.icon_color.as_deref(),
+            12.0,
+        ));
+        it.checked = on;
+        items.push(it);
+    }
+    let mut new = Item::new(
+        "plus",
+        "New group\u{2026}",
+        Act::NewGroup(Some(sid.to_owned())),
+    )
+    .side(Inset::NESTED);
+    new.icon = Some(("plus", look::GRAY_300));
+    items.push(new);
+    if current.is_some() {
+        items.push(
+            Item::option(
+                "Remove from group",
+                false,
+                Act::MoveToGroup {
+                    session: sid.to_owned(),
+                    group: None,
+                },
+            )
+            .side(Inset::NESTED),
+        );
+    }
+    items
 }
 
 fn launch_projects(s: &Screen<'_>) -> Vec<Item> {
@@ -455,15 +600,19 @@ fn launch_agents(s: &Screen<'_>) -> Vec<Item> {
             .unwrap_or(s.store.default_agent());
     AGENTS
         .iter()
-        .map(|(k, name)| {
+        .map(|(k, _)| {
             let ok =
                 s.st.installed
                     .as_ref()
                     .is_none_or(|i| i.iter().any(|a| a == k));
-            let mut it = Item::new("bot", *name, Act::PickAgent((*k).to_owned()))
-                .tint(look::GRAY_400)
-                .disabled(!ok);
-            it.checked = current == *k;
+            let mut it = Item::option(
+                launch_name(k),
+                current == *k,
+                Act::PickAgent((*k).to_owned()),
+            )
+            .plain()
+            .mark(super::agent_icon(s, k, 14.0))
+            .disabled(!ok);
             if !ok {
                 it.detail = Some("Not installed".to_owned());
             }

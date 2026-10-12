@@ -5,9 +5,19 @@
 use crate::ui::{Rect, Rgba, Ui, BOLD, ITALIC};
 use crate::view::{flags, Cursor, PaneView};
 
-/// Draws `v` in `r` (physical pixels). `focused` draws the cursor solid;
+/// How a pane shows its cursor, as today's terminals do: the session being
+/// typed into draws its own shape, the current one with keys elsewhere an
+/// outline, and the rest none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Caret {
+    Live,
+    Hollow,
+    Hidden,
+}
+
+/// Draws `v` in `r` (physical pixels) with its cursor shown as `caret`;
 /// `preedit` is IME composition shown at the cursor.
-pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, focused: bool, preedit: &str) {
+pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, caret: Caret, preedit: &str) {
     let cell = ui.text.cell();
     let (x0, y0) = (r.x.round(), r.y.round());
     let at = |col: u16, row: u16| (x0 + f32::from(col) * cell.w, y0 + f32::from(row) * cell.h);
@@ -30,9 +40,13 @@ pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, focused: bool, preedit: &str) {
                 .quad(Rect::new(x, sy, w, thin), Rgba::hex(run.fg), 0.0, None);
         }
     }
-    let cursor = (v.cursor_visible && preedit.is_empty()).then_some((v.cursor_x, v.cursor_y));
-    // An unfocused terminal shows a hollow cursor, as the renderer's does.
-    let shape = if focused { v.cursor } else { Cursor::Hollow };
+    let cursor = (caret != Caret::Hidden && v.cursor_visible && preedit.is_empty())
+        .then_some((v.cursor_x, v.cursor_y));
+    let shape = if caret == Caret::Live {
+        v.cursor
+    } else {
+        Cursor::Hollow
+    };
     if let Some((cx, cy)) = cursor {
         let (x, y) = at(cx, cy);
         let cc = Rgba::hex(v.cursor_color);

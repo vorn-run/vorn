@@ -98,10 +98,11 @@ impl Screen<'_> {
         root = root.child_if(dialogs::dialog(self));
         if let Some(menu) = &self.st.menu {
             let w = menus::width(&menu.kind);
-            let panel = match menu.kind {
+            let panel = match &menu.kind {
                 crate::state::MenuKind::Recent => chrome::recent_panel(self),
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
+                crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,
@@ -111,7 +112,7 @@ impl Screen<'_> {
                     menu.sub,
                 ),
             };
-            let place = if menu.kind.is_launch() {
+            let place = if menu.kind.opens_up() {
                 Place::AboveStart
             } else {
                 Place::BelowStart

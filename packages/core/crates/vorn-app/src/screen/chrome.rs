@@ -7,7 +7,7 @@ use crate::act::{Act, Acts};
 use crate::look;
 use crate::state::{now_ms, short_duration, time_ago, MenuKind};
 use crate::ui::widgets::{self, Pill, ToastKind};
-use crate::ui::{div, icon, text, tooltip, Action, El, Id, Role, Sense};
+use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Role, Sense};
 use serde_json::Value;
 
 /// The toolbar's drag region; a double press maximizes.
@@ -668,7 +668,14 @@ fn task_options(s: &Screen<'_>) -> El {
                 .absolute_right(2.0, 2.0),
         );
     }
-    tooltip(s.ui, b, id, "View options", Some(&format!("{MOD_LABEL}J")))
+    tooltip_at(
+        s.ui,
+        b,
+        id,
+        "View options",
+        Some(&format!("{MOD_LABEL}J")),
+        Place::Below,
+    )
 }
 
 /// The left of the toolbar after the nav cluster: the dock and the

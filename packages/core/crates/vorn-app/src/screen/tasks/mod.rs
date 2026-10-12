@@ -19,7 +19,7 @@ use crate::look::{self, Rgb};
 use crate::screen::menus::{Item, AGENTS};
 use crate::state::MenuKind;
 use crate::tasks::{self, Form, Mode, Source, TaskAct, STATUSES};
-use crate::ui::{div, text, tooltip, Action, El, Id, Place, Rgba, Role, Sense};
+use crate::ui::{div, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
 
 pub fn title_id(form: Form) -> Id {
     Id::new("task-title").child(form)
@@ -456,7 +456,14 @@ fn header(s: &Screen<'_>, status: &'static tasks::Status, count: usize, list: bo
             ),
         )
         .child(div().grow())
-        .child(tooltip(s.ui, add_btn, add, "Add task", None))
+        .child(tooltip_at(
+            s.ui,
+            add_btn,
+            add,
+            "Add task",
+            None,
+            Place::Below,
+        ))
 }
 
 fn list(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {

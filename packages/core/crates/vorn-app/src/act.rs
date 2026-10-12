@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::screen::MainView;
-use crate::state::{Filter, LayoutMode, MenuKind, Sort};
+use crate::state::{Filter, LayoutMode, MenuKind, SidebarMode, Sort};
 use crate::ui::{Action, El, Id, Sense};
 
 /// One thing a control does.
@@ -73,7 +73,47 @@ pub enum Act {
     Settings,
     /// Filters the grid to a project, or all of them.
     Project(Option<String>),
+    /// Filters the grid to one of a project's worktrees (`""` is the main
+    /// checkout), or back to the whole project when it already is.
+    Worktree {
+        project: String,
+        path: String,
+    },
+    /// Folds a sidebar worktree's sessions (`""` is the main checkout's).
+    ToggleWorktree {
+        project: String,
+        path: String,
+    },
+    /// Opens a project in the editor `ide` (`ide:open`).
+    OpenIde {
+        ide: String,
+        path: String,
+    },
     AddProject,
+    /// How the sidebar arranges the sessions.
+    SidebarMode(SidebarMode),
+    /// Folds the sessions sidebar's section.
+    ToggleSection,
+    /// Filters the grid to a group's sessions, or clears it.
+    Group(Option<String>),
+    /// Folds a group's sessions.
+    ToggleGroup(String),
+    /// A group named "New group", its name being edited; moving the
+    /// session given into it.
+    NewGroup(Option<String>),
+    RenameGroup(String),
+    GroupIcon(String),
+    GroupIconName(String, String),
+    GroupIconColor(String, String),
+    /// Lets every session of a group go.
+    UngroupAll(String),
+    AskDeleteGroup(String),
+    DeleteGroup(String),
+    /// Moves a session into a group, or out of its own.
+    MoveToGroup {
+        session: String,
+        group: Option<String>,
+    },
     /// Folds a sidebar project's sessions.
     ToggleProject(String),
     EditProject(String),

@@ -101,6 +101,38 @@ impl LayoutMode {
     }
 }
 
+/// How the sessions view's sidebar arranges its sessions
+/// (`SidebarViewMode`), worktrees and their sessions by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum SidebarMode {
+    Worktrees,
+    #[default]
+    WorktreesSessions,
+    Projects,
+    Groups,
+    Flat,
+}
+
+impl SidebarMode {
+    pub const ALL: [SidebarMode; 5] = [
+        SidebarMode::Worktrees,
+        SidebarMode::WorktreesSessions,
+        SidebarMode::Projects,
+        SidebarMode::Groups,
+        SidebarMode::Flat,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SidebarMode::Worktrees => "Projects > Worktrees",
+            SidebarMode::WorktreesSessions => "Projects > Worktrees > Sessions",
+            SidebarMode::Projects => "Projects > Sessions",
+            SidebarMode::Groups => "Groups > Sessions",
+            SidebarMode::Flat => "Sessions (Flat)",
+        }
+    }
+}
+
 /// Which menu is open.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MenuKind {
@@ -116,6 +148,14 @@ pub enum MenuKind {
     Headless,
     /// A project row's context menu in the sidebar.
     Project(String),
+    /// The sidebar's Filter & sort.
+    SidebarOptions,
+    /// A session group's More menu.
+    Group(String),
+    /// A sidebar session's More menu: the groups it can move to.
+    SessionGroups(String),
+    /// A group's icon and colour picker.
+    GroupIcon(String),
     /// The launcher's pickers.
     LaunchProject,
     LaunchAgent,
@@ -145,10 +185,17 @@ pub enum MenuKind {
     NodeMore(String),
     /// The editor's icon and colour picker.
     WfIcon,
+    /// A status bar's Open chevron: the editors to open the project in.
+    OpenIn(String),
 }
 
 impl MenuKind {
-    /// The launcher's pickers, which open above their chip.
+    /// The menus that open above their control.
+    pub fn opens_up(&self) -> bool {
+        self.is_launch() || matches!(self, MenuKind::OpenIn(_))
+    }
+
+    /// The launcher's pickers.
     pub fn is_launch(&self) -> bool {
         matches!(
             self,
@@ -324,6 +371,20 @@ pub struct State {
     pub sidebar: bool,
     /// The grid's project filter (the sidebar's active project).
     pub project: Option<String>,
+    /// The grid's group filter (the sidebar's active group).
+    pub group: Option<String>,
+    /// The grid's worktree filter inside `project`: a worktree path, or `""`
+    /// for the main checkout.
+    pub worktree: Option<String>,
+    /// Sidebar worktrees whose sessions are folded, as project + path.
+    pub worktrees_folded: HashSet<(String, String)>,
+    pub sidebar_mode: SidebarMode,
+    /// The sessions sidebar's section folded shut.
+    pub section_folded: bool,
+    /// Session groups folded shut.
+    pub groups_folded: HashSet<String>,
+    /// The group whose name is being edited.
+    pub renaming_group: Option<String>,
     pub filter: Filter,
     pub sort: Sort,
     /// 0 for the automatic layout, -1 flexible, else that many columns.
@@ -352,12 +413,23 @@ pub struct State {
     pub form: ProjectForm,
     /// Agents installed here, when known.
     pub installed: Option<Vec<String>>,
+    /// The selected card's terminal takes the keys on the next frame, as
+    /// today's `term.focus()` after a jump or a new session.
+    pub focus_terminal: bool,
+    /// The editors found here (`ide:detect`), by id and name; the first opens.
+    pub ides: Vec<(String, String)>,
+    /// Sessions whose branch was asked since the last poll.
+    pub branch_asked: HashSet<String>,
+    /// When every session's branch was last asked (`useGitDiffPolling`).
+    pub branch_polled: Option<Instant>,
     /// When each session last drew, for the recent sort.
     pub last_output: HashMap<String, Instant>,
     /// Panes whose size this device does not drive.
     pub locked: HashSet<String>,
     /// Sidebar projects folded shut.
     pub collapsed: HashSet<String>,
+    /// Projects the sidebar has drawn, so only a new one takes its fold.
+    pub seen_projects: HashSet<String>,
     /// Cards stowed in the session dock rather than the grid.
     pub minimized: HashSet<String>,
     /// The session dock folded into its count chip.
@@ -380,6 +452,14 @@ impl State {
                 self.project
                     .as_deref()
                     .is_none_or(|p| s.info.project_name == p)
+                    && self
+                        .group
+                        .as_deref()
+                        .is_none_or(|g| s.info.group_id.as_deref() == Some(g))
+                    && self
+                        .worktree
+                        .as_deref()
+                        .is_none_or(|w| s.info.worktree_path.as_deref().unwrap_or("") == w)
                     && self.filter.keeps(s)
             })
             .map(|(i, _)| i)
