@@ -7,6 +7,7 @@ mod cards;
 mod chrome;
 mod composer;
 mod dialogs;
+pub mod gates;
 pub mod menus;
 pub mod runs;
 mod sidebar;

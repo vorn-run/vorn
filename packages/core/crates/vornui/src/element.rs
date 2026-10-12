@@ -184,6 +184,9 @@ pub struct EditLook {
     pub placeholder: String,
     pub placeholder_color: Rgba,
     pub multiline: bool,
+    /// A `<textarea>`: Enter starts a line and the primary modifier with
+    /// Enter submits.
+    pub textarea: bool,
 }
 
 /// Accessibility facts beyond role and label.

@@ -29,6 +29,7 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+mod gates;
 mod tasks;
 mod workflows;
 
@@ -200,6 +201,8 @@ pub struct App {
     pub chrome: bool,
     /// The last frame's size.
     size: (f32, f32),
+    /// vornd's HTTP port, for pages it serves (a gate's review page).
+    port: u16,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
 }
@@ -238,6 +241,7 @@ impl App {
             closed: false,
             chrome: !cfg!(target_os = "macos"),
             size: look::WINDOW,
+            port: ep.port,
             carried: Vec::new(),
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -891,6 +895,7 @@ impl App {
             Act::Shortcuts => self.run_shortcut(ui, Shortcut::Shortcuts),
             Act::Task(a) => self.run_task(ui, a),
             Act::Run(a) => self.run_run(a),
+            Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
             Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
                 self.close_task_dialog(ui);
@@ -1068,7 +1073,7 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
-        if self.task_event(ui, &event) || self.wf_event(ui, &event) {
+        if self.gate_event(ui, &event) || self.task_event(ui, &event) || self.wf_event(ui, &event) {
             return;
         }
         match event {

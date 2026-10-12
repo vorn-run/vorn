@@ -12,6 +12,7 @@
 pub mod act;
 pub mod app;
 pub mod client;
+pub mod gates;
 pub mod grid;
 pub mod layout;
 pub mod look;

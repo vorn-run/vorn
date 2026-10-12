@@ -25,8 +25,9 @@ pub(super) enum WfCall {
     Runs,
     /// `workflowRun:list` for the editor's workflow.
     History(String),
-    /// `workflow:resolveGate`.
-    Gate,
+    /// `workflow:resolveGate` from a gate's controls, and whether it sent
+    /// the work back.
+    Gate(Option<String>, bool),
     /// `connection:browserAuth`.
     SignIn,
     /// `connection:list`, for the sign-in button's name.
@@ -42,13 +43,30 @@ impl App {
                     self.st.wf.history = list(answer);
                 }
             }
-            WfCall::Gate => match answer {
+            WfCall::Gate(key, changes) => match answer {
                 Ok(v) if v.get("accepted").and_then(Value::as_bool) == Some(false) => {
-                    let why = s(&v, "reason").unwrap_or("That gate is no longer waiting");
+                    let why = s(&v, "reason").unwrap_or(if changes {
+                        "This gate takes no more changes. Approve or reject it."
+                    } else {
+                        "The gate did not take that answer."
+                    });
                     self.st.toast(why.to_owned(), true);
+                    if let Some(k) = key {
+                        self.gate_answered(&k, false);
+                    }
                 }
-                Ok(_) => self.wf_refresh(),
-                Err(e) => self.st.toast(e.to_string(), true),
+                Ok(_) => {
+                    if let Some(k) = key {
+                        self.gate_answered(&k, true);
+                    }
+                    self.wf_refresh();
+                }
+                Err(e) => {
+                    self.st.toast(e.to_string(), true);
+                    if let Some(k) = key {
+                        self.gate_answered(&k, false);
+                    }
+                }
             },
             WfCall::Connections => self.st.wf.connections = list(answer),
             WfCall::SignIn => match answer {
@@ -175,13 +193,12 @@ impl App {
             self.open_prompt(ui, id, &name, &nodes, source, target);
             return;
         }
-        self.launch_wf(id, &name, source.map(|s| ("source", s)), None, target);
+        self.launch_wf(id, source.map(|s| ("source", s)), None, target);
     }
 
     fn launch_wf(
         &mut self,
         id: &str,
-        name: &str,
         base: Option<(&str, Value)>,
         inputs: Option<Value>,
         target: Option<String>,
@@ -193,7 +210,8 @@ impl App {
         if let Some(i) = inputs {
             context.insert("inputs".into(), i);
         }
-        let toast = Call::Toast(format!("Started \"{name}\""));
+        // `startManualRun` says nothing on success; the run shows up live.
+        let toast = Call::Quiet;
         if context.is_empty() && target.is_none() {
             self.call(toast, "workflow:runManual", json!({ "workflowId": id }));
             return;
@@ -309,7 +327,7 @@ impl App {
             }
             _ => None,
         };
-        self.launch_wf(&p.workflow, &p.name, base, inputs, p.target);
+        self.launch_wf(&p.workflow, base, inputs, p.target);
         self.st.wf.prompt = None;
         self.st.dialog = None;
         ui.set_focus(None);
@@ -326,7 +344,10 @@ impl App {
             .filter(|w| s(w, "workspaceId").unwrap_or("personal") == ws)
             .filter_map(|w| s(w, "id"))
             .map(|id| {
-                let rid = App::control("wf-side", &crate::act::Act::Workflow(WfAct::Edit(id.into())));
+                let rid = App::control(
+                    "wf-side",
+                    &crate::act::Act::Workflow(WfAct::Edit(id.into())),
+                );
                 (id.to_owned(), rid)
             })
             .collect()
@@ -467,14 +488,6 @@ impl App {
                 if let Some(wid) = wid {
                     self.run_wf(ui, WfAct::Edit(wid), Src::default());
                 }
-            }
-            WfAct::Gate { run, node, approve } => {
-                let decision = if approve { "approve" } else { "reject" };
-                self.call(
-                    Call::Workflow(WfCall::Gate),
-                    "workflow:resolveGate",
-                    json!({ "runId": run, "nodeId": node, "decision": decision }),
-                );
             }
             WfAct::SignIn(conn) => {
                 self.call(
@@ -1013,16 +1026,21 @@ impl App {
         }
         let node = s(gate, "nodeId").unwrap_or("").to_owned();
         let key = runs::key(run);
-        let act = if wf::is_sign_in(gate) {
-            WfAct::SignIn(s(gate, "connectionId").unwrap_or("").to_owned())
+        if wf::is_sign_in(gate) {
+            let conn = s(gate, "connectionId").unwrap_or("").to_owned();
+            self.run_wf(ui, WfAct::SignIn(conn), Src::default());
+            return true;
+        }
+        let gk = crate::gates::key(crate::gates::Place::Pane, &key, &node);
+        if self.st.runs.gates.get(&gk).is_some_and(|g| g.busy()) {
+            return false;
+        }
+        let op = if approve {
+            crate::gates::GateOp::Approve(gk)
         } else {
-            WfAct::Gate {
-                run: key,
-                node,
-                approve,
-            }
+            crate::gates::GateOp::Reject(gk)
         };
-        self.run_wf(ui, act, Src::default());
+        self.run_gate(ui, op);
         true
     }
 }

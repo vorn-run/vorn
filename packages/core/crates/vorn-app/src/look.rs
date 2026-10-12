@@ -297,8 +297,10 @@ mod tests {
     fn every_icon_used_loads_and_takes_its_stroke() {
         for name in ICONS {
             let svg = icon(name, 1.5).unwrap_or_else(|| panic!("{name}"));
+            // The brand marks are filled, not stroked.
+            let filled = matches!(*name, "github" | "linear" | "mcp");
             assert!(
-                svg.contains("stroke-width=\"1.5\"") && svg.contains("#ffffff"),
+                (filled || svg.contains("stroke-width=\"1.5\"")) && svg.contains("#ffffff"),
                 "{name}"
             );
         }

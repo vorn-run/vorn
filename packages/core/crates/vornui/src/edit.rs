@@ -54,6 +54,8 @@ pub struct TextEdit {
     anchor: usize,
     preedit: String,
     multiline: bool,
+    /// Enter starts a line; the primary modifier with Enter submits.
+    textarea: bool,
     /// Its field has been painted, so `multiline` is the field's.
     shaped: bool,
     /// Where an up/down run started, physical pixels, so the caret keeps
@@ -80,6 +82,10 @@ impl TextEdit {
 
     pub fn is_multiline(&self) -> bool {
         self.multiline
+    }
+
+    pub(crate) fn set_textarea(&mut self, on: bool) {
+        self.textarea = on;
     }
 
     /// Follows the field's look, for edits made before their field was
@@ -305,7 +311,7 @@ impl TextEdit {
                 Outcome::Changed
             }
             "Enter" | "NumpadEnter" => {
-                if self.multiline && shift {
+                if self.multiline && (shift || (self.textarea && !primary)) {
                     self.insert("\n");
                     Outcome::Changed
                 } else {
@@ -458,6 +464,23 @@ mod tests {
         assert_eq!(
             e.key(&key("KeyV", mods::CTRL), true, &mut c),
             Outcome::Unhandled
+        );
+    }
+
+    #[test]
+    fn a_textarea_breaks_on_enter_and_submits_with_the_primary_key() {
+        let mut c = MemoryClipboard::default();
+        let mut e = TextEdit::new("a", true);
+        e.set_textarea(true);
+        assert_eq!(e.key(&key("Enter", 0), false, &mut c), Outcome::Changed);
+        assert_eq!(e.text(), "a\n");
+        assert_eq!(
+            e.key(&key("Enter", mods::CTRL), false, &mut c),
+            Outcome::Submit
+        );
+        assert_eq!(
+            e.key(&key("Enter", mods::SUPER), true, &mut c),
+            Outcome::Submit
         );
     }
 

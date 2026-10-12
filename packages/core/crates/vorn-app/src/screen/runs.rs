@@ -3,8 +3,10 @@
 
 use serde_json::Value;
 
+use super::gates;
 use super::{c, ico, white, Screen};
 use crate::act::Act;
+use crate::gates::Place;
 use crate::look;
 use crate::runs::{self, s as sv, Line, RunAct};
 use crate::ui::{div, text, tooltip, Action, El, Rgba, Role};
@@ -213,15 +215,16 @@ pub fn run_entry(
         .clip()
         .child(row);
     if open {
-        frame = frame.child(steps(s, run, nodes, &key));
+        frame = frame.child(steps(s, run, nodes, &key, false));
     }
     frame
 }
 
-/// `RunStepsList` without the trigger.
-pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str) -> El {
+/// `RunStepsList`: the inputs, then each step, the trigger first when
+/// `trigger` (the runs pane reads what fired the run there).
+pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str, trigger: bool) -> El {
     let tasks = task_values(s);
-    let mut col = div().col().border_top(1.0, white(0.06));
+    let mut col = div().col().w_full().border_top(1.0, white(0.06));
     let inputs: Vec<(&String, &Value)> = run
         .get("inputs")
         .and_then(Value::as_object)
@@ -253,12 +256,17 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str) -> El {
                 .px(16.0)
                 .py(8.0)
                 .border_bottom(1.0, white(0.05))
-                .child(text("INPUTS", 10.0, faint()).line_height(14.0).silent())
-                .child(wrap),
+                .child(
+                    text("INPUTS", 10.0, faint())
+                        .tracking(0.05)
+                        .line_height(15.0)
+                        .silent(),
+                )
+                .child(wrap.grow()),
         );
     }
     let open = s.st.runs.step(run).map(str::to_owned);
-    let shown = runs::steps(run, nodes);
+    let shown = runs::steps(run, nodes, trigger);
     let last = shown.len().saturating_sub(1);
     for (i, ns) in shown.into_iter().enumerate() {
         let nid = sv(ns, "nodeId").unwrap_or("");
@@ -307,8 +315,19 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str) -> El {
                     .silent(),
             );
         }
+        let kind = node.and_then(|n| sv(n, "type"));
+        let gate_waits = status == "waiting" && kind == Some("approval");
+        let config = node.and_then(|n| n.get("config"));
+        if let Some(t) =
+            sv(ns, "taskId").and_then(|id| tasks.iter().find(|t| sv(t, "id") == Some(id)))
+        {
+            label = label.child(task_chip(s, t, 80.0));
+        }
         let dur = match (sv(ns, "startedAt"), sv(ns, "completedAt")) {
-            (Some(a), Some(b)) => Some(runs::duration(a, Some(b))),
+            (Some(a), Some(b)) => Some(text(runs::duration(a, Some(b)), 12.0, secondary())),
+            _ if gate_waits => {
+                crate::gates::round_label(config, ns).map(|r| text(r, 11.0, faint()))
+            }
             _ => None,
         };
         let mut button = div()
@@ -325,16 +344,20 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str) -> El {
             .child(status_dot(if rejected { "cancelled" } else { status }))
             .child(label);
         if let Some(d) = dur {
-            button = button.child(
-                text(&d, 12.0, secondary())
-                    .mono()
-                    .line_height(16.0)
-                    .silent(),
-            );
+            button = button.child(d.mono().line_height(16.0).silent());
         }
         let mut item = div().col().child(button);
         if i < last {
             item = item.border_bottom(1.0, white(0.05));
+        }
+        if gate_waits {
+            item = item.child(
+                under()
+                    .col()
+                    .gap(8.0)
+                    .child(gates::ask(ns, config))
+                    .child(gates::actions(s, Place::Trace, key, ns, config, nodes)),
+            );
         }
         if status == "waiting" && sv(ns, "waitingFor") == Some("signIn") {
             let msg = sv(ns, "error").unwrap_or("Signed out. Sign in, and this step runs again.");
@@ -355,6 +378,32 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str) -> El {
         col = col.child(item);
     }
     col
+}
+
+/// `TASK_CHIP`: a task's title, opening it.
+fn task_chip(s: &Screen<'_>, t: &Value, max: f32) -> El {
+    let tid = sv(t, "id").unwrap_or("").to_owned();
+    let title = sv(t, "title").unwrap_or("");
+    let id = s
+        .acts
+        .on("run-task", Act::Task(crate::tasks::TaskAct::Open(tid)));
+    let hot = s.ui.hover(id);
+    div()
+        .id(id)
+        .on(Action::Click)
+        .max_w(max)
+        .px(6.0)
+        .py(2.0)
+        .rounded(4.0)
+        .border(1.0, white(0.08))
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::Button, title)
+        .child(
+            text(title, 10.0, secondary())
+                .line_height(15.0)
+                .truncate()
+                .silent(),
+        )
 }
 
 /// `UNDER_LABEL`: lined up with the step's name, past the dot.

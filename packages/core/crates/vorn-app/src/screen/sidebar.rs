@@ -528,26 +528,26 @@ pub(super) fn toggle_section(
         .pt(12.0)
         .pb(6.0)
         .child(
-        div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .role(Role::Button, title)
-            .expanded(open)
-            .child(ico(chevron, 10.0, 2.0, c(look::GRAY_600)))
-            .child(
-                text(
-                    title.to_uppercase(),
-                    11.0,
-                    c(look::GRAY_500).mix(c(look::GRAY_300), hot),
-                )
-                .weight(500)
-                .tracking(0.05)
-                .line_height(16.5)
-                .silent(),
-            ),
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(6.0)
+                .role(Role::Button, title)
+                .expanded(open)
+                .child(ico(chevron, 10.0, 2.0, c(look::GRAY_600)))
+                .child(
+                    text(
+                        title.to_uppercase(),
+                        11.0,
+                        c(look::GRAY_500).mix(c(look::GRAY_300), hot),
+                    )
+                    .weight(500)
+                    .tracking(0.05)
+                    .line_height(16.5)
+                    .silent(),
+                ),
         )
         .child(div().row().items_center().gap(2.0).children(actions))
 }

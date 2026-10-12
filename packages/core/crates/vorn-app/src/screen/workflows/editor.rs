@@ -67,26 +67,24 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
     } else {
         0.04 * s.ui.hover(name_id)
     };
-    left = left
-        .child(wf_glyph(&d.wf, 16.0))
-        .child(
-            field(
-                name_id,
-                "Workflow name",
-                "Workflow name",
-                TextStyle {
-                    weight: 500,
-                    line_height: 22.0,
-                    ..TextStyle::ui(15.0)
-                },
-                c(look::WHITE),
-            )
-            .w(240.0)
-            .px(8.0)
-            .py(4.0)
-            .rounded(6.0)
-            .bg(white(hot)),
-        );
+    left = left.child(wf_glyph(&d.wf, 16.0)).child(
+        field(
+            name_id,
+            "Workflow name",
+            "Workflow name",
+            TextStyle {
+                weight: 500,
+                line_height: 22.0,
+                ..TextStyle::ui(15.0)
+            },
+            c(look::WHITE),
+        )
+        .w(240.0)
+        .px(8.0)
+        .py(4.0)
+        .rounded(6.0)
+        .bg(white(hot)),
+    );
     let mut right = div().row().items_center().gap(4.0);
     match s.st.wf.running_since(&s.store.runs) {
         Some(since) => {

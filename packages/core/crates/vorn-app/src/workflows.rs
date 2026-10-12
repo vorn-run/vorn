@@ -381,7 +381,7 @@ pub fn is_sign_in(state: &Value) -> bool {
 
 /// `stepProgress`: succeeded steps out of those reached, the trigger left out.
 pub fn progress(run: &Value, nodes: &Value) -> (usize, usize) {
-    let steps = runs::steps(run, nodes);
+    let steps = runs::steps(run, nodes, false);
     let done = steps
         .iter()
         .filter(|n| s(n, "status") == Some("success"))
@@ -459,11 +459,13 @@ pub fn side_status(wf: &Value, waiting: bool, failed: bool) -> Option<&'static s
     if waiting {
         Some("waiting")
     } else if is_scheduled(wf) {
-        Some(if wf.get("enabled").and_then(Value::as_bool) == Some(false) {
-            "disabled"
-        } else {
-            "scheduled"
-        })
+        Some(
+            if wf.get("enabled").and_then(Value::as_bool) == Some(false) {
+                "disabled"
+            } else {
+                "scheduled"
+            },
+        )
     } else if failed {
         Some("error")
     } else {
@@ -1800,11 +1802,6 @@ pub enum WfAct {
     SelectRun(String),
     /// The run's workflow in the editor.
     OpenRun(String),
-    Gate {
-        run: String,
-        node: String,
-        approve: bool,
-    },
     SignIn(String),
     Side(SideFilter),
     /// The sidebar section's fold.

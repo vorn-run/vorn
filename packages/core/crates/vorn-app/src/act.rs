@@ -44,6 +44,8 @@ pub enum Act {
     },
     /// A shell in a directory, or the active project's when empty.
     NewShellIn(String),
+    /// An approval gate's controls.
+    Gate(crate::gates::GateOp),
     RunWorkflow {
         id: String,
         source: Option<String>,

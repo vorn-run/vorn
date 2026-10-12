@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
+use vorn_app::gates::{self, GateOp, Mode, Place};
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
@@ -303,13 +304,9 @@ fn the_landing_answers_a_gate_and_the_prompt_asks_for_inputs() {
     shot.save(&mut app, "w-landing-gate");
     shot.click(
         &mut app,
-        control(
+        App::control(
             "wf-gate",
-            WfAct::Gate {
-                run: run.clone(),
-                node: "g".into(),
-                approve: true,
-            },
+            &Act::Gate(GateOp::Approve(gates::key(Place::Pane, &run, "g"))),
         ),
     );
     shot.until(&mut app, "the run approved", |app, _| {
@@ -346,4 +343,186 @@ fn the_landing_answers_a_gate_and_the_prompt_asks_for_inputs() {
     );
     shot.click(&mut app, control("wf-missed-skip", WfAct::MissedSkip));
     assert_eq!(app.st.dialog, None);
+}
+
+fn gate(op: GateOp) -> Id {
+    App::control("gate", &Act::Gate(op))
+}
+
+fn pane_gate(op: GateOp) -> Id {
+    App::control("wf-gate", &Act::Gate(op))
+}
+
+/// The gate's state in vornd's latest copy of the run.
+fn gate_state(app: &App, id: &str) -> Option<Value> {
+    let r = runs_of(app, id).into_iter().next()?;
+    r["nodeStates"]
+        .as_array()?
+        .iter()
+        .find(|n| n["nodeId"] == "g")
+        .cloned()
+}
+
+#[test]
+fn a_gate_is_edited_sent_back_reviewed_and_approved() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = workflows_view(&v);
+    let web = v.home.join("web");
+    let list = r#"[{"id":1,"ok":true,"note":"null deref"},{"id":2,"ok":false,"note":"typo"}]"#;
+    seed(
+        &mut app,
+        &mut shot,
+        json!({
+            "id": "wf-review", "name": "Review it", "icon": "Shield", "iconColor": "#8b5cf6",
+            "enabled": true, "workspaceId": "personal",
+            "nodes": [
+                { "id": "t", "type": "trigger", "label": "Manual", "position": { "x": 0, "y": 0 },
+                  "config": { "triggerType": "manual" } },
+                { "id": "s", "type": "script", "label": "Find issues", "slug": "find-issues",
+                  "position": { "x": 0, "y": 0 },
+                  "config": { "scriptType": "bash", "scriptContent": "echo found",
+                              "projectName": "web", "projectPath": web } },
+                { "id": "g", "type": "approval", "label": "Check findings", "slug": "check-findings",
+                  "position": { "x": 0, "y": 0 },
+                  "config": { "message": "Keep the real findings.", "edit": list,
+                              "feedback": { "from": "s", "maxRounds": 2 },
+                              "view": "<h1>Findings</h1>{{steps.find-issues.output}}" } }
+            ],
+            "edges": [
+                { "id": "e1", "source": "t", "target": "s" },
+                { "id": "e2", "source": "s", "target": "g" }
+            ]
+        }),
+    );
+    shot.hover(
+        &mut app,
+        App::control("wf-side", &Act::Workflow(WfAct::Edit("wf-review".into()))),
+    );
+    shot.click(&mut app, Id::new("wf-side-run").child("wf-review"));
+    let st = shot.until(&mut app, "the gate open", |app, _| {
+        gate_state(app, "wf-review").filter(|g| g["status"] == "waiting")
+    });
+    assert!(
+        st["viewToken"].is_string(),
+        "the review page was kept: {st}"
+    );
+    let run = runs_of(&app, "wf-review")[0]["runId"]
+        .as_str()
+        .expect("run id")
+        .to_owned();
+    shot.click(
+        &mut app,
+        App::control("sidebar", &Act::Workflow(WfAct::AllRuns)),
+    );
+    shot.until(&mut app, "the run listed", |app, _| {
+        app.st
+            .wf
+            .runs
+            .iter()
+            .any(|r| r["runId"] == run.as_str())
+            .then_some(())
+    });
+    shot.click(&mut app, control("wf-run", WfAct::SelectRun(run.clone())));
+    shot.save(&mut app, "g-pane");
+
+    // The list opens as a table; a row goes and the rewrite is kept.
+    let pane = gates::key(Place::Pane, &run, "g");
+    shot.click(&mut app, pane_gate(GateOp::Open(pane.clone(), Mode::Edit)));
+    shot.save(&mut app, "g-edit-table");
+    shot.click(
+        &mut app,
+        App::control("gate-tab", &Act::Gate(GateOp::Source(pane.clone(), true))),
+    );
+    shot.save(&mut app, "g-edit-source");
+    shot.click(
+        &mut app,
+        App::control("gate-tab", &Act::Gate(GateOp::Source(pane.clone(), false))),
+    );
+    shot.click(
+        &mut app,
+        App::control(
+            "gate-row",
+            &Act::Gate(GateOp::Remove(pane.clone(), 1, true)),
+        ),
+    );
+    shot.click(&mut app, gate(GateOp::Save(pane.clone())));
+    let kept = app.st.runs.gates[&pane]
+        .edited
+        .clone()
+        .expect("a rewrite kept");
+    let kept: Value = serde_json::from_str(&kept).expect("json");
+    assert_eq!(kept, json!([{ "id": 1, "ok": true, "note": "null deref" }]));
+
+    // Sending the work back runs it again from the script, at round 2.
+    shot.click(
+        &mut app,
+        pane_gate(GateOp::Open(pane.clone(), Mode::Changes)),
+    );
+    shot.type_text(&mut app, "Drop the typo");
+    shot.save(&mut app, "g-changes");
+    shot.click(&mut app, gate(GateOp::Send(pane.clone())));
+    let st = shot.until(&mut app, "round two", |app, _| {
+        gate_state(app, "wf-review")
+            .filter(|g| g["status"] == "waiting" && g["round"].as_f64() == Some(2.0))
+    });
+    assert_eq!(st["feedback"][0]["comment"], "Drop the typo");
+    assert!(!gates::can_request_changes(
+        Some(&json!({ "feedback": { "from": "s", "maxRounds": 2 } })),
+        &st
+    ));
+
+    // The trace's Reject asks for a note; the review page opens over it.
+    let trace = gates::key(Place::Trace, &run, "g");
+    shot.until(&mut app, "the run updated", |app, _| {
+        app.store.runs.get(&run).and_then(|r| {
+            r["nodeStates"]
+                .as_array()?
+                .iter()
+                .any(|n| n["nodeId"] == "g" && n["round"].as_f64() == Some(2.0))
+                .then_some(())
+        })
+    });
+    shot.click(&mut app, gate(GateOp::Open(trace.clone(), Mode::Reject)));
+    shot.save(&mut app, "g-reject-note");
+    shot.click(&mut app, gate(GateOp::Cancel(trace)));
+    shot.click(
+        &mut app,
+        pane_gate(GateOp::Review(Some((run.clone(), "g".into())))),
+    );
+    assert_eq!(app.st.dialog, Some(Dialog::GateReview));
+    shot.save(&mut app, "g-review");
+    shot.click(
+        &mut app,
+        App::control("gate-review", &Act::Gate(GateOp::Review(None))),
+    );
+    assert_eq!(app.st.dialog, None);
+
+    // Approving sends the rewrite made in the editor.
+    shot.click(&mut app, pane_gate(GateOp::Open(pane.clone(), Mode::Edit)));
+    shot.click(
+        &mut app,
+        App::control(
+            "gate-row",
+            &Act::Gate(GateOp::Remove(pane.clone(), 0, true)),
+        ),
+    );
+    shot.click(&mut app, pane_gate(GateOp::Approve(pane)));
+    let done = shot.until(&mut app, "the run done", |app, _| {
+        let r = runs_of(app, "wf-review").into_iter().next()?;
+        (r["status"] != "running").then_some(r)
+    });
+    assert_eq!(done["status"], "success", "{done}");
+    let g = done["nodeStates"]
+        .as_array()
+        .and_then(|l| l.iter().find(|n| n["nodeId"] == "g").cloned())
+        .expect("gate state");
+    let sent: Value =
+        serde_json::from_str(g["editedText"].as_str().unwrap_or("null")).unwrap_or(Value::Null);
+    assert_eq!(
+        sent,
+        json!([{ "id": 2, "ok": false, "note": "typo" }]),
+        "{g}"
+    );
 }

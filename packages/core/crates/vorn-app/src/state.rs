@@ -184,6 +184,8 @@ pub enum Dialog {
     Missed,
     /// The export or import path.
     WfFile,
+    /// GateReviewModal: the review page of a waiting gate.
+    GateReview,
 }
 
 /// A toast in the bottom right.

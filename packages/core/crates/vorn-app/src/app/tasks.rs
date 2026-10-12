@@ -757,7 +757,7 @@ impl App {
 
     /// The run `key` names: what vornd last reported, else the list the
     /// panel loaded.
-    fn find_run(&self, key: &str) -> Option<Value> {
+    pub(super) fn find_run(&self, key: &str) -> Option<Value> {
         self.store.runs.get(key).cloned().or_else(|| {
             self.st
                 .tasks
@@ -817,6 +817,25 @@ impl App {
                 self.st.tasks.output = logs;
                 self.st.tasks.copied = None;
                 self.st.dialog = Some(Dialog::Output);
+            }
+            RunAct::OpenReview(key, nid) => {
+                let token = self.find_run(&key).and_then(|r| {
+                    runs::states(&r)
+                        .find(|n| runs::s(n, "nodeId") == Some(nid.as_str()))
+                        .and_then(|n| runs::s(n, "viewToken"))
+                        .map(str::to_owned)
+                });
+                let Some(t) = token else {
+                    self.st.toast("The review page could not be opened.", true);
+                    return;
+                };
+                open_url(&format!(
+                    "http://127.0.0.1:{}/gate-view/{}/{}?t={}",
+                    self.port,
+                    runs::encode(&key),
+                    runs::encode(&nid),
+                    runs::encode(&t)
+                ));
             }
             RunAct::Resume(key, nid) => {
                 let Some(run) = self.find_run(&key) else {

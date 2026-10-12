@@ -90,7 +90,12 @@ fn wf_icon(w: Option<&Value>, size: f32, fallback: &str, color: Rgba) -> El {
 /// the editor's mark.
 fn wf_glyph(w: &Value, size: f32) -> El {
     let name = sv(w, "icon").and_then(look::icon_map).unwrap_or("workflow");
-    ico(name, size, 1.5, hex(sv(w, "iconColor")).unwrap_or(c(0x6b7280)))
+    ico(
+        name,
+        size,
+        1.5,
+        hex(sv(w, "iconColor")).unwrap_or(c(0x6b7280)),
+    )
 }
 
 /// `SOURCE_ICONS`.
@@ -401,22 +406,24 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
     }
     col.child(
         div()
+            .w_full()
             .px(20.0)
             .pb(24.0)
-            .child(super::runs::steps(s, run, nodes, &key)),
+            .child(super::runs::steps(s, run, nodes, &key, true)),
     )
 }
 
 fn gate_button(
     s: &Screen<'_>,
-    a: WfAct,
+    a: Act,
     icon: &str,
     label: &str,
     key: Option<&str>,
     approve: bool,
+    disabled: bool,
 ) -> El {
-    let id = s.acts.on("wf-gate", act(a));
-    let hot = s.ui.hover(id);
+    let id = s.acts.on("wf-gate", a);
+    let hot = if disabled { 0.0 } else { s.ui.hover(id) };
     let bronzo = |a: f32| Rgba::hexa(look::BRONZO, a);
     let (fg, bg, border) = if approve {
         (
@@ -433,7 +440,6 @@ fn gate_button(
     };
     let mut b = div()
         .id(id)
-        .on(Action::Click)
         .row()
         .items_center()
         .gap(8.0)
@@ -442,10 +448,15 @@ fn gate_button(
         .rounded(6.0)
         .border(1.0, border)
         .bg(bg)
+        .opacity(if disabled { 0.4 } else { 1.0 })
         .role(Role::Button, label)
+        .disabled(disabled)
         .child(ico(icon, 14.0, 2.0, fg))
         .child(text(label, 13.0, fg).line_height(18.0).silent())
         .child(div().grow());
+    if !disabled {
+        b = b.on(Action::Click);
+    }
     if let Some(k) = key {
         b = b.shortcut(k).child(
             div()
@@ -459,12 +470,102 @@ fn gate_button(
     b
 }
 
+/// A `flex-1` neutral button of the pane's Edit, Open review and Request
+/// changes row.
+fn pane_button(s: &Screen<'_>, a: Act, icon: &str, label: &str) -> El {
+    let id = s.acts.on("wf-gate", a);
+    let hot = s.ui.hover(id);
+    div()
+        .id(id)
+        .on(Action::Click)
+        .flex(1.0)
+        .row()
+        .items_center()
+        .justify_center()
+        .gap(8.0)
+        .px(16.0)
+        .py(8.0)
+        .rounded(6.0)
+        .border(1.0, white(0.06))
+        .bg(white(0.0).mix(white(0.04), hot))
+        .role(Role::Button, label)
+        .child(ico(icon, 13.0, 1.75, secondary().mix(ink(1.0), hot)))
+        .child(
+            text(label, 12.5, secondary().mix(ink(1.0), hot))
+                .line_height(18.75)
+                .silent(),
+        )
+}
+
+/// `RunDetailPane`'s waiting block: what the gate asks, its editor or
+/// comment when open, then Approve & continue and Reject run.
 fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
+    use crate::gates::{self as g, GateOp, Mode, Place};
     let key = runs::key(run);
     let nid = sv(gate, "nodeId").unwrap_or("").to_owned();
-    let mut col = div().col().gap(6.0).px(20.0).pb(16.0).shrink0();
+    let gk = g::key(Place::Pane, &key, &nid);
+    let mut col = div().col().w_full().gap(6.0).px(20.0).pb(16.0).shrink0();
     let sign_in = wf::is_sign_in(gate);
     let node = runs::node(nodes, &nid);
+    let approval = node.and_then(|n| sv(n, "type")) == Some("approval");
+    let config = node.and_then(|n| n.get("config"));
+    if !sign_in && approval {
+        col = col.child(super::gates::ask(gate, config));
+        let open = s.st.runs.gates.get(&gk);
+        match open.and_then(|o| o.mode) {
+            Some(Mode::Edit) => {
+                if let Some(e) = open.and_then(|o| o.editor.as_ref()) {
+                    col = col.child(super::gates::editor(s, &gk, e, true, false));
+                }
+            }
+            Some(Mode::Changes) => {
+                col = col.child(super::gates::composer(
+                    s,
+                    &gk,
+                    Mode::Changes,
+                    gate,
+                    config,
+                    nodes,
+                    true,
+                ));
+            }
+            _ => {
+                let mut row = div().row().gap(6.0);
+                let mut any = false;
+                if g::editable(gate).is_some() {
+                    let edited = open.is_some_and(|o| o.edited.is_some());
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Open(gk.clone(), Mode::Edit)),
+                        "pencil",
+                        if edited { "Edited" } else { "Edit" },
+                    ));
+                    any = true;
+                }
+                if sv(gate, "viewToken").is_some() {
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Review(Some((key.clone(), nid.clone())))),
+                        "eye",
+                        "Open review",
+                    ));
+                    any = true;
+                }
+                if g::can_request_changes(config, gate) {
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Open(gk.clone(), Mode::Changes)),
+                        "message-square",
+                        "Request changes",
+                    ));
+                    any = true;
+                }
+                if any {
+                    col = col.child(row);
+                }
+            }
+        }
+    }
     if sign_in {
         let conn = sv(gate, "connectionId")
             .or_else(|| {
@@ -483,80 +584,37 @@ fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
                 .to_owned();
         col = col.child(gate_button(
             s,
-            WfAct::SignIn(conn),
+            act(WfAct::SignIn(conn)),
             "log-in",
             &format!("Sign in to {name}"),
             None,
             true,
+            false,
         ));
     } else {
-        let message = sv(gate, "message")
-            .or_else(|| {
-                node.and_then(|n| n.pointer("/config/message"))
-                    .and_then(Value::as_str)
-            })
-            .filter(|m| !m.is_empty());
-        col = col.child(match message {
-            Some(m) => div()
-                .id(Id::new("wf-gate-message").child(&key))
-                .max_h(192.0)
-                .scroll_y()
-                .rounded(6.0)
-                .border(1.0, white(0.07))
-                .bg(c(look::SURFACE_BASE))
-                .px(10.0)
-                .py(8.0)
-                .child(
-                    text(m, 12.0, ink(1.0))
-                        .wrapping()
-                        .min_w0()
-                        .line_height(18.0),
-                ),
-            None => text("Waiting for approval.", 11.5, c(look::BRONZO)).line_height(16.0),
-        });
-        let asked = gate
-            .get("feedback")
-            .and_then(Value::as_array)
-            .and_then(|f| {
-                f.iter()
-                    .rev()
-                    .find(|f| sv(f, "decision") == Some("changes"))
-            })
-            .and_then(|f| sv(f, "comment"));
-        if let Some(a) = asked {
-            col = col.child(
-                div()
-                    .row()
-                    .gap(6.0)
-                    .child(text("You asked", 11.5, faint()).line_height(16.0).silent())
-                    .child(text(a, 11.5, secondary()).line_height(16.0).truncate()),
-            );
-        }
-        let approve = WfAct::Gate {
-            run: key.clone(),
-            node: nid.clone(),
-            approve: true,
-        };
+        let blocked =
+            s.st.runs
+                .gates
+                .get(&gk)
+                .and_then(|o| o.editor.as_ref().filter(|_| o.mode == Some(Mode::Edit)))
+                .and_then(|e| e.invalid());
         col = col.child(gate_button(
             s,
-            approve,
+            Act::Gate(GateOp::Approve(gk.clone())),
             "check",
             "Approve & continue",
             Some(&format!("{MOD_LABEL}\u{21b5}")),
             true,
+            blocked.is_some(),
         ));
     }
-    let reject = WfAct::Gate {
-        run: key,
-        node: nid,
-        approve: false,
-    };
     col.child(gate_button(
         s,
-        reject,
+        Act::Gate(GateOp::Reject(gk)),
         "x",
         "Reject run",
         (!sign_in).then_some("R"),
+        false,
         false,
     ))
 }
@@ -717,11 +775,10 @@ pub fn sidebar(s: &Screen<'_>) -> El {
     let reorder = wfs.side == SideFilter::All;
     for (i, w) in shown.into_iter().enumerate() {
         let id = sv(w, "id").unwrap_or("");
-        let is_waiting = s
-            .store
-            .runs
-            .values()
-            .any(|r| sv(r, "workflowId") == Some(id) && runs::states(r).any(|n| sv(n, "status") == Some("waiting")));
+        let is_waiting = s.store.runs.values().any(|r| {
+            sv(r, "workflowId") == Some(id)
+                && runs::states(r).any(|n| sv(n, "status") == Some("waiting"))
+        });
         let failed = sv(w, "lastRunStatus") == Some("error");
         let over = reorder
             && wfs
@@ -762,11 +819,12 @@ fn all_runs(s: &Screen<'_>, waiting: usize, on: bool) -> El {
         .child_if(on.then(selected_bar))
         .child(ico("activity", 14.0, 1.5, c(look::GRAY_400)))
         .child(
-            div()
-                .row()
-                .grow()
-                .min_w0()
-                .child(text("All runs", 13.0, fg).line_height(19.5).truncate().silent()),
+            div().row().grow().min_w0().child(
+                text("All runs", 13.0, fg)
+                    .line_height(19.5)
+                    .truncate()
+                    .silent(),
+            ),
         )
         .child_if((waiting > 0).then(|| {
             text(waiting.to_string(), 10.0, c(look::BRONZO))

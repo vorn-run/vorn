@@ -108,11 +108,11 @@ pub fn node_label(node: Option<&Value>, id: &str) -> String {
 }
 
 /// The steps a run list shows: all but the trigger.
-pub fn steps<'a>(run: &'a Value, nodes: &'a Value) -> Vec<&'a Value> {
+pub fn steps<'a>(run: &'a Value, nodes: &'a Value, trigger: bool) -> Vec<&'a Value> {
     states(run)
         .filter(|ns| {
             let id = s(ns, "nodeId").unwrap_or("");
-            node(nodes, id).and_then(|n| s(n, "type")) != Some("trigger")
+            trigger || node(nodes, id).and_then(|n| s(n, "type")) != Some("trigger")
         })
         .collect()
 }
@@ -174,6 +174,21 @@ pub enum RunAct {
     Output(String, String),
     /// "Resume session" on the agent session a step left.
     Resume(String, String),
+    /// A gate's review page, in the browser.
+    OpenReview(String, String),
+}
+
+/// `encodeURIComponent`.
+pub fn encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Which runs and steps the lists hold open, past their defaults.
@@ -181,6 +196,10 @@ pub enum RunAct {
 pub struct RunView {
     pub open: HashMap<String, bool>,
     pub step: HashMap<String, Option<String>>,
+    /// Each gate's draft, by [`crate::gates::key`].
+    pub gates: HashMap<String, crate::gates::GateUi>,
+    /// The review page open over everything: run and node.
+    pub review: Option<(String, String)>,
 }
 
 impl RunView {
@@ -388,7 +407,7 @@ mod tests {
                 { "nodeId": "a", "status": "error" }
             ]
         });
-        let shown = steps(&run, &nodes);
+        let shown = steps(&run, &nodes, false);
         assert_eq!(shown.len(), 1);
         assert_eq!(focus(&run), Some("a"));
         assert_eq!(node_label(node(&nodes, "a"), "a"), "Fix");

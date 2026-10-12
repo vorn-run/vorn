@@ -785,6 +785,7 @@ impl Ui {
             .entry(id)
             .or_insert_with(|| TextEdit::new("", look.multiline));
         e.set_multiline(look.multiline);
+        e.set_textarea(look.textarea);
         let (shown, pre) = e.display();
         let caret_at = if e.preedit().is_empty() {
             e.caret()
