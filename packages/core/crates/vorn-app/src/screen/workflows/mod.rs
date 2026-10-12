@@ -857,7 +857,7 @@ pub fn sidebar(s: &Screen<'_>) -> El {
         control(s, act(WfAct::New), "workflow", "New workflow", 13.0, 1.5),
     ];
     let waiting = wfs.waiting(&s.store.runs);
-    let col = div().col().child(toggle_section(
+    let col = div().col().gap(2.0).child(toggle_section(
         s,
         "Workflows",
         !wfs.folded,

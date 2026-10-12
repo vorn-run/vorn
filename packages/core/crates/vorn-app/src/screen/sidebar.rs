@@ -62,7 +62,7 @@ fn header(s: &Screen<'_>) -> El {
         .role(Role::Label, workspace)
         .child(ico("user", 14.0, 1.5, c(look::GRAY_500)))
         .child(
-            text(workspace, 13.0, c(look::GRAY_300))
+            text(workspace, 13.0, c(look::GRAY_200))
                 .weight(500)
                 .line_height(18.0)
                 .truncate()
@@ -71,7 +71,7 @@ fn header(s: &Screen<'_>) -> El {
     let bar = div()
         .row()
         .items_center()
-        .h(look::TOP_BAR_H - 1.0)
+        .h(look::TOP_BAR_H)
         .pl(12.0)
         .pr(12.0)
         .child(title)
@@ -85,14 +85,7 @@ fn header(s: &Screen<'_>) -> El {
             Some(&format!("{MOD_LABEL}B")),
             false,
         ));
-    let bar = draggable(
-        s,
-        div()
-            .col()
-            .shrink0()
-            .child(bar)
-            .child(div().h(1.0).w_full().bg(white(0.06))),
-    );
+    let bar = draggable(s, div().col().shrink0().child(bar));
     let modes = [
         (
             MainView::Sessions,
@@ -147,11 +140,17 @@ fn header(s: &Screen<'_>) -> El {
             .selected(on)
             .child(ico(name, 14.0, 2.0, fg));
         if on {
-            b = b.child(text(label, 12.0, fg).weight(500).line_height(16.0).silent());
+            b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
         }
         row = row.child(tooltip(s.ui, b, id, label, Some(&keys)));
     }
-    div().col().shrink0().child(bar).child(row)
+    // `border-b` under the whole header, the view pills included.
+    div()
+        .col()
+        .shrink0()
+        .child(bar)
+        .child(row)
+        .child(div().h(1.0).w_full().bg(white(0.06)))
 }
 
 /// SidebarSectionHeader: the label and its controls.
