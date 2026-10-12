@@ -77,7 +77,7 @@ pub enum Glyph {
 
 /// One command.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Command {
+pub struct Entry {
     pub cat: Cat,
     pub label: String,
     pub sublabel: Option<String>,
@@ -87,9 +87,9 @@ pub struct Command {
     pub act: Act,
 }
 
-impl Command {
-    fn new(cat: Cat, label: impl Into<String>, glyph: Glyph, act: Act) -> Command {
-        Command {
+impl Entry {
+    fn new(cat: Cat, label: impl Into<String>, glyph: Glyph, act: Act) -> Entry {
+        Entry {
             cat,
             label: label.into(),
             sublabel: None,
@@ -100,17 +100,17 @@ impl Command {
         }
     }
 
-    fn keys(mut self, words: &[&str]) -> Command {
+    fn keys(mut self, words: &[&str]) -> Entry {
         self.keywords.extend(words.iter().map(|w| (*w).to_owned()));
         self
     }
 
-    fn sub(mut self, text: impl Into<String>) -> Command {
+    fn sub(mut self, text: impl Into<String>) -> Entry {
         self.sublabel = Some(text.into());
         self
     }
 
-    fn shortcut(mut self, keys: impl Into<String>) -> Command {
+    fn shortcut(mut self, keys: impl Into<String>) -> Entry {
         self.shortcut = Some(keys.into());
         self
     }
@@ -118,7 +118,7 @@ impl Command {
 
 /// `scoreMatch`: an exact label, a prefix, a word's prefix, anywhere in
 /// the label, then the keywords; 0 is no match.
-pub fn score(query: &str, cmd: &Command) -> u32 {
+pub fn score(query: &str, cmd: &Entry) -> u32 {
     let q = query.to_lowercase();
     let label = cmd.label.to_lowercase();
     if label == q {
@@ -138,17 +138,17 @@ pub fn score(query: &str, cmd: &Command) -> u32 {
 
 /// The rows the palette shows, in order: by category with nothing typed
 /// (Quick Launch left out), else every match, best first.
-pub fn shown(commands: Vec<Command>, query: &str) -> Vec<Command> {
+pub fn shown(commands: Vec<Entry>, query: &str) -> Vec<Entry> {
     let q = query.trim();
     if q.is_empty() {
-        let mut list: Vec<Command> = commands
+        let mut list: Vec<Entry> = commands
             .into_iter()
             .filter(|c| c.cat != Cat::QuickLaunch)
             .collect();
         list.sort_by_key(|c| c.cat);
         return list;
     }
-    let mut scored: Vec<(u32, Command)> = commands
+    let mut scored: Vec<(u32, Entry)> = commands
         .into_iter()
         .map(|c| (score(q, &c), c))
         .filter(|(s, _)| *s > 0)
@@ -170,7 +170,7 @@ fn is_local(hosts: Option<&Value>) -> bool {
 /// `m` and `alt` are the modifier labels; the status filters show the
 /// keys that really pick them (Alt), not the renderer's ⌘ digits, which
 /// jump to a card.
-pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
+pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
     for s in &store.sessions {
         let kind = if s.is_shell() {
@@ -179,7 +179,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
             crate::screen::menus::agent_name(s.info.agent_type.as_str())
         };
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::Terminals,
                 s.title(),
                 Glyph::Agent(s.info.agent_type.as_str().to_owned()),
@@ -209,7 +209,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
             r.activity_text()
         );
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::Recent,
                 label,
                 Glyph::Agent(r.agent.clone()),
@@ -220,7 +220,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
         );
     }
     out.push(
-        Command::new(
+        Entry::new(
             Cat::Projects,
             "All Projects",
             Glyph::Icon("monitor"),
@@ -230,7 +230,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
     );
     for p in &store.projects {
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::Projects,
                 &p.name,
                 Glyph::None,
@@ -250,7 +250,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
             .filter(|s| !s.is_empty())
             .collect();
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::Workflows,
                 &wf.name,
                 Glyph::Icon("workflow"),
@@ -267,9 +267,9 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Command> {
     out
 }
 
-fn actions(store: &Store, m: &str) -> Vec<Command> {
+fn actions(store: &Store, m: &str) -> Vec<Entry> {
     let running = store.sessions.len();
-    let mut stop = Command::new(
+    let mut stop = Entry::new(
         Cat::Actions,
         "Stop Sessions and Server",
         Glyph::Icon("power"),
@@ -284,7 +284,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         LayoutMode::Tabs => LayoutMode::Grid,
     };
     vec![
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "New Session",
             Glyph::Icon("plus"),
@@ -292,7 +292,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         )
         .shortcut(format!("{m}N"))
         .keys(&["create", "add", "agent", "terminal", "launch"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Open Settings",
             Glyph::Icon("settings"),
@@ -300,7 +300,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         )
         .shortcut(format!("{m},"))
         .keys(&["preferences", "config", "options"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Toggle Sidebar",
             Glyph::Icon("panel-left"),
@@ -308,7 +308,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         )
         .shortcut(format!("{m}B"))
         .keys(&["hide", "show", "panel"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Keyboard Shortcuts",
             Glyph::Icon("keyboard"),
@@ -323,28 +323,28 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
             "bindings",
             "hotkeys",
         ]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Add Project",
             Glyph::Icon("folder-plus"),
             Act::AddProject,
         )
         .keys(&["new project", "create project"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Add Workflow",
             Glyph::Icon("workflow"),
             Act::Workflow(WfAct::New),
         )
         .keys(&["new workflow", "create workflow", "schedule"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Open Tasks View",
             Glyph::Icon("list-todo"),
             Act::View(MainView::Tasks),
         )
         .keys(&["task", "kanban", "queue", "todo", "board"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Create Task",
             Glyph::Icon("plus"),
@@ -352,21 +352,21 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         )
         .keys(&["new task", "add task", "todo"]),
         stop,
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Toggle Layout (Grid/Tabs)",
             Glyph::Icon("layout-dashboard"),
             Act::Layout(next_layout),
         )
         .keys(&["grid", "tabs", "layout", "switch", "view"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Show Welcome Guide",
             Glyph::Icon("book-open"),
             Act::Welcome,
         )
         .keys(&["welcome", "guide", "help", "onboarding", "tour"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "New Terminal Session",
             Glyph::Icon("terminal"),
@@ -374,7 +374,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
         )
         .shortcut("Ctrl+`")
         .keys(&["shell", "terminal", "zsh", "bash"]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Copy MCP Server URL",
             Glyph::Icon("plug"),
@@ -392,7 +392,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
             "server",
             "url",
         ]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "Manage Worktrees",
             Glyph::Icon("hard-drive"),
@@ -408,7 +408,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
             "size",
             "node_modules",
         ]),
-        Command::new(
+        Entry::new(
             Cat::Actions,
             "SSH & Hosts",
             Glyph::Icon("server"),
@@ -428,7 +428,7 @@ fn actions(store: &Store, m: &str) -> Vec<Command> {
 
 /// Each installed agent on each local project, its worktrees and a new
 /// one; then a shell in each.
-fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
+fn quick_launch(store: &Store, st: &State, out: &mut Vec<Entry>) {
     let local: Vec<_> = store
         .projects
         .iter()
@@ -462,7 +462,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
             };
             let glyph = Glyph::Agent(agent.to_owned());
             out.push(
-                Command::new(
+                Entry::new(
                     Cat::QuickLaunch,
                     format!("{name} on {}", p.name),
                     glyph.clone(),
@@ -475,7 +475,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
             };
             for w in wts {
                 out.push(
-                    Command::new(
+                    Entry::new(
                         Cat::QuickLaunch,
                         format!("{name} on {} \u{203a} {}", p.name, w.name),
                         glyph.clone(),
@@ -488,7 +488,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
                 );
             }
             out.push(
-                Command::new(
+                Entry::new(
                     Cat::QuickLaunch,
                     format!("{name} on {} (new worktree)", p.name),
                     glyph,
@@ -503,7 +503,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
     }
     for p in &local {
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::QuickLaunch,
                 format!("Terminal in {}", p.name),
                 Glyph::Icon("terminal"),
@@ -513,7 +513,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
         );
         for w in worktrees(&p.path).unwrap_or_default() {
             out.push(
-                Command::new(
+                Entry::new(
                     Cat::QuickLaunch,
                     format!("Terminal in {} \u{203a} {}", p.name, w.name),
                     Glyph::Icon("terminal"),
@@ -528,7 +528,7 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Command>) {
     }
 }
 
-fn filters(alt: &str, out: &mut Vec<Command>) {
+fn filters(alt: &str, out: &mut Vec<Entry>) {
     let shows = [
         (Filter::All, "Show All"),
         (Filter::Running, "Show Running"),
@@ -538,7 +538,7 @@ fn filters(alt: &str, out: &mut Vec<Command>) {
     ];
     for (i, (f, label)) in shows.into_iter().enumerate() {
         out.push(
-            Command::new(Cat::Filter, label, Glyph::Icon("funnel"), Act::Filter(f))
+            Entry::new(Cat::Filter, label, Glyph::Icon("funnel"), Act::Filter(f))
                 .shortcut(format!("{alt}{}", i + 1))
                 .keys(&["filter", "status"]),
         );
@@ -550,7 +550,7 @@ fn filters(alt: &str, out: &mut Vec<Command>) {
     ];
     for (s, label) in sorts {
         out.push(
-            Command::new(
+            Entry::new(
                 Cat::Filter,
                 label,
                 Glyph::Icon("arrow-up-down"),
@@ -565,8 +565,8 @@ fn filters(alt: &str, out: &mut Vec<Command>) {
 mod tests {
     use super::*;
 
-    fn cmd(label: &str, keys: &[&str]) -> Command {
-        Command::new(Cat::Actions, label, Glyph::None, Act::Nothing).keys(keys)
+    fn cmd(label: &str, keys: &[&str]) -> Entry {
+        Entry::new(Cat::Actions, label, Glyph::None, Act::Nothing).keys(keys)
     }
 
     #[test]

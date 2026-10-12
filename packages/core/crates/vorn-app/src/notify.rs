@@ -255,9 +255,9 @@ pub fn show(notice: Notice) {
 /// The OS's own notifier, given the text as arguments or environment so
 /// nothing in it is ever read as script.
 fn command(title: &str, body: &str) -> std::process::Command {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let mut c = if cfg!(target_os = "macos") {
-        let mut c = Command::new("osascript");
+        let mut c = vorn_spawn::command("osascript");
         c.args([
             "-e",
             "on run argv",
@@ -270,13 +270,13 @@ fn command(title: &str, body: &str) -> std::process::Command {
         ]);
         c
     } else if cfg!(windows) {
-        let mut c = Command::new("powershell");
+        let mut c = vorn_spawn::command("powershell");
         c.args(["-NoProfile", "-NonInteractive", "-Command", WINDOWS_TOAST])
             .env("VORN_NOTICE_TITLE", title)
             .env("VORN_NOTICE_BODY", body);
         c
     } else {
-        let mut c = Command::new("notify-send");
+        let mut c = vorn_spawn::command("notify-send");
         c.args(["--app-name=Vorn", title, body]);
         c
     };

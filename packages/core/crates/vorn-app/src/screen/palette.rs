@@ -111,7 +111,7 @@ pub(super) fn palette(s: &Screen<'_>) -> El {
     super::dialogs::backdrop(s, 0.4).child(panel.absolute(x, s.size.1 * 0.2))
 }
 
-fn row(s: &Screen<'_>, i: usize, cmd: &palette::Command, query: &str) -> El {
+fn row(s: &Screen<'_>, i: usize, cmd: &palette::Entry, query: &str) -> El {
     let id = s.acts.on("palette", Act::Palette(PalAct::Execute(i)));
     let active = i == s.st.palette.active;
     let bg = if active {

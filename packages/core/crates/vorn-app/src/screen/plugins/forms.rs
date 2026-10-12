@@ -97,7 +97,7 @@ fn connect_box(s: &Screen<'_>, a: &Adding) -> El {
                     .bg(if on { white(0.1) } else { white(0.0) })
                     .role(Role::Button, label)
                     .toggled(on)
-                    .child(text(label, 12.0, fg).line_height(16.0).silent()),
+                    .child(text(label, 12.0, fg).line_height(18.0).silent()),
             );
         }
         col = col.child(tabs);
@@ -120,7 +120,7 @@ fn input(s: &Screen<'_>, f: Field, value: &str, name: &str, placeholder: &str, m
         ..TextStyle::ui(14.0)
     };
     field(id, name, placeholder, style, k::GRAY_200)
-        .placeholder_color(k::GRAY_600)
+        .placeholder_color(k::GRAY_200.alpha(0.5))
         .w_full()
         .px(12.0)
         .py(6.0)
@@ -294,7 +294,7 @@ fn dynamic(s: &Screen<'_>, f: &BuiltinForm, spec: &Value) -> Option<El> {
                 ..TextStyle::ui(14.0)
             };
             textarea(id, name, placeholder, style, k::GRAY_200)
-                .placeholder_color(k::GRAY_600)
+                .placeholder_color(k::GRAY_200.alpha(0.5))
                 .w_full()
                 .h(74.0)
                 .px(12.0)
@@ -774,7 +774,7 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
             )
             .child(
                 field(id, l, ph, style, k::GRAY_200)
-                    .placeholder_color(k::GRAY_600)
+                    .placeholder_color(k::GRAY_200.alpha(0.5))
                     .w_full()
                     .px(8.0)
                     .py(6.0)

@@ -286,6 +286,10 @@ pub struct App {
     discarding: bool,
     /// The browser and device panes' web views and calls in flight.
     web: browser::Web,
+    /// Wakes the window from another thread.
+    wake: Wake,
+    /// The OS file picker, while it is open.
+    picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
 
 impl App {
@@ -293,6 +297,7 @@ impl App {
     /// `wake` runs whenever either has news for the next frame.
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
+        let app_wake = Arc::clone(&wake);
         let store = Store::load(&rpc)?;
         let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
@@ -338,6 +343,8 @@ impl App {
             removals: Vec::new(),
             discarding: false,
             web,
+            wake: app_wake,
+            picking: None,
         };
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -2376,6 +2383,7 @@ impl App {
         self.panes_tick(ui);
         self.tasks_tick(ui);
         self.net_tick(ui);
+        self.plug_tick();
         self.settings_tick(now);
         let focus = ui.focus();
         if focus != self.last_focus {

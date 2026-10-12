@@ -110,7 +110,7 @@ fn filters(s: &Screen<'_>) -> El {
             s.ui,
             pick_id(&pick),
             name,
-            PickerLook::Chip,
+            PickerLook::Select,
             &choices,
             chosen,
         ))
@@ -135,11 +135,34 @@ fn filters(s: &Screen<'_>) -> El {
     let at = p.rung.and_then(|x| rs.iter().position(|y| *y == x));
     let labels = rs.iter().map(|r| r.label().to_owned()).collect();
     let rung = dropdown(Pick::Rung, "Filter by sign-in", "Any sign-in", labels, at);
+    let id = s.acts.on("plug-file", act(PlugAct::InstallFile));
+    let hot = s.ui.hover(id);
+    let fg = k::GRAY_300.mix(k::WHITE, hot);
+    let label = "Install from file";
+    let file = div()
+        .id(id)
+        .on(Action::Click)
+        .ring(R)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .shrink0()
+        .px(8.0)
+        .py(6.0)
+        .rounded(R)
+        .border(1.0, white(0.1))
+        .bg(white(0.06 * hot))
+        .role(Role::Button, label)
+        .child(ico("folder-open", 11.0, 2.0, fg))
+        .child(text(label, 12.0, fg).line_height(16.0).silent());
+    let file =
+        crate::ui::widgets::tooltip(s.ui, file, id, "Install a .vorn.tgz you already have", None);
     let row = div()
         .row()
         .wrap_children()
         .items_center()
         .gap(8.0)
+        .child(file)
         .child_if(category)
         .child_if(kind)
         .child_if(rung);

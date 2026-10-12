@@ -12,7 +12,7 @@ use crate::ui::{mods, Event as UiEvent, Input, Ui};
 
 impl App {
     /// The rows the palette shows now, in order.
-    pub(super) fn palette_rows(&self) -> Vec<palette::Command> {
+    pub(super) fn palette_rows(&self) -> Vec<palette::Entry> {
         let all = palette::commands(&self.store, &self.st, MOD_LABEL, ALT_LABEL);
         palette::shown(all, &self.st.palette.query)
     }

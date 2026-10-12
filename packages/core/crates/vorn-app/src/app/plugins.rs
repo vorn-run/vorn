@@ -29,6 +29,8 @@ pub(super) enum PlugCall {
         key: String,
         direct: bool,
     },
+    /// A pack picked from disk; it has no row until it names itself.
+    InspectFile,
     Install {
         id: String,
     },
@@ -85,6 +87,14 @@ impl App {
             PlugAct::CloseForm if p.from_editor => self.plug_leave(),
             PlugAct::CloseForm => p.adding = None,
             PlugAct::Install(key) => self.plug_inspect(&key, true),
+            PlugAct::InstallFile => {
+                p.report = None;
+                p.pending = None;
+                if self.picking.is_none() {
+                    let wake = std::sync::Arc::clone(&self.wake);
+                    self.picking = Some(crate::system::pick_file("Install a connector pack", wake));
+                }
+            }
             PlugAct::ConfirmInstall => {
                 if let Some(pending) = p.pending.clone() {
                     self.plug_keep(pending);
@@ -388,7 +398,12 @@ impl App {
     /// `keep`: install what was staged.
     fn plug_keep(&mut self, pending: Pending) {
         let p = &mut self.st.plugins;
-        let Some(id) = p.listing(&pending.key).map(|l| l.id.clone()) else {
+        // A pack from a file names itself; a listed one goes by its row.
+        let Some(id) = p
+            .listing(&pending.key)
+            .map(|l| l.id.clone())
+            .or_else(|| s(&pending.preview, "id").map(str::to_owned))
+        else {
             p.pending = None;
             return;
         };
@@ -602,6 +617,17 @@ impl App {
                     self.plug_catalog(v);
                 }
             }
+            PlugCall::InspectFile => match answer {
+                Err(e) => p.report = Some(e.to_string()),
+                Ok(v) => match refused(&v) {
+                    Some(e) => p.report = Some(e),
+                    None => {
+                        let preview = v.get("preview").cloned().unwrap_or(Value::Null);
+                        let key = s(&preview, "id").unwrap_or("").to_owned();
+                        p.pending = Some(Pending { key, preview });
+                    }
+                },
+            },
             PlugCall::Inspect { key, direct } => {
                 let Some(l) = p.listing(&key).cloned() else {
                     return;
@@ -922,6 +948,20 @@ impl App {
                 self.st.plugins.loads += 1;
             }
             _ => {}
+        }
+    }
+
+    /// Once a frame: a picked file goes to vornd to be checked.
+    pub(super) fn plug_tick(&mut self) {
+        let Some(rx) = &self.picking else { return };
+        let Ok(picked) = rx.try_recv() else { return };
+        self.picking = None;
+        if let Some(path) = picked {
+            self.call(
+                Call::Plug(PlugCall::InspectFile),
+                "connector:inspectPack",
+                json!({ "kind": "file", "path": path.to_string_lossy() }),
+            );
         }
     }
 

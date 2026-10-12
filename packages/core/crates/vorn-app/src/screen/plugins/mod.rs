@@ -88,7 +88,7 @@ fn tabs(s: &Screen<'_>, current: Tab) -> El {
                 .bg(if on { white(0.08) } else { white(0.0) })
                 .role(Role::Button, tab.label())
                 .toggled(on)
-                .child(text(tab.label(), 12.0, fg).line_height(16.0).silent()),
+                .child(text(tab.label(), 12.0, fg).line_height(18.0).silent()),
         );
     }
     div().row().child(row)

@@ -38,7 +38,7 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
                 .mb(16.0)
                 .role(Role::Button, back_label)
                 .child(ico("arrow-left", 12.0, 2.0, fg))
-                .child(text(back_label, 12.0, fg).line_height(16.0).silent()),
+                .child(text(back_label, 12.0, fg).line_height(18.0).silent()),
         ),
     );
 
@@ -64,10 +64,10 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
         .child(
             text(&l.name, 16.0, k::GRAY_100)
                 .weight(500)
-                .line_height(22.0)
+                .line_height(24.0)
                 .role(Role::Heading, &l.name),
         )
-        .child(text(sub, 11.5, k::GRAY_600).line_height(16.0).wrapping());
+        .child(text(sub, 11.5, k::GRAY_600).line_height(17.25).wrapping());
     if let Some(v) = &l.verified {
         who = who.child(verified(v));
     }
@@ -128,15 +128,30 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
                 items(&d.actions, "Nothing — this one only watches."),
             ));
         if !d.settings.is_empty() {
+            // One word per piece, so the row wraps between words as the paragraph does.
             let mut line = div().row().wrap_children().gap(0.0);
+            let last = d.settings.len() - 1;
             for (i, (name, required, _)) in d.settings.iter().enumerate() {
-                let lead = if i > 0 { "   " } else { "" };
                 let (label, fg) = if *required {
-                    (format!("{lead}{name}"), k::GRAY_400)
+                    (name.clone(), k::GRAY_400)
                 } else {
-                    (format!("{lead}{name} (optional)"), k::GRAY_600)
+                    (format!("{name} (optional)"), k::GRAY_600)
                 };
-                line = line.child(text(label, 11.0, fg).mono().line_height(18.0));
+                let words: Vec<&str> = label.split(' ').collect();
+                for (j, w) in words.iter().enumerate() {
+                    // The renderer's three spaces collapse to one, as HTML does.
+                    let gap = if j + 1 < words.len() || i < last {
+                        " "
+                    } else {
+                        ""
+                    };
+                    line = line.child(
+                        text(format!("{w}{gap}"), 11.0, fg)
+                            .mono()
+                            .line_height(18.0)
+                            .silent(),
+                    );
+                }
             }
             col = col.child(section("You will need", vec![line]));
         }
@@ -434,14 +449,14 @@ fn section(label: &str, children: Vec<El>) -> El {
         .child(
             text(label.to_uppercase(), 10.0, k::GRAY_600)
                 .tracking(0.05)
-                .line_height(14.0)
+                .line_height(15.0)
                 .role(Role::Heading, label),
         )
         .child(div().col().gap(8.0).mt(8.0).children(children))
 }
 
 fn item(title: &str, detail: Option<&str>, when: Option<&str>) -> El {
-    let line = |t: &str, fg| text(t, 12.5, fg).line_height(18.0).wrapping();
+    let line = |t: &str, fg| text(t, 12.5, fg).line_height(18.75).wrapping();
     div()
         .col()
         .child(line(title, k::GRAY_300))
@@ -450,11 +465,11 @@ fn item(title: &str, detail: Option<&str>, when: Option<&str>) -> El {
 }
 
 fn para(t: &str, fg: crate::ui::Rgba) -> El {
-    text(t, 12.5, fg).line_height(18.0).wrapping()
+    text(t, 12.5, fg).line_height(18.75).wrapping()
 }
 
 fn quiet(t: &str) -> El {
-    text(t, 12.0, k::GRAY_600).line_height(16.0).wrapping()
+    text(t, 12.0, k::GRAY_600).line_height(18.0).wrapping()
 }
 
 /// `Fact`: a 72 px term beside its value.

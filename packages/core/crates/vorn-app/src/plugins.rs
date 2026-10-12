@@ -23,6 +23,8 @@ pub enum PlugAct {
     CloseForm,
     /// Install, update or retry a listing's pack.
     Install(String),
+    /// Pick a `.vorn.tgz` on this disk, then check it.
+    InstallFile,
     ConfirmInstall,
     CancelInstall,
     Remove(String),
