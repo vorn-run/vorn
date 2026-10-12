@@ -74,7 +74,7 @@ public struct RootView: View {
     /// A workflow's page draws its own bar, as do the tabs strip and a focused session's header.
     private var showsTopBar: Bool {
         switch model.mainViewMode {
-        case .workflows: features.workflows.editingWorkflow == nil
+        case .workflows: !features.workflows.isEditing
         case .tasks: true
         case .sessions: model.layoutMode(store) == .grid && focusedSession == nil
         }

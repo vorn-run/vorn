@@ -18,8 +18,8 @@ public struct WorkflowsView<Leading: View>: View {
 
     public var body: some View {
         Group {
-            if let workflow = store.editingWorkflow {
-                WorkflowPage(store: store, workflow: workflow) { leading }
+            if store.isEditing, let editor = store.editor {
+                WorkflowPage(store: store, editor: editor) { leading }
             } else {
                 WorkflowsLandingView(store: store)
             }
@@ -37,14 +37,22 @@ extension WorkflowsView where Leading == EmptyView {
     }
 }
 
-/// The app's error toast: red X, gray-200 text, on a dark rounded card; clears after 4s.
+/// The app's toast: a tone's icon and tint, gray-200 text, on a dark rounded card.
 struct ToastView: View {
     let store: WorkflowsStore
 
     var body: some View {
         if let message = store.toast {
+            let tone = store.toastTone
+            let tint: Color = tone == .success ? Theme.green500 : tone == .warning ? Theme.amber500 : Theme.red500
             HStack(spacing: 10) {
-                Icon(.x, size: 15, weight: .bold).foregroundStyle(Color(hex: 0xFF6467))
+                Group {
+                    switch tone {
+                    case .success: LucideIcon(.check, size: 15).foregroundStyle(Color(hex: 0x05DF72))
+                    case .warning: LucideIcon(.triangleAlert, size: 15).foregroundStyle(Theme.amber400)
+                    case .error: Icon(.x, size: 15, weight: .bold).foregroundStyle(Color(hex: 0xFF6467))
+                    }
+                }
                 Text(message)
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.gray200)
@@ -62,12 +70,12 @@ struct ToastView: View {
             .padding(.vertical, 10)
             .frame(minWidth: 200, maxWidth: 360)
             .fixedSize(horizontal: false, vertical: true)
-            .background(Color(hex: 0xFB2C36).opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
+            .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
             .background(Color(red: 26 / 255, green: 26 / 255, blue: 30 / 255).opacity(0.92), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(Color(hex: 0xFB2C36).opacity(0.2), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(tint.opacity(0.2), lineWidth: 1))
             .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
             .task(id: message) {
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: .seconds(tone == .success ? 2.5 : tone == .warning ? 3.5 : 4))
                 if store.toast == message { store.toast = nil }
             }
         }

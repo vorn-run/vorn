@@ -2,6 +2,8 @@ import Foundation
 import Observation
 import VornCore
 
+public enum ToastTone: Sendable { case error, success, warning }
+
 public enum WorkflowsTab: String, Sendable { case runs, review }
 
 public enum SidebarWorkflowFilter: String, Sendable, CaseIterable {
@@ -29,11 +31,24 @@ public final class WorkflowsStore {
     public var sidebarFilter: SidebarWorkflowFilter = .all
     public var selectedRunId: String?
     public private(set) var editingWorkflowId: String?
-    public var historyOpen = true
+    /// A new workflow's editor is open (it has no id yet).
+    public private(set) var editorOpen = false
+    /// The open workflow's draft; one editor serves every workflow, reloaded per open.
+    public private(set) var editor: WorkflowEditorModel?
+    /// Canvas views and the step library's memory; renders and tests use an ephemeral one.
+    @ObservationIgnored public var editorMemory: EditorMemory = .userDefaults
+    public var historyOpen = false
     public var listWidth: CGFloat = 420
     public private(set) var loading = 0
     /// One transient message, shown like the app's error toast.
-    public var toast: String?
+    public var toast: String? {
+        didSet {
+            toastTone = nextTone ?? .error
+            nextTone = nil
+        }
+    }
+    public private(set) var toastTone: ToastTone = .error
+    @ObservationIgnored private var nextTone: ToastTone?
     /// The open dropdown, drawn by `workflowsMenuHost`.
     public var menu: WorkflowsMenu?
     public var sidebarSectionOpen = true
@@ -119,6 +134,9 @@ public final class WorkflowsStore {
 
     public var editingWorkflow: WorkflowDefinition? { editingWorkflowId.flatMap(workflow) }
 
+    /// The editor page shows: an open workflow, or a new one.
+    public var isEditing: Bool { editorOpen || editingWorkflow != nil }
+
     /// The row's workflow, or what the run remembers of a deleted one.
     public func ref(for run: WorkflowExecution) -> RunWorkflowRef? {
         if let w = workflow(run.workflowId) { return RunWorkflowRef(w) }
@@ -172,12 +190,62 @@ public final class WorkflowsStore {
     public func openWorkflow(_ id: String) -> Task<Void, Never> {
         editingWorkflowId = id
         workflowRuns = runs.filter { $0.workflowId == id }
+        editorModel().load(workflow(id))
         return Task { await loadWorkflowRuns(id) }
     }
 
-    public func showAllRuns() {
+    /// The sidebar's New workflow: a blank editor, offered a template first.
+    public func newWorkflow() {
         editingWorkflowId = nil
         workflowRuns = []
+        editorModel().load(nil)
+        editorOpen = true
+    }
+
+    public func showAllRuns() {
+        closeEditor()
+    }
+
+    /// Leaves the editor for the runs landing; an import's leftovers go with it.
+    public func closeEditor() {
+        editingWorkflowId = nil
+        workflowRuns = []
+        editorOpen = false
+        importedRequirements = nil
+    }
+
+    /// A new workflow's first save makes it the open one.
+    func adoptEditing(_ id: String) {
+        editingWorkflowId = id
+        editorOpen = false
+    }
+
+    private func editorModel() -> WorkflowEditorModel {
+        if let editor { return editor }
+        let made = WorkflowEditorModel(store: self)
+        editor = made
+        return made
+    }
+
+    /// Writes a definition through vornd and keeps the local list in step.
+    func saveWorkflow(_ wf: WorkflowDefinition, isNew: Bool) async {
+        if let i = workflows.firstIndex(where: { $0.id == wf.id }) { workflows[i] = wf } else { workflows.append(wf) }
+        do {
+            let json = try JSONValue.from(wf)
+            if isNew {
+                _ = try await backend.rpc("workflow:create", .object(["workflow": json]))
+            } else {
+                _ = try await backend.rpc("workflow:update", .object(["id": .string(wf.id), "updates": json]))
+            }
+        } catch {
+            notify(String(describing: error))
+        }
+    }
+
+    /// Shows one toast; errors stay red, the rest carry their own tone.
+    public func notify(_ message: String, tone: ToastTone = .error) {
+        nextTone = tone
+        toast = message
     }
 
     private func loadWorkflowRuns(_ id: String) async {

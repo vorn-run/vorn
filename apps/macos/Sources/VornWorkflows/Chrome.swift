@@ -172,7 +172,7 @@ public struct WorkflowsSidebarSection: View {
                 }
                 .trackFrame($filterFrame)
                 headerAction(.download, help: "Import workflow file") { store.importWorkflow() }
-                headerAction(.workflow, help: "New workflow", disabled: true) {}
+                headerAction(.workflow, help: "New workflow") { store.newWorkflow() }
             }
         }
         .padding(.top, 12)
@@ -225,7 +225,7 @@ private struct AllRunsRow: View {
     let store: WorkflowsStore
 
     var body: some View {
-        SidebarRow(selected: store.editingWorkflowId == nil) { _ in
+        SidebarRow(selected: store.editingWorkflowId == nil && !store.editorOpen) { _ in
             Icon(.activity, size: 14, weight: .light).foregroundStyle(Theme.gray400)
             Text("All runs").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             if store.waitingCount > 0 {

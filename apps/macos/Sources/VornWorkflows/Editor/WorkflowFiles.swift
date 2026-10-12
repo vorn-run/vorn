@@ -214,9 +214,11 @@ extension WorkflowsStore {
             let file = WorkflowFiles.fileFromWorkflow(
                 workflow, projectPath: project?.path ?? "", connections: await portableConnections())
             guard try await workflowFiles.save(file.name, file.contents, "Export workflow") else { return }
-            toast = file.residual.isEmpty
-                ? "Exported \"\(workflow.name)\""
-                : "Exported, but these still name this machine: \(file.residual.joined(separator: ", "))"
+            if file.residual.isEmpty {
+                notify("Exported \"\(workflow.name)\"", tone: .success)
+            } else {
+                notify("Exported, but these still name this machine: \(file.residual.joined(separator: ", "))")
+            }
         }
     }
 
@@ -267,7 +269,7 @@ extension WorkflowsStore {
 
         let pending = imported.unresolved.map(WorkflowFiles.describeRequirement).joined(separator: ", ")
         let note = !pending.isEmpty ? " — still needs \(pending)" : existing != nil ? "" : " — enable it when ready"
-        toast = "\(existing != nil ? "Updated" : "Imported") \"\(imported.definition.name)\"\(note)"
+        notify("\(existing != nil ? "Updated" : "Imported") \"\(imported.definition.name)\"\(note)", tone: .success)
         // No toast actions here, so the editor's "Still needs" list is primed rather than offered.
         if !imported.unresolved.isEmpty {
             importedRequirements = ImportedRequirements(workflowId: imported.definition.id, requirements: imported.unresolved)

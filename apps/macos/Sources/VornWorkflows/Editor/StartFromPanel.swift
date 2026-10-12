@@ -76,11 +76,11 @@ struct StartFromPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PickRow(action: onClose) { hovered in
-                        rowIcon(symbol: "doc.badge.plus")
+                        rowIcon(.filePlusCorner)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text("Blank canvas").font(.system(size: 12, weight: .medium))
+                            Text("Blank canvas").font(.system(size: 12, weight: .medium)).frame(height: 18)
                                 .foregroundStyle(hovered ? Color.white : Theme.gray300)
-                            Text("Pick your own trigger").font(.system(size: 11)).foregroundStyle(Theme.gray500)
+                            Text("Pick your own trigger").font(.system(size: 11)).frame(height: 16.5).foregroundStyle(Theme.gray500)
                         }
                     }
                     if !data.templates.isEmpty { sectionHeader("Templates") }
@@ -90,11 +90,11 @@ struct StartFromPanel: View {
                     if !data.suggestions.isEmpty { sectionHeader("From your connections") }
                     ForEach(data.suggestions) { suggestion in
                         PickRow(action: { pickSuggestion(suggestion) }) { hovered in
-                            rowIcon(symbol: "powerplug")
+                            rowIcon(.plug)
                             VStack(alignment: .leading, spacing: 0) {
-                                Text(suggestion.name).font(.system(size: 12, weight: .medium))
+                                Text(suggestion.name).font(.system(size: 12, weight: .medium)).frame(height: 18)
                                     .foregroundStyle(hovered ? Color.white : Theme.gray300)
-                                Text(suggestion.connectionName).font(.system(size: 11)).foregroundStyle(Theme.gray500)
+                                Text(suggestion.connectionName).font(.system(size: 11)).frame(height: 16.5).foregroundStyle(Theme.gray500)
                             }
                             .lineLimit(1)
                         }
@@ -117,6 +117,7 @@ struct StartFromPanel: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 10, design: .monospaced))
+            .frame(height: 15)
             .tracking(0.5)
             .foregroundStyle(Theme.gray600)
             .padding(.horizontal, 8)
@@ -132,7 +133,7 @@ struct StartFromPanel: View {
         onPick(seed)
         onClose()
         if !seed.unresolved.isEmpty {
-            store.toast = "Started from \"\(template.name)\" — still needs \(seed.unresolved.joined(separator: ", "))"
+            store.notify("Started from \"\(template.name)\" — still needs \(seed.unresolved.joined(separator: ", "))", tone: .warning)
         }
     }
 
@@ -145,13 +146,13 @@ struct StartFromPanel: View {
             onClose()
             await store.reload()
             if let id = result["workflowId"]?.stringValue { store.openWorkflow(id) }
-            store.toast = "Started \"\(suggestion.name)\""
+            store.notify("Started \"\(suggestion.name)\"", tone: .success)
         }
     }
 }
 
-private func rowIcon(symbol: String) -> some View {
-    Icon(symbol: symbol, size: 14, weight: .light).foregroundStyle(Theme.gray500).padding(.top, 2)
+private func rowIcon(_ glyph: LucideGlyph) -> some View {
+    LucideIcon(glyph, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray500).padding(.top, 2)
 }
 
 /// px-2.5 py-2 rounded-md row, white/.06 on hover.
@@ -189,15 +190,16 @@ private struct TemplateRow: View {
                     HStack(alignment: .top, spacing: 10) {
                         StepStrip(count: template.nodeCount).padding(.top, 2)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(template.name).font(.system(size: 12, weight: .medium))
+                            Text(template.name).font(.system(size: 12, weight: .medium)).frame(height: 18)
                                 .foregroundStyle(hovered ? Color.white : Theme.gray300)
-                            Text(template.steps.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(Theme.gray500)
+                            Text(template.steps.joined(separator: " · ")).font(.system(size: 11)).frame(height: 16.5).foregroundStyle(Theme.gray500)
                             if pending.isEmpty && !requirements.isEmpty {
                                 HStack(spacing: 4) {
                                     Icon(.check, size: 10, weight: .semibold)
                                     Text("Connected")
                                 }
                                 .font(.system(size: 11))
+                                .frame(height: 16.5)
                                 .foregroundStyle(Theme.statusSage)
                             }
                         }

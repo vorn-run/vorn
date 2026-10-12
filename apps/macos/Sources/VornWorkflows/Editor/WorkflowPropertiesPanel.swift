@@ -42,7 +42,7 @@ struct WorkflowPropertiesPanel: View {
                             ? "Cleanup applies only to worktrees this workflow creates. All agents inherit their worktree from context, so there is nothing to clean up."
                             : "")
                     }
-                    Color.clear.frame(height: 4)
+                    Color.clear.frame(height: 8)
                     PropertyRow(label: "Trigger") {
                         Hovering { hovered in
                             Button { onSelectTrigger?() } label: {
@@ -166,8 +166,8 @@ private struct PropertyRow<Content: View>: View {
             content.foregroundStyle(Theme.gray200).frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.system(size: 12))
-        .frame(minHeight: 32)
         .padding(.vertical, 4)
+        .frame(minHeight: 32)
     }
 }
 

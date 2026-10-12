@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import VornCore
 
@@ -7,7 +8,7 @@ enum AddableNodeType: String, CaseIterable, Sendable {
 }
 
 /// library-pick.ts LibraryPick: one row picked in the step library.
-enum LibraryPick: Equatable, Sendable {
+enum LibraryPick: Hashable, Sendable {
     case type(AddableNodeType)
     case parallel
     case connectorAction(connectionId: String, action: String, actionLabel: String)
@@ -42,6 +43,8 @@ struct InsertAnchor: Equatable, Sendable {
     var insideBranch: Bool = false
     var bodyOnly: Bool = false
     var replaceNodeId: String?
+    /// Flow coordinates for picks that land where an edge was dropped.
+    var position: CGPoint?
 
     static let trigger = InsertAnchor(afterNodeId: EditorAnchor.trigger)
 

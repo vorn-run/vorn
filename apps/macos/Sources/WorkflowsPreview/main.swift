@@ -74,7 +74,7 @@ struct PreviewShell: View {
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.white(0.06)).frame(width: 1) }
 
             VStack(spacing: 0) {
-                if store.editingWorkflow == nil {
+                if !store.isEditing {
                     HStack(spacing: 4) {
                         ToolbarGlyph(symbol: "sidebar.left")
                         VDivider().padding(.horizontal, 2)
