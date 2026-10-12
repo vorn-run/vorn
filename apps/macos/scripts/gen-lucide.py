@@ -49,6 +49,11 @@ ICONS = {
     "gripVertical": "grip-vertical",
     "arrowDown": "arrow-down",
     "keyboard": "keyboard",
+    "refreshCw": "refresh-cw",
+    "loaderCircle": "loader-circle",
+    "gitCommitHorizontal": "git-commit-horizontal",
+    "send": "send",
+    "messageSquare": "message-square",
 }
 # Inline glyphs from TaskToolbar.tsx and OptionRow.tsx rather than lucide.
 INLINE = {

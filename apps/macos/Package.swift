@@ -41,11 +41,11 @@ let package = Package(
         ),
         .executableTarget(name: "VornMac", dependencies: ["VornApp"]),
         // Mount one feature view alone, in a window or offscreen.
-        .executableTarget(name: "VornTasksPreview", dependencies: ["VornCore", "VornUI", "VornTasks"]),
+        .executableTarget(name: "VornTasksPreview", dependencies: ["VornCore", "VornUI", "VornTasks", "VornWorkflows"]),
         .executableTarget(name: "WorkflowsPreview", dependencies: ["VornCore", "VornUI", "VornWorkflows"]),
         .testTarget(name: "VornCoreTests", dependencies: ["VornCore"]),
         .testTarget(name: "VornTerminalsTests", dependencies: ["VornTerminals", "VornCore"]),
-        .testTarget(name: "VornTasksTests", dependencies: ["VornCore", "VornTasks"]),
+        .testTarget(name: "VornTasksTests", dependencies: ["VornCore", "VornTasks", "VornWorkflows"]),
         .testTarget(
             name: "VornWorkflowsTests",
             dependencies: ["VornWorkflows", "VornCore"],
