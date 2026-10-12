@@ -10,6 +10,7 @@ use crate::client::RpcError;
 use crate::runs::{self, s};
 use crate::screen::MainView;
 use crate::state::{now_ms, Dialog};
+use crate::templates;
 use crate::ui::{mods, Event as UiEvent, Input, Ui};
 use crate::workflows::{self as wf, Draft, Missed, Panel, Prompt, WfAct};
 
@@ -46,6 +47,8 @@ pub(super) enum WfCall {
     Models(String, String),
     /// `git:isGitRepo` for a path.
     GitRepo(String),
+    /// `connector:seedWorkflow`, with the suggestion's name.
+    Seed(String),
 }
 
 impl App {
@@ -132,6 +135,21 @@ impl App {
                     .and_then(|v| s(&v, "baseUrl").map(str::to_owned));
             }
             WfCall::Connectors => self.st.wf.lib.connectors = list(answer),
+            WfCall::Seed(name) => match answer {
+                Ok(v) => {
+                    let Some(id) = s(&v, "workflowId").map(str::to_owned) else {
+                        return;
+                    };
+                    if self.workflow(&id).is_none() {
+                        if let Ok(config) = self.rpc.call("config:load", Value::Null) {
+                            self.store.apply("config:changed", config);
+                        }
+                    }
+                    self.st.wf.open_next = Some(id);
+                    self.st.toast(format!("Started \"{name}\""), false);
+                }
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
             WfCall::SignIn => match answer {
                 Ok(v) => match v.pointer("/browser/signInUrl").and_then(Value::as_str) {
                     Some(url) => open_url(url),
@@ -612,6 +630,40 @@ impl App {
     }
 
     /// The first project, which a new agent step runs in.
+    /// `handlePickTemplate`.
+    fn pick_template(&mut self, ui: &mut Ui, i: usize) {
+        let Some(template) = self.st.wf.lib.templates.get(i).cloned() else {
+            return;
+        };
+        let project = self
+            .active_project()
+            .or_else(|| self.first_project())
+            .unwrap_or_default();
+        let (def, unresolved) =
+            templates::seed(&template, (&project.0, &project.1), &self.st.wf.connections);
+        let name = s(&template, "name").unwrap_or("").to_owned();
+        self.edit_graph(|d| {
+            d.wf["name"] = json!(name);
+            for key in ["icon", "iconColor"] {
+                if let Some(v) = def.get(key).filter(|v| v.is_string()) {
+                    d.wf[key] = v.clone();
+                }
+            }
+            d.wf["nodes"] = def["nodes"].clone();
+            d.wf["edges"] = def["edges"].clone();
+        });
+        ui.set_edit_text(wf::field_id(None, "name"), &name);
+        self.st.wf.panel = Panel::Properties;
+        let pending: Vec<String> = unresolved.iter().map(templates::describe).collect();
+        if !pending.is_empty() {
+            let text = format!(
+                "Started from \"{name}\" \u{2014} still needs {}",
+                pending.join(", ")
+            );
+            self.st.toast(text, false);
+        }
+    }
+
     fn first_project(&self) -> Option<(String, String)> {
         self.store
             .projects
@@ -932,6 +984,22 @@ impl App {
                 self.edit(|d| wf::remove_input(d, &node, i));
             }
             WfAct::StartBlank => self.st.wf.panel = Panel::Properties,
+            WfAct::Template(i) => self.pick_template(ui, i),
+            WfAct::Suggest(key) => {
+                let all =
+                    templates::suggestions(&self.st.wf.connections, &self.st.wf.lib.connectors);
+                if let Some(sg) = all.into_iter().find(|sg| sg.key == key) {
+                    self.call(
+                        Call::Workflow(WfCall::Seed(sg.name)),
+                        "connector:seedWorkflow",
+                        json!({ "connectionId": sg.connection_id, "event": sg.event }),
+                    );
+                }
+            }
+            WfAct::Fix(_) => self
+                .st
+                .toast("Connector setup is not in this build yet", true),
+            WfAct::DismissNeeds => self.st.wf.imported = None,
             WfAct::ClosePanel => {
                 self.st.wf.panel = match self.st.wf.panel {
                     Panel::Properties => Panel::None,
@@ -1090,9 +1158,10 @@ impl App {
             .and_then(|e| e.get("workspaceId").cloned())
             .unwrap_or_else(|| json!(self.workspace()));
         let name = s(&def, "name").unwrap_or("").to_owned();
+        self.st.wf.imported = (!unresolved.is_empty()).then(|| (id.clone(), unresolved.clone()));
         let pending = unresolved
             .iter()
-            .map(describe_requirement)
+            .map(crate::templates::describe)
             .collect::<Vec<_>>()
             .join(", ");
         let note = if !pending.is_empty() {
@@ -1392,30 +1461,6 @@ fn graph_complaint(p: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// `describeRequirement`.
-fn describe_requirement(r: &Value) -> String {
-    let name = s(r, "name").filter(|n| !n.is_empty());
-    if s(r, "kind") == Some("httpProfile") {
-        return name.map_or_else(
-            || "an HTTP profile".to_owned(),
-            |n| format!("an HTTP profile like \"{n}\""),
-        );
-    }
-    let connector = s(r, "connectorId")
-        .filter(|c| !c.is_empty())
-        .unwrap_or("connector");
-    if s(r, "key") == Some("secretsFrom") {
-        let used = name
-            .map(|n| format!(" (it used \"{n}\")"))
-            .unwrap_or_default();
-        return format!("a {connector} key for its Secrets from{used}");
-    }
-    name.map_or_else(
-        || format!("a {connector} connection"),
-        |n| format!("a {connector} connection like \"{n}\""),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1463,11 +1508,11 @@ mod tests {
     #[test]
     fn requirements_read_as_the_toast_says_them() {
         assert_eq!(
-            describe_requirement(&json!({ "kind": "httpProfile", "name": "api" })),
+            crate::templates::describe(&json!({ "kind": "httpProfile", "name": "api" })),
             "an HTTP profile like \"api\""
         );
         assert_eq!(
-            describe_requirement(&json!({ "kind": "connection", "connectorId": "github" })),
+            crate::templates::describe(&json!({ "kind": "connection", "connectorId": "github" })),
             "a github connection"
         );
     }

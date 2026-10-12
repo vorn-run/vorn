@@ -3652,12 +3652,16 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                         },
                         c(look::GRAY_200),
                     )
+                    // The browser's own `darkGray`: this input sets no placeholder colour.
+                    .placeholder_color(c(0xa9a9a9))
                     .w_full(),
                 ),
         ))
         .child(row(
             "Cleanup worktrees",
+            // An inline span: the toggle sits on the text baseline, with a descent under it.
             div()
+                .pb(5.0)
                 .opacity(if inherited { 0.5 } else { 1.0 })
                 .child(toggle(
                     s,

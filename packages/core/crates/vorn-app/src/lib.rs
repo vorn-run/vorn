@@ -24,6 +24,7 @@ pub mod runs;
 pub mod screen;
 pub mod state;
 pub mod tasks;
+pub mod templates;
 pub mod ui;
 pub mod vars;
 pub mod view;

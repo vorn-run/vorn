@@ -20,6 +20,7 @@ pub fn editor(s: &Screen<'_>) -> El {
         .min_h(0.0)
         .items_stretch()
         .child(super::canvas::canvas(s, d))
+        .child_if(super::panels::needs(s))
         .child_if(super::panels::panel(s, d));
     div().col().grow().min_w0().child(bar(s, d)).child(body)
 }

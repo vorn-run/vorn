@@ -98,7 +98,7 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
         App::control("sidebar", &Act::Workflow(WfAct::New)),
     );
     assert_eq!(app.st.wf.panel, Panel::StartFrom);
-    shot.save(&mut app, "w-start-from");
+    shot.save(&mut app, "w-start-from-first");
     shot.click(&mut app, control("wf-start-blank", WfAct::StartBlank));
     assert_eq!(app.st.wf.panel, Panel::Properties);
     shot.save(&mut app, "w-editor-blank");
@@ -689,4 +689,65 @@ fn the_canvas_lays_out_forks_and_loops_pans_zooms_drags_and_connects() {
     shot.send(&mut app, key("KeyZ", MOD, None));
     let d = app.st.wf.editor.as_ref().expect("editor");
     assert_eq!(d.node("h").unwrap()["position"]["x"], 0);
+}
+
+#[test]
+fn a_template_starts_the_canvas_and_names_what_it_still_needs() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = workflows_view(&v);
+    shot.click(
+        &mut app,
+        App::control("sidebar", &Act::Workflow(WfAct::New)),
+    );
+    let at = shot.until(&mut app, "the templates", |app, _| {
+        app.st.wf.lib.templates.iter().position(|t| {
+            t.pointer("/portable/requires")
+                .and_then(Value::as_array)
+                .is_some_and(|r| !r.is_empty())
+        })
+    });
+    shot.save(&mut app, "w-start-from");
+    let name = app.st.wf.lib.templates[at]["name"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    let place = format!(
+        "wf-template.{}",
+        app.st.wf.lib.templates[at]["id"].as_str().unwrap_or("")
+    );
+    shot.click(&mut app, control(&place, WfAct::Template(at)));
+    assert_eq!(app.st.wf.panel, Panel::Properties);
+    let d = app.st.wf.editor.as_ref().expect("the editor");
+    assert_eq!(d.wf["name"], name);
+    assert!(!d.nodes().is_empty());
+    assert!(app.st.toasts.iter().any(|t| t.text.contains("still needs")));
+    // A public request is a finished step, so nothing is listed as still needed.
+    assert!(app.st.wf.still_needed().is_empty());
+    shot.save(&mut app, "w-template");
+
+    // A connector step with no connection is.
+    let home = v.home.to_string_lossy().into_owned();
+    seed(
+        &mut app,
+        &mut shot,
+        json!({
+            "id": "wf-needs", "name": "Needs a hand", "icon": "Zap", "iconColor": "#6366f1",
+            "enabled": true, "workspaceId": "personal",
+            "nodes": [
+                { "id": "t", "type": "trigger", "label": "Manual", "position": { "x": 0, "y": 0 },
+                  "config": { "triggerType": "manual" } },
+                { "id": "a", "type": "callConnectorAction", "label": "Open an issue",
+                  "position": { "x": 0, "y": 120 },
+                  "config": { "connectorId": "github", "connectionId": "", "action": "", "args": {}, "cwd": home } }
+            ],
+            "edges": [{ "id": "e", "source": "t", "target": "a" }]
+        }),
+    );
+    shot.click(&mut app, control("wf-side", WfAct::Edit("wf-needs".into())));
+    let needs = app.st.wf.still_needed();
+    assert_eq!(needs.len(), 1);
+    assert_eq!(needs[0].req["connectorId"], "github");
+    shot.save(&mut app, "w-still-needs");
 }

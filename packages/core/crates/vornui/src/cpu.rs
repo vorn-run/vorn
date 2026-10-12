@@ -495,11 +495,12 @@ fn quad_pixel(q: &Quad, half: [f32; 2], r: f32, bw: f32, lx: f32, ly: f32) -> [f
     if bw > 0.0 {
         let inner = (0.5 - (d + bw)).clamp(0.0, 1.0);
         let b = q.border_color;
-        let fill_a = c[3] * inner;
+        // The fill runs under the border, as CSS paints a background.
+        let fill_a = c[3];
         let border_a = b[3] * (1.0 - inner);
-        let a = fill_a + border_a * (1.0 - fill_a);
+        let a = border_a + fill_a * (1.0 - border_a);
         let k = a.max(1e-5);
-        let ch = |i: usize| (c[i] * fill_a + b[i] * border_a * (1.0 - fill_a)) / k;
+        let ch = |i: usize| (b[i] * border_a + c[i] * fill_a * (1.0 - border_a)) / k;
         c = [ch(0), ch(1), ch(2), a];
     }
     let a = c[3] * outer;

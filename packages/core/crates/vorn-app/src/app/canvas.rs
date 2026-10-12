@@ -44,7 +44,7 @@ pub fn panel_width(panel: &Panel) -> f32 {
         Panel::None => 0.0,
         Panel::Library(_) | Panel::StartFrom => 280.0,
         Panel::Node => 420.0,
-        Panel::Properties | Panel::History | Panel::Needs => 340.0,
+        Panel::Properties | Panel::History => 340.0,
     }
 }
 
@@ -56,7 +56,12 @@ impl App {
         } else {
             0.0
         };
-        let w = self.size.0 - side - panel_width(&self.st.wf.panel);
+        let needs = if self.st.wf.still_needed().is_empty() {
+            0.0
+        } else {
+            280.0
+        };
+        let w = self.size.0 - side - panel_width(&self.st.wf.panel) - needs;
         let h = self.size.1 - look::TOP_BAR_H;
         (f64::from(w.max(0.0)), f64::from(h.max(0.0)))
     }

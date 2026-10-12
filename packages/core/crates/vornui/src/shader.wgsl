@@ -76,10 +76,11 @@ fn quad_fs(i: QuadOut) -> @location(0) vec4<f32> {
     var c = i.color;
     if (bw > 0.0) {
         let inner = clamp(0.5 - (d + bw), 0.0, 1.0);
-        let fill_a = i.color.a * inner;
+        // The fill runs under the border, as CSS paints a background.
+        let fill_a = i.color.a;
         let border_a = i.border_color.a * (1.0 - inner);
-        let a = fill_a + border_a * (1.0 - fill_a);
-        let rgb = (i.color.rgb * fill_a + i.border_color.rgb * border_a * (1.0 - fill_a)) / max(a, 1e-5);
+        let a = border_a + fill_a * (1.0 - border_a);
+        let rgb = (i.border_color.rgb * border_a + i.color.rgb * fill_a * (1.0 - border_a)) / max(a, 1e-5);
         c = vec4<f32>(rgb, a);
     }
     let a = c.a * outer;

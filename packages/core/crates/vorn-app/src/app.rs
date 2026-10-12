@@ -1539,6 +1539,9 @@ impl App {
         if self.st.menu.is_some() && !ui.menu_open(menus::MENU) {
             self.st.menu = None;
         }
+        if let Some(id) = self.st.wf.open_next.take() {
+            self.run_wf(ui, crate::workflows::WfAct::Edit(id), Src::default());
+        }
         self.acts.clear();
         let root = self.screen(ui).build();
         self.seed_texts(ui);

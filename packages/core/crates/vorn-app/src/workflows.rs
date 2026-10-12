@@ -107,8 +107,6 @@ pub enum Panel {
     Properties,
     StartFrom,
     History,
-    /// What the canvas still needs: an import's leftovers, unbound steps.
-    Needs,
 }
 
 /// What the run prompt asks for.
@@ -237,6 +235,39 @@ pub struct Workflows {
     pub models: HashMap<(String, String), Vec<Value>>,
     /// `git:isGitRepo`, by path.
     pub git_repo: HashMap<String, bool>,
+    /// What an import left unbound, by the workflow it landed in.
+    pub imported: Option<(String, Vec<Value>)>,
+    /// A workflow vornd just made, opened once the frame has a `Ui`.
+    pub open_next: Option<String>,
+}
+
+impl Workflows {
+    /// `stillNeeded`: the canvas's unbound steps and an import's leftovers,
+    /// when no selection, library, history or start-from holds the slot.
+    pub fn still_needed(&self) -> Vec<crate::templates::Need> {
+        use crate::templates as t;
+        let Some(d) = &self.editor else {
+            return Vec::new();
+        };
+        let free = match self.panel {
+            Panel::Properties | Panel::None => true,
+            Panel::Node => self.node.as_deref().and_then(|n| d.node(n)).is_none(),
+            _ => false,
+        };
+        if !free {
+            return Vec::new();
+        }
+        let imported = self
+            .imported
+            .as_ref()
+            .filter(|(id, _)| id == d.id())
+            .map_or(&[][..], |(_, r)| r.as_slice());
+        let all = t::merge(t::of_definition(d.nodes()), imported);
+        t::with_bindings(&all, &self.connections)
+            .into_iter()
+            .filter(|n| n.bound.is_none())
+            .collect()
+    }
 }
 
 /// The variable dropdown under a field (`VariableAutocomplete`).
@@ -1820,6 +1851,14 @@ pub enum WfAct {
     AddInput,
     RemoveInput(usize),
     StartBlank,
+    /// A start-from template, by its catalog index.
+    Template(usize),
+    /// A connection's default workflow, by suggestion key.
+    Suggest(String),
+    /// A requirement row's button.
+    Fix(crate::templates::Fix),
+    /// Stop asking about what an import left unbound.
+    DismissNeeds,
     ClosePanel,
     /// The run prompt.
     PromptProject(String),

@@ -316,6 +316,13 @@ impl El {
         self.content = c;
         self
     }
+    /// An edit field's placeholder ink, for one without `placeholder-*`.
+    pub fn placeholder_color(mut self, c: Rgba) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.placeholder_color = c;
+        }
+        self
+    }
     pub fn row(mut self) -> El {
         self.style.display = Display::Flex;
         self.style.flex_direction = FlexDirection::Row;
