@@ -16,10 +16,13 @@ pub mod grid;
 pub mod layout;
 pub mod look;
 pub mod paint;
+pub mod runs;
 pub mod screen;
 pub mod state;
+pub mod tasks;
 pub mod ui;
 pub mod view;
+pub mod workflows;
 
 pub use app::App;
 

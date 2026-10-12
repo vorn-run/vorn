@@ -84,6 +84,11 @@ pub enum Act {
     NewWorktree(bool),
     PickBranch(Option<String>),
     Launch,
+    Task(crate::tasks::TaskAct),
+    Run(crate::runs::RunAct),
+    Workflow(crate::workflows::WfAct),
+    /// Opens a link in the system browser.
+    OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.
     Nothing,
 }

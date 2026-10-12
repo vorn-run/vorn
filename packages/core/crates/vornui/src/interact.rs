@@ -46,6 +46,35 @@ pub enum Event {
     /// The wheel over an element with [`Sense::WHEEL`] that no scroll view
     /// took, at `(x, y)` logical pixels.
     Wheel { id: Id, dy: f32, x: f32, y: f32 },
+    /// An element with [`Sense::MOVE`] is being dragged: `(dx, dy)` from
+    /// where the press began, the pointer at `(x, y)`.
+    Move {
+        id: Id,
+        dx: f32,
+        dy: f32,
+        x: f32,
+        y: f32,
+    },
+    /// The drag of an element with [`Sense::MOVE`] ended with the pointer
+    /// at `(x, y)`, `(dx, dy)` from where it began.
+    Drop {
+        id: Id,
+        dx: f32,
+        dy: f32,
+        x: f32,
+        y: f32,
+    },
+}
+
+/// How far a press travels before it is a drag rather than a click.
+pub const MOVE_SLOP: f32 = 4.0;
+
+/// A press on an element with [`Sense::MOVE`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Moving {
+    pub id: Id,
+    pub start: (f32, f32),
+    pub moved: bool,
 }
 
 /// What the app asks of the window it runs in.
@@ -151,6 +180,7 @@ pub(crate) struct State {
     pub closed_menu: Option<Menu>,
     pub scroll: HashMap<Id, Scroll>,
     pub drag: Option<Id>,
+    pub moving: Option<Moving>,
     pub selecting: Option<Id>,
     pub last_click: Option<(Id, Instant)>,
     pub edits: HashMap<Id, TextEdit>,
@@ -184,6 +214,7 @@ impl State {
             closed_menu: None,
             scroll: HashMap::new(),
             drag: None,
+            moving: None,
             selecting: None,
             last_click: None,
             edits: HashMap::new(),
@@ -330,6 +361,14 @@ impl Ui {
         self.st.pressed == Some(id)
     }
 
+    /// The element being dragged with [`Sense::MOVE`] and how far it has
+    /// travelled, once it has travelled past [`MOVE_SLOP`].
+    pub fn moving(&self) -> Option<(Id, f32, f32)> {
+        let m = self.st.moving.filter(|m| m.moved)?;
+        let (x, y) = self.st.pointer?;
+        Some((m.id, x - m.start.0, y - m.start.1))
+    }
+
     pub fn focused(&self, id: Id) -> bool {
         self.st.focus == Some(id)
     }
@@ -417,6 +456,11 @@ impl Ui {
         self.st.edits.entry(id).or_default()
     }
 
+    /// The edit field `id`, if it exists.
+    pub fn edit(&self, id: Id) -> Option<&TextEdit> {
+        self.st.edits.get(&id)
+    }
+
     /// The text of edit field `id` ("" before it exists).
     pub fn edit_text(&self, id: Id) -> &str {
         self.st.edits.get(&id).map_or("", TextEdit::text)
@@ -502,7 +546,17 @@ impl Ui {
     /// The pointer moved to `(x, y)`, logical pixels.
     pub fn pointer_move(&mut self, x: f32, y: f32) {
         self.st.pointer = Some((x, y));
-        if let Some(id) = self.st.drag {
+        if let Some(m) = &mut self.st.moving {
+            let (dx, dy) = (x - m.start.0, y - m.start.1);
+            if !m.moved && dx.hypot(dy) >= MOVE_SLOP {
+                m.moved = true;
+                self.st.tip = None;
+            }
+            if m.moved {
+                let id = m.id;
+                self.st.events.push(Event::Move { id, dx, dy, x, y });
+            }
+        } else if let Some(id) = self.st.drag {
             if let Some(h) = self.st.hit(id) {
                 let (pos, start, extent) = if h.vertical {
                     (x, h.parent.x, h.parent.w)
@@ -526,7 +580,7 @@ impl Ui {
 
     /// The pointer left the window.
     pub fn pointer_leave(&mut self) {
-        if self.st.drag.is_none() {
+        if self.st.drag.is_none() && self.st.moving.is_none() {
             self.st.pointer = None;
             self.st.rehover();
         }
@@ -548,6 +602,7 @@ impl Ui {
                     || h.sense.has(Sense::DRAG)
                     || h.sense.has(Sense::WINDOW_DRAG)
                     || h.sense.has(Sense::DOUBLE)
+                    || h.sense.has(Sense::MOVE)
             })
             .last()
             .cloned();
@@ -606,6 +661,13 @@ impl Ui {
             self.st.drag = Some(h.id);
             self.st.pressed = Some(h.id);
             return;
+        }
+        if h.sense.has(Sense::MOVE) {
+            self.st.moving = Some(Moving {
+                id: h.id,
+                start: p,
+                moved: false,
+            });
         }
         // Menu entries choose on press, so a press-drag-release works.
         if matches!(h.action, Some(Action::Select { .. })) && h.layer > 0 {
@@ -676,6 +738,22 @@ impl Ui {
             self.st.events.push(Event::ResizeEnd { id, ratio });
             self.st.rehover();
             return;
+        }
+        if let Some(m) = self.st.moving.take() {
+            if m.moved {
+                self.st.pressed = None;
+                let (x, y) = self.st.pointer.unwrap_or(m.start);
+                let (dx, dy) = (x - m.start.0, y - m.start.1);
+                self.st.events.push(Event::Drop {
+                    id: m.id,
+                    dx,
+                    dy,
+                    x,
+                    y,
+                });
+                self.st.rehover();
+                return;
+            }
         }
         let Some(pressed) = self.st.pressed.take() else {
             return;

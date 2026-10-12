@@ -18,7 +18,7 @@ pub mod json;
 pub mod rpc;
 pub mod server;
 mod tools;
-mod workflow;
+pub mod workflow;
 pub mod zod;
 
 use std::sync::LazyLock;

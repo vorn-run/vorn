@@ -103,6 +103,8 @@ pub struct Store {
     pub workflows: Vec<WorkflowDefinition>,
     /// Steps waiting on an approval, by run id: what the session dock counts.
     pub approvals: HashMap<String, usize>,
+    /// The latest of every run vornd reported since loading, by run id.
+    pub runs: HashMap<String, Value>,
 }
 
 impl Store {
@@ -168,6 +170,7 @@ impl Store {
         let Some(id) = run.get("runId").and_then(Value::as_str) else {
             return false;
         };
+        self.runs.insert(id.to_owned(), run.clone());
         let waiting = run
             .get("nodeStates")
             .and_then(Value::as_array)

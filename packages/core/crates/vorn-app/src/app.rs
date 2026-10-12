@@ -29,6 +29,9 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+mod tasks;
+mod workflows;
+
 /// The modifier the renderer's shortcuts use (`modKey`).
 pub const MOD: u16 = if cfg!(target_os = "macos") {
     mods::SUPER
@@ -161,6 +164,8 @@ enum Call {
     Branches(String),
     /// A `config:save`; the next one waits for it.
     Saved(Box<Call>),
+    Task(tasks::TaskCall),
+    Workflow(workflows::WfCall),
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -213,6 +218,7 @@ impl App {
         let st = State {
             sidebar: true,
             layout: LayoutMode::from_config(&store.config),
+            tasks: crate::tasks::Tasks::new(&store.config),
             ..State::default()
         };
         let mut app = App {
@@ -276,6 +282,14 @@ impl App {
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {
+                    if method == "workflow:runUpdated" {
+                        self.task_run_updated(&params);
+                        self.wf_run_updated(&params);
+                    }
+                    if method == "scheduler:missed" {
+                        self.wf_missed(&params);
+                        continue;
+                    }
                     self.store.apply(&method, params);
                 }
                 Event::Closed => self.closed = true,
@@ -347,6 +361,8 @@ impl App {
                 Err(e) => self.st.toast(e.to_string(), true),
             },
             Call::Resumed { id, auto } => self.resumed(&id, auto, answer),
+            Call::Task(c) => self.task_answered(c, answer),
+            Call::Workflow(c) => self.wf_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -723,6 +739,9 @@ impl App {
                 if v != MainView::Sessions {
                     self.st.focused = None;
                 }
+                if v == MainView::Workflows {
+                    self.wf_refresh();
+                }
             }
             Act::ToggleSidebar => self.st.sidebar = !self.st.sidebar,
             Act::Select(id) => {
@@ -801,24 +820,12 @@ impl App {
                 self.call(Call::Created, "shell:create", cwd);
             }
             Act::RunWorkflow { id, source } => {
-                let name = self
-                    .store
-                    .workflows
-                    .iter()
-                    .find(|w| w.id == id)
-                    .map_or_else(|| id.clone(), |w| w.name.clone());
                 let source = source
                     .and_then(|s| self.store.session(&s))
                     .map(|s| json!(s.info));
-                let (method, params) = match source {
-                    Some(source) => (
-                        "workflow:run",
-                        json!({ "workflowId": id, "context": { "source": source } }),
-                    ),
-                    None => ("workflow:runManual", json!({ "workflowId": id })),
-                };
-                self.call(Call::Toast(format!("Started \"{name}\"")), method, params);
+                self.start_run(ui, &id, source, None);
             }
+            Act::Workflow(a) => self.run_wf(ui, a, src),
             Act::Rename(id) => {
                 let Some(title) = self.store.session(&id).map(|s| s.title()) else {
                     return;
@@ -882,9 +889,17 @@ impl App {
                 }
             }
             Act::Shortcuts => self.run_shortcut(ui, Shortcut::Shortcuts),
+            Act::Task(a) => self.run_task(ui, a),
+            Act::Run(a) => self.run_run(a),
+            Act::OpenUrl(u) => tasks::open_url(&u),
+            Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
+                self.close_task_dialog(ui);
+            }
             Act::CloseDialog => {
                 self.st.dialog = None;
                 self.st.composer_open = false;
+                self.st.wf.prompt = None;
+                self.st.wf.file = None;
             }
             // The welcome guide and settings are later surfaces of the port.
             Act::Welcome | Act::Settings => self.st.dialog = None,
@@ -1053,6 +1068,9 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
+        if self.task_event(ui, &event) || self.wf_event(ui, &event) {
+            return;
+        }
         match event {
             UiEvent::Click(id) => {
                 if let Some(act) = self.acts.clicked(id) {
@@ -1222,6 +1240,7 @@ impl App {
                 | Act::Columns(_)
                 | Act::Layout(_)
                 | Act::AskDeleteProject(_)
+                | Act::Task(crate::tasks::TaskAct::AskDelete(_))
         );
         if stays {
             ui.reopen_menu();
@@ -1234,6 +1253,9 @@ impl App {
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.st.menu.is_none() && (self.task_key(ui, input) || self.wf_key(ui, input)) {
+            return true;
+        }
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
@@ -1250,8 +1272,13 @@ impl App {
         if self.st.menu.is_some() || code != "Escape" || *m & (MOD | mods::ALT) != 0 {
             return false;
         }
-        if self.st.dialog.is_some() {
+        if self.st.dialog == Some(Dialog::AddTask) {
+            self.close_task_dialog(ui);
+        } else if self.st.dialog == Some(Dialog::Missed) {
+        } else if self.st.dialog.is_some() {
             self.st.dialog = None;
+            self.st.wf.prompt = None;
+            self.st.wf.file = None;
             ui.set_focus(None);
         } else if self.st.renaming.is_some() {
             self.st.renaming = None;
@@ -1453,6 +1480,7 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.tasks_tick(ui);
         self.size = size;
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
