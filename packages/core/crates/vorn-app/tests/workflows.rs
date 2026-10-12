@@ -17,7 +17,7 @@ use vorn_app::screen::menus::MENU;
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::ui::{item_id, mods, Id};
-use vorn_app::workflows::{self as wf, Anchor, Missed, Panel, WfAct};
+use vorn_app::workflows::{self as wf, Anchor, Missed, Panel, Pick, WfAct};
 use vorn_app::App;
 
 fn control(place: &str, a: WfAct) -> Id {
@@ -61,8 +61,8 @@ fn workflows_view(v: &TestVornd) -> (App, Shot) {
 }
 
 /// A library pick at the open anchor; the new node's id.
-fn pick(shot: &mut Shot, app: &mut App, kind: &str) -> String {
-    shot.click(app, control("wf-library", WfAct::Pick(kind.into())));
+fn pick(shot: &mut Shot, app: &mut App, p: Pick) -> String {
+    shot.click(app, control("wf-library", WfAct::Pick(p)));
     assert_eq!(app.st.wf.panel, Panel::Node);
     app.st.wf.node.clone().expect("the new node open")
 }
@@ -109,7 +109,7 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
     };
     shot.click(&mut app, control("wf-canvas", WfAct::Library(at)));
     shot.save(&mut app, "w-library-triggers");
-    let trigger = pick(&mut shot, &mut app, "manual");
+    let trigger = pick(&mut shot, &mut app, Pick::TriggerType("manual".into()));
     shot.save(&mut app, "w-node-trigger");
     let plus = Anchor {
         after: Some(trigger.clone()),

@@ -1,6 +1,7 @@
 //! The Workflows view: the runs landing (`WorkflowsLandingView`), the
 //! sidebar's section (`WorkflowsSection`), their menus, and the editor.
 
+mod canvas;
 mod dialogs;
 mod editor;
 mod panels;
@@ -17,7 +18,7 @@ use crate::look;
 use crate::runs::{self, s as sv, RunAct};
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{div, text, tooltip, Action, El, Id, Rgba, Role, Sense};
-use crate::workflows::{self as wf, Anchor, Bucket, Panel, SideFilter, Tab, WfAct, Workflows};
+use crate::workflows::{self as wf, Anchor, Bucket, Panel, SideFilter, Tab, WfAct};
 
 pub use dialogs::dialog;
 pub use editor::editor;
@@ -96,6 +97,43 @@ fn wf_glyph(w: &Value, size: f32) -> El {
         1.5,
         hex(sv(w, "iconColor")).unwrap_or(c(0x6b7280)),
     )
+}
+
+/// A canvas card's glyph: the trigger's kind or its connector, the agent's
+/// mark, the script's language, the connector a step calls.
+pub(super) fn node_glyph(s: &Screen<'_>, n: &Value, size: f32) -> El {
+    let cfg = |k: &str| {
+        n.pointer(&format!("/config/{k}"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+    let conn = match sv(n, "type").unwrap_or("") {
+        "callConnectorAction" => Some(cfg("connectionId")),
+        "trigger" if cfg("triggerType") == "connectorPoll" => Some(cfg("connectionId")),
+        _ => None,
+    };
+    if let Some(look) = conn.filter(|c| !c.is_empty()).and_then(|c| {
+        let src = crate::library::Sources {
+            connections: &s.st.wf.connections,
+            packs: &s.st.wf.lib.packs,
+            ..crate::library::Sources::default()
+        };
+        crate::library::look_for(&src, c)
+    }) {
+        return panels::mark(Some(&look), size);
+    }
+    let glyph = match sv(n, "type").unwrap_or("") {
+        "trigger" => wf::trigger_icon(cfg("triggerType")),
+        "script" => match cfg("scriptType") {
+            "python" | "node" => "code-xml",
+            _ => "terminal",
+        },
+        "launchAgent" if cfg("agentType") == "fromTask" => "clipboard-list",
+        "launchAgent" => return super::agent_icon(s, cfg("agentType"), size),
+        "callConnectorAction" => "zap",
+        k => super::runs::node_icon(k),
+    };
+    ico(glyph, size, 2.0, secondary())
 }
 
 /// `SOURCE_ICONS`.
@@ -955,18 +993,6 @@ fn size_dot_at(size: f32) -> f32 {
     size + 2.0 - 8.0
 }
 
-/// The step library's rows for the open anchor, through the search.
-pub fn library_rows(wf: &Workflows) -> Vec<(&'static str, &'static str, &'static str)> {
-    let trigger = matches!(&wf.panel, Panel::Library(Anchor { trigger: true, .. }));
-    let q = wf.search.trim().to_lowercase();
-    let pool: &[(&'static str, &'static str, &'static str)] =
-        if trigger { &wf::TRIGGERS } else { &wf::STEPS };
-    pool.iter()
-        .filter(|(_, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
-        .copied()
-        .collect()
-}
-
 /// The workflow menus' entries.
 pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     match kind {
@@ -1061,7 +1087,6 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
             let anchor = if trigger {
                 Anchor {
                     trigger: true,
-                    replace: Some(id.clone()),
                     ..Anchor::default()
                 }
             } else {
@@ -1200,22 +1225,5 @@ mod tests {
         assert_eq!(look::icon_map("Workflow"), Some("workflow"));
         assert_eq!(look::icon_map("Play"), Some("play"));
         assert_eq!(look::icon_map("RotateCcw"), None, "not in ICON_MAP");
-    }
-
-    #[test]
-    fn the_library_filters_by_label() {
-        let mut w = Workflows {
-            panel: Panel::Library(Anchor::default()),
-            ..Workflows::default()
-        };
-        assert_eq!(library_rows(&w).len(), wf::STEPS.len());
-        w.search = "scr".into();
-        assert_eq!(library_rows(&w)[0].0, "script");
-        w.panel = Panel::Library(Anchor {
-            trigger: true,
-            ..Anchor::default()
-        });
-        w.search = "task".into();
-        assert_eq!(library_rows(&w).len(), 2);
     }
 }

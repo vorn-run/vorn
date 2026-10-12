@@ -26,6 +26,7 @@ pub fn panel(s: &Screen<'_>, d: &Draft) -> Option<El> {
         Panel::Properties => properties(s, d),
         Panel::StartFrom => start_from(s),
         Panel::History => history(s, d),
+        Panel::Needs => properties(s, d),
     })
 }
 
@@ -77,17 +78,21 @@ fn header(s: &Screen<'_>, label: &str, close_label: &str, px: f32, py: f32) -> E
         .child(close(s, "wf-panel-close", close_label))
 }
 
-fn heading(label: &str) -> El {
-    div().px(8.0).pt(12.0).pb(4.0).child(
-        text(label.to_uppercase(), 10.0, c(look::GRAY_600))
-            .mono()
-            .line_height(14.0),
-    )
+/// A connector's mark at `size`: its own glyph in full ink, or a built-in
+/// mark.
+pub fn mark(look: Option<&crate::library::Look>, size: f32) -> El {
+    match look.and_then(crate::library::mark_svg) {
+        Some(svg) if look.is_some_and(|l| !l.connector.is_empty()) => {
+            crate::ui::icon(svg, size, Rgba::hex(look::INK))
+        }
+        _ => ico("zap", size, 2.0, Rgba::hexa(look::INK, look::INK_SECONDARY)),
+    }
 }
 
-/// `StepLibrary`.
+/// `StepLibrary`: the steps or triggers, Recent, then each connector's
+/// group, the highlighted line answering Enter.
 fn library(s: &Screen<'_>, at: &Anchor) -> El {
-    let label = if at.trigger && at.replace.is_none() {
+    let label = if at.trigger {
         "Add a trigger"
     } else if at.replace.is_some() {
         "Replace step"
@@ -113,7 +118,10 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
                 wf::search_id(),
                 placeholder,
                 placeholder,
-                TextStyle::ui(12.0),
+                TextStyle {
+                    line_height: 18.0,
+                    ..TextStyle::ui(12.0)
+                },
                 c(look::WHITE),
             )
             .grow(),
@@ -133,41 +141,158 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
                 .child(close(s, "wf-panel-close", "Close")),
         )
         .child(search);
-    let rows = super::library_rows(&s.st.wf);
+    let lib = &s.st.wf.lib;
+    let src = crate::library::Sources {
+        connections: &s.st.wf.connections,
+        actions: &lib.actions,
+        catalog: &lib.catalog,
+        packs: &lib.packs,
+        connectors: &lib.connectors,
+    };
+    let entries = crate::library::entries(&src, at.into(), &s.st.wf.search, &lib.recent, &lib.open);
+    let reach = entries.iter().filter(|e| e.reachable()).count();
+    let lit = lib.highlight.min(reach.saturating_sub(1));
+    let secondary = Rgba::hexa(look::INK, look::INK_SECONDARY);
     let mut list = div().col().p(8.0);
-    if rows.is_empty() {
+    if reach == 0 {
         list = list.child(
             div()
                 .px(10.0)
                 .py(12.0)
-                .child(text("Nothing matches", 11.0, c(look::GRAY_500)).line_height(14.0)),
+                .child(text("Nothing matches", 11.0, c(look::GRAY_500)).line_height(16.5)),
         );
-    } else {
-        list = list.child(heading(if at.trigger { "Triggers" } else { "Steps" }));
-        for (kind, name, icon) in rows {
-            let id = s.acts.on("wf-library", act(WfAct::Pick(kind.to_owned())));
-            let hot = s.ui.hover(id);
-            list = list.child(
-                div()
+    }
+    let mut index = 0;
+    let mut first = true;
+    for e in &entries {
+        use crate::library::Entry;
+        match e {
+            Entry::Heading(h) => {
+                list = list.child(
+                    div()
+                        .px(8.0)
+                        .pt(if first { 4.0 } else { 12.0 })
+                        .pb(4.0)
+                        .child(
+                            text(h.to_uppercase(), 10.0, c(look::GRAY_600))
+                                .mono()
+                                .tracking(0.05)
+                                .line_height(15.0),
+                        ),
+                );
+            }
+            Entry::Group {
+                key,
+                label,
+                look: lk,
+                detail,
+                count,
+                open,
+            } => {
+                let id = s
+                    .acts
+                    .on("wf-library-group", act(WfAct::Group(key.clone())));
+                let on = index == lit;
+                let on = on || s.ui.hovered(id);
+                let fg = if on { c(look::WHITE) } else { secondary };
+                let mut meta = div().row().items_center().gap(8.0).shrink0();
+                if let Some(d) = detail {
+                    meta = meta.child(text(*d, 10.0, c(look::GRAY_600)).line_height(15.0).silent());
+                }
+                meta = meta.child(
+                    text(count.to_string(), 10.0, c(look::GRAY_600))
+                        .mono()
+                        .line_height(15.0)
+                        .silent(),
+                );
+                list =
+                    list.child(
+                        div()
+                            .id(id)
+                            .on(Action::Click)
+                            .row()
+                            .items_center()
+                            .gap(8.0)
+                            .px(8.0)
+                            .py(6.0)
+                            .rounded(6.0)
+                            .bg(if on { white(0.06) } else { white(0.0) })
+                            .role(Role::Button, label)
+                            .expanded(*open)
+                            .child(ico(
+                                if *open {
+                                    "chevron-down"
+                                } else {
+                                    "chevron-right"
+                                },
+                                12.0,
+                                2.0,
+                                c(look::GRAY_500),
+                            ))
+                            .child(mark(lk.as_ref(), 14.0))
+                            .child(div().grow().min_w0().child(
+                                text(label, 12.5, fg).line_height(18.75).truncate().silent(),
+                            ))
+                            .child(meta),
+                    );
+                index += 1;
+            }
+            Entry::Row {
+                key,
+                label,
+                pick,
+                icon,
+                look: lk,
+                owner,
+                nested,
+                ..
+            } => {
+                let id = s.acts.on("wf-library", act(WfAct::Pick(pick.clone())));
+                let _ = key;
+                let on = index == lit || s.ui.hovered(id);
+                let fg = if on {
+                    c(look::WHITE)
+                } else {
+                    c(look::GRAY_300)
+                };
+                let mut r = div()
                     .id(id)
                     .on(Action::Click)
                     .row()
                     .items_center()
                     .gap(10.0)
-                    .px(8.0)
+                    .pl(if *nested { 32.0 } else { 8.0 })
+                    .pr(8.0)
                     .py(6.0)
                     .rounded(6.0)
-                    .bg(white(0.0).mix(white(0.06), hot))
-                    .role(Role::Button, name)
-                    .child(ico(icon, 14.0, 1.5, c(look::GRAY_400)))
-                    .child(
-                        text(name, 12.5, c(look::GRAY_300).mix(c(look::WHITE), hot))
-                            .line_height(18.0)
-                            .truncate()
-                            .silent(),
-                    ),
-            );
+                    .bg(if on { white(0.06) } else { white(0.0) })
+                    .role(Role::Button, label);
+                if let Some(i) = icon {
+                    r = r.child(ico(i, 14.0, 2.0, secondary));
+                } else if !nested {
+                    r = r.child(mark(lk.as_ref(), 14.0));
+                }
+                r = r.child(
+                    div()
+                        .grow()
+                        .min_w0()
+                        .child(text(label, 12.5, fg).line_height(18.75).truncate().silent()),
+                );
+                if let (false, Some(o)) = (*nested, owner) {
+                    r = r.child(
+                        div().max_w(100.0).shrink0().child(
+                            text(o, 10.0, c(look::GRAY_600))
+                                .line_height(15.0)
+                                .truncate()
+                                .silent(),
+                        ),
+                    );
+                }
+                list = list.child(r);
+                index += 1;
+            }
         }
+        first = false;
     }
     shell(280.0, label).child(top).child(
         div()

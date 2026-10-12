@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 
+use crate::graph;
 use crate::runs::{self, s};
 
 /// The landing's two tabs.
@@ -83,9 +84,17 @@ pub struct Anchor {
     /// The trigger's slot.
     pub trigger: bool,
     pub after: Option<String>,
+    /// A node to splice before, [`graph::LOOP_BODY`] or [`graph::FORK`];
+    /// none to append.
     pub before: Option<String>,
     /// The node the pick replaces in place.
     pub replace: Option<String>,
+    /// Loop and parallel insertion stay off anchors inside a fork branch.
+    pub inside_branch: bool,
+    /// A loop body takes only the steps it can repeat.
+    pub body_only: bool,
+    /// Flow coordinates where a dragged edge was let go.
+    pub position: Option<(i64, i64)>,
 }
 
 /// The editor's right panel.
@@ -98,6 +107,8 @@ pub enum Panel {
     Properties,
     StartFrom,
     History,
+    /// What the canvas still needs: an import's leftovers, unbound steps.
+    Needs,
 }
 
 /// What the run prompt asks for.
@@ -167,7 +178,7 @@ impl Draft {
             .find(|n| s(n, "id") == Some(id))
     }
 
-    fn set_graph(&mut self, nodes: Vec<Value>, edges: Vec<Value>) {
+    pub fn set_graph(&mut self, nodes: Vec<Value>, edges: Vec<Value>) {
         self.wf["nodes"] = Value::Array(nodes);
         self.wf["edges"] = Value::Array(edges);
     }
@@ -201,8 +212,95 @@ pub struct Workflows {
     pub missed: Vec<Missed>,
     /// The export dialog's workflow; none for import.
     pub file: Option<String>,
-    /// `connection:list`, for naming a sign-in.
+    /// `connection:list`, for naming a sign-in and the library's groups.
     pub connections: Vec<Value>,
+    /// The canvas's view and the gesture on it.
+    pub canvas: CanvasState,
+    /// What the step library and start-from draw from vornd.
+    pub lib: LibraryData,
+    /// The definition's undo and redo.
+    pub undo: Undo,
+}
+
+/// A gesture on the canvas.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gesture {
+    /// The pane dragged, from this view.
+    Pan(crate::canvas::Viewport),
+    /// Cards dragged: each top-level card's position when it began.
+    Node {
+        id: String,
+        starts: Vec<(String, (f64, f64))>,
+    },
+    /// A connection drawn from a port to the pointer, in flow coordinates.
+    Connect {
+        source: String,
+        body_port: bool,
+        to: (f64, f64),
+    },
+    /// The minimap dragged, from this view.
+    Mini(crate::canvas::Viewport),
+}
+
+/// The canvas between frames.
+#[derive(Debug, Default)]
+pub struct CanvasState {
+    /// Where each workflow was last looked at (`canvas-views`).
+    pub views: HashMap<String, crate::canvas::Viewport>,
+    pub gesture: Option<Gesture>,
+    /// Cards' positions while they are dragged.
+    pub dragged: HashMap<String, (f64, f64)>,
+    /// The edge the pointer is over, whose + shows.
+    pub edge: Option<String>,
+}
+
+/// The step library's sources and memory (`step-library-memory`).
+#[derive(Debug, Default)]
+pub struct LibraryData {
+    /// `connector:catalog`: items, templates, MCP servers.
+    pub catalog: Vec<Value>,
+    pub templates: Vec<Value>,
+    pub packs: Vec<Value>,
+    /// `connector:list`.
+    pub connectors: Vec<Value>,
+    /// `connection:listActions`, by connection.
+    pub actions: HashMap<String, Vec<Value>>,
+    pub recent: Vec<crate::library::Recent>,
+    pub open: HashSet<String>,
+    /// The highlighted line, among those the arrow keys reach.
+    pub highlight: usize,
+}
+
+/// `useDefinitionHistory`: snapshots of nodes and edges, edits within half
+/// a second undone as one.
+#[derive(Debug, Default)]
+pub struct Undo {
+    pub past: Vec<(Value, Value)>,
+    pub future: Vec<(Value, Value)>,
+    pub last: f64,
+}
+
+impl Undo {
+    /// `STACK_LIMIT`.
+    const LIMIT: usize = 100;
+    /// `MERGE_WINDOW_MS`.
+    const MERGE: f64 = 500.0;
+
+    /// Records the graph as it was before an edit at `now`.
+    pub fn record(&mut self, before: (Value, Value), now: f64) {
+        if now - self.last > Self::MERGE || self.past.is_empty() {
+            self.past.push(before);
+            if self.past.len() > Self::LIMIT {
+                self.past.remove(0);
+            }
+        }
+        self.last = now;
+        self.future.clear();
+    }
+
+    pub fn clear(&mut self) {
+        *self = Undo::default();
+    }
 }
 
 /// `liveExecSignature`'s part for one run: its status, end and the nodes
@@ -677,73 +775,6 @@ pub fn trigger_config(kind: &str) -> Value {
     }
 }
 
-fn trigger_label(kind: &str) -> &'static str {
-    match kind {
-        "manual" => "Manual Trigger",
-        "once" => "Schedule (Once)",
-        "recurring" => "Schedule (Recurring)",
-        "taskCreated" => "When Task Created",
-        "taskStatusChanged" => "When Task Status Changes",
-        "connectorPoll" => "Connector Poll",
-        "webhook" => "Webhook",
-        _ => "Trigger",
-    }
-}
-
-/// `createTriggerNode`.
-pub fn trigger_node(kind: &str) -> Value {
-    json!({
-        "id": crate::tasks::uuid(),
-        "type": "trigger",
-        "label": trigger_label(kind),
-        "config": trigger_config(kind),
-        "position": { "x": 0, "y": 0 },
-    })
-}
-
-/// The `create*Node` factories, with a slug no other node has.
-pub fn step_node(kind: &str, nodes: &[Value]) -> Option<Value> {
-    let (label, config) = match kind {
-        "launchAgent" => (
-            "Launch Agent",
-            json!({ "agentType": "claude", "projectName": "", "projectPath": "", "headless": true }),
-        ),
-        "script" => (
-            "Execute Script",
-            json!({
-                "scriptType": "bash", "scriptContent": "# Write your script here\n",
-                "projectName": "", "projectPath": ""
-            }),
-        ),
-        "approval" => ("Approval Gate", json!({ "message": "" })),
-        "condition" => (
-            "Condition",
-            json!({ "variable": "", "operator": "equals", "value": "" }),
-        ),
-        "httpRequest" => (
-            "HTTP Request",
-            json!({ "nodeType": "httpRequest", "method": "GET", "url": "", "headers": {}, "body": "" }),
-        ),
-        "loop" => (
-            "Repeat Steps",
-            json!({ "nodeType": "loop", "bodyNodeIds": [], "maxIterations": 2 }),
-        ),
-        _ => return None,
-    };
-    let taken: HashSet<String> = nodes
-        .iter()
-        .filter_map(|n| s(n, "slug").map(str::to_owned))
-        .collect();
-    Some(json!({
-        "id": crate::tasks::uuid(),
-        "type": kind,
-        "label": label,
-        "slug": unique_slug(&slugify(label), &taken),
-        "config": config,
-        "position": { "x": 0, "y": 0 },
-    }))
-}
-
 /// A new workflow's defaults.
 pub fn blank(workspace: Option<&str>) -> Value {
     let mut wf = json!({
@@ -761,396 +792,391 @@ pub fn blank(workspace: Option<&str>) -> Value {
     wf
 }
 
-fn edge(source: &str, target: &str, branch: Option<&str>) -> Value {
-    let mut e = json!({ "id": crate::tasks::uuid(), "source": source, "target": target });
-    if let Some(b) = branch {
-        e["conditionBranch"] = json!(b);
-    }
-    e
-}
-
-fn successors(edges: &[Value]) -> HashMap<String, Vec<String>> {
-    let mut map: HashMap<String, Vec<(u8, String)>> = HashMap::new();
-    for e in edges {
-        let (Some(a), Some(b)) = (s(e, "source"), s(e, "target")) else {
-            continue;
-        };
-        let rank = match s(e, "conditionBranch") {
-            Some("true") => 0,
-            Some("false") => 1,
-            _ => 2,
-        };
-        map.entry(a.to_owned())
-            .or_default()
-            .push((rank, b.to_owned()));
-    }
-    map.into_iter()
-        .map(|(k, mut v)| {
-            v.sort_by_key(|(r, _)| *r);
-            (k, v.into_iter().map(|(_, t)| t).collect())
-        })
-        .collect()
-}
-
-fn reach(start: &str, succ: &HashMap<String, Vec<String>>) -> HashSet<String> {
-    let mut seen = HashSet::new();
-    let mut queue = vec![start.to_owned()];
-    while let Some(n) = queue.pop() {
-        if seen.insert(n.clone()) {
-            queue.extend(succ.get(&n).into_iter().flatten().cloned());
-        }
-    }
-    seen
-}
-
-/// `findJoinPoint`: the first node every branch reaches.
-fn join(children: &[String], succ: &HashMap<String, Vec<String>>) -> Option<String> {
-    if children.len() < 2 {
-        return None;
-    }
-    let sets: Vec<HashSet<String>> = children.iter().map(|c| reach(c, succ)).collect();
-    let mut visited = HashSet::new();
-    let mut queue: std::collections::VecDeque<String> = children.iter().cloned().collect();
-    while let Some(cur) = queue.pop_front() {
-        if !visited.insert(cur.clone()) {
-            continue;
-        }
-        if !children.contains(&cur) && sets.iter().all(|s| s.contains(&cur)) {
-            return Some(cur);
-        }
-        queue.extend(succ.get(&cur).into_iter().flatten().cloned());
-    }
-    None
-}
-
-/// One row of the canvas, top to bottom.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Row {
-    /// A node, and the edge from it down to the next row when there is one.
-    Node { id: String, next: Option<String> },
-    /// A fork's branches side by side, each with its tag, until they join.
-    Fork {
-        from: String,
-        branches: Vec<(Option<String>, Vec<Row>)>,
+/// What the step library hands back (`LibraryPick`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Pick {
+    /// A built-in step: `agent`, `script`, `httpRequest`, `condition`,
+    /// `approval`, `loop` or `connectorAction`.
+    Type(String),
+    Parallel,
+    TriggerType(String),
+    ConnectorTrigger {
+        connection: String,
+        event: String,
+    },
+    ConnectorAction {
+        connection: String,
+        action: String,
+        label: String,
+    },
+    CatalogAction {
+        connector: String,
+        action: String,
+        label: String,
+    },
+    HttpProfile {
+        connection: String,
+        name: String,
     },
 }
 
-/// `computeFlowLayout`, without the loop frames: the trigger's chain, a
-/// fork's branches side by side.
-pub fn flow(nodes: &[Value], edges: &[Value]) -> Vec<Row> {
-    let succ = successors(edges);
-    let mut seen = HashSet::new();
-    let mut rows = Vec::new();
-    let has_in: HashSet<&str> = edges.iter().filter_map(|e| s(e, "target")).collect();
-    let roots: Vec<&str> = match trigger(nodes).and_then(|t| s(t, "id")) {
-        Some(t) => vec![t],
-        None => nodes
-            .iter()
-            .filter_map(|n| s(n, "id"))
-            .filter(|id| !has_in.contains(id))
-            .collect(),
-    };
-    for r in roots {
-        rows.extend(chain(r, None, &succ, edges, &mut seen));
+impl Pick {
+    /// `stepForPick`: the node type and what it already knows.
+    fn step(&self) -> Option<(&str, Value)> {
+        Some(match self {
+            Pick::Type(t) => (t.as_str(), json!({})),
+            Pick::ConnectorAction {
+                connection,
+                action,
+                label,
+            } => (
+                "connectorAction",
+                json!({ "connectionId": connection, "action": action, "actionLabel": label }),
+            ),
+            Pick::CatalogAction {
+                connector,
+                action,
+                label,
+            } => (
+                "connectorAction",
+                json!({ "connectionId": "", "connectorId": connector, "action": action, "actionLabel": label }),
+            ),
+            Pick::HttpProfile { connection, .. } => {
+                ("httpRequest", json!({ "profileConnectionId": connection }))
+            }
+            _ => return None,
+        })
     }
-    for n in nodes.iter().filter_map(|n| s(n, "id")) {
-        if !seen.contains(n) {
-            rows.extend(chain(n, None, &succ, edges, &mut seen));
-        }
-    }
-    rows
 }
 
-fn branch_tag(edges: &[Value], from: &str, to: &str) -> Option<String> {
-    edges
+/// The slugs in use, but `except`'s.
+fn slugs(nodes: &[Value], except: Option<&str>) -> HashSet<String> {
+    nodes
         .iter()
-        .find(|e| s(e, "source") == Some(from) && s(e, "target") == Some(to))
-        .and_then(|e| s(e, "conditionBranch"))
-        .map(str::to_owned)
+        .filter(|n| except != s(n, "id"))
+        .filter_map(|n| s(n, "slug").map(str::to_owned))
+        .collect()
 }
 
-fn chain(
-    start: &str,
-    stop: Option<&str>,
-    succ: &HashMap<String, Vec<String>>,
-    edges: &[Value],
-    seen: &mut HashSet<String>,
-) -> Vec<Row> {
-    let mut rows = Vec::new();
-    let mut cur = start.to_owned();
-    loop {
-        if Some(cur.as_str()) == stop || !seen.insert(cur.clone()) {
-            break;
+/// `createNodeWithUniqueSlug`: an addable step, agents in the first project.
+pub fn new_step(
+    kind: &str,
+    nodes: &[Value],
+    project: Option<(&str, &str)>,
+    except: Option<&str>,
+) -> Option<Value> {
+    let taken = slugs(nodes, except);
+    Some(match kind {
+        "agent" | "launchAgent" => graph::agent_node(project, &taken),
+        "script" => graph::script_node(&taken),
+        "approval" => graph::approval_node(&taken),
+        "loop" => graph::loop_node(&taken),
+        "connectorAction" | "callConnectorAction" => graph::connector_action_node(&taken),
+        "httpRequest" => graph::http_node(&taken),
+        "condition" => {
+            let mut c = graph::condition_node();
+            c["slug"] = json!(unique_slug("condition", &taken));
+            c
         }
-        let next = succ.get(&cur).cloned().unwrap_or_default();
-        match next.len() {
-            0 => {
-                rows.push(Row::Node {
-                    id: cur,
-                    next: None,
-                });
-                break;
-            }
-            1 => {
-                let n = next[0].clone();
-                let down = (Some(n.as_str()) != stop && !seen.contains(&n)).then(|| n.clone());
-                rows.push(Row::Node {
-                    id: cur.clone(),
-                    next: down,
-                });
-                cur = n;
-            }
-            _ => {
-                rows.push(Row::Node {
-                    id: cur.clone(),
-                    next: None,
-                });
-                let j = join(&next, succ);
-                let branches = next
-                    .iter()
-                    .map(|c| {
-                        let tag = branch_tag(edges, &cur, c);
-                        (tag, chain(c, j.as_deref().or(stop), succ, edges, seen))
-                    })
-                    .collect();
-                rows.push(Row::Fork {
-                    from: cur.clone(),
-                    branches,
-                });
-                match j {
-                    Some(j) => cur = j,
-                    None => break,
+        _ => return None,
+    })
+}
+
+fn with_config(mut n: Value, preset: &Value) -> Value {
+    if let (Some(c), Some(p)) = (
+        n.get_mut("config").and_then(Value::as_object_mut),
+        preset.as_object(),
+    ) {
+        for (k, v) in p {
+            c.insert(k.clone(), v.clone());
+        }
+    }
+    n
+}
+
+/// `handleLibraryPick`: what was picked, where the open anchor says; the
+/// node to select after.
+pub fn pick(d: &mut Draft, at: &Anchor, p: &Pick, project: Option<(&str, &str)>) -> Option<String> {
+    let nodes = d.nodes().to_vec();
+    let edges = d.edges().to_vec();
+    if let Pick::TriggerType(_) | Pick::ConnectorTrigger { .. } = p {
+        let config = match p {
+            Pick::TriggerType(t) => trigger_config(t),
+            Pick::ConnectorTrigger { connection, event } => json!({
+                "triggerType": "connectorPoll", "connectionId": connection, "event": event,
+                "cron": "*/5 * * * *"
+            }),
+            _ => return None,
+        };
+        if let Some(existing) = trigger(&nodes).cloned() {
+            let cur = existing.get("config").cloned().unwrap_or_default();
+            let same = match p {
+                Pick::TriggerType(t) => s(&cur, "triggerType") == Some(t.as_str()),
+                Pick::ConnectorTrigger { connection, event } => {
+                    s(&cur, "triggerType") == Some("connectorPoll")
+                        && s(&cur, "connectionId") == Some(connection.as_str())
+                        && s(&cur, "event") == Some(event.as_str())
                 }
-            }
-        }
-    }
-    rows
-}
-
-/// `insertNodeBetween`: the edge split, its branch tag kept on the first half.
-pub fn insert_between(d: &mut Draft, after: &str, before: &str, node: Value) {
-    let nid = s(&node, "id").unwrap_or("").to_owned();
-    let mut edges = d.edges().to_vec();
-    let Some(i) = edges
-        .iter()
-        .position(|e| s(e, "source") == Some(after) && s(e, "target") == Some(before))
-    else {
-        return;
-    };
-    let old = edges.remove(i);
-    edges.push(edge(after, &nid, s(&old, "conditionBranch")));
-    edges.push(edge(&nid, before, None));
-    let mut nodes = d.nodes().to_vec();
-    nodes.push(node);
-    d.set_graph(nodes, edges);
-}
-
-/// `appendNodeAfter`.
-pub fn append_after(d: &mut Draft, after: &str, node: Value) {
-    let nid = s(&node, "id").unwrap_or("").to_owned();
-    let mut edges = d.edges().to_vec();
-    edges.push(edge(after, &nid, None));
-    let mut nodes = d.nodes().to_vec();
-    nodes.push(node);
-    d.set_graph(nodes, edges);
-}
-
-/// `insertConditionBetween`: a condition whose two placeholder branches
-/// rejoin at `before`.
-pub fn insert_condition(d: &mut Draft, after: &str, before: Option<&str>) {
-    let Some(cond) = step_node("condition", d.nodes()) else {
-        return;
-    };
-    let cid = s(&cond, "id").unwrap_or("").to_owned();
-    let mut nodes = d.nodes().to_vec();
-    nodes.push(cond);
-    let mut edges = d.edges().to_vec();
-    match before {
-        Some(before) => {
-            let branch = |label: &str, content: &str, nodes: &mut Vec<Value>| {
-                let mut n = step_node("script", nodes).unwrap_or_default();
-                n["label"] = json!(label);
-                n["slug"] = json!(slugify(label));
-                n["config"]["scriptContent"] = json!(content);
-                let id = s(&n, "id").unwrap_or("").to_owned();
-                nodes.push(n);
-                id
+                _ => false,
             };
-            let t = branch("True Branch", "# True branch\nexit 0\n", &mut nodes);
-            let f = branch("False Branch", "# False branch\nexit 0\n", &mut nodes);
-            edges.retain(|e| !(s(e, "source") == Some(after) && s(e, "target") == Some(before)));
-            edges.push(edge(after, &cid, None));
-            edges.push(edge(&cid, &t, Some("true")));
-            edges.push(edge(&cid, &f, Some("false")));
-            edges.push(edge(&t, before, None));
-            edges.push(edge(&f, before, None));
+            let eid = s(&existing, "id").unwrap_or("").to_owned();
+            if same {
+                return None;
+            }
+            let mut fresh = graph::trigger_node(config);
+            fresh["id"] = existing["id"].clone();
+            fresh["position"] = existing["position"].clone();
+            if let Some(slug) = existing.get("slug") {
+                fresh["slug"] = slug.clone();
+            }
+            let next = nodes
+                .into_iter()
+                .map(|n| {
+                    if s(&n, "id") == Some(eid.as_str()) {
+                        fresh.clone()
+                    } else {
+                        n
+                    }
+                })
+                .collect();
+            d.set_graph(next, edges);
+            return Some(eid);
         }
-        None => edges.push(edge(after, &cid, None)),
+        let t = graph::trigger_node(config);
+        let tid = s(&t, "id").unwrap_or("").to_owned();
+        let owners = graph::loop_body_owners(&nodes);
+        let has_in: HashSet<&str> = edges.iter().filter_map(|e| s(e, "target")).collect();
+        let mut next_edges = edges.clone();
+        for n in &nodes {
+            let nid = s(n, "id").unwrap_or("");
+            if !has_in.contains(nid) && !owners.contains_key(nid) {
+                next_edges.push(graph::edge(&tid, nid, None));
+            }
+        }
+        let mut next = nodes.clone();
+        next.push(t);
+        d.set_graph(next, next_edges);
+        return Some(tid);
     }
+    if let Some(r) = &at.replace {
+        let target = nodes
+            .iter()
+            .find(|n| s(n, "id") == Some(r.as_str()))?
+            .clone();
+        let fresh = match p {
+            Pick::ConnectorAction {
+                connection,
+                action,
+                label,
+            } => {
+                let n = new_step("connectorAction", &nodes, project, Some(r))?;
+                with_config(
+                    n,
+                    &json!({ "connectionId": connection, "action": action, "actionLabel": label }),
+                )
+            }
+            Pick::Type(t) if t != "condition" && t != "loop" => {
+                new_step(t, &nodes, project, Some(r))?
+            }
+            _ => return None,
+        };
+        let mut swapped = fresh.clone();
+        swapped["id"] = target["id"].clone();
+        swapped["position"] = target["position"].clone();
+        if let Some(slug) = target.get("slug") {
+            swapped["slug"] = slug.clone();
+        }
+        let next = nodes
+            .into_iter()
+            .map(|n| {
+                if s(&n, "id") == Some(r.as_str()) {
+                    swapped.clone()
+                } else {
+                    n
+                }
+            })
+            .collect();
+        d.set_graph(next, edges);
+        return Some(r.clone());
+    }
+    let after = at.after.clone()?;
+    if !nodes.iter().any(|n| s(n, "id") == Some(after.as_str())) {
+        return None;
+    }
+    if let Some(b) = at.before.as_deref() {
+        if b != graph::FORK && b != graph::LOOP_BODY && !nodes.iter().any(|n| s(n, "id") == Some(b))
+        {
+            return None;
+        }
+    }
+    if *p == Pick::Parallel {
+        let n = new_step("agent", &nodes, project, None)?;
+        let nid = s(&n, "id").unwrap_or("").to_owned();
+        let (nn, ne) = graph::add_parallel_branch(&nodes, &edges, &after, n);
+        d.set_graph(nn, ne);
+        return Some(nid);
+    }
+    let (kind, preset) = p.step()?;
+    if let (Some(pos), None) = (at.position, &at.before) {
+        return palette_insert(
+            d,
+            &after,
+            kind,
+            &preset,
+            (pos.0 as f64, pos.1 as f64),
+            project,
+        );
+    }
+    insert(d, &after, at.before.as_deref(), kind, &preset, project)
+}
+
+/// `handleInsertNode`.
+fn insert(
+    d: &mut Draft,
+    after: &str,
+    before: Option<&str>,
+    kind: &str,
+    preset: &Value,
+    project: Option<(&str, &str)>,
+) -> Option<String> {
+    let nodes = d.nodes().to_vec();
+    let edges = d.edges().to_vec();
+    if kind == "condition" {
+        let b = before.filter(|b| *b != graph::LOOP_BODY);
+        let result = graph::insert_condition(&nodes, &edges, after, b, &slugs(&nodes, None));
+        let (nn, ne) = graph::adopt_into_loop_body(&nodes, result, after, before);
+        let cid = nn
+            .iter()
+            .find(|n| {
+                s(n, "type") == Some("condition") && !nodes.iter().any(|o| o["id"] == n["id"])
+            })
+            .and_then(|n| s(n, "id"))
+            .map(str::to_owned);
+        d.set_graph(nn, ne);
+        return cid;
+    }
+    let n = with_config(new_step(kind, &nodes, project, None)?, preset);
+    let nid = s(&n, "id").unwrap_or("").to_owned();
+    let result = match before {
+        Some(graph::LOOP_BODY) => {
+            match graph::loop_owning(&nodes, after).and_then(|l| s(l, "id")) {
+                Some(lid) => {
+                    let lid = lid.to_owned();
+                    let anchor = (after != lid).then_some(after);
+                    graph::append_to_loop_body(&nodes, &edges, &lid, n, anchor)
+                }
+                None => graph::append_after(&nodes, &edges, after, n),
+            }
+        }
+        Some(graph::FORK) => graph::insert_before_fork(&nodes, &edges, after, n),
+        Some(b) => match edges
+            .iter()
+            .find(|e| s(e, "source") == Some(after) && s(e, "target") == Some(b))
+            .and_then(|e| s(e, "id"))
+        {
+            Some(eid) => graph::insert_between(&nodes, &edges, &eid.to_owned(), n),
+            None => graph::append_after(&nodes, &edges, after, n),
+        },
+        None => graph::append_after(&nodes, &edges, after, n),
+    };
+    let (nn, ne) = graph::adopt_into_loop_body(&nodes, result, after, before);
+    d.set_graph(nn, ne);
+    Some(nid)
+}
+
+/// `handlePaletteInsert`: a step dropped where an edge was released, the
+/// computed layout materialized first.
+fn palette_insert(
+    d: &mut Draft,
+    after: &str,
+    kind: &str,
+    preset: &Value,
+    pos: (f64, f64),
+    project: Option<(&str, &str)>,
+) -> Option<String> {
+    let nodes = d.nodes().to_vec();
+    let edges = d.edges().to_vec();
+    let seed = graph::positions_are_seed(&nodes);
+    let place = |placed: Vec<Value>, layout_edges: &[Value], new_id: Option<&str>| -> Vec<Value> {
+        let base = if seed {
+            let (positions, _) = crate::canvas::layout_positions(&placed, layout_edges);
+            placed
+                .into_iter()
+                .map(|mut n| {
+                    if let Some(p) = positions.get(s(&n, "id").unwrap_or("")) {
+                        n["position"] = json!({ "x": graph::num(p.0), "y": graph::num(p.1) });
+                    }
+                    n
+                })
+                .collect()
+        } else {
+            placed
+        };
+        base.into_iter()
+            .map(|mut n| {
+                if new_id.is_some() && s(&n, "id") == new_id {
+                    n["position"] = json!({ "x": graph::num(pos.0), "y": graph::num(pos.1) });
+                }
+                n
+            })
+            .collect()
+    };
+    if kind == "condition" {
+        let (nn, ne) = graph::insert_condition(&nodes, &edges, after, None, &slugs(&nodes, None));
+        let cid = nn
+            .iter()
+            .find(|n| {
+                s(n, "type") == Some("condition") && !nodes.iter().any(|o| o["id"] == n["id"])
+            })
+            .and_then(|n| s(n, "id"))
+            .map(str::to_owned);
+        let placed = place(nn, &ne, cid.as_deref());
+        d.set_graph(placed, ne);
+        return cid;
+    }
+    let n = with_config(new_step(kind, &nodes, project, None)?, preset);
+    let nid = s(&n, "id").unwrap_or("").to_owned();
+    let (nn, ne) = graph::append_after(&nodes, &edges, after, n);
+    let placed = place(nn, &ne, Some(&nid));
+    d.set_graph(placed, ne);
+    Some(nid)
+}
+
+/// `handleDeleteNode`.
+pub fn remove(d: &mut Draft, id: &str) {
+    let (nodes, edges) = graph::remove(d.nodes(), d.edges(), id);
     d.set_graph(nodes, edges);
 }
 
-/// `removeNode`: incoming edges rewired to outgoing ones; a condition takes
-/// its branches with it, up to where they join.
-pub fn remove(d: &mut Draft, id: &str) {
+/// `handleConnectEdge`.
+pub fn connect(d: &mut Draft, source: &str, target: &str) {
     let mut edges = d.edges().to_vec();
-    let mut gone: HashSet<String> = HashSet::from([id.to_owned()]);
-    let preds: Vec<String> = edges
-        .iter()
-        .filter(|e| s(e, "target") == Some(id))
-        .filter_map(|e| s(e, "source").map(str::to_owned))
-        .collect();
-    if d.node(id).and_then(|n| s(n, "type")) == Some("condition") {
-        let succ = successors(&edges);
-        let starts = succ.get(id).cloned().unwrap_or_default();
-        let j = join(&starts, &succ);
-        let mut queue = starts;
-        while let Some(cur) = queue.pop() {
-            if Some(&cur) == j.as_ref() || !gone.insert(cur.clone()) {
-                continue;
-            }
-            queue.extend(succ.get(&cur).into_iter().flatten().cloned());
-        }
-        edges.retain(|e| {
-            !gone.contains(s(e, "source").unwrap_or(""))
-                && !gone.contains(s(e, "target").unwrap_or(""))
-        });
-        if let Some(j) = j {
-            for p in &preds {
-                edges.push(edge(p, &j, None));
-            }
-        }
-    } else {
-        let outs: Vec<String> = edges
-            .iter()
-            .filter(|e| s(e, "source") == Some(id))
-            .filter_map(|e| s(e, "target").map(str::to_owned))
-            .collect();
-        edges.retain(|e| s(e, "source") != Some(id) && s(e, "target") != Some(id));
-        for p in &preds {
-            for o in &outs {
-                edges.push(edge(p, o, None));
-            }
-        }
-    }
+    edges.push(json!({ "id": crate::tasks::uuid(), "source": source, "target": target }));
+    let nodes = d.nodes().to_vec();
+    d.set_graph(nodes, edges);
+}
+
+/// `handlePositionsCommit`.
+pub fn commit_positions(d: &mut Draft, positions: &HashMap<String, (f64, f64)>) {
     let nodes: Vec<Value> = d
         .nodes()
         .iter()
-        .filter(|n| !gone.contains(s(n, "id").unwrap_or("")))
         .cloned()
         .map(|mut n| {
-            if let Some(body) = n
-                .pointer_mut("/config/bodyNodeIds")
-                .and_then(Value::as_array_mut)
-            {
-                body.retain(|b| !gone.contains(b.as_str().unwrap_or("")));
+            if let Some(p) = positions.get(s(&n, "id").unwrap_or("")) {
+                n["position"] = json!({ "x": graph::num(p.0), "y": graph::num(p.1) });
             }
             n
         })
         .collect();
+    let edges = d.edges().to_vec();
     d.set_graph(nodes, edges);
 }
 
-/// A step swapped for another kind in place: same id, edges and slug.
-pub fn replace(d: &mut Draft, id: &str, kind: &str) {
-    let fresh = if d.node(id).and_then(|n| s(n, "type")) == Some("trigger") {
-        trigger_node(kind)
-    } else {
-        match step_node(kind, d.nodes()) {
-            Some(n) => n,
-            None => return,
-        }
-    };
-    if let Some(n) = d.node_mut(id) {
-        n["type"] = fresh["type"].clone();
-        n["label"] = fresh["label"].clone();
-        n["config"] = fresh["config"].clone();
-        if let Some(slug) = fresh.get("slug") {
-            n["slug"] = slug.clone();
-        }
-    }
-}
-
-/// Adds what the library picked at `at`.
-pub fn add(d: &mut Draft, at: &Anchor, kind: &str) -> Option<String> {
-    if let Some(r) = &at.replace {
-        replace(d, r, kind);
-        return Some(r.clone());
-    }
-    if at.trigger {
-        if let Some(t) = trigger(d.nodes())
-            .and_then(|t| s(t, "id"))
-            .map(str::to_owned)
-        {
-            replace(d, &t, kind);
-            return Some(t);
-        }
-        let node = trigger_node(kind);
-        let tid = s(&node, "id").unwrap_or("").to_owned();
-        let has_in: HashSet<String> = d
-            .edges()
-            .iter()
-            .filter_map(|e| s(e, "target").map(str::to_owned))
-            .collect();
-        let roots: Vec<String> = d
-            .nodes()
-            .iter()
-            .filter_map(|n| s(n, "id").map(str::to_owned))
-            .filter(|id| !has_in.contains(id))
-            .collect();
-        let mut nodes = vec![node];
-        nodes.extend(d.nodes().iter().cloned());
-        let mut edges = d.edges().to_vec();
-        for r in roots {
-            edges.push(edge(&tid, &r, None));
-        }
-        d.set_graph(nodes, edges);
-        return Some(tid);
-    }
-    let after = at.after.clone();
-    if kind == "condition" {
-        let after = after.or_else(|| last_leaf(d))?;
-        insert_condition(d, &after, at.before.as_deref());
-        return d
-            .nodes()
-            .last()
-            .filter(|n| s(n, "type") == Some("condition"))
-            .or_else(|| {
-                d.nodes()
-                    .iter()
-                    .rev()
-                    .find(|n| s(n, "type") == Some("condition"))
-            })
-            .and_then(|n| s(n, "id"))
-            .map(str::to_owned);
-    }
-    let node = step_node(kind, d.nodes())?;
-    let id = s(&node, "id").unwrap_or("").to_owned();
-    match (after, &at.before) {
-        (Some(a), Some(b)) => insert_between(d, &a, b, node),
-        (Some(a), None) => append_after(d, &a, node),
-        (None, _) => match last_leaf(d) {
-            Some(a) => append_after(d, &a, node),
-            None => {
-                let mut nodes = d.nodes().to_vec();
-                nodes.push(node);
-                let edges = d.edges().to_vec();
-                d.set_graph(nodes, edges);
-            }
-        },
-    }
-    Some(id)
-}
-
-/// `appendNode`'s anchor: the last node with nothing after it.
-fn last_leaf(d: &Draft) -> Option<String> {
-    let outs: HashSet<&str> = d.edges().iter().filter_map(|e| s(e, "source")).collect();
-    d.nodes()
-        .iter()
-        .rev()
-        .filter_map(|n| s(n, "id"))
-        .find(|id| !outs.contains(id))
-        .map(str::to_owned)
+/// `handleTidyUp`: the layout's positions written in.
+pub fn tidy(d: &mut Draft) {
+    let (positions, _) = crate::canvas::layout_positions(d.nodes(), d.edges());
+    commit_positions(d, &positions);
 }
 
 /// The text of a config value, as a field shows it.
@@ -1265,6 +1291,17 @@ pub fn subtitle(node: &Value) -> String {
             Some(u) => format!("{} {u}", c("method")),
             None => "Set URL".to_owned(),
         },
+        "callConnectorAction" => cfg(node, "actionLabel")
+            .or_else(|| cfg(node, "action"))
+            .unwrap_or("Select action")
+            .to_owned(),
+        "createTaskFromItem" => {
+            let p = match c("project") {
+                "fromConnection" => "Project from connection",
+                other => other,
+            };
+            format!("{p} \u{b7} initial: {}", c("initialStatus"))
+        }
         "loop" => {
             if c("mode") == "forEach" {
                 "each".to_owned()
@@ -1283,33 +1320,53 @@ pub fn subtitle(node: &Value) -> String {
 /// A canvas card's footer: the script's first line, the prompt, the
 /// message, the condition or the body.
 pub fn footer(node: &Value) -> Option<String> {
-    let cut = |t: &str, n: usize| crate::screen::truncate(t, n);
+    // `truncate` in node-visuals: cut and three dots.
+    let cut = |t: &str, n: usize| {
+        if t.chars().count() > n {
+            format!("{}...", t.chars().take(n).collect::<String>())
+        } else {
+            t.to_owned()
+        }
+    };
     match s(node, "type").unwrap_or("") {
-        "script" => cfg(node, "scriptContent").and_then(|c| {
-            c.lines()
-                .find(|l| !l.trim().is_empty() && !l.starts_with('#'))
-                .map(|l| l.trim().to_owned())
-        }),
-        "launchAgent" => cfg(node, "prompt").map(|p| cut(p, 60)),
-        "approval" => cfg(node, "message").map(|m| cut(m, 60)),
+        "script" => node
+            .pointer("/config/scriptContent")
+            .and_then(Value::as_str)
+            .and_then(|c| {
+                c.split('\n')
+                    .find(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            })
+            .map(|l| cut(l.trim(), 50)),
+        "launchAgent" => match node.pointer("/config/prompt").and_then(Value::as_str) {
+            Some(p) if !p.is_empty() => Some(cut(p, 60)),
+            _ if node
+                .pointer("/config/taskFromQueue")
+                .and_then(Value::as_bool)
+                == Some(true) =>
+            {
+                Some("Next task from queue".to_owned())
+            }
+            _ if cfg(node, "taskId").is_some() => Some("From task".to_owned()),
+            _ => None,
+        },
+        "approval" => node
+            .pointer("/config/message")
+            .and_then(Value::as_str)
+            .filter(|m| !m.is_empty())
+            .map(|m| cut(m, 60)),
         "httpRequest" => cfg(node, "body").map(|b| cut(b.trim(), 50)),
         "condition" => {
             let v = cfg(node, "variable")?;
-            let op = cfg(node, "operator").unwrap_or("equals");
+            let op = cfg(node, "operator")?;
             let val = match (op, cfg(node, "value")) {
                 ("isEmpty" | "isNotEmpty", _) | (_, None) => String::new(),
                 (_, Some(v)) => format!(" \"{v}\""),
             };
             Some(cut(&format!("{v} {}{val}", operator_symbol(op)), 60))
         }
-        "loop" => Some(if cfg(node, "mode") == Some("forEach") {
-            format!(
-                "for each in {}",
-                cfg(node, "items").unwrap_or("a list not chosen yet")
-            )
-        } else {
-            "runs every pass".to_owned()
-        }),
+        "callConnectorAction" => {
+            crate::canvas::args_preview(node.pointer("/config/args")).map(|p| cut(&p, 50))
+        }
         _ => None,
     }
 }
@@ -1823,7 +1880,7 @@ pub enum WfAct {
     Settings,
     SelectNode(String),
     Library(Anchor),
-    Pick(String),
+    Pick(Pick),
     DeleteNode(String),
     RunTo(String),
     Set(String, String),
@@ -1843,6 +1900,17 @@ pub enum WfAct {
     MissedSkip,
     /// The export or import dialog's go.
     File,
+    /// The canvas controls.
+    ZoomIn,
+    ZoomOut,
+    Fit,
+    Tidy,
+    /// Undo, or redo when true.
+    Undo(bool),
+    /// A library group folded open or shut.
+    Group(String),
+    /// The library line under the pointer, for Enter.
+    Highlight(usize),
 }
 
 #[cfg(test)]
@@ -1919,75 +1987,130 @@ mod tests {
         assert!(valid_key("my_key1") && !valid_key("1x") && !valid_key(""));
     }
 
-    #[test]
-    fn a_condition_forks_and_rejoins() {
-        let mut d = wf(
-            json!([n("t", "trigger"), n("b", "script")]),
-            json!([e("t", "b")]),
-        );
-        insert_condition(&mut d, "t", Some("b"));
-        let rows = flow(d.nodes(), d.edges());
-        assert_eq!(rows.len(), 4, "{rows:?}");
-        let Row::Fork { branches, .. } = &rows[2] else {
-            panic!("{rows:?}")
-        };
-        assert_eq!(branches.len(), 2);
-        assert_eq!(branches[0].0.as_deref(), Some("true"));
-        assert_eq!(
-            rows[3],
-            Row::Node {
-                id: "b".into(),
-                next: None
-            }
-        );
-        let cid = s(&d.nodes()[2], "id").unwrap().to_owned();
-        remove(&mut d, &cid);
-        assert_eq!(d.nodes().len(), 2);
-        assert_eq!(flow(d.nodes(), d.edges()).len(), 2);
+    fn after(a: &str, b: Option<&str>) -> Anchor {
+        Anchor {
+            after: Some(a.into()),
+            before: b.map(Into::into),
+            ..Anchor::default()
+        }
     }
 
-    #[test]
-    fn steps_insert_append_and_remove() {
-        let mut d = wf(
-            json!([n("t", "trigger"), n("b", "script")]),
-            json!([e("t", "b")]),
-        );
-        let at = Anchor {
-            after: Some("t".into()),
-            before: Some("b".into()),
-            ..Anchor::default()
-        };
-        let id = add(&mut d, &at, "approval").unwrap();
-        let order: Vec<String> = flow(d.nodes(), d.edges())
-            .into_iter()
-            .map(|r| match r {
-                Row::Node { id, .. } => id,
-                Row::Fork { .. } => String::new(),
-            })
-            .collect();
-        assert_eq!(order, ["t".to_owned(), id.clone(), "b".to_owned()]);
-        let end = add(&mut d, &Anchor::default(), "script").unwrap();
-        assert_eq!(s(d.node(&end).unwrap(), "slug"), Some("execute_script"));
-        remove(&mut d, &id);
-        assert!(d
+    fn ends(d: &Draft) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = d
             .edges()
             .iter()
-            .any(|e| s(e, "source") == Some("t") && s(e, "target") == Some("b")));
-        replace(&mut d, "b", "httpRequest");
-        assert_eq!(s(d.node("b").unwrap(), "type"), Some("httpRequest"));
+            .map(|e| {
+                (
+                    s(e, "source").unwrap().into(),
+                    s(e, "target").unwrap().into(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
     }
 
     #[test]
-    fn a_trigger_goes_above_the_roots() {
+    fn a_condition_forks_and_rejoins_and_goes_with_its_branches() {
+        let mut d = wf(
+            json!([n("t", "trigger"), n("b", "script")]),
+            json!([e("t", "b")]),
+        );
+        let cid = pick(
+            &mut d,
+            &after("t", Some("b")),
+            &Pick::Type("condition".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(d.nodes().len(), 5);
+        let rows = graph::compute_flow_layout(d.nodes(), d.edges());
+        assert!(matches!(&rows[2], graph::FlowRow::Fork { branches, .. } if branches.len() == 2));
+        remove(&mut d, &cid);
+        assert_eq!(d.nodes().len(), 2);
+        assert_eq!(ends(&d), [("t".into(), "b".into())]);
+    }
+
+    #[test]
+    fn steps_insert_append_replace_and_remove() {
+        let mut d = wf(
+            json!([n("t", "trigger"), n("b", "script")]),
+            json!([e("t", "b")]),
+        );
+        let id = pick(
+            &mut d,
+            &after("t", Some("b")),
+            &Pick::Type("approval".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            ends(&d),
+            [(id.clone(), "b".into()), ("t".into(), id.clone())]
+        );
+        let end = pick(
+            &mut d,
+            &after("b", None),
+            &Pick::Type("script".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(s(d.node(&end).unwrap(), "slug"), Some("execute_script"));
+        remove(&mut d, &id);
+        assert!(ends(&d).contains(&("t".into(), "b".into())));
+        let r = Anchor {
+            replace: Some("b".into()),
+            ..after("b", None)
+        };
+        pick(&mut d, &r, &Pick::Type("httpRequest".into()), None);
+        assert_eq!(s(d.node("b").unwrap(), "type"), Some("httpRequest"));
+        let p = pick(
+            &mut d,
+            &after("t", None),
+            &Pick::Parallel,
+            Some(("web", "/w")),
+        )
+        .unwrap();
+        assert_eq!(d.node(&p).unwrap()["config"]["projectName"], "web");
+    }
+
+    #[test]
+    fn a_trigger_goes_above_the_roots_and_is_swapped_in_place() {
         let mut d = wf(json!([n("b", "script")]), json!([]));
         let at = Anchor {
             trigger: true,
             ..Anchor::default()
         };
-        let t = add(&mut d, &at, "recurring").unwrap();
-        assert_eq!(s(&d.nodes()[0], "label"), Some("Schedule (Recurring)"));
+        let t = pick(&mut d, &at, &Pick::TriggerType("recurring".into()), None).unwrap();
+        assert_eq!(
+            s(d.node(&t).unwrap(), "label"),
+            Some("Schedule (Recurring)")
+        );
         assert!(d.edges().iter().any(|e| s(e, "source") == Some(t.as_str())));
-        assert_eq!(subtitle(&d.nodes()[0]), "Cron: 0 9 * * *");
+        assert_eq!(subtitle(d.node(&t).unwrap()), "Cron: 0 9 * * *");
+        assert_eq!(
+            pick(&mut d, &at, &Pick::TriggerType("recurring".into()), None),
+            None
+        );
+        let again = pick(&mut d, &at, &Pick::TriggerType("manual".into()), None).unwrap();
+        assert_eq!(again, t, "the same node, its edges kept");
+        assert_eq!(s(d.node(&t).unwrap(), "label"), Some("Manual Trigger"));
+    }
+
+    #[test]
+    fn a_step_dropped_off_an_edge_lands_where_it_was_let_go() {
+        let mut d = wf(json!([n("t", "trigger")]), json!([]));
+        let at = Anchor {
+            position: Some((400, 320)),
+            ..after("t", None)
+        };
+        let id = pick(&mut d, &at, &Pick::Type("script".into()), None).unwrap();
+        assert_eq!(graph::position(d.node(&id).unwrap()), (400.0, 320.0));
+        assert_ne!(
+            graph::position(d.node("t").unwrap()).0,
+            0.0,
+            "the layout materialized"
+        );
     }
 
     #[test]

@@ -30,8 +30,16 @@ pub(super) enum WfCall {
     Gate(Option<String>, bool),
     /// `connection:browserAuth`.
     SignIn,
-    /// `connection:list`, for the sign-in button's name.
+    /// `connection:list`, for the sign-in button's name and the library.
     Connections,
+    /// `connector:catalog`.
+    Catalog,
+    /// `connector:listPacks`.
+    Packs,
+    /// `connector:list`.
+    Connectors,
+    /// `connection:listActions` for one connection.
+    Actions(String),
 }
 
 impl App {
@@ -68,7 +76,40 @@ impl App {
                     }
                 }
             },
-            WfCall::Connections => self.st.wf.connections = list(answer),
+            WfCall::Connections => {
+                self.st.wf.connections = list(answer);
+                let ids: Vec<String> = self
+                    .st
+                    .wf
+                    .connections
+                    .iter()
+                    .filter_map(|c| s(c, "id").map(str::to_owned))
+                    .collect();
+                for id in ids {
+                    self.call(
+                        Call::Workflow(WfCall::Actions(id.clone())),
+                        "connection:listActions",
+                        json!(id),
+                    );
+                }
+            }
+            WfCall::Actions(id) => {
+                self.st.wf.lib.actions.insert(id, list(answer));
+            }
+            WfCall::Catalog => {
+                if let Ok(v) = answer {
+                    let take = |k: &str| {
+                        v.get(k)
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+                    self.st.wf.lib.catalog = take("items");
+                    self.st.wf.lib.templates = take("templates");
+                }
+            }
+            WfCall::Packs => self.st.wf.lib.packs = list(answer),
+            WfCall::Connectors => self.st.wf.lib.connectors = list(answer),
             WfCall::SignIn => match answer {
                 Ok(v) => match v.pointer("/browser/signInUrl").and_then(Value::as_str) {
                     Some(url) => open_url(url),
@@ -435,7 +476,12 @@ impl App {
         self.st.wf.panel = panel;
         self.st.wf.history.clear();
         self.st.wf.launching = None;
+        self.st.wf.undo.clear();
+        self.st.wf.canvas.gesture = None;
+        self.st.wf.canvas.dragged.clear();
         self.st.view = MainView::Workflows;
+        self.open_view();
+        self.load_library();
     }
 
     /// The open node's fields filled from it.
@@ -470,9 +516,77 @@ impl App {
     }
 
     fn edit(&mut self, f: impl FnOnce(&mut Draft)) {
-        if let Some(d) = self.st.wf.editor.as_mut() {
-            f(d);
+        self.edit_graph(f);
+    }
+
+    /// The library's lines for the open anchor, as it draws them.
+    pub(super) fn library_entries(&self) -> Vec<crate::library::Entry> {
+        let Panel::Library(at) = &self.st.wf.panel else {
+            return Vec::new();
+        };
+        let lib = &self.st.wf.lib;
+        let src = crate::library::Sources {
+            connections: &self.st.wf.connections,
+            actions: &lib.actions,
+            catalog: &lib.catalog,
+            packs: &lib.packs,
+            connectors: &lib.connectors,
+        };
+        crate::library::entries(&src, at.into(), &self.st.wf.search, &lib.recent, &lib.open)
+    }
+
+    /// Enter on the library: the highlighted group folds, a row is picked.
+    fn library_choose(&mut self, ui: &mut Ui) {
+        let entries = self.library_entries();
+        let reach: Vec<&crate::library::Entry> = entries.iter().filter(|e| e.reachable()).collect();
+        let i = self.st.wf.lib.highlight.min(reach.len().saturating_sub(1));
+        match reach.get(i) {
+            Some(crate::library::Entry::Group { key, .. }) => {
+                let key = key.clone();
+                self.run_wf(ui, WfAct::Group(key), Src::default());
+            }
+            Some(crate::library::Entry::Row { pick, recent, .. }) => {
+                if let Some(r) = recent.clone() {
+                    crate::library::remember(&mut self.st.wf.lib.recent, r);
+                }
+                let p = pick.clone();
+                self.run_wf(ui, WfAct::Pick(p), Src::default());
+            }
+            _ => {}
         }
+    }
+
+    /// The first project, which a new agent step runs in.
+    fn first_project(&self) -> Option<(String, String)> {
+        self.store
+            .projects
+            .first()
+            .map(|p| (p.name.clone(), p.path.clone()))
+    }
+
+    /// What the library and start-from draw: the catalog, packs,
+    /// connectors, connections and each connection's actions.
+    fn load_library(&mut self) {
+        self.call(
+            Call::Workflow(WfCall::Catalog),
+            "connector:catalog",
+            Value::Null,
+        );
+        self.call(
+            Call::Workflow(WfCall::Packs),
+            "connector:listPacks",
+            Value::Null,
+        );
+        self.call(
+            Call::Workflow(WfCall::Connectors),
+            "connector:list",
+            Value::Null,
+        );
+        self.call(
+            Call::Workflow(WfCall::Connections),
+            "connection:list",
+            json!({}),
+        );
     }
 
     pub(super) fn run_wf(&mut self, ui: &mut Ui, act: WfAct, _src: Src) {
@@ -635,19 +749,50 @@ impl App {
             }
             WfAct::SelectNode(id) => self.select_node(ui, Some(id)),
             WfAct::Library(at) => {
+                self.st.wf.lib.highlight = 0;
                 self.st.wf.search.clear();
                 ui.set_edit_text(wf::search_id(), "");
                 ui.set_focus(Some(wf::search_id()));
                 self.st.wf.panel = Panel::Library(at);
             }
-            WfAct::Pick(kind) => {
+            WfAct::Pick(p) => {
                 let Panel::Library(at) = self.st.wf.panel.clone() else {
                     return;
                 };
+                let project = self.first_project();
                 let mut added = None;
-                self.edit(|d| added = wf::add(d, &at, &kind));
-                self.select_node(ui, added);
+                self.edit(|d| {
+                    added = wf::pick(
+                        d,
+                        &at,
+                        &p,
+                        project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
+                    )
+                });
+                match added {
+                    Some(n) => self.select_node(ui, Some(n)),
+                    None => {
+                        self.st.wf.panel = if self.st.wf.node.is_some() {
+                            Panel::Node
+                        } else {
+                            Panel::Properties
+                        };
+                        ui.set_focus(None);
+                    }
+                }
             }
+            WfAct::ZoomIn => self.zoom(1.2),
+            WfAct::ZoomOut => self.zoom(1.0 / 1.2),
+            WfAct::Fit => self.fit(),
+            WfAct::Tidy => self.edit(wf::tidy),
+            WfAct::Undo(redo) => self.undo(redo),
+            WfAct::Group(key) => {
+                let open = &mut self.st.wf.lib.open;
+                if !open.remove(&key) {
+                    open.insert(key);
+                }
+            }
+            WfAct::Highlight(i) => self.st.wf.lib.highlight = i,
             WfAct::DeleteNode(id) => {
                 self.edit(|d| wf::remove(d, &id));
                 if self.st.wf.node.as_deref() == Some(id.as_str()) {
@@ -926,6 +1071,7 @@ impl App {
             UiEvent::Changed(id) => {
                 if id == wf::search_id() {
                     self.st.wf.search = ui.edit_text(id).to_owned();
+                    self.st.wf.lib.highlight = 0;
                     return true;
                 }
                 let Some(d) = &self.st.wf.editor else {
@@ -966,12 +1112,7 @@ impl App {
                     return true;
                 }
                 if id == wf::search_id() {
-                    let first = crate::screen::workflows::library_rows(&self.st.wf)
-                        .into_iter()
-                        .next();
-                    if let Some((kind, _, _)) = first {
-                        self.run_wf(ui, WfAct::Pick(kind.to_owned()), Src::default());
-                    }
+                    self.library_choose(ui);
                     return true;
                 }
                 if self.st.wf.editor.is_some() && id == wf::field_id(None, "name") {
@@ -995,6 +1136,47 @@ impl App {
         }
         let held = *m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
         if self.st.wf.editor.is_some() {
+            let typed = match input {
+                Input::Key { text, .. } => text.as_deref(),
+                _ => None,
+            };
+            if matches!(self.st.wf.panel, Panel::Library(_)) && ui.focus() == Some(wf::search_id())
+            {
+                let reach = self
+                    .library_entries()
+                    .into_iter()
+                    .filter(|e| e.reachable())
+                    .count();
+                let h = &mut self.st.wf.lib.highlight;
+                match code.as_str() {
+                    "ArrowDown" => {
+                        *h = (*h + 1).min(reach.saturating_sub(1));
+                        return true;
+                    }
+                    "ArrowUp" => {
+                        *h = h.saturating_sub(1);
+                        return true;
+                    }
+                    "ArrowRight" | "ArrowLeft" => {
+                        let entries = self.library_entries();
+                        let reach: Vec<&crate::library::Entry> =
+                            entries.iter().filter(|e| e.reachable()).collect();
+                        let i = self.st.wf.lib.highlight.min(reach.len().saturating_sub(1));
+                        if let Some(crate::library::Entry::Group { key, open, .. }) = reach.get(i) {
+                            if *open != (code == "ArrowRight") {
+                                let key = key.clone();
+                                self.run_wf(ui, WfAct::Group(key), Src::default());
+                            }
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let in_text = ui.focus().is_some_and(|f| f != super::canvas::pane_id());
+            if !in_text && code != "Escape" && self.canvas_key(ui, code, typed, held) {
+                return true;
+            }
             if code == "Escape"
                 && held == 0
                 && self.st.wf.panel != Panel::None

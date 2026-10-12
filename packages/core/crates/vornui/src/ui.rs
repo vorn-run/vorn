@@ -113,6 +113,38 @@ struct Cx<'a> {
     clip: Rect,
     layer: u32,
     focus_seen: bool,
+    /// The transform painting is under, in logical pixels, so what is hit
+    /// is where it is drawn.
+    xf: Xf,
+}
+
+/// Scale about `origin`, then shift: an element's `transform`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Xf {
+    scale: f32,
+    origin: (f32, f32),
+    offset: (f32, f32),
+}
+
+impl Xf {
+    const IDENTITY: Xf = Xf {
+        scale: 1.0,
+        origin: (0.0, 0.0),
+        offset: (0.0, 0.0),
+    };
+
+    fn apply(&self, r: Rect) -> Rect {
+        if *self == Xf::IDENTITY {
+            return r;
+        }
+        let (ox, oy) = self.origin;
+        Rect::new(
+            ox + (r.x - ox) * self.scale + self.offset.0,
+            oy + (r.y - oy) * self.scale + self.offset.1,
+            r.w * self.scale,
+            r.h * self.scale,
+        )
+    }
 }
 
 impl Ui {
@@ -259,6 +291,7 @@ impl Ui {
             clip: Rect::EVERYTHING,
             layer: 0,
             focus_seen: false,
+            xf: Xf::IDENTITY,
         };
         self.st.hits.clear();
         self.st.focus_order.clear();
@@ -470,9 +503,15 @@ impl Ui {
         if el.opacity < 1.0 {
             self.scene.push_opacity(el.opacity);
         }
+        let saved_xf = cx.xf;
         if let Some((s, (dx, dy))) = el.transform {
             self.scene
                 .push_transform(s, (r.x + r.w / 2.0, r.y + r.h / 2.0), (dx * k, dy * k));
+            cx.xf = Xf {
+                scale: s,
+                origin: (rl.x + rl.w / 2.0, rl.y + rl.h / 2.0),
+                offset: (dx, dy),
+            };
         }
         let radius = if ring {
             theme::focus::RADIUS
@@ -500,7 +539,7 @@ impl Ui {
                 let target = Rect::new(x - sx, y - sy, rl.w + 2.0 * sx, rl.h + 2.0 * sy);
                 self.st.hits.push(Hit {
                     id,
-                    rect: target.intersect(&cx.clip),
+                    rect: cx.xf.apply(target).intersect(&cx.clip),
                     sense: el.sense,
                     action: el.action,
                     cursor: el.cursor,
@@ -569,6 +608,16 @@ impl Ui {
                     self.scene.sprite(ir, uv, *color, false);
                 }
             }
+            Content::Svg { svg, color } => {
+                let z = cx.xf.scale;
+                let px = (
+                    (inner.w * k * z).round() as u32,
+                    (inner.h * k * z).round() as u32,
+                );
+                if let Some(uv) = self.svg_raster(svg, px) {
+                    self.scene.sprite(inner.scaled(k), uv, *color, false);
+                }
+            }
             Content::Image { id, color } => {
                 if let Some(uv) = self.images.get(*id as usize).and_then(|i| i.uv) {
                     self.scene.sprite(r, uv, *color, true);
@@ -590,7 +639,7 @@ impl Ui {
         let saved_clip = cx.clip;
         if el.clip {
             self.scene.push_clip(clip_box.scaled(k));
-            cx.clip = cx.clip.intersect(&clip_box);
+            cx.clip = cx.clip.intersect(&cx.xf.apply(clip_box));
         }
         let mut scrolled = 0.0;
         let mut max = 0.0;
@@ -660,11 +709,12 @@ impl Ui {
             );
         }
         for ov in &el.overlays {
-            cx.overlays.push((ov, rl));
+            cx.overlays.push((ov, cx.xf.apply(rl)));
         }
         if el.transform.is_some() {
             self.scene.pop_transform();
         }
+        cx.xf = saved_xf;
         if el.opacity < 1.0 {
             self.scene.pop_opacity();
         }
@@ -951,6 +1001,22 @@ impl Ui {
         uv
     }
 
+    /// An SVG's coverage at `w`×`h` physical pixels, kept with the icons.
+    fn svg_raster(&mut self, svg: &str, (w, h): (u32, u32)) -> Option<[f32; 4]> {
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let key = (Id::new(svg).child((w, h)).0, w);
+        if let Some(hit) = self.icons.get(&key) {
+            return *hit;
+        }
+        let uv = rasterize_svg_to(svg, w, h).and_then(|mask| self.atlases.insert_mask(w, h, &mask));
+        if uv.is_some() || !self.atlases.full {
+            self.icons.insert(key, uv);
+        }
+        uv
+    }
+
     /// Empties the atlases and everything that pointed into them; images
     /// are uploaded again.
     fn reset_atlases(&mut self) {
@@ -1085,6 +1151,36 @@ pub fn rasterize_svg(svg: &str, px: u32) -> Option<Vec<u8>> {
     let tf = tiny_skia::Transform::from_scale(px as f32 / s.width(), px as f32 / s.height());
     resvg::render(&tree, tf, &mut pm.as_mut());
     Some(pm.data().chunks(4).map(|p| p[3]).collect())
+}
+
+/// An SVG stretched over `w`×`h` pixels, as a coverage mask.
+pub fn rasterize_svg_to(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pm = tiny_skia::Pixmap::new(w, h)?;
+    let s = tree.size();
+    let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
+    resvg::render(&tree, tf, &mut pm.as_mut());
+    Some(pm.data().chunks(4).map(|p| p[3]).collect())
+}
+
+/// An SVG in its own colours at `w`×`h` pixels, as straight-alpha RGBA.
+pub fn rasterize_svg_rgba(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pm = tiny_skia::Pixmap::new(w, h)?;
+    let s = tree.size();
+    let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
+    resvg::render(&tree, tf, &mut pm.as_mut());
+    Some(
+        pm.pixels()
+            .iter()
+            .flat_map(|p| {
+                let c = p.demultiply();
+                [c.red(), c.green(), c.blue(), c.alpha()]
+            })
+            .collect(),
+    )
 }
 
 /// Decodes a PNG to straight-alpha RGBA.

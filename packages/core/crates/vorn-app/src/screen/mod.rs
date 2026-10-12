@@ -56,6 +56,8 @@ pub struct Screen<'a> {
     pub panes: &'a HashMap<String, PaneView>,
     /// The logo's image id, once registered.
     pub logo: Option<u32>,
+    /// The agents' marks, by agent.
+    pub agents: &'a HashMap<&'static str, u32>,
     pub size: (f32, f32),
     /// The app draws its own window controls (no system title bar).
     pub chrome: bool,
@@ -166,6 +168,14 @@ pub(crate) fn white(a: f32) -> Rgba {
 /// A lucide icon at `size` with `stroke`, tinted.
 pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
     icon(look::icon(name, stroke).unwrap_or_default(), size, color)
+}
+
+/// `AgentIcon`: an agent's mark, or a shell's terminal.
+pub(crate) fn agent_icon(s: &Screen<'_>, agent: &str, size: f32) -> El {
+    match s.agents.get(agent) {
+        Some(id) => crate::ui::image(*id, size, size),
+        None => ico("terminal", size, 1.5, c(look::GRAY_400)),
+    }
 }
 
 /// The Alt key's label in shortcut hints.

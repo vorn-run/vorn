@@ -222,6 +222,15 @@ icons! {
     "zap",
 }
 
+/// `AgentIcon`'s marks, in their own colours.
+pub const AGENT_ICONS: [(&str, &str); 5] = [
+    ("claude", include_str!("../assets/agents/claude.svg")),
+    ("copilot", include_str!("../assets/agents/copilot.svg")),
+    ("codex", include_str!("../assets/agents/codex.svg")),
+    ("opencode", include_str!("../assets/agents/opencode.svg")),
+    ("gemini", include_str!("../assets/agents/gemini.svg")),
+];
+
 /// `ICON_MAP` and `PROJECT_ICON_OPTIONS`: the names a workflow or project
 /// stores, the glyph each draws and the picker's label.
 pub const ICON_OPTIONS: [(&str, &str, &str); 24] = [

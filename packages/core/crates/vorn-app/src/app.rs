@@ -29,6 +29,7 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+pub mod canvas;
 mod gates;
 mod tasks;
 mod workflows;
@@ -195,6 +196,8 @@ pub struct App {
     saves: VecDeque<(Value, Call)>,
     saving: bool,
     logo: Option<u32>,
+    /// The agents' marks, registered as images.
+    agents: HashMap<&'static str, u32>,
     /// vornd hung up.
     pub closed: bool,
     /// The app draws its own title bar and window controls.
@@ -238,6 +241,7 @@ impl App {
             saves: VecDeque::new(),
             saving: false,
             logo: None,
+            agents: HashMap::new(),
             closed: false,
             chrome: !cfg!(target_os = "macos"),
             size: look::WINDOW,
@@ -1073,7 +1077,11 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
-        if self.gate_event(ui, &event) || self.task_event(ui, &event) || self.wf_event(ui, &event) {
+        if self.gate_event(ui, &event)
+            || self.canvas_event(ui, &event)
+            || self.task_event(ui, &event)
+            || self.wf_event(ui, &event)
+        {
             return;
         }
         match event {
@@ -1466,6 +1474,7 @@ impl App {
             st: &self.st,
             panes: &self.views,
             logo: self.logo,
+            agents: &self.agents,
             size: self.size,
             chrome: self.chrome,
         }
@@ -1487,6 +1496,16 @@ impl App {
         self.pump();
         self.tasks_tick(ui);
         self.size = size;
+        if self.agents.is_empty() {
+            for (name, svg) in look::AGENT_ICONS {
+                let px = 48;
+                if let Some(id) = crate::ui::rasterize_svg_rgba(svg, px, px)
+                    .and_then(|rgba| ui.image(px, px, &rgba))
+                {
+                    self.agents.insert(name, id);
+                }
+            }
+        }
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
             self.logo = decode_png(look::LOGO_PNG)

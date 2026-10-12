@@ -165,6 +165,12 @@ pub enum Content {
         size: f32,
         color: Rgba,
     },
+    /// An SVG drawn over the whole box in one colour (a canvas's lines),
+    /// rasterized at the size it is drawn.
+    Svg {
+        svg: String,
+        color: Rgba,
+    },
     /// An RGBA image the app registered with [`crate::Ui::image`].
     Image {
         id: u32,
@@ -282,6 +288,14 @@ pub fn icon(svg: impl Into<String>, size: f32, color: Rgba) -> El {
     div().size(size, size).content(Content::Icon {
         svg: svg.into(),
         size,
+        color,
+    })
+}
+
+/// `svg` stretched over a `w`×`h` box and tinted `color`.
+pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: Rgba) -> El {
+    div().size(w, h).content(Content::Svg {
+        svg: svg.into(),
         color,
     })
 }
@@ -539,6 +553,7 @@ impl El {
         match &mut self.content {
             Content::Image { color, .. }
             | Content::Icon { color, .. }
+            | Content::Svg { color, .. }
             | Content::Text { color, .. } => *color = color.alpha(a),
             Content::None | Content::Custom(_) | Content::Edit(_) => {}
         }
