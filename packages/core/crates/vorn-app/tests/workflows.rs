@@ -70,7 +70,9 @@ fn pick(shot: &mut Shot, app: &mut App, kind: &str) -> String {
 fn seed(app: &mut App, shot: &mut Shot, w: Value) {
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     let id = w["id"].as_str().unwrap_or("").to_owned();
-    config["workflows"] = json!([w]);
+    let mut list = config["workflows"].as_array().cloned().unwrap_or_default();
+    list.push(w);
+    config["workflows"] = Value::Array(list);
     app.rpc().call("config:save", config).expect("saved");
     shot.until(app, "the workflow listed", |app, _| {
         app.store.config["workflows"]

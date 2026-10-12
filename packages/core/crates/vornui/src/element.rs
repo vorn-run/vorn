@@ -559,6 +559,13 @@ impl El {
         }
         self
     }
+    /// Letter spacing in ems, for a text element.
+    pub fn tracking(mut self, em: f32) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.tracking = em;
+        }
+        self
+    }
     pub fn line_height(mut self, h: f32) -> El {
         if let Content::Text { style, .. } = &mut self.content {
             style.line_height = h;

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::{act, wf_icon};
+use super::{act, wf_glyph};
 use crate::act::Act;
 use crate::look;
 use crate::runs::{self, s as sv};
@@ -68,7 +68,7 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
         0.04 * s.ui.hover(name_id)
     };
     left = left
-        .child(wf_icon(Some(&d.wf), 16.0, "workflow", c(look::GRAY_400)))
+        .child(wf_glyph(&d.wf, 16.0))
         .child(
             field(
                 name_id,

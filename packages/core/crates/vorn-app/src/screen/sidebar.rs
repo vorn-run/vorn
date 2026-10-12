@@ -507,7 +507,13 @@ fn projects(s: &Screen<'_>) -> El {
 }
 
 /// SidebarSectionHeader with a fold: a chevron and an uppercase title.
-pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) -> El {
+pub(super) fn toggle_section(
+    s: &Screen<'_>,
+    title: &str,
+    open: bool,
+    act: Act,
+    actions: Vec<El>,
+) -> El {
     let id = s.acts.on("sidebar-section", act);
     let hot = s.ui.hover(id);
     let chevron = if open {
@@ -515,7 +521,13 @@ pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) 
     } else {
         "chevron-right"
     };
-    div().row().items_center().pt(12.0).pb(6.0).child(
+    div()
+        .row()
+        .items_center()
+        .justify_between()
+        .pt(12.0)
+        .pb(6.0)
+        .child(
         div()
             .id(id)
             .on(Action::Click)
@@ -532,10 +544,12 @@ pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) 
                     c(look::GRAY_500).mix(c(look::GRAY_300), hot),
                 )
                 .weight(500)
-                .line_height(14.0)
+                .tracking(0.05)
+                .line_height(16.5)
                 .silent(),
             ),
-    )
+        )
+        .child(div().row().items_center().gap(2.0).children(actions))
 }
 
 /// TasksProjectsSection: All Projects and each project, under a fold.
@@ -546,6 +560,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
         "Projects",
         open,
         Act::Task(crate::tasks::TaskAct::ToggleProjects),
+        Vec::new(),
     ));
     if !open {
         return col;

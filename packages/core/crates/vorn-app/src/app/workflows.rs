@@ -316,6 +316,46 @@ impl App {
     }
 
     /// Saves the config with the workflows `f` changed, toasting `text`.
+    /// The sidebar's rows, by workflow id, while it is unfiltered.
+    fn side_ids(&self) -> Vec<(String, crate::ui::Id)> {
+        let ws = self.workspace();
+        self.store.config["workflows"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|w| s(w, "workspaceId").unwrap_or("personal") == ws)
+            .filter_map(|w| s(w, "id"))
+            .map(|id| {
+                let rid = App::control("wf-side", &crate::act::Act::Workflow(WfAct::Edit(id.into())));
+                (id.to_owned(), rid)
+            })
+            .collect()
+    }
+
+    /// `reorderWorkflows`: within the active workspace, the others kept in
+    /// their slots.
+    fn reorder_workflows(&mut self, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+        let ws = self.workspace();
+        self.change_workflows(None, |list| {
+            let mine: Vec<usize> = (0..list.len())
+                .filter(|&i| s(&list[i], "workspaceId").unwrap_or("personal") == ws)
+                .collect();
+            if from >= mine.len() || to >= mine.len() {
+                return false;
+            }
+            let mut order: Vec<Value> = mine.iter().map(|&i| list[i].clone()).collect();
+            let moved = order.remove(from);
+            order.insert(to, moved);
+            for (slot, w) in mine.into_iter().zip(order) {
+                list[slot] = w;
+            }
+            true
+        });
+    }
+
     fn change_workflows(&mut self, text: Option<String>, f: impl FnOnce(&mut Vec<Value>) -> bool) {
         let mut config = self.store.config.clone();
         if !config.get("workflows").is_some_and(Value::is_array) {
@@ -444,6 +484,7 @@ impl App {
                 );
             }
             WfAct::Side(f) => self.st.wf.side = f,
+            WfAct::Fold => self.st.wf.folded = !self.st.wf.folded,
             WfAct::AllRuns | WfAct::Close => {
                 self.st.wf.editor = None;
                 self.st.wf.node = None;
@@ -845,6 +886,30 @@ impl App {
     /// The editor's and the landing's own events: a field's edit.
     pub(super) fn wf_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
         match *event {
+            UiEvent::Move { id, x, y, .. } => {
+                let ids = self.side_ids();
+                let Some(from) = ids.iter().find(|(_, rid)| *rid == id) else {
+                    return false;
+                };
+                let over = ids.iter().position(|(_, rid)| {
+                    ui.rect_of(*rid)
+                        .is_some_and(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+                });
+                self.st.wf.drag = Some((from.0.clone(), over));
+                true
+            }
+            UiEvent::Drop { id, .. } => {
+                let ids = self.side_ids();
+                if !ids.iter().any(|(_, rid)| *rid == id) {
+                    return false;
+                }
+                if let Some((from, Some(to))) = self.st.wf.drag.take() {
+                    if let Some(from) = ids.iter().position(|(w, _)| *w == from) {
+                        self.reorder_workflows(from, to);
+                    }
+                }
+                true
+            }
             UiEvent::Changed(id) => {
                 if id == wf::search_id() {
                     self.st.wf.search = ui.edit_text(id).to_owned();

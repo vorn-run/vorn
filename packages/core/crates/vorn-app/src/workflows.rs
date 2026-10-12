@@ -183,6 +183,10 @@ pub struct Workflows {
     /// `workflowRun:listAll`.
     pub runs: Vec<Value>,
     pub side: SideFilter,
+    /// The sidebar section folded under its header.
+    pub folded: bool,
+    /// A sidebar row being dragged, and the index it would land on.
+    pub drag: Option<(String, Option<usize>)>,
     pub editor: Option<Draft>,
     /// The node whose config is open.
     pub node: Option<String>,
@@ -445,22 +449,23 @@ fn trigger_type(wf: &Value) -> Option<&str> {
         .as_str()
 }
 
-/// A once or recurring trigger.
+/// `isScheduledWorkflow`: any trigger but a manual one.
 pub fn is_scheduled(wf: &Value) -> bool {
-    matches!(trigger_type(wf), Some("once" | "recurring"))
+    trigger_type(wf).is_some_and(|t| t != "manual")
 }
 
-/// The sidebar's status dot for a workflow: waiting, scheduled, disabled
-/// or error.
+/// `statusDotState`: the sidebar's dot for a workflow, the gate first.
 pub fn side_status(wf: &Value, waiting: bool, failed: bool) -> Option<&'static str> {
     if waiting {
         Some("waiting")
+    } else if is_scheduled(wf) {
+        Some(if wf.get("enabled").and_then(Value::as_bool) == Some(false) {
+            "disabled"
+        } else {
+            "scheduled"
+        })
     } else if failed {
         Some("error")
-    } else if is_scheduled(wf) && wf.get("enabled").and_then(Value::as_bool) == Some(false) {
-        Some("disabled")
-    } else if is_scheduled(wf) {
-        Some("scheduled")
     } else {
         None
     }
@@ -1802,6 +1807,8 @@ pub enum WfAct {
     },
     SignIn(String),
     Side(SideFilter),
+    /// The sidebar section's fold.
+    Fold,
     AllRuns,
     Edit(String),
     New,
