@@ -32,6 +32,7 @@ use vorn_protocol::TerminalSession;
 pub mod canvas;
 pub mod forms;
 mod gates;
+mod settings;
 mod tasks;
 mod workflows;
 
@@ -169,6 +170,7 @@ enum Call {
     Saved(Box<Call>),
     Task(tasks::TaskCall),
     Workflow(workflows::WfCall),
+    Set(settings::SetCall),
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -209,6 +211,13 @@ pub struct App {
     port: u16,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
+    /// vornd's data directory, where its session holders announce
+    /// themselves.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// The health check on its way.
+    health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
+    /// The field that had focus last frame, to tell when one loses it.
+    last_focus: Option<Id>,
 }
 
 impl App {
@@ -226,6 +235,7 @@ impl App {
             sidebar: true,
             layout: LayoutMode::from_config(&store.config),
             tasks: crate::tasks::Tasks::new(&store.config),
+            settings: crate::settings::Settings::new(),
             ..State::default()
         };
         let mut app = App {
@@ -248,6 +258,9 @@ impl App {
             size: look::WINDOW,
             port: ep.port,
             carried: Vec::new(),
+            data_dir: None,
+            health: None,
+            last_focus: None,
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
@@ -294,6 +307,13 @@ impl App {
                     if method == "workflow:runUpdated" {
                         self.task_run_updated(&params);
                         self.wf_run_updated(&params);
+                    }
+                    if method == "server:identity" {
+                        self.st.server_version = params
+                            .get("appVersion")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        continue;
                     }
                     if method == "scheduler:missed" {
                         self.wf_missed(&params);
@@ -372,6 +392,7 @@ impl App {
             Call::Resumed { id, auto } => self.resumed(&id, auto, answer),
             Call::Task(c) => self.task_answered(c, answer),
             Call::Workflow(c) => self.wf_answered(c, answer),
+            Call::Set(c) => self.set_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -842,6 +863,7 @@ impl App {
                 self.start_run(ui, &id, source, None);
             }
             Act::Workflow(a) => self.run_wf(ui, a, src),
+            Act::Set(a) => self.run_set(ui, a),
             Act::Rename(id) => {
                 let Some(title) = self.store.session(&id).map(|s| s.title()) else {
                     return;
@@ -918,8 +940,13 @@ impl App {
                 self.st.wf.prompt = None;
                 self.st.wf.file = None;
             }
-            // The welcome guide and settings are later surfaces of the port.
-            Act::Welcome | Act::Settings => self.st.dialog = None,
+            Act::Settings => {
+                self.st.dialog = None;
+                let cat = self.st.settings.category;
+                self.open_settings(cat);
+            }
+            // The welcome guide is a later surface of the port.
+            Act::Welcome => self.st.dialog = None,
             Act::Project(p) => {
                 self.st.project = p;
                 if self.st.view == MainView::Workflows {
@@ -1085,7 +1112,8 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
-        if self.gate_event(ui, &event)
+        if self.settings_event(ui, &event)
+            || self.gate_event(ui, &event)
             || self.canvas_event(ui, &event)
             || self.form_event(ui, &event)
             || self.task_event(ui, &event)
@@ -1283,6 +1311,12 @@ impl App {
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.settings_key(ui, input) {
+            return true;
+        }
+        if self.st.settings.open {
+            return false;
+        }
         if self.st.menu.is_none() && (self.task_key(ui, input) || self.wf_key(ui, input)) {
             return true;
         }
@@ -1326,7 +1360,7 @@ impl App {
     /// One key or IME event the UI did not use: the composer's or the
     /// terminal's.
     pub fn input(&mut self, input: Input) {
-        if self.st.dialog.is_some() || self.st.menu.is_some() {
+        if self.st.dialog.is_some() || self.st.menu.is_some() || self.st.settings.open {
             return;
         }
         if self.composing() {
@@ -1512,6 +1546,22 @@ impl App {
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
         self.tasks_tick(ui);
+        self.settings_tick(std::time::Instant::now());
+        let focus = ui.focus();
+        if focus != self.last_focus {
+            if let Some(old) = self.last_focus {
+                self.settings_blur(ui, old);
+            }
+            self.last_focus = focus;
+        }
+        // `fontSize` 13 is the size the terminal font was matched at.
+        let font = self
+            .store
+            .config
+            .pointer("/defaults/fontSize")
+            .and_then(Value::as_f64)
+            .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
+        ui.text.set_term_size(font);
         self.size = size;
         if self.agents.is_empty() {
             for (name, svg) in look::AGENT_ICONS {

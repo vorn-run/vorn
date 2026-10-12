@@ -193,6 +193,12 @@ pub struct EditLook {
     /// A `<textarea>`: Enter starts a line and the primary modifier with
     /// Enter submits.
     pub textarea: bool,
+    /// A multiline field whose lines do not wrap; long ones scroll sideways.
+    pub nowrap: bool,
+    /// Colours for byte ranges of the text (code), `color` elsewhere.
+    pub spans: Vec<(std::ops::Range<usize>, Rgba)>,
+    /// Backgrounds under byte ranges (find matches).
+    pub marks: Vec<(std::ops::Range<usize>, Rgba)>,
 }
 
 /// Accessibility facts beyond role and label.
@@ -320,6 +326,20 @@ impl El {
         self
     }
     /// An edit field's placeholder ink, for one without `placeholder-*`.
+    /// Colours an edit field's text by byte range and marks ranges with a
+    /// background; a no-op on anything else.
+    pub fn edit_colors(
+        mut self,
+        spans: Vec<(std::ops::Range<usize>, Rgba)>,
+        marks: Vec<(std::ops::Range<usize>, Rgba)>,
+    ) -> El {
+        if let Content::Edit(look) = &mut self.content {
+            look.spans = spans;
+            look.marks = marks;
+        }
+        self
+    }
+
     pub fn placeholder_color(mut self, c: Rgba) -> El {
         if let Content::Edit(l) = &mut self.content {
             l.placeholder_color = c;
@@ -380,6 +400,16 @@ impl El {
         self.style.margin.top = length(m);
         self
     }
+    pub fn mb(mut self, m: f32) -> El {
+        self.style.margin.bottom = length(m);
+        self
+    }
+
+    pub fn mr(mut self, m: f32) -> El {
+        self.style.margin.right = length(m);
+        self
+    }
+
     pub fn ml(mut self, m: f32) -> El {
         self.style.margin.left = length(m);
         self
@@ -456,6 +486,10 @@ impl El {
     }
     pub fn shrink0(mut self) -> El {
         self.style.flex_shrink = 0.0;
+        self
+    }
+    pub fn items_start(mut self) -> El {
+        self.style.align_items = Some(AlignItems::FlexStart);
         self
     }
     pub fn items_center(mut self) -> El {

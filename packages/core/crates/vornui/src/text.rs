@@ -445,6 +445,53 @@ impl TextSystem {
         }
     }
 
+    /// Draws `sh` as [`TextSystem::draw`] does, each glyph in the colour of
+    /// the span (sorted, by byte range) holding its first byte.
+    pub fn draw_spans(
+        &mut self,
+        scene: &mut Scene,
+        atlases: &mut Atlases,
+        sh: &Shaped,
+        (x, y): (f32, f32),
+        color: Rgba,
+        spans: &[(std::ops::Range<usize>, Rgba)],
+    ) {
+        for ((g, line_y), pos) in sh.glyphs.iter().zip(&sh.pos) {
+            let at = spans.partition_point(|(r, _)| r.end <= pos.start);
+            let c = spans
+                .get(at)
+                .filter(|(r, _)| r.start <= pos.start)
+                .map_or(color, |(_, c)| *c);
+            let p = g.physical((x, y + line_y), 1.0);
+            let Some(ra) = self.raster(atlases, p.cache_key) else {
+                continue;
+            };
+            let rect = Rect::new(
+                p.x as f32 + ra.left,
+                p.y as f32 - ra.top,
+                ra.uv[2],
+                ra.uv[3],
+            );
+            scene.sprite(rect, ra.uv, c, ra.colored);
+        }
+    }
+
+    /// The terminal font size, logical pixels.
+    pub fn term_size(&self) -> f32 {
+        self.term_size
+    }
+
+    /// Changes the terminal font size; cells are measured again.
+    pub fn set_term_size(&mut self, size: f32) {
+        if (size - self.term_size).abs() < f32::EPSILON {
+            return;
+        }
+        self.term_size = size;
+        self.ascii.fill(None);
+        self.clusters.clear();
+        self.cell = self.measure_cell();
+    }
+
     fn shape_cell(&mut self, atlases: &mut Atlases, text: &str, style: u8) -> Vec<CellPiece> {
         let size = self.term_size * self.scale;
         let weight = if style & BOLD != 0 { 700 } else { 400 };

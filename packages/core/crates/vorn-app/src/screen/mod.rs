@@ -10,6 +10,7 @@ mod dialogs;
 pub mod gates;
 pub mod menus;
 pub mod runs;
+pub mod settings;
 mod sidebar;
 pub mod tasks;
 pub mod workflows;
@@ -93,6 +94,17 @@ impl Screen<'_> {
         if self.st.view == MainView::Tasks {
             root = root.child_if(tasks::ghost(self));
         }
+        if self.st.settings.open {
+            root = root.child(
+                div()
+                    .id(crate::ui::Id::new("settings-page"))
+                    .sense(crate::ui::Sense::HOVER)
+                    .absolute(0.0, 0.0)
+                    .size(self.size.0, self.size.1)
+                    .layered()
+                    .child(settings::page(self)),
+            );
+        }
         root = root.child_if(dialogs::dialog(self));
         if let Some(menu) = &self.st.menu {
             let w = menus::width(&menu.kind);
@@ -100,6 +112,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::Recent => chrome::recent_panel(self),
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
+                crate::state::MenuKind::SetShell => settings::shell_panel(self),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,

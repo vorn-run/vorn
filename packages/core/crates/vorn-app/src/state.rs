@@ -145,6 +145,12 @@ pub enum MenuKind {
     NodeMore(String),
     /// The editor's icon and colour picker.
     WfIcon,
+    /// The settings shell picker's list.
+    SetShell,
+    /// A settings `<select>`, by the default it writes.
+    SetSelect(String),
+    /// A host's stored-key select.
+    SshKey(String),
 }
 
 impl MenuKind {
@@ -361,6 +367,9 @@ pub struct State {
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
     pub wf: crate::workflows::Workflows,
+    pub settings: crate::settings::Settings,
+    /// The build of the vornd this app talks to, from `server:identity`.
+    pub server_version: Option<String>,
 }
 
 impl State {

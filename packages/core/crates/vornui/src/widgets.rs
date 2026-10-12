@@ -479,7 +479,25 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         placeholder_color: color::GRAY_600,
         multiline,
         textarea: false,
+        nowrap: false,
+        spans: Vec::new(),
+        marks: Vec::new(),
     }))
+}
+
+/// A code field: a `<textarea>` whose lines do not wrap, as tall as the
+/// caller sizes it, coloured with [`El::edit_colors`].
+pub fn code(id: Id, name: &str, style: TextStyle, color: Rgba) -> El {
+    let mut look = edit_look(style, color, "", true);
+    if let Content::Edit(l) = &mut look {
+        l.textarea = true;
+        l.nowrap = true;
+    }
+    div()
+        .id(id)
+        .sense(Sense::TEXT)
+        .content(look)
+        .role(Role::MultilineTextInput, name)
 }
 
 /// A bare one-line text field in `style`, for callers that draw their own

@@ -89,6 +89,8 @@ pub enum Act {
     Task(crate::tasks::TaskAct),
     Run(crate::runs::RunAct),
     Workflow(crate::workflows::WfAct),
+    /// The settings page's controls.
+    Set(crate::settings::SetAct),
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.

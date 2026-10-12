@@ -27,12 +27,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading"] }
 
 # The UI layer turns winit's defaults off; a Linux window needs a display
 # server, so the app asks for both.
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 
-[target.'cfg(unix)'.dev-dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"

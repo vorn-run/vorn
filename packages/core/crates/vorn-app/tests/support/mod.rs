@@ -279,26 +279,45 @@ pub fn add_project(app: &mut App, v: &TestVornd, name: &str, defaults: Value) ->
 pub struct Shot {
     pub ui: Ui,
     target: Offscreen,
+    pub size: (f32, f32),
+}
+
+/// The window a shot draws: `VORN_APP_SHOT_SIZE` (`1400x900`) and
+/// `VORN_APP_SHOT_SCALE`, to compare with captures of today's app.
+fn shot_window() -> ((f32, f32), f32) {
+    let size = std::env::var("VORN_APP_SHOT_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse().ok()?, h.parse().ok()?))
+        })
+        .unwrap_or(look::WINDOW);
+    let scale = std::env::var("VORN_APP_SHOT_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    (size, scale)
 }
 
 impl Shot {
     pub fn new() -> Shot {
-        let ui = Ui::headless(RenderMode::Auto, &ui_config(1.0));
-        let px = (look::WINDOW.0 as u32, look::WINDOW.1 as u32);
+        let (size, scale) = shot_window();
+        let ui = Ui::headless(RenderMode::Auto, &ui_config(scale));
+        let px = ((size.0 * scale) as u32, (size.1 * scale) as u32);
         let target = ui.offscreen(px);
-        Shot { ui, target }
+        Shot { ui, target, size }
     }
 
     /// A frame laid out, so controls have their place, without drawing.
     pub fn frame(&mut self, app: &mut App) {
-        app.frame(&mut self.ui, look::WINDOW);
+        app.frame(&mut self.ui, self.size);
     }
 
     pub fn draw(&mut self, app: &mut App) {
         // A full atlas empties itself; the second pass fits one frame.
-        app.frame(&mut self.ui, look::WINDOW);
+        app.frame(&mut self.ui, self.size);
         if !self.ui.render_offscreen(&self.target) {
-            app.frame(&mut self.ui, look::WINDOW);
+            app.frame(&mut self.ui, self.size);
             self.ui.render_offscreen(&self.target);
         }
     }
@@ -338,8 +357,39 @@ impl Shot {
     #[track_caller]
     pub fn click(&mut self, app: &mut App, id: Id) {
         self.frame(app);
+        if app.st.settings.open && app.st.menu.is_none() && self.ui.rect_of(id).is_some() {
+            self.reveal(app, vorn_app::screen::settings::CONTENT, id);
+        }
         assert!(app.click(&mut self.ui, id), "{id:?} is on screen");
         self.frame(app);
+    }
+
+    /// Scrolls the scroll view `view` until `id` is inside the window.
+    #[track_caller]
+    pub fn reveal(&mut self, app: &mut App, view: Id, id: Id) {
+        let mut probe = 0.0;
+        for _ in 0..40 {
+            self.frame(app);
+            let Some(r) = self.ui.rect_of(id) else {
+                panic!("{id:?} is laid out");
+            };
+            let off = self.ui.scroll_offset(view);
+            // Clipped away entirely: walk the view from the top until it shows.
+            if r.h < 0.5 {
+                self.ui.set_scroll_offset(view, probe);
+                probe += self.size.1 / 2.0;
+                continue;
+            }
+            if r.y + r.h > self.size.1 - 8.0 {
+                self.ui
+                    .set_scroll_offset(view, off + (r.y + r.h - self.size.1) + 120.0);
+            } else if r.y < 0.0 {
+                self.ui
+                    .set_scroll_offset(view, (off + r.y - 120.0).max(0.0));
+            } else {
+                return;
+            }
+        }
     }
 
     /// Rests the pointer on `id`, for what shows on hover.
@@ -374,4 +424,80 @@ impl Shot {
             f(app, &self.ui)
         })
     }
+}
+
+/// Runs git in `dir` with a fixed author and date, as the capture seed does.
+pub fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "t@e.st")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "t@e.st")
+        .env("GIT_AUTHOR_DATE", "2026-10-01T10:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2026-10-01T10:00:00Z")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("git runs");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The wave 3 seed (`seed-w3.mjs`): an `acme` repository with staged and
+/// unstaged changes, a `feature-greet` worktree, a remote host, and a
+/// shell in the repository. Answers the repository's path.
+pub fn seed_acme(app: &mut App, v: &TestVornd) -> PathBuf {
+    let repo = v.home.join("acme");
+    std::fs::create_dir_all(repo.join("src/lib")).expect("dirs");
+    let w = |p: &str, t: &str| std::fs::write(repo.join(p), t).expect("write");
+    w("README.md", "# Acme\n\nA small service.\n");
+    w(
+        "package.json",
+        "{\n  \"name\": \"acme\",\n  \"version\": \"1.0.0\"\n}\n",
+    );
+    w("src/app.ts", "import { greet } from './lib/greet'\n\nexport function main(): void {\n  console.log(greet('world'))\n}\n\nmain()\n");
+    w(
+        "src/lib/greet.ts",
+        "export function greet(name: string): string {\n  return `Hello, ${name}`\n}\n",
+    );
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "Start the service"]);
+    w("src/app.ts", "import { greet } from './lib/greet'\n\nconst names = ['world', 'team']\n\nexport function main(): void {\n  for (const name of names) console.log(greet(name))\n}\n\nmain()\n");
+    w(
+        "src/lib/format.ts",
+        "export const upper = (s: string): string => s.toUpperCase()\n",
+    );
+    w(
+        "README.md",
+        "# Acme\n\nA small service that greets people.\n",
+    );
+    git(&repo, &["add", "README.md"]);
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    let projects = config["projects"].as_array().cloned().unwrap_or_default();
+    let mut projects = projects;
+    projects.push(json!({ "name": "acme", "path": repo, "preferredAgents": ["claude"], "icon": "Code", "iconColor": "#6F8FAF", "workspaceId": "personal" }));
+    config["projects"] = json!(projects);
+    config["remoteHosts"] = json!([{ "id": "host-1", "label": "Build box", "hostname": "build.example.com", "user": "ci", "port": 2222, "authMethod": "agent" }]);
+    app.rpc().call("config:save", config).expect("saved");
+    app.rpc()
+        .call(
+            "git:createWorktree",
+            json!({ "projectPath": repo, "branch": "feature-greet", "worktreeName": "feature-greet" }),
+        )
+        .expect("worktree");
+    wait_for("the project to arrive", || {
+        app.pump();
+        app.store
+            .projects
+            .iter()
+            .any(|p| p.name == "acme")
+            .then_some(())
+    });
+    repo
 }
