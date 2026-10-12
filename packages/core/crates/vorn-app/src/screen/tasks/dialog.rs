@@ -109,7 +109,7 @@ pub(in crate::screen) fn add_task(s: &Screen<'_>) -> El {
             s,
             Form::Dialog,
             "Add description...",
-            120.0,
+            202.0,
             64,
         )));
     if !f.images.is_empty() || f.attaching {

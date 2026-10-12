@@ -956,6 +956,19 @@ impl App {
                 }
                 if [desc_id(Form::Dialog), desc_id(Form::Detail)].contains(&id) {
                     self.st.tasks.slash = 0;
+                    // The menu opens under the `/`, not under the caret.
+                    let query = ui.edit(id).and_then(|e| {
+                        let (start, _) = tasks::slash_query(e.text(), e.caret())?;
+                        e.text().get(start..e.caret()).map(str::to_owned)
+                    });
+                    if let Some(q) = query {
+                        let style = crate::ui::TextStyle {
+                            line_height: 22.4,
+                            ..crate::ui::TextStyle::ui(14.0)
+                        };
+                        let scale = ui.text.scale.max(1.0);
+                        self.st.tasks.slash_dx = ui.text.shape(&q, style, None).w / scale;
+                    }
                 }
                 false
             }

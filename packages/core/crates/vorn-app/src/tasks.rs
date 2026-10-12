@@ -721,6 +721,8 @@ pub struct Tasks {
     pub slash: usize,
     /// Where the slash query Escape dismissed starts.
     pub slash_closed: Option<usize>,
+    /// How far left of the caret the open `/` sits, for the menu under it.
+    pub slash_dx: f32,
     /// The selection a link is being typed for.
     pub linking: Option<(Form, std::ops::Range<usize>)>,
     /// Where the link bar floats: the caret when it opened.

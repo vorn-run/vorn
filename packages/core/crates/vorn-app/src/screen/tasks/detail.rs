@@ -667,7 +667,7 @@ pub(super) fn panel(s: &Screen<'_>) -> Option<El> {
             s,
             Form::Detail,
             "Describe the task in detail, or type / for commands...",
-            120.0,
+            202.0,
             cols,
         )))
         .child(div().px(16.0).pb(12.0).child(images(s, Form::Detail, 64.0)));

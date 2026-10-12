@@ -291,7 +291,8 @@ pub(in crate::screen) fn overlay(s: &Screen<'_>) -> Option<El> {
     let caret = s.ui.ime_area();
     if let Some((form, _, matches)) = slash_open(s.ui, s.st.tasks.slash_closed) {
         let r = caret?;
-        return Some(slash_menu(s, form, &matches).absolute(r.x, r.y + r.h + 6.0));
+        let x = (r.x - s.st.tasks.slash_dx).max(0.0);
+        return Some(slash_menu(s, form, &matches).absolute(x, r.y + r.h + 6.0));
     }
     if s.st.tasks.linking.is_some() {
         let (x, y) = s.st.tasks.link_pos;
