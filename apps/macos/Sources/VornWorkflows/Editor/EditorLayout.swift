@@ -310,9 +310,11 @@ enum EditorLayout {
         var adds: [AddStep] = []
         for node in nodes where owners[node.id] == nil && !hasOutgoing.contains(node.id) {
             guard let anchor = cards.first(where: { $0.id == node.id }) else { continue }
+            let x: Double = anchor.absolute.x + anchor.width / 2 - 11
+            let y: Double = anchor.absolute.y + anchor.height + 18
             adds.append(AddStep(
                 id: "add:\(node.id)", afterNodeId: node.id, insideBranch: branchMembers.contains(node.id),
-                position: CGPoint(x: anchor.absolute.x + anchor.width / 2 - 11, y: anchor.absolute.y + anchor.height + 18)))
+                position: CGPoint(x: x, y: y)))
         }
 
         var addTrigger: CGPoint?
