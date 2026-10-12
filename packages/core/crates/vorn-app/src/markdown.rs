@@ -134,6 +134,9 @@ fn starts_block(t: &str) -> bool {
         }
 }
 
+/// Reaches one of an [`Inline`]'s marks.
+type Flag = fn(&mut Inline) -> &mut bool;
+
 /// The inline marks: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`
 /// and `[links](url)`.
 pub fn inline(src: &str) -> Vec<Inline> {
@@ -181,7 +184,7 @@ pub fn inline(src: &str) -> Vec<Inline> {
                 }
             }
         }
-        let toggles: [(&str, fn(&mut Inline) -> &mut bool); 5] = [
+        let toggles: [(&str, Flag); 5] = [
             ("**", |i| &mut i.bold),
             ("__", |i| &mut i.bold),
             ("~~", |i| &mut i.strike),
