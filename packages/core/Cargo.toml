@@ -62,7 +62,7 @@ strip = "symbols"
 # The browser build: size over the last few percent of speed.
 [profile.wasm]
 inherits = "release"
-opt-level = "s"
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
