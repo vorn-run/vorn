@@ -76,7 +76,11 @@ impl InputEncoder {
                 unshifted,
                 composing,
             } => {
-                let mods = tab_mods(t, *key, *mods)?;
+                let mods = match legacy(t, *key, *action, *mods)? {
+                    Legacy::Mods(m) => m,
+                    Legacy::Bytes(b) => return Ok(Encoded::Bytes(b.to_vec())),
+                    Legacy::Nothing => return Ok(Encoded::Nothing),
+                };
                 let ev = &mut self.key_event;
                 ev.set_action(match action {
                     KeyAction::Press => key::Action::Press,
@@ -232,16 +236,46 @@ impl InputEncoder {
     }
 }
 
-/// The cell a position in cells falls in, held inside the pane as Ghostty holds it.
-/// Tab's modifiers as xterm.js sends them, Ctrl and Alt dropped (Shift
-/// still makes it CSI Z), unless the program asked for Kitty key reports.
-fn tab_mods(t: &Term, key: KeyCode, m: u16) -> Result<u16, Error> {
-    if key.name() != "Tab" || !t.kitty_keyboard_flags()?.is_empty() {
-        return Ok(m);
-    }
-    Ok(m & !(mods::CTRL | mods::ALT | mods::CTRL_RIGHT | mods::ALT_RIGHT))
+/// What a key comes to while the program has not asked for Kitty key
+/// reports: the legacy bytes Vorn's web terminal sends, which differ from
+/// the encoder's own.
+#[derive(Debug, PartialEq, Eq)]
+enum Legacy {
+    /// Encode with these modifiers.
+    Mods(u16),
+    Bytes(&'static [u8]),
+    Nothing,
 }
 
+/// The web terminal's choices: Tab, Enter, Escape and Backspace ignore the
+/// modifiers it has no code for, Cmd+arrows send nothing, and Alt+arrows
+/// move by word. The grid endpoint is local, so vornd's platform is the
+/// client's, which decides Option+Left as the web terminal does on a Mac.
+fn legacy(t: &Term, key: KeyCode, action: KeyAction, m: u16) -> Result<Legacy, Error> {
+    if action == KeyAction::Release || !t.kitty_keyboard_flags()?.is_empty() {
+        return Ok(Legacy::Mods(m));
+    }
+    const SHIFT: u16 = mods::SHIFT | mods::SHIFT_RIGHT;
+    const ALT: u16 = mods::ALT | mods::ALT_RIGHT;
+    const CTRL: u16 = mods::CTRL | mods::CTRL_RIGHT;
+    const SUPER: u16 = mods::SUPER | mods::SUPER_RIGHT;
+    let mac = cfg!(target_os = "macos");
+    let only_alt = m & (mods::SHIFT | mods::ALT | mods::CTRL | mods::SUPER) == mods::ALT;
+    let as_ctrl = (m & !ALT) | mods::CTRL;
+    Ok(match key.name() {
+        "Tab" => Legacy::Mods(m & !(CTRL | ALT | SUPER)),
+        "Enter" | "NumpadEnter" | "Escape" => Legacy::Mods(m & !(SHIFT | CTRL | SUPER)),
+        "Backspace" => Legacy::Mods(m & !(SHIFT | SUPER)),
+        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" if m & SUPER != 0 => Legacy::Nothing,
+        "ArrowLeft" if only_alt && mac => Legacy::Bytes(b"\x1bb"),
+        "ArrowRight" if only_alt && mac => Legacy::Bytes(b"\x1bf"),
+        "ArrowLeft" | "ArrowRight" if only_alt => Legacy::Mods(as_ctrl),
+        "ArrowUp" | "ArrowDown" if only_alt && !mac => Legacy::Mods(as_ctrl),
+        _ => Legacy::Mods(m),
+    })
+}
+
+/// The cell a position in cells falls in, held inside the pane as Ghostty holds it.
 fn clamp_cell(at: f32, n: u32) -> u32 {
     (at.max(0.0) as u32).min(n.saturating_sub(1))
 }
@@ -340,6 +374,47 @@ mod tests {
         let mut t = t;
         t.vt_write(b"\x1b[>1u");
         assert_eq!(send(&t, mods::CTRL, None), b"\x1b[9;5u");
+    }
+
+    #[test]
+    fn modified_keys_encode_as_the_web_terminal_sends_them() {
+        let t = Term::new(20, 5).unwrap();
+        let mut enc = InputEncoder::new().unwrap();
+        let mut send = |t: &Term, name, m| enc.encode(t, &key(name, m, None)).unwrap();
+        let (sup, alt, ctrl, shift) = (mods::SUPER, mods::ALT, mods::CTRL, mods::SHIFT);
+        for m in [shift, ctrl, sup, sup | shift] {
+            assert_eq!(bytes(send(&t, "Enter", m)), b"\r", "Enter {m:#x}");
+            assert_eq!(bytes(send(&t, "Escape", m)), b"\x1b", "Escape {m:#x}");
+        }
+        assert_eq!(bytes(send(&t, "Enter", alt)), b"\x1b\r");
+        assert_eq!(bytes(send(&t, "Escape", alt)), b"\x1b\x1b");
+        assert_eq!(bytes(send(&t, "Backspace", sup)), b"\x7f");
+        assert_eq!(bytes(send(&t, "Backspace", alt)), b"\x1b\x7f");
+        assert_eq!(bytes(send(&t, "Backspace", ctrl)), b"\x08");
+        for arrow in ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] {
+            assert_eq!(send(&t, arrow, sup), Encoded::Nothing, "Cmd+{arrow}");
+        }
+        let (left, right) = if cfg!(target_os = "macos") {
+            (&b"\x1bb"[..], &b"\x1bf"[..])
+        } else {
+            (&b"\x1b[1;5D"[..], &b"\x1b[1;5C"[..])
+        };
+        assert_eq!(bytes(send(&t, "ArrowLeft", alt)), left);
+        assert_eq!(bytes(send(&t, "ArrowRight", alt)), right);
+        assert_eq!(bytes(send(&t, "ArrowLeft", alt | shift)), b"\x1b[1;4D");
+        assert_eq!(bytes(send(&t, "ArrowLeft", ctrl)), b"\x1b[1;5D");
+        assert_eq!(bytes(send(&t, "Home", 0)), b"\x1b[H");
+        assert_eq!(bytes(send(&t, "End", 0)), b"\x1b[F");
+        assert_eq!(bytes(send(&t, "Home", shift)), b"\x1b[1;2H");
+        // Cmd with a letter is the app's: nothing reaches the program.
+        let cmd_v = key("V", sup, Some("v"));
+        assert_eq!(enc.encode(&t, &cmd_v).unwrap(), Encoded::Nothing);
+        // Kitty key reports keep every modifier.
+        let mut t = t;
+        t.vt_write(b"\x1b[>1u");
+        let mut send = |t: &Term, name, m| enc.encode(t, &key(name, m, None)).unwrap();
+        assert_ne!(bytes(send(&t, "Enter", shift)), b"\r");
+        assert_eq!(bytes(send(&t, "ArrowLeft", alt)), b"\x1b[1;3D");
     }
 
     #[test]
