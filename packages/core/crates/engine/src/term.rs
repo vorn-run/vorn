@@ -394,7 +394,10 @@ any = ['^>']
         let mut t = ruled();
         let mut fx = Vec::new();
         let mut feed = |t: &mut Term, b: &[u8]| t.feed(b, true, &mut fx);
-        assert_eq!(feed(&mut t, b"\x1b[4;1H> "), Some(vorn_analysis::STATUS_IDLE));
+        assert_eq!(
+            feed(&mut t, b"\x1b[4;1H> "),
+            Some(vorn_analysis::STATUS_IDLE)
+        );
         assert_eq!(feed(&mut t, b"x"), None);
         assert_eq!(
             feed(&mut t, b"\x1b[3;1H* esc to interrupt\x1b[4;1H\x1b[2K"),

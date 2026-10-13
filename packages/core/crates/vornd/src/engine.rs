@@ -45,8 +45,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{
-    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool,
-    Summary, Viewed,
+    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer,
+    Pool, Summary, Viewed,
 };
 use vorn_sessiond_wire::{
     Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnSpec,
@@ -254,9 +254,7 @@ impl Engine {
         // says which agent a session runs.
         let known = Arc::clone(&registry);
         let agents = Agents(Arc::new(move |id: &str| {
-            known
-                .agent_type(id)
-                .map(|t| vorn_agents::status::rules(&t))
+            known.agent_type(id).map(|t| vorn_agents::status::rules(&t))
         }));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),

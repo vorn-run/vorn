@@ -132,7 +132,7 @@ impl Region {
         };
         let (lo, hi) = (lo.max(0), hi.min(h - 1));
         // Both within 0..height by now, so they fit.
-        (lo <= hi).then(|| (lo as u16, hi as u16))
+        (lo <= hi).then_some((lo as u16, hi as u16))
     }
 }
 
@@ -330,7 +330,14 @@ title = '^t$'
         assert_eq!(r.agent(), "t");
         let s = rows("busy\nx\nProceed?\n");
         assert_eq!(
-            r.status(&screen(&s, Cursor { row: 1, col: 0, visible: false })),
+            r.status(&screen(
+                &s,
+                Cursor {
+                    row: 1,
+                    col: 0,
+                    visible: false
+                }
+            )),
             Some(ScreenStatus::Waiting)
         );
     }
@@ -346,8 +353,15 @@ title = '^t$'
     fn cursor_rows_follow_the_cursor_and_its_visibility() {
         let r = Rules::parse(FILE).unwrap();
         let s = rows("busy\nx\n\n\n\n");
-        let at = |row, visible| Cursor { row, col: 0, visible };
-        assert_eq!(r.status(&screen(&s, at(1, false))), Some(ScreenStatus::Working));
+        let at = |row, visible| Cursor {
+            row,
+            col: 0,
+            visible,
+        };
+        assert_eq!(
+            r.status(&screen(&s, at(1, false))),
+            Some(ScreenStatus::Working)
+        );
         assert_eq!(r.status(&screen(&s, at(1, true))), None);
         assert_eq!(r.status(&screen(&s, at(3, false))), None);
         let done = rows("done\nbusy\n\n");

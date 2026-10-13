@@ -63,11 +63,14 @@ fn read(rules: &Rules, fixture: &Fixture) -> Option<ScreenStatus> {
         .lines()
         .map(|l| l.trim_end().to_owned())
         .collect();
-    let cursor = fixture.cursor.as_ref().map_or(Cursor::default(), |c| Cursor {
-        row: c.row,
-        col: c.col,
-        visible: true,
-    });
+    let cursor = fixture
+        .cursor
+        .as_ref()
+        .map_or(Cursor::default(), |c| Cursor {
+            row: c.row,
+            col: c.col,
+            visible: true,
+        });
     rules.status(&Screen {
         rows: &rows,
         top: 0,

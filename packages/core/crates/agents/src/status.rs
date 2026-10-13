@@ -54,7 +54,10 @@ mod tests {
     fn every_agent_has_a_rule_file_naming_it() {
         for agent in Agent::ALL {
             assert_eq!(agent.screen_rules().agent(), agent.id());
-            assert!(std::ptr::eq(rules(agent.id()).unwrap(), agent.screen_rules()));
+            assert!(std::ptr::eq(
+                rules(agent.id()).unwrap(),
+                agent.screen_rules()
+            ));
         }
         assert!(rules("shell").is_none());
         assert!(rules("").is_none());

@@ -14,7 +14,7 @@ Rust binaries:
 | Crate                                         | What                                                                                        |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `crates/screen` (`vorn-screen`)               | A terminal's screen on libghostty-vt: feed, title, cwd, serialize                           |
-| `crates/analysis` (`vorn-analysis`)           | Stripped line ring, bracketed paste and status patterns                                     |
+| `crates/analysis` (`vorn-analysis`)           | Stripped line ring, bracketed paste, status patterns and the agents' screen rule matcher    |
 | `crates/pipeline` (`vorn-pipeline`)           | A terminal's thread: screen, scrollback ring, history frames and checkpoint bodies          |
 | `crates/term-proto` (`vorn-term-proto`)       | Wire types: record headers and cursors, the screen mirror's rows, `row_fmt` 1, bytes frames |
 | `crates/term-mirror` (`vorn-term-mirror`)     | A client's copy of a screen, kept from snapshots and deltas with no parser                  |

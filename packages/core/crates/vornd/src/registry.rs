@@ -2988,8 +2988,12 @@ mod tests {
         r.screen_status("a", RUNNING, at(1, 1, 0));
         let note = r.screen_status("a", IDLE, at(1, 2, 0)).unwrap();
         assert_eq!(note["record"]["status"], "idle");
-        r.hook_status(&hook("a", Some("running"), true), Some(at(1, 3, 0)), Instant::now())
-            .unwrap();
+        r.hook_status(
+            &hook("a", Some("running"), true),
+            Some(at(1, 3, 0)),
+            Instant::now(),
+        )
+        .unwrap();
         assert!(r.screen_status("a", IDLE, at(1, 4, 0)).is_none());
         assert!(r.screen_status("a", WAITING, at(1, 5, 0)).is_none());
         assert_eq!(status(&r, "a"), AgentStatus::Running);

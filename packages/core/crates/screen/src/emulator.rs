@@ -489,7 +489,10 @@ mod tests {
         let mut em = Emulator::with_scrollback(12, 6, 1 << 16).unwrap();
         let mut fx = Vec::new();
         em.feed(b"old\r\n\r\n\r\n\r\n\r\n\r\n", &mut fx);
-        em.feed(b"\x1b[2J\x1b[Htop  \x1b[3;3Hmid\x1b[6;1H> abcdefghi\x1b[?25l", &mut fx);
+        em.feed(
+            b"\x1b[2J\x1b[Htop  \x1b[3;3Hmid\x1b[6;1H> abcdefghi\x1b[?25l",
+            &mut fx,
+        );
         let mut rows = Vec::new();
         em.rows_text(0, 5, &mut rows);
         assert_eq!(rows, ["top", "", "  mid", "", "", "> abcdefghi"]);
