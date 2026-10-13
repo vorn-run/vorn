@@ -62,14 +62,8 @@ public struct RootView: View {
         }
         .overlay {
             if model.commitOpen, let s = changesSession {
-                let cwd = s.worktreePath ?? s.projectPath
-                CommitDialog(cwd: cwd, branch: s.branch, stat: store.diffStats[cwd], client: store.client, toasts: model.toasts,
-                             onClose: { model.commitOpen = false }) {
-                    model.panes.diffSessionID = nil
-                    Task {
-                        await store.refreshDiffStat(cwd)
-                        model.panes.diffSessionID = s.id
-                    }
+                CommitDialog(branch: s.branch, stat: store.diffStats[s.worktreePath ?? s.projectPath], onClose: { model.commitOpen = false }) {
+                    await actions.commit(s, message: $0, includeUnstaged: $1, push: $2)
                 }
             }
         }

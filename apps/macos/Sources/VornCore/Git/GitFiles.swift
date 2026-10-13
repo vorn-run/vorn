@@ -1,15 +1,29 @@
 import Foundation
 
-/// One changed file and its unified diff (`GitFileDiff`).
+/// `GitFileDiff` in types.ts: one changed file and its unified diff.
 public struct GitFileDiff: Codable, Hashable, Sendable, Identifiable {
+    public enum Status: String, Codable, Sendable {
+        case added, modified, deleted, renamed
+
+        /// STATUS_LETTER in DiffSidebar.tsx.
+        public var letter: String {
+            switch self {
+            case .modified: "M"
+            case .added: "A"
+            case .deleted: "D"
+            case .renamed: "R"
+            }
+        }
+    }
+
     public var filePath: String
-    public var status: String
+    public var status: Status
     public var insertions: Int
     public var deletions: Int
     public var diff: String
     public var id: String { filePath }
 
-    public init(filePath: String, status: String, insertions: Int, deletions: Int, diff: String) {
+    public init(filePath: String, status: Status, insertions: Int, deletions: Int, diff: String) {
         self.filePath = filePath
         self.status = status
         self.insertions = insertions
@@ -17,17 +31,17 @@ public struct GitFileDiff: Codable, Hashable, Sendable, Identifiable {
         self.diff = diff
     }
 
-    /// The status letter DiffSidebar.tsx draws.
-    public var letter: String {
-        switch status {
-        case "added": "A"
-        case "deleted": "D"
-        case "renamed": "R"
-        default: "M"
-        }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        filePath = try c.decode(String.self, forKey: .filePath)
+        status = (try? c.decode(Status.self, forKey: .status)) ?? .modified
+        insertions = (try? c.decode(Int.self, forKey: .insertions)) ?? 0
+        deletions = (try? c.decode(Int.self, forKey: .deletions)) ?? 0
+        diff = (try? c.decode(String.self, forKey: .diff)) ?? ""
     }
 }
 
+/// `GitDiffResult` in types.ts: what `git:diffFull` answers.
 public struct GitDiffResult: Codable, Hashable, Sendable {
     public var stat: DiffStat
     public var files: [GitFileDiff]
@@ -38,13 +52,14 @@ public struct GitDiffResult: Codable, Hashable, Sendable {
 }
 
 /// One line of a file's diff as drawn; `index` is its line in the raw diff, which comments are keyed by.
-public struct DiffRow: Hashable, Sendable {
+public struct DiffRow: Hashable, Sendable, Identifiable {
     public enum Kind: Sendable { case meta, hunk, add, del, ctx }
     public var kind: Kind
     public var index: Int
     public var text: String
     public var oldLine: Int?
     public var newLine: Int?
+    public var id: Int { index }
 
     /// parseDiffRows: header lines dropped, hunks numbered, blank metadata skipped.
     public static func parse(_ diff: String) -> [DiffRow] {
@@ -75,7 +90,7 @@ public struct DiffRow: Hashable, Sendable {
     }
 }
 
-/// A review comment on one diff line.
+/// `DiffComment` in DiffSidebar.tsx: a review note on one line of a file's diff, keyed by its index in the raw diff.
 public struct DiffComment: Hashable, Sendable {
     public var filePath: String
     public var lineIndex: Int

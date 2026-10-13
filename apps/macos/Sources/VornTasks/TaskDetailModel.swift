@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import VornCore
+import VornUI
 
 /// An image picked before the task exists; it is uploaded once the task is created.
 struct PendingImage: Identifiable, Hashable {
@@ -32,10 +33,8 @@ public final class TaskDetailModel {
     /// The task and folder the diff was last fetched for; nil while the task shows no changes.
     private var diffKey: String??
     var showDiff = true
-    var selectedFile: String?
-    public private(set) var comments: [DiffComment] = []
-    /// The line whose comment box is open; its `comment` is unused.
-    var commentingLine: DiffComment?
+    public let review = DiffReviewState()
+    public var comments: [DiffComment] { review.comments }
     public var commitDialogOpen = false
 
     public init(store: TasksStore, taskId: String?) {
@@ -57,9 +56,9 @@ public final class TaskDetailModel {
     public var showsChanges: Bool { task.map { $0.status == .inProgress || $0.status == .inReview } ?? false }
 
     /// The totals over every file, as the panel's header and the commit dialog show them.
-    var stat: GitDiffResult.Stat? {
+    var stat: DiffStat? {
         guard let diff else { return nil }
-        return GitDiffResult.Stat(filesChanged: diff.files.count, insertions: diff.files.reduce(0) { $0 + $1.insertions },
+        return DiffStat(filesChanged: diff.files.count, insertions: diff.files.reduce(0) { $0 + $1.insertions },
                                   deletions: diff.files.reduce(0) { $0 + $1.deletions })
     }
 
@@ -189,7 +188,7 @@ public final class TaskDetailModel {
         diffKey = .some(key)
         if key == nil {
             diff = nil
-            resetReview()
+            review.reset()
         } else {
             await loadDiff()
         }
@@ -203,43 +202,9 @@ public final class TaskDetailModel {
         defer { diffLoading = false }
         do {
             diff = try await extras.gitDiff(cwd: cwd)
-            resetReview()
+            review.reset()
         } catch {}
     }
-
-    private func resetReview() {
-        selectedFile = nil
-        comments = []
-        commentingLine = nil
-    }
-
-    /// handleClickLine: a second click on the open line closes it.
-    public func clickLine(filePath: String, lineIndex: Int, lineContent: String) {
-        if commentingLine?.filePath == filePath, commentingLine?.lineIndex == lineIndex {
-            commentingLine = nil
-        } else {
-            commentingLine = DiffComment(filePath: filePath, lineIndex: lineIndex, lineContent: lineContent, comment: "")
-        }
-    }
-
-    public func addComment(_ text: String) {
-        guard var line = commentingLine else { return }
-        line.comment = text
-        comments.append(line)
-        commentingLine = nil
-    }
-
-    public func comment(filePath: String, lineIndex: Int, lineContent: String, _ text: String) {
-        clickLine(filePath: filePath, lineIndex: lineIndex, lineContent: lineContent)
-        addComment(text)
-    }
-
-    func removeComment(at index: Int) {
-        guard comments.indices.contains(index) else { return }
-        comments.remove(at: index)
-    }
-
-    func clearComments() { comments = [] }
 
     /// What the send button says: "Send to Agent" when the task has a conversation, else "Copy Feedback".
     var sendsToAgent: Bool { task?.agentSessionId != nil }
@@ -247,7 +212,7 @@ public final class TaskDetailModel {
     /// handleSendFeedback: the task's conversation resumed with the review as its prompt, else the clipboard.
     public func sendFeedback() async {
         guard !comments.isEmpty, let task else { return }
-        let feedback = DiffReview.feedback(comments)
+        let feedback = DiffComment.feedback(comments)
         if task.agentSessionId != nil, let agent = task.assignedAgent, agent.supportsExactSessionResume,
            store.projects.contains(where: { $0.name == task.projectName }) {
             let prompt = DiffReview.prompt(feedback, task: task, projectName: task.projectName)
@@ -257,8 +222,8 @@ public final class TaskDetailModel {
             store.copyText(feedback)
             store.onToast("Review feedback copied to clipboard", .info)
         }
-        comments = []
-        commentingLine = nil
+        review.clearComments()
+        review.commentingLine = nil
     }
 
     /// CommitDialog.handleSubmit: commit, optionally push; the answer is the error to show, if any.

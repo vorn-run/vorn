@@ -108,6 +108,24 @@ struct ShellActions {
         return g
     }
 
+    /// CommitDialog.handleContinue for a session's tree: commit, then push if asked; answers the error to show.
+    func commit(_ session: TerminalSession, message: String, includeUnstaged: Bool, push: Bool) async -> String? {
+        let cwd = session.worktreePath ?? session.projectPath
+        do {
+            if let err = try await store.client.commit(cwd: cwd, message: message, includeUnstaged: includeUnstaged) { return err }
+            if push, let err = try await store.client.push(cwd: cwd) { return "Committed, but push failed: \(err)" }
+        } catch {
+            return String(describing: error)
+        }
+        model.toasts.show(push ? "Committed and pushed" : "Changes committed", .success)
+        // The panel remounts so it fetches the diff again, as onCommitted does.
+        model.commitOpen = false
+        model.panes.diffSessionID = nil
+        await store.refreshDiffStat(cwd)
+        model.panes.diffSessionID = session.id
+        return nil
+    }
+
     /// addTerminalToPanel: a shell in the owner's tree, claimed by the owner's panel.
     func addPanelTerminal(_ ownerID: String) {
         guard let owner = store.session(ownerID) else { return }

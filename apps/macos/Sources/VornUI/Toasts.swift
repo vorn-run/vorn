@@ -173,23 +173,31 @@ private struct ToastRow: View {
     }
 }
 
-/// A glyph turning once a second, as `animate-spin`.
+/// A glyph turning once a second while `active`, as `animate-spin` on Loader2 or a refreshing RefreshCw.
 public struct SpinningGlyph: View {
     let glyph: LucideGlyph
-    var size: CGFloat = 13
-    var strokeWidth: CGFloat = 2
-    @State private var turn = false
+    var size: CGFloat
+    var strokeWidth: CGFloat
+    var active: Bool
+    @State private var angle = 0.0
 
-    public init(glyph: LucideGlyph = .loaderCircle, size: CGFloat = 13, strokeWidth: CGFloat = 2) {
+    public init(glyph: LucideGlyph = .loaderCircle, size: CGFloat = 13, strokeWidth: CGFloat = 2, active: Bool = true) {
         self.glyph = glyph
         self.size = size
         self.strokeWidth = strokeWidth
+        self.active = active
     }
 
     public var body: some View {
         LucideIcon(glyph, size: size, strokeWidth: strokeWidth)
-            .rotationEffect(.degrees(turn ? 360 : 0))
-            .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: turn)
-            .onAppear { turn = true }
+            .rotationEffect(.degrees(active ? angle : 0))
+            .onAppear(perform: spin)
+            .onChange(of: active) { spin() }
+    }
+
+    private func spin() {
+        guard active else { return }
+        angle = 0
+        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { angle = 360 }
     }
 }

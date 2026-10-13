@@ -250,8 +250,8 @@ struct TaskChangesSection: View {
                         .foregroundStyle(Theme.inkFaint)
                         .frame(maxWidth: .infinity).padding(.vertical, 32)
                 } else if let diff = model.diff, !diff.files.isEmpty {
-                    DiffFileList(files: diff.files, selectedFile: model.selectedFile) { model.selectedFile = $0 }
-                    DiffContent(model: model, files: diff.files)
+                    DiffFileList(files: diff.files, selectedFile: model.review.selectedFile) { model.review.selectedFile = $0 }
+                    DiffContent(review: model.review, files: diff.files)
                 } else {
                     Text(model.cwd.isEmpty ? "No project path" : "No uncommitted changes")
                         .font(.system(size: 12)).foregroundStyle(Theme.inkFaint)
@@ -269,7 +269,7 @@ struct TaskChangesSection: View {
                 .font(.system(size: 12)).foregroundStyle(Theme.inkSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Hovering { hovered in
-                Button { model.clearComments() } label: {
+                Button { model.review.clearComments() } label: {
                     Text("Clear").font(.system(size: 11)).foregroundStyle(hovered ? Theme.inkSecondary : Theme.inkFaint)
                 }
                 .buttonStyle(.plain)
@@ -292,28 +292,6 @@ struct TaskChangesSection: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.white(0.02))
         .overlay(alignment: .top) { Rectangle().fill(Theme.white(0.08)).frame(height: 1) }
-    }
-}
-
-/// A glyph that turns while `active`, for Loader2 and a refreshing RefreshCw.
-struct SpinningGlyph: View {
-    let glyph: LucideGlyph
-    var size: CGFloat
-    var strokeWidth: CGFloat
-    var active: Bool
-    @State private var angle = 0.0
-
-    var body: some View {
-        LucideIcon(glyph, size: size, strokeWidth: strokeWidth)
-            .rotationEffect(.degrees(active ? angle : 0))
-            .onAppear(perform: spin)
-            .onChange(of: active) { spin() }
-    }
-
-    private func spin() {
-        guard active else { return }
-        angle = 0
-        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { angle = 360 }
     }
 }
 
