@@ -2747,15 +2747,21 @@ impl App {
         let k = ui.scale();
         let cell = ui.text.cell();
         let Some(r) = ui.rect_of(id) else { return };
+        // Pixel travel meets physical rows; a notch counts in logical WHEEL_LINE units.
+        let dy = if phase == WheelPhase::Line {
+            dy
+        } else {
+            dy * k
+        };
         if route == Route::History {
             let history = self.views.get(&session).map_or(0, |v| v.history);
             let s = self.scrolls.entry(session.clone()).or_default();
             s.set_metrics(cell.h, r.h * k, history);
             s.reduced = ui.reduced_motion();
-            s.wheel(dy * k, phase, now);
+            s.wheel(dy, phase, now);
             ui.wake_at(now);
         } else {
-            let n = rows.take(dy * k, phase, cell.h, route);
+            let n = rows.take(dy, phase, cell.h, route);
             let col = ((x - r.x) * k / cell.w).floor().max(0.0);
             let row = ((y - r.y) * k / cell.h).floor().max(0.0);
             g.wheel_rows(&session, n, route, col, row);
