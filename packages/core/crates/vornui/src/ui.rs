@@ -116,6 +116,23 @@ struct Cx<'a> {
     xf: Xf,
 }
 
+/// How close an overlay comes to the window's edges.
+const MARGIN: f32 = 4.0;
+
+/// Where a [`Place::Beside`] overlay `w` wide starts: right of `host`,
+/// else left of it when only that side fits, else the roomier side.
+fn beside_x(host: Rect, w: f32, gap: f32, win_w: f32) -> f32 {
+    let right = host.right() + gap;
+    let left = host.x - gap - w;
+    let room_right = win_w - MARGIN - right;
+    let room_left = host.x - gap - MARGIN;
+    if room_right >= w || room_right >= room_left {
+        right
+    } else {
+        left
+    }
+}
+
 /// A border `w` logical pixels wide at scale `k`, in whole physical pixels
 /// and never under one, so a 1px border is one crisp pixel at 1.5x too.
 fn border_px(w: f32, k: f32) -> f32 {
@@ -468,11 +485,13 @@ impl Ui {
             Place::BelowEnd => (host.right() - w, host.bottom() + g),
             Place::AboveStart => (host.x, host.y - g - h),
             Place::Right => (host.right() + g, host.y + (host.h - h) / 2.0),
+            Place::Beside => (beside_x(host, w, g, win.0), host.y - ov.lift),
         };
         // Flip to the other side when there is no room, then keep it on
         // screen.
-        const MARGIN: f32 = 4.0;
-        if y + h > win.1 - MARGIN && host.y - g - h >= MARGIN {
+        if ov.place == Place::Beside {
+            // Slides up to fit rather than flipping above its entry.
+        } else if y + h > win.1 - MARGIN && host.y - g - h >= MARGIN {
             y = host.y - g - h;
         } else if y < MARGIN && host.bottom() + g + h <= win.1 - MARGIN {
             y = host.bottom() + g;

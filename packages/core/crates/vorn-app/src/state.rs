@@ -243,7 +243,7 @@ impl MenuKind {
 pub struct Menu {
     pub kind: MenuKind,
     pub at: (f32, f32),
-    pub sub: Option<usize>,
+    pub sub: crate::ui::menu::Cascade,
 }
 
 /// The dialog over everything.

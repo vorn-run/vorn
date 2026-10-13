@@ -48,7 +48,14 @@ pub fn width(kind: &MenuKind) -> f32 {
 }
 
 /// A panel of `items` in the open menu's group, its submenu in [`SUB`].
-pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
+pub fn panel(
+    ui: &Ui,
+    group: Id,
+    w: f32,
+    name: &str,
+    items: Vec<Item>,
+    sub: crate::ui::menu::Cascade,
+) -> El {
     crate::ui::menu::panel(ui, MENU, group, SUB, w, name, items, sub)
 }
 

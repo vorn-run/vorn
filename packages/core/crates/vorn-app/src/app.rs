@@ -24,7 +24,7 @@ use crate::state::{
     basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
-    decode_png, item_id, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
+    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
     WindowRequest,
 };
 use crate::view::PaneView;
@@ -1096,7 +1096,7 @@ impl App {
         self.st.menu = Some(Menu {
             kind,
             at,
-            sub: None,
+            sub: Default::default(),
         });
         ui.open_menu(menus::MENU, trigger.unwrap_or(menus::MENU));
         if self
@@ -2242,12 +2242,13 @@ impl App {
             return;
         };
         let items = menus::items(&self.screen(ui), &menu.kind);
-        let Some(item) = menus::chosen(items, menu.sub, group, index) else {
+        let Some(item) = menus::chosen(items, menu.sub.open, group, index) else {
             return;
         };
+        // An entry with a submenu toggles it.
         if group == menus::MENU && !item.sub.is_empty() {
             if let Some(m) = &mut self.st.menu {
-                m.sub = Some(index);
+                m.sub.click(index, ui.now());
             }
             ui.reopen_menu();
             return;
@@ -2275,9 +2276,34 @@ impl App {
         self.run(ui, act, Src::default());
     }
 
+    /// Which of the open menu's entries have a submenu.
+    fn menu_subs(&self, ui: &Ui) -> Option<Vec<bool>> {
+        let menu = self.st.menu.as_ref()?;
+        let items = menus::items(&self.screen(ui), &menu.kind);
+        Some(items.iter().map(|i| !i.sub.is_empty()).collect())
+    }
+
+    /// The open menu's submenu keys: Right and Enter open one, Left and
+    /// Escape close it.
+    fn menu_key(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        let Input::Key { code, .. } = input else {
+            return false;
+        };
+        let Some(subs) = self.menu_subs(ui) else {
+            return false;
+        };
+        let Some(m) = &mut self.st.menu else {
+            return false;
+        };
+        crate::ui::menu::key(ui, &mut m.sub, menus::MENU, menus::SUB, &subs, code)
+    }
+
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.st.menu.is_some() && self.menu_key(ui, input) {
+            return true;
+        }
         if self.palette_key(ui, input) || self.onboard_key(ui, input) {
             return true;
         }
@@ -2628,18 +2654,11 @@ impl App {
                 .ok()
                 .and_then(|(w, h, rgba)| ui.image(w, h, &rgba));
         }
-        // A hovered entry with a submenu opens it; another closes it.
-        if let Some(menu) = self.st.menu.clone() {
-            let items = menus::items(&self.screen(ui), &menu.kind);
-            let hovered = items
-                .iter()
-                .enumerate()
-                .find(|(i, _)| ui.hovered(item_id(menus::MENU, *i)));
-            if let Some((i, item)) = hovered {
-                let sub = (!item.sub.is_empty()).then_some(i);
-                if let Some(m) = &mut self.st.menu {
-                    m.sub = sub;
-                }
+        // A hovered entry with a submenu opens it, unless the pointer is
+        // on its way to the one open.
+        if let Some(subs) = self.menu_subs(ui) {
+            if let Some(m) = &mut self.st.menu {
+                crate::ui::menu::track(ui, &mut m.sub, menus::MENU, menus::SUB, &subs);
             }
         }
         if self.st.menu.is_some() && !ui.menu_open(menus::MENU) {
