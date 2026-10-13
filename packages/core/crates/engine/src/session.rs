@@ -106,8 +106,8 @@ pub struct Config {
     /// host's bytes clients); one with any is never put away.
     pub viewed: Option<Viewed>,
     /// The screen rules a session's agent status is read with, asked of it
-    /// by id. None, or no rules for a session, leaves the analyzer's
-    /// patterns.
+    /// by id. Where none of them holds, or a session has none, the
+    /// analyzer's patterns decide.
     pub agents: Option<Agents>,
 }
 
@@ -281,9 +281,9 @@ pub enum Effect {
     /// A state: the cwd from here on.
     Cwd(String),
     /// A state: the agent status from here on, one of
-    /// `vorn_analysis::STATUS_*`: read by the agent's screen rules when
-    /// [`Config::agents`] has some for it (idle among them), else by the
-    /// analyzer's patterns.
+    /// `vorn_analysis::STATUS_*`: what the agent's screen rules from
+    /// [`Config::agents`] read (idle among them), or the analyzer's
+    /// patterns where none holds.
     Status(u32),
     /// A state: the program's OSC 9;4 progress from here on.
     Progress {

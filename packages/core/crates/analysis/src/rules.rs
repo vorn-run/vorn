@@ -3,8 +3,8 @@
 //! A rule file is TOML, one per agent, with an ordered list of rules. Each
 //! rule names a status and the conditions that mean it: text patterns in a
 //! region of rows, the cursor's visibility, the window title. The first rule
-//! whose conditions all hold decides; when none does, the status stays what it
-//! was.
+//! whose conditions all hold decides; when none does, the rules say nothing
+//! and the caller falls back on [`crate::Analyzer`]'s patterns.
 //!
 //! ```toml
 //! agent = "example"

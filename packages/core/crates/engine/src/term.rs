@@ -64,9 +64,9 @@ pub(crate) struct Term {
     pub(crate) fidelity: Fidelity,
     /// The theme colour queries are answered with, kept across a reset.
     colors: Option<Theme>,
-    /// The agent's screen rules, when its status comes from them rather than
-    /// from the analyzer's patterns. Not part of a checkpoint: the session
-    /// sets them.
+    /// The agent's screen rules, which decide its status when one holds; the
+    /// analyzer's patterns decide when none does. Not part of a checkpoint:
+    /// the session sets them.
     pub(crate) rules: Option<&'static Rules>,
     /// The rows the rules last read, kept for their allocations.
     rows: Vec<String>,
@@ -106,12 +106,10 @@ impl Term {
     ) -> Option<u32> {
         self.em.feed(bytes, effects);
         let text = self.decode(bytes);
+        let patterns = self.analyzer.append_str(&text, analyze);
         let status = match self.rules {
-            Some(rules) if analyze => {
-                self.analyzer.feed(&text);
-                self.screen_status(rules)
-            }
-            _ => self.analyzer.append_str(&text, analyze),
+            Some(rules) if analyze => self.screen_status(rules).unwrap_or(patterns),
+            _ => patterns,
         };
         if status == vorn_analysis::STATUS_NONE || status == self.status {
             return None;
@@ -120,11 +118,12 @@ impl Term {
         Some(status)
     }
 
-    /// The status the agent's screen rules read on the screen now, or
-    /// `STATUS_NONE` when none holds or a synchronized frame is half drawn.
-    fn screen_status(&mut self, rules: &Rules) -> u32 {
+    /// The status the agent's screen rules read on the screen now:
+    /// `STATUS_NONE` while a synchronized frame is half drawn, `None` when no
+    /// rule holds.
+    fn screen_status(&mut self, rules: &Rules) -> Option<u32> {
         if self.em.render_hold().is_some() {
-            return vorn_analysis::STATUS_NONE;
+            return Some(vorn_analysis::STATUS_NONE);
         }
         let (row, col, visible) = self.em.cursor();
         let height = self.em.rows();
@@ -145,9 +144,7 @@ impl Term {
             cursor: Cursor { row, col, visible },
             title: self.em.title(),
         };
-        rules
-            .status(&screen)
-            .map_or(vorn_analysis::STATUS_NONE, |s| s.code())
+        rules.status(&screen).map(|s| s.code())
     }
 
     /// The text the analyzer reads: `bytes` after whatever the last record
@@ -403,11 +400,15 @@ any = ['^>']
             feed(&mut t, b"\x1b[3;1H* esc to interrupt\x1b[4;1H\x1b[2K"),
             Some(vorn_analysis::STATUS_RUNNING)
         );
-        // Text the analyzer's own patterns take for a prompt is not read.
-        assert_eq!(feed(&mut t, b"\x1b[1;1HContinue? (y/n)"), None);
         assert_eq!(
             feed(&mut t, b"\x1b[2;1HProceed?"),
             Some(vorn_analysis::STATUS_WAITING)
+        );
+        // With no rule holding, the analyzer's patterns decide: errors only
+        // come from them.
+        assert_eq!(
+            feed(&mut t, b"\x1b[2J\x1b[1;1Hwork\r\nError: it broke\r\n"),
+            Some(vorn_analysis::STATUS_ERROR)
         );
     }
 

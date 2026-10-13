@@ -2,8 +2,9 @@
 //! waiting for input or idle, as one TOML file per agent in `status/`.
 //!
 //! Adding or fixing an agent is an edit to its file plus fixtures under
-//! `tests/fixtures/status/<agent>/` that show the screens it reads. Hooks,
-//! where an agent has them, still decide over these.
+//! `tests/fixtures/status/<agent>/` that show the screens it reads. Where no
+//! rule holds, the generic output patterns decide (errors come only from
+//! them), and hooks, where an agent has them, decide over both.
 
 use std::sync::OnceLock;
 
