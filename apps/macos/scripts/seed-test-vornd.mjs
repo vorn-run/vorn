@@ -165,8 +165,15 @@ if (shellAt > 0) {
 // --artifacts: a doc with two versions and comments, and a design with artboards and tweaks, from the first shell.
 if (process.argv.includes('--artifacts') && shells[0]) {
   const sessionId = shells[0].id
-  const plan = '# Launch plan\n\nWe ship the native Mac app to a small group first, then widen it once crash reports stay quiet for a week.\n\nThe browser pane, artifacts and the device pane come over in this wave.\n\n- Browser pane\n- Artifacts and comments\n- Device pane\n'
-  const doc = await call('artifact:publish', { sessionId, title: 'Launch plan', kind: 'doc', content: plan, open: false })
+  const plan =
+    '# Launch plan\n\nWe ship the native Mac app to a small group first, then widen it once crash reports stay quiet for a week.\n\nThe browser pane, artifacts and the device pane come over in this wave.\n\n- Browser pane\n- Artifacts and comments\n- Device pane\n'
+  const doc = await call('artifact:publish', {
+    sessionId,
+    title: 'Launch plan',
+    kind: 'doc',
+    content: plan,
+    open: false
+  })
   await call('artifact:publish', {
     sessionId,
     artifactId: doc.artifact.id,
@@ -178,16 +185,32 @@ if (process.argv.includes('--artifacts') && shells[0]) {
   await call('artifact:saveComment', {
     artifactId: doc.artifact.id,
     version: 2,
-    anchor: { kind: 'quote', quote: 'crash reports stay quiet', prefix: 'once ', suffix: ' for a week' },
+    anchor: {
+      kind: 'quote',
+      quote: 'crash reports stay quiet',
+      prefix: 'once ',
+      suffix: ' for a week'
+    },
     body: 'How quiet is quiet? Give a number.'
   })
-  await call('artifact:saveComment', { artifactId: doc.artifact.id, version: 2, anchor: null, body: 'Add a rollback step.' })
+  await call('artifact:saveComment', {
+    artifactId: doc.artifact.id,
+    version: 2,
+    anchor: null,
+    body: 'Add a rollback step.'
+  })
   const design = `<!doctype html><html><head><script type="application/json" id="artifact">
 {"kind":"design","title":"Pricing hero","tweaks":{"dark":{"type":"boolean","default":true,"label":"Dark"},"accent":{"type":"color","default":"#c9a26b","label":"Accent"},"size":{"type":"number","default":44,"min":28,"max":64,"unit":"px","label":"Title size"}},
 "artboards":[{"id":"desktop","label":"Desktop","width":1280,"height":800},{"id":"phone","label":"Phone","width":390,"height":844}]}
 </script><style>body{margin:0;font:16px -apple-system,sans-serif;background:#0b0b0c;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh}h1{font-size:44px;margin:0 0 12px}a{color:#c9a26b}</style></head>
 <body><div><h1>Simple pricing</h1><p>One plan, every agent. <a href="#">Start free</a></p></div></body></html>`
-  await call('artifact:publish', { sessionId, title: 'Pricing hero', kind: 'design', content: design, open: false })
+  await call('artifact:publish', {
+    sessionId,
+    title: 'Pricing hero',
+    kind: 'design',
+    content: design,
+    open: false
+  })
 }
 const runs = await call('workflowRun:listAll', { workspaceId: 'personal', limit: 50 })
 console.log(
