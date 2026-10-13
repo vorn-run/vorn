@@ -242,6 +242,8 @@ public struct PaneColumn: View {
         switch e.kind {
         case .files: FilesCard(panes: panes, sessionID: sessionID, services: services)
         case .terminals: TerminalsCard(panes: panes, sessionID: sessionID, services: services)
+        case .browser: BrowserCard(panes: panes, sessionID: sessionID, services: services)
+        case .device: DeviceCard(panes: panes, sessionID: sessionID)
         }
     }
 }

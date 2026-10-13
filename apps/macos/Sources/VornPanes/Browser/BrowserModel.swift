@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 import VornCore
 import VornUI
 
@@ -136,6 +137,8 @@ public final class BrowserModel {
     @ObservationIgnored private var listener: Task<Void, Never>?
     /// The size of each page view, for placing the popover.
     @ObservationIgnored var areas: [String: CGSize] = [:]
+    /// The size of each device stage, for fitting the frame.
+    @ObservationIgnored var deviceAreas: [String: CGSize] = [:]
 
     public init(defaults: UserDefaults = .standard, persists: Bool = true, ephemeral: Bool = false) {
         self.defaults = defaults
@@ -842,6 +845,12 @@ public final class BrowserModel {
     }
 
     func closeDevicePane(_ s: String) { devices[s] = nil }
+
+    /// Whether the picker is open for `s` from the pane, or from the card's button.
+    public func pickerBinding(_ s: String, fromPane: Bool) -> Binding<Bool> {
+        Binding(get: { [weak self] in self?.picker.map { $0.session == s && $0.fromPane == fromPane } ?? false },
+                set: { [weak self] open in if !open, self?.picker?.session == s, self?.picker?.fromPane == fromPane { self?.picker = nil } })
+    }
 
     func openPicker(_ s: String, fromPane: Bool) {
         picker = DevicePicker(session: s, fromPane: fromPane)
