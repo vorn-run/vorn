@@ -139,18 +139,28 @@ final class KeyMonitor {
     func install(model: AppModel) {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 13, mods == .command, model.collapse() { return nil }
-            if event.keyCode == 40, mods == .command {
-                model.toggle(.commandPalette)
-                return nil
-            }
-            guard event.keyCode == 53, mods.isEmpty else { return event }
             let responder = event.window?.firstResponder
             let typing = responder is TerminalNSView || responder is NSTextView
-            if typing, model.contextMenu == nil, model.overlay == nil, !model.settingsOpen { return event }
-            return model.escape() ? nil : event
+            return KeyRouting.handle(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                                     typing: typing, model: model) ? nil : event
         }
+    }
+}
+
+/// The window-level keys, decided before the focused view sees them.
+@MainActor
+enum KeyRouting {
+    /// True when the app takes the key; false sends it on to the focused view (a terminal keeps Tab, Esc, Ctrl chords).
+    static func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, typing: Bool, model: AppModel) -> Bool {
+        let mods = modifiers.intersection([.command, .shift, .option, .control])
+        if keyCode == 13, mods == .command { return model.collapse() }
+        if keyCode == 40, mods == .command {
+            model.toggle(.commandPalette)
+            return true
+        }
+        guard keyCode == 53, mods.isEmpty else { return false }
+        if typing, model.contextMenu == nil, model.overlay == nil, !model.settingsOpen { return false }
+        return model.escape()
     }
 }
 
