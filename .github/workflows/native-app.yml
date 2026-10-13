@@ -20,6 +20,7 @@ on:
       - 'packages/core/scripts/package-native.mjs'
       - 'packages/core/scripts/release-feeds.mjs'
       - 'packages/core/scripts/vorn.nsi'
+      - 'packages/core/crates/vorn-app/src/cli_link.rs'
 
 jobs:
   package:
@@ -190,6 +191,51 @@ jobs:
             test ! -e "$inst/Vorn.exe"
             test ! -e "$inst/resources"
           fi
+
+      # Installing Vorn puts the vorn command on PATH: the installer on Windows,
+      # the package on Linux, and the app's launch step (a temp HOME and
+      # VORN_CLI_DIR here) for the AppImage and on macOS.
+      - name: The vorn command is installed
+        timeout-minutes: 10
+        run: |
+          dir=$(mktemp -d)
+          case "$RUNNER_OS" in
+            Windows)
+              MSYS2_ARG_CONV_EXCL="*" ./dist-native/Vorn-Setup-*.exe /S
+              inst="$(cygpath -u "$LOCALAPPDATA")/Programs/vorn"
+              want="$(cygpath -w "$inst")\resources\vornd"
+              user_path() { powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','User')"; }
+              count() { user_path | tr ';' '\n' | tr -d '\r' | grep -icxF "$want" || true; }
+              user_path
+              test "$(count)" = 1
+              # A terminal opened now finds it.
+              powershell -NoProfile -Command "\$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine'); vorn --version"
+              # The app's own launch step agrees and adds no second entry.
+              "$inst/Vorn.exe" install-cli --data-dir "$(cygpath -w "$dir/data")" > "$dir/cli.out"
+              cat "$dir/cli.out"
+              test "$(count)" = 1
+              MSYS2_ARG_CONV_EXCL="*" "$inst/Uninstall Vorn.exe" /S "_?=$(cygpath -w "$inst")"
+              user_path
+              test "$(count)" = 0 ;;
+            Linux)
+              sudo apt-get install -y "$PWD"/dist-native/vorn_*.deb
+              test "$(readlink /usr/bin/vorn)" = /opt/Vorn/resources/vornd/vorn
+              vorn --version
+              sudo apt-get remove -y vorn
+              test ! -e /usr/bin/vorn
+              image=$(ls "$PWD"/dist-native/Vorn-*.AppImage)
+              HOME="$dir/home" VORN_CLI_DIR="$dir/bin" APPIMAGE_EXTRACT_AND_RUN=1 "$image" install-cli --data-dir "$dir/data"
+              test "$(readlink "$dir/bin/vorn")" = "$image"
+              HOME="$dir/home" APPIMAGE_EXTRACT_AND_RUN=1 "$dir/bin/vorn" --version ;;
+            macOS)
+              ditto -x -k dist-native/Vorn-*-mac.zip "$dir"
+              HOME="$dir/home" VORN_CLI_DIR="$dir/bin" "$dir/Vorn.app/Contents/MacOS/Vorn" install-cli --data-dir "$dir/data"
+              case "$(readlink "$dir/bin/vorn")" in
+                */Vorn.app/Contents/Resources/vornd/vorn) ;;
+                *) echo "ERROR: the link points elsewhere"; exit 1 ;;
+              esac
+              HOME="$dir/home" "$dir/bin/vorn" --version ;;
+          esac
 
       - uses: actions/upload-artifact@v7
         with:
