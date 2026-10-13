@@ -24,27 +24,27 @@ vi.hoisted(() => {
 
 const slotCalls: Array<{ terminalId: string; className?: string }> = []
 
-vi.mock('../src/renderer/components/TerminalSlot', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalSlot', () => ({
   TerminalSlot: (props: { terminalId: string; className?: string }) => {
     slotCalls.push({ terminalId: props.terminalId, className: props.className })
     return <div data-testid={`slot-${props.terminalId}`} className={props.className} />
   }
 }))
 
-vi.mock('../src/renderer/hooks/useTerminalScrollButton', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useTerminalScrollButton', () => ({
   useTerminalScrollButton: () => ({ showScrollBtn: false, handleScrollToBottom: () => {} })
 }))
 
 // Whether the shell reports command boundaries. Blocks are gated on it, so a
 // layout test has to state which kind of shell it is describing.
 let integrated = false
-vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
+vi.mock('../packages/web/src/renderer/lib/command-blocks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return { ...actual, hasShellIntegration: () => integrated }
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { AgentCard } from '../src/renderer/components/AgentCard'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { AgentCard } from '../packages/web/src/renderer/components/AgentCard'
 
 function seedTerminal(
   id: string,

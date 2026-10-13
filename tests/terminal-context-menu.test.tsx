@@ -11,7 +11,7 @@ const mockGetTerminalSizing = vi.fn()
 const mockFitTerminalToDevice = vi.fn()
 const mockSetTerminalSizeLock = vi.fn()
 
-vi.mock('../src/renderer/lib/terminal-registry', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => ({
   getTerminalSelection: (...args: unknown[]) => mockGetTerminalSelection(...args),
   clearTerminalSelection: (...args: unknown[]) => mockClearTerminalSelection(...args),
   pasteToTerminal: (...args: unknown[]) => mockPasteToTerminal(...args),
@@ -29,8 +29,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { TerminalContextMenu } from '../src/renderer/components/TerminalContextMenu'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { TerminalContextMenu } from '../packages/web/src/renderer/components/TerminalContextMenu'
 
 const mockConfig = {
   projects: [],

@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { VariableAutocomplete } from '../src/renderer/components/workflow-editor/panels/VariableAutocomplete'
+import { VariableAutocomplete } from '../packages/web/src/renderer/components/workflow-editor/panels/VariableAutocomplete'
 import type { TemplateVariable } from '@vornrun/shared/template-vars'
 
 describe('VariableAutocomplete', () => {

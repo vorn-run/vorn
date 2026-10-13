@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { HttpRequestConfig } from '../src/shared/types'
-import { HttpRequestNode } from '../src/renderer/components/workflow-editor/nodes/HttpRequestNode'
-import { stepPreview } from '../src/renderer/components/workflow-editor/node-visuals'
+import type { HttpRequestConfig } from '../packages/web/src/shared/types'
+import { HttpRequestNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/HttpRequestNode'
+import { stepPreview } from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
 
 const config = (over: Partial<HttpRequestConfig> = {}): HttpRequestConfig => ({
   nodeType: 'httpRequest',

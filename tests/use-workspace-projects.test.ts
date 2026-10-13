@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
-import { useWorkspaceProjects } from '../src/renderer/hooks/useWorkspaceProjects'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { useWorkspaceProjects } from '../packages/web/src/renderer/hooks/useWorkspaceProjects'
 import type { AppConfig, ProjectConfig } from '../packages/shared/src/types'
 
 function makeProject(name: string, workspaceId?: string): ProjectConfig {

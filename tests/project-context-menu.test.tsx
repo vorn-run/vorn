@@ -2,10 +2,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ProjectContextMenu } from '../src/renderer/components/project-sidebar/ProjectContextMenu'
-import type { ProjectConfig } from '../src/shared/types'
+import { ProjectContextMenu } from '../packages/web/src/renderer/components/project-sidebar/ProjectContextMenu'
+import type { ProjectConfig } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 

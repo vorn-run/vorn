@@ -33,7 +33,6 @@ on:
       - 'tests/fixtures/cli-reference.json'
       - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
-      - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
       - '.github/workflows/core.yml'
@@ -163,10 +162,6 @@ jobs:
 
       - name: Install dependencies
         run: yarn install
-
-      # Fetched once here, so parallel test workers never race to download it.
-      - name: Electron binary
-        run: node node_modules/electron/install.js
 
       - name: Rust format
         if: runner.os == 'Linux'

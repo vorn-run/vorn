@@ -55,16 +55,8 @@ describe('extension RPC wiring', () => {
     expect(host).toContain(`SELECTION_RESULT: &str = "${pushes.EXTENSION_SELECTION_RESULT}"`)
   })
 
-  it('forwards each request from the main process', () => {
-    const handlers = read('src/main/ipc-handlers.ts')
-    for (const key of Object.keys(requests)) {
-      expect(handlers).toContain(`IPC.${key}`)
-    }
-    expect(handlers).toContain(`IPC.${'EXTENSION_SELECTION_RESULT'}`)
-  })
-
   it('exposes each of them to a window', () => {
-    const preload = read('src/preload/index.ts')
+    const preload = read('packages/web/src/renderer/api.ts')
     for (const key of Object.keys({ ...requests, ...pushes })) {
       expect(preload).toContain(`IPC.${key}`)
     }

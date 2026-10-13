@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { CommandBlock } from '../src/renderer/lib/command-blocks'
+import type { CommandBlock } from '../packages/web/src/renderer/lib/command-blocks'
 import {
   chooseAnchor,
   pruneScrollAnchors,
   readScrollAnchor,
   resolveAnchor,
   writeScrollAnchor
-} from '../src/renderer/lib/scroll-anchor'
+} from '../packages/web/src/renderer/lib/scroll-anchor'
 
 const KEY = 'vorn:scrollAnchors'
 

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
-import { claimedTerminalIds } from '../src/renderer/hooks/usePanelTerminals'
-import { activePanelTerminalId } from '../src/renderer/stores/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { claimedTerminalIds } from '../packages/web/src/renderer/hooks/usePanelTerminals'
+import { activePanelTerminalId } from '../packages/web/src/renderer/stores/types'
 
 const session = (id: string) =>
   ({
@@ -216,7 +216,7 @@ describe('the terminals panel', () => {
       ...(window as unknown as { api: Record<string, unknown> }).api,
       killTerminal: kill
     }
-    const { closeTerminalsPanel } = await import('../src/renderer/lib/terminal-close')
+    const { closeTerminalsPanel } = await import('../packages/web/src/renderer/lib/terminal-close')
     act(() => {
       s().openTerminalsPane('owner', 'sh1')
       s().openTerminalsPane('owner', 'sh2')
@@ -238,7 +238,7 @@ describe('the terminals panel', () => {
   })
 
   it('reads a corrupted active tab as the first one', async () => {
-    const { parsePersistedPanels } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedPanels } = await import('../packages/web/src/renderer/stores/ui-slice')
     // `?? 0` only catches null and undefined. A string or a NaN here reaches
     // the card as an index, which looks up undefined and is dereferenced.
     const restored = parsePersistedPanels({
@@ -287,7 +287,7 @@ describe('the terminals panel', () => {
   })
 
   it('survives a reload with the same shells and the same one in front', async () => {
-    const { parsePersistedPanels } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedPanels } = await import('../packages/web/src/renderer/stores/ui-slice')
     act(() => {
       s().openTerminalsPane('owner', 'sh1')
       s().openTerminalsPane('owner', 'sh2')
@@ -301,7 +301,7 @@ describe('the terminals panel', () => {
   })
 
   it('drops a persisted panel that has no shells left', async () => {
-    const { parsePersistedPanels } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedPanels } = await import('../packages/web/src/renderer/stores/ui-slice')
     // Its ids are what hid those terminals; an empty one is a pane that would
     // render nothing.
     const restored = parsePersistedPanels({ owner: { terminals: [], activeTab: 0 } })
@@ -309,7 +309,7 @@ describe('the terminals panel', () => {
   })
 
   it('clamps a persisted active tab that points past the end', async () => {
-    const { parsePersistedPanels } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedPanels } = await import('../packages/web/src/renderer/stores/ui-slice')
     const restored = parsePersistedPanels({ owner: { terminals: ['sh1'], activeTab: 7 } })
     expect(restored.get('owner')?.activeTab).toBe(0)
   })

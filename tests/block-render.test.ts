@@ -6,7 +6,7 @@ import {
   extractBlock,
   type BufferLike,
   type LineLike
-} from '../src/renderer/lib/block-render'
+} from '../packages/web/src/renderer/lib/block-render'
 
 /**
  * Drives a real xterm so the extraction is verified against actual VT

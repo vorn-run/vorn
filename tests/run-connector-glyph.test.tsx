@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
-import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
-import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
+import type { RunListEntry } from '../packages/web/src/renderer/hooks/useAllWorkflowRuns'
+import { __resetConnectionsCacheForTests } from '../packages/web/src/renderer/lib/use-connections'
 
 const mockState = {
   setMainViewMode: vi.fn(),
@@ -12,7 +12,7 @@ const mockState = {
   config: { workflows: [] }
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
@@ -48,8 +48,9 @@ beforeEach(() => {
   }
 })
 
-const { RunsList } = await import('../src/renderer/components/workflow-runs/RunsList')
-const { RunStepsList } = await import('../src/renderer/components/workflow-editor/RunEntry')
+const { RunsList } = await import('../packages/web/src/renderer/components/workflow-runs/RunsList')
+const { RunStepsList } =
+  await import('../packages/web/src/renderer/components/workflow-editor/RunEntry')
 
 function packagedRun(overrides: Partial<RunListEntry> = {}): RunListEntry {
   return {

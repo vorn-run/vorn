@@ -9,8 +9,8 @@ Object.defineProperty(window, 'api', {
 })
 
 const seeded = vi.hoisted(() => [] as string[])
-vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/renderer/lib/command-blocks')>()),
+vi.mock('../packages/web/src/renderer/lib/command-blocks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/web/src/renderer/lib/command-blocks')>()),
   markSeededFromServer: (id: string) => seeded.push(id)
 }))
 
@@ -18,7 +18,7 @@ import {
   registerSlot,
   hydrateTerminal,
   destroyTerminal
-} from '../src/renderer/lib/terminal-registry'
+} from '../packages/web/src/renderer/lib/terminal-registry'
 
 /**
  * A replayed screen must not be answered.

@@ -2,11 +2,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { StartFromPanel } from '../src/renderer/components/workflow-editor/panels/StartFromPanel'
+import { StartFromPanel } from '../packages/web/src/renderer/components/workflow-editor/panels/StartFromPanel'
 import { TEMPLATE_SEED } from './helpers/template-seed'
-import { RequirementRow } from '../src/renderer/components/workflow-editor/panels/RequirementRow'
-import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
-import type { RequirementAction } from '../src/renderer/lib/template-requirements'
+import { RequirementRow } from '../packages/web/src/renderer/components/workflow-editor/panels/RequirementRow'
+import type { ConnectorListing } from '../packages/web/src/renderer/lib/connector-browse'
+import type { RequirementAction } from '../packages/web/src/renderer/lib/template-requirements'
 
 /** A published connector this machine has not installed. */
 const LISTING: ConnectorListing = {

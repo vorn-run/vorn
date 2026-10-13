@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { AppConfig, UpdateStatus, ServerRuntimeStatus } from '../src/shared/types'
+import type { AppConfig, UpdateStatus, ServerRuntimeStatus } from '../packages/web/src/shared/types'
 
 const mockStore = {
   config: null as AppConfig | null,
@@ -12,7 +12,7 @@ const mockStore = {
   terminals: new Map<string, { status: string; ended?: unknown }>()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
@@ -58,7 +58,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { UpdatesSettings } = await import('../src/renderer/components/settings/UpdatesSettings')
+const { UpdatesSettings } =
+  await import('../packages/web/src/renderer/components/settings/UpdatesSettings')
 
 function makeConfig(defaults: Partial<AppConfig['defaults']> = {}): AppConfig {
   return {

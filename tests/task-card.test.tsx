@@ -10,19 +10,19 @@ vi.hoisted(() => {
   })
 })
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (s: unknown) => unknown) => {
     const state = { connections: [], config: { connections: [] } }
     return selector ? selector(state) : state
   }
 }))
-vi.mock('../src/renderer/components/task-board/KanbanCardMenu', () => ({
+vi.mock('../packages/web/src/renderer/components/task-board/KanbanCardMenu', () => ({
   KanbanCardMenu: () => <div data-testid="kanban-menu" />
 }))
 
-import { TaskCard } from '../src/renderer/components/task-board/TaskCard'
-import { TASK_STATUS_TEXT, TASK_LIVE_DOT } from '../src/renderer/lib/task-status'
-import type { TaskConfig } from '../src/shared/types'
+import { TaskCard } from '../packages/web/src/renderer/components/task-board/TaskCard'
+import { TASK_STATUS_TEXT, TASK_LIVE_DOT } from '../packages/web/src/renderer/lib/task-status'
+import type { TaskConfig } from '../packages/web/src/shared/types'
 
 const task = (over: Partial<TaskConfig> = {}): TaskConfig =>
   ({

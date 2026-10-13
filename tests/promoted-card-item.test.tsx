@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { PromotedCard } from '../src/renderer/hooks/usePromotedCards'
+import type { PromotedCard } from '../packages/web/src/renderer/hooks/usePromotedCards'
 
 const setSelected = vi.fn()
 const setFocusedTerminal = vi.fn()
@@ -14,7 +14,7 @@ let focusedTerminalId: string | null = null
 let activeTabId: string | null = null
 let layoutMode = 'grid'
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       selectedTerminalId,
@@ -32,7 +32,7 @@ vi.mock('../src/renderer/stores', () => ({
 }))
 
 const { PromotedCardItem } =
-  await import('../src/renderer/components/project-sidebar/PromotedCardItem')
+  await import('../packages/web/src/renderer/components/project-sidebar/PromotedCardItem')
 
 const fileCard: PromotedCard = {
   id: 'card:t1:0',

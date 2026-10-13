@@ -4,7 +4,7 @@ import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 // Simple zustand stub — the node components only read config for icon/label.
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = { config: { remoteHosts: [] } }
     return selector ? selector(state) : state
@@ -21,15 +21,15 @@ beforeEach(() => {
   })
 })
 
-import { CreateTaskFromItemNode } from '../src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
-import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
-import { TriggerNode } from '../src/renderer/components/workflow-editor/nodes/TriggerNode'
+import { CreateTaskFromItemNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
+import { CallConnectorActionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
+import { TriggerNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/TriggerNode'
 import type {
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
   ConnectorPollTriggerConfig,
   TriggerConfig
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 describe('CreateTaskFromItemNode', () => {
   const config: CreateTaskFromItemConfig = {

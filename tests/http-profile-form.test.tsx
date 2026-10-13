@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { HttpProfileForm } from '../src/renderer/components/settings/HttpProfileForm'
+import { HttpProfileForm } from '../packages/web/src/renderer/components/settings/HttpProfileForm'
 
 const createConnection = vi.fn()
 const updateConnection = vi.fn()

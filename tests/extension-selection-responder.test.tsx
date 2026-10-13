@@ -11,12 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mounted = new Set<string>()
 const selections = new Map<string, string>()
 
-vi.mock('../src/renderer/lib/terminal-registry', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => ({
   hasTerminal: (id: string) => mounted.has(id),
   getTerminalSelection: (id: string) => selections.get(id) ?? ''
 }))
 
-const { listenForSelectionRequests } = await import('../src/renderer/lib/extension-selection')
+const { listenForSelectionRequests } =
+  await import('../packages/web/src/renderer/lib/extension-selection')
 
 const sent: Array<{ requestId: number; text: string }> = []
 let deliver: ((payload: { requestId: number; sessionId: string }) => void) | undefined

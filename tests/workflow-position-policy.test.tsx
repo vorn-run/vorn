@@ -9,8 +9,8 @@ import {
   insertNodeBetween,
   placeNewNodes,
   createScriptNode
-} from '../src/renderer/lib/workflow-helpers'
-import { useDefinitionHistory } from '../src/renderer/lib/use-definition-history'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
+import { useDefinitionHistory } from '../packages/web/src/renderer/lib/use-definition-history'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 const node = (

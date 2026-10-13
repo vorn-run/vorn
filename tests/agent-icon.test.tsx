@@ -2,8 +2,8 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { AgentIcon } from '../src/renderer/components/AgentIcon'
-import type { AgentType } from '../src/shared/types'
+import { AgentIcon } from '../packages/web/src/renderer/components/AgentIcon'
+import type { AgentType } from '../packages/web/src/shared/types'
 
 describe('AgentIcon', () => {
   const types: AgentType[] = ['claude', 'copilot', 'codex', 'opencode', 'gemini', 'shell']

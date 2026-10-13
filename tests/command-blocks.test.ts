@@ -10,10 +10,17 @@ import {
   type CommandBlock,
   type MarkerLike,
   type TrackerHost
-} from '../src/renderer/lib/command-blocks'
-import { captureBlock, clearBlockLog, getBlockLog } from '../src/renderer/lib/block-log'
-import { markSeededFromServer, setDomBlockRendering } from '../src/renderer/lib/command-blocks'
-import { registerBlockLogView } from '../src/renderer/lib/block-log'
+} from '../packages/web/src/renderer/lib/command-blocks'
+import {
+  captureBlock,
+  clearBlockLog,
+  getBlockLog
+} from '../packages/web/src/renderer/lib/block-log'
+import {
+  markSeededFromServer,
+  setDomBlockRendering
+} from '../packages/web/src/renderer/lib/command-blocks'
+import { registerBlockLogView } from '../packages/web/src/renderer/lib/block-log'
 
 class FakeMarker implements MarkerLike {
   isDisposed = false

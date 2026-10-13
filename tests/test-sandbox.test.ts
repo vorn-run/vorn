@@ -3,9 +3,7 @@ import fs, { writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import electronLog from 'electron-log/main'
-import { describe, expect, inject, it, vi } from 'vitest'
-import log from '../src/main/logger'
+import { describe, expect, inject, it } from 'vitest'
 import { dataDir } from '../packages/mcp/src/rpc-client'
 import { appLogFiles, linesSince, snapshotLogs } from './helpers/app-log'
 import { assertSandboxed, isInside } from './helpers/sandbox'
@@ -22,18 +20,6 @@ describe('the test sandbox', () => {
     expect(process.env.VORN_DATA_DIR).toBeUndefined()
     expect(process.env.VORN_SESSION_ID).toBeUndefined()
     expect(dataDir()).toBe(path.join(os.homedir(), '.vorn'))
-  })
-
-  it('writes the main-process log to the temporary home, never the real main.log', async () => {
-    const real = snapshotLogs(appLogFiles(realHome))
-    const token = `sandbox-${randomUUID()}`
-    log.warn(token)
-    log.error(new Error(token))
-
-    const file = electronLog.transports.file.getFile().path
-    expect(isInside(file, os.homedir())).toBe(true)
-    await vi.waitFor(() => expect(fs.readFileSync(file, 'utf8')).toContain(token))
-    expect(linesSince(real, token)).toEqual([])
   })
 
   it('refuses writes anywhere in the real home', () => {
@@ -84,7 +70,7 @@ describe('the real app log guard', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  it('names main.log where electron-log keeps it on this platform', () => {
+  it("names the app's main.log for this platform", () => {
     const home = path.join(os.tmpdir(), 'no-such-home')
     const expected =
       process.platform === 'darwin'

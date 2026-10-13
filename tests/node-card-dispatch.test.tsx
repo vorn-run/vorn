@@ -3,13 +3,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => undefined,
   useConnectionIconFor: () => undefined
 }))
 
-import { NodeCard } from '../src/renderer/components/workflow-editor/nodes/NodeCard'
+import { NodeCard } from '../packages/web/src/renderer/components/workflow-editor/nodes/NodeCard'
 import type { WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)

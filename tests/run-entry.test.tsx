@@ -26,10 +26,17 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Square: (p: Record<string, unknown>) => <svg data-testid="square" {...p} />
 }))
 
-import type { TaskConfig } from '../src/shared/types'
-import { RunEntry, RunStepsList } from '../src/renderer/components/workflow-editor/RunEntry'
-import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
-import type { WorkflowExecution, WorkflowNode, NodeExecutionState } from '../src/shared/types'
+import type { TaskConfig } from '../packages/web/src/shared/types'
+import {
+  RunEntry,
+  RunStepsList
+} from '../packages/web/src/renderer/components/workflow-editor/RunEntry'
+import { __resetConnectionsCacheForTests } from '../packages/web/src/renderer/lib/use-connections'
+import type {
+  WorkflowExecution,
+  WorkflowNode,
+  NodeExecutionState
+} from '../packages/web/src/shared/types'
 
 function makeExec(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
   return {

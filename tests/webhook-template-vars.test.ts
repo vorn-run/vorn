@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkflowExecutionContext } from '../src/shared/types'
+import type { WorkflowExecutionContext } from '../packages/web/src/shared/types'
 import { getAvailableContextVars, resolveTemplateVars } from '@vornrun/shared/template-vars'
 
 describe('webhook trigger variables', () => {
@@ -38,7 +38,8 @@ describe('webhook trigger variables', () => {
 
 describe('resume context keeps webhook variables resolving', () => {
   it('resolves {{trigger.query.*}} from a rebuilt context', async () => {
-    const { webhookTriggerFromItem } = await import('../src/renderer/lib/workflow-helpers')
+    const { webhookTriggerFromItem } =
+      await import('../packages/web/src/renderer/lib/workflow-helpers')
     const trigger = webhookTriggerFromItem({
       connectionId: 'webhook',
       connectorId: 'webhook',

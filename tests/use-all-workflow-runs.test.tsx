@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import type { WorkflowExecution } from '../src/shared/types'
+import type { WorkflowExecution } from '../packages/web/src/shared/types'
 
 const setWorkflowExecution = vi.fn((id: string, exec: WorkflowExecution) => {
   mockState.workflowExecutions.set(id, exec)
@@ -22,9 +22,9 @@ const useAppStore = Object.assign(
   { getState: () => mockState }
 )
 
-vi.mock('../src/renderer/stores', () => ({ useAppStore }))
+vi.mock('../packages/web/src/renderer/stores', () => ({ useAppStore }))
 
-const { useAllWorkflowRuns } = await import('../src/renderer/hooks/useAllWorkflowRuns')
+const { useAllWorkflowRuns } = await import('../packages/web/src/renderer/hooks/useAllWorkflowRuns')
 
 function run(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
   return {

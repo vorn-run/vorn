@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitGrid, MIN_FONT_PX } from '../src/renderer/lib/grid-fit'
+import { fitGrid, MIN_FONT_PX } from '../packages/web/src/renderer/lib/grid-fit'
 
 /**
  * TP-T9e, the renderer's half: viewers fit, they never clip. Whatever the

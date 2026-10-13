@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeFlowLayout } from '../src/renderer/lib/workflow-helpers'
+import { computeFlowLayout } from '../packages/web/src/renderer/lib/workflow-helpers'
 import type { WorkflowNode, WorkflowEdge } from '../packages/shared/src/types'
 
 function node(id: string, type: WorkflowNode['type'] = 'script'): WorkflowNode {

@@ -2,18 +2,18 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
-import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
-import { useAppStore } from '../src/renderer/stores'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
+import type { RunListEntry } from '../packages/web/src/renderer/hooks/useAllWorkflowRuns'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 // Answering a gate is a request; the pane only makes it.
 const resolveWorkflowGate = vi.fn()
 
-vi.mock('../src/renderer/components/workflow-runs/StopRunButton', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-runs/StopRunButton', () => ({
   StopRunButton: () => <button type="button">Stop</button>
 }))
 
-vi.mock('../src/renderer/components/workflow-editor/RunEntry', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/RunEntry', () => ({
   StatusDot: ({ status }: { status: string }) => <span data-testid="status-dot">{status}</span>,
   RunStepsList: ({ includeTrigger }: { includeTrigger?: boolean }) => (
     <div data-testid="run-steps-list" data-include-trigger={String(!!includeTrigger)} />
@@ -41,7 +41,7 @@ beforeEach(() => {
 })
 
 const { RunDetailPane, RunDetailEmptyState } =
-  await import('../src/renderer/components/workflow-runs/RunDetailPane')
+  await import('../packages/web/src/renderer/components/workflow-runs/RunDetailPane')
 
 function makeNode(id: string, label: string, type: WorkflowNode['type'], config = {}) {
   return { id, type, label, config, position: { x: 0, y: 0 } } as WorkflowNode

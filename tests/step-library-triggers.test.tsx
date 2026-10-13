@@ -8,8 +8,8 @@ const connections = [
   { id: 'c2', name: 'Notes MCP', connectorId: 'mcp' }
 ]
 
-vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
+vi.mock('../packages/web/src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/web/src/renderer/lib/use-connections')>()),
   useConnections: () => connections,
   useInstalledPacks: () => []
 }))
@@ -39,7 +39,7 @@ const listConnectors = vi.fn(async () => [
 import {
   StepLibrary,
   LibraryPick
-} from '../src/renderer/components/workflow-editor/panels/StepLibrary'
+} from '../packages/web/src/renderer/components/workflow-editor/panels/StepLibrary'
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)

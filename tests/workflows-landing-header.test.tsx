@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
-import type { RunBucket } from '../src/renderer/stores/types'
+import type { RunBucket } from '../packages/web/src/renderer/stores/types'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
 
@@ -18,19 +18,19 @@ const mockState = {
   bumpWorkflowsRunsReload: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockState) : mockState
   }
 }))
 
 const waitingMock = vi.fn(() => [] as unknown[])
-vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingMock()
 }))
 
 const { WorkflowsLandingHeader } =
-  await import('../src/renderer/components/workflow-runs/WorkflowsLandingHeader')
+  await import('../packages/web/src/renderer/components/workflow-runs/WorkflowsLandingHeader')
 
 beforeEach(() => {
   mockState.workflowsLandingTab = 'runs'

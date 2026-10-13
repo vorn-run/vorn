@@ -14,10 +14,10 @@ import {
   getTaskShortId,
   TASK_STATUS_TEXT,
   TASK_STATUS_DOT
-} from '../src/renderer/lib/task-status'
-import { STATUS_TEXT as SESSION_TEXT } from '../src/renderer/lib/status-colors'
-import { WORKFLOW_STATUS_TEXT as WORKFLOW_TEXT } from '../src/renderer/lib/workflow-status'
-import type { TaskStatus } from '../src/shared/types'
+} from '../packages/web/src/renderer/lib/task-status'
+import { STATUS_TEXT as SESSION_TEXT } from '../packages/web/src/renderer/lib/status-colors'
+import { WORKFLOW_STATUS_TEXT as WORKFLOW_TEXT } from '../packages/web/src/renderer/lib/workflow-status'
+import type { TaskStatus } from '../packages/web/src/shared/types'
 
 describe('formatTaskDate', () => {
   it('formats ISO date to month and day', () => {

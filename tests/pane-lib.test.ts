@@ -17,14 +17,14 @@ import {
   paneKind,
   paneOwnerId,
   isTerminalPane
-} from '../src/renderer/lib/pane-id'
+} from '../packages/web/src/renderer/lib/pane-id'
 import {
   dirtyRefFor,
   isEditorDirty,
   clearDirty,
   confirmDiscard,
   useDirtyVersion
-} from '../src/renderer/lib/editor-dirty'
+} from '../packages/web/src/renderer/lib/editor-dirty'
 
 /**
  * Pane ids are opaque strings everywhere except here — the grid, dock, tab strip

@@ -23,31 +23,31 @@ vi.hoisted(() => {
   })
 })
 
-vi.mock('../src/renderer/components/TerminalSlot', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalSlot', () => ({
   TerminalSlot: ({ terminalId }: { terminalId: string }) => (
     <div data-testid={`slot-${terminalId}`} />
   )
 }))
-vi.mock('../src/renderer/hooks/useTerminalScrollButton', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useTerminalScrollButton', () => ({
   useTerminalScrollButton: () => ({ showScrollBtn: false, handleScrollToBottom: () => {} })
 }))
-vi.mock('../src/renderer/components/FilesCard', () => ({
+vi.mock('../packages/web/src/renderer/components/FilesCard', () => ({
   FilesCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`files-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/EditorCard', () => ({
+vi.mock('../packages/web/src/renderer/components/EditorCard', () => ({
   EditorCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`editor-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/BrowserCard', () => ({
+vi.mock('../packages/web/src/renderer/components/BrowserCard', () => ({
   BrowserCard: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={`browser-${sessionId}`} />
   )
 }))
-vi.mock('../src/renderer/components/DeviceCard', () => ({
+vi.mock('../packages/web/src/renderer/components/DeviceCard', () => ({
   DeviceCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`device-${sessionId}`} />
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { AgentCard } from '../src/renderer/components/AgentCard'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { AgentCard } from '../packages/web/src/renderer/components/AgentCard'
 
 function seed(ids: string[]): void {
   const terminals = new Map()

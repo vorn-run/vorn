@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { InstalledConnectorPack } from '../packages/shared/src/types'
-import { canAddConnection, describePackStatus, packStateFor } from '../src/renderer/lib/pack-status'
+import {
+  canAddConnection,
+  describePackStatus,
+  packStateFor
+} from '../packages/web/src/renderer/lib/pack-status'
 
 const pack = (overrides: Partial<InstalledConnectorPack> = {}): InstalledConnectorPack => ({
   id: 'acme',

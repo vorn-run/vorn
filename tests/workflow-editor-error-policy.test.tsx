@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowNodeErrorPolicy } from '../src/shared/types'
+import type { WorkflowNodeErrorPolicy } from '../packages/web/src/shared/types'
 
 vi.mock('framer-motion', () => ({
   motion: {
@@ -18,12 +18,12 @@ vi.mock('react-dom', async () => {
   return { ...actual, createPortal: (node: React.ReactNode) => node }
 })
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
 // The canvas is where a node gets selected; select the one under test directly.
-vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
   WorkflowCanvas: ({ onNodeClick }: { onNodeClick?: (id: string) => void }) => (
     <button data-testid="select-step" onClick={() => onNodeClick?.('s1')}>
       select
@@ -34,7 +34,7 @@ vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
 // Stand in for the real panel so the test can drive `onErrorChange` without
 // going through the select — what is under test here is what the editor does
 // with the answer, not how the control renders it.
-vi.mock('../src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
   NodeConfigPanel: ({
     onErrorChange
   }: {
@@ -51,13 +51,16 @@ vi.mock('../src/renderer/components/workflow-editor/panels/NodeConfigPanel', () 
   )
 }))
 
-vi.mock('../src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
   RunHistoryPanel: () => <div />
 }))
 
-vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel', () => ({
-  WorkflowPropertiesPanel: () => <div />
-}))
+vi.mock(
+  '../packages/web/src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel',
+  () => ({
+    WorkflowPropertiesPanel: () => <div />
+  })
+)
 
 const step = {
   id: 's1',
@@ -104,7 +107,7 @@ const mockState = {
   workflowExecutions: new Map<string, unknown>()
 }
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const useAppStore = (selector?: (s: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
   useAppStore.getState = () => mockState
@@ -124,7 +127,8 @@ vi.mock('../src/renderer/stores', () => {
   }
 }
 
-const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
+const { WorkflowEditor } =
+  await import('../packages/web/src/renderer/components/workflow-editor/WorkflowEditor')
 
 function savedNodes(): Array<Record<string, unknown>> {
   const calls = mockState.updateWorkflow.mock.calls

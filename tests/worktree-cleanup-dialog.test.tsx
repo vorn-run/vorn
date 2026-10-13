@@ -35,7 +35,7 @@ const mockLoading = vi.fn((_msg: string) => 'toast-id')
 const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 const mockDismiss = vi.fn()
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: Object.assign(
     (msg: string) => {
       mockLoading(msg)
@@ -71,7 +71,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: Object.assign(
     (selector: (s: unknown) => unknown) => selector({ loadWorktrees: mockLoadWorktreesStoreFn }),
     {
@@ -83,7 +83,7 @@ vi.mock('../src/renderer/stores', () => ({
 import {
   WorktreeCleanupDialog,
   requestWorktreeDelete
-} from '../src/renderer/components/WorktreeCleanupDialog'
+} from '../packages/web/src/renderer/components/WorktreeCleanupDialog'
 
 async function openExplicitDelete(
   opts: {

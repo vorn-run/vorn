@@ -8,7 +8,7 @@ import { Terminal as Headless } from '@xterm/headless'
 import type { Terminal } from '@xterm/xterm'
 import type { RecordCursor } from '../../packages/shared/src/types'
 import { decodeTerminalFrameV2, frameResume } from '../../packages/shared/src/terminal-frame'
-import { swallowQueries } from '../../src/renderer/lib/vornd-replies'
+import { swallowQueries } from '../../packages/web/src/renderer/lib/vornd-replies'
 
 /** vornd as the server on a test's own data directory, with sessions started by `vornd:spawn` (`--debug-spawn`). */
 

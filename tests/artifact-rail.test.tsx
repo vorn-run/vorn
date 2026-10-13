@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import type { ArtifactComment } from '../src/shared/types'
-import { ArtifactRail } from '../src/renderer/components/browser/ArtifactRail'
+import type { ArtifactComment } from '../packages/web/src/shared/types'
+import { ArtifactRail } from '../packages/web/src/renderer/components/browser/ArtifactRail'
 
 const comment = (id: string, over: Partial<ArtifactComment> = {}): ArtifactComment => ({
   id,

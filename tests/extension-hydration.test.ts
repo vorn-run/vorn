@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, waitFor } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 import {
   hydrateExtensions as hydrate,
   __resetExtensionHydrationForTests
-} from '../src/renderer/lib/extension-hydration'
+} from '../packages/web/src/renderer/lib/extension-hydration'
 import type {
   ExtensionActivationState,
   ExtensionFooterReading,

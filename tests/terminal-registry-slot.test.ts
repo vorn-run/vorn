@@ -144,7 +144,7 @@ import {
   fitTerminal,
   setAllTerminalsFontSize,
   startTerminalOverlaySync
-} from '../src/renderer/lib/terminal-registry'
+} from '../packages/web/src/renderer/lib/terminal-registry'
 
 /** Read lazily, so a test can move the rect it passed. */
 function makeSlot(rect: Partial<DOMRect>): HTMLDivElement {

@@ -9,17 +9,18 @@ const mockStore = {
   config: { defaults: { mainViewMode: 'sessions' as 'sessions' | 'tasks' | 'workflows' } }
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
 }))
 
-vi.mock('../src/renderer/components/WorkspaceSwitcher', () => ({
+vi.mock('../packages/web/src/renderer/components/WorkspaceSwitcher', () => ({
   WorkspaceSwitcher: () => <div data-testid="workspace-switcher" />
 }))
 
-const { SidebarHeader } = await import('../src/renderer/components/project-sidebar/SidebarHeader')
+const { SidebarHeader } =
+  await import('../packages/web/src/renderer/components/project-sidebar/SidebarHeader')
 
 beforeEach(() => {
   mockStore.toggleSidebar.mockReset()

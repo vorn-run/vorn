@@ -20,8 +20,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { AgentSettings } from '../src/renderer/components/settings/AgentSettings'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { AgentSettings } from '../packages/web/src/renderer/components/settings/AgentSettings'
 
 const initialState = useAppStore.getState()
 

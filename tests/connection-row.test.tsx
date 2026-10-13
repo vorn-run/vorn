@@ -2,9 +2,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ConnectionRow } from '../src/renderer/components/settings/ConnectionRow'
-import { rowState, type RowAction } from '../src/renderer/lib/use-row-action'
-import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../src/shared/types'
+import { ConnectionRow } from '../packages/web/src/renderer/components/settings/ConnectionRow'
+import { rowState, type RowAction } from '../packages/web/src/renderer/lib/use-row-action'
+import type {
+  ConnectorManifest,
+  SourceConnection,
+  WorkflowDefinition
+} from '../packages/web/src/shared/types'
 
 const connection = (overrides: Partial<SourceConnection> = {}): SourceConnection =>
   ({

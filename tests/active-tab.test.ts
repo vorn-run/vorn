@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { chooseActiveTab } from '../src/renderer/lib/active-tab'
+import { chooseActiveTab } from '../packages/web/src/renderer/lib/active-tab'
 
 const asked = (...ids: string[]): Set<string> => new Set(ids)
 /** Before any sync pass has answered. */

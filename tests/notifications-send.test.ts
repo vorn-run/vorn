@@ -4,9 +4,9 @@ import {
   sendAgentNotification,
   sendProgramNotification,
   sendWorkflowGateNotification
-} from '../src/renderer/lib/notifications'
-import type { AppConfig, WorkflowDefinition } from '../src/shared/types'
-import type { TerminalState } from '../src/renderer/stores/types'
+} from '../packages/web/src/renderer/lib/notifications'
+import type { AppConfig, WorkflowDefinition } from '../packages/web/src/shared/types'
+import type { TerminalState } from '../packages/web/src/renderer/stores/types'
 
 function makeConfig(overrides: Partial<AppConfig['defaults']['notifications']> = {}): AppConfig {
   return {

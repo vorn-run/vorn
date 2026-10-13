@@ -8,17 +8,21 @@ const resolveWorkflowGate = vi.fn()
 
 const showRun = vi.fn()
 const mockState = { showRun }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-import { WaitingApprovalPill } from '../src/renderer/components/WaitingApprovalPill'
-import type { WorkflowExecution, NodeExecutionState, WorkflowDefinition } from '../src/shared/types'
+import { WaitingApprovalPill } from '../packages/web/src/renderer/components/WaitingApprovalPill'
+import type {
+  WorkflowExecution,
+  NodeExecutionState,
+  WorkflowDefinition
+} from '../packages/web/src/shared/types'
 
 function execution(): WorkflowExecution {
   return {

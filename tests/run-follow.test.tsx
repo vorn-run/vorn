@@ -3,18 +3,18 @@ import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => null,
   useConnectionIconFor: () => undefined,
   // A step with no connection draws its node-type glyph instead.
   connectorLookFor: () => undefined
 }))
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-import { RunEntry } from '../src/renderer/components/workflow-editor/RunEntry'
+import { RunEntry } from '../packages/web/src/renderer/components/workflow-editor/RunEntry'
 import type { WorkflowExecution, WorkflowNode } from '../packages/shared/src/types'
 
 const nodes = [

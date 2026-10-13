@@ -2,8 +2,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { IconColorPicker } from '../src/renderer/components/IconColorPicker'
-import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../src/renderer/lib/project-icons'
+import { IconColorPicker } from '../packages/web/src/renderer/components/IconColorPicker'
+import {
+  PROJECT_ICON_OPTIONS,
+  ICON_COLOR_PALETTE
+} from '../packages/web/src/renderer/lib/project-icons'
 
 /** Shared by the project dialog and a group's Change icon, so it holds no state. */
 describe('the icon and colour picker', () => {

@@ -18,7 +18,7 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
-vi.mock('../src/renderer/lib/session-utils', async (orig) => {
+vi.mock('../packages/web/src/renderer/lib/session-utils', async (orig) => {
   const actual = (await orig()) as Record<string, unknown>
   return {
     ...actual,
@@ -53,8 +53,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { CommandPalette } from '../src/renderer/components/CommandPalette'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CommandPalette } from '../packages/web/src/renderer/components/CommandPalette'
 
 const initialState = useAppStore.getState()
 

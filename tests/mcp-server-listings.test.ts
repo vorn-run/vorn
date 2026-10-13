@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildConnectorListings } from '../src/renderer/lib/connector-browse'
-import { canAddConnection } from '../src/renderer/lib/pack-status'
+import { buildConnectorListings } from '../packages/web/src/renderer/lib/connector-browse'
+import { canAddConnection } from '../packages/web/src/renderer/lib/pack-status'
 import type { McpServerCatalogEntry, SourceConnection } from '../packages/shared/src/types'
 
 const SERVER: McpServerCatalogEntry = {

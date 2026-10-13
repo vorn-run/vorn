@@ -7,12 +7,12 @@ import type {
   InstalledConnectorPack,
   SourceConnection
 } from '../packages/shared/src/types'
-import { buildConnectorListings } from '../src/renderer/lib/connector-browse'
+import { buildConnectorListings } from '../packages/web/src/renderer/lib/connector-browse'
 import {
   ConnectorDirectory,
   ConnectorRow
-} from '../src/renderer/components/settings/ConnectorDirectory'
-import { ConnectorDetail } from '../src/renderer/components/settings/ConnectorDetail'
+} from '../packages/web/src/renderer/components/settings/ConnectorDirectory'
+import { ConnectorDetail } from '../packages/web/src/renderer/components/settings/ConnectorDetail'
 
 const catalogEntry: ConnectorCatalogItem = {
   id: 'acme',

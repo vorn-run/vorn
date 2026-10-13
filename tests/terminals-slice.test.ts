@@ -9,8 +9,8 @@ Object.defineProperty(window, 'api', {
 })
 
 import { create } from 'zustand'
-import { createTerminalsSlice } from '../src/renderer/stores/terminals-slice'
-import type { TerminalsSlice } from '../src/renderer/stores/types'
+import { createTerminalsSlice } from '../packages/web/src/renderer/stores/terminals-slice'
+import type { TerminalsSlice } from '../packages/web/src/renderer/stores/types'
 
 function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {

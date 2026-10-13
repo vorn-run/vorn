@@ -20,7 +20,7 @@ vi.mock('framer-motion', () => ({
 // Spy on the props every AgentPicker render receives so tests can read
 // `allowFromTask` for each re-render without mounting the real component.
 const agentPickerProps: Array<Record<string, unknown>> = []
-vi.mock('../src/renderer/components/AgentPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentPicker', () => ({
   AgentPicker: (props: Record<string, unknown>) => {
     agentPickerProps.push(props)
     return (
@@ -32,22 +32,25 @@ vi.mock('../src/renderer/components/AgentPicker', () => ({
 // Capture props each render so tests can read allowFromContext / isFromContext
 // without mounting the real picker.
 const projectPickerProps: Array<Record<string, unknown>> = []
-vi.mock('../src/renderer/components/ProjectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => {
     projectPickerProps.push(props)
     return <div data-testid="project-picker" />
   }
 }))
-vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
+vi.mock('../packages/web/src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
   RichMarkdownEditor: () => <div data-testid="rich-md" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/VariableAutocomplete', () => ({
-  VariableAutocomplete: () => <div data-testid="variable-autocomplete" />
-}))
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock(
+  '../packages/web/src/renderer/components/workflow-editor/panels/VariableAutocomplete',
+  () => ({
+    VariableAutocomplete: () => <div data-testid="variable-autocomplete" />
+  })
+)
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({
     status: {
       claude: true,
@@ -66,7 +69,7 @@ const mockConfig = {
   tasks: [],
   defaults: { defaultAgent: 'claude' as const }
 }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = { config: mockConfig }
     return selector ? selector(state) : state
@@ -87,9 +90,9 @@ beforeEach(() => {
 })
 
 const { LaunchAgentConfigForm } =
-  await import('../src/renderer/components/workflow-editor/panels/LaunchAgentConfigForm')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/LaunchAgentConfigForm')
 
-import type { LaunchAgentConfig } from '../src/shared/types'
+import type { LaunchAgentConfig } from '../packages/web/src/shared/types'
 
 function baseConfig(overrides: Partial<LaunchAgentConfig> = {}): LaunchAgentConfig {
   return {

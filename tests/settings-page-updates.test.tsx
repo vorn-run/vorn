@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { SettingsCategory } from '../src/renderer/stores/types'
+import type { SettingsCategory } from '../packages/web/src/renderer/stores/types'
 
 const mockStore = {
   setSettingsOpen: vi.fn(),
@@ -10,14 +10,14 @@ const mockStore = {
   setSettingsCategory: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
 // The Updates entry is gated on this, and it is the whole point of the file.
 const platform = { isElectron: true, isMac: false, isWeb: false }
-vi.mock('../src/renderer/lib/platform', () => ({
+vi.mock('../packages/web/src/renderer/lib/platform', () => ({
   get isElectron() {
     return platform.isElectron
   },
@@ -34,40 +34,40 @@ vi.mock('../src/renderer/lib/platform', () => ({
 // Every panel is stubbed: this file is about which one is chosen, not what
 // any of them render. Spelled out rather than built in a loop — vi.mock paths
 // must be statically analysable to hoist correctly.
-vi.mock('../src/renderer/components/settings/AppearanceSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/AppearanceSettings', () => ({
   AppearanceSettings: () => <div data-testid="appearance-panel" />
 }))
-vi.mock('../src/renderer/components/settings/GeneralSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div data-testid="general-panel" />
 }))
-vi.mock('../src/renderer/components/settings/UpdatesSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/UpdatesSettings', () => ({
   UpdatesSettings: () => <div data-testid="updates-panel" />
 }))
-vi.mock('../src/renderer/components/settings/NotificationSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/NotificationSettings', () => ({
   NotificationSettings: () => <div data-testid="notifications-panel" />
 }))
-vi.mock('../src/renderer/components/settings/WorktreeSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/WorktreeSettings', () => ({
   WorktreeSettings: () => <div data-testid="worktrees-panel" />
 }))
-vi.mock('../src/renderer/components/settings/AgentSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/AgentSettings', () => ({
   AgentSettings: () => <div data-testid="agents-panel" />
 }))
-vi.mock('../src/renderer/components/settings/SSHSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/SSHSettings', () => ({
   SSHSettings: () => <div data-testid="ssh-panel" />
 }))
-vi.mock('../src/renderer/components/settings/McpSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/McpSettings', () => ({
   McpSettings: () => <div data-testid="mcp-panel" />
 }))
-vi.mock('../src/renderer/components/settings/ConnectorSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/ConnectorSettings', () => ({
   ConnectorSettings: () => <div data-testid="connectors-panel" />
 }))
-vi.mock('../src/renderer/components/settings/KeysSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/KeysSettings', () => ({
   KeysSettings: () => <div data-testid="keys-panel" />
 }))
-vi.mock('../src/renderer/components/settings/NetworkSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/NetworkSettings', () => ({
   NetworkSettings: () => <div data-testid="network-panel" />
 }))
-vi.mock('../src/renderer/components/settings/AboutSettings', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/AboutSettings', () => ({
   AboutSettings: () => <div data-testid="about-panel" />
 }))
 
@@ -84,7 +84,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { SettingsPage } = await import('../src/renderer/components/SettingsPage')
+const { SettingsPage } = await import('../packages/web/src/renderer/components/SettingsPage')
 
 beforeEach(() => {
   vi.clearAllMocks()

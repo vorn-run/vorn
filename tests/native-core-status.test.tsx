@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { CoreStatus, SessionHolders, VorndStatus } from '../src/shared/types'
+import type { CoreStatus, SessionHolders, VorndStatus } from '../packages/web/src/shared/types'
 
 let status: CoreStatus | Error | undefined
 let daemon: VorndStatus | null
@@ -17,7 +17,8 @@ const api: Record<string, unknown> = {
 }
 Object.defineProperty(window, 'api', { value: api, writable: true })
 
-const { NativeCoreStatus } = await import('../src/renderer/components/settings/NativeCoreStatus')
+const { NativeCoreStatus } =
+  await import('../packages/web/src/renderer/components/settings/NativeCoreStatus')
 
 function core(over: Partial<CoreStatus> = {}): CoreStatus {
   return { loaded: true, version: '0.2.0', error: null, missing: [], ...over }

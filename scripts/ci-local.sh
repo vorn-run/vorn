@@ -19,7 +19,7 @@ step "Completion index is up to date"
 # Output is not silenced: without the corpus the generator skips, and that
 # needs to be visible rather than looking like a passing check.
 yarn gen:completions
-git diff --exit-code src/renderer/lib/completion-index
+git diff --exit-code packages/web/src/renderer/lib/completion-index
 # The generator cannot run without the corpus, so verify the committed index
 # was built from the committed allowlist. This is what actually catches an
 # allowlist edited without regenerating.

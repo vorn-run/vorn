@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ConnectorManifest, McpServerCatalogEntry } from '../src/shared/types'
+import type { ConnectorManifest, McpServerCatalogEntry } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
       selector({
@@ -16,7 +16,8 @@ vi.mock('../src/renderer/stores', () => ({
   )
 }))
 
-const { ConnectorSettings } = await import('../src/renderer/components/settings/ConnectorSettings')
+const { ConnectorSettings } =
+  await import('../packages/web/src/renderer/components/settings/ConnectorSettings')
 
 const SERVER: McpServerCatalogEntry = {
   id: 'playwright',

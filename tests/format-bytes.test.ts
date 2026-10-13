@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatBytes } from '../src/renderer/lib/format-bytes'
+import { formatBytes } from '../packages/web/src/renderer/lib/format-bytes'
 
 describe('formatBytes', () => {
   it('reports nothing and negatives as zero', () => {

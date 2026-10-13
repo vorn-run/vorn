@@ -2,19 +2,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowExecution } from '../src/shared/types'
+import type { WorkflowExecution } from '../packages/web/src/shared/types'
 
 // Stopping is the server's now; this only checks that the button asks.
 const stopWorkflowRun = vi.hoisted(() => vi.fn())
 
 const toastError = vi.hoisted(() => vi.fn())
-vi.mock('../src/renderer/components/Toast', () => ({ toast: { error: toastError } }))
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({ toast: { error: toastError } }))
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-import { StopRunButton } from '../src/renderer/components/workflow-runs/StopRunButton'
+import { StopRunButton } from '../packages/web/src/renderer/components/workflow-runs/StopRunButton'
 
 /**
  * Ending a run that is still going. A run with no way to stop it is half of

@@ -8,13 +8,13 @@ import {
   NAL_IDR,
   NAL_SLICE,
   NAL_SPS
-} from '../src/renderer/lib/h264-annexb'
+} from '../packages/web/src/renderer/lib/h264-annexb'
 import {
   DeviceVideoDecoder,
   MAX_BACKLOG,
   type DecoderDeps,
   type DecoderLike
-} from '../src/renderer/lib/device-video-decoder'
+} from '../packages/web/src/renderer/lib/device-video-decoder'
 
 /**
  * What the pane does to the companion's H.264 before WebCodecs sees it: find

@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { PackInstallConfirm } from '../src/renderer/components/settings/PackInstallConfirm'
-import type { ConnectorPackSummary } from '../src/shared/types'
+import { PackInstallConfirm } from '../packages/web/src/renderer/components/settings/PackInstallConfirm'
+import type { ConnectorPackSummary } from '../packages/web/src/shared/types'
 
 const PREVIEW: ConnectorPackSummary = {
   id: 'packdemo',

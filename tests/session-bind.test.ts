@@ -8,14 +8,14 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-vi.mock('../src/renderer/components/Toast', () => {
+vi.mock('../packages/web/src/renderer/components/Toast', () => {
   const toast = Object.assign(vi.fn(), { error: vi.fn() })
   return { toast }
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { resumeEndedSession } from '../src/renderer/lib/session-resume'
-import { toast } from '../src/renderer/components/Toast'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { resumeEndedSession } from '../packages/web/src/renderer/lib/session-resume'
+import { toast } from '../packages/web/src/renderer/components/Toast'
 
 /**
  * Resuming a pane whose conversation is already open somewhere else.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseLaunchSpec } from '../src/renderer/components/settings/parse-launch-spec'
+import { parseLaunchSpec } from '../packages/web/src/renderer/components/settings/parse-launch-spec'
 
 describe('parseLaunchSpec', () => {
   it('runs a bare package name through npx so nothing has to be installed first', () => {

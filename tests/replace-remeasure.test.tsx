@@ -17,7 +17,7 @@ vi.hoisted(() => {
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = NoopResizeObserver
 })
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => undefined,
   useConnectionIconFor: () => undefined
@@ -38,8 +38,8 @@ vi.mock('@xyflow/react', async () => {
   }
 })
 
-import { WorkflowCanvas } from '../src/renderer/components/workflow-editor/WorkflowCanvas'
-import { toCanvasElements } from '../src/renderer/lib/workflow-canvas-layout'
+import { WorkflowCanvas } from '../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas'
+import { toCanvasElements } from '../packages/web/src/renderer/lib/workflow-canvas-layout'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(() => {

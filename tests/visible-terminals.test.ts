@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const platform = { isWeb: true }
-vi.mock('../src/renderer/lib/platform', () => ({
+vi.mock('../packages/web/src/renderer/lib/platform', () => ({
   get isWeb() {
     return platform.isWeb
   },
@@ -13,7 +13,11 @@ vi.mock('../src/renderer/lib/platform', () => ({
   MOD: 'Cmd'
 }))
 
-import { markVisible, markHidden, resetVisible } from '../src/renderer/lib/visible-terminals'
+import {
+  markVisible,
+  markHidden,
+  resetVisible
+} from '../packages/web/src/renderer/lib/visible-terminals'
 import { PHONE_BASE_TOPICS } from '../packages/shared/src/topics'
 
 const setTopics = vi.fn(async (_topics: readonly string[]) => {})

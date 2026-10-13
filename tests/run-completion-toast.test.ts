@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { runCompletionToast } from '../src/renderer/lib/run-presentation'
+import { runCompletionToast } from '../packages/web/src/renderer/lib/run-presentation'
 import type { WorkflowExecution, WorkflowNode } from '../packages/shared/src/types'
 
 const nodes = [

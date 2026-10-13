@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowNode } from '../src/shared/types'
+import type { WorkflowNode } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const state = {
     config: { projects: [], tasks: [], defaults: { defaultAgent: 'claude' } },
     activeWorkspace: 'personal'
@@ -16,20 +16,20 @@ vi.mock('../src/renderer/stores', () => {
   return { useAppStore }
 })
 
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: () => <div />
 }))
 
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({ status: {} })
 }))
 
-vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
+vi.mock('../packages/web/src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
   RichMarkdownEditor: () => <div />
 }))
 
 const { NodeConfigPanel } =
-  await import('../src/renderer/components/workflow-editor/panels/NodeConfigPanel')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/NodeConfigPanel')
 
 function makeNode(type: WorkflowNode['type']): WorkflowNode {
   return {

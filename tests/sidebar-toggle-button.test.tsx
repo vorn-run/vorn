@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
 
@@ -13,8 +13,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { SidebarToggleButton } from '../src/renderer/components/SidebarToggleButton'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { SidebarToggleButton } from '../packages/web/src/renderer/components/SidebarToggleButton'
 
 const toggleSidebar = vi.fn()
 

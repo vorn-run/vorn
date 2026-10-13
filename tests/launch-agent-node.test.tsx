@@ -8,7 +8,7 @@ import '@testing-library/jest-dom/vitest'
 const mockConfig = {
   remoteHosts: [] as Array<{ id: string; label: string }>
 }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = { config: mockConfig }
     return selector ? selector(state) : state
@@ -16,16 +16,16 @@ vi.mock('../src/renderer/stores', () => ({
 }))
 
 // Replace AgentIcon with a tagged div so tests can detect which branch ran.
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: ({ agentType }: { agentType: string }) => (
     <div data-testid="agent-icon" data-agent={agentType} />
   )
 }))
 
 const { LaunchAgentNode } =
-  await import('../src/renderer/components/workflow-editor/nodes/LaunchAgentNode')
+  await import('../packages/web/src/renderer/components/workflow-editor/nodes/LaunchAgentNode')
 
-import type { LaunchAgentConfig } from '../src/shared/types'
+import type { LaunchAgentConfig } from '../packages/web/src/shared/types'
 
 function makeConfig(overrides: Partial<LaunchAgentConfig> = {}): LaunchAgentConfig {
   return {

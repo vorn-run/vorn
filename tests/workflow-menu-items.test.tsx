@@ -6,7 +6,7 @@ const mockExecuteWorkflow = vi.fn()
 // Runs start in the server; these check what the window asks for.
 
 const mockSetPending = vi.fn()
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const state = {
     setPendingWorkflowRun: (...args: unknown[]) => mockSetPending(...args)
   }
@@ -19,12 +19,19 @@ vi.mock('../src/renderer/stores', () => {
 })
 
 const mockToastError = vi.fn()
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { error: (...args: unknown[]) => mockToastError(...args), success: vi.fn() }
 }))
 
-import { buildWorkflowMenuItems, startManualRun } from '../src/renderer/lib/workflow-menu-items'
-import type { TaskConfig, TerminalSession, WorkflowDefinition } from '../src/shared/types'
+import {
+  buildWorkflowMenuItems,
+  startManualRun
+} from '../packages/web/src/renderer/lib/workflow-menu-items'
+import type {
+  TaskConfig,
+  TerminalSession,
+  WorkflowDefinition
+} from '../packages/web/src/shared/types'
 
 function makeWorkflow(id: string, contextual: boolean): WorkflowDefinition {
   return {

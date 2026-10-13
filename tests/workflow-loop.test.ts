@@ -6,7 +6,7 @@ import {
   computeFlowLayout,
   appendToLoopBody,
   loopOwningInsertPoint
-} from '../src/renderer/lib/workflow-helpers'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 describe('loop bounds', () => {

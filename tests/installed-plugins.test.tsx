@@ -2,10 +2,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { InstalledPlugins } from '../src/renderer/components/settings/InstalledPlugins'
-import { buildConnectorListings, type ConnectorListing } from '../src/renderer/lib/connector-browse'
-import type { ConnectorCatalogItem, InstalledConnectorPack } from '../src/shared/types'
-import type { RowActivity } from '../src/renderer/lib/use-row-action'
+import { InstalledPlugins } from '../packages/web/src/renderer/components/settings/InstalledPlugins'
+import {
+  buildConnectorListings,
+  type ConnectorListing
+} from '../packages/web/src/renderer/lib/connector-browse'
+import type { ConnectorCatalogItem, InstalledConnectorPack } from '../packages/web/src/shared/types'
+import type { RowActivity } from '../packages/web/src/renderer/lib/use-row-action'
 
 const REVIEW: ConnectorCatalogItem = {
   id: 'review',

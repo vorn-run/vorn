@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculatePopoverPosition } from '../src/renderer/lib/popover-position'
+import { calculatePopoverPosition } from '../packages/web/src/renderer/lib/popover-position'
 
 describe('calculatePopoverPosition', () => {
   it('clamps the popover horizontally when the trigger is near the right edge', () => {

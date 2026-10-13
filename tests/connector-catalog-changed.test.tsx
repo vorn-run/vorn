@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ConnectorCatalogSnapshot } from '../src/shared/types'
+import type { ConnectorCatalogSnapshot } from '../packages/web/src/shared/types'
 
 const listConnectorCatalog = vi.fn()
 const onConnectorCatalogChanged = vi.fn()
@@ -13,7 +13,7 @@ let announce: ((snapshot: ConnectorCatalogSnapshot) => void) | undefined
 }
 
 const { useConnectorCatalog, __resetCatalogCacheForTests } =
-  await import('../src/renderer/lib/use-connector-catalog')
+  await import('../packages/web/src/renderer/lib/use-connector-catalog')
 
 const snapshot = (id: string): ConnectorCatalogSnapshot => ({
   items: [

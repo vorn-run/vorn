@@ -3,13 +3,13 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => null,
   useConnectionIconFor: () => undefined
 }))
 
-import { VariableAutocomplete } from '../src/renderer/components/workflow-editor/panels/VariableAutocomplete'
+import { VariableAutocomplete } from '../packages/web/src/renderer/components/workflow-editor/panels/VariableAutocomplete'
 import type { StepVariableGroup } from '@vornrun/shared/template-vars'
 
 const triageGroup: StepVariableGroup = {

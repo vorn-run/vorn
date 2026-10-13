@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SURFACE, TERMINAL_BACKGROUND } from '../src/shared/surface'
+import { SURFACE, TERMINAL_BACKGROUND } from '../packages/web/src/shared/surface'
 
 const root = join(__dirname, '..')
 const read = (p: string): string => readFileSync(join(root, p), 'utf8')
 
-const css = read('src/renderer/theme.css')
+const css = read('packages/web/src/renderer/theme.css')
 
 /** Every stylesheet that is the sole entry point for one of the clients. */
-const ENTRY_SHEETS = ['src/renderer/global.css', 'packages/web/src/global.css'] as const
+const ENTRY_SHEETS = [
+  'packages/web/src/renderer/global.css',
+  'packages/web/src/global.css'
+] as const
 
 /** Every ground painted before a client's stylesheet has loaded. */
 const PRE_MOUNT_GROUNDS = [
-  'src/renderer/index.html',
+  'packages/web/src/renderer/index.html',
   'packages/web/index.html',
   'packages/web/public/offline.html'
 ] as const
@@ -55,10 +58,10 @@ describe('the surface ladder', () => {
     expect(missing).toEqual([])
 
     // And exactly one file may declare them, or the two drift.
-    const declaring = [...ENTRY_SHEETS, 'src/renderer/theme.css'].filter((p) =>
+    const declaring = [...ENTRY_SHEETS, 'packages/web/src/renderer/theme.css'].filter((p) =>
       read(p).includes('--color-surface-base:')
     )
-    expect(declaring).toEqual(['src/renderer/theme.css'])
+    expect(declaring).toEqual(['packages/web/src/renderer/theme.css'])
   })
 
   it('keeps every @import ahead of the statements that would drop it', () => {

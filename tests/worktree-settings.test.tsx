@@ -7,7 +7,7 @@ import type {
   WorktreeInventory,
   WorktreeInventoryEntry,
   WorktreeProjectInventory
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({
@@ -35,7 +35,7 @@ vi.mock('framer-motion', () => ({
   )
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: Object.assign((msg: string) => msg, {
     loading: () => 'toast-id',
     update: vi.fn(),
@@ -64,7 +64,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { WorktreeSettings } from '../src/renderer/components/settings/WorktreeSettings'
+import { WorktreeSettings } from '../packages/web/src/renderer/components/settings/WorktreeSettings'
 
 const MB = 1024 ** 2
 const GB = 1024 ** 3

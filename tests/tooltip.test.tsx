@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { Tooltip } from '../src/renderer/components/Tooltip'
+import { Tooltip } from '../packages/web/src/renderer/components/Tooltip'
 
 function getWrapper() {
   return screen.getByText('Hover me').parentElement!

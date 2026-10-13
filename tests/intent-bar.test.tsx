@@ -28,7 +28,7 @@ const registryMocks = vi.hoisted(() => ({
   scrollToBottom: vi.fn()
 }))
 
-vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => registryMocks)
 
 // What the shell is doing right now decides where a keystroke belongs.
 const shellState = vi.hoisted(() => ({
@@ -37,7 +37,7 @@ const shellState = vi.hoisted(() => ({
 // Listeners are captured so a test can drive a real state transition; several
 // of these only reproduce on the change, not on the state they land in.
 const blocks = vi.hoisted(() => ({ listeners: new Set<() => void>() }))
-vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
+vi.mock('../packages/web/src/renderer/lib/command-blocks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
     ...actual,
@@ -66,11 +66,14 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { IntentBar } from '../src/renderer/components/IntentBar'
-import { focusIntentBar } from '../src/renderer/lib/intent-bar-focus'
-import { recordCommand, resetCommandHistoryCache } from '../src/renderer/lib/command-history'
-import { resetCompletionCaches } from '../src/renderer/lib/completions'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { IntentBar } from '../packages/web/src/renderer/components/IntentBar'
+import { focusIntentBar } from '../packages/web/src/renderer/lib/intent-bar-focus'
+import {
+  recordCommand,
+  resetCommandHistoryCache
+} from '../packages/web/src/renderer/lib/command-history'
+import { resetCompletionCaches } from '../packages/web/src/renderer/lib/completions'
 
 const writeTerminal = window.api.writeTerminal as ReturnType<typeof vi.fn>
 

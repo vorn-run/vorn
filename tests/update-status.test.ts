@@ -3,7 +3,7 @@ import {
   describeUpdateStatus,
   formatLastChecked,
   hasPendingUpdate
-} from '../src/renderer/lib/update-status'
+} from '../packages/web/src/renderer/lib/update-status'
 
 const NOW = 1_700_000_000_000
 

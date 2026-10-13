@@ -11,7 +11,11 @@ vi.hoisted(() => {
   })
 })
 
-import { SHORTCUTS, SHORTCUT_CATEGORIES, getShortcut } from '../src/renderer/lib/keyboard-shortcuts'
+import {
+  SHORTCUTS,
+  SHORTCUT_CATEGORIES,
+  getShortcut
+} from '../packages/web/src/renderer/lib/keyboard-shortcuts'
 
 describe('SHORTCUTS', () => {
   it('has no duplicate ids', () => {

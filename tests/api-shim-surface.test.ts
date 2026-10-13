@@ -3,10 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 /**
- * The web shim must implement every method the preload does.
+ * The web shim must implement every method of the `window.api` surface.
  *
- * The renderer is shared: the same components run in Electron against `window.api`
- * from the preload, and in the browser against the shim. A method present in one and
+ * The renderer is written against the surface declared in renderer/api.ts, and runs in
+ * the browser against the shim. A method present in one and
  * missing from the other is not a degraded feature — `App` subscribes to several at
  * mount, so one missing name throws during render and the entire web app fails to
  * appear, showing its loading screen forever with no error on screen.
@@ -30,7 +30,7 @@ function methodNames(file: string, indent: number): Set<string> {
 }
 
 describe('web api shim surface', () => {
-  const preload = methodNames('src/preload/index.ts', 2)
+  const preload = methodNames('packages/web/src/renderer/api.ts', 2)
   const shim = methodNames('packages/web/src/api-shim.ts', 4)
 
   it('reads both files, so a rename cannot make this test vacuously pass', () => {

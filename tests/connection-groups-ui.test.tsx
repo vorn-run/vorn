@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ConnectionGroups } from '../src/renderer/components/settings/ConnectionGroups'
-import { buildConnectorListings } from '../src/renderer/lib/connector-browse'
-import type { ConnectorCatalogItem, SourceConnection } from '../src/shared/types'
+import { ConnectionGroups } from '../packages/web/src/renderer/components/settings/ConnectionGroups'
+import { buildConnectorListings } from '../packages/web/src/renderer/lib/connector-browse'
+import type { ConnectorCatalogItem, SourceConnection } from '../packages/web/src/shared/types'
 
 const ADO: ConnectorCatalogItem = {
   id: 'ado',

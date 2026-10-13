@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { CopyButton } from '../src/renderer/components/settings/network/shared'
+import { CopyButton } from '../packages/web/src/renderer/components/settings/network/shared'
 
 /**
  * Copying an address out of the Remote Access panel.

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { HttpRequestConfig } from '../src/shared/types'
+import type { HttpRequestConfig } from '../packages/web/src/shared/types'
 
 const listConnections = vi.fn(async () => [
   { id: 'p1', name: 'Acme API', connectorId: 'http' },
@@ -13,7 +13,7 @@ const listConnections = vi.fn(async () => [
   listConnections
 }
 
-import { HttpRequestConfigForm } from '../src/renderer/components/workflow-editor/panels/HttpRequestConfigForm'
+import { HttpRequestConfigForm } from '../packages/web/src/renderer/components/workflow-editor/panels/HttpRequestConfigForm'
 
 afterEach(cleanup)
 

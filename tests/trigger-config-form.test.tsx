@@ -2,9 +2,9 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { TriggerConfig } from '../src/shared/types'
+import type { TriggerConfig } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const state = { config: { projects: [] }, editingWorkflowId: 'wf-1' }
   return {
     useAppStore: (selector?: (s: unknown) => unknown) => (selector ? selector(state) : state)
@@ -18,7 +18,7 @@ const getWebhookInfo = vi.fn(async () => ({ baseUrl: 'http://127.0.0.1:4444' }))
 }
 
 const { TriggerConfigForm } =
-  await import('../src/renderer/components/workflow-editor/panels/TriggerConfigForm')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/TriggerConfigForm')
 
 afterEach(() => vi.unstubAllGlobals())
 

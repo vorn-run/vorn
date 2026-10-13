@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
-import type { RunBucket } from '../src/renderer/stores/types'
+import type { RunBucket } from '../packages/web/src/renderer/stores/types'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
 
-import { RunsToolbar } from '../src/renderer/components/workflow-runs/RunsToolbar'
+import { RunsToolbar } from '../packages/web/src/renderer/components/workflow-runs/RunsToolbar'
 
 const setFilter = vi.fn()
 

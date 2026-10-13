@@ -5,7 +5,7 @@ import {
   WORKFLOW_STATUS_TEXT,
   outcomeToneClass,
   type WorkflowStatusKey
-} from '../src/renderer/lib/workflow-status'
+} from '../packages/web/src/renderer/lib/workflow-status'
 
 const EVERY_STATUS: WorkflowStatusKey[] = [
   'waiting',

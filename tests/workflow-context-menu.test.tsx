@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { WorkflowContextMenu } from '../src/renderer/components/project-sidebar/WorkflowContextMenu'
+import { WorkflowContextMenu } from '../packages/web/src/renderer/components/project-sidebar/WorkflowContextMenu'
 
 describe('WorkflowContextMenu', () => {
   it('renders Edit and Delete buttons', () => {

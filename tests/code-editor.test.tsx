@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { CodeEditor } from '../src/renderer/components/code-editor/CodeEditor'
+import { CodeEditor } from '../packages/web/src/renderer/components/code-editor/CodeEditor'
 
 // Stub shiki so highlightCode resolves without WASM in jsdom.
 vi.mock('shiki', () => ({

@@ -39,7 +39,7 @@ export default tseslint.config(
   },
 
   {
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: ['packages/web/src/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh

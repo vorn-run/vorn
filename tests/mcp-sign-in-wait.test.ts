@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { WorkflowExecution } from '../src/shared/types'
+import type { WorkflowExecution } from '../packages/web/src/shared/types'
 import { annotateWaitingGates, resolveGateTarget } from '../packages/mcp/src/tools/workflows'
 
 const run = {

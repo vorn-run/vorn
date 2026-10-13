@@ -45,16 +45,8 @@ describe('connector pack RPC wiring', () => {
     expect(methods).toContain(`"${channels.CONNECTOR_INSTALL_PROGRESS}"`)
   })
 
-  it('forwards each request from the main process', () => {
-    const handlers = read('src/main/ipc-handlers.ts')
-    for (const key of Object.keys(channels)) {
-      if (key === 'CONNECTOR_INSTALL_PROGRESS') continue
-      expect(handlers).toContain(`safeHandle(IPC.${key}`)
-    }
-  })
-
-  it('exposes each one on the preload, progress included', () => {
-    const preload = read('src/preload/index.ts')
+  it('exposes each one on the window.api surface, progress included', () => {
+    const preload = read('packages/web/src/renderer/api.ts')
     for (const method of [
       'inspectConnectorPack',
       'installConnectorPack',

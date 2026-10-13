@@ -3,35 +3,35 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (sel?: (s: unknown) => unknown) => {
     const state = { config: { remoteHosts: [{ id: 'h1', label: 'build-box' }] } }
     return sel ? sel(state) : state
   }
 }))
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnectorIdFor: (id: string | null) => (id ? 'github' : null),
   useConnectionIconFor: () => undefined
 }))
-vi.mock('../src/renderer/components/ConnectorIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/ConnectorIcon', () => ({
   ConnectorIcon: () => <span data-testid="connector-icon" />
 }))
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: () => <span data-testid="agent-icon" />
 }))
 
-import { ScriptNode } from '../src/renderer/components/workflow-editor/nodes/ScriptNode'
-import { ConditionNode } from '../src/renderer/components/workflow-editor/nodes/ConditionNode'
-import { LaunchAgentNode } from '../src/renderer/components/workflow-editor/nodes/LaunchAgentNode'
-import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
-import { TriggerNode } from '../src/renderer/components/workflow-editor/nodes/TriggerNode'
+import { ScriptNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ScriptNode'
+import { ConditionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ConditionNode'
+import { LaunchAgentNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/LaunchAgentNode'
+import { CallConnectorActionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
+import { TriggerNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/TriggerNode'
 import type {
   ScriptConfig,
   ConditionConfig,
   LaunchAgentConfig,
   CallConnectorActionConfig,
   TriggerConfig
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 const noop = (): void => {}
 

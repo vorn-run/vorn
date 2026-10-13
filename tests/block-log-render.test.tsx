@@ -2,9 +2,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { BlockLog } from '../src/renderer/components/BlockLog'
-import { captureBlock, clearBlockLog } from '../src/renderer/lib/block-log'
-import type { BlockRow } from '../src/renderer/lib/block-render'
+import { BlockLog } from '../packages/web/src/renderer/components/BlockLog'
+import { captureBlock, clearBlockLog } from '../packages/web/src/renderer/lib/block-log'
+import type { BlockRow } from '../packages/web/src/renderer/lib/block-render'
 
 /**
  * Finished commands drawn as elements. This is what makes a block a real

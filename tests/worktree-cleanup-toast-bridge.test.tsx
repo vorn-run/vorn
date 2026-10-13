@@ -13,7 +13,7 @@ const mockToast = vi.fn(() => 'toast-id')
 const mockUpdateIfExists = vi.fn()
 const mockDismiss = vi.fn()
 
-vi.mock('../src/renderer/components/Toast', () => {
+vi.mock('../packages/web/src/renderer/components/Toast', () => {
   const fn = (...args: unknown[]) => (mockToast as unknown as (...a: unknown[]) => string)(...args)
   return {
     toast: Object.assign(fn, {
@@ -35,7 +35,7 @@ vi.mock('../src/renderer/components/Toast', () => {
 })
 
 const mockRemove = vi.fn()
-vi.mock('../src/renderer/lib/remove-worktree', () => ({
+vi.mock('../packages/web/src/renderer/lib/remove-worktree', () => ({
   removeWorktreeWithProgress: (...args: unknown[]) => mockRemove(...args)
 }))
 
@@ -57,7 +57,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { WorktreeCleanupToastBridge } from '../src/renderer/components/WorktreeCleanupToastBridge'
+import { WorktreeCleanupToastBridge } from '../packages/web/src/renderer/components/WorktreeCleanupToastBridge'
 
 function fire(worktreePath = '/tmp/proj/feature-x', projectPath = '/tmp/proj') {
   act(() => {

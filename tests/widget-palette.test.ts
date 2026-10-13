@@ -5,7 +5,7 @@ import { join } from 'node:path'
 const root = join(__dirname, '..')
 const read = (p: string): string => readFileSync(join(root, p), 'utf8')
 
-const widget = read('src/renderer/widget.css')
+const widget = read('packages/web/src/renderer/widget.css')
 
 describe('the widget reads the same palette as the app', () => {
   it('imports the theme rather than keeping its own copy', () => {
