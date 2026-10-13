@@ -17,6 +17,18 @@ public protocol WorkflowsBackend: Sendable {
         -> GateResolution
     /// Pushes until the caller stops listening.
     func events() async throws -> AsyncStream<WorkflowEvent>
+    /// Any other vornd method, for surfaces that need more than the calls above.
+    func rpc(_ method: String, _ params: JSONValue?) async throws -> JSONValue
+    func serverURL() async -> URL?
+}
+
+extension WorkflowsBackend {
+    /// Where vornd serves pages over HTTP, such as a gate's review page.
+    public func serverURL() async -> URL? { nil }
+
+    public func rpc<R: Decodable>(_ method: String, _ params: JSONValue?, as: R.Type) async throws -> R {
+        try await rpc(method, params).decode(R.self)
+    }
 }
 
 /// The backend over a vornd connection.
@@ -34,6 +46,10 @@ public struct LiveWorkflowsBackend: WorkflowsBackend {
         let client = VornClient(dataDir: dataDir, readOnly: readOnly)
         try await client.connect()
         return LiveWorkflowsBackend(client: client)
+    }
+
+    public func serverURL() async -> URL? {
+        await client.endpoint.flatMap { URL(string: "http://\($0.host):\($0.port)") }
     }
 
     public func listWorkflows() async throws -> [WorkflowDefinition] { try await client.listWorkflows() }
@@ -69,6 +85,10 @@ public struct LiveWorkflowsBackend: WorkflowsBackend {
     ) async throws -> GateResolution {
         try await client.resolveGate(
             runId: runId, nodeId: nodeId, decision: decision, comment: comment, edited: edited)
+    }
+
+    public func rpc(_ method: String, _ params: JSONValue?) async throws -> JSONValue {
+        try await client.call(method, params)
     }
 
     public func events() async throws -> AsyncStream<WorkflowEvent> {

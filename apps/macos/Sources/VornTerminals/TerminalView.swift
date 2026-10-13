@@ -70,7 +70,9 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
     public override var acceptsFirstResponder: Bool { true }
     public override var isOpaque: Bool { true }
 
-    private var fonts: TerminalFonts { pane.engine.fonts }
+    private var fonts: TerminalFonts {
+        TerminalFonts.of(size: pane.engine.fontSize, scale: window?.backingScaleFactor ?? 2)
+    }
 
     func paneDidChange() { needsDisplay = true }
 
@@ -82,6 +84,12 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         layoutGrid()
+    }
+
+    public override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        layoutGrid()
+        needsDisplay = true
     }
 
     /// Attaches on first layout, then follows the view's size.
@@ -213,6 +221,7 @@ public struct TerminalSurface: View {
             }
         } else {
             TerminalRepresentable(engine: engine, sessionID: sessionID, focusRequest: focusRequest, onFocus: onFocus)
+                .id(ObjectIdentifier(engine))
         }
     }
 }

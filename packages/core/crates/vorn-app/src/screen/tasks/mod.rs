@@ -4,7 +4,7 @@
 
 mod detail;
 mod dialog;
-mod diff;
+pub(crate) mod diff;
 mod editor;
 
 pub(super) use dialog::{add_task, commit, output};
@@ -643,6 +643,7 @@ fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
                         .py(20.0)
                         .rounded(8.0)
                         .border(1.0, white(0.08))
+                        .dashed()
                         .center()
                         .child(
                             text("Drop tasks here", 12.0, faint())
@@ -838,11 +839,11 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
                 .child(
                     div().grow().child(
                         text("Include archived", 12.0, secondary())
-                            .line_height(16.0)
+                            .line_height(18.0)
                             .silent(),
                     ),
                 )
-                .child(switch(t.archived)),
+                .child(crate::ui::widgets::switch_track(t.archived)),
         ),
         ..Item::default()
     });
@@ -869,7 +870,7 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
             .role(Role::Button, label)
             .selected(on)
             .child(ico(icon, 12.0, 2.0, fg))
-            .child(text(label, 11.0, fg).line_height(14.0).silent())
+            .child(text(label, 11.0, fg).line_height(16.5).silent())
     };
     items.push(Item {
         row: Some(
@@ -879,40 +880,11 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
                 .px(12.0)
                 .py(4.0)
                 .child(seg(Mode::List, "List", "list"))
-                .child(seg(Mode::Board, "Board", "grid-4")),
+                .child(seg(Mode::Board, "Board", "columns-3")),
         ),
         ..Item::default()
     });
     items
-}
-
-/// `ToggleSwitch`: a 28 by 16 track with its knob.
-pub(super) fn switch(on: bool) -> El {
-    let track = if on {
-        c(look::INK).mix(white(0.0), 0.0)
-    } else {
-        white(0.12)
-    };
-    div()
-        .w(28.0)
-        .h(16.0)
-        .rounded(8.0)
-        .bg(if on {
-            Rgba::hexa(look::INK, 0.85)
-        } else {
-            track
-        })
-        .child(
-            div()
-                .absolute(if on { 14.0 } else { 2.0 }, 2.0)
-                .size(12.0, 12.0)
-                .rounded(6.0)
-                .bg(if on {
-                    c(look::SURFACE_BASE)
-                } else {
-                    white(0.6)
-                }),
-        )
 }
 
 /// `KanbanCardMenu`'s entries.
@@ -1128,16 +1100,25 @@ pub(in crate::screen) fn agent_items(s: &Screen<'_>, form: Form) -> Vec<Item> {
     items
 }
 
+/// How a picker's trigger is drawn: `StatusPicker` is bare,
+/// `ProjectPicker` adds a chevron, `AgentPicker` a chevron in an outline.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trigger {
+    Bare,
+    Chevron,
+    Outlined,
+}
+
 /// A picker's trigger: an icon and a label that open `kind`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn picker(
+fn picker(
     s: &Screen<'_>,
     place: &str,
     kind: MenuKind,
     icon: El,
     label: &str,
     color: Rgba,
-    pill: bool,
+    look: Trigger,
     disabled: bool,
 ) -> El {
     let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
@@ -1148,77 +1129,100 @@ pub(super) fn picker(
         .row()
         .items_center()
         .gap(6.0)
+        .px(6.0)
+        .py(2.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.04), hot))
         .role(Role::Button, label)
         .has_popup()
         .expanded(open)
         .child(icon)
         .child(
-            text(label, if pill { 11.0 } else { 12.0 }, color)
-                .line_height(16.0)
+            text(label, 12.0, color)
+                .line_height(18.0)
                 .truncate()
                 .silent(),
         );
+    if look != Trigger::Bare {
+        b = b.child(ico("chevron-down", 11.0, 2.0, c(look::GRAY_500)));
+    }
+    b = if look == Trigger::Outlined {
+        b.border(1.0, white(0.12).mix(white(0.25), hot))
+    } else {
+        // `-mx-1.5`: the label lines up with the text around it.
+        b.mx(-6.0)
+    };
     if !disabled {
         b = b.on(Action::Click);
     }
-    if pill {
-        b.px(8.0)
-            .py(4.0)
-            .rounded(6.0)
-            .border(1.0, white(0.08))
-            .bg(white(0.03).mix(white(0.06), hot.max(if open { 1.0 } else { 0.0 })))
-    } else {
-        b.px(6.0)
-            .py(2.0)
-            .rounded(4.0)
-            .bg(white(0.0).mix(white(0.04), hot))
-    }
+    b
 }
 
-pub(super) fn status_picker(s: &Screen<'_>, form: Form, pill: bool, disabled: bool) -> El {
-    let status = s.st.tasks.form_ref(form).status.clone();
+pub(super) fn status_picker(s: &Screen<'_>, form: Form, disabled: bool) -> El {
+    let f = s.st.tasks.form_ref(form);
+    // An open task's picker shows the task as it is now, moved from anywhere.
+    let live = (form == Form::Detail && f.editing)
+        .then(|| s.store.tasks.iter().find(|t| t.id == f.id))
+        .flatten()
+        .map(|t| t.status.to_string());
+    let status = live.unwrap_or_else(|| f.status.clone());
     let st = tasks::status(&status);
     picker(
         s,
         "task-status-picker",
         MenuKind::TaskStatus(form),
-        ico(st.icon, if pill { 12.0 } else { 13.0 }, 2.0, tone(&status)),
+        ico(st.icon, 13.0, 2.0, tone(&status)),
         st.label,
         tone(&status),
-        pill,
+        Trigger::Bare,
         disabled,
     )
 }
 
-pub(super) fn project_picker(s: &Screen<'_>, form: Form, pill: bool) -> El {
+pub(super) fn project_picker(s: &Screen<'_>, form: Form) -> El {
     let p = &s.st.tasks.form_ref(form).project;
-    let label = if p.is_empty() { "Project" } else { p.as_str() };
+    let label = if p.is_empty() {
+        "Select project..."
+    } else {
+        p.as_str()
+    };
     picker(
         s,
         "task-project-picker",
         MenuKind::TaskProject(form),
-        ico("folder", if pill { 12.0 } else { 13.0 }, 2.0, secondary()),
+        s.store.projects.iter().find(|q| &q.name == p).map_or_else(
+            || ico("folder", 14.0, 1.5, c(look::GRAY_500)),
+            |q| crate::screen::sidebar_project_icon(q, 14.0),
+        ),
         label,
-        if p.is_empty() { faint() } else { secondary() },
-        pill,
+        if p.is_empty() {
+            c(look::GRAY_600)
+        } else {
+            c(look::GRAY_300)
+        },
+        Trigger::Chevron,
         false,
     )
 }
 
-pub(super) fn agent_picker(s: &Screen<'_>, form: Form, pill: bool) -> El {
+pub(super) fn agent_picker(s: &Screen<'_>, form: Form) -> El {
     let a = s.st.tasks.form_ref(form).agent.as_deref();
-    let label = a.map_or(
-        if pill { "Agent" } else { "None" },
-        crate::screen::menus::agent_name,
-    );
+    let icon = match a {
+        Some(k) => crate::screen::agent_icon(s, k, 14.0),
+        None => ico("bot", 14.0, 2.0, c(look::GRAY_500)),
+    };
     picker(
         s,
         "task-agent-picker",
         MenuKind::TaskAgent(form),
-        ico("bot", if pill { 12.0 } else { 13.0 }, 1.5, secondary()),
-        label,
-        if a.is_some() { secondary() } else { faint() },
-        pill,
+        icon,
+        a.map_or("Unassigned", crate::screen::menus::agent_name),
+        if a.is_some() {
+            c(look::GRAY_300)
+        } else {
+            c(look::GRAY_600)
+        },
+        Trigger::Outlined,
         false,
     )
 }

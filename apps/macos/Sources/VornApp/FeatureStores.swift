@@ -37,6 +37,29 @@ public final class FeatureStores {
         settings.onToast = { [weak model] message, kind in
             model?.toasts.show(message, kind == .error ? .error : kind == .success ? .success : .info)
         }
+        tasks.workflows = workflows
+        tasks.launchSession = { [weak store] payload in
+            guard let store else { throw VornError.notConnected }
+            return try await store.createSession(payload)
+        }
+        tasks.focusSession = { [weak model] id in
+            model?.mainViewMode = .sessions
+            model?.focus(id)
+        }
+        tasks.writeSession = { [weak store] id, data in try await store?.write(id, data) }
+        workflows.taskTitles = { [weak tasks] in
+            Dictionary((tasks?.tasks ?? []).map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        }
+        workflows.taskContext = { [weak tasks] id in tasks?.runTaskContext(id) }
+        // As the editor does: the step's agent reopens in a session, and the page closes.
+        workflows.resumeSession = { [weak tasks, weak workflows] r in
+            tasks?.resumeStep(r)
+            workflows?.showAllRuns()
+        }
+        workflows.openTask = { [weak tasks, weak workflows] id in
+            tasks?.selectedTaskId = id
+            workflows?.showAllRuns()
+        }
     }
 
     /// The board follows the sidebar: the active project, else the workspace's projects.

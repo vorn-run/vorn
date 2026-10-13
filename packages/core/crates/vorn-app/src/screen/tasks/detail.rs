@@ -42,7 +42,7 @@ fn head_btn(
 }
 
 fn header(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
-    let mut row = div().row().items_center().gap(8.0);
+    let mut row = div().row().w_full().items_center().gap(8.0);
     row = match task {
         None => row.child(
             div().grow().child(
@@ -114,7 +114,7 @@ fn prop(label: &str, value: El) -> El {
             div()
                 .w(80.0)
                 .shrink0()
-                .child(text(label, 12.0, faint()).line_height(16.0).silent()),
+                .child(text(label, 12.0, faint()).line_height(18.0).silent()),
         )
         .child(value)
 }
@@ -145,7 +145,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
             .child(ico("folder-git-2", 13.0, 1.5, color))
             .child(
                 text(if on { "Enabled" } else { "Disabled" }, 12.0, color)
-                    .line_height(16.0)
+                    .line_height(18.0)
                     .silent(),
             )
     };
@@ -165,6 +165,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
                     TextStyle::ui(12.0),
                     secondary(),
                 )
+                .placeholder_color(faint())
                 .w_full(),
             ),
         );
@@ -176,12 +177,12 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
         .border_bottom(1.0, white(0.06))
         .child(prop(
             "Status",
-            status_picker(s, Form::Detail, false, task.is_none()),
+            status_picker(s, Form::Detail, task.is_none()),
         ))
-        .child(prop("Project", project_picker(s, Form::Detail, false)))
+        .child(prop("Project", project_picker(s, Form::Detail)))
         .child(prop("Branch", branch))
         .child(prop("Worktree", worktree))
-        .child(prop("Agent", agent_picker(s, Form::Detail, false)));
+        .child(prop("Agent", agent_picker(s, Form::Detail)));
     let date = |icon: &str, iso: &str| {
         div()
             .row()
@@ -190,7 +191,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
             .child(ico(icon, 11.0, 2.0, secondary()))
             .child(
                 text(tasks::long_date(iso), 12.0, secondary())
-                    .line_height(16.0)
+                    .line_height(18.0)
                     .silent(),
             )
     };
@@ -292,6 +293,7 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
         .size(size, size)
         .rounded(8.0)
         .border(1.0, white(0.10 + 0.10 * hot))
+        .dashed()
         .center()
         .role(Role::Button, "Add images")
         .child(ico(
@@ -527,7 +529,11 @@ fn changes(s: &Screen<'_>, t: &TaskConfig) -> Option<El> {
     let mut col = div().col().border_top(1.0, white(0.06)).child(head);
     if open {
         if !d.comments.is_empty() {
-            col = col.child(diff::feedback_bar(s, t.agent_session_id.is_some()));
+            col = col.child(diff::feedback_bar(
+                s,
+                diff::Scope::Task,
+                t.agent_session_id.is_some(),
+            ));
         }
         col = if d.loading && d.files.is_empty() {
             col.child(div().row().justify_center().py(32.0).child(ico(
@@ -537,8 +543,8 @@ fn changes(s: &Screen<'_>, t: &TaskConfig) -> Option<El> {
                 faint(),
             )))
         } else if !d.files.is_empty() {
-            col.child(diff::file_list(s, &d.files))
-                .child(diff::content(s, &d.files))
+            col.child(diff::file_list(s, diff::Scope::Task, &d.files))
+                .child(diff::content(s, diff::Scope::Task, &d.files))
         } else {
             let msg = if d.cwd.is_empty() {
                 "No project path"
@@ -666,7 +672,7 @@ pub(super) fn panel(s: &Screen<'_>) -> Option<El> {
             s,
             Form::Detail,
             "Describe the task in detail, or type / for commands...",
-            120.0,
+            202.0,
             cols,
         )))
         .child(div().px(16.0).pb(12.0).child(images(s, Form::Detail, 64.0)));

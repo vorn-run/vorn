@@ -118,12 +118,13 @@ let nodes: [WorkflowNode] = try! decode(
 
 @Suite struct CanvasTests {
     @Test func cardTextFollowsNodeShell() {
-        #expect(NodeCardText.subtitle(nodes[0]) == "Click to run")
-        #expect(NodeCardText.subtitle(nodes[1]) == "bash")
-        #expect(NodeCardText.footer(nodes[1])?.text == "make all")
-        #expect(NodeCardText.footer(nodes[1])?.mono == true)
-        #expect(NodeCardText.subtitle(nodes[2]) == "Waits for approval")
-        #expect(NodeCardText.footer(nodes[2])?.text == "Ship it?")
+        #expect(CardText.subtitle(nodes[0]).text == "Click to run")
+        #expect(CardText.subtitle(nodes[1]).text == "bash")
+        #expect(CardText.footer(nodes[1])?.text == "make all")
+        #expect(CardText.footer(nodes[1])?.mono == true)
+        #expect(CardText.subtitle(nodes[2]).text == "Waits for approval")
+        #expect(CardText.footer(nodes[2])?.text == "Ship it?")
+        #expect(CardText.truncate(String(repeating: "a", count: 55), 50).hasSuffix("a..."))
     }
 
     @Test func seededPositionsStackIntoATrunk() throws {
@@ -136,7 +137,7 @@ let nodes: [WorkflowNode] = try! decode(
                       {"id":"b","type":"script","label":"B","config":{},"position":{"x":0,"y":0}}],
              "edges":[{"id":"1","source":"t","target":"a"},{"id":"2","source":"a","target":"b"}]}
             """#)
-        let p = CanvasLayout.positions(wf)
+        let p = EditorLayout.layoutPositions(wf.nodes, wf.edges).positions
         #expect(p["t"]!.y < p["a"]!.y)
         #expect(p["a"]!.y < p["b"]!.y)
         #expect(p["t"]!.x == p["b"]!.x)

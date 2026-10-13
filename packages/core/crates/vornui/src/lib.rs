@@ -12,12 +12,18 @@
 
 mod a11y;
 pub mod atlas;
+mod backdrop;
 mod cpu;
 pub mod edit;
 pub mod element;
 pub mod gpu;
+pub mod icons;
 pub mod input;
 mod interact;
+#[cfg(target_os = "macos")]
+mod macos;
+pub mod menu;
+pub mod motion;
 pub mod pace;
 mod render;
 pub mod scene;
@@ -31,14 +37,18 @@ pub use {accesskit, wgpu, winit};
 
 pub use edit::{Clipboard, MemoryClipboard, TextEdit};
 pub use element::{
-    custom, div, icon, image, text, Action, Content, Cursor, El, Id, Overlay, Place, Sense,
+    custom, div, icon, image, shape, text, Action, Content, Cursor, El, Id, Overlay, Place, Sense,
 };
 pub use gpu::Gpu;
 pub use input::Input;
 pub use interact::{Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, MOVE_SLOP, TOOLTIP_DELAY};
+pub use motion::{Animate, Transform, Transition};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
-pub use scene::{Rect, Rgba, Scene};
+pub use scene::{Blur, Rect, Rgba, Scene, Shadow, TextGamma};
 pub use text::{TextStyle, TextSystem};
-pub use ui::{decode_png, rasterize_svg, write_png, CustomA11y, Laid, Ui, UiConfig, ROOT_NODE};
+pub use ui::{
+    decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
+    ROOT_NODE,
+};
 pub use window::{run, run_with, App, UserEvent, Waker, WindowOptions};

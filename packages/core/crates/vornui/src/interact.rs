@@ -7,6 +7,7 @@
 //! Widgets read this state while building the next frame (`ui.hover(id)`,
 //! `ui.menu_open(id)`), so there are no callbacks and no retained widgets.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ use accesskit::{ActionData, ActionRequest};
 use crate::edit::{Outcome, TextEdit};
 use crate::element::{Action, Cursor, Id, Sense};
 use crate::input::Input;
+use crate::motion::{self, Animate, Motion, Transition};
 use crate::scene::Rect;
 use crate::text::Shaped;
 use crate::theme;
@@ -166,6 +168,8 @@ pub(crate) struct EditGeom {
 
 pub(crate) struct State {
     pub now: Instant,
+    /// What looping animations count from, so every instance stays in phase.
+    pub epoch: Instant,
     pub pointer: Option<(f32, f32)>,
     /// Ids under the pointer in its topmost layer, outermost first.
     pub under: Vec<Id>,
@@ -197,12 +201,17 @@ pub(crate) struct State {
     pub ime: Option<Rect>,
     pub requests: Vec<WindowRequest>,
     pub maximized: bool,
+    /// Values moving under [`Ui::animate`], and whether each was asked for
+    /// since the last layout; a value nobody asks for is dropped.
+    pub motions: RefCell<HashMap<Id, (Motion, bool)>>,
+    pub reduced_motion: bool,
 }
 
 impl State {
     pub fn new(now: Instant) -> State {
         State {
             now,
+            epoch: now,
             pointer: None,
             under: Vec::new(),
             pressed: None,
@@ -229,6 +238,8 @@ impl State {
             ime: None,
             requests: Vec::new(),
             maximized: false,
+            motions: RefCell::new(HashMap::new()),
+            reduced_motion: motion::system_reduced_motion(),
         }
     }
 
@@ -239,9 +250,10 @@ impl State {
     /// Whether anything is mid-animation at `now`.
     pub fn animating(&self, now: Instant) -> bool {
         self.fades.values().any(|f| !f.settled(now))
-            || self
-                .menu
-                .is_some_and(|m| now.saturating_duration_since(m.opened) < MENU_IN)
+            || self.menu.is_some_and(|m| {
+                !self.reduced_motion && now.saturating_duration_since(m.opened) < MENU_IN
+            })
+            || self.motions.borrow().values().any(|(m, _)| !m.settled(now))
     }
 
     fn focused_edit(&self) -> Option<Id> {
@@ -315,6 +327,9 @@ impl State {
     pub fn gc(&mut self) {
         let now = self.now;
         self.fades.retain(|_, f| f.on || f.linear(now) > 0.0);
+        self.motions
+            .get_mut()
+            .retain(|_, (_, seen)| std::mem::take(seen));
     }
 }
 
@@ -390,20 +405,68 @@ impl Ui {
         self.st.menu.is_some_and(|m| m.id == menu)
     }
 
-    /// How far the open menu's entrance has run, eased: 0 just opened, 1 done.
+    /// How far the open menu's entrance has run: 0 just opened, 1 done,
+    /// along the app's popover spring. Always 1 under reduced motion.
     pub fn menu_progress(&self, menu: Id) -> f32 {
         match self.st.menu {
             Some(m) if m.id == menu => {
-                let t = self
-                    .st
-                    .now
-                    .saturating_duration_since(m.opened)
-                    .as_secs_f32()
-                    / MENU_IN.as_secs_f32();
-                ease_out(t.min(1.0))
+                let t = self.st.now.saturating_duration_since(m.opened);
+                if self.st.reduced_motion || t >= MENU_IN {
+                    return 1.0;
+                }
+                let Transition::Spring { duration, bounce } = Transition::POPOVER else {
+                    return 1.0;
+                };
+                1.0 + motion::spring(duration, bounce, -1.0, 0.0, t.as_secs_f32()).0
             }
             _ => 0.0,
         }
+    }
+
+    /// `target`, reached smoothly: the value `key` shows this frame as it
+    /// moves to `target` by `transition`. Changing the target mid-flight
+    /// carries on from where the value is. The first call for a key starts
+    /// at `target`; a key not asked for in a frame is forgotten. Frames
+    /// are asked for only while something moves.
+    ///
+    /// Under reduced motion a value that moves things ([`Animate::MOVES`])
+    /// jumps; colours and opacity still fade.
+    pub fn animate<T: Animate>(&self, key: Id, target: T, transition: Transition) -> T {
+        self.animate_from(key, target, target, transition)
+    }
+
+    /// [`Ui::animate`], starting from `from` the first time `key` is seen:
+    /// an entrance.
+    pub fn animate_from<T: Animate>(
+        &self,
+        key: Id,
+        from: T,
+        target: T,
+        transition: Transition,
+    ) -> T {
+        let now = self.st.now;
+        let jump = self.st.reduced_motion && T::MOVES;
+        let mut motions = self.st.motions.borrow_mut();
+        let (m, seen) = motions
+            .entry(key)
+            .or_insert_with(|| (Motion::at_rest(if jump { target } else { from }, now), true));
+        *seen = true;
+        if jump {
+            m.snap(target, now);
+        } else {
+            m.retarget(target, transition, now);
+        }
+        m.value(now)
+    }
+
+    /// Whether motion is reduced: entrances and moves jump to their end.
+    pub fn reduced_motion(&self) -> bool {
+        self.st.reduced_motion
+    }
+
+    /// Overrides the platform's reduced-motion setting, read at start.
+    pub fn set_reduced_motion(&mut self, on: bool) {
+        self.st.reduced_motion = on;
     }
 
     /// Opens `menu` from `trigger`, closing any other.
@@ -484,6 +547,16 @@ impl Ui {
         self.st.scroll.get(&id).map_or(0.0, |s| s.offset)
     }
 
+    /// Scrolls scroll view `id` to `offset`, clamped once it is laid out.
+    pub fn set_scroll_offset(&mut self, id: Id, offset: f32) {
+        let s = self.st.scroll.entry(id).or_default();
+        s.offset = if s.max > 0.0 {
+            offset.clamp(0.0, s.max)
+        } else {
+            offset.max(0.0)
+        };
+    }
+
     /// The events since the last call, oldest first.
     pub fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.st.events)
@@ -500,8 +573,36 @@ impl Ui {
         self.st.animating(self.st.now)
     }
 
+    /// The time this frame is drawn at: what a view animates by.
+    pub fn now(&self) -> Instant {
+        self.st.now
+    }
+
+    /// Seconds since the shared clock that looping animations (a spinner,
+    /// a pulse) count from, so every instance of one runs in phase.
+    pub fn anim_time(&self) -> f64 {
+        self.st
+            .now
+            .saturating_duration_since(self.st.epoch)
+            .as_secs_f64()
+    }
+
+    /// Restarts the clock [`Ui::anim_time`] counts from at `epoch`.
+    pub fn set_anim_epoch(&mut self, epoch: Instant) {
+        self.st.epoch = epoch;
+    }
+
+    /// Asks for a frame at `at` (or sooner), for motion the view drives
+    /// itself. Holds for the frame being built only: a view that keeps
+    /// moving asks again each frame.
+    pub fn wake_at(&self, at: Instant) {
+        let next = self.wake.get().map_or(at, |w| w.min(at));
+        self.wake.set(Some(next));
+    }
+
     /// When a frame is next needed without input: a tooltip's delay
-    /// running out, the caret blinking. `None` when nothing is pending.
+    /// running out, the caret blinking, a view's [`Ui::wake_at`]. `None`
+    /// when nothing is pending.
     pub fn next_wake(&self) -> Option<Instant> {
         let now = self.st.now;
         if self.animating() {
@@ -519,7 +620,7 @@ impl Ui {
                 / BLINK.as_millis();
             self.st.blink_from + BLINK * (n as u32 + 1)
         });
-        tip.into_iter().chain(blink).min()
+        tip.into_iter().chain(blink).chain(self.wake.get()).min()
     }
 
     /// Whether keys should go through the IME: a text field has focus.
@@ -1085,9 +1186,4 @@ fn clamp_ratio(r: f32) -> f32 {
     } else {
         0.5
     }
-}
-
-/// A short ease-out, standing in for the menu's spring (0.2 s, bounce 0.1).
-fn ease_out(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
 }

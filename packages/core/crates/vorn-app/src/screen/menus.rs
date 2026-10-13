@@ -7,94 +7,15 @@ use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
 use crate::state::{Filter, LayoutMode, MenuKind, Sort};
-use crate::ui::{div, item_id, text, Action, El, Id, Place, Role, Ui};
+use crate::ui::{div, text, Action, El, Id, Role, Ui};
 
 /// The open menu's choice group; entries report `Select` in it.
 pub const MENU: Id = Id(0x6d65_6e75_0000_0001);
 /// The open submenu's choice group.
 pub const SUB: Id = Id(0x6d65_6e75_0000_0003);
 
-/// One entry of a menu.
-#[derive(Default)]
-pub struct Item {
-    pub icon: Option<(&'static str, Rgb)>,
-    /// A coloured dot instead of an icon (the status filter).
-    pub dot: Option<Rgb>,
-    pub label: String,
-    pub detail: Option<String>,
-    pub shortcut: Option<String>,
-    pub act: Option<Act>,
-    pub sub: Vec<Item>,
-    /// A rule above it.
-    pub separator: bool,
-    /// A section title rather than a choice.
-    pub header: bool,
-    pub disabled: bool,
-    pub checked: bool,
-    pub danger: bool,
-    pub mono: bool,
-    /// A row drawn by the caller (the layout buttons); not a choice.
-    pub row: Option<El>,
-}
-
-impl Item {
-    pub fn new(icon: &'static str, label: impl Into<String>, act: Act) -> Item {
-        Item {
-            icon: Some((icon, look::GRAY_500)),
-            label: label.into(),
-            act: Some(act),
-            ..Item::default()
-        }
-    }
-
-    pub fn header(label: impl Into<String>) -> Item {
-        Item {
-            label: label.into(),
-            header: true,
-            ..Item::default()
-        }
-    }
-
-    pub fn option(label: impl Into<String>, checked: bool, act: Act) -> Item {
-        Item {
-            label: label.into(),
-            act: Some(act),
-            checked,
-            ..Item::default()
-        }
-    }
-
-    pub fn sep(mut self) -> Item {
-        self.separator = true;
-        self
-    }
-
-    pub fn submenu(mut self, items: Vec<Item>) -> Item {
-        self.sub = items;
-        self
-    }
-
-    pub fn detail(mut self, d: impl Into<String>) -> Item {
-        self.detail = Some(d.into());
-        self
-    }
-
-    pub fn tint(mut self, color: Rgb) -> Item {
-        if let Some((name, _)) = self.icon {
-            self.icon = Some((name, color));
-        }
-        self
-    }
-
-    pub fn disabled(mut self, d: bool) -> Item {
-        self.disabled = d;
-        self
-    }
-
-    fn choosable(&self) -> bool {
-        !self.header && self.row.is_none()
-    }
-}
+/// One entry of a menu, its choice an [`Act`].
+pub type Item = crate::ui::menu::Item<Act>;
 
 /// How wide each menu is, as the renderer sizes them.
 pub fn width(kind: &MenuKind) -> f32 {
@@ -112,163 +33,50 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Recent | MenuKind::Headless => 280.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
+        MenuKind::SetShell => 288.0,
+        MenuKind::SetSelect(_) => 128.0,
+        MenuKind::SshKey(_) => 300.0,
+        MenuKind::OpenIn(_) => 180.0,
+        MenuKind::Branch(_) | MenuKind::FileTabs(_) => 220.0,
         _ => 200.0,
     }
 }
 
-fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
-    if let Some(r) = item.row {
-        return r;
-    }
-    if item.header {
-        return div().px(12.0).pt(6.0).pb(4.0).child(
-            text(item.label.to_uppercase(), 10.0, c(look::GRAY_500))
-                .line_height(14.0)
-                .role(Role::Label, item.label.as_str()),
-        );
-    }
-    let id = item_id(group, i);
-    let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
-    let fg = if item.danger {
-        c(look::DANGER)
-    } else if item.checked {
-        c(look::WHITE)
-    } else {
-        c(look::GRAY_300).mix(c(look::WHITE), hot)
-    };
-    let bg = if item.checked {
-        white(0.06)
-    } else {
-        white(0.0).mix(white(0.06), hot)
-    };
-    let mut r = div()
-        .id(id)
-        .row()
-        .items_center()
-        .gap(10.0)
-        .px(12.0)
-        .h(32.0)
-        .bg(bg)
-        .role(Role::MenuItem, item.label.as_str())
-        .selected(item.checked);
-    if item.disabled {
-        r = r.opacity(0.4).disabled(true);
-    } else {
-        r = r.on(Action::Select { group, index: i });
-    }
-    if let Some(dot) = item.dot {
-        r = r.child(div().size(8.0, 8.0).rounded(4.0).bg(c(dot)).shrink0());
-    }
-    if let Some((name, color)) = item.icon {
-        let color = if item.danger { look::DANGER } else { color };
-        r = r.child(ico(name, 14.0, 1.5, c(color)).shrink0());
-    }
-    let mut label = text(&item.label, 12.0, fg)
-        .line_height(16.0)
-        .truncate()
-        .silent();
-    if item.mono {
-        label = label.mono();
-    }
-    r = r.child(div().row().grow().min_w(0.0).child(label));
-    if let Some(d) = &item.detail {
-        r = r.child(text(d, 10.0, c(look::GRAY_600)).line_height(14.0).silent());
-    }
-    if let Some(s) = &item.shortcut {
-        r = r.child(
-            text(s, 10.0, c(look::GRAY_600))
-                .mono()
-                .line_height(14.0)
-                .silent(),
-        );
-    }
-    if !item.sub.is_empty() {
-        r = r.has_popup().expanded(sub_open.is_some()).child(ico(
-            "chevron-right",
-            11.0,
-            2.0,
-            c(look::GRAY_500),
-        ));
-    }
-    if item.checked {
-        r = r.child(ico("check", 11.0, 3.0, fg));
-    }
-    match sub_open {
-        Some(panel) => r.overlay(panel, Place::Right, 4.0),
-        None => r,
-    }
-}
-
-/// A panel of `items`: `bg-surface-overlay border-white/10 rounded-lg
-/// py-1`, rows of 32 px, separators as rules.
+/// A panel of `items` in the open menu's group, its submenu in [`SUB`].
 pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
-    let p = ui.menu_progress(MENU);
-    let mut col = div()
-        .col()
-        .w(w)
-        .py(4.0)
-        .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.10))
-        .rounded(8.0)
-        .opacity(p)
-        .transform(0.96 + 0.04 * p, (0.0, -4.0 * (1.0 - p)))
-        .role(Role::Menu, name);
-    for (i, mut item) in items.into_iter().enumerate() {
-        if item.separator && i > 0 {
-            col = col.child(super::rule(4.0));
-        }
-        let sub_items = std::mem::take(&mut item.sub);
-        let open = sub == Some(i) && !sub_items.is_empty();
-        let has_sub = !sub_items.is_empty();
-        let sub_panel = open.then(|| {
-            div()
-                .id(SUB.child("scroll"))
-                .col()
-                .scroll_y()
-                .max_h(320.0)
-                .child(panel_inner(ui, SUB, sub_items))
-        });
-        if has_sub {
-            // Keeps the chevron while the entries live in the submenu.
-            item.sub.push(Item::default());
-        }
-        col = col.child(row(ui, group, i, item, sub_panel));
-    }
-    col
-}
-
-fn panel_inner(ui: &Ui, group: Id, items: Vec<Item>) -> El {
-    let mut col = div()
-        .col()
-        .w(200.0)
-        .py(4.0)
-        .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.10))
-        .rounded(8.0)
-        .role(Role::Menu, "Submenu");
-    for (i, item) in items.into_iter().enumerate() {
-        if item.separator && i > 0 {
-            col = col.child(super::rule(4.0));
-        }
-        col = col.child(row(ui, group, i, item, None));
-    }
-    col
+    crate::ui::menu::panel(ui, MENU, group, SUB, w, name, items, sub)
 }
 
 /// The entry `index` of a menu's items, or of the open submenu's.
-pub fn chosen(mut items: Vec<Item>, sub: Option<usize>, group: Id, index: usize) -> Option<Item> {
-    if group == SUB {
-        let parent = items.get_mut(sub?)?;
-        let mut subs = std::mem::take(&mut parent.sub);
-        return (index < subs.len()).then(|| subs.swap_remove(index));
-    }
-    (index < items.len())
-        .then(|| items.swap_remove(index))
-        .filter(Item::choosable)
+pub fn chosen(items: Vec<Item>, sub: Option<usize>, group: Id, index: usize) -> Option<Item> {
+    crate::ui::menu::chosen(items, sub, group == SUB, index)
 }
 
 /// The entries of the menu `kind`, from what the screen shows.
 pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
+    let mut items = kind_items(s, kind);
+    // These menus are `OptionRow`s under small uppercase section titles.
+    if matches!(
+        kind,
+        MenuKind::ViewOptions | MenuKind::TaskOptions | MenuKind::WorkflowFilter
+    ) {
+        for it in &mut items {
+            it.option_row = true;
+            if !it.header && it.row.is_none() {
+                it.picker = true;
+                it.icon = None;
+            }
+        }
+    }
+    if matches!(kind, MenuKind::TaskCard(_)) {
+        for it in &mut items {
+            it.card_row = true;
+        }
+    }
+    items
+}
+
+fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     match kind {
         MenuKind::Grid => grid(s),
         MenuKind::Card(id) => card(s, id),
@@ -279,7 +87,11 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless => Vec::new(),
+        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
+        MenuKind::SetSelect(key) => super::settings::select_items(s, key),
+        MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
+        MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
+        MenuKind::Branch(_) | MenuKind::OpenIn(_) => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)

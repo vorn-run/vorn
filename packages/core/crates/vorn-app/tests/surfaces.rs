@@ -2,7 +2,8 @@
 //! HOME: the sidebar and the add-project dialog, the cards with their menus,
 //! rename, close, the intent bar, the focused stage and the tabs layout, the
 //! shortcuts panel and filters, the ended strip, and what a restart leaves:
-//! the restored banner, recent sessions and the headless pill.
+//! the restored banner, recent sessions and the headless pill; a card's
+//! minimize, expand and collapse with the dock's pills, and the view pills.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
@@ -14,7 +15,9 @@ use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::screen::menus::MENU;
-use vorn_app::screen::{intent_id, term_id, MainView, PROJECT_NAME, PROJECT_PATH};
+use vorn_app::screen::{
+    intent_id, term_id, MainView, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
+};
 use vorn_app::state::{Dialog, Filter, LayoutMode, MenuKind};
 use vorn_app::ui::{item_id, mods, Id};
 use vorn_app::App;
@@ -463,4 +466,66 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
     assert!(app.st.banner.is_empty());
     shot.until(&mut app, "its screen", |app, _| app.pane(&id).map(|_| ()));
     shot.save(&mut app, "reopened");
+}
+
+#[test]
+fn cards_minimize_to_the_dock_expand_and_switch_views() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    add_project(&mut app, &v, "demo", json!({}));
+    let mut shot = Shot::new();
+    shot.frame(&mut app);
+    shot.click(
+        &mut app,
+        control("sidebar-project", Act::Project(Some("demo".into()))),
+    );
+    let a = new_shell(&mut shot, &mut app);
+    let b = new_shell(&mut shot, &mut app);
+    let pill = control("dock", Act::ToggleMinimized(a.clone()));
+
+    // Minimize leaves the grid for a pill in the top bar.
+    shot.hover(&mut app, term_id(&a));
+    shot.click(&mut app, control("card", Act::ToggleMinimized(a.clone())));
+    assert!(app.st.minimized.contains(&a));
+    assert!(shot.ui.rect_of(term_id(&a)).is_none());
+    assert!(shot.ui.rect_of(pill).is_some());
+    shot.save(&mut app, "minimized");
+
+    // The dock folds to its count and back.
+    let fold = control("dock", Act::ToggleDock);
+    shot.click(&mut app, fold);
+    assert!(app.st.dock_collapsed);
+    assert!(shot.ui.rect_of(pill).is_none());
+    shot.save(&mut app, "dock-collapsed");
+    // Its count chip opens the popover that expands it again.
+    shot.click(&mut app, control("dock", Act::DockPopover));
+    shot.save(&mut app, "dock-popover");
+    shot.click(&mut app, fold);
+    assert!(!app.st.dock_collapsed);
+
+    // The pill restores its card.
+    shot.click(&mut app, pill);
+    assert!(app.st.minimized.is_empty());
+    assert_eq!(app.st.selected.as_deref(), Some(a.as_str()));
+    assert!(shot.ui.rect_of(term_id(&a)).is_some());
+
+    // Expand puts a card on the focused stage; its toggle collapses it.
+    shot.hover(&mut app, term_id(&b));
+    shot.click(&mut app, control("card", Act::Expand(b.clone())));
+    assert_eq!(app.st.focused.as_deref(), Some(b.as_str()));
+    shot.save(&mut app, "expanded");
+    shot.hover(&mut app, term_id(&b));
+    shot.click(&mut app, control("card", Act::Collapse));
+    assert_eq!(app.st.focused, None);
+
+    // With the sidebar closed, the top bar's view pills switch the view.
+    shot.click(&mut app, control("sidebar", Act::ToggleSidebar));
+    assert!(!app.st.sidebar);
+    for (i, view) in VIEW_ORDER.iter().enumerate().rev() {
+        shot.click(&mut app, item_id(VIEWS, i));
+        assert_eq!(app.st.view, *view);
+    }
+    assert_eq!(app.st.view, MainView::Sessions);
 }

@@ -74,8 +74,8 @@ public enum Theme {
             0x52525B, 0xF87171, 0x4ADE80, 0xFACC15, 0x60A5FA, 0xC084FC, 0x22D3EE, 0xFAFAFA,
         ]
         public static let fontSize: CGFloat = 13
-        /// The first of today's font stack that macOS ships.
-        public static let fontName = "Menlo"
+        /// Today's font stack (TERM_OPTIONS.fontFamily); the first installed one is used.
+        public static let fontFamilies = ["JetBrains Mono", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New"]
     }
 }
 

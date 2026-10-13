@@ -161,7 +161,9 @@ public final class SettingsModel {
     }
 
     public func deleteSSHKey(_ id: String) async {
-        try? await client.call("credential:deleteKey", .string(id))
+        do { try await client.call("credential:deleteKey", .string(id)) } catch {
+            onToast(error.localizedDescription, .error)
+        }
         await loadSSHKeys()
     }
 

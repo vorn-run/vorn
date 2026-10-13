@@ -23,8 +23,8 @@ public actor VornClient {
     /// Writes-free methods a read-only client may call besides `list*`/`get*` queries.
     public static let readMethods: Set<String> = [
         "auth:authenticate", "subscribe:set", "config:load", "agent:detectInstalled", "git:isGitRepo",
-        "sessions:restored", "git:diffStat", "git:worktreeDirty",
-        "core:status", "credential:safeStorageAvailable", "worktree:inventory", "git:diffFull", "file:readContent", "file:stamp", "ide:detect",
+        "sessions:restored", "git:diffStat", "git:diffFull", "git:worktreeDirty", "connector:catalog", "webhook:info",
+        "core:status", "credential:safeStorageAvailable", "worktree:inventory", "file:readContent", "file:stamp", "ide:detect",
     ]
 
     /// Whether a read-only connection may send `method`.

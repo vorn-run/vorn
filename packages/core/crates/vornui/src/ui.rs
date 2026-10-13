@@ -3,6 +3,7 @@
 //! records where interactive boxes landed and builds the accessibility
 //! tree; [`Ui::render_offscreen`] or the window then draws the scene.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -44,16 +45,9 @@ pub struct UiConfig {
 
 impl UiConfig {
     /// The faces the app's CSS stacks resolve to on this platform
-    /// (`-apple-system, "Segoe UI", Roboto, sans-serif` and the terminal's
-    /// monospace).
+    /// ([`crate::theme::font`]).
     pub fn system(scale: f32, term_size: f32) -> UiConfig {
-        let (ui_font, mono_font) = if cfg!(target_os = "macos") {
-            ("Helvetica Neue", "Menlo")
-        } else if cfg!(windows) {
-            ("Segoe UI", "Consolas")
-        } else {
-            ("DejaVu Sans", "DejaVu Sans Mono")
-        };
+        let (ui_font, mono_font) = (crate::theme::font::UI, crate::theme::font::MONO);
         UiConfig {
             scale,
             ui_font,
@@ -90,6 +84,10 @@ pub struct Ui {
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
     anon: u64,
+    /// The earliest frame a view asked for while building this one, for
+    /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
+    /// view holding `&Ui` can ask.
+    pub(crate) wake: Cell<Option<Instant>>,
 }
 
 enum Measure<'a> {
@@ -113,6 +111,48 @@ struct Cx<'a> {
     clip: Rect,
     layer: u32,
     focus_seen: bool,
+    /// The transform painting is under, in logical pixels, so what is hit
+    /// is where it is drawn.
+    xf: Xf,
+}
+
+/// A border `w` logical pixels wide at scale `k`, in whole physical pixels
+/// and never under one, so a 1px border is one crisp pixel at 1.5x too.
+fn border_px(w: f32, k: f32) -> f32 {
+    if w <= 0.0 {
+        0.0
+    } else {
+        (w * k + 0.01).floor().max(1.0)
+    }
+}
+
+/// Scale about `origin`, then shift: an element's `transform`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Xf {
+    scale: f32,
+    origin: (f32, f32),
+    offset: (f32, f32),
+}
+
+impl Xf {
+    const IDENTITY: Xf = Xf {
+        scale: 1.0,
+        origin: (0.0, 0.0),
+        offset: (0.0, 0.0),
+    };
+
+    fn apply(&self, r: Rect) -> Rect {
+        if *self == Xf::IDENTITY {
+            return r;
+        }
+        let (ox, oy) = self.origin;
+        Rect::new(
+            ox + (r.x - ox) * self.scale + self.offset.0,
+            oy + (r.y - oy) * self.scale + self.offset.1,
+            r.w * self.scale,
+            r.h * self.scale,
+        )
+    }
 }
 
 impl Ui {
@@ -152,6 +192,7 @@ impl Ui {
             icons: HashMap::new(),
             images: Vec::new(),
             anon: 0,
+            wake: Cell::new(None),
         }
     }
 
@@ -234,6 +275,7 @@ impl Ui {
     /// Starts a frame at `now`: tests drive animations and timers with it.
     pub fn begin_at(&mut self, clear: Rgba, now: Instant) {
         self.st.now = now;
+        self.wake.set(None);
         self.scene.clear();
         self.clear = clear;
     }
@@ -259,6 +301,7 @@ impl Ui {
             clip: Rect::EVERYTHING,
             layer: 0,
             focus_seen: false,
+            xf: Xf::IDENTITY,
         };
         self.st.hits.clear();
         self.st.focus_order.clear();
@@ -343,7 +386,7 @@ impl Ui {
         let mut again = false;
         for n in scrolls {
             let Ok(l) = cx.taffy.layout(n) else { continue };
-            if l.content_size.height > l.size.height + 0.5 {
+            if l.content_size.height + l.border.bottom > l.size.height + 0.5 {
                 if let Ok(s) = cx.taffy.style(n) {
                     let mut s = s.clone();
                     s.scrollbar_width = theme::scrollbar::WIDTH;
@@ -376,14 +419,20 @@ impl Ui {
                     style,
                     wrap,
                 } => {
+                    let k = text.scale;
                     let max_w = wrap.then(|| {
                         known.width.unwrap_or(match avail.width {
                             AvailableSpace::Definite(w) => w,
-                            _ => f32::MAX,
+                            // As CSS sizes it: the longest word.
+                            AvailableSpace::MinContent => s
+                                .split_whitespace()
+                                .map(|w| text.shape(w, *style, None).w / k)
+                                .fold(0.0, f32::max)
+                                .ceil(),
+                            AvailableSpace::MaxContent => f32::MAX,
                         })
                     });
                     let sh = text.shape(s, *style, max_w);
-                    let k = text.scale;
                     Size {
                         width: known.width.unwrap_or(sh.w / k),
                         height: known.height.unwrap_or(sh.h / k),
@@ -416,6 +465,7 @@ impl Ui {
             Place::Above => (host.x + (host.w - w) / 2.0, host.y - g - h),
             Place::Below => (host.x + (host.w - w) / 2.0, host.bottom() + g),
             Place::BelowStart => (host.x, host.bottom() + g),
+            Place::BelowEnd => (host.right() - w, host.bottom() + g),
             Place::AboveStart => (host.x, host.y - g - h),
             Place::Right => (host.right() + g, host.y + (host.h - h) / 2.0),
         };
@@ -470,29 +520,66 @@ impl Ui {
         if el.opacity < 1.0 {
             self.scene.push_opacity(el.opacity);
         }
+        let saved_xf = cx.xf;
         if let Some((s, (dx, dy))) = el.transform {
             self.scene
                 .push_transform(s, (r.x + r.w / 2.0, r.y + r.h / 2.0), (dx * k, dy * k));
+            cx.xf = Xf {
+                scale: s,
+                origin: (rl.x + rl.w / 2.0, rl.y + rl.h / 2.0),
+                offset: (dx, dy),
+            };
         }
         let radius = if ring {
             theme::focus::RADIUS
         } else {
             el.radius
         };
+        // Unscaled boxes snap to whole pixels; a scaling transform is mid
+        // animation, where snapping would make it judder.
+        let snap = cx.xf.scale == 1.0;
+        let bx = if snap { r.snapped() } else { r };
+        let stroke = |w: f32| if snap { border_px(w, k) } else { w * k };
+        if let Some(sigma) = el.backdrop_blur {
+            self.scene.backdrop_blur(bx, sigma * k, radius * k);
+        }
+        for s in &el.shadows {
+            self.scene.shadow(bx, radius * k, &s.scaled(k));
+        }
         if el.bg.is_some() || el.border.is_some() {
             let fill = el.bg.unwrap_or_default();
-            let border = el.border.map(|(w, c)| (w * k, c));
-            self.scene.quad(r, fill, radius * k, border);
+            let border = el
+                .border
+                .filter(|_| !el.dashed)
+                .map(|(w, c)| (stroke(w), c));
+            self.scene.quad(bx, fill, radius * k, border);
+        }
+        if let Some((w, c)) = el.border.filter(|_| el.dashed) {
+            let svg = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\"><rect x=\"{h}\" y=\"{h}\" width=\"{}\" height=\"{}\" rx=\"{radius}\" fill=\"none\" stroke=\"#fff\" stroke-width=\"{w}\" stroke-dasharray=\"{d} {d}\"/></svg>",
+                rl.w,
+                rl.h,
+                rl.w - w,
+                rl.h - w,
+                h = w / 2.0,
+                d = 3.0 * w,
+            );
+            let z = cx.xf.scale;
+            let px = ((rl.w * k * z).round() as u32, (rl.h * k * z).round() as u32);
+            if let Some(uv) = self.svg_raster(&svg, px) {
+                self.scene.sprite(r, uv, c, false);
+            }
         }
         for (side, rule) in el.rules.iter().enumerate() {
             let Some((w, c)) = *rule else { continue };
+            let w = stroke(w);
             let line = match side {
-                0 => Rect::new(x, y, rl.w, w),
-                1 => Rect::new(x + rl.w - w, y, w, rl.h),
-                2 => Rect::new(x, y + rl.h - w, rl.w, w),
-                _ => Rect::new(x, y, w, rl.h),
+                0 => Rect::new(bx.x, bx.y, bx.w, w),
+                1 => Rect::new(bx.right() - w, bx.y, w, bx.h),
+                2 => Rect::new(bx.x, bx.bottom() - w, bx.w, w),
+                _ => Rect::new(bx.x, bx.y, w, bx.h),
             };
-            self.scene.quad(line.scaled(k), c, 0.0, None);
+            self.scene.quad(line, c, 0.0, None);
         }
         if let Some(id) = el.id {
             if el.sense != Sense::NONE || el.action.is_some() || el.tip {
@@ -500,7 +587,7 @@ impl Ui {
                 let target = Rect::new(x - sx, y - sy, rl.w + 2.0 * sx, rl.h + 2.0 * sy);
                 self.st.hits.push(Hit {
                     id,
-                    rect: target.intersect(&cx.clip),
+                    rect: cx.xf.apply(target).intersect(&cx.clip),
                     sense: el.sense,
                     action: el.action,
                     cursor: el.cursor,
@@ -549,24 +636,60 @@ impl Ui {
             } => {
                 // Rounded layout can leave a box up to a pixel short of what its text measured.
                 let room = inner.w + 1.0;
-                let sh = if *truncate {
-                    self.text.shape_truncated(text, *style, room)
+                // Under a zoom, text is shaped at the size it shows, so it stays sharp.
+                let z = cx.xf.scale;
+                let (style, room, at) = if z == 1.0 {
+                    (*style, room, inner)
                 } else {
-                    self.text.shape(text, *style, wrap.then_some(room))
+                    let scaled = TextStyle {
+                        size: style.size * z,
+                        line_height: style.line_height * z,
+                        ..*style
+                    };
+                    (scaled, room * z, cx.xf.apply(inner))
                 };
+                let sh = if *truncate {
+                    self.text.shape_truncated(text, style, room)
+                } else {
+                    self.text.shape(text, style, wrap.then_some(room))
+                };
+                if z != 1.0 {
+                    self.scene.push_transform(1.0, (0.0, 0.0), (0.0, 0.0));
+                }
                 self.text.draw(
                     &mut self.scene,
                     &mut self.atlases,
                     &sh,
-                    (inner.x * k, inner.y * k),
+                    (at.x * k, at.y * k),
                     *color,
                 );
+                if z != 1.0 {
+                    self.scene.pop_transform();
+                }
             }
             Content::Icon { svg, size, color } => {
-                let px = (size * k).round() as u32;
+                let z = cx.xf.scale;
+                let at = if z == 1.0 { inner } else { cx.xf.apply(inner) };
+                let px = (size * k * z).round() as u32;
                 if let Some(uv) = self.icon_raster(svg, px) {
-                    let ir = Rect::new((inner.x * k).round(), (inner.y * k).round(), uv[2], uv[3]);
+                    let ir = Rect::new((at.x * k).round(), (at.y * k).round(), uv[2], uv[3]);
+                    if z != 1.0 {
+                        self.scene.push_transform(1.0, (0.0, 0.0), (0.0, 0.0));
+                    }
                     self.scene.sprite(ir, uv, *color, false);
+                    if z != 1.0 {
+                        self.scene.pop_transform();
+                    }
+                }
+            }
+            Content::Svg { svg, color } => {
+                let z = cx.xf.scale;
+                let px = (
+                    (inner.w * k * z).round() as u32,
+                    (inner.h * k * z).round() as u32,
+                );
+                if let Some(uv) = self.svg_raster(svg, px) {
+                    self.scene.sprite(inner.scaled(k), uv, *color, false);
                 }
             }
             Content::Image { id, color } => {
@@ -590,14 +713,18 @@ impl Ui {
         let saved_clip = cx.clip;
         if el.clip {
             self.scene.push_clip(clip_box.scaled(k));
-            cx.clip = cx.clip.intersect(&clip_box);
+            cx.clip = cx.clip.intersect(&cx.xf.apply(clip_box));
         }
         let mut scrolled = 0.0;
         let mut max = 0.0;
         if el.scroll {
             if let Some(id) = el.id {
-                max = (l.content_size.height - l.size.height + l.border.top + l.border.bottom)
-                    .max(0.0);
+                // Taffy measures the content from the border box's top edge.
+                max = l.content_size.height + l.border.bottom - l.size.height;
+                // The rounded box against unrounded content is not an overflow.
+                if max < 1.0 {
+                    max = 0.0;
+                }
                 let s = self.st.scroll.entry(id).or_default();
                 s.max = max;
                 s.offset = s.offset.clamp(0.0, max);
@@ -652,19 +779,22 @@ impl Ui {
         }
         if ring {
             let d = theme::focus::OFFSET + theme::focus::WIDTH;
+            let w = stroke(theme::focus::WIDTH);
+            let outer = rl.outset(d).scaled(k);
             self.scene.quad(
-                rl.outset(d).scaled(k),
+                if snap { outer.snapped() } else { outer },
                 Rgba::TRANSPARENT,
                 (theme::focus::RADIUS + d) * k,
-                Some((theme::focus::WIDTH * k, theme::focus::RING)),
+                Some((w, theme::focus::RING)),
             );
         }
         for ov in &el.overlays {
-            cx.overlays.push((ov, rl));
+            cx.overlays.push((ov, cx.xf.apply(rl)));
         }
         if el.transform.is_some() {
             self.scene.pop_transform();
         }
+        cx.xf = saved_xf;
         if el.opacity < 1.0 {
             self.scene.pop_opacity();
         }
@@ -785,6 +915,7 @@ impl Ui {
             .entry(id)
             .or_insert_with(|| TextEdit::new("", look.multiline));
         e.set_multiline(look.multiline);
+        e.set_textarea(look.textarea);
         let (shown, pre) = e.display();
         let caret_at = if e.preedit().is_empty() {
             e.caret()
@@ -792,9 +923,8 @@ impl Ui {
             pre.end
         };
         let sel = e.selection();
-        let sh = self
-            .text
-            .shape(&shown, look.style, look.multiline.then_some(inner.w));
+        let wrap = look.multiline && !look.nowrap;
+        let sh = self.text.shape(&shown, look.style, wrap.then_some(inner.w));
         // Keep the caret in view.
         let (cx_, line) = sh.caret(caret_at);
         let e = self.st.edits.get_mut(&id).expect("inserted above");
@@ -807,9 +937,15 @@ impl Ui {
                 e.scroll_y = top + line_h - inner.h;
             }
             e.scroll_y = e.scroll_y.clamp(0.0, (sh.h / k - inner.h).max(0.0));
-        } else {
+        }
+        if !wrap {
             let cxl = cx_ / k;
-            let sx = &mut e.scroll_y; // a single line scrolls sideways
+            // A single line keeps its sideways scroll in `scroll_y`.
+            let sx = if look.multiline {
+                &mut e.scroll_x
+            } else {
+                &mut e.scroll_y
+            };
             if cxl < *sx {
                 *sx = cxl;
             } else if cxl > *sx + inner.w - 1.0 {
@@ -817,10 +953,18 @@ impl Ui {
             }
             *sx = sx.clamp(0.0, (sh.w / k - inner.w + 1.0).max(0.0));
         }
-        let (ox, oy) = if look.multiline {
-            (inner.x * k, (inner.y - e.scroll_y) * k)
-        } else {
-            ((inner.x - e.scroll_y) * k, inner.y * k)
+        // A centred line sits mid-field while it fits; longer, it scrolls as usual.
+        let centre = |w: f32| {
+            if look.centered && !look.multiline {
+                ((inner.w * k - w) / 2.0).max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let (ox, oy) = match (look.multiline, wrap) {
+            (true, true) => (inner.x * k, (inner.y - e.scroll_y) * k),
+            (true, false) => ((inner.x - e.scroll_x) * k, (inner.y - e.scroll_y) * k),
+            (false, _) => ((inner.x - e.scroll_y) * k + centre(sh.w), inner.y * k),
         };
         let anchor_caret = (e.anchor(), e.caret());
         self.scene.push_clip(inner.scaled(k));
@@ -841,6 +985,19 @@ impl Ui {
                 self.scene.quad(rr, theme::color::SELECTION, 0.0, None);
             }
         }
+        for (range, bg) in &look.marks {
+            for (i, l) in sh.lines.iter().enumerate() {
+                let start = range.start.max(l.start);
+                let end = range.end.min(a11y::run_end(&sh, i, shown.len()));
+                if start >= end {
+                    continue;
+                }
+                let x0 = sh.caret(start).0;
+                let x1 = sh.caret(end).0.max(x0 + 1.0);
+                let rr = Rect::new(ox + x0, oy + l.top, x1 - x0, l.height);
+                self.scene.quad(rr, *bg, k, None);
+            }
+        }
         if shown.is_empty() && !look.placeholder.is_empty() {
             let ph = self.text.shape(
                 &look.placeholder,
@@ -851,17 +1008,28 @@ impl Ui {
                 &mut self.scene,
                 &mut self.atlases,
                 &ph,
-                (inner.x * k, inner.y * k),
+                (inner.x * k + centre(ph.w), inner.y * k),
                 look.placeholder_color,
             );
         }
-        self.text.draw(
-            &mut self.scene,
-            &mut self.atlases,
-            &sh,
-            (ox, oy),
-            look.color,
-        );
+        if look.spans.is_empty() || !pre.is_empty() {
+            self.text.draw(
+                &mut self.scene,
+                &mut self.atlases,
+                &sh,
+                (ox, oy),
+                look.color,
+            );
+        } else {
+            self.text.draw_spans(
+                &mut self.scene,
+                &mut self.atlases,
+                &sh,
+                (ox, oy),
+                look.color,
+                &look.spans,
+            );
+        }
         if !pre.is_empty() {
             for (i, l) in sh.lines.iter().enumerate() {
                 let start = pre.start.max(l.start);
@@ -944,6 +1112,22 @@ impl Ui {
             return *hit;
         }
         let uv = rasterize_svg(svg, px).and_then(|mask| self.atlases.insert_mask(px, px, &mask));
+        if uv.is_some() || !self.atlases.full {
+            self.icons.insert(key, uv);
+        }
+        uv
+    }
+
+    /// An SVG's coverage at `w`×`h` physical pixels, kept with the icons.
+    fn svg_raster(&mut self, svg: &str, (w, h): (u32, u32)) -> Option<[f32; 4]> {
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let key = (Id::new(svg).child((w, h)).0, w);
+        if let Some(hit) = self.icons.get(&key) {
+            return *hit;
+        }
+        let uv = rasterize_svg_to(svg, w, h).and_then(|mask| self.atlases.insert_mask(w, h, &mask));
         if uv.is_some() || !self.atlases.full {
             self.icons.insert(key, uv);
         }
@@ -1084,6 +1268,36 @@ pub fn rasterize_svg(svg: &str, px: u32) -> Option<Vec<u8>> {
     let tf = tiny_skia::Transform::from_scale(px as f32 / s.width(), px as f32 / s.height());
     resvg::render(&tree, tf, &mut pm.as_mut());
     Some(pm.data().chunks(4).map(|p| p[3]).collect())
+}
+
+/// An SVG stretched over `w`×`h` pixels, as a coverage mask.
+pub fn rasterize_svg_to(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pm = tiny_skia::Pixmap::new(w, h)?;
+    let s = tree.size();
+    let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
+    resvg::render(&tree, tf, &mut pm.as_mut());
+    Some(pm.data().chunks(4).map(|p| p[3]).collect())
+}
+
+/// An SVG in its own colours at `w`×`h` pixels, as straight-alpha RGBA.
+pub fn rasterize_svg_rgba(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pm = tiny_skia::Pixmap::new(w, h)?;
+    let s = tree.size();
+    let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
+    resvg::render(&tree, tf, &mut pm.as_mut());
+    Some(
+        pm.pixels()
+            .iter()
+            .flat_map(|p| {
+                let c = p.demultiply();
+                [c.red(), c.green(), c.blue(), c.alpha()]
+            })
+            .collect(),
+    )
 }
 
 /// Decodes a PNG to straight-alpha RGBA.

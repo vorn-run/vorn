@@ -55,9 +55,15 @@ done
 "$bin/Vorn" --render "$out/panes-changes.png" --changes 0
 "$bin/Vorn" --render "$out/panes-commit.png" --changes 0 --commit
 "$bin/Vorn" --render "$out/component-branch-picker.png" --size 300x320 --component branch-picker
+node "$here/scripts/seed-test-vornd.mjs" "$data" --no-runs --review >/dev/null
+sleep 3
+"$bin/Vorn" --render "$out/app-workflows-review.png" --view workflows --review
 
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"
+done
+for state in detail-review commit; do
+  "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state" --size 1200x1500
 done
 "$bin/VornTasksPreview" --data-dir "$data" --render "$out/tasks-vornd.png"
 
@@ -65,4 +71,6 @@ for scene in landing review failed page toast menu; do
   "$bin/WorkflowsPreview" --fixtures "$fixtures" --render "$out/workflows-$scene.png" --scene "$scene"
 done
 "$bin/WorkflowsPreview" --data-dir "$data" --render "$out/workflows-vornd.png"
+"$bin/WorkflowsPreview" --fixtures "$fixtures" --render "$out/workflows-run-prompt.png" --scene run-prompt --size 1280x1000
+"$bin/WorkflowsPreview" --fixtures "$fixtures" --render "$out/workflows-missed.png" --scene missed
 ls "$out"

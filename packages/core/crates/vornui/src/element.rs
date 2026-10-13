@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use accesskit::Role;
 use taffy::prelude::*;
 
-use crate::scene::Rgba;
+use crate::scene::{Rgba, Shadow};
 use crate::text::TextStyle;
 
 /// A stable name for an element across frames: what hover, focus, scroll
@@ -134,6 +134,8 @@ pub enum Place {
     Below,
     /// Below, left edges aligned (a dropdown menu).
     BelowStart,
+    /// Below, right edges aligned (a popover at the end of a row).
+    BelowEnd,
     /// Above, left edges aligned (a dropdown that has no room below).
     AboveStart,
     /// To the right, vertically centred.
@@ -165,6 +167,12 @@ pub enum Content {
         size: f32,
         color: Rgba,
     },
+    /// An SVG drawn over the whole box in one colour (a canvas's lines),
+    /// rasterized at the size it is drawn.
+    Svg {
+        svg: String,
+        color: Rgba,
+    },
     /// An RGBA image the app registered with [`crate::Ui::image`].
     Image {
         id: u32,
@@ -184,6 +192,17 @@ pub struct EditLook {
     pub placeholder: String,
     pub placeholder_color: Rgba,
     pub multiline: bool,
+    /// A `<textarea>`: Enter starts a line and the primary modifier with
+    /// Enter submits.
+    pub textarea: bool,
+    /// A multiline field whose lines do not wrap; long ones scroll sideways.
+    pub nowrap: bool,
+    /// Colours for byte ranges of the text (code), `color` elsewhere.
+    pub spans: Vec<(std::ops::Range<usize>, Rgba)>,
+    /// Backgrounds under byte ranges (find matches).
+    pub marks: Vec<(std::ops::Range<usize>, Rgba)>,
+    /// One line drawn mid-field (`text-center`) rather than from the left.
+    pub centered: bool,
 }
 
 /// Accessibility facts beyond role and label.
@@ -230,6 +249,13 @@ pub struct El {
     pub(crate) slop: (f32, f32),
     /// Painted, and hit-tested, above everything in the window drawn before it.
     pub(crate) layered: bool,
+    /// The border drawn in dashes (`border-dashed`).
+    pub(crate) dashed: bool,
+    /// Soft shadows under the box, first drawn lowest (`box-shadow`).
+    pub(crate) shadows: Vec<Shadow>,
+    /// Blur what is drawn under the box by this standard deviation, in
+    /// logical pixels (`backdrop-filter: blur()`).
+    pub(crate) backdrop_blur: Option<f32>,
 }
 
 pub fn div() -> El {
@@ -255,6 +281,9 @@ pub fn div() -> El {
         rules: [None; 4],
         slop: (0.0, 0.0),
         layered: false,
+        dashed: false,
+        shadows: Vec::new(),
+        backdrop_blur: None,
     }
 }
 
@@ -283,6 +312,14 @@ pub fn icon(svg: impl Into<String>, size: f32, color: Rgba) -> El {
     })
 }
 
+/// `svg` stretched over a `w`×`h` box and tinted `color`.
+pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: Rgba) -> El {
+    div().size(w, h).content(Content::Svg {
+        svg: svg.into(),
+        color,
+    })
+}
+
 pub fn image(id: u32, w: f32, h: f32) -> El {
     div().size(w, h).content(Content::Image {
         id,
@@ -297,6 +334,34 @@ pub fn custom(id: u64) -> El {
 impl El {
     pub fn content(mut self, c: Content) -> El {
         self.content = c;
+        self
+    }
+    /// An edit field's placeholder ink, for one without `placeholder-*`.
+    /// Colours an edit field's text by byte range and marks ranges with a
+    /// background; a no-op on anything else.
+    pub fn edit_colors(
+        mut self,
+        spans: Vec<(std::ops::Range<usize>, Rgba)>,
+        marks: Vec<(std::ops::Range<usize>, Rgba)>,
+    ) -> El {
+        if let Content::Edit(look) = &mut self.content {
+            look.spans = spans;
+            look.marks = marks;
+        }
+        self
+    }
+
+    pub fn placeholder_color(mut self, c: Rgba) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.placeholder_color = c;
+        }
+        self
+    }
+    /// An edit field's line centred, as `text-center` does.
+    pub fn text_center(mut self) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.centered = true;
+        }
         self
     }
     pub fn row(mut self) -> El {
@@ -355,6 +420,14 @@ impl El {
     }
     pub fn ml(mut self, m: f32) -> El {
         self.style.margin.left = length(m);
+        self
+    }
+    pub fn mb(mut self, m: f32) -> El {
+        self.style.margin.bottom = length(m);
+        self
+    }
+    pub fn mr(mut self, m: f32) -> El {
+        self.style.margin.right = length(m);
         self
     }
     /// Horizontal margins; negative pulls a hover background past the
@@ -435,6 +508,10 @@ impl El {
         self.style.align_items = Some(AlignItems::Center);
         self
     }
+    pub fn items_start(mut self) -> El {
+        self.style.align_items = Some(AlignItems::Start);
+        self
+    }
     pub fn items_end(mut self) -> El {
         self.style.align_items = Some(AlignItems::End);
         self
@@ -497,6 +574,23 @@ impl El {
         };
         self
     }
+    /// Draws the border in 3 px dashes, as `border-dashed` does.
+    pub fn dashed(mut self) -> El {
+        self.dashed = true;
+        self
+    }
+    /// A box shadow behind it, replacing any before: black layers of
+    /// (y offset, blur, spread, alpha) in CSS order, as `theme::shadow`
+    /// lists them.
+    pub fn shadow(mut self, layers: &[(f32, f32, f32, f32)]) -> El {
+        self.shadows.clear();
+        let black = |a: f32| Rgba::rgba_const(0, 0, 0, a);
+        for &(y, blur, spread, a) in layers {
+            self.shadows
+                .insert(0, Shadow::new(0.0, y, blur, spread, black(a)));
+        }
+        self
+    }
     /// A top border only (`border-t`).
     pub fn border_top(mut self, w: f32, c: Rgba) -> El {
         self.style.border.top = length(w);
@@ -536,6 +630,7 @@ impl El {
         match &mut self.content {
             Content::Image { color, .. }
             | Content::Icon { color, .. }
+            | Content::Svg { color, .. }
             | Content::Text { color, .. } => *color = color.alpha(a),
             Content::None | Content::Custom(_) | Content::Edit(_) => {}
         }
@@ -559,6 +654,13 @@ impl El {
         }
         self
     }
+    /// Letter spacing in ems, for a text element.
+    pub fn tracking(mut self, em: f32) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.tracking = em;
+        }
+        self
+    }
     pub fn line_height(mut self, h: f32) -> El {
         if let Content::Text { style, .. } = &mut self.content {
             style.line_height = h;
@@ -569,6 +671,14 @@ impl El {
     pub fn mono(mut self) -> El {
         if let Content::Text { style, .. } = &mut self.content {
             style.mono = true;
+        }
+        self
+    }
+
+    /// Slanted, for a text element (a preview tab's name).
+    pub fn italic(mut self) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.italic = true;
         }
         self
     }
@@ -644,6 +754,21 @@ impl El {
     /// keyboard.
     pub fn ring(mut self, r: f32) -> El {
         self.ring = Some(r);
+        self
+    }
+    /// Adds soft shadows of any colour and offset under the box, following
+    /// its corner radius, in CSS `box-shadow` order (first on top).
+    pub fn shadows(mut self, list: &[Shadow]) -> El {
+        for s in list {
+            self.shadows.insert(0, *s);
+        }
+        self
+    }
+    /// Blurs whatever is drawn under the box, within its rounded corners,
+    /// by standard deviation `sigma` logical pixels: frosted glass under a
+    /// translucent background.
+    pub fn backdrop_blur(mut self, sigma: f32) -> El {
+        self.backdrop_blur = (sigma > 0.0).then_some(sigma);
         self
     }
     pub fn overlay(mut self, el: El, place: Place, gap: f32) -> El {
@@ -756,5 +881,14 @@ mod tests {
         let d = div().on(Action::Click).disabled(true);
         assert_eq!(d.sense, Sense::NONE);
         assert!(d.action.is_none());
+    }
+
+    #[test]
+    fn shadows_paint_the_first_listed_on_top() {
+        let s = |blur| Shadow::new(0.0, 2.0, blur, -1.0, Rgba::rgba_const(0, 0, 0, 0.1));
+        let layers = div().shadow(&[(2.0, 1.0, -1.0, 0.1), (2.0, 2.0, -1.0, 0.1)]);
+        let listed = div().shadows(&[s(1.0), s(2.0)]);
+        assert_eq!(listed.shadows, layers.shadows);
+        assert_eq!(listed.shadows.last(), Some(&s(1.0)), "drawn last");
     }
 }

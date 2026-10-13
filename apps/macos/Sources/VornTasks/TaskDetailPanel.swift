@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import VornCore
 import VornUI
 
@@ -6,6 +7,7 @@ import VornUI
 struct TaskDetailPanel: View {
     let store: TasksStore
     let task: VornTask?
+    let model: TaskDetailModel
     @State private var form: TaskForm
     @State private var saveTimer: Task<Void, Never>?
     @State private var trashFrame: CGRect = .zero
@@ -13,9 +15,10 @@ struct TaskDetailPanel: View {
 
     private var isCreate: Bool { task == nil }
 
-    init(store: TasksStore, task: VornTask?) {
+    init(store: TasksStore, task: VornTask?, model: TaskDetailModel) {
         self.store = store
         self.task = task
+        self.model = model
         _form = State(initialValue: task.map(TaskForm.init(task:)) ?? TaskForm(projectName: store.defaultProjectName))
     }
 
@@ -27,6 +30,7 @@ struct TaskDetailPanel: View {
                     properties
                     BareField(placeholder: "Task title", text: $form.title, font: .system(size: 16, weight: .semibold))
                         .focused($titleFocused)
+                        .frame(minHeight: 29.6)
                         .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
                     if let task, task.sourceConnectorId != nil, let url = task.sourceExternalUrl.flatMap(URL.init(string:)) {
                         Link(destination: url) {
@@ -41,11 +45,15 @@ struct TaskDetailPanel: View {
                         }
                         .padding(.horizontal, 16).padding(.bottom, 8)
                     }
-                    DescriptionEditor(text: $form.description,
-                                      placeholder: "Describe the task in detail, or type / for commands...")
-                        .frame(minHeight: 200)
+                    RichMarkdownEditor(value: $form.description,
+                                       placeholder: "Describe the task in detail, or type / for commands...")
                         .padding(.horizontal, 16).padding(.bottom, 12)
-                    sessionActions
+                    TaskImagesStrip(model: model)
+                    if let task {
+                        TaskSessionActions(store: store, task: task)
+                        TaskWorkflowRuns(store: store, model: model)
+                    }
+                    if model.showsChanges { TaskChangesSection(model: model) }
                 }
             }
             if isCreate { footer }
@@ -57,6 +65,26 @@ struct TaskDetailPanel: View {
         .onAppear { if isCreate { titleFocused = true } }
         .onChange(of: form) { _, form in scheduleSave(form) }
         .onDisappear { flushSave() }
+        .onDrop(of: [.fileURL], isTargeted: nil, perform: drop)
+        .task(id: model.currentDiffKey) { await model.syncDiff() }
+        .task(id: model.images) { await model.loadImagePaths() }
+        .task { if !isCreate { await model.followRuns() } }
+    }
+
+    /// handleDrop: image files dropped anywhere on the panel are added.
+    private func drop(_ providers: [NSItemProvider]) -> Bool {
+        let providers = providers.filter { $0.canLoadObject(ofClass: URL.self) }
+        guard !providers.isEmpty else { return false }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for provider in providers {
+                if let url = await withCheckedContinuation({ (done: CheckedContinuation<URL?, Never>) in
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in done.resume(returning: url) }
+                }) { urls.append(url) }
+            }
+            await model.addImages(urls)
+        }
+        return true
     }
 
     private var header: some View {
@@ -140,29 +168,6 @@ struct TaskDetailPanel: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.white(0.06)).frame(height: 1) }
     }
 
-    @ViewBuilder
-    private var sessionActions: some View {
-        if let task, let open = store.openSession, store.isSessionLive(task) || task.agentSessionId != nil {
-            let live = store.isSessionLive(task)
-            HStack(spacing: 8) {
-                Button { open(task) } label: {
-                    HStack(spacing: 6) {
-                        LucideIcon(live ? .terminal : .play, size: 12)
-                        Text(live ? "Focus Session" : "Resume Session")
-                    }
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.inkSecondary)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Theme.white(0.04), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.08)))
-                }
-                .buttonStyle(.plain)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.white(0.06)).frame(height: 1) }
-        }
-    }
-
     private var footer: some View {
         HStack(spacing: 8) {
             Spacer()
@@ -177,7 +182,9 @@ struct TaskDetailPanel: View {
                 var draft = form.draft
                 draft.status = .todo
                 Task {
-                    if let id = await store.create(draft) { store.selectedTaskId = id }
+                    guard let id = await store.create(draft) else { return }
+                    await model.uploadPending(to: id)
+                    store.selectedTaskId = id
                 }
             } label: {
                 HStack(spacing: 6) {
@@ -202,6 +209,7 @@ struct TaskDetailPanel: View {
             content()
             Spacer(minLength: 0)
         }
+        .frame(minHeight: 22)
     }
 
     private func dated(_ glyph: LucideGlyph, _ date: String) -> some View {

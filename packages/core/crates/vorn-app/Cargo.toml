@@ -14,25 +14,34 @@ path = "src/main.rs"
 [dependencies]
 # The UI layer, reached only through `src/ui.rs`.
 vornui = { path = "../vornui" }
+# The composed components the screens are built from.
+vorn-components = { path = "../vorn-components" }
 vorn-protocol = { path = "../protocol" }
 vorn-grid-client = { path = "../grid-client" }
 vorn-term-mirror = { path = "../term-mirror" }
 vorn-term-proto = { path = "../term-proto" }
 # Workflow files: the portable format the editor exports and imports.
 vorn-mcp = { path = "../mcp" }
+vorn-spawn = { path = "../spawn" }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
 tokio-tungstenite = "0.28"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The address bar parses as the renderer's WHATWG `URL` does.
+url = "2"
+# The browser pane: the OS web view (WKWebView, WebView2, WebKitGTK).
+wry = "0.57"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading"] }
 
 # The UI layer turns winit's defaults off; a Linux window needs a display
 # server, so the app asks for both.
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+# WebKitGTK runs on GTK's loop, which the window pumps between frames.
+gtk = "0.18"
 
-[target.'cfg(unix)'.dev-dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"

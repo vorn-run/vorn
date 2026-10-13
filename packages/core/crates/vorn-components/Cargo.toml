@@ -1,0 +1,14 @@
+[package]
+name = "vorn-components"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's composed components (agent and status icons, session card chrome, the session dock), built only from vornui's primitives"
+
+[dependencies]
+vornui = { path = "../vornui" }
+
+[[example]]
+name = "gallery"

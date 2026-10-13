@@ -120,6 +120,26 @@ fn parts(iso: &str) -> Option<(u32, usize, u32, u32, u32)> {
     ))
 }
 
+/// `Date.toLocaleString()` in en-US: "1/1/2030, 9:00:00 AM".
+pub fn locale_string(iso: &str) -> String {
+    let sec = iso
+        .get(17..19)
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    match parts(iso) {
+        Some((y, m, d, h, min)) => {
+            let (h12, half) = match h {
+                0 => (12, "AM"),
+                1..=11 => (h, "AM"),
+                12 => (12, "PM"),
+                _ => (h - 12, "PM"),
+            };
+            format!("{m}/{d}/{y}, {h12}:{min:02}:{sec:02} {half}")
+        }
+        None => String::new(),
+    }
+}
+
 /// `formatTaskDate`: "Mar 5".
 pub fn short_date(iso: &str) -> String {
     match parts(iso) {
@@ -192,6 +212,24 @@ pub fn ms(iso: &str) -> Option<f64> {
     let days = era * 146_097 + doe - 719_468;
     let secs = days * 86_400 + i64::from(h) * 3600 + i64::from(min) * 60;
     Some((secs as f64 + sec + frac) * 1000.0)
+}
+
+/// `Intl.DateTimeFormat().resolvedOptions().timeZone`: `TZ`, else the
+/// zone `/etc/localtime` points at, else UTC.
+pub fn local_zone() -> &'static str {
+    static ZONE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ZONE.get_or_init(|| {
+        if let Some(tz) = std::env::var("TZ").ok().filter(|t| t.contains('/')) {
+            return tz.trim_start_matches(':').to_owned();
+        }
+        std::fs::read_link("/etc/localtime")
+            .ok()
+            .and_then(|p| {
+                let s = p.to_string_lossy().into_owned();
+                s.split_once("zoneinfo/").map(|(_, z)| z.to_owned())
+            })
+            .unwrap_or_else(|| "UTC".to_owned())
+    })
 }
 
 pub fn now_iso() -> String {
@@ -323,6 +361,10 @@ pub enum TaskAct {
     RemoveImage(Form, String),
     /// A slash command, by index into [`SLASH`].
     Slash(Form, usize),
+    /// The rendered description clicked: edit its markdown.
+    EditDesc(Form),
+    /// A task item's box in the rendered description, by source line.
+    CheckItem(Form, usize),
     Format(Form, Mark),
     /// "Add link": the toolbar asks for the address.
     StartLink(Form),
@@ -679,6 +721,8 @@ pub struct Tasks {
     pub slash: usize,
     /// Where the slash query Escape dismissed starts.
     pub slash_closed: Option<usize>,
+    /// How far left of the caret the open `/` sits, for the menu under it.
+    pub slash_dx: f32,
     /// The selection a link is being typed for.
     pub linking: Option<(Form, std::ops::Range<usize>)>,
     /// Where the link bar floats: the caret when it opened.

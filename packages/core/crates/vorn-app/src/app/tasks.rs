@@ -543,8 +543,9 @@ impl App {
             }
             TaskAct::SetStatus(Form::Dialog, s) => self.st.tasks.dialog_form.status = s,
             TaskAct::SetStatus(Form::Detail, s) => {
-                let f = &self.st.tasks.detail_form;
+                let f = &mut self.st.tasks.detail_form;
                 if f.editing {
+                    f.status = s.clone();
                     let id = f.id.clone();
                     self.set_status(&id, &s);
                 }
@@ -613,6 +614,18 @@ impl App {
                 let (text, caret) = tasks::apply_slash(&text, start, caret, index);
                 self.st.tasks.slash = 0;
                 self.set_desc(ui, form, &text, caret);
+            }
+            TaskAct::EditDesc(form) => {
+                let id = desc_id(form);
+                let end = ui.edit_text(id).len();
+                ui.set_focus(Some(id));
+                ui.edit_mut(id).move_to(end, false);
+            }
+            TaskAct::CheckItem(form, line) => {
+                let id = desc_id(form);
+                let text = crate::markdown::toggle_task(ui.edit_text(id), line);
+                ui.set_edit_text(id, &text);
+                self.touch(form);
             }
             TaskAct::Format(form, mark) => {
                 let Some(edit) = ui.edit(desc_id(form)) else {
@@ -757,7 +770,7 @@ impl App {
 
     /// The run `key` names: what vornd last reported, else the list the
     /// panel loaded.
-    fn find_run(&self, key: &str) -> Option<Value> {
+    pub(super) fn find_run(&self, key: &str) -> Option<Value> {
         self.store.runs.get(key).cloned().or_else(|| {
             self.st
                 .tasks
@@ -817,6 +830,25 @@ impl App {
                 self.st.tasks.output = logs;
                 self.st.tasks.copied = None;
                 self.st.dialog = Some(Dialog::Output);
+            }
+            RunAct::OpenReview(key, nid) => {
+                let token = self.find_run(&key).and_then(|r| {
+                    runs::states(&r)
+                        .find(|n| runs::s(n, "nodeId") == Some(nid.as_str()))
+                        .and_then(|n| runs::s(n, "viewToken"))
+                        .map(str::to_owned)
+                });
+                let Some(t) = token else {
+                    self.st.toast("The review page could not be opened.", true);
+                    return;
+                };
+                open_url(&format!(
+                    "http://127.0.0.1:{}/gate-view/{}/{}?t={}",
+                    self.port,
+                    runs::encode(&key),
+                    runs::encode(&nid),
+                    runs::encode(&t)
+                ));
             }
             RunAct::Resume(key, nid) => {
                 let Some(run) = self.find_run(&key) else {
@@ -925,6 +957,19 @@ impl App {
                 }
                 if [desc_id(Form::Dialog), desc_id(Form::Detail)].contains(&id) {
                     self.st.tasks.slash = 0;
+                    // The menu opens under the `/`, not under the caret.
+                    let query = ui.edit(id).and_then(|e| {
+                        let (start, _) = tasks::slash_query(e.text(), e.caret())?;
+                        e.text().get(start..e.caret()).map(str::to_owned)
+                    });
+                    if let Some(q) = query {
+                        let style = crate::ui::TextStyle {
+                            line_height: 22.4,
+                            ..crate::ui::TextStyle::ui(14.0)
+                        };
+                        let scale = ui.text.scale.max(1.0);
+                        self.st.tasks.slash_dx = ui.text.shape(&q, style, None).w / scale;
+                    }
                 }
                 false
             }

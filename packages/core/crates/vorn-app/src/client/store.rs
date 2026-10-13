@@ -18,6 +18,9 @@ pub const TOPICS: &[&str] = &[
     "widget:status-update",
     "config:changed",
     "workflow:runUpdated",
+    "worktree:confirmCleanup",
+    "artifact:published",
+    "artifact:commentsChanged",
 ];
 
 /// The agent a new composer session starts when the config names none, as
@@ -35,16 +38,11 @@ pub struct Session {
 }
 
 impl Session {
-    /// The card's title: the name given, else the agent and project.
+    /// `getDisplayName`: the name given, else the project's.
     pub fn title(&self) -> String {
-        match self.info.display_name.as_deref().filter(|n| !n.is_empty()) {
-            Some(name) => name.to_owned(),
-            None if self.info.project_name.is_empty() => self.info.agent_type.to_string(),
-            None => format!(
-                "{} · {}",
-                self.info.agent_type.as_str(),
-                self.info.project_name
-            ),
+        match self.info.display_name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => name.to_owned(),
+            _ => self.info.project_name.clone(),
         }
     }
 

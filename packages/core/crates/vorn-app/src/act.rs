@@ -44,6 +44,8 @@ pub enum Act {
     },
     /// A shell in a directory, or the active project's when empty.
     NewShellIn(String),
+    /// An approval gate's controls.
+    Gate(crate::gates::GateOp),
     RunWorkflow {
         id: String,
         source: Option<String>,
@@ -52,6 +54,15 @@ pub enum Act {
     /// Asks before closing a session.
     AskClose(String),
     CloseSession(String),
+    /// Stows a card in the session dock, or brings it back
+    /// (`toggleMinimized`).
+    ToggleMinimized(String),
+    /// Folds the session dock into its chip, or opens it out.
+    ToggleDock,
+    /// Opens or closes the dock's popover.
+    DockPopover,
+    /// Opens a run on the workflows landing (`showRun`), by key.
+    ShowRun(String),
     Resume(String),
     Paste(String),
     FitToDevice(String),
@@ -87,6 +98,12 @@ pub enum Act {
     Task(crate::tasks::TaskAct),
     Run(crate::runs::RunAct),
     Workflow(crate::workflows::WfAct),
+    /// The settings page's controls.
+    Set(crate::settings::SetAct),
+    Git(crate::git::GitAct),
+    Side(crate::side::SideAct),
+    Edit(crate::editor::EditAct),
+    Pane(crate::panes::PaneAct),
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.
@@ -99,6 +116,9 @@ pub struct Acts {
     clicks: RefCell<HashMap<Id, Act>>,
     contexts: RefCell<HashMap<Id, Act>>,
     doubles: RefCell<HashMap<Id, Act>>,
+    /// Text fields bound to a value: what typing in them does, and the
+    /// text the model holds.
+    texts: RefCell<HashMap<Id, (Act, String)>>,
 }
 
 impl Acts {
@@ -138,6 +158,25 @@ impl Acts {
         self.doubles.borrow_mut().insert(id, act);
     }
 
+    /// Typing in the field `id` does `act`; `value` is what the model
+    /// holds, which the field shows while it is not being typed in.
+    pub fn text(&self, id: Id, act: Act, value: impl Into<String>) {
+        self.texts.borrow_mut().insert(id, (act, value.into()));
+    }
+
+    pub fn text_of(&self, id: Id) -> Option<Act> {
+        self.texts.borrow().get(&id).map(|(a, _)| a.clone())
+    }
+
+    /// Every bound field and the text its model holds.
+    pub fn texts(&self) -> Vec<(Id, String)> {
+        self.texts
+            .borrow()
+            .iter()
+            .map(|(id, (_, v))| (*id, v.clone()))
+            .collect()
+    }
+
     pub fn clicked(&self, id: Id) -> Option<Act> {
         self.clicks.borrow().get(&id).cloned()
     }
@@ -154,6 +193,7 @@ impl Acts {
         self.clicks.borrow_mut().clear();
         self.contexts.borrow_mut().clear();
         self.doubles.borrow_mut().clear();
+        self.texts.borrow_mut().clear();
     }
 }
 

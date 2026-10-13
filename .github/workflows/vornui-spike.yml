@@ -84,6 +84,21 @@ jobs:
         continue-on-error: true
         run: scripts/measure.sh target/release/vornui-proto.exe vornui results/windows
 
+      - name: Measure vornui on the software renderer
+        continue-on-error: true
+        env:
+          VORNUI_RENDERER: cpu
+        run: scripts/measure.sh target/release/vornui-proto.exe vornui-cpu results/windows
+
+      - name: Render the vornui gallery
+        continue-on-error: true
+        working-directory: packages/core
+        run: |
+          out="$GITHUB_WORKSPACE/spikes/vornui/results/windows/gallery"
+          mkdir -p "$out"
+          cargo run --release -p vornui --example gallery -- --render "$out" --renderer cpu
+          cargo run --release -p vornui --example gallery -- --render "$out" --renderer gpu
+
       - name: Fetch GPUI
         run: sh gpui/fetch_zed.sh
 

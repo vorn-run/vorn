@@ -162,7 +162,8 @@ struct WindowConfigurator: NSViewRepresentable {
 /// Renders the main screen offscreen with live data from vornd (read-only),
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
-/// `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -173,7 +174,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         size = CGSize(width: w, height: h)
     }
 
-    let store = VornStore(readOnly: true)
+    // An import writes, so a render that drops a file needs a writable connection to its test vornd.
+    let store = VornStore(readOnly: !args.contains("--drop-file"))
     let features = FeatureStores(client: store.client)
     let model = AppModel()
     model.persistsSidebar = false
@@ -205,7 +207,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         return 1
     }
     try? await Task.sleep(for: .milliseconds(300))
-    engines.update(socket: endpoint.gridSocket, readOnly: true)
+    engines.update(socket: endpoint.gridSocket, readOnly: true, fontSize: store.defaults?.fontSize)
 
     features.bind(store: store, model: model)
     switch model.mainViewMode {
@@ -213,8 +215,66 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     case .tasks:
         features.tasks.scope = features.scope(model, store)
         await features.tasks.reload()
+        if let title = value("--task"), let task = features.tasks.tasks.first(where: { $0.title == title }) {
+            features.tasks.selectedTaskId = task.id
+            try? await Task.sleep(for: .milliseconds(800))
+        }
     case .workflows:
+        features.workflows.editorMemory = .ephemeral()
         await features.workflows.reload()
+        if args.contains("--new-workflow") {
+            await features.workflows.awaitFreshCatalog()
+            features.workflows.newWorkflow()
+            if args.contains("--trigger-library") { features.workflows.editor?.driveForRender(triggerLibrary: true) }
+        }
+        if let spec = value("--export-workflow")?.split(separator: "@"), spec.count == 2,
+           let wf = features.workflows.workflows.first(where: { $0.name == spec[0] }) {
+            let to = URL(fileURLWithPath: String(spec[1]))
+            features.workflows.workflowFiles = WorkflowFileIO(
+                save: { _, contents, _ in try contents.write(to: to, atomically: true, encoding: .utf8); return true },
+                pick: { nil })
+            features.workflows.exportWorkflow(wf)
+            try? await Task.sleep(for: .milliseconds(800))
+        }
+        if let path = value("--drop-file") {
+            features.workflows.projects = store.projects
+            features.workflows.importDroppedWorkflow([URL(fileURLWithPath: path)])
+            try? await Task.sleep(for: .milliseconds(800))
+        }
+        if let name = value("--run-prompt"), let wf = features.workflows.workflows.first(where: { $0.name == name }) {
+            features.workflows.projects = store.projects
+            features.workflows.runNow(wf)
+        }
+        if let raw = value("--missed"), let json = try? JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8)) {
+            features.workflows.surfaces.missed = MissedSchedule.list(json)
+            features.workflows.surfaces.missedSelected = Set(features.workflows.surfaces.missed.map(\.workflowId))
+            if let off = value("--missed-unselect") { features.workflows.surfaces.missedSelected.remove(off) }
+        }
+        if let target = value("--workflow-menu")?.split(separator: "@"), target.count == 2,
+           let wf = features.workflows.workflows.first(where: { $0.name == target[0] }) {
+            let xy = target[1].split(separator: ",").compactMap { Double($0) }
+            if xy.count == 2 { features.workflows.menu = WorkflowsMenu(kind: .workflow(wf.id), at: CGPoint(x: xy[0], y: xy[1])) }
+        }
+        if let name = value("--workflow"), let wf = features.workflows.workflows.first(where: { $0.name == name }) {
+            await features.workflows.openWorkflow(wf.id).value
+            features.workflows.historyOpen = args.contains("--history")
+            features.workflows.editor?.driveForRender(
+                select: value("--select"), library: args.contains("--library"), query: value("--library-query"),
+                iconPicker: args.contains("--icon-picker"), more: args.contains("--more"),
+                formOpen: value("--form-open"), panelScroll: value("--panel-scroll").flatMap(Double.init) ?? 0)
+            if args.contains("--full-output"),
+               let logs = features.workflows.workflowRuns.first?.nodeStates.compactMap(\.logs).first(where: { !$0.isEmpty }) {
+                features.workflows.showFullOutput(logs)
+            }
+        }
+        if args.contains("--review") {
+            let wf = features.workflows
+            if let run = (wf.runs + wf.workflowRuns).first(where: { $0.nodeStates.contains { $0.viewToken != nil } }),
+               let gate = run.nodeStates.first(where: { $0.viewToken != nil }) {
+                wf.selectedRunId = run.runId
+                wf.openReview(run, nodeId: gate.nodeId, workflowName: wf.ref(for: run)?.name)
+            }
+        }
     }
 
     if let s = value("--update-status") {
@@ -383,11 +443,14 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
-    let scrolls = model.mainViewMode == .tasks || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
+    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
         || model.panes.diffSessionID != nil || !model.panes.filesPanes.isEmpty || !model.panes.terminalsPanes.isEmpty
         || !model.panes.editorCards.isEmpty
-    let settle = model.panes.filesPanes.isEmpty && model.panes.editorCards.isEmpty ? 400 : 1500
-    let image = scrolls ? await hostedImage(of: content, size: size, settle: settle) : {
+    let editorState = value("--editor")
+    let settle = args.contains("--review") ? 2500 : model.panes.filesPanes.isEmpty && model.panes.editorCards.isEmpty ? 300 : 1500
+    let image = scrolls ? await hostedImage(of: content, size: size, settle: settle) { root in
+        if let editorState { RichEditorDriver.drive(root, editorState) }
+    } : {
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         renderer.isOpaque = false
@@ -414,7 +477,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
 
 /// Draws `content` in an offscreen window at 2x, for views ImageRenderer cannot draw.
 @MainActor
-private func hostedImage(of content: some View, size: CGSize, settle: Int = 400) async -> CGImage? {
+private func hostedImage(
+    of content: some View, size: CGSize, settle: Int = 300, prepare: (NSView) -> Void = { _ in }
+) async -> CGImage? {
     let host = NSHostingView(rootView: content)
     host.frame = CGRect(origin: .zero, size: size)
     let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -423,6 +488,8 @@ private func hostedImage(of content: some View, size: CGSize, settle: Int = 400)
     window.isOpaque = false
     window.contentView = host
     host.layoutSubtreeIfNeeded()
+    try? await Task.sleep(for: .milliseconds(400))
+    prepare(host)
     try? await Task.sleep(for: .milliseconds(settle))
     host.layoutSubtreeIfNeeded()
     guard let rep = NSBitmapImageRep(

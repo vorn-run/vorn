@@ -69,6 +69,14 @@ pub trait App: 'static {
     fn background(&self) -> Rgba {
         crate::theme::color::SURFACE_BASE
     }
+    /// The window exists, before it is first shown: for an app that seats
+    /// native views (a web view) in it.
+    fn opened(&mut self, _window: &Arc<Window>) {}
+    /// Runs each time the loop is about to sleep, for work a native view's
+    /// toolkit needs pumped; returns when it wants to run again.
+    fn tick(&mut self) -> Option<Instant> {
+        None
+    }
 }
 
 pub enum UserEvent {
@@ -140,6 +148,10 @@ pub struct WindowOptions {
     pub min_size: Option<(f32, f32)>,
     /// The system's title bar and frame; without them the app draws its own.
     pub decorations: bool,
+    /// macOS: no title bar drawn, the traffic lights at this logical point
+    /// over the app's own top bar; the title still names the window for the
+    /// Dock and the window switcher.
+    pub inset_title: Option<(f32, f32)>,
     pub maximized: bool,
 }
 
@@ -149,6 +161,7 @@ impl WindowOptions {
             size,
             min_size: None,
             decorations: true,
+            inset_title: None,
             maximized: false,
         }
     }
@@ -216,6 +229,14 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         if let Some((w, h)) = o.min_size {
             attrs = attrs.with_min_inner_size(LogicalSize::new(w, h));
         }
+        #[cfg(target_os = "macos")]
+        if o.inset_title.is_some() {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs = attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true);
+        }
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let access =
             accesskit_winit::Adapter::with_event_loop_proxy(el, &window, self.proxy.clone());
@@ -263,7 +284,12 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             });
         let make = self.make.take().ok_or("app already made")?;
         ui.set_maximized(window.is_maximized());
-        let app = make(&mut ui, Waker(self.proxy.clone()));
+        #[cfg(target_os = "macos")]
+        if let Some(at) = o.inset_title {
+            crate::macos::place_traffic_lights(&window, at);
+        }
+        let mut app = make(&mut ui, Waker(self.proxy.clone()));
+        app.opened(&window);
         window.set_visible(true);
         Ok(Live {
             window,
@@ -349,6 +375,11 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             WindowEvent::ModifiersChanged(m) => self.mods = *m,
             WindowEvent::Resized(px) => {
                 l.ui.set_maximized(l.window.is_maximized());
+                // AppKit lays the buttons out again on every resize.
+                #[cfg(target_os = "macos")]
+                if let Some(at) = self.opts.inset_title {
+                    crate::macos::place_traffic_lights(&l.window, at);
+                }
                 if let (Present::Gpu { surface, config }, Some(g)) = (&mut l.present, &l.ui.gpu) {
                     config.width = px.width.max(1);
                     config.height = px.height.max(1);
@@ -430,14 +461,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
+        let tick = l.app.tick();
         match wake {
             Some(t) if t <= now => {
                 l.pending = None;
                 l.window.request_redraw();
-                el.set_control_flow(ControlFlow::Wait);
+                el.set_control_flow(tick.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
             }
-            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(t)),
-            None => el.set_control_flow(ControlFlow::Wait),
+            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(tick.map_or(t, |k| k.min(t)))),
+            None => el.set_control_flow(tick.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)),
         }
     }
 }
@@ -589,8 +621,12 @@ fn configure(
         wgpu::PresentMode::Fifo
     };
     let px = window.inner_size();
+    // Copying from the frame is what backdrop blur reads; without it blurs
+    // are skipped.
+    let usage =
+        wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
     let config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage,
         format,
         width: px.width.max(1),
         height: px.height.max(1),

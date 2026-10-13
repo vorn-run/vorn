@@ -82,6 +82,10 @@ enum TaskDates {
     /// The detail panel's date: month, day and a two-digit time in the user's locale.
     static func long(_ s: String) -> String {
         guard let d = parse(s) else { return "" }
-        return d.formatted(.dateTime.month(.abbreviated).day().hour(.twoDigits(amPM: .abbreviated)).minute(.twoDigits))
+        // toLocaleDateString with month, day, 2-digit hour and minute: "Oct 12, 09:33 AM".
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM d, hh:mm a"
+        return f.string(from: d)
     }
 }

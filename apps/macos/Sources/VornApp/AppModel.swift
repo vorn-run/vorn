@@ -330,9 +330,10 @@ public final class EngineHolder {
 
     public init() {}
 
-    public func update(socket: String?, readOnly: Bool) {
-        guard engine?.socket != socket || engine?.readOnly != readOnly else { return }
+    public func update(socket: String?, readOnly: Bool, fontSize: Double? = nil) {
+        let size = fontSize.map { CGFloat($0) } ?? Theme.Terminal.fontSize
+        guard engine?.socket != socket || engine?.readOnly != readOnly || engine?.fontSize != size else { return }
         engine?.shutdown()
-        engine = socket.map { TerminalEngine(socket: $0, readOnly: readOnly) }
+        engine = socket.map { TerminalEngine(socket: $0, readOnly: readOnly, fontSize: size) }
     }
 }

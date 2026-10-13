@@ -1,14 +1,16 @@
-//! The GPU renderer: one wgpu device, two instanced pipelines (rounded quads,
-//! and sprites from the mask or color atlas) and a scene drawn layer by
-//! layer. Everything the UI shows is one of those two primitives, so a frame
-//! is a handful of draw calls whatever it contains.
+//! The GPU renderer: one wgpu device, two instanced pipelines (rounded quads
+//! and shadows, and sprites from the mask or color atlas) and a scene drawn
+//! layer by layer. A layer that blurs what is under it splits the frame
+//! into passes around the blur (`backdrop.rs`); otherwise a frame is a
+//! handful of draw calls in one pass whatever it contains.
 
 use std::num::NonZeroU64;
 
 use bytemuck::{Pod, Zeroable};
 
 use crate::atlas::Atlases;
-use crate::scene::{Quad, Rgba, Scene, Sprite};
+use crate::backdrop::Blurrer;
+use crate::scene::{Layer, Quad, Rgba, Scene, Sprite};
 
 /// The device and queue, shared by every target.
 pub struct Gpu {
@@ -110,6 +112,9 @@ pub struct GpuRenderer {
     sprite_scratch: Vec<Sprite>,
     /// The last frame submitted, waited on before the next is queued.
     in_flight: Option<wgpu::SubmissionIndex>,
+    format: wgpu::TextureFormat,
+    /// Made the first time a frame blurs; boxed to keep the renderer small.
+    blurrer: Option<Box<Blurrer>>,
 }
 
 const SHADER: &str = include_str!("shader.wgsl");
@@ -250,6 +255,8 @@ impl GpuRenderer {
             quad_scratch: Vec::new(),
             sprite_scratch: Vec::new(),
             in_flight: None,
+            format,
+            blurrer: None,
         })
     }
 
@@ -294,48 +301,103 @@ impl GpuRenderer {
         let mut enc = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let c = clear.0;
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(c[0]),
-                            g: f64::from(c[1]),
-                            b: f64::from(c[2]),
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_bind_group(0, &self.bind, &[]);
-            let qs = std::mem::size_of::<Quad>() as u64;
-            let ss = std::mem::size_of::<Sprite>() as u64;
-            let (mut q0, mut s0) = (0u32, 0u32);
-            for l in &scene.layers {
-                let (nq, ns) = (l.quads.len() as u32, l.sprites.len() as u32);
-                if nq > 0 {
-                    pass.set_pipeline(&self.quad_pipe);
-                    pass.set_vertex_buffer(0, self.quads.slice(u64::from(q0) * qs..));
-                    pass.draw(0..4, 0..nq);
+        // A blur reads what is drawn so far, so the frame is split into one
+        // pass per run of layers between layers that blur. A target that
+        // cannot be copied from draws no blurs.
+        let layers = &scene.layers;
+        let blurs = view
+            .texture()
+            .usage()
+            .contains(wgpu::TextureUsages::COPY_SRC)
+            && layers.iter().any(|l| !l.blurs.is_empty());
+        let starts_run = |i: usize| blurs && !layers[i].blurs.is_empty();
+        let c = clear.0;
+        let mut load = wgpu::LoadOp::Clear(wgpu::Color {
+            r: f64::from(c[0]),
+            g: f64::from(c[1]),
+            b: f64::from(c[2]),
+            a: 1.0,
+        });
+        let mut offsets = (0u32, 0u32);
+        let mut start = 0;
+        if blurs {
+            let blurrer = self
+                .blurrer
+                .get_or_insert_with(|| Box::new(Blurrer::new(gpu, self.format)));
+            blurrer.begin();
+        }
+        loop {
+            if start > 0 || starts_run(0) {
+                if start == 0 {
+                    // The first layer blurs the clear color alone.
+                    self.pass(&mut enc, view, load, &layers[..0], &mut offsets);
+                    load = wgpu::LoadOp::Load;
                 }
-                if ns > 0 {
-                    pass.set_pipeline(&self.sprite_pipe);
-                    pass.set_vertex_buffer(0, self.sprites.slice(u64::from(s0) * ss..));
-                    pass.draw(0..4, 0..ns);
+                if let Some(b) = self.blurrer.as_mut() {
+                    for blur in &layers[start].blurs {
+                        b.encode(gpu, &mut enc, view, size, blur);
+                    }
                 }
-                q0 += nq;
-                s0 += ns;
             }
+            let end = (start + 1..layers.len())
+                .find(|&i| starts_run(i))
+                .unwrap_or(layers.len());
+            self.pass(&mut enc, view, load, &layers[start..end], &mut offsets);
+            load = wgpu::LoadOp::Load;
+            if end >= layers.len() {
+                break;
+            }
+            start = end;
+        }
+        if let Some(b) = self.blurrer.as_ref().filter(|_| blurs) {
+            b.upload(gpu);
         }
         let submitted = gpu.queue.submit(Some(enc.finish()));
         settle(gpu, &mut self.in_flight, submitted);
+    }
+
+    /// One render pass drawing `layers`, whose instances start at
+    /// `offsets` (quads, sprites) in this frame's buffers; advances them.
+    fn pass(
+        &self,
+        enc: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        load: wgpu::LoadOp<wgpu::Color>,
+        layers: &[Layer],
+        offsets: &mut (u32, u32),
+    ) {
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("frame"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &self.bind, &[]);
+        let qs = std::mem::size_of::<Quad>() as u64;
+        let ss = std::mem::size_of::<Sprite>() as u64;
+        let (q0, s0) = offsets;
+        for l in layers {
+            let (nq, ns) = (l.quads.len() as u32, l.sprites.len() as u32);
+            if nq > 0 {
+                pass.set_pipeline(&self.quad_pipe);
+                pass.set_vertex_buffer(0, self.quads.slice(u64::from(*q0) * qs..));
+                pass.draw(0..4, 0..nq);
+            }
+            if ns > 0 {
+                pass.set_pipeline(&self.sprite_pipe);
+                pass.set_vertex_buffer(0, self.sprites.slice(u64::from(*s0) * ss..));
+                pass.draw(0..4, 0..ns);
+            }
+            *q0 += nq;
+            *s0 += ns;
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 //! The Workflows view: the runs landing (`WorkflowsLandingView`), the
 //! sidebar's section (`WorkflowsSection`), their menus, and the editor.
 
+mod canvas;
 mod dialogs;
 mod editor;
+mod forms;
 mod panels;
 
 use serde_json::Value;
@@ -10,14 +12,14 @@ use serde_json::Value;
 use super::chrome::{divider, tool, window_controls};
 use super::menus::Item;
 use super::runs::{icon_button, status_dot};
-use super::sidebar::{control, nav_item, section};
+use super::sidebar::{control, toggle_section};
 use super::{c, ico, white, MainView, Screen, MOD_LABEL};
 use crate::act::Act;
 use crate::look;
 use crate::runs::{self, s as sv, RunAct};
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{div, text, tooltip, Action, El, Id, Rgba, Role, Sense};
-use crate::workflows::{self as wf, Anchor, Bucket, Panel, SideFilter, Tab, WfAct, Workflows};
+use crate::workflows::{self as wf, Anchor, Bucket, SideFilter, Tab, WfAct};
 
 pub use dialogs::dialog;
 pub use editor::editor;
@@ -67,7 +69,7 @@ fn listed<'a>(s: &'a Screen<'_>) -> Vec<&'a Value> {
 }
 
 /// `#rrggbb` as a colour.
-fn hex(v: Option<&str>) -> Option<Rgba> {
+pub(super) fn hex(v: Option<&str>) -> Option<Rgba> {
     let h = v?.strip_prefix('#')?;
     (h.len() == 6)
         .then(|| u32::from_str_radix(h, 16).ok())
@@ -75,27 +77,138 @@ fn hex(v: Option<&str>) -> Option<Rgba> {
         .map(Rgba::hex)
 }
 
-/// `ICON_MAP`'s PascalCase name as a lucide glyph, when there is one.
-fn icon_name(name: Option<&str>) -> Option<String> {
-    let name = name?;
-    let mut out = String::new();
-    for (i, ch) in name.chars().enumerate() {
-        if i > 0 && (ch.is_ascii_uppercase() || ch.is_ascii_digit()) && !out.ends_with('-') {
-            out.push('-');
-        }
-        out.push(ch.to_ascii_lowercase());
-    }
-    look::icon(&out, 1.5).is_some().then_some(out)
-}
-
-/// A workflow's own glyph in its colour, else `fallback`.
+/// `RunIcon`: the workflow's `ICON_MAP` glyph in its colour, else
+/// `fallback`.
 fn wf_icon(w: Option<&Value>, size: f32, fallback: &str, color: Rgba) -> El {
-    let name = icon_name(w.and_then(|w| sv(w, "icon")));
+    let name = w.and_then(|w| sv(w, "icon")).and_then(look::icon_map);
     let tint = w.and_then(|w| hex(sv(w, "iconColor")));
     match name {
-        Some(n) => ico(&n, size, 1.5, tint.unwrap_or(c(0x6b7280))),
+        Some(n) => ico(n, size, 1.5, tint.unwrap_or(c(0x6b7280))),
         None => ico(fallback, size, 1.5, color),
     }
+}
+
+/// `ICON_MAP[icon] || Workflow` in the workflow's colour: the sidebar's and
+/// the editor's mark.
+fn wf_glyph(w: &Value, size: f32) -> El {
+    let name = sv(w, "icon").and_then(look::icon_map).unwrap_or("workflow");
+    ico(
+        name,
+        size,
+        1.5,
+        hex(sv(w, "iconColor")).unwrap_or(c(0x6b7280)),
+    )
+}
+
+/// A canvas card's glyph: the trigger's kind or its connector, the agent's
+/// mark, the script's language, the connector a step calls.
+pub(super) fn node_glyph(s: &Screen<'_>, n: &Value, size: f32) -> El {
+    let cfg = |k: &str| {
+        n.pointer(&format!("/config/{k}"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+    let conn = match sv(n, "type").unwrap_or("") {
+        "callConnectorAction" => Some(cfg("connectionId")),
+        "trigger" if cfg("triggerType") == "connectorPoll" => Some(cfg("connectionId")),
+        _ => None,
+    };
+    if let Some(look) = conn.filter(|c| !c.is_empty()).and_then(|c| {
+        let src = crate::library::Sources {
+            connections: &s.st.wf.connections,
+            packs: &s.st.wf.lib.packs,
+            ..crate::library::Sources::default()
+        };
+        crate::library::look_for(&src, c)
+    }) {
+        return panels::mark(Some(&look), size);
+    }
+    let glyph = match sv(n, "type").unwrap_or("") {
+        "trigger" => wf::trigger_icon(cfg("triggerType")),
+        "script" => match cfg("scriptType") {
+            "python" | "node" => "code-xml",
+            _ => "terminal",
+        },
+        "launchAgent" if cfg("agentType") == "fromTask" => "clipboard-list",
+        "launchAgent" => return super::agent_icon(s, cfg("agentType"), size),
+        "callConnectorAction" => "zap",
+        k => super::runs::node_icon(k),
+    };
+    ico(glyph, size, 2.0, secondary())
+}
+
+/// The editor's icon picker: `PROJECT_ICON_OPTIONS` eight across, then
+/// `ICON_COLOR_PALETTE`.
+pub fn icon_picker(s: &Screen<'_>) -> El {
+    let Some(d) = &s.st.wf.editor else {
+        return div();
+    };
+    let icon = sv(&d.wf, "icon").unwrap_or("Workflow");
+    let color = sv(&d.wf, "iconColor").unwrap_or("#3b82f6");
+    let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
+    let mut grid = div().row().wrap_children().gap(4.0);
+    for (name, glyph, label) in look::ICON_OPTIONS {
+        let id = s.acts.on("wf-icon", act(WfAct::Icon(name.to_owned())));
+        let on = icon == name;
+        let hot = s.ui.hover(id);
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .size(22.0, 24.0)
+            .center()
+            .rounded(4.0)
+            .bg(if on {
+                white(0.10)
+            } else {
+                white(0.0).mix(white(0.06), hot)
+            })
+            .border(1.0, if on { white(0.2) } else { white(0.0) })
+            .role(Role::Button, label)
+            .selected(on)
+            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+        grid = grid.child(tooltip(s.ui, b, id, label, None));
+    }
+    let mut swatches = div().row().gap(6.0);
+    for rgb in look::ICON_COLORS {
+        let hexs = format!("#{rgb:06x}");
+        let id = s
+            .acts
+            .on("wf-icon-color", act(WfAct::IconColor(hexs.clone())));
+        let on = color.eq_ignore_ascii_case(&hexs);
+        let hot = s.ui.hover(id);
+        let size = if on { 22.0 } else { 20.0 };
+        swatches = swatches.child(
+            div().size(20.0, 20.0).center().child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .size(size, size)
+                    .rounded(size / 2.0)
+                    .bg(c(rgb))
+                    .border(
+                        1.0,
+                        if on {
+                            c(look::WHITE)
+                        } else {
+                            white(0.0).mix(white(0.3), hot)
+                        },
+                    )
+                    .role(Role::Button, &hexs)
+                    .selected(on),
+            ),
+        );
+    }
+    div()
+        .col()
+        .gap(8.0)
+        .w(220.0)
+        .p(8.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Dialog, "Change icon")
+        .child(grid)
+        .child(swatches)
 }
 
 /// `SOURCE_ICONS`.
@@ -335,7 +448,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
             div().grow().min_w0().child(
                 text(d.title.as_str(), 15.0, ink(1.0))
                     .weight(500)
-                    .line_height(22.0)
+                    .line_height(22.5)
                     .truncate()
                     .role(Role::Heading, d.title.as_str()),
             ),
@@ -379,11 +492,11 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
         .child(title)
         .child(
             text(meta.join(" \u{b7} "), 12.0, faint())
-                .line_height(16.0)
+                .line_height(18.0)
                 .truncate(),
         );
     if let Some(sub) = &d.subtitle {
-        head = head.child(text(sub.as_str(), 13.0, secondary()).line_height(18.0));
+        head = head.child(text(sub.as_str(), 13.0, secondary()).line_height(19.5));
     }
     head = head.child(
         div()
@@ -391,7 +504,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
             .items_center()
             .gap(8.0)
             .child(status_dot(dot_status(run)))
-            .child(text(wf::status_line(run, nodes), 13.0, ink(1.0)).line_height(18.0)),
+            .child(text(wf::status_line(run, nodes), 13.0, ink(1.0)).line_height(19.5)),
     );
     let mut col = div()
         .id(Id::new("wf-detail"))
@@ -406,22 +519,24 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
     }
     col.child(
         div()
+            .w_full()
             .px(20.0)
             .pb(24.0)
-            .child(super::runs::steps(s, run, nodes, &key)),
+            .child(super::runs::steps(s, run, nodes, &key, true)),
     )
 }
 
 fn gate_button(
     s: &Screen<'_>,
-    a: WfAct,
+    a: Act,
     icon: &str,
     label: &str,
     key: Option<&str>,
     approve: bool,
+    disabled: bool,
 ) -> El {
-    let id = s.acts.on("wf-gate", act(a));
-    let hot = s.ui.hover(id);
+    let id = s.acts.on("wf-gate", a);
+    let hot = if disabled { 0.0 } else { s.ui.hover(id) };
     let bronzo = |a: f32| Rgba::hexa(look::BRONZO, a);
     let (fg, bg, border) = if approve {
         (
@@ -438,7 +553,6 @@ fn gate_button(
     };
     let mut b = div()
         .id(id)
-        .on(Action::Click)
         .row()
         .items_center()
         .gap(8.0)
@@ -447,10 +561,15 @@ fn gate_button(
         .rounded(6.0)
         .border(1.0, border)
         .bg(bg)
+        .opacity(if disabled { 0.4 } else { 1.0 })
         .role(Role::Button, label)
+        .disabled(disabled)
         .child(ico(icon, 14.0, 2.0, fg))
-        .child(text(label, 13.0, fg).line_height(18.0).silent())
+        .child(text(label, 13.0, fg).line_height(19.5).silent())
         .child(div().grow());
+    if !disabled {
+        b = b.on(Action::Click);
+    }
     if let Some(k) = key {
         b = b.shortcut(k).child(
             div()
@@ -458,18 +577,108 @@ fn gate_button(
                 .py(2.0)
                 .rounded(4.0)
                 .border(1.0, white(0.08))
-                .child(text(k, 10.0, faint()).mono().line_height(12.0).silent()),
+                .child(text(k, 10.0, faint()).mono().line_height(15.0).silent()),
         );
     }
     b
 }
 
+/// A `flex-1` neutral button of the pane's Edit, Open review and Request
+/// changes row.
+fn pane_button(s: &Screen<'_>, a: Act, icon: &str, label: &str) -> El {
+    let id = s.acts.on("wf-gate", a);
+    let hot = s.ui.hover(id);
+    div()
+        .id(id)
+        .on(Action::Click)
+        .flex(1.0)
+        .row()
+        .items_center()
+        .justify_center()
+        .gap(8.0)
+        .px(16.0)
+        .py(8.0)
+        .rounded(6.0)
+        .border(1.0, white(0.06))
+        .bg(white(0.0).mix(white(0.04), hot))
+        .role(Role::Button, label)
+        .child(ico(icon, 13.0, 1.75, secondary().mix(ink(1.0), hot)))
+        .child(
+            text(label, 12.5, secondary().mix(ink(1.0), hot))
+                .line_height(18.75)
+                .silent(),
+        )
+}
+
+/// `RunDetailPane`'s waiting block: what the gate asks, its editor or
+/// comment when open, then Approve & continue and Reject run.
 fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
+    use crate::gates::{self as g, GateOp, Mode, Place};
     let key = runs::key(run);
     let nid = sv(gate, "nodeId").unwrap_or("").to_owned();
-    let mut col = div().col().gap(6.0).px(20.0).pb(16.0).shrink0();
+    let gk = g::key(Place::Pane, &key, &nid);
+    let mut col = div().col().w_full().gap(6.0).px(20.0).pb(16.0).shrink0();
     let sign_in = wf::is_sign_in(gate);
     let node = runs::node(nodes, &nid);
+    let approval = node.and_then(|n| sv(n, "type")) == Some("approval");
+    let config = node.and_then(|n| n.get("config"));
+    if !sign_in && approval {
+        col = col.child(super::gates::ask(gate, config));
+        let open = s.st.runs.gates.get(&gk);
+        match open.and_then(|o| o.mode) {
+            Some(Mode::Edit) => {
+                if let Some(e) = open.and_then(|o| o.editor.as_ref()) {
+                    col = col.child(super::gates::editor(s, &gk, e, true, false));
+                }
+            }
+            Some(Mode::Changes) => {
+                col = col.child(super::gates::composer(
+                    s,
+                    &gk,
+                    Mode::Changes,
+                    gate,
+                    config,
+                    nodes,
+                    true,
+                ));
+            }
+            _ => {
+                let mut row = div().row().gap(6.0);
+                let mut any = false;
+                if g::editable(gate).is_some() {
+                    let edited = open.is_some_and(|o| o.edited.is_some());
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Open(gk.clone(), Mode::Edit)),
+                        "pencil",
+                        if edited { "Edited" } else { "Edit" },
+                    ));
+                    any = true;
+                }
+                if sv(gate, "viewToken").is_some() {
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Review(Some((key.clone(), nid.clone())))),
+                        "eye",
+                        "Open review",
+                    ));
+                    any = true;
+                }
+                if g::can_request_changes(config, gate) {
+                    row = row.child(pane_button(
+                        s,
+                        Act::Gate(GateOp::Open(gk.clone(), Mode::Changes)),
+                        "message-square",
+                        "Request changes",
+                    ));
+                    any = true;
+                }
+                if any {
+                    col = col.child(row);
+                }
+            }
+        }
+    }
     if sign_in {
         let conn = sv(gate, "connectionId")
             .or_else(|| {
@@ -488,80 +697,37 @@ fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
                 .to_owned();
         col = col.child(gate_button(
             s,
-            WfAct::SignIn(conn),
+            act(WfAct::SignIn(conn)),
             "log-in",
             &format!("Sign in to {name}"),
             None,
             true,
+            false,
         ));
     } else {
-        let message = sv(gate, "message")
-            .or_else(|| {
-                node.and_then(|n| n.pointer("/config/message"))
-                    .and_then(Value::as_str)
-            })
-            .filter(|m| !m.is_empty());
-        col = col.child(match message {
-            Some(m) => div()
-                .id(Id::new("wf-gate-message").child(&key))
-                .max_h(192.0)
-                .scroll_y()
-                .rounded(6.0)
-                .border(1.0, white(0.07))
-                .bg(c(look::SURFACE_BASE))
-                .px(10.0)
-                .py(8.0)
-                .child(
-                    text(m, 12.0, ink(1.0))
-                        .wrapping()
-                        .min_w0()
-                        .line_height(18.0),
-                ),
-            None => text("Waiting for approval.", 11.5, c(look::BRONZO)).line_height(16.0),
-        });
-        let asked = gate
-            .get("feedback")
-            .and_then(Value::as_array)
-            .and_then(|f| {
-                f.iter()
-                    .rev()
-                    .find(|f| sv(f, "decision") == Some("changes"))
-            })
-            .and_then(|f| sv(f, "comment"));
-        if let Some(a) = asked {
-            col = col.child(
-                div()
-                    .row()
-                    .gap(6.0)
-                    .child(text("You asked", 11.5, faint()).line_height(16.0).silent())
-                    .child(text(a, 11.5, secondary()).line_height(16.0).truncate()),
-            );
-        }
-        let approve = WfAct::Gate {
-            run: key.clone(),
-            node: nid.clone(),
-            approve: true,
-        };
+        let blocked =
+            s.st.runs
+                .gates
+                .get(&gk)
+                .and_then(|o| o.editor.as_ref().filter(|_| o.mode == Some(Mode::Edit)))
+                .and_then(|e| e.invalid());
         col = col.child(gate_button(
             s,
-            approve,
+            Act::Gate(GateOp::Approve(gk.clone())),
             "check",
             "Approve & continue",
             Some(&format!("{MOD_LABEL}\u{21b5}")),
             true,
+            blocked.is_some(),
         ));
     }
-    let reject = WfAct::Gate {
-        run: key,
-        node: nid,
-        approve: false,
-    };
     col.child(gate_button(
         s,
-        reject,
+        Act::Gate(GateOp::Reject(gk)),
         "x",
         "Reject run",
         (!sign_in).then_some("R"),
+        false,
         false,
     ))
 }
@@ -678,7 +844,7 @@ pub fn sidebar(s: &Screen<'_>) -> El {
                 .absolute_right(0.0, 0.0),
         );
     }
-    let controls = vec![
+    let actions = vec![
         filter,
         control(
             s,
@@ -691,41 +857,109 @@ pub fn sidebar(s: &Screen<'_>) -> El {
         control(s, act(WfAct::New), "workflow", "New workflow", 13.0, 1.5),
     ];
     let waiting = wfs.waiting(&s.store.runs);
-    let mut col = div()
-        .col()
-        .gap(2.0)
-        .child(section(s, "Workflows", controls))
-        .child(nav_item(
-            s,
-            act(WfAct::AllRuns),
-            ico("activity", 14.0, 1.5, c(look::GRAY_400)),
-            "All runs",
-            Some(waiting.len()).filter(|n| *n > 0),
-            s.st.view == MainView::Workflows && wfs.editor.is_none(),
-        ));
-    let list: Vec<&Value> = listed(s)
+    let col = div().col().gap(2.0).child(toggle_section(
+        s,
+        "Workflows",
+        !wfs.folded,
+        act(WfAct::Fold),
+        actions,
+    ));
+    if wfs.folded {
+        return col;
+    }
+    let mut list = div().col().gap(2.0).child(all_runs(
+        s,
+        waiting.len(),
+        s.st.view == MainView::Workflows && wfs.editor.is_none(),
+    ));
+    let shown: Vec<&Value> = listed(s)
         .into_iter()
         .filter(|w| wfs.side.keeps(w))
         .collect();
-    if list.is_empty() {
-        col = col.child(
+    if shown.is_empty() {
+        list = list.child(
             div().px(10.0).py(4.0).child(
                 text("No workflows", 13.0, c(look::GRAY_600))
-                    .line_height(18.0)
+                    .line_height(19.5)
                     .role(Role::Label, "No workflows"),
             ),
         );
     }
-    for w in list {
+    let reorder = wfs.side == SideFilter::All;
+    for (i, w) in shown.into_iter().enumerate() {
         let id = sv(w, "id").unwrap_or("");
-        let is_waiting = waiting.iter().any(|r| sv(r, "workflowId") == Some(id));
+        let is_waiting = s.store.runs.values().any(|r| {
+            sv(r, "workflowId") == Some(id)
+                && runs::states(r).any(|n| sv(n, "status") == Some("waiting"))
+        });
         let failed = sv(w, "lastRunStatus") == Some("error");
-        col = col.child(side_row(s, w, wf::side_status(w, is_waiting, failed)));
+        let over = reorder
+            && wfs
+                .drag
+                .as_ref()
+                .is_some_and(|(from, to)| *to == Some(i) && from != id);
+        let row = side_row(s, w, wf::side_status(w, is_waiting, failed), reorder);
+        list = list.child(if over {
+            div().border_top(1.0, white(0.4)).child(row)
+        } else {
+            row
+        });
     }
-    col
+    col.child(list)
 }
 
-fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>) -> El {
+/// The `All runs` row: the landing, with the gates waiting on someone.
+fn all_runs(s: &Screen<'_>, waiting: usize, on: bool) -> El {
+    let id = s.acts.on("sidebar", act(WfAct::AllRuns));
+    let hot = !on && s.ui.hovered(id);
+    let fg = if on || hot {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300)
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(6.0)
+        .rounded(6.0)
+        .bg(if hot { white(0.04) } else { white(0.0) })
+        .role(Role::Button, "All runs")
+        .toggled(on)
+        .child_if(on.then(selected_bar))
+        .child(ico("activity", 14.0, 1.5, c(look::GRAY_400)))
+        .child(
+            div().row().grow().min_w0().child(
+                text("All runs", 13.0, fg)
+                    .line_height(19.5)
+                    .truncate()
+                    .silent(),
+            ),
+        )
+        .child_if((waiting > 0).then(|| {
+            text(waiting.to_string(), 10.0, c(look::BRONZO))
+                .mono()
+                .line_height(15.0)
+                .silent()
+        }))
+}
+
+/// `absolute left-0 top-1 bottom-1 w-px bg-white`: the selected row's mark.
+fn selected_bar() -> El {
+    div()
+        .absolute(0.0, 4.0)
+        .w(1.0)
+        .h(23.5)
+        .rounded(0.5)
+        .bg(c(look::WHITE))
+}
+
+/// `WorkflowItem`: the glyph with its status dot, the name, and Run and
+/// More on hover, held in place so the name truncates the same way.
+fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> El {
     let id = sv(w, "id").unwrap_or("").to_owned();
     let name = sv(w, "name").unwrap_or("");
     let editing =
@@ -740,23 +974,48 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>) -> El {
         || s.st.menu.as_ref().is_some_and(|m| m.kind == menu);
     let dot = status.map(|st| {
         let color = match st {
-            "waiting" => c(look::AMBER_400),
+            "waiting" => {
+                let (rgb, a) = runs::dot("waiting");
+                Rgba::hexa(rgb, a)
+            }
             "scheduled" => secondary(),
             "disabled" => faint(),
-            _ => c(look::DANGER),
+            _ => {
+                let (rgb, a) = runs::dot("error");
+                Rgba::hexa(rgb, a)
+            }
         };
         div()
-            .size(6.0, 6.0)
-            .rounded(3.0)
+            .absolute(size_dot_at(14.0), size_dot_at(14.0))
+            .size(8.0, 8.0)
+            .rounded(4.0)
             .bg(color)
-            .shrink0()
+            .border(1.0, c(look::SURFACE_BASE))
             .role(Role::Image, st)
     });
-    let dim = if status == Some("disabled") { 0.4 } else { 1.0 };
     let fg = if editing || hot {
         c(look::WHITE)
     } else {
         c(look::GRAY_300)
+    };
+    let small = |bid: Id, a: Act, icon: &str, size: f32, label: &str| {
+        s.acts.bind(bid, a);
+        let h = s.ui.hover(bid);
+        let b = div()
+            .id(bid)
+            .on(Action::Click)
+            .p(2.0)
+            .rounded(4.0)
+            .opacity(if hot { 1.0 } else { 0.0 })
+            .bg(white(0.0).mix(white(0.08), h))
+            .role(Role::Button, label)
+            .child(ico(
+                icon,
+                size,
+                2.0,
+                c(look::GRAY_500).mix(c(look::WHITE), h),
+            ));
+        tooltip(s.ui, b, bid, label, None)
     };
     let mut row = div()
         .id(row_id)
@@ -767,77 +1026,46 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>) -> El {
         .px(8.0)
         .py(6.0)
         .rounded(6.0)
-        .bg(if editing {
-            white(0.08)
-        } else if hot {
+        .opacity(if status == Some("disabled") { 0.4 } else { 1.0 })
+        .bg(if hot && !editing {
             white(0.04)
         } else {
             white(0.0)
         })
         .role(Role::Button, name)
         .selected(editing)
-        .child(
-            div()
-                .opacity(dim)
-                .child(wf_icon(Some(w), 14.0, "workflow", c(look::GRAY_400))),
-        )
+        .child_if(editing.then(selected_bar))
+        .child(div().shrink0().child(wf_glyph(w, 14.0)).child_if(dot))
         .child(
             div()
                 .row()
                 .grow()
                 .min_w0()
-                .opacity(dim)
-                .child(text(name, 13.0, fg).line_height(18.0).truncate().silent()),
+                .child(text(name, 13.0, fg).line_height(19.5).truncate().silent()),
         )
-        .child_if(dot);
-    row = s.acts.context(row, row_id, Act::Open(menu.clone()));
-    if hot {
-        let small = |bid: Id, a: Act, icon: &str, size: f32, label: &str| {
-            s.acts.bind(bid, a);
-            let h = s.ui.hover(bid);
-            let b = div()
-                .id(bid)
-                .on(Action::Click)
-                .p(2.0)
-                .rounded(4.0)
-                .bg(white(0.0).mix(white(0.08), h))
-                .role(Role::Button, label)
-                .child(ico(
-                    icon,
-                    size,
-                    2.0,
-                    c(look::GRAY_500).mix(c(look::WHITE), h),
-                ));
-            tooltip(s.ui, b, bid, label, None)
-        };
-        row = row.child(
-            div()
-                .row()
-                .items_center()
-                .gap(2.0)
-                .child(small(
-                    run_id,
-                    act(WfAct::Run(id.clone())),
-                    "play",
-                    11.0,
-                    "Run",
-                ))
-                .child(small(more_id, Act::Open(menu), "ellipsis", 12.0, "More")),
-        );
+        .child(small(
+            run_id,
+            act(WfAct::Run(id.clone())),
+            "play",
+            11.0,
+            &format!("Run workflow {name}"),
+        ))
+        .child(small(
+            more_id,
+            Act::Open(menu.clone()),
+            "ellipsis",
+            12.0,
+            &format!("More options for {name}"),
+        ));
+    if reorder {
+        row = row.sense(Sense::MOVE);
     }
-    row
+    s.acts.context(row, row_id, Act::Open(menu))
 }
 
-/// The step library's rows for the open anchor, through the search.
-pub fn library_rows(wf: &Workflows) -> Vec<(&'static str, &'static str, &'static str)> {
-    let trigger = matches!(&wf.panel, Panel::Library(Anchor { trigger: true, .. }));
-    let q = wf.search.trim().to_lowercase();
-    let pool: &[(&'static str, &'static str, &'static str)] =
-        if trigger { &wf::TRIGGERS } else { &wf::STEPS };
-    pool.iter()
-        .filter(|(_, label, _)| q.is_empty() || label.to_lowercase().contains(&q))
-        .copied()
-        .collect()
+/// `-bottom-0.5 -right-0.5` on a glyph `size` wide, for an 8 px dot.
+fn size_dot_at(size: f32) -> f32 {
+    size + 2.0 - 8.0
 }
 
 /// The workflow menus' entries.
@@ -897,14 +1125,14 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 "Delete Workflow",
                 act(WfAct::Delete(id.clone())),
             )));
-            out
+            out.into_iter().map(Item::plain).collect()
         }
         MenuKind::EditorMore => {
             let Some(d) = &s.st.wf.editor else {
                 return Vec::new();
             };
             let mut out = vec![Item::new(
-                "settings-2",
+                "settings",
                 "Workflow settings",
                 act(WfAct::Settings),
             )];
@@ -924,7 +1152,7 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                     .sep(),
                 );
             }
-            out
+            out.into_iter().map(Item::plain).collect()
         }
         MenuKind::NodeMore(id) => {
             let Some(n) = s.st.wf.editor.as_ref().and_then(|d| d.node(id)) else {
@@ -934,7 +1162,6 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
             let anchor = if trigger {
                 Anchor {
                     trigger: true,
-                    replace: Some(id.clone()),
                     ..Anchor::default()
                 }
             } else {
@@ -1024,42 +1251,18 @@ fn choice_items(s: &Screen<'_>, path: &str) -> Vec<Item> {
             })
             .collect();
     }
-    let cur = current(s, path);
-    let set = |v: &str| act(WfAct::Set(path.to_owned(), v.to_owned()));
-    if path == "config.projectName" || path == "config.projectFilter" {
-        let mut out = Vec::new();
-        if path == "config.projectFilter" {
-            out.push(Item::option("All projects", cur.is_empty(), set("")));
-        }
-        for p in &s.store.projects {
-            out.push(Item::option(p.name.as_str(), cur == p.name, set(&p.name)));
-        }
-        return out;
-    }
-    wf::choices(path)
-        .into_iter()
-        .map(|(v, label)| Item::option(label, cur == v, set(v)))
-        .collect()
-}
-
-/// The open form's value at `path`.
-fn current(s: &Screen<'_>, path: &str) -> String {
-    let Some(d) = &s.st.wf.editor else {
-        return String::new();
-    };
-    match s.st.wf.node.as_deref().and_then(|n| d.node(n)) {
-        Some(n) if s.st.wf.panel == Panel::Node => wf::field_text(n, path),
-        _ => wf::text_of(d.wf.get(path)),
-    }
+    forms::choice_items(s, path)
 }
 
 /// How wide each workflow menu is.
 pub fn menu_width(kind: &MenuKind) -> Option<f32> {
     Some(match kind {
+        MenuKind::WfChoice(t) if !t.starts_with("prompt.") => forms::choice_width(t),
         MenuKind::RunStatus | MenuKind::WfChoice(_) => 200.0,
         MenuKind::WorkflowFilter | MenuKind::NodeMore(_) => 160.0,
         MenuKind::WorkflowItem(_) | MenuKind::EditorMore => 180.0,
         MenuKind::PromptProject => 240.0,
+        MenuKind::WfIcon => 220.0,
         _ => return None,
     })
 }
@@ -1070,25 +1273,8 @@ mod tests {
 
     #[test]
     fn icon_names_map_to_glyphs() {
-        assert_eq!(icon_name(Some("Workflow")).as_deref(), Some("workflow"));
-        assert_eq!(icon_name(Some("GitBranch")).as_deref(), Some("git-branch"));
-        assert_eq!(icon_name(Some("NoSuchGlyph")), None);
-    }
-
-    #[test]
-    fn the_library_filters_by_label() {
-        let mut w = Workflows {
-            panel: Panel::Library(Anchor::default()),
-            ..Workflows::default()
-        };
-        assert_eq!(library_rows(&w).len(), wf::STEPS.len());
-        w.search = "scr".into();
-        assert_eq!(library_rows(&w)[0].0, "script");
-        w.panel = Panel::Library(Anchor {
-            trigger: true,
-            ..Anchor::default()
-        });
-        w.search = "task".into();
-        assert_eq!(library_rows(&w).len(), 2);
+        assert_eq!(look::icon_map("Workflow"), Some("workflow"));
+        assert_eq!(look::icon_map("Play"), Some("play"));
+        assert_eq!(look::icon_map("RotateCcw"), None, "not in ICON_MAP");
     }
 }

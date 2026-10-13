@@ -135,7 +135,7 @@ fn connector_of(connection: &Value) -> Option<Value> {
 }
 
 /// `boundConnectionKey(node, config)`.
-fn bound_connection_key(node: &Value, config: &Map<String, Value>) -> Option<&'static str> {
+pub fn bound_connection_key(node: &Value, config: &Map<String, Value>) -> Option<&'static str> {
     match node.get("type").and_then(Value::as_str) {
         Some("trigger")
             if config.get("triggerType").and_then(Value::as_str) == Some("connectorPoll") =>
@@ -151,7 +151,7 @@ fn bound_connection_key(node: &Value, config: &Map<String, Value>) -> Option<&'s
 
 /// `resolveRequirement`: the connection a requirement binds to here, when
 /// this machine has exactly one answer.
-fn resolve_requirement(requirement: &Value, connections: &[Value]) -> Option<Value> {
+pub fn resolve_requirement(requirement: &Value, connections: &[Value]) -> Option<Value> {
     let http = requirement.get("kind").and_then(Value::as_str) == Some("httpProfile");
     let wanted = requirement.get("connectorId");
     let candidates: Vec<&Value> = connections
@@ -324,7 +324,7 @@ pub fn to_portable(workflow: &Value, project_path: &str, connections: &[Value]) 
 }
 
 /// `bindsOnlyByHand`: a script's key is handed over by a person, in the step.
-fn binds_only_by_hand(requirement: &Value) -> bool {
+pub fn binds_only_by_hand(requirement: &Value) -> bool {
     requirement.get("kind").and_then(Value::as_str) == Some("connection")
         && requirement.get("key").and_then(Value::as_str) == Some("secretsFrom")
 }

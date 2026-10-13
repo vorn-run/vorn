@@ -121,16 +121,7 @@ fn near(px: [u8; 4], c: Rgba) {
 #[test]
 fn pills_choose_on_click_and_arrows() {
     let g = Id::new("view");
-    let items = [
-        Pill {
-            label: "Terminals",
-            icon: None,
-        },
-        Pill {
-            label: "Tasks",
-            icon: None,
-        },
-    ];
+    let items = [Pill::new("Terminals", None), Pill::new("Tasks", None)];
     let build = |ui: &Ui| widgets::pills(ui, g, "View", &items, 0);
     let mut r = Rig::new();
     r.frame(&build);
@@ -284,6 +275,22 @@ fn menu_grows_in_then_settles() {
     assert_eq!(r.ui.menu_progress(menu), 1.0);
     r.frame(&build);
     assert!(!r.ui.animating());
+}
+
+#[test]
+fn a_view_asked_wake_holds_for_its_frame_only() {
+    let mut r = Rig::new();
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
+    let at = r.now + Duration::from_millis(33);
+    r.frame(&|ui: &Ui| {
+        ui.wake_at(ui.now() + Duration::from_millis(50));
+        ui.wake_at(ui.now() + Duration::from_millis(33));
+        div()
+    });
+    assert_eq!(r.ui.next_wake(), Some(at));
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
 }
 
 #[test]
@@ -701,4 +708,29 @@ fn moving_presses_report_moves_and_a_drop_and_still_presses_click() {
         "{events:?}"
     );
     assert_eq!(rig.ui.moving(), None);
+}
+
+#[test]
+fn a_transformed_subtree_is_hit_where_it_is_drawn() {
+    let mut r = Rig::new();
+    let dot = Id::new("dot");
+    let build = |_: &Ui| {
+        // A 200x200 layer scaled 2x about its centre and shifted right 10.
+        div().size(200.0, 200.0).transform(2.0, (10.0, 0.0)).child(
+            div()
+                .absolute(100.0, 100.0)
+                .size(10.0, 10.0)
+                .id(dot)
+                .on(vornui::Action::Click),
+        )
+    };
+    r.frame(&build);
+    let at = r.ui.rect_of(dot).expect("drawn");
+    // Centre (116, 116); the dot's corner at 116 + (116 - 116) * 2 + 10.
+    assert_eq!((at.x, at.y, at.w, at.h), (126.0, 116.0, 20.0, 20.0));
+    r.ui.pointer_move(at.x + 15.0, at.y + 15.0);
+    r.frame(&build);
+    r.ui.pointer_down();
+    r.ui.pointer_up();
+    assert_eq!(r.ui.take_events(), vec![Event::Click(dot)]);
 }

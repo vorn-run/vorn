@@ -20,14 +20,20 @@
 //!   their turn to start while the frame waited on them.
 //!
 //! It is its own small rasterizer rather than a general one (tiny-skia)
-//! because the scene has two primitives and must match the shader's
-//! distance field and sampling exactly; a path rasterizer would need both
+//! because the scene has few primitives and must match the shader's
+//! distance field and sampling exactly; a path rasterizer would need them
 //! re-expressed as paths and would still differ at the edges.
+//!
+//! A backdrop blur reads what is under it, so it splits the frame: the
+//! primitives before it are drawn into every dirty tile, the blur runs over
+//! the whole frame, then drawing resumes. Tiles a blur reads from are
+//! redrawn together, so it never reads a pixel that already shows what is
+//! drawn over it.
 
 use rayon::prelude::*;
 
 use crate::atlas::Atlases;
-use crate::scene::{Quad, Rgba, Scene, Sprite};
+use crate::scene::{luminance, text_coverage, Blur, Quad, Rgba, Scene, Sprite};
 
 /// Tile side, in pixels.
 const TILE: usize = 64;
@@ -50,14 +56,39 @@ pub struct CpuRaster {
     bins: Vec<Vec<u32>>,
     dirty: Vec<bool>,
     damage: Vec<(u32, u32)>,
+    /// Glyph coverage correction tables, kept across frames.
+    luts: Vec<[u8; 256]>,
+    /// Per (contrast, gamma) bits, each luminance level's index into
+    /// `luts`: a direct lookup, as a terminal can show thousands of colours.
+    lut_index: Vec<([u32; 2], [u16; LUM_LEVELS + 1])>,
 }
+
+/// A sprite's index into [`CpuRaster::luts`] when it has none.
+const NO_LUT: u16 = u16::MAX;
+/// Text luminance steps the correction tables are made for. The mix is
+/// linear in luminance, so 64 steps put every table within 1/255 of exact.
+const LUM_LEVELS: usize = 64;
+/// More (contrast, gamma) settings than this and the tables start over.
+const MAX_GAMMAS: usize = 8;
+/// The correction table of uncorrected text.
+const IDENTITY: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        t[i] = i as u8;
+        i += 1;
+    }
+    t
+};
 
 /// A primitive with the pixels it may touch: its coverage within its clip
 /// and the frame, as `[x0, y0, x1, y1)`.
 #[derive(Clone, Copy)]
 enum Prim<'a> {
     Quad(&'a Quad, [i32; 4]),
-    Sprite(&'a Sprite, [i32; 4]),
+    /// With its glyph correction's index in the frame's tables.
+    Sprite(&'a Sprite, [i32; 4], u16),
+    Blur(&'a Blur, [i32; 4]),
 }
 
 impl CpuRaster {
@@ -86,6 +117,8 @@ impl CpuRaster {
             bins: Vec::new(),
             dirty: Vec::new(),
             damage: Vec::new(),
+            luts: Vec::new(),
+            lut_index: Vec::new(),
         }
     }
 
@@ -166,24 +199,41 @@ impl CpuRaster {
         );
         let mut tile_hash = vec![seed; n];
         let mut prims = Vec::new();
+        let mut blurs = Vec::new();
+        if self.lut_index.len() > MAX_GAMMAS {
+            self.lut_index.clear();
+            self.luts.clear();
+        }
         let frame = [0, 0, w as i32, h as i32];
         for l in &scene.layers {
+            let blur_prims = l
+                .blurs
+                .iter()
+                .map(|b| Prim::Blur(b, coverage(b.rect, b.clip, 1.0)));
             let quads = l
                 .quads
                 .iter()
-                .map(|q| Prim::Quad(q, coverage(q.rect, q.clip)));
+                .map(|q| Prim::Quad(q, coverage(q.rect, q.clip, q.reach())));
             let sprites = l
                 .sprites
                 .iter()
-                .map(|s| Prim::Sprite(s, coverage(s.rect, s.clip)));
-            for p in quads.chain(sprites) {
+                .map(|s| Prim::Sprite(s, coverage(s.rect, s.clip, 0.0), NO_LUT));
+            for p in blur_prims.chain(quads).chain(sprites) {
                 let b = intersect(p.bounds(), frame);
                 if b[0] >= b[2] || b[1] >= b[3] {
                     continue;
                 }
                 let ph = p.hash();
                 let idx = prims.len() as u32;
-                prims.push(p.with_bounds(b));
+                let p = match p {
+                    Prim::Sprite(s, _, _) => Prim::Sprite(s, b, self.lut(s)),
+                    Prim::Blur(..) => {
+                        blurs.push(idx);
+                        p.with_bounds(b)
+                    }
+                    Prim::Quad(..) => p.with_bounds(b),
+                };
+                prims.push(p);
                 let (tx0, tx1) = (b[0] as usize / TILE, (b[2] as usize - 1) / TILE);
                 let (ty0, ty1) = (b[1] as usize / TILE, (b[3] as usize - 1) / TILE);
                 for ty in ty0..=ty1 {
@@ -204,51 +254,151 @@ impl CpuRaster {
                 .map(|(i, h)| fresh || self.hashes[i] != *h),
         );
         self.hashes = tile_hash;
+        spread_blur_damage(&mut self.dirty, tiles_x, &prims, &blurs, frame);
         self.damage.clear();
         let mut bands = Vec::new();
         let mut dirty_px = 0;
-        for (b, rows) in self.pixels.chunks_mut(w * TILE).enumerate() {
+        for b in 0..tiles_y {
             let tiles = &self.dirty[b * tiles_x..(b + 1) * tiles_x];
             let count = tiles.iter().filter(|d| **d).count();
             if count == 0 {
                 continue;
             }
-            dirty_px += count * TILE * (rows.len() / w);
-            let (y0, y1) = ((b * TILE) as u32, (b * TILE + rows.len() / w) as u32);
+            let rows = TILE.min(h - b * TILE);
+            dirty_px += count * TILE * rows;
+            let (y0, y1) = ((b * TILE) as u32, (b * TILE + rows) as u32);
             match self.damage.last_mut() {
                 Some(last) if last.1 == y0 => last.1 = y1,
                 _ => self.damage.push((y0, y1)),
             }
-            bands.push((b, rows));
+            bands.push(b);
         }
-        let job = Job {
-            w,
-            tiles_x,
-            dirty: &self.dirty,
-            bins: &self.bins,
-            prims: &prims,
-            mask: atlases.mask.pixels().unwrap_or(&[]),
-            mask_size: atlases.mask.size as usize,
-            color: atlases.color.pixels().unwrap_or(&[]),
-            color_size: atlases.color.size as usize,
-            clear: clear_px,
-            bgra: self.bgra,
-        };
-        match &self.pool {
-            Some(pool) if dirty_px >= PARALLEL_MIN_PX && bands.len() >= 2 => {
-                // One band per task so a busy band does not hold up an idle thread.
-                pool.install(|| {
-                    bands
-                        .into_par_iter()
-                        .with_max_len(1)
-                        .for_each(|(b, rows)| job.band(b, rows));
-                });
+        // Drawing stops at each blur, which runs over the whole frame.
+        let mut start = 0u32;
+        for end in blurs.iter().copied().chain(Some(prims.len() as u32)) {
+            let job = Job {
+                w,
+                tiles_x,
+                dirty: &self.dirty,
+                bins: &self.bins,
+                prims: &prims,
+                range: (start, end),
+                mask: atlases.mask.pixels().unwrap_or(&[]),
+                mask_size: atlases.mask.size as usize,
+                color: atlases.color.pixels().unwrap_or(&[]),
+                color_size: atlases.color.size as usize,
+                luts: &self.luts,
+                clear: (start == 0).then_some(clear_px),
+                bgra: self.bgra,
+            };
+            let rows = self
+                .pixels
+                .chunks_mut(w * TILE)
+                .enumerate()
+                .filter(|(b, _)| bands.binary_search(b).is_ok());
+            match &self.pool {
+                Some(pool) if dirty_px >= PARALLEL_MIN_PX && bands.len() >= 2 => {
+                    // One band per task so a busy band does not hold up an idle thread.
+                    let rows: Vec<_> = rows.collect();
+                    pool.install(|| {
+                        rows.into_par_iter()
+                            .with_max_len(1)
+                            .for_each(|(b, rows)| job.band(b, rows));
+                    });
+                }
+                _ => rows.for_each(|(b, rows)| job.band(b, rows)),
             }
-            _ => {
-                for (b, rows) in bands {
-                    job.band(b, rows);
+            if let Some(Prim::Blur(blur, b)) = prims.get(end as usize) {
+                if any_dirty(&self.dirty, tiles_x, *b) {
+                    backdrop(&mut self.pixels, (w, h), blur, *b);
                 }
             }
+            start = end + 1;
+        }
+    }
+
+    /// The index of `s`'s glyph correction table, made if new.
+    fn lut(&mut self, s: &Sprite) -> u16 {
+        let Some(g) = s.text_gamma() else {
+            return NO_LUT;
+        };
+        let key = [g.contrast.to_bits(), g.gamma.to_bits()];
+        let slot = match self.lut_index.iter().position(|(k, _)| *k == key) {
+            Some(i) => i,
+            None => {
+                self.lut_index.push((key, [NO_LUT; LUM_LEVELS + 1]));
+                self.lut_index.len() - 1
+            }
+        };
+        let lum = luminance([s.color[0], s.color[1], s.color[2]]).clamp(0.0, 1.0);
+        let level = (lum * LUM_LEVELS as f32).round() as usize;
+        let i = self.lut_index[slot].1[level];
+        if i != NO_LUT {
+            return i;
+        }
+        let lum = level as f32 / LUM_LEVELS as f32;
+        let mut t = [0u8; 256];
+        for (m, v) in t.iter_mut().enumerate() {
+            *v = unit(text_coverage(m as f32 / 255.0, lum, g.contrast, g.gamma)) as u8;
+        }
+        self.luts.push(t);
+        let i = (self.luts.len() - 1) as u16;
+        self.lut_index[slot].1[level] = i;
+        i
+    }
+}
+
+/// The tiles `b` covers, clamped to a `tiles_x` wide grid: inclusive
+/// column and row ranges.
+fn tiles_of(b: [i32; 4]) -> ([usize; 2], [usize; 2]) {
+    (
+        [b[0] as usize / TILE, (b[2] as usize - 1) / TILE],
+        [b[1] as usize / TILE, (b[3] as usize - 1) / TILE],
+    )
+}
+
+fn any_dirty(dirty: &[bool], tiles_x: usize, b: [i32; 4]) -> bool {
+    let ([x0, x1], [y0, y1]) = tiles_of(b);
+    (y0..=y1).any(|ty| dirty[ty * tiles_x + x0..=ty * tiles_x + x1].contains(&true))
+}
+
+/// Makes a blur's whole source dirty when any of it is: the blur reads
+/// every pixel within its margin, and a clean tile there shows what was
+/// drawn over the blur last frame, not what is under it. Repeats until no
+/// blur's source changes, as one blur's spread can reach another's.
+fn spread_blur_damage(
+    dirty: &mut [bool],
+    tiles_x: usize,
+    prims: &[Prim<'_>],
+    blurs: &[u32],
+    frame: [i32; 4],
+) {
+    let sources: Vec<[i32; 4]> = blurs
+        .iter()
+        .filter_map(|&i| match prims[i as usize] {
+            Prim::Blur(bl, b) => {
+                let m = bl.margin().ceil() as i32;
+                Some(intersect([b[0] - m, b[1] - m, b[2] + m, b[3] + m], frame))
+            }
+            _ => None,
+        })
+        .collect();
+    loop {
+        let mut changed = false;
+        for &s in &sources {
+            if !any_dirty(dirty, tiles_x, s) {
+                continue;
+            }
+            let ([x0, x1], [y0, y1]) = tiles_of(s);
+            for ty in y0..=y1 {
+                for d in &mut dirty[ty * tiles_x + x0..=ty * tiles_x + x1] {
+                    changed |= !*d;
+                    *d = true;
+                }
+            }
+        }
+        if !changed {
+            break;
         }
     }
 }
@@ -277,21 +427,27 @@ fn raise_priority() {
 impl Prim<'_> {
     fn bounds(&self) -> [i32; 4] {
         match self {
-            Prim::Quad(_, b) | Prim::Sprite(_, b) => *b,
+            Prim::Quad(_, b) | Prim::Sprite(_, b, _) | Prim::Blur(_, b) => *b,
         }
     }
 
     fn with_bounds(self, b: [i32; 4]) -> Self {
         match self {
             Prim::Quad(q, _) => Prim::Quad(q, b),
-            Prim::Sprite(s, _) => Prim::Sprite(s, b),
+            Prim::Sprite(s, _, l) => Prim::Sprite(s, b, l),
+            Prim::Blur(bl, _) => Prim::Blur(bl, b),
         }
     }
 
     fn hash(&self) -> u64 {
         let (tag, bytes): (u64, &[u8]) = match self {
             Prim::Quad(q, _) => (1, bytemuck::bytes_of(*q)),
-            Prim::Sprite(s, _) => (2, bytemuck::bytes_of(*s)),
+            Prim::Sprite(s, _, _) => (2, bytemuck::bytes_of(*s)),
+            Prim::Blur(b, _) => {
+                let fields = [b.sigma, b.radius, b.alpha];
+                let h = b.rect.iter().chain(&b.clip).chain(&fields);
+                return h.fold(mix(FX_SEED, 3), |h, v| mix(h, u64::from(v.to_bits())));
+            }
         };
         bytes.chunks_exact(8).fold(mix(FX_SEED, tag), |h, c| {
             mix(h, u64::from_le_bytes(c.try_into().unwrap_or([0; 8])))
@@ -306,13 +462,14 @@ fn mix(h: u64, v: u64) -> u64 {
     (h.rotate_left(5) ^ v).wrapping_mul(0x517c_c1b7_2722_0a95)
 }
 
-/// The pixels whose centres fall inside `rect` and inside `clip`, as the
-/// GPU rasterizes a quad and the shader's clip test keeps its fragments.
-fn coverage(rect: [f32; 4], clip: [f32; 4]) -> [i32; 4] {
-    let x0 = rect[0].max(clip[0]);
-    let y0 = rect[1].max(clip[1]);
-    let x1 = (rect[0] + rect[2]).min(clip[2]);
-    let y1 = (rect[1] + rect[3]).min(clip[3]);
+/// The pixels whose centres fall inside `rect` grown by `reach` and inside
+/// `clip`, as the GPU rasterizes a quad and the shader's clip test keeps its
+/// fragments.
+fn coverage(rect: [f32; 4], clip: [f32; 4], reach: f32) -> [i32; 4] {
+    let x0 = (rect[0] - reach).max(clip[0]);
+    let y0 = (rect[1] - reach).max(clip[1]);
+    let x1 = (rect[0] + rect[2] + reach).min(clip[2]);
+    let y1 = (rect[1] + rect[3] + reach).min(clip[3]);
     let edge = |v: f32| (v - 0.5).ceil().clamp(-1.0e6, 1.0e6) as i32;
     [edge(x0), edge(y0), edge(x1), edge(y1)]
 }
@@ -333,11 +490,16 @@ struct Job<'a> {
     dirty: &'a [bool],
     bins: &'a [Vec<u32>],
     prims: &'a [Prim<'a>],
+    /// The primitives this pass draws, `[start, end)`: those between two
+    /// blurs.
+    range: (u32, u32),
     mask: &'a [u8],
     mask_size: usize,
     color: &'a [u8],
     color_size: usize,
-    clear: u32,
+    luts: &'a [[u8; 256]],
+    /// What dirty tiles start as, on the first pass only.
+    clear: Option<u32>,
     bgra: bool,
 }
 
@@ -371,15 +533,29 @@ impl Job<'_> {
                 ((tx + 1) * TILE).min(self.w) as i32,
                 y0 + rows as i32,
             ];
-            for y in area[1]..area[3] {
-                band.row(y, area[0], area[2]).fill(self.clear);
+            if let Some(clear) = self.clear {
+                for y in area[1]..area[3] {
+                    band.row(y, area[0], area[2]).fill(clear);
+                }
             }
+            let (start, end) = self.range;
             for &i in &self.bins[t] {
+                if i < start {
+                    continue;
+                }
+                if i >= end {
+                    break;
+                }
                 match self.prims[i as usize] {
-                    Prim::Quad(q, bounds) => self.quad(&mut band, q, intersect(bounds, area)),
-                    Prim::Sprite(s, bounds) => {
-                        self.sprite(&mut band, s, intersect(bounds, area));
+                    Prim::Quad(q, bounds) if q.is_shadow() => {
+                        self.shadow(&mut band, q, intersect(bounds, area));
                     }
+                    Prim::Quad(q, bounds) => self.quad(&mut band, q, intersect(bounds, area)),
+                    Prim::Sprite(s, bounds, lut) => {
+                        let lut = self.luts.get(usize::from(lut));
+                        self.sprite(&mut band, s, intersect(bounds, area), lut);
+                    }
+                    Prim::Blur(..) => {}
                 }
             }
         }
@@ -416,7 +592,32 @@ impl Job<'_> {
         }
     }
 
-    fn sprite(&self, band: &mut Band<'_>, s: &Sprite, a: [i32; 4]) {
+    /// Draws shadow `q` over `a`, skipping the pixels its box cuts out.
+    fn shadow(&self, band: &mut Band<'_>, q: &Quad, a: [i32; 4]) {
+        let sh = ShadowShape::of(q);
+        let [bx, by, bw, bh] = q.border_color;
+        // Pixels at least this far inside the box are cut out entirely.
+        let inset = sh.box_r + 1.0;
+        let ix0 = (bx + inset - 0.5).ceil() as i32;
+        let ix1 = (bx + bw - inset - 0.5).ceil() as i32;
+        let iy0 = (by + inset - 0.5).ceil() as i32;
+        let iy1 = (by + bh - inset - 0.5).ceil() as i32;
+        for py in a[1]..a[3] {
+            let (s0, s1) = if py >= iy0 && py < iy1 {
+                (ix0.clamp(a[0], a[2]), ix1.clamp(a[0], a[2]))
+            } else {
+                (a[2], a[2])
+            };
+            let row = band.row(py, a[0], a[2]);
+            for px in (a[0]..s0).chain(s1.max(s0)..a[2]) {
+                let c = sh.pixel(q, px as f32 + 0.5, py as f32 + 0.5);
+                let dst = &mut row[(px - a[0]) as usize];
+                *dst = blend_f(*dst, c, self.bgra);
+            }
+        }
+    }
+
+    fn sprite(&self, band: &mut Band<'_>, s: &Sprite, a: [i32; 4], lut: Option<&[u8; 256]>) {
         if a[0] >= a[2] || a[1] >= a[3] {
             return;
         }
@@ -452,10 +653,12 @@ impl Job<'_> {
                     }
                 } else {
                     let src = &tex[ty * size + tx0..ty * size + tx0 + n];
+                    let lut = lut.unwrap_or(&IDENTITY);
                     for (dst, &m) in row.iter_mut().zip(src) {
                         if m == 0 {
                             continue;
                         }
+                        let m = lut[usize::from(m)];
                         *dst = over(*dst, scale(tint, u32::from(m)));
                     }
                 }
@@ -474,7 +677,17 @@ impl Job<'_> {
                     let al = t[3] * s.color[3];
                     [t[0] * al, t[1] * al, t[2] * al, al]
                 } else {
-                    let al = t[0] * s.color[3];
+                    let m = match lut {
+                        Some(l) => {
+                            let f = t[0].clamp(0.0, 1.0) * 255.0;
+                            let (i, k) = (f.floor() as usize, f.fract());
+                            let lo = f32::from(l[i]);
+                            let hi = f32::from(l[(i + 1).min(255)]);
+                            (lo + (hi - lo) * k) / 255.0
+                        }
+                        None => t[0],
+                    };
+                    let al = m * s.color[3];
                     [s.color[0] * al, s.color[1] * al, s.color[2] * al, al]
                 };
                 row[d] = blend_f(row[d], c, self.bgra);
@@ -483,27 +696,250 @@ impl Job<'_> {
     }
 }
 
+/// The shader's `rounded_box`: the signed distance from `p` (from the
+/// centre) to a box of half size `half` and corner radius `r`.
+fn rounded_box(p: [f32; 2], half: [f32; 2], r: f32) -> f32 {
+    let qx = p[0].abs() - half[0] + r;
+    let qy = p[1].abs() - half[1] + r;
+    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
+}
+
 /// The shader's quad colour at `local` (from the quad's top-left),
 /// premultiplied.
 fn quad_pixel(q: &Quad, half: [f32; 2], r: f32, bw: f32, lx: f32, ly: f32) -> [f32; 4] {
-    let p = [lx - half[0], ly - half[1]];
-    let qx = p[0].abs() - half[0] + r;
-    let qy = p[1].abs() - half[1] + r;
-    let d = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
+    let d = rounded_box([lx - half[0], ly - half[1]], half, r);
     let outer = (0.5 - d).clamp(0.0, 1.0);
     let mut c = q.color;
     if bw > 0.0 {
         let inner = (0.5 - (d + bw)).clamp(0.0, 1.0);
         let b = q.border_color;
-        let fill_a = c[3] * inner;
+        // The fill runs under the border, as CSS paints a background.
+        let fill_a = c[3];
         let border_a = b[3] * (1.0 - inner);
-        let a = fill_a + border_a * (1.0 - fill_a);
+        let a = border_a + fill_a * (1.0 - border_a);
         let k = a.max(1e-5);
-        let ch = |i: usize| (c[i] * fill_a + b[i] * border_a * (1.0 - fill_a)) / k;
+        let ch = |i: usize| (b[i] * border_a + c[i] * fill_a * (1.0 - border_a)) / k;
         c = [ch(0), ch(1), ch(2), a];
     }
     let a = c[3] * outer;
     [c[0] * a, c[1] * a, c[2] * a, a]
+}
+
+/// One level of a blur's downsampling chain: the texels of `area` (in
+/// that level's grid), RGBA8 as the GPU stores them between passes.
+struct Level {
+    area: [i32; 4],
+    px: Vec<[u8; 4]>,
+}
+
+impl Level {
+    fn new(area: [i32; 4], mut texel: impl FnMut(i32, i32) -> [u8; 4]) -> Level {
+        let mut px = Vec::with_capacity(((area[2] - area[0]) * (area[3] - area[1])) as usize);
+        for y in area[1]..area[3] {
+            for x in area[0]..area[2] {
+                px.push(texel(x, y));
+            }
+        }
+        Level { area, px }
+    }
+
+    /// The texel at `(x, y)`, clamped to the level's area as the GPU
+    /// clamps its loads to the texture.
+    fn at(&self, x: i32, y: i32) -> [u8; 4] {
+        let x = x.clamp(self.area[0], self.area[2] - 1) - self.area[0];
+        let y = y.clamp(self.area[1], self.area[3] - 1) - self.area[1];
+        self.px[(y * (self.area[2] - self.area[0]) + x) as usize]
+    }
+
+    /// The level's area at half the size, each texel the mean of 2x2.
+    fn half(&self, area: [i32; 4]) -> Level {
+        Level::new(area, |x, y| {
+            let t = [
+                self.at(2 * x, 2 * y),
+                self.at(2 * x + 1, 2 * y),
+                self.at(2 * x, 2 * y + 1),
+                self.at(2 * x + 1, 2 * y + 1),
+            ];
+            std::array::from_fn(|c| {
+                let sum: u32 = t.iter().map(|p| u32::from(p[c])).sum();
+                unit(sum as f32 / (4.0 * 255.0)) as u8
+            })
+        })
+    }
+
+    /// The level blurred along `dir` with normalised `weights` (centre
+    /// first, the same each side).
+    fn gauss(&self, dir: (i32, i32), weights: &[f32]) -> Level {
+        Level::new(self.area, |x, y| {
+            let mut acc = [0.0f32; 4];
+            let centre = self.at(x, y);
+            for (c, v) in acc.iter_mut().enumerate() {
+                *v = f32::from(centre[c]) * weights[0];
+            }
+            for (t, w) in weights.iter().enumerate().skip(1) {
+                let t = t as i32;
+                let a = self.at(x + t * dir.0, y + t * dir.1);
+                let b = self.at(x - t * dir.0, y - t * dir.1);
+                for (c, v) in acc.iter_mut().enumerate() {
+                    *v += (f32::from(a[c]) + f32::from(b[c])) * w;
+                }
+            }
+            acc.map(|v| unit(v / 255.0) as u8)
+        })
+    }
+
+    /// Linearly filtered at texel coordinate `(u, v)` (centres at whole
+    /// numbers), as `blur.wgsl`'s `bilinear`.
+    fn bilinear(&self, u: f32, v: f32) -> [f32; 4] {
+        let (x0, y0) = (u.floor(), v.floor());
+        let (fx, fy) = (u - x0, v - y0);
+        let (x0, y0) = (x0 as i32, y0 as i32);
+        let t = [
+            self.at(x0, y0),
+            self.at(x0 + 1, y0),
+            self.at(x0, y0 + 1),
+            self.at(x0 + 1, y0 + 1),
+        ];
+        std::array::from_fn(|c| {
+            let ch = |i: usize| f32::from(t[i][c]) / 255.0;
+            let top = ch(0) + (ch(1) - ch(0)) * fx;
+            let bot = ch(2) + (ch(3) - ch(2)) * fx;
+            top + (bot - top) * fy
+        })
+    }
+}
+
+/// The Gaussian's weights from the centre out, normalised over both sides.
+pub(crate) fn gauss_weights(blur: &Blur) -> Vec<f32> {
+    let s = blur.residual_sigma();
+    let taps = blur.taps().max(0);
+    if s <= 0.0 || taps == 0 {
+        return vec![1.0];
+    }
+    let w: Vec<f32> = (0..=taps)
+        .map(|t| (-((t * t) as f32) / (2.0 * s * s)).exp())
+        .collect();
+    let total = w[0] + 2.0 * w[1..].iter().sum::<f32>();
+    w.iter().map(|v| v / total).collect()
+}
+
+/// Draws `blur` into `pixels` over `bounds`, from what they show now: the
+/// frame around it halved down to the blur's factor, blurred across then
+/// down, and laid back under a rounded mask. `blur.wgsl` does the same
+/// on the GPU, pass for pass.
+fn backdrop(pixels: &mut [u32], (w, h): (usize, usize), blur: &Blur, bounds: [i32; 4]) {
+    let m = blur.margin().ceil() as i32;
+    let src = intersect(
+        [bounds[0] - m, bounds[1] - m, bounds[2] + m, bounds[3] + m],
+        [0, 0, w as i32, h as i32],
+    );
+    if src[0] >= src[2] || src[1] >= src[3] {
+        return;
+    }
+    let mut level = Level::new(src, |x, y| {
+        pixels[y as usize * w + x as usize].to_le_bytes()
+    });
+    let f = blur.factor() as i32;
+    let mut size = 1;
+    while size < f {
+        size *= 2;
+        let down = |v: i32| v / size;
+        let up = |v: i32| (v + size - 1) / size;
+        level = level.half([down(src[0]), down(src[1]), up(src[2]), up(src[3])]);
+    }
+    let weights = gauss_weights(blur);
+    let level = level.gauss((1, 0), &weights).gauss((0, 1), &weights);
+    let [x, y, bw, bh] = blur.rect;
+    let half = [bw * 0.5, bh * 0.5];
+    let r = blur.radius.min(half[0]).min(half[1]).max(0.0);
+    let k = 1.0 / f as f32;
+    for py in bounds[1]..bounds[3] {
+        let cy = py as f32 + 0.5;
+        let row = &mut pixels[py as usize * w..(py as usize + 1) * w];
+        for px in bounds[0]..bounds[2] {
+            let cx = px as f32 + 0.5;
+            let d = rounded_box([cx - x - half[0], cy - y - half[1]], half, r);
+            let a = (0.5 - d).clamp(0.0, 1.0) * blur.alpha;
+            if a <= 0.0 {
+                continue;
+            }
+            let c = level.bilinear(cx * k - 0.5, cy * k - 0.5).map(|v| v * a);
+            let dst = &mut row[px as usize];
+            *dst = blend_f(*dst, c, false);
+        }
+    }
+}
+
+/// A shadow quad's shape, worked out once per primitive.
+struct ShadowShape {
+    half: [f32; 2],
+    r: f32,
+    sigma: f32,
+    box_half: [f32; 2],
+    box_r: f32,
+}
+
+impl ShadowShape {
+    fn of(q: &Quad) -> ShadowShape {
+        let half = [q.rect[2] * 0.5, q.rect[3] * 0.5];
+        let box_half = [q.border_color[2] * 0.5, q.border_color[3] * 0.5];
+        ShadowShape {
+            half,
+            r: q.params[0].min(half[0]).min(half[1]).max(0.0),
+            sigma: q.params[2],
+            box_half,
+            box_r: q.params[1].min(box_half[0]).min(box_half[1]).max(0.0),
+        }
+    }
+
+    /// The shader's `shadow_fs` at pixel centre `(gx, gy)`, premultiplied.
+    fn pixel(&self, q: &Quad, gx: f32, gy: f32) -> [f32; 4] {
+        let b = q.border_color;
+        let bp = [gx - b[0] - self.box_half[0], gy - b[1] - self.box_half[1]];
+        let inside = (0.5 - rounded_box(bp, self.box_half, self.box_r)).clamp(0.0, 1.0);
+        if inside >= 1.0 {
+            return [0.0; 4];
+        }
+        let p = [gx - q.rect[0] - self.half[0], gy - q.rect[1] - self.half[1]];
+        let cover = if self.sigma < Quad::MIN_SIGMA {
+            (0.5 - rounded_box(p, self.half, self.r)).clamp(0.0, 1.0)
+        } else {
+            shadow_coverage(p, self.half, self.r, self.sigma)
+        };
+        let a = q.color[3] * cover.clamp(0.0, 1.0) * (1.0 - inside);
+        [q.color[0] * a, q.color[1] * a, q.color[2] * a, a]
+    }
+}
+
+/// The shader's `erf2`, one lane.
+fn erf(x: f32) -> f32 {
+    let s = if x < 0.0 { -1.0 } else { 1.0 };
+    let a = x.abs();
+    let t = 1.0 + (0.278_393 + (0.230_389 + 0.078_108 * (a * a)) * a) * a;
+    let t = t * t;
+    s - s / (t * t)
+}
+
+/// The shader's `shadow_coverage`.
+fn shadow_coverage(p: [f32; 2], half: [f32; 2], r: f32, sigma: f32) -> f32 {
+    let lo = (-3.0 * sigma).clamp(p[1] - half[1], p[1] + half[1]);
+    let hi = (3.0 * sigma).clamp(p[1] - half[1], p[1] + half[1]);
+    let step = (hi - lo) * 0.25;
+    let k = std::f32::consts::FRAC_1_SQRT_2 / sigma;
+    let norm = 1.0 / ((2.0 * std::f32::consts::PI).sqrt() * sigma);
+    let mut y = lo + step * 0.5;
+    let mut sum = 0.0;
+    for _ in 0..4 {
+        let row = p[1] - y;
+        let d = (half[1] - r - row.abs()).min(0.0);
+        let w = half[0] - r + (r * r - d * d).max(0.0).sqrt();
+        let e0 = 0.5 + 0.5 * erf((p[0] - w) * k);
+        let e1 = 0.5 + 0.5 * erf((p[0] + w) * k);
+        let g = (-(y * y) / (2.0 * sigma * sigma)).exp() * norm;
+        sum += (e1 - e0) * g * step;
+        y += step;
+    }
+    sum
 }
 
 /// A texel of a 1- or 4-byte atlas, linearly filtered at texel coordinate

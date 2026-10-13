@@ -4,6 +4,7 @@
 //! (`FocusedStage`) and the tabs layout (`TabView`), which show one card.
 
 use super::chrome::{self, divider, draggable};
+use super::panes;
 use super::{c, ico, truncate, white, Screen, MOD_LABEL};
 use crate::act::{Act, Acts};
 use crate::client::Session;
@@ -11,7 +12,7 @@ use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
 use crate::ui::{
-    custom, div, field, text, text_input, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
+    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -74,180 +75,70 @@ fn fade(color: Rgb, alpha: f32, dim: f32) -> Rgba {
     Rgba::hexa(color, alpha * dim)
 }
 
-/// AgentStatusIcon: the agent's icon, or the running glyph while an agent
-/// works.
-pub(super) fn status_icon(s: &Session, size: f32, dim: f32) -> El {
-    if s.is_shell() {
-        return ico("terminal", size, 1.5, fade(look::GRAY_400, 1.0, dim));
-    }
-    let (color, alpha) = match s.status() {
-        "running" => return running(size, dim),
-        "waiting" => (look::BRONZO, 1.0),
-        "error" => (look::DANGER, 1.0),
-        _ => (look::GRAY_400, 1.0),
-    };
-    ico("bot", size, 2.0, fade(color, alpha, dim))
+/// AgentStatusIcon: the agent's own icon, or the running glyph while an
+/// agent works. A shell is always its terminal icon.
+pub(super) fn status_icon(s: &Screen<'_>, session: &Session, size: f32, dim: f32) -> El {
+    use crate::components::{status_icon, Status};
+    let status = Status::parse(session.status());
+    status_icon(s.ui, s.agents, &session.info.agent_type, status, size, dim)
 }
 
-/// RunningGlyph, still: a dot in `text-white/85` where the glyph spins.
-fn running(size: f32, dim: f32) -> El {
-    div()
-        .size(size, size)
-        .center()
-        .role(Role::Image, "Running")
-        .child(
-            div()
-                .size(8.0, 8.0)
-                .rounded(4.0)
-                .bg(fade(look::WHITE, 0.85, dim)),
-        )
-}
-
-/// `p-1 rounded hover:bg-white/10 text-ink`, the danger one turning red.
-fn icon_button(
-    s: &Screen<'_>,
-    act: Act,
-    name: &str,
-    label: &str,
-    tip: (&str, Option<&str>),
-    danger: bool,
-) -> El {
-    let id = s.acts.on("card", act);
-    let hot = s.ui.hover(id);
-    let fg = if danger {
-        c(look::INK).mix(c(look::DANGER), hot)
-    } else {
-        c(look::INK)
-    };
-    let b = div()
-        .id(id)
-        .on(Action::Click)
-        .p(4.0)
-        .rounded(4.0)
-        .bg(white(0.0).mix(white(0.10), hot))
-        .role(Role::Button, label)
-        .child(ico(name, 14.0, 2.0, fg));
-    tooltip(s.ui, b, id, tip.0, tip.1)
-}
-
-/// ConfirmPopover: the question and its two buttons, under `trigger`.
+/// ConfirmPopover under `trigger`, its buttons running `ok` and `cancel`.
 fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, label: &str) -> El {
-    let cancel_id = s.acts.on("confirm", cancel);
-    let ok_id = s.acts.on("confirm", ok);
-    let panel = div()
-        .col()
-        .min_w(180.0)
-        .max_w(280.0)
-        .p(12.0)
-        .rounded(8.0)
-        .border(1.0, white(0.1))
-        .bg(c(look::SURFACE_OVERLAY))
-        .role(Role::AlertDialog, message)
-        .child(
-            text(message, 12.0, c(look::GRAY_300))
-                .line_height(16.0)
-                .mt(0.0)
-                .silent(),
-        )
-        .child(
-            div()
-                .row()
-                .justify_between()
-                .gap(8.0)
-                .mt(12.0)
-                .child(div().grow())
-                .child(
-                    div()
-                        .id(cancel_id)
-                        .on(Action::Click)
-                        .px(12.0)
-                        .py(8.0)
-                        .rounded(6.0)
-                        .bg(white(0.04).mix(white(0.08), s.ui.hover(cancel_id)))
-                        .role(Role::Button, "Cancel")
-                        .child(
-                            text("Cancel", 12.0, c(look::GRAY_400))
-                                .line_height(16.0)
-                                .silent(),
-                        ),
-                )
-                .child(
-                    div()
-                        .id(ok_id)
-                        .on(Action::Click)
-                        .px(12.0)
-                        .py(8.0)
-                        .rounded(6.0)
-                        .bg(Rgba::hexa(look::RED_500, 0.1)
-                            .mix(Rgba::hexa(look::RED_500, 0.2), s.ui.hover(ok_id)))
-                        .border(1.0, Rgba::hexa(look::RED_500, 0.2))
-                        .role(Role::Button, label)
-                        .child(
-                            text(label, 12.0, c(look::RED_400))
-                                .weight(500)
-                                .line_height(16.0)
-                                .silent(),
-                        ),
-                ),
-        );
-    trigger.overlay(panel, Place::Below, 4.0)
+    let ok = (s.acts.on("confirm", ok), label);
+    let cancel = s.acts.on("confirm", cancel);
+    crate::ui::widgets::confirm(
+        s.ui,
+        trigger,
+        message,
+        ok,
+        cancel,
+        crate::ui::widgets::Tone::Danger,
+    )
 }
 
-/// CardActionCluster: more actions, expand or collapse, close.
+/// CardActionCluster: more actions, minimize on a grid card, expand or
+/// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
+    use crate::components::card::{card_actions_with, CardActions, CardButton, CardVariant};
     let sid = session.info.id.clone();
-    let expand = if focused {
-        icon_button(
-            s,
-            Act::Collapse,
-            "minimize-2",
-            "Collapse session",
-            ("Collapse to grid", Some(&format!("{MOD_LABEL}W"))),
-            false,
-        )
+    let (variant, toggle, key) = if focused {
+        (CardVariant::Focused, Act::Collapse, 'W')
     } else {
-        icon_button(
-            s,
-            Act::Expand(sid.clone()),
-            "maximize-2",
-            "Expand session",
-            ("Expand", Some(&format!("{MOD_LABEL}O"))),
-            false,
-        )
+        (CardVariant::Mini, Act::Expand(sid.clone()), 'O')
     };
-    let mut close = icon_button(
-        s,
-        Act::AskClose(sid.clone()),
-        "x",
-        "Close session",
-        ("Close session", None),
-        true,
-    );
-    if s.st.confirm_close.as_deref() == Some(sid.as_str()) {
-        close = confirm(
-            s,
-            close,
-            "Close this session?",
-            Act::CloseSession(sid.clone()),
-            Act::AskClose(String::new()),
-            "Close",
-        );
-    }
-    div()
-        .row()
-        .items_center()
-        .gap(2.0)
-        .shrink0()
-        .child(icon_button(
-            s,
-            Act::Open(MenuKind::Card(sid)),
-            "ellipsis",
-            "More actions",
-            ("More actions", None),
-            false,
-        ))
-        .child(expand)
-        .child(close)
+    let confirming = (s.st.confirm_close.as_deref() == Some(sid.as_str())).then(|| {
+        (
+            s.acts.on("confirm", Act::CloseSession(sid.clone())),
+            s.acts.on("confirm", Act::AskClose(String::new())),
+        )
+    });
+    let specs = super::side::header_buttons(s, session);
+    let side: Vec<CardButton<'_>> = specs
+        .iter()
+        .map(|(act, icon, label)| CardButton {
+            id: s.acts.on("card", act.clone()),
+            icon,
+            label,
+            tip: label,
+            shortcut: None,
+            danger: false,
+        })
+        .collect();
+    card_actions_with(
+        s.ui,
+        &CardActions {
+            variant,
+            more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
+            panes: &side,
+            minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
+            toggle: s.acts.on("card", toggle),
+            close: s.acts.on("card", Act::AskClose(sid)),
+            toggle_key: &format!("{MOD_LABEL}{key}"),
+            confirming,
+        },
+        panes::card_buttons(s, session, variant),
+    )
 }
 
 /// The title, or the inline rename field while renaming.
@@ -333,7 +224,7 @@ fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> E
         .px(12.0)
         .h(look::CARD_HEADER_H - 1.0)
         .shrink0()
-        .child(status_icon(session, 18.0, dim))
+        .child(status_icon(s, session, 18.0, dim))
         .child(
             div()
                 .row()
@@ -422,7 +313,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .row()
         .items_center()
         .gap(8.0)
-        .pl(12.0)
+        .pl(s.lead())
         .pr(if s.chrome { 0.0 } else { 12.0 })
         .h(look::TOP_BAR_H - 1.0)
         .bg(c(look::SURFACE_RAISED));
@@ -430,7 +321,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         row = row.child(chrome::nav_cluster(s)).child(divider());
     }
     row = row
-        .child(status_icon(session, 18.0, 1.0))
+        .child(status_icon(s, session, 18.0, 1.0))
         .child(
             div()
                 .row()
@@ -446,7 +337,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .shrink0()
         .child(row)
         .child(div().h(1.0).w_full().bg(white(0.04)));
-    if s.chrome {
+    if s.chrome || s.traffic {
         s.acts.double(chrome::TITLE_BAR, Act::Collapse);
         bar.id(chrome::TITLE_BAR)
             .sense(Sense::WINDOW_DRAG | Sense::DOUBLE)
@@ -457,16 +348,30 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
     }
 }
 
-/// BranchChip: the worktree in ink-secondary, then the branch.
-fn branch_chip(s: &Session, dim: f32) -> Option<El> {
+/// BranchChip: the worktree in ink-secondary, then the branch; a click
+/// opens the branch switcher.
+pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> {
     let branch = s.info.branch.as_deref()?;
+    let id = sc.acts.on("branch-chip", super::side::branch_act(s));
+    let open = sc
+        .st
+        .menu
+        .as_ref()
+        .is_some_and(|m| m.kind == MenuKind::Branch(s.info.id.clone()));
     let mut chip = div()
+        .id(id)
+        .on(Action::Click)
         .row()
         .items_center()
         .gap(4.0)
         .px(4.0)
         .py(2.0)
         .rounded(4.0)
+        .bg(if open {
+            white(0.08)
+        } else {
+            white(0.06 * sc.ui.hover(id))
+        })
         .role(Role::Button, format!("Switch branch (current: {branch})"));
     if let (Some(true), Some(name)) = (s.info.is_worktree, s.info.worktree_name.as_deref()) {
         let ink = fade(look::INK, look::INK_SECONDARY, dim);
@@ -541,11 +446,15 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         .px(8.0)
         .h(look::CARD_STATUS_H - 1.0)
         .shrink0();
-    if let Some(chip) = branch_chip(session, dim) {
+    if let Some(chip) = branch_chip(s, session, dim) {
         bar = bar.child(chip);
     }
     if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
+    }
+    bar = bar.child(div().grow());
+    for item in super::side::status_items(s, session, dim) {
+        bar = bar.child(item);
     }
     div()
         .col()
@@ -774,16 +683,16 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
 }
 
 /// SessionComposer: the ended strip, or a shell's intent bar.
-fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
+pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
     if session.ended() {
         return Some(ended_strip(s, session, compact));
     }
     session.is_shell().then(|| intent_bar(s, session, compact))
 }
 
-/// The terminal, its composer and status bar: what every layout shows of a
-/// session under its header or tab.
-fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+/// The terminal and its composer: what every layout shows of a session
+/// under its header or tab.
+fn term_body(s: &Screen<'_>, i: usize, session: &Session, compact: bool) -> El {
     div()
         .col()
         .grow()
@@ -792,7 +701,17 @@ fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) ->
         .child(div().h(look::CARD_BODY_PT).shrink0())
         .child(terminal(s, i, session))
         .child_if(composer(s, session, compact))
-        .child(status_bar(s, session, dim))
+}
+
+/// The terminal with its status bar, beside the session's panes.
+fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+    super::side::frame(
+        s,
+        session,
+        None,
+        term_body(s, i, session, compact),
+        status_bar(s, session, dim),
+    )
 }
 
 fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
@@ -813,19 +732,29 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
         .border(1.0, white(0.06).mix(white(0.12), s.ui.hover(card_id)))
         .role(Role::Group, session.title())
         .selected(selected)
-        .child(header(s, session, pos, dim, hot))
-        .child(body(s, i, session, true, dim));
+        .child(super::side::frame(
+            s,
+            session,
+            Some(header(s, session, pos, dim, hot)),
+            term_body(s, i, session, true),
+            status_bar(s, session, dim),
+        ));
     s.acts
         .click(el, "card-box", Act::Select(sid.to_owned()))
         .sense(Sense::HOVER)
 }
 
 /// The grid's empty state when the filter hides every card.
+/// GridView's filtered-out state: a terminal on a monitor, and the
+/// heading over its hint.
+const NO_MATCH_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8l3 3-3 3M12 14h4"/></svg>"##;
+
 fn no_match() -> El {
     div()
         .col()
         .center()
         .grow()
+        .child(icon(NO_MATCH_SVG, 64.0, white(0.2)).mb(24.0))
         .child(
             text("No matching agents", 24.0, c(look::WHITE))
                 .weight(600)
@@ -836,29 +765,50 @@ fn no_match() -> El {
             text("Try changing the status filter", 14.0, c(look::GRAY_500))
                 .line_height(20.0)
                 .mt(8.0)
+                .mb(24.0)
                 .silent(),
         )
 }
 
+/// A grid cell: a session's card, or a file popped out of one.
+enum Cell<'a> {
+    Session(usize),
+    Card(&'a str),
+}
+
+/// The grid's cells: each session, then the cards it popped out.
+fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
+    let mut out = Vec::new();
+    for i in s.st.gridded(s.store) {
+        out.push(Cell::Session(i));
+        for card in s.st.side.cards_of(&s.store.sessions[i].info.id) {
+            out.push(Cell::Card(card));
+        }
+    }
+    out
+}
+
 pub(super) fn grid(s: &Screen<'_>) -> El {
-    let shown = s.st.visible(s.store);
-    if shown.is_empty() {
+    let cells = cells(s);
+    if cells.is_empty() {
         return no_match();
     }
     let selected = s.st.selected.as_deref().and_then(|id| {
-        shown
-            .iter()
-            .position(|&i| s.store.sessions[i].info.id == id)
+        cells.iter().position(|cell| match cell {
+            Cell::Session(i) => s.store.sessions[*i].info.id == id,
+            Cell::Card(c) => *c == id,
+        })
     });
-    let (l, first, rows) = visible(shown.len(), selected, s.grid_size(), s.st.columns);
+    let (l, first, rows) = visible(cells.len(), selected, s.grid_size(), s.st.columns);
     let mut body = div().col().grow().min_h(0.0).role(Role::Grid, "Sessions");
     let grid_id = Id::new("grid");
     for r in first..first + rows {
         let mut row = div().row().grow().min_h(0.0);
         for col in 0..l.cols {
             let n = r * l.cols + col;
-            row = row.child(match shown.get(n) {
-                Some(&i) => card(s, i, n, &s.store.sessions[i]).flex(1.0),
+            row = row.child(match cells.get(n) {
+                Some(Cell::Session(i)) => card(s, *i, n, &s.store.sessions[*i]).flex(1.0),
+                Some(Cell::Card(c)) => super::side::editor_card(s, c).flex(1.0),
                 None => div().grow(),
             });
         }
@@ -986,7 +936,7 @@ fn tab(s: &Screen<'_>, n: usize, session: &Session, active: bool) -> El {
                 .pl(12.0)
                 .pr(8.0)
                 .grow()
-                .child(status_icon(session, 16.0, 1.0))
+                .child(status_icon(s, session, 16.0, 1.0))
                 .child(label)
                 .child_if(right),
         )
@@ -1020,6 +970,9 @@ pub(super) fn tabs(s: &Screen<'_>) -> El {
         .items_center()
         .min_h(40.0)
         .bg(c(look::SURFACE_OVERLAY));
+    if s.traffic && !s.st.sidebar {
+        strip = strip.pl(look::TRAFFIC_LIGHT_PAD);
+    }
     if !s.st.sidebar {
         strip = strip.child(div().pl(8.0).child(chrome::nav_cluster(s)));
     }

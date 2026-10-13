@@ -1,0 +1,6255 @@
+{
+  "normalizeUrl": [
+    {
+      "input": "",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "   ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "   ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost:3000",
+      "allowFile": false,
+      "out": "http://localhost:3000/"
+    },
+    {
+      "input": "localhost:3000",
+      "allowFile": true,
+      "out": "http://localhost:3000/"
+    },
+    {
+      "input": "localhost",
+      "allowFile": false,
+      "out": "http://localhost/"
+    },
+    {
+      "input": "localhost",
+      "allowFile": true,
+      "out": "http://localhost/"
+    },
+    {
+      "input": "example.com",
+      "allowFile": false,
+      "out": "https://example.com/"
+    },
+    {
+      "input": "example.com",
+      "allowFile": true,
+      "out": "https://example.com/"
+    },
+    {
+      "input": "example.com/path?x=1#h",
+      "allowFile": false,
+      "out": "https://example.com/path?x=1#h"
+    },
+    {
+      "input": "example.com/path?x=1#h",
+      "allowFile": true,
+      "out": "https://example.com/path?x=1#h"
+    },
+    {
+      "input": "http://example.com",
+      "allowFile": false,
+      "out": "http://example.com/"
+    },
+    {
+      "input": "http://example.com",
+      "allowFile": true,
+      "out": "http://example.com/"
+    },
+    {
+      "input": "https://Example.COM:443/a",
+      "allowFile": false,
+      "out": "https://example.com/a"
+    },
+    {
+      "input": "https://Example.COM:443/a",
+      "allowFile": true,
+      "out": "https://example.com/a"
+    },
+    {
+      "input": "file:///tmp/a.html",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file:///tmp/a.html",
+      "allowFile": true,
+      "out": "file:///tmp/a.html"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "javascript:alert(1)",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "javascript:alert(1)",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "foo bar",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "foo bar",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "192.168.1.10:5173/app",
+      "allowFile": false,
+      "out": "https://192.168.1.10:5173/app"
+    },
+    {
+      "input": "192.168.1.10:5173/app",
+      "allowFile": true,
+      "out": "https://192.168.1.10:5173/app"
+    },
+    {
+      "input": "[::1]:3000",
+      "allowFile": false,
+      "out": "http://[::1]:3000/"
+    },
+    {
+      "input": "[::1]:3000",
+      "allowFile": true,
+      "out": "http://[::1]:3000/"
+    },
+    {
+      "input": "chrome://settings",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "chrome://settings",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "ftp://example.com",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "ftp://example.com",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "http://data:text/html,hi127.0.0.1:8080",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "http://data:text/html,hi127.0.0.1:8080",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.devfile://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "bar.devfile://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": " about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": " about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "/pathbar.dev/pathfile://",
+      "allowFile": false,
+      "out": "https://pathbar.dev/pathfile://"
+    },
+    {
+      "input": "/pathbar.dev/pathfile://",
+      "allowFile": true,
+      "out": "https://pathbar.dev/pathfile://"
+    },
+    {
+      "input": "[::1]%20example.com",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "[::1]%20example.com",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://",
+      "allowFile": true,
+      "out": "file:///"
+    },
+    {
+      "input": "localhost:3000http://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000http://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "http://mailto:a@b.clocalhost",
+      "allowFile": false,
+      "out": "http://mailto:a@b.clocalhost/"
+    },
+    {
+      "input": "http://mailto:a@b.clocalhost",
+      "allowFile": true,
+      "out": "http://mailto:a@b.clocalhost/"
+    },
+    {
+      "input": "localhost:3000:javascript:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000:javascript:",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "foohttps://[::1]",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "foohttps://[::1]",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080localhost:3000https:// ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080localhost:3000https:// ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "foo :",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "foo :",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080127.0.0.1:8080about:blankdata:text/html,hi",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080127.0.0.1:8080about:blankdata:text/html,hi",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost:3000bar.dev/path",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000bar.dev/path",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://",
+      "allowFile": true,
+      "out": "file:///"
+    },
+    {
+      "input": "?q=1about:blankjavascript:%20",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "?q=1about:blankjavascript:%20",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.dev/pathabout:blank",
+      "allowFile": false,
+      "out": "https://bar.dev/pathabout:blank"
+    },
+    {
+      "input": "bar.dev/pathabout:blank",
+      "allowFile": true,
+      "out": "https://bar.dev/pathabout:blank"
+    },
+    {
+      "input": ":data:text/html,hi",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": ":data:text/html,hi",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "#topmailto:a@b.c",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "#topmailto:a@b.c",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "/pathhttps://",
+      "allowFile": false,
+      "out": "https://pathhttps//"
+    },
+    {
+      "input": "/pathhttps://",
+      "allowFile": true,
+      "out": "https://pathhttps//"
+    },
+    {
+      "input": "localhostfoofile://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhostfoofile://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "http://bar.devfoohttp://",
+      "allowFile": false,
+      "out": "http://bar.devfoohttp//"
+    },
+    {
+      "input": "http://bar.devfoohttp://",
+      "allowFile": true,
+      "out": "http://bar.devfoohttp//"
+    },
+    {
+      "input": " ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": " ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost/pathabout:blankhttps://",
+      "allowFile": false,
+      "out": "http://localhost/pathabout:blankhttps://"
+    },
+    {
+      "input": "localhost/pathabout:blankhttps://",
+      "allowFile": true,
+      "out": "http://localhost/pathabout:blankhttps://"
+    },
+    {
+      "input": "?q=1data:text/html,hi:localhost",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "?q=1data:text/html,hi:localhost",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": " ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": " ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "#top",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "#top",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.dev",
+      "allowFile": false,
+      "out": "https://bar.dev/"
+    },
+    {
+      "input": "bar.dev",
+      "allowFile": true,
+      "out": "https://bar.dev/"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "mailto:a@b.c/pathfile://https://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "mailto:a@b.c/pathfile://https://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.devmailto:a@b.chttp://javascript:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "bar.devmailto:a@b.chttp://javascript:",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.chttps://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.chttps://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "javascript:localhostjavascript:/path",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "javascript:localhostjavascript:/path",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": ":javascript:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": ":javascript:",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "%20",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "%20",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "[::1]",
+      "allowFile": false,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "[::1]",
+      "allowFile": true,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "javascript:mailto:a@b.c file://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "javascript:mailto:a@b.c file://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "http://about:blanklocalhost:3000",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "http://about:blanklocalhost:3000",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080mailto:a@b.c",
+      "allowFile": false,
+      "out": "http://127.0.0.1:8080mailto%3Aa@b.c/"
+    },
+    {
+      "input": "127.0.0.1:8080mailto:a@b.c",
+      "allowFile": true,
+      "out": "http://127.0.0.1:8080mailto%3Aa@b.c/"
+    },
+    {
+      "input": ":example.com#toplocalhost:3000",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": ":example.com#toplocalhost:3000",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "%20 localhostdata:text/html,hi",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "%20 localhostdata:text/html,hi",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.dev",
+      "allowFile": false,
+      "out": "https://bar.dev/"
+    },
+    {
+      "input": "bar.dev",
+      "allowFile": true,
+      "out": "https://bar.dev/"
+    },
+    {
+      "input": "bar.devlocalhost",
+      "allowFile": false,
+      "out": "https://bar.devlocalhost/"
+    },
+    {
+      "input": "bar.devlocalhost",
+      "allowFile": true,
+      "out": "https://bar.devlocalhost/"
+    },
+    {
+      "input": "localhost:3000 data:text/html,hi",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000 data:text/html,hi",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blankhttp://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "about:blankhttp://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost:3000[::1]#top%20",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000[::1]#top%20",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blankabout:blank",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "about:blankabout:blank",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "/path",
+      "allowFile": false,
+      "out": "https://path/"
+    },
+    {
+      "input": "/path",
+      "allowFile": true,
+      "out": "https://path/"
+    },
+    {
+      "input": "javascript:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "javascript:",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://file://bar.dev",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://file://bar.dev",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080",
+      "allowFile": false,
+      "out": "http://127.0.0.1:8080/"
+    },
+    {
+      "input": "127.0.0.1:8080",
+      "allowFile": true,
+      "out": "http://127.0.0.1:8080/"
+    },
+    {
+      "input": "[::1]",
+      "allowFile": false,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "[::1]",
+      "allowFile": true,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "localhostjavascript:about:blank",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhostjavascript:about:blank",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.c%20%20",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.c%20%20",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "data:text/html,hi%20?q=1 ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "data:text/html,hi%20?q=1 ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "data:text/html,hiabout:blank",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "data:text/html,hiabout:blank",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "localhost:3000127.0.0.1:8080http://localhost:3000",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000127.0.0.1:8080http://localhost:3000",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost/path",
+      "allowFile": false,
+      "out": "http://localhost/path"
+    },
+    {
+      "input": "localhost/path",
+      "allowFile": true,
+      "out": "http://localhost/path"
+    },
+    {
+      "input": "[::1]",
+      "allowFile": false,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "[::1]",
+      "allowFile": true,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "127.0.0.1:8080%20[::1]foo",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "127.0.0.1:8080%20[::1]foo",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": " [::1]file://#top",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": " [::1]file://#top",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.dev127.0.0.1:8080%20",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "bar.dev127.0.0.1:8080%20",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "mailto:a@b.c",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "mailto:a@b.c",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "http://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "http://",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "#topdata:text/html,hidata:text/html,hi",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "#topdata:text/html,hidata:text/html,hi",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "about:blank#tophttp://example.com",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "about:blank#tophttp://example.com",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "/path/pathfoobar.dev",
+      "allowFile": false,
+      "out": "https://path/pathfoobar.dev"
+    },
+    {
+      "input": "/path/pathfoobar.dev",
+      "allowFile": true,
+      "out": "https://path/pathfoobar.dev"
+    },
+    {
+      "input": "[::1] ",
+      "allowFile": false,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "[::1] ",
+      "allowFile": true,
+      "out": "http://[::1]/"
+    },
+    {
+      "input": "file://",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://",
+      "allowFile": true,
+      "out": "file:///"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": false,
+      "out": "about:blank"
+    },
+    {
+      "input": "about:blank",
+      "allowFile": true,
+      "out": "about:blank"
+    },
+    {
+      "input": "localhost:3000bar.dev?q=1foo",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000bar.dev?q=1foo",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.c127.0.0.1:8080",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "file://mailto:a@b.c127.0.0.1:8080",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost:3000%20[::1] ",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000%20[::1] ",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "javascript:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "javascript:",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "localhost:3000127.0.0.1:8080",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "localhost:3000127.0.0.1:8080",
+      "allowFile": true,
+      "out": null
+    },
+    {
+      "input": "bar.devexample.com/path",
+      "allowFile": false,
+      "out": "https://bar.devexample.com/path"
+    },
+    {
+      "input": "bar.devexample.com/path",
+      "allowFile": true,
+      "out": "https://bar.devexample.com/path"
+    },
+    {
+      "input": "data:text/html,hibar.dev:",
+      "allowFile": false,
+      "out": null
+    },
+    {
+      "input": "data:text/html,hibar.dev:",
+      "allowFile": true,
+      "out": null
+    }
+  ],
+  "displayHost": [
+    {
+      "input": "http://localhost:3000/",
+      "out": "localhost:3000"
+    },
+    {
+      "input": "http://localhost:3000/",
+      "out": "localhost:3000"
+    },
+    {
+      "input": "http://localhost/",
+      "out": "localhost"
+    },
+    {
+      "input": "http://localhost/",
+      "out": "localhost"
+    },
+    {
+      "input": "https://example.com/",
+      "out": "example.com"
+    },
+    {
+      "input": "https://example.com/",
+      "out": "example.com"
+    },
+    {
+      "input": "https://example.com/path?x=1#h",
+      "out": "example.com"
+    },
+    {
+      "input": "https://example.com/path?x=1#h",
+      "out": "example.com"
+    },
+    {
+      "input": "http://example.com/",
+      "out": "example.com"
+    },
+    {
+      "input": "http://example.com/",
+      "out": "example.com"
+    },
+    {
+      "input": "https://example.com/a",
+      "out": "example.com"
+    },
+    {
+      "input": "https://example.com/a",
+      "out": "example.com"
+    },
+    {
+      "input": "file:///tmp/a.html",
+      "out": "a.html"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "https://192.168.1.10:5173/app",
+      "out": "192.168.1.10:5173"
+    },
+    {
+      "input": "https://192.168.1.10:5173/app",
+      "out": "192.168.1.10:5173"
+    },
+    {
+      "input": "http://[::1]:3000/",
+      "out": "[::1]:3000"
+    },
+    {
+      "input": "http://[::1]:3000/",
+      "out": "[::1]:3000"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "https://pathbar.dev/pathfile://",
+      "out": "pathbar.dev"
+    },
+    {
+      "input": "https://pathbar.dev/pathfile://",
+      "out": "pathbar.dev"
+    },
+    {
+      "input": "file:///",
+      "out": "file:///"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "http://mailto:a@b.clocalhost/",
+      "out": "b.clocalhost"
+    },
+    {
+      "input": "http://mailto:a@b.clocalhost/",
+      "out": "b.clocalhost"
+    },
+    {
+      "input": "file:///",
+      "out": "file:///"
+    },
+    {
+      "input": "https://bar.dev/pathabout:blank",
+      "out": "bar.dev"
+    },
+    {
+      "input": "https://bar.dev/pathabout:blank",
+      "out": "bar.dev"
+    },
+    {
+      "input": "https://pathhttps//",
+      "out": "pathhttps"
+    },
+    {
+      "input": "https://pathhttps//",
+      "out": "pathhttps"
+    },
+    {
+      "input": "http://bar.devfoohttp//",
+      "out": "bar.devfoohttp"
+    },
+    {
+      "input": "http://bar.devfoohttp//",
+      "out": "bar.devfoohttp"
+    },
+    {
+      "input": "http://localhost/pathabout:blankhttps://",
+      "out": "localhost"
+    },
+    {
+      "input": "http://localhost/pathabout:blankhttps://",
+      "out": "localhost"
+    },
+    {
+      "input": "https://bar.dev/",
+      "out": "bar.dev"
+    },
+    {
+      "input": "https://bar.dev/",
+      "out": "bar.dev"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "http://127.0.0.1:8080mailto%3Aa@b.c/",
+      "out": "b.c"
+    },
+    {
+      "input": "http://127.0.0.1:8080mailto%3Aa@b.c/",
+      "out": "b.c"
+    },
+    {
+      "input": "https://bar.dev/",
+      "out": "bar.dev"
+    },
+    {
+      "input": "https://bar.dev/",
+      "out": "bar.dev"
+    },
+    {
+      "input": "https://bar.devlocalhost/",
+      "out": "bar.devlocalhost"
+    },
+    {
+      "input": "https://bar.devlocalhost/",
+      "out": "bar.devlocalhost"
+    },
+    {
+      "input": "https://path/",
+      "out": "path"
+    },
+    {
+      "input": "https://path/",
+      "out": "path"
+    },
+    {
+      "input": "http://127.0.0.1:8080/",
+      "out": "127.0.0.1:8080"
+    },
+    {
+      "input": "http://127.0.0.1:8080/",
+      "out": "127.0.0.1:8080"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "http://localhost/path",
+      "out": "localhost"
+    },
+    {
+      "input": "http://localhost/path",
+      "out": "localhost"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "https://path/pathfoobar.dev",
+      "out": "path"
+    },
+    {
+      "input": "https://path/pathfoobar.dev",
+      "out": "path"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "http://[::1]/",
+      "out": "[::1]"
+    },
+    {
+      "input": "file:///",
+      "out": "file:///"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    },
+    {
+      "input": "https://bar.devexample.com/path",
+      "out": "bar.devexample.com"
+    },
+    {
+      "input": "https://bar.devexample.com/path",
+      "out": "bar.devexample.com"
+    },
+    {
+      "input": "not a url",
+      "out": "not a url"
+    },
+    {
+      "input": "file:///Users/me/My%20Site/index.html",
+      "out": "index.html"
+    },
+    {
+      "input": "about:blank",
+      "out": "New tab"
+    }
+  ],
+  "flattenPageText": [
+    {
+      "raw": "- item\nfox\ngamma\nbeta\n\n\nalpha\n\n\n\n**bold**\ngamma\n\n\n\n\n\n\nbeta\nthe\n**bold**\n\n\n\n  \n**bold**\n\n\n\n**bold**\nquick\nfox\ndelta\nalpha\n\n\n\n\t",
+      "max": 34,
+      "out": "- item fox gamma beta alpha **bold…"
+    },
+    {
+      "raw": "\n\n\n  \nbeta\nbeta\n**bold**\ngamma\n- item\nbeta\ndelta\n- item\n\n\n\n\n  \n**bold**\nbeta\n\t\ngamma\nquick\n- item\nfox\n  \ndelta\n\n\n\ndelta",
+      "max": 32,
+      "out": "beta beta **bold** gamma - item …"
+    },
+    {
+      "raw": "beta    the \n\n alpha fox - item delta **bold** fox \t \n \t delta delta delta \t    \t \n quick \n\n gamma the delta beta fox \n\n - item gamma the    alpha - item    fox \n \n fox - item",
+      "max": 51,
+      "out": "beta the alpha fox - item delta **bold** fox delta …"
+    },
+    {
+      "raw": "alphabeta",
+      "max": 117,
+      "out": "alphabeta"
+    },
+    {
+      "raw": "- item\n**bold**\nbeta\n\n\n\n\n\nquick",
+      "max": 31,
+      "out": "- item **bold** beta quick"
+    },
+    {
+      "raw": "alpha\t\talpha**bold**\t\tdelta\t\n\nfoxbetagamma\n- item\tthe- item\n\nfox\n\nalpha\n\tfox  delta\t\n  ",
+      "max": 42,
+      "out": "alpha alpha**bold** delta foxbetagamma - i…"
+    },
+    {
+      "raw": "\t  \n\nthe**bold**delta- itemalpha**bold**the\n**bold**\t",
+      "max": 10,
+      "out": "the**bold*…"
+    },
+    {
+      "raw": "\n\n",
+      "max": 41,
+      "out": ""
+    },
+    {
+      "raw": "alpha\n\n\n\n- item\nthe\n- item\n\t\n\t\nalpha\n- item\n\n\nbeta\ngamma",
+      "max": 109,
+      "out": "alpha - item the - item alpha - item beta gamma"
+    },
+    {
+      "raw": "\t \t \n the    quick delta - item \n\n delta the fox beta fox the delta alpha beta beta fox \t **bold** fox beta \n the beta",
+      "max": 94,
+      "out": "the quick delta - item delta the fox beta fox the delta alpha beta beta fox **bold** fox beta …"
+    },
+    {
+      "raw": "the\n\ngammathegamma- itemquickgamma**bold**deltathe\n\ngammaalpha**bold**\n**bold**thethefox  deltathe\tdeltafoxdeltathedelta- itemquickbeta    betafox",
+      "max": 17,
+      "out": "the gammathegamma…"
+    },
+    {
+      "raw": "gamma gamma alpha quick    gamma the quick beta \n \n\n \n beta",
+      "max": 18,
+      "out": "gamma gamma alpha …"
+    },
+    {
+      "raw": "\n\n**bold**\ngamma\nquick\n\n\n- item\nquick\nquick\nbeta\nalpha\nalpha\n**bold**\n  \ngamma\n- item\ndelta\n**bold**\n- item\n**bold**\ndelta\nquick\n\t\nquick\nthe\n\n\n\n\n\ndelta\ndelta\nthe\nbeta\ndelta\nbeta\nbeta\n\t\nbeta\nquick\n\n\n\nbeta\nbeta",
+      "max": 98,
+      "out": "**bold** gamma quick - item quick quick beta alpha alpha **bold** gamma - item delta **bold** - it…"
+    },
+    {
+      "raw": "- item - item **bold** quick quick delta the quick fox beta delta alpha    alpha delta",
+      "max": 90,
+      "out": "- item - item **bold** quick quick delta the quick fox beta delta alpha alpha delta"
+    },
+    {
+      "raw": "\n\nfox\nthe\n**bold**\n\t\n\n",
+      "max": 18,
+      "out": "fox the **bold**"
+    },
+    {
+      "raw": "**bold** the \n\n the fox \t beta delta **bold** alpha gamma \n    \n beta alpha alpha - item quick **bold** alpha the beta \t **bold** gamma \t fox",
+      "max": 77,
+      "out": "**bold** the the fox beta delta **bold** alpha gamma beta alpha alpha - item …"
+    },
+    {
+      "raw": "fox \n\n gamma beta    \t \n quick beta delta **bold**   ",
+      "max": 46,
+      "out": "fox gamma beta quick beta delta **bold**"
+    },
+    {
+      "raw": "alpha\nquick\n- item\n\t\n\t\ndelta\nquick\nalpha\nquick\n- item\n\n\n- item\n\n\n\n- item\nthe",
+      "max": 42,
+      "out": "alpha quick - item delta quick alpha quick…"
+    },
+    {
+      "raw": "\n\nthedeltabetadeltaquickfoxbetathefoxfoxgammaquickquick\nalphathe- itembetaalpha\t  \t- itemalpha\t\n**bold**beta\n\n**bold**alpha\talpha- item\tthe",
+      "max": 67,
+      "out": "thedeltabetadeltaquickfoxbetathefoxfoxgammaquickquick alphathe- ite…"
+    },
+    {
+      "raw": "\t",
+      "max": 69,
+      "out": ""
+    },
+    {
+      "raw": "**bold**\n\n\nquick\ndelta",
+      "max": 45,
+      "out": "**bold** quick delta"
+    },
+    {
+      "raw": "- item \n\n quick \n\n \n\n \n \n\n **bold** \n\n **bold**    \t alpha    beta **bold** - item alpha \n\n fox - item quick - item gamma",
+      "max": 39,
+      "out": "- item quick **bold** **bold** alpha be…"
+    },
+    {
+      "raw": "gamma\n  \nthe\ngamma\n\t\n\n\n\nquick\ngamma\ngamma\n  \n  \ndelta\n\n\n\nquick\n  \n**bold**",
+      "max": 115,
+      "out": "gamma the gamma quick gamma gamma delta quick **bold**"
+    },
+    {
+      "raw": "alpha\nquick",
+      "max": 70,
+      "out": "alpha quick"
+    },
+    {
+      "raw": "delta\nquick\n- item\n  \nbeta\n\n\n\n\n\nthe\n  \nthe\n\t\nbeta\ngamma\n- item\n- item\n\n\nalpha\n\n\n\n\t\n\t\nbeta\n\n\n\nquick\nquick\nalpha\n\n\n\nthe\ngamma\nfox\n  \n\n\n\n**bold**\nalpha\nalpha\n\n\ngamma",
+      "max": 71,
+      "out": "delta quick - item beta the the beta gamma - item - item alpha beta qui…"
+    },
+    {
+      "raw": "gamma the quick **bold**    - item delta \t delta \n beta delta beta delta - item gamma \n \n \n\n \n\n alpha - item quick - item alpha the **bold** \n\n \n\n \n\n \n\n quick",
+      "max": 79,
+      "out": "gamma the quick **bold** - item delta delta beta delta beta delta - item gamma …"
+    },
+    {
+      "raw": "\n**bold**quick  fox",
+      "max": 103,
+      "out": "**bold**quick fox"
+    },
+    {
+      "raw": "delta **bold** \n\n quick delta \t    delta - item fox fox beta - item fox",
+      "max": 8,
+      "out": "delta **…"
+    },
+    {
+      "raw": "- item quick gamma - item gamma the beta delta - item \n    gamma \n\n - item \n alpha the    **bold** the fox fox \n - item - item    - item \n\n delta gamma beta",
+      "max": 52,
+      "out": "- item quick gamma - item gamma the beta delta - ite…"
+    },
+    {
+      "raw": "- item\nfox\ndelta\n\t\n- item\n  \nquick\n- item\n- item\ndelta\n**bold**\n  \ngamma\nquick\ndelta\nfox\n\n\n- item\nthe\nquick\n\n\ndelta",
+      "max": 112,
+      "out": "- item fox delta - item quick - item - item delta **bold** gamma quick delta fox - item the quick delta"
+    }
+  ],
+  "docEdits": [
+    {
+      "original": "fox fox - item\n\n\n- item\n\n\nquick the **bold** **bold** beta alpha\n\n\nfox quick **bold** beta\n\n\n**bold**\n\n\ndelta **bold** **bold** beta",
+      "edited": "fox fox - item\n\n- item\n\nquick the **bold** **bold** beta alpha\n\nfox quick **bold** beta\n\n**bold**\n\ndelta **bold** **bold** beta",
+      "paragraphs": [
+        "fox fox - item",
+        "- item",
+        "quick the **bold** **bold** beta alpha",
+        "fox quick **bold** beta",
+        "**bold**",
+        "delta **bold** **bold** beta"
+      ],
+      "merged": {
+        "body": "fox fox - item\n\n- item\n\nquick the **bold** **bold** beta alpha\n\nfox quick **bold** beta\n\n**bold**\n\ndelta **bold** **bold** beta\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "**bold** quick the gamma\n\nthe",
+      "edited": "**bold** quick the gamma\n\nbeta - item **bold**\n\nthe",
+      "paragraphs": ["**bold** quick the gamma", "the"],
+      "merged": {
+        "body": "**bold** quick the gamma\n\nbeta - item **bold**\n\nthe\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "beta - item **bold**"
+          }
+        ]
+      }
+    },
+    {
+      "original": "quick\n\n\nalpha - item\n\n\n**bold** alpha - item fox delta\n\n\nalpha fox\n\n\nalpha **bold** the the delta",
+      "edited": "quick\n\nalpha - item\n\n**bold** alpha - item fox delta\n\nalpha fox\n\nalpha **bold** the the delta",
+      "paragraphs": [
+        "quick",
+        "alpha - item",
+        "**bold** alpha - item fox delta",
+        "alpha fox",
+        "alpha **bold** the the delta"
+      ],
+      "merged": {
+        "body": "quick\n\nalpha - item\n\n**bold** alpha - item fox delta\n\nalpha fox\n\nalpha **bold** the the delta\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta delta\n\n\nquick delta gamma **bold** beta",
+      "edited": "delta delta",
+      "paragraphs": ["delta delta", "quick delta gamma **bold** beta"],
+      "merged": {
+        "body": "delta delta\n",
+        "edits": [
+          {
+            "before": "quick delta gamma **bold** beta",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "**bold** delta gamma\n\n\n**bold** - item quick beta - item\n\n\ndelta\n\n\n**bold** beta\n\n\nquick quick the gamma",
+      "edited": "**bold** delta gamma\n\n**bold** - item quick beta - item\n\ndelta\n\n**bold**\n\nquick quick the gamma",
+      "paragraphs": [
+        "**bold** delta gamma",
+        "**bold** - item quick beta - item",
+        "delta",
+        "**bold** beta",
+        "quick quick the gamma"
+      ],
+      "merged": {
+        "body": "**bold** delta gamma\n\n**bold** - item quick beta - item\n\ndelta\n\n**bold**\n\nquick quick the gamma\n",
+        "edits": [
+          {
+            "before": "**bold** beta",
+            "after": "**bold**"
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma gamma\n  \nquick fox\n  \ngamma fox **bold**\n  \nalpha alpha - item **bold**\n  \nquick beta gamma beta quick",
+      "edited": "gamma gamma\n\nquick fox\n\ngamma fox **bold**\n\nalpha alpha - item **bold**\n\nquick beta gamma beta quick",
+      "paragraphs": [
+        "gamma gamma",
+        "quick fox",
+        "gamma fox **bold**",
+        "alpha alpha - item **bold**",
+        "quick beta gamma beta quick"
+      ],
+      "merged": {
+        "body": "gamma gamma\n\nquick fox\n\ngamma fox **bold**\n\nalpha alpha - item **bold**\n\nquick beta gamma beta quick\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "fox alpha gamma fox quick",
+      "edited": "fox alpha gamma fox quick",
+      "paragraphs": ["fox alpha gamma fox quick"],
+      "merged": {
+        "body": "fox alpha gamma fox quick\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta **bold** gamma beta gamma fox\n  \ndelta delta the **bold**\n  \ndelta beta beta delta the\n  \nfox - item alpha alpha quick gamma",
+      "edited": "quick the **bold** delta the\n\ndelta delta the **bold**\n\ndelta beta beta delta the\n\nfox - item alpha alpha quick gamma",
+      "paragraphs": [
+        "delta **bold** gamma beta gamma fox",
+        "delta delta the **bold**",
+        "delta beta beta delta the",
+        "fox - item alpha alpha quick gamma"
+      ],
+      "merged": {
+        "body": "quick the **bold** delta the\n\ndelta delta the **bold**\n\ndelta beta beta delta the\n\nfox - item alpha alpha quick gamma\n",
+        "edits": [
+          {
+            "before": "delta **bold** gamma beta gamma fox",
+            "after": "quick the **bold** delta the"
+          }
+        ]
+      }
+    },
+    {
+      "original": "fox\n\n\nfox delta fox **bold**\n\n\n- item alpha gamma delta\n\n\nquick alpha alpha - item **bold** delta\n\n\n- item\n\n\nthe delta the **bold** fox",
+      "edited": "fox\n\n- item alpha gamma delta\n\nquick alpha alpha - item **bold** delta\n\n- item fox - item beta delta\n\n- item\n\nthe delta the **bold** fox",
+      "paragraphs": [
+        "fox",
+        "fox delta fox **bold**",
+        "- item alpha gamma delta",
+        "quick alpha alpha - item **bold** delta",
+        "- item",
+        "the delta the **bold** fox"
+      ],
+      "merged": {
+        "body": "fox\n\n- item alpha gamma delta\n\nquick alpha alpha - item **bold** delta\n\n- item fox - item beta delta\n\n- item\n\nthe delta the **bold** fox\n",
+        "edits": [
+          {
+            "before": "fox delta fox **bold**",
+            "after": ""
+          },
+          {
+            "before": "",
+            "after": "- item fox - item beta delta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "alpha alpha beta",
+      "edited": "alpha alpha beta",
+      "paragraphs": ["alpha alpha beta"],
+      "merged": {
+        "body": "alpha alpha beta\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "beta beta alpha quick\n\nfox beta delta alpha fox\n\nalpha\n\n- item gamma delta gamma **bold**\n\nbeta beta gamma beta beta **bold**\n\n- item the fox",
+      "edited": "fox beta delta alpha fox\n\nalpha\n\n- item gamma delta gamma **bold**\n\nbeta beta gamma beta beta **bold**\n\n- item the fox",
+      "paragraphs": [
+        "beta beta alpha quick",
+        "fox beta delta alpha fox",
+        "alpha",
+        "- item gamma delta gamma **bold**",
+        "beta beta gamma beta beta **bold**",
+        "- item the fox"
+      ],
+      "merged": {
+        "body": "fox beta delta alpha fox\n\nalpha\n\n- item gamma delta gamma **bold**\n\nbeta beta gamma beta beta **bold**\n\n- item the fox\n",
+        "edits": [
+          {
+            "before": "beta beta alpha quick",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "alpha - item the\n\ngamma delta\n\n- item",
+      "edited": "alpha - item the\n\ngamma delta\n\n- item",
+      "paragraphs": ["alpha - item the", "gamma delta", "- item"],
+      "merged": {
+        "body": "alpha - item the\n\ngamma delta\n\n- item\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "quick gamma beta\n  \nfox - item",
+      "edited": "quick gamma beta\n\nfox - item\n\n**bold** quick the the",
+      "paragraphs": ["quick gamma beta", "fox - item"],
+      "merged": {
+        "body": "quick gamma beta\n\nfox - item\n\n**bold** quick the the\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "**bold** quick the the"
+          }
+        ]
+      }
+    },
+    {
+      "original": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox",
+      "edited": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox",
+      "paragraphs": ["delta", "gamma delta alpha", "- item", "**bold** fox - item the the fox"],
+      "merged": {
+        "body": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "beta - item - item beta fox",
+      "edited": "the delta delta beta\n\ndelta - item",
+      "paragraphs": ["beta - item - item beta fox"],
+      "merged": {
+        "body": "the delta delta beta\n\ndelta - item\n",
+        "edits": [
+          {
+            "before": "beta - item - item beta fox",
+            "after": "the delta delta beta\n\ndelta - item"
+          }
+        ]
+      }
+    },
+    {
+      "original": "**bold**\n  \n**bold** alpha quick **bold** **bold** fox\n  \nbeta\n  \nquick alpha the alpha quick delta\n  \nthe beta **bold** - item",
+      "edited": "**bold**\n\n**bold** alpha quick **bold** **bold** fox\n\nbeta\n\nquick alpha the alpha quick delta\n\nfox alpha alpha the delta",
+      "paragraphs": [
+        "**bold**",
+        "**bold** alpha quick **bold** **bold** fox",
+        "beta",
+        "quick alpha the alpha quick delta",
+        "the beta **bold** - item"
+      ],
+      "merged": {
+        "body": "**bold**\n\n**bold** alpha quick **bold** **bold** fox\n\nbeta\n\nquick alpha the alpha quick delta\n\nfox alpha alpha the delta\n",
+        "edits": [
+          {
+            "before": "the beta **bold** - item",
+            "after": "fox alpha alpha the delta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta fox **bold** gamma - item\n\nthe\n\ngamma alpha beta alpha gamma beta\n\nbeta alpha",
+      "edited": "delta fox **bold** gamma - item\n\nthe\n\ngamma alpha beta alpha gamma beta\n\nthe **bold** - item\n\nbeta alpha",
+      "paragraphs": [
+        "delta fox **bold** gamma - item",
+        "the",
+        "gamma alpha beta alpha gamma beta",
+        "beta alpha"
+      ],
+      "merged": {
+        "body": "delta fox **bold** gamma - item\n\nthe\n\ngamma alpha beta alpha gamma beta\n\nthe **bold** - item\n\nbeta alpha\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "the **bold** - item"
+          }
+        ]
+      }
+    },
+    {
+      "original": "delta **bold** delta\n  \nbeta alpha the gamma alpha\n  \n**bold**\n  \nquick quick quick **bold** **bold**\n  \ndelta alpha the delta fox quick\n  \nalpha",
+      "edited": "beta alpha the gamma alpha\n\n**bold**\n\n**bold** **bold** - item alpha gamma\n\ndelta alpha the delta fox quick\n\nalpha\n\nalpha the",
+      "paragraphs": [
+        "delta **bold** delta",
+        "beta alpha the gamma alpha",
+        "**bold**",
+        "quick quick quick **bold** **bold**",
+        "delta alpha the delta fox quick",
+        "alpha"
+      ],
+      "merged": {
+        "body": "beta alpha the gamma alpha\n\n**bold**\n\n**bold** **bold** - item alpha gamma\n\ndelta alpha the delta fox quick\n\nalpha\n\nalpha the\n",
+        "edits": [
+          {
+            "before": "delta **bold** delta",
+            "after": ""
+          },
+          {
+            "before": "quick quick quick **bold** **bold**",
+            "after": "**bold** **bold** - item alpha gamma"
+          },
+          {
+            "before": "",
+            "after": "alpha the"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "- item - item the delta alpha delta",
+      "paragraphs": [],
+      "merged": {
+        "body": "- item - item the delta alpha delta\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "- item - item the delta alpha delta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "gamma alpha fox the the gamma\n\n\n**bold** alpha quick alpha\n\n\ngamma the alpha beta beta",
+      "edited": "quick alpha beta\n\n**bold** alpha quick alpha\n\ngamma the alpha beta beta",
+      "paragraphs": [
+        "gamma alpha fox the the gamma",
+        "**bold** alpha quick alpha",
+        "gamma the alpha beta beta"
+      ],
+      "merged": {
+        "body": "quick alpha beta\n\n**bold** alpha quick alpha\n\ngamma the alpha beta beta\n",
+        "edits": [
+          {
+            "before": "gamma alpha fox the the gamma",
+            "after": "quick alpha beta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "the alpha beta gamma fox quick\n\n\ndelta alpha alpha\n\n\n**bold** fox\n\n\ngamma quick **bold**\n\n\n- item fox beta quick fox alpha\n\n\ngamma delta",
+      "edited": "the alpha beta gamma fox quick\n\ndelta alpha alpha\n\n**bold** fox\n\ngamma quick **bold**\n\n- item fox beta quick fox alpha\n\ngamma delta",
+      "paragraphs": [
+        "the alpha beta gamma fox quick",
+        "delta alpha alpha",
+        "**bold** fox",
+        "gamma quick **bold**",
+        "- item fox beta quick fox alpha",
+        "gamma delta"
+      ],
+      "merged": {
+        "body": "the alpha beta gamma fox quick\n\ndelta alpha alpha\n\n**bold** fox\n\ngamma quick **bold**\n\n- item fox beta quick fox alpha\n\ngamma delta\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "beta\n\nalpha\n\ndelta fox - item gamma alpha the\n\nalpha the delta delta **bold** - item\n\ndelta - item fox",
+      "edited": "alpha\n\ndelta fox - item gamma alpha the\n\nalpha the delta delta **bold** - item\n\ndelta - item fox",
+      "paragraphs": [
+        "beta",
+        "alpha",
+        "delta fox - item gamma alpha the",
+        "alpha the delta delta **bold** - item",
+        "delta - item fox"
+      ],
+      "merged": {
+        "body": "alpha\n\ndelta fox - item gamma alpha the\n\nalpha the delta delta **bold** - item\n\ndelta - item fox\n",
+        "edits": [
+          {
+            "before": "beta",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "fox fox beta gamma gamma\n\ndelta delta gamma gamma\n\nthe the quick fox delta\n\nfox\n\nbeta **bold** gamma quick gamma\n\n- item",
+      "edited": "delta beta the\n\n- item - item delta\n\ndelta delta gamma gamma\n\n- item alpha beta\n\nthe the quick fox delta\n\nfox\n\nbeta **bold** gamma quick gamma\n\n- item",
+      "paragraphs": [
+        "fox fox beta gamma gamma",
+        "delta delta gamma gamma",
+        "the the quick fox delta",
+        "fox",
+        "beta **bold** gamma quick gamma",
+        "- item"
+      ],
+      "merged": {
+        "body": "delta beta the\n\n- item - item delta\n\ndelta delta gamma gamma\n\n- item alpha beta\n\nthe the quick fox delta\n\nfox\n\nbeta **bold** gamma quick gamma\n\n- item\n",
+        "edits": [
+          {
+            "before": "fox fox beta gamma gamma",
+            "after": "delta beta the\n\n- item - item delta"
+          },
+          {
+            "before": "",
+            "after": "- item alpha beta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "fox gamma **bold** gamma",
+      "paragraphs": [],
+      "merged": {
+        "body": "fox gamma **bold** gamma\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "fox gamma **bold** gamma"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "quick alpha **bold**\n\nbeta quick gamma\n\nthe fox delta the beta\n\nthe gamma beta",
+      "edited": "quick alpha **bold**\n\nbeta quick gamma\n\n**bold** the delta alpha\n\nthe gamma beta",
+      "paragraphs": [
+        "quick alpha **bold**",
+        "beta quick gamma",
+        "the fox delta the beta",
+        "the gamma beta"
+      ],
+      "merged": {
+        "body": "quick alpha **bold**\n\nbeta quick gamma\n\n**bold** the delta alpha\n\nthe gamma beta\n",
+        "edits": [
+          {
+            "before": "the fox delta the beta",
+            "after": "**bold** the delta alpha"
+          }
+        ]
+      }
+    },
+    {
+      "original": "the beta beta\n\n\nthe alpha fox\n\n\nbeta - item",
+      "edited": "the beta beta\n\nthe alpha fox\n\nbeta - item",
+      "paragraphs": ["the beta beta", "the alpha fox", "beta - item"],
+      "merged": {
+        "body": "the beta beta\n\nthe alpha fox\n\nbeta - item\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "alpha **bold** the quick beta quick\n\nquick\n\ngamma **bold** fox alpha",
+      "edited": "alpha **bold** the quick beta quick\n\n**bold** - item fox\n\nquick\n\ngamma **bold** fox alpha",
+      "paragraphs": ["alpha **bold** the quick beta quick", "quick", "gamma **bold** fox alpha"],
+      "merged": {
+        "body": "alpha **bold** the quick beta quick\n\n**bold** - item fox\n\nquick\n\ngamma **bold** fox alpha\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "**bold** - item fox"
+          }
+        ]
+      }
+    },
+    {
+      "original": "fox\n\nquick",
+      "edited": "",
+      "paragraphs": ["fox", "quick"],
+      "merged": {
+        "body": "\n",
+        "edits": [
+          {
+            "before": "fox\n\nquick",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "**bold**",
+      "edited": "fox gamma",
+      "paragraphs": ["**bold**"],
+      "merged": {
+        "body": "fox gamma\n",
+        "edits": [
+          {
+            "before": "**bold**",
+            "after": "fox gamma"
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma\n  \nthe quick - item\n  \nquick quick delta quick - item delta\n  \nfox beta fox alpha\n  \ndelta",
+      "edited": "gamma\n\nthe quick - item\n\nfox beta fox alpha",
+      "paragraphs": [
+        "gamma",
+        "the quick - item",
+        "quick quick delta quick - item delta",
+        "fox beta fox alpha",
+        "delta"
+      ],
+      "merged": {
+        "body": "gamma\n\nthe quick - item\n\nfox beta fox alpha\n",
+        "edits": [
+          {
+            "before": "quick quick delta quick - item delta",
+            "after": ""
+          },
+          {
+            "before": "delta",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma the\n\nquick\n\nfox quick delta alpha",
+      "edited": "the the\n\nquick\n\nfox the - item **bold** alpha",
+      "paragraphs": ["gamma the", "quick", "fox quick delta alpha"],
+      "merged": {
+        "body": "the the\n\nquick\n\nfox the - item **bold** alpha\n",
+        "edits": [
+          {
+            "before": "gamma the",
+            "after": "the the"
+          },
+          {
+            "before": "fox quick delta alpha",
+            "after": "fox the - item **bold** alpha"
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma **bold** **bold** fox\n\ngamma delta **bold** delta\n\nalpha quick\n\n- item delta **bold** the alpha beta",
+      "edited": "gamma **bold** **bold** fox\n\ngamma alpha\n\nfox gamma delta gamma",
+      "paragraphs": [
+        "gamma **bold** **bold** fox",
+        "gamma delta **bold** delta",
+        "alpha quick",
+        "- item delta **bold** the alpha beta"
+      ],
+      "merged": {
+        "body": "gamma **bold** **bold** fox\n\ngamma alpha\n\nfox gamma delta gamma\n",
+        "edits": [
+          {
+            "before": "gamma delta **bold** delta\n\nalpha quick\n\n- item delta **bold** the alpha beta",
+            "after": "gamma alpha\n\nfox gamma delta gamma"
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma - item the gamma",
+      "edited": "fox the the - item",
+      "paragraphs": ["gamma - item the gamma"],
+      "merged": {
+        "body": "fox the the - item\n",
+        "edits": [
+          {
+            "before": "gamma - item the gamma",
+            "after": "fox the the - item"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta fox quick\n\n\n**bold** the\n\n\ngamma the **bold** **bold** fox",
+      "edited": "delta fox quick\n\n**bold** the\n\ngamma the **bold** **bold** fox",
+      "paragraphs": ["delta fox quick", "**bold** the", "gamma the **bold** **bold** fox"],
+      "merged": {
+        "body": "delta fox quick\n\n**bold** the\n\ngamma the **bold** **bold** fox\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "the gamma\n  \ngamma\n  \nthe delta\n  \n**bold**",
+      "edited": "gamma\n\nthe delta\n\n**bold**",
+      "paragraphs": ["the gamma", "gamma", "the delta", "**bold**"],
+      "merged": {
+        "body": "gamma\n\nthe delta\n\n**bold**\n",
+        "edits": [
+          {
+            "before": "the gamma",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "the gamma alpha gamma - item beta\n  \ndelta the - item\n  \n- item gamma\n  \nquick gamma **bold** fox quick\n  \n**bold**\n  \n**bold**",
+      "edited": "beta the alpha **bold** beta\n\n- item gamma\n\nalpha\n\nquick gamma **bold** fox quick\n\n**bold**\n\n**bold**",
+      "paragraphs": [
+        "the gamma alpha gamma - item beta",
+        "delta the - item",
+        "- item gamma",
+        "quick gamma **bold** fox quick",
+        "**bold**",
+        "**bold**"
+      ],
+      "merged": {
+        "body": "beta the alpha **bold** beta\n\n- item gamma\n\nalpha\n\nquick gamma **bold** fox quick\n\n**bold**\n\n**bold**\n",
+        "edits": [
+          {
+            "before": "the gamma alpha gamma - item beta\n\ndelta the - item",
+            "after": "beta the alpha **bold** beta"
+          },
+          {
+            "before": "",
+            "after": "alpha"
+          }
+        ]
+      }
+    },
+    {
+      "original": "the gamma delta\n  \nfox the\n  \nthe - item beta\n  \nfox - item gamma beta **bold** delta\n  \n- item quick quick\n  \nbeta fox beta alpha quick quick",
+      "edited": "the gamma delta\n\nfox the\n\n- item **bold** fox\n\nfox - item gamma beta **bold** delta\n\n- item quick quick\n\nalpha alpha **bold** alpha",
+      "paragraphs": [
+        "the gamma delta",
+        "fox the",
+        "the - item beta",
+        "fox - item gamma beta **bold** delta",
+        "- item quick quick",
+        "beta fox beta alpha quick quick"
+      ],
+      "merged": {
+        "body": "the gamma delta\n\nfox the\n\n- item **bold** fox\n\nfox - item gamma beta **bold** delta\n\n- item quick quick\n\nalpha alpha **bold** alpha\n",
+        "edits": [
+          {
+            "before": "the - item beta",
+            "after": "- item **bold** fox"
+          },
+          {
+            "before": "beta fox beta alpha quick quick",
+            "after": "alpha alpha **bold** alpha"
+          }
+        ]
+      }
+    },
+    {
+      "original": "gamma\n  \nquick - item **bold** **bold**\n  \ngamma - item\n  \nquick gamma\n  \ndelta - item the beta beta\n  \n**bold** fox",
+      "edited": "gamma\n\nquick - item **bold** **bold**\n\ngamma - item\n\nquick gamma\n\ndelta - item the beta beta\n\n**bold** fox\n\nalpha fox quick **bold** the",
+      "paragraphs": [
+        "gamma",
+        "quick - item **bold** **bold**",
+        "gamma - item",
+        "quick gamma",
+        "delta - item the beta beta",
+        "**bold** fox"
+      ],
+      "merged": {
+        "body": "gamma\n\nquick - item **bold** **bold**\n\ngamma - item\n\nquick gamma\n\ndelta - item the beta beta\n\n**bold** fox\n\nalpha fox quick **bold** the\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "alpha fox quick **bold** the"
+          }
+        ]
+      }
+    },
+    {
+      "original": "alpha gamma **bold** gamma",
+      "edited": "",
+      "paragraphs": ["alpha gamma **bold** gamma"],
+      "merged": {
+        "body": "\n",
+        "edits": [
+          {
+            "before": "alpha gamma **bold** gamma",
+            "after": ""
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta\n  \nalpha quick gamma beta\n  \nalpha alpha **bold** beta delta\n  \ndelta the gamma quick **bold** beta\n  \ndelta\n  \n**bold** **bold** gamma **bold** alpha",
+      "edited": "delta\n\nalpha quick gamma beta\n\n**bold**\n\nalpha alpha **bold** beta delta\n\ndelta the gamma quick **bold** beta\n\ndelta quick alpha\n\n**bold** **bold** gamma **bold** alpha",
+      "paragraphs": [
+        "delta",
+        "alpha quick gamma beta",
+        "alpha alpha **bold** beta delta",
+        "delta the gamma quick **bold** beta",
+        "delta",
+        "**bold** **bold** gamma **bold** alpha"
+      ],
+      "merged": {
+        "body": "delta\n\nalpha quick gamma beta\n\n**bold**\n\nalpha alpha **bold** beta delta\n\ndelta the gamma quick **bold** beta\n\ndelta quick alpha\n\n**bold** **bold** gamma **bold** alpha\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "**bold**"
+          },
+          {
+            "before": "delta",
+            "after": "delta quick alpha"
+          }
+        ]
+      }
+    },
+    {
+      "original": "quick delta the alpha **bold** the",
+      "edited": "quick delta the alpha **bold** the",
+      "paragraphs": ["quick delta the alpha **bold** the"],
+      "merged": {
+        "body": "quick delta the alpha **bold** the\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "- item\n\n\n**bold** gamma fox\n\n\nalpha the **bold** - item fox delta\n\n\nfox alpha\n\n\n**bold** beta - item alpha\n\n\ndelta **bold** - item alpha beta delta",
+      "edited": "- item\n\n**bold** gamma fox\n\nalpha the **bold** - item fox delta\n\nfox alpha\n\n**bold** beta - item alpha\n\ndelta **bold** - item alpha beta delta",
+      "paragraphs": [
+        "- item",
+        "**bold** gamma fox",
+        "alpha the **bold** - item fox delta",
+        "fox alpha",
+        "**bold** beta - item alpha",
+        "delta **bold** - item alpha beta delta"
+      ],
+      "merged": {
+        "body": "- item\n\n**bold** gamma fox\n\nalpha the **bold** - item fox delta\n\nfox alpha\n\n**bold** beta - item alpha\n\ndelta **bold** - item alpha beta delta\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "fox\n\n\n- item quick the\n\n\nalpha\n\n\ndelta\n\n\ngamma gamma\n\n\nthe the - item the quick - item",
+      "edited": "fox\n\n- item quick the\n\nalpha\n\ndelta\n\ngamma gamma\n\n**bold** beta beta **bold**\n\nthe the - item the quick - item\n\nthe **bold** the delta",
+      "paragraphs": [
+        "fox",
+        "- item quick the",
+        "alpha",
+        "delta",
+        "gamma gamma",
+        "the the - item the quick - item"
+      ],
+      "merged": {
+        "body": "fox\n\n- item quick the\n\nalpha\n\ndelta\n\ngamma gamma\n\n**bold** beta beta **bold**\n\nthe the - item the quick - item\n\nthe **bold** the delta\n",
+        "edits": [
+          {
+            "before": "",
+            "after": "**bold** beta beta **bold**"
+          },
+          {
+            "before": "",
+            "after": "the **bold** the delta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "delta gamma - item beta - item **bold**\n\n\nthe gamma quick",
+      "edited": "- item delta",
+      "paragraphs": ["delta gamma - item beta - item **bold**", "the gamma quick"],
+      "merged": {
+        "body": "- item delta\n",
+        "edits": [
+          {
+            "before": "delta gamma - item beta - item **bold**\n\nthe gamma quick",
+            "after": "- item delta"
+          }
+        ]
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "gamma delta",
+      "edited": "beta quick quick\n\ngamma delta the",
+      "paragraphs": ["gamma delta"],
+      "merged": {
+        "body": "beta quick quick\n\ngamma delta the\n",
+        "edits": [
+          {
+            "before": "gamma delta",
+            "after": "beta quick quick\n\ngamma delta the"
+          }
+        ]
+      }
+    },
+    {
+      "original": "delta alpha\n  \ngamma delta alpha **bold**",
+      "edited": "delta alpha\n\ngamma delta alpha **bold**",
+      "paragraphs": ["delta alpha", "gamma delta alpha **bold**"],
+      "merged": {
+        "body": "delta alpha\n\ngamma delta alpha **bold**\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "",
+      "edited": "",
+      "paragraphs": [],
+      "merged": {
+        "body": "\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "the - item alpha delta\n\n- item alpha **bold**\n\nthe fox\n\nfox\n\nfox - item delta **bold** - item alpha",
+      "edited": "the - item alpha delta\n\n- item alpha **bold**\n\nthe fox\n\nfox\n\nfox - item delta **bold** - item alpha",
+      "paragraphs": [
+        "the - item alpha delta",
+        "- item alpha **bold**",
+        "the fox",
+        "fox",
+        "fox - item delta **bold** - item alpha"
+      ],
+      "merged": {
+        "body": "the - item alpha delta\n\n- item alpha **bold**\n\nthe fox\n\nfox\n\nfox - item delta **bold** - item alpha\n",
+        "edits": []
+      }
+    },
+    {
+      "original": "fox - item - item gamma **bold**\n\n\ngamma **bold** quick quick",
+      "edited": "- item gamma alpha the beta\n\nfox",
+      "paragraphs": ["fox - item - item gamma **bold**", "gamma **bold** quick quick"],
+      "merged": {
+        "body": "- item gamma alpha the beta\n\nfox\n",
+        "edits": [
+          {
+            "before": "fox - item - item gamma **bold**\n\ngamma **bold** quick quick",
+            "after": "- item gamma alpha the beta\n\nfox"
+          }
+        ]
+      }
+    }
+  ],
+  "canvas": [
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 527,
+          "height": 243
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1397,
+          "height": 729
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 1213,
+          "height": 881
+        },
+        {
+          "id": "b3",
+          "label": "Board 3",
+          "width": 1315,
+          "height": 194
+        }
+      ],
+      "area": {
+        "width": 94,
+        "height": 164
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 180,
+          "top": 44
+        },
+        {
+          "left": 553,
+          "top": 44
+        },
+        {
+          "left": 880,
+          "top": 44
+        }
+      ],
+      "width": 1233,
+      "height": 288
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 263,
+          "height": 851
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1104,
+          "height": 1092
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 1497,
+          "height": 1178
+        },
+        {
+          "id": "b3",
+          "label": "Board 3",
+          "width": 355,
+          "height": 449
+        }
+      ],
+      "area": {
+        "width": 1265,
+        "height": 1563
+      },
+      "zoom": 0.35,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 140,
+          "top": 44
+        },
+        {
+          "left": 550,
+          "top": 44
+        },
+        {
+          "left": 1098,
+          "top": 44
+        }
+      ],
+      "width": 1246,
+      "height": 480
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 941,
+          "height": 1132
+        }
+      ],
+      "area": {
+        "width": 1662,
+        "height": 202
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 283,
+      "height": 351
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 781,
+          "height": 975
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 953,
+          "height": 567
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 1414,
+          "height": 130
+        }
+      ],
+      "area": {
+        "width": 324,
+        "height": 375
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 243,
+          "top": 44
+        },
+        {
+          "left": 505,
+          "top": 44
+        }
+      ],
+      "width": 883,
+      "height": 312
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 1694,
+        "height": 60
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 1036,
+        "height": 633
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1160,
+          "height": 224
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 156,
+          "height": 990
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 451,
+          "height": 733
+        }
+      ],
+      "area": {
+        "width": 1626,
+        "height": 1281
+      },
+      "zoom": 0.86,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 1046,
+          "top": 44
+        },
+        {
+          "left": 1204,
+          "top": 44
+        }
+      ],
+      "width": 1616,
+      "height": 919
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 135,
+        "height": 28
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1247,
+          "height": 366
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1105,
+          "height": 1158
+        }
+      ],
+      "area": {
+        "width": 1303,
+        "height": 1008
+      },
+      "zoom": 0.52,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 696,
+          "top": 44
+        }
+      ],
+      "width": 1295,
+      "height": 670
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 272,
+          "height": 791
+        }
+      ],
+      "area": {
+        "width": 2345,
+        "height": 1263
+      },
+      "zoom": 1,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 320,
+      "height": 859
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1429,
+          "height": 290
+        }
+      ],
+      "area": {
+        "width": 1204,
+        "height": 631
+      },
+      "zoom": 0.8,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 1191,
+      "height": 300
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 561,
+          "height": 1100
+        }
+      ],
+      "area": {
+        "width": 630,
+        "height": 850
+      },
+      "zoom": 0.71,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 446,
+      "height": 849
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1539,
+          "height": 334
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 414,
+          "height": 426
+        }
+      ],
+      "area": {
+        "width": 875,
+        "height": 959
+      },
+      "zoom": 0.41,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 679,
+          "top": 44
+        }
+      ],
+      "width": 873,
+      "height": 243
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1532,
+          "height": 881
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1114,
+          "height": 1048
+        }
+      ],
+      "area": {
+        "width": 337,
+        "height": 214
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 431,
+          "top": 44
+        }
+      ],
+      "width": 734,
+      "height": 330
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 374,
+          "height": 467
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 713,
+          "height": 460
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 747,
+          "height": 737
+        }
+      ],
+      "area": {
+        "width": 1890,
+        "height": 187
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 142,
+          "top": 44
+        },
+        {
+          "left": 344,
+          "top": 44
+        }
+      ],
+      "width": 555,
+      "height": 252
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 616,
+          "height": 249
+        }
+      ],
+      "area": {
+        "width": 2088,
+        "height": 249
+      },
+      "zoom": 0.72,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 492,
+      "height": 247
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 487,
+          "height": 931
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1075,
+          "height": 1063
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 1050,
+          "height": 1139
+        },
+        {
+          "id": "b3",
+          "label": "Board 3",
+          "width": 879,
+          "height": 215
+        }
+      ],
+      "area": {
+        "width": 1924,
+        "height": -1
+      },
+      "zoom": 1,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 535,
+          "top": 44
+        },
+        {
+          "left": 1634,
+          "top": 44
+        },
+        {
+          "left": 2708,
+          "top": 44
+        }
+      ],
+      "width": 3611,
+      "height": 1207
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 869,
+        "height": 197
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1162,
+          "height": 278
+        }
+      ],
+      "area": {
+        "width": 1845,
+        "height": 1255
+      },
+      "zoom": 1,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 1210,
+      "height": 346
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 227,
+          "height": 507
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1376,
+          "height": 765
+        }
+      ],
+      "area": {
+        "width": 418,
+        "height": 1142
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 105,
+          "top": 44
+        }
+      ],
+      "width": 473,
+      "height": 259
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 882,
+          "height": 299
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1182,
+          "height": 545
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 309,
+          "height": 431
+        },
+        {
+          "id": "b3",
+          "label": "Board 3",
+          "width": 357,
+          "height": 423
+        }
+      ],
+      "area": {
+        "width": 1151,
+        "height": 1297
+      },
+      "zoom": 0.37,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 374,
+          "top": 44
+        },
+        {
+          "left": 835,
+          "top": 44
+        },
+        {
+          "left": 973,
+          "top": 44
+        }
+      ],
+      "width": 1129,
+      "height": 270
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 827,
+          "height": 1132
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 217,
+          "height": 1070
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 1360,
+          "height": 674
+        }
+      ],
+      "area": {
+        "width": 213,
+        "height": 1388
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 255,
+          "top": 44
+        },
+        {
+          "left": 333,
+          "top": 44
+        }
+      ],
+      "width": 697,
+      "height": 351
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 169,
+          "height": 816
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 724,
+          "height": 797
+        }
+      ],
+      "area": {
+        "width": 1059,
+        "height": 1397
+      },
+      "zoom": 1,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 217,
+          "top": 44
+        }
+      ],
+      "width": 965,
+      "height": 884
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 1438,
+        "height": 442
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 823,
+          "height": 1116
+        }
+      ],
+      "area": {
+        "width": 2049,
+        "height": 389
+      },
+      "zoom": 0.28,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 278,
+      "height": 380
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 833,
+          "height": 501
+        }
+      ],
+      "area": {
+        "width": 530,
+        "height": 685
+      },
+      "zoom": 0.57,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 523,
+      "height": 354
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1201,
+          "height": 903
+        }
+      ],
+      "area": {
+        "width": 978,
+        "height": 130
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 348,
+      "height": 294
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1161,
+          "height": 1054
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 132,
+          "height": 947
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 154,
+          "height": 160
+        }
+      ],
+      "area": {
+        "width": 1,
+        "height": 1547
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 338,
+          "top": 44
+        },
+        {
+          "left": 395,
+          "top": 44
+        }
+      ],
+      "width": 458,
+      "height": 332
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1517,
+          "height": 407
+        }
+      ],
+      "area": {
+        "width": 1291,
+        "height": 523
+      },
+      "zoom": 0.81,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 1277,
+      "height": 398
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1192,
+          "height": 1110
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1524,
+          "height": 162
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 168,
+          "height": 396
+        }
+      ],
+      "area": {
+        "width": 17,
+        "height": 1494
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 346,
+          "top": 44
+        },
+        {
+          "left": 751,
+          "top": 44
+        }
+      ],
+      "width": 817,
+      "height": 346
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 907,
+          "height": 487
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 176,
+          "height": 198
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 996,
+          "height": 1129
+        },
+        {
+          "id": "b3",
+          "label": "Board 3",
+          "width": 1239,
+          "height": 627
+        }
+      ],
+      "area": {
+        "width": 172,
+        "height": 246
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 275,
+          "top": 44
+        },
+        {
+          "left": 343,
+          "top": 44
+        },
+        {
+          "left": 616,
+          "top": 44
+        }
+      ],
+      "width": 950,
+      "height": 350
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 372,
+          "height": 529
+        }
+      ],
+      "area": {
+        "width": 402,
+        "height": 1497
+      },
+      "zoom": 0.95,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 401,
+      "height": 571
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 687,
+          "height": 171
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 822,
+          "height": 1039
+        }
+      ],
+      "area": {
+        "width": 1796,
+        "height": 769
+      },
+      "zoom": 0.67,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 508,
+          "top": 44
+        }
+      ],
+      "width": 1083,
+      "height": 764
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 923,
+          "height": 752
+        }
+      ],
+      "area": {
+        "width": 1929,
+        "height": 798
+      },
+      "zoom": 0.97,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 943,
+      "height": 797
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1229,
+          "height": 703
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 1437,
+          "height": 292
+        }
+      ],
+      "area": {
+        "width": 366,
+        "height": 1437
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 355,
+          "top": 44
+        }
+      ],
+      "width": 738,
+      "height": 244
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 1482,
+          "height": 256
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 706,
+          "height": 505
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 153,
+          "height": 1134
+        }
+      ],
+      "area": {
+        "width": 2362,
+        "height": 849
+      },
+      "zoom": 0.68,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 1056,
+          "top": 44
+        },
+        {
+          "left": 1560,
+          "top": 44
+        }
+      ],
+      "width": 1688,
+      "height": 839
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 491,
+          "height": 919
+        }
+      ],
+      "area": {
+        "width": 819,
+        "height": 1249
+      },
+      "zoom": 1,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        }
+      ],
+      "width": 539,
+      "height": 987
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 934,
+          "height": 416
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 364,
+          "height": 766
+        }
+      ],
+      "area": {
+        "width": 463,
+        "height": 134
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 282,
+          "top": 44
+        }
+      ],
+      "width": 397,
+      "height": 260
+    },
+    {
+      "boards": [],
+      "area": {
+        "width": 743,
+        "height": 914
+      },
+      "zoom": 1,
+      "placed": [],
+      "width": 24,
+      "height": 68
+    },
+    {
+      "boards": [
+        {
+          "id": "b0",
+          "label": "Board 0",
+          "width": 750,
+          "height": 854
+        },
+        {
+          "id": "b1",
+          "label": "Board 1",
+          "width": 908,
+          "height": 977
+        },
+        {
+          "id": "b2",
+          "label": "Board 2",
+          "width": 741,
+          "height": 818
+        }
+      ],
+      "area": {
+        "width": 1200,
+        "height": 43
+      },
+      "zoom": 0.25,
+      "placed": [
+        {
+          "left": 24,
+          "top": 44
+        },
+        {
+          "left": 236,
+          "top": 44
+        },
+        {
+          "left": 487,
+          "top": 44
+        }
+      ],
+      "width": 696,
+      "height": 312
+    }
+  ],
+  "clampZoom": [
+    {
+      "input": 0.33953201631084085,
+      "out": 0.34
+    },
+    {
+      "input": 0.04312156839296222,
+      "out": 0.25
+    },
+    {
+      "input": 1.1664668177254498,
+      "out": 1
+    },
+    {
+      "input": 1.5807454399764538,
+      "out": 1
+    },
+    {
+      "input": 1.359481405466795,
+      "out": 1
+    },
+    {
+      "input": 1.5327917262911797,
+      "out": 1
+    },
+    {
+      "input": 0.6140550686977804,
+      "out": 0.61
+    },
+    {
+      "input": 0.805283585563302,
+      "out": 0.81
+    },
+    {
+      "input": 1.5917681707069278,
+      "out": 1
+    },
+    {
+      "input": 1.6449021031148732,
+      "out": 1
+    },
+    {
+      "input": -0.028873239178210497,
+      "out": 0.25
+    },
+    {
+      "input": 0.27304085716605186,
+      "out": 0.27
+    },
+    {
+      "input": 0.5613690954633057,
+      "out": 0.56
+    },
+    {
+      "input": -0.02092588972300291,
+      "out": 0.25
+    },
+    {
+      "input": 0.3197838282212615,
+      "out": 0.32
+    },
+    {
+      "input": 0.046402521431446075,
+      "out": 0.25
+    },
+    {
+      "input": 0.7961850552819669,
+      "out": 0.8
+    },
+    {
+      "input": 1.0976430890150368,
+      "out": 1
+    },
+    {
+      "input": 0.13039751909673214,
+      "out": 0.25
+    },
+    {
+      "input": 0.46158562740311027,
+      "out": 0.46
+    },
+    {
+      "input": 1.3379897181876004,
+      "out": 1
+    },
+    {
+      "input": 0.440706099383533,
+      "out": 0.44
+    },
+    {
+      "input": 1.1057009603828192,
+      "out": 1
+    },
+    {
+      "input": 0.6205874159932137,
+      "out": 0.62
+    },
+    {
+      "input": -0.10027756914496422,
+      "out": 0.25
+    },
+    {
+      "input": 1.2638893802650273,
+      "out": 1
+    },
+    {
+      "input": 0.3255900884978473,
+      "out": 0.33
+    },
+    {
+      "input": 0.6567376586608589,
+      "out": 0.66
+    },
+    {
+      "input": 0.7989978305995464,
+      "out": 0.8
+    },
+    {
+      "input": 1.466610639821738,
+      "out": 1
+    }
+  ],
+  "artboardUrl": [
+    {
+      "url": "file:///a/b.html",
+      "id": "main",
+      "out": "file:///a/b.html#artboard=main"
+    },
+    {
+      "url": "file:///a/b.html#old",
+      "id": "x y",
+      "out": "file:///a/b.html#artboard=x%20y"
+    },
+    {
+      "url": "http://localhost:3000/#/route",
+      "id": "é/ü",
+      "out": "http://localhost:3000/#artboard=%C3%A9%2F%C3%BC"
+    },
+    {
+      "url": "http://h/p?q=1",
+      "id": "a-b_c.d!~*'()",
+      "out": "http://h/p?q=1#artboard=a-b_c.d!~*'()"
+    }
+  ],
+  "placePopover": [
+    {
+      "rect": {
+        "x": 587,
+        "y": 366,
+        "width": 91,
+        "height": 55
+      },
+      "area": {
+        "width": 662,
+        "height": 302
+      },
+      "out": {
+        "x": 394,
+        "y": 208
+      }
+    },
+    {
+      "rect": {
+        "x": 701,
+        "y": 432,
+        "width": 11,
+        "height": 72
+      },
+      "area": {
+        "width": 698,
+        "height": 789
+      },
+      "out": {
+        "x": 430,
+        "y": 512
+      }
+    },
+    {
+      "rect": {
+        "x": 401,
+        "y": 22,
+        "width": 195,
+        "height": 6
+      },
+      "area": {
+        "width": 981,
+        "height": 376
+      },
+      "out": {
+        "x": 401,
+        "y": 36
+      }
+    },
+    {
+      "rect": {
+        "x": 893,
+        "y": 652,
+        "width": 93,
+        "height": 73
+      },
+      "area": {
+        "width": 949,
+        "height": 324
+      },
+      "out": {
+        "x": 681,
+        "y": 494
+      }
+    },
+    {
+      "rect": {
+        "x": 102,
+        "y": 630,
+        "width": 116,
+        "height": 8
+      },
+      "area": {
+        "width": 967,
+        "height": 628
+      },
+      "out": {
+        "x": 102,
+        "y": 472
+      }
+    },
+    {
+      "rect": {
+        "x": 476,
+        "y": 181,
+        "width": 136,
+        "height": 52
+      },
+      "area": {
+        "width": 571,
+        "height": 366
+      },
+      "out": {
+        "x": 303,
+        "y": 23
+      }
+    },
+    {
+      "rect": {
+        "x": 251,
+        "y": 557,
+        "width": 110,
+        "height": 5
+      },
+      "area": {
+        "width": 971,
+        "height": 743
+      },
+      "out": {
+        "x": 251,
+        "y": 570
+      }
+    },
+    {
+      "rect": {
+        "x": 356,
+        "y": 627,
+        "width": 172,
+        "height": 39
+      },
+      "area": {
+        "width": 588,
+        "height": 183
+      },
+      "out": {
+        "x": 320,
+        "y": 469
+      }
+    },
+    {
+      "rect": {
+        "x": 187,
+        "y": 228,
+        "width": 90,
+        "height": 75
+      },
+      "area": {
+        "width": 869,
+        "height": 399
+      },
+      "out": {
+        "x": 187,
+        "y": 70
+      }
+    },
+    {
+      "rect": {
+        "x": 675,
+        "y": 192,
+        "width": 187,
+        "height": 1
+      },
+      "area": {
+        "width": 498,
+        "height": 571
+      },
+      "out": {
+        "x": 230,
+        "y": 201
+      }
+    },
+    {
+      "rect": {
+        "x": 180,
+        "y": 514,
+        "width": 261,
+        "height": 6
+      },
+      "area": {
+        "width": 636,
+        "height": 697
+      },
+      "out": {
+        "x": 180,
+        "y": 528
+      }
+    },
+    {
+      "rect": {
+        "x": 740,
+        "y": 444,
+        "width": 193,
+        "height": 25
+      },
+      "area": {
+        "width": 885,
+        "height": 358
+      },
+      "out": {
+        "x": 617,
+        "y": 286
+      }
+    },
+    {
+      "rect": {
+        "x": 364,
+        "y": 617,
+        "width": 96,
+        "height": 12
+      },
+      "area": {
+        "width": 961,
+        "height": 702
+      },
+      "out": {
+        "x": 364,
+        "y": 459
+      }
+    },
+    {
+      "rect": {
+        "x": 388,
+        "y": 273,
+        "width": 77,
+        "height": 20
+      },
+      "area": {
+        "width": 971,
+        "height": 739
+      },
+      "out": {
+        "x": 388,
+        "y": 301
+      }
+    },
+    {
+      "rect": {
+        "x": 821,
+        "y": 376,
+        "width": 197,
+        "height": 9
+      },
+      "area": {
+        "width": 860,
+        "height": 699
+      },
+      "out": {
+        "x": 592,
+        "y": 393
+      }
+    },
+    {
+      "rect": {
+        "x": 871,
+        "y": 74,
+        "width": 72,
+        "height": 70
+      },
+      "area": {
+        "width": 1000,
+        "height": 660
+      },
+      "out": {
+        "x": 732,
+        "y": 152
+      }
+    },
+    {
+      "rect": {
+        "x": 666,
+        "y": 530,
+        "width": 128,
+        "height": 66
+      },
+      "area": {
+        "width": 668,
+        "height": 605
+      },
+      "out": {
+        "x": 400,
+        "y": 372
+      }
+    },
+    {
+      "rect": {
+        "x": 12,
+        "y": 524,
+        "width": 26,
+        "height": 38
+      },
+      "area": {
+        "width": 942,
+        "height": 459
+      },
+      "out": {
+        "x": 12,
+        "y": 366
+      }
+    },
+    {
+      "rect": {
+        "x": 884,
+        "y": 655,
+        "width": 134,
+        "height": 32
+      },
+      "area": {
+        "width": 372,
+        "height": 662
+      },
+      "out": {
+        "x": 104,
+        "y": 497
+      }
+    },
+    {
+      "rect": {
+        "x": 55,
+        "y": 584,
+        "width": 296,
+        "height": 63
+      },
+      "area": {
+        "width": 876,
+        "height": 583
+      },
+      "out": {
+        "x": 55,
+        "y": 426
+      }
+    },
+    {
+      "rect": {
+        "x": 144,
+        "y": 449,
+        "width": 81,
+        "height": 47
+      },
+      "area": {
+        "width": 439,
+        "height": 714
+      },
+      "out": {
+        "x": 144,
+        "y": 504
+      }
+    },
+    {
+      "rect": {
+        "x": 217,
+        "y": 164,
+        "width": 138,
+        "height": 38
+      },
+      "area": {
+        "width": 724,
+        "height": 657
+      },
+      "out": {
+        "x": 217,
+        "y": 210
+      }
+    },
+    {
+      "rect": {
+        "x": 537,
+        "y": 236,
+        "width": 210,
+        "height": 5
+      },
+      "area": {
+        "width": 759,
+        "height": 504
+      },
+      "out": {
+        "x": 491,
+        "y": 249
+      }
+    },
+    {
+      "rect": {
+        "x": 721,
+        "y": 654,
+        "width": 112,
+        "height": 67
+      },
+      "area": {
+        "width": 985,
+        "height": 537
+      },
+      "out": {
+        "x": 717,
+        "y": 496
+      }
+    },
+    {
+      "rect": {
+        "x": 692,
+        "y": -7,
+        "width": 75,
+        "height": 14
+      },
+      "area": {
+        "width": 644,
+        "height": 615
+      },
+      "out": {
+        "x": 376,
+        "y": 15
+      }
+    },
+    {
+      "rect": {
+        "x": 154,
+        "y": 337,
+        "width": 267,
+        "height": 30
+      },
+      "area": {
+        "width": 724,
+        "height": 589
+      },
+      "out": {
+        "x": 154,
+        "y": 375
+      }
+    },
+    {
+      "rect": {
+        "x": 17,
+        "y": 466,
+        "width": 272,
+        "height": 31
+      },
+      "area": {
+        "width": 387,
+        "height": 788
+      },
+      "out": {
+        "x": 17,
+        "y": 505
+      }
+    },
+    {
+      "rect": {
+        "x": 598,
+        "y": 135,
+        "width": 125,
+        "height": 66
+      },
+      "area": {
+        "width": 680,
+        "height": 388
+      },
+      "out": {
+        "x": 412,
+        "y": 209
+      }
+    },
+    {
+      "rect": {
+        "x": 182,
+        "y": 258,
+        "width": 140,
+        "height": 75
+      },
+      "area": {
+        "width": 894,
+        "height": 317
+      },
+      "out": {
+        "x": 182,
+        "y": 100
+      }
+    },
+    {
+      "rect": {
+        "x": 897,
+        "y": 573,
+        "width": 243,
+        "height": 15
+      },
+      "area": {
+        "width": 889,
+        "height": 414
+      },
+      "out": {
+        "x": 621,
+        "y": 415
+      }
+    },
+    {
+      "rect": {
+        "x": 675,
+        "y": 218,
+        "width": 135,
+        "height": 43
+      },
+      "area": {
+        "width": 789,
+        "height": 334
+      },
+      "out": {
+        "x": 521,
+        "y": 60
+      }
+    },
+    {
+      "rect": {
+        "x": 638,
+        "y": 558,
+        "width": 144,
+        "height": 19
+      },
+      "area": {
+        "width": 505,
+        "height": 206
+      },
+      "out": {
+        "x": 237,
+        "y": 400
+      }
+    },
+    {
+      "rect": {
+        "x": 189,
+        "y": 154,
+        "width": 204,
+        "height": 60
+      },
+      "area": {
+        "width": 428,
+        "height": 158
+      },
+      "out": {
+        "x": 160,
+        "y": 8
+      }
+    },
+    {
+      "rect": {
+        "x": 364,
+        "y": 518,
+        "width": 61,
+        "height": 12
+      },
+      "area": {
+        "width": 510,
+        "height": 473
+      },
+      "out": {
+        "x": 242,
+        "y": 360
+      }
+    },
+    {
+      "rect": {
+        "x": 263,
+        "y": 189,
+        "width": 47,
+        "height": 75
+      },
+      "area": {
+        "width": 630,
+        "height": 391
+      },
+      "out": {
+        "x": 263,
+        "y": 31
+      }
+    },
+    {
+      "rect": {
+        "x": 776,
+        "y": 471,
+        "width": 196,
+        "height": 63
+      },
+      "area": {
+        "width": 957,
+        "height": 407
+      },
+      "out": {
+        "x": 689,
+        "y": 313
+      }
+    },
+    {
+      "rect": {
+        "x": 247,
+        "y": 576,
+        "width": 170,
+        "height": 55
+      },
+      "area": {
+        "width": 518,
+        "height": 709
+      },
+      "out": {
+        "x": 247,
+        "y": 418
+      }
+    },
+    {
+      "rect": {
+        "x": 765,
+        "y": 219,
+        "width": 57,
+        "height": 80
+      },
+      "area": {
+        "width": 305,
+        "height": 478
+      },
+      "out": {
+        "x": 37,
+        "y": 307
+      }
+    },
+    {
+      "rect": {
+        "x": 333,
+        "y": 212,
+        "width": 273,
+        "height": 26
+      },
+      "area": {
+        "width": 213,
+        "height": 413
+      },
+      "out": {
+        "x": 8,
+        "y": 246
+      }
+    },
+    {
+      "rect": {
+        "x": 549,
+        "y": 472,
+        "width": 112,
+        "height": 75
+      },
+      "area": {
+        "width": 582,
+        "height": 250
+      },
+      "out": {
+        "x": 314,
+        "y": 314
+      }
+    }
+  ],
+  "bezel": [
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 68,
+        "height": 687
+      },
+      "scale": 0.10178117048346055,
+      "width": 40,
+      "height": 87,
+      "thickness": 6,
+      "outerRadius": 3
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 783,
+        "height": 242
+      },
+      "scale": 0.17755443886097153,
+      "width": 148,
+      "height": 212,
+      "thickness": 7,
+      "outerRadius": 5
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 1062,
+        "height": 583
+      },
+      "scale": 1.1901408450704225,
+      "width": 1014,
+      "height": 468,
+      "thickness": 16,
+      "outerRadius": 40
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 403,
+        "height": 136
+      },
+      "scale": 0.1267605633802817,
+      "width": 50,
+      "height": 108,
+      "thickness": 6,
+      "outerRadius": 4
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 1177,
+        "height": 773
+      },
+      "scale": 0.7778969957081545,
+      "width": 334,
+      "height": 725,
+      "thickness": 16,
+      "outerRadius": 28
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 639,
+        "height": 650
+      },
+      "scale": 0.6459227467811158,
+      "width": 278,
+      "height": 602,
+      "thickness": 16,
+      "outerRadius": 24
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 60,
+        "height": 828
+      },
+      "scale": 0.03836930455635491,
+      "width": 32,
+      "height": 46,
+      "thickness": 6,
+      "outerRadius": 1
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 627
+      },
+      "container": {
+        "width": 673,
+        "height": 903
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 627,
+      "thickness": 16,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 646,
+        "height": 841
+      },
+      "container": {
+        "width": 1361,
+        "height": 420
+      },
+      "scale": 0.4518430439952438,
+      "width": 292,
+      "height": 380,
+      "thickness": 12,
+      "outerRadius": 10
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 403,
+        "height": 493
+      },
+      "scale": 0.5269953051643192,
+      "width": 207,
+      "height": 449,
+      "thickness": 14,
+      "outerRadius": 18
+    },
+    {
+      "screen": {
+        "width": 819,
+        "height": 381
+      },
+      "container": {
+        "width": 1022,
+        "height": 1126
+      },
+      "scale": 1.1892551892551892,
+      "width": 974,
+      "height": 453,
+      "thickness": 16,
+      "outerRadius": 39
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 1069,
+        "height": 476
+      },
+      "scale": 0.36348408710217756,
+      "width": 303,
+      "height": 434,
+      "thickness": 13,
+      "outerRadius": 11
+    },
+    {
+      "screen": {
+        "width": 1247,
+        "height": 990
+      },
+      "container": {
+        "width": 11,
+        "height": 390
+      },
+      "scale": 1,
+      "width": 1247,
+      "height": 990,
+      "thickness": 6,
+      "outerRadius": 35
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 58,
+        "height": 1163
+      },
+      "scale": 0.06976744186046512,
+      "width": 30,
+      "height": 65,
+      "thickness": 6,
+      "outerRadius": 3
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 1117,
+        "height": 737
+      },
+      "scale": 0.8086854460093896,
+      "width": 318,
+      "height": 689,
+      "thickness": 16,
+      "outerRadius": 27
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 274,
+        "height": 597
+      },
+      "scale": 0.6055979643765903,
+      "width": 238,
+      "height": 516,
+      "thickness": 10,
+      "outerRadius": 20
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 250,
+        "height": 609
+      },
+      "scale": 0.5023255813953489,
+      "width": 216,
+      "height": 468,
+      "thickness": 9,
+      "outerRadius": 18
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 1213,
+        "height": 74
+      },
+      "scale": 0.11704834605597965,
+      "width": 100,
+      "height": 46,
+      "thickness": 6,
+      "outerRadius": 4
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 774,
+        "height": 1087
+      },
+      "scale": 1.1148068669527897,
+      "width": 479,
+      "height": 1039,
+      "thickness": 16,
+      "outerRadius": 41
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 9,
+        "height": 27
+      },
+      "scale": 1,
+      "width": 1024,
+      "height": 1366,
+      "thickness": 6,
+      "outerRadius": 36
+    },
+    {
+      "screen": {
+        "width": 1128,
+        "height": 1218
+      },
+      "container": {
+        "width": 67,
+        "height": 461
+      },
+      "scale": 0.034574468085106384,
+      "width": 39,
+      "height": 42,
+      "thickness": 6,
+      "outerRadius": 1
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 367
+      },
+      "container": {
+        "width": 701,
+        "height": 886
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 367,
+      "thickness": 16,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 1257,
+        "height": 208
+      },
+      "scale": 0.1507537688442211,
+      "width": 126,
+      "height": 180,
+      "thickness": 6,
+      "outerRadius": 4
+    },
+    {
+      "screen": {
+        "width": 511,
+        "height": 245
+      },
+      "container": {
+        "width": 379,
+        "height": 327
+      },
+      "scale": 0.6673189823874756,
+      "width": 341,
+      "height": 163,
+      "thickness": 11,
+      "outerRadius": 14
+    },
+    {
+      "screen": {
+        "width": 313,
+        "height": 1391
+      },
+      "container": {
+        "width": 1003,
+        "height": 1086
+      },
+      "scale": 0.7462257368799425,
+      "width": 234,
+      "height": 1038,
+      "thickness": 16,
+      "outerRadius": 20
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 1284,
+        "height": 925
+      },
+      "scale": 0.6420204978038068,
+      "width": 657,
+      "height": 877,
+      "thickness": 16,
+      "outerRadius": 23
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 189,
+        "height": 600
+      },
+      "scale": 0.3697674418604651,
+      "width": 159,
+      "height": 345,
+      "thickness": 7,
+      "outerRadius": 14
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 1113,
+        "height": 733
+      },
+      "scale": 0.7349785407725322,
+      "width": 316,
+      "height": 685,
+      "thickness": 16,
+      "outerRadius": 27
+    },
+    {
+      "screen": {
+        "width": 485,
+        "height": 1260
+      },
+      "container": {
+        "width": 677,
+        "height": 1049
+      },
+      "scale": 0.7944444444444444,
+      "width": 385,
+      "height": 1001,
+      "thickness": 16,
+      "outerRadius": 33
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 89,
+        "height": 134
+      },
+      "scale": 0.0715962441314554,
+      "width": 61,
+      "height": 28,
+      "thickness": 6,
+      "outerRadius": 2
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 1361,
+        "height": 695
+      },
+      "scale": 1.5410798122065728,
+      "width": 1313,
+      "height": 606,
+      "thickness": 16,
+      "outerRadius": 52
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 77
+      },
+      "container": {
+        "width": 109,
+        "height": 896
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 77,
+      "thickness": 6,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 805,
+        "height": 402
+      },
+      "scale": 0.2664714494875549,
+      "width": 273,
+      "height": 364,
+      "thickness": 11,
+      "outerRadius": 10
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 765,
+        "height": 193
+      },
+      "scale": 0.19131455399061034,
+      "width": 75,
+      "height": 163,
+      "thickness": 7,
+      "outerRadius": 6
+    },
+    {
+      "screen": {
+        "width": 408,
+        "height": 1277
+      },
+      "container": {
+        "width": 593,
+        "height": 1127
+      },
+      "scale": 0.8449490994518403,
+      "width": 345,
+      "height": 1079,
+      "thickness": 16,
+      "outerRadius": 29
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 171,
+        "height": 325
+      },
+      "scale": 0.3186695278969957,
+      "width": 137,
+      "height": 297,
+      "thickness": 6,
+      "outerRadius": 12
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 566,
+        "height": 73
+      },
+      "scale": 0.048283261802575105,
+      "width": 21,
+      "height": 45,
+      "thickness": 6,
+      "outerRadius": 2
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 607,
+        "height": 964
+      },
+      "scale": 1.0751173708920188,
+      "width": 423,
+      "height": 916,
+      "thickness": 16,
+      "outerRadius": 36
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 1094,
+        "height": 569
+      },
+      "scale": 0.43634840871021774,
+      "width": 364,
+      "height": 521,
+      "thickness": 16,
+      "outerRadius": 13
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 860,
+        "height": 115
+      },
+      "scale": 0.0636896046852123,
+      "width": 65,
+      "height": 87,
+      "thickness": 6,
+      "outerRadius": 2
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 943,
+        "height": 104
+      },
+      "scale": 0.0815450643776824,
+      "width": 35,
+      "height": 76,
+      "thickness": 6,
+      "outerRadius": 3
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 535
+      },
+      "container": {
+        "width": 590,
+        "height": 825
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 535,
+      "thickness": 16,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 365,
+        "height": 236
+      },
+      "scale": 0.17252931323283083,
+      "width": 144,
+      "height": 206,
+      "thickness": 7,
+      "outerRadius": 5
+    },
+    {
+      "screen": {
+        "width": 834,
+        "height": 1194
+      },
+      "container": {
+        "width": 1364,
+        "height": 755
+      },
+      "scale": 0.5921273031825796,
+      "width": 494,
+      "height": 707,
+      "thickness": 16,
+      "outerRadius": 17
+    },
+    {
+      "screen": {
+        "width": 337,
+        "height": 307
+      },
+      "container": {
+        "width": 627,
+        "height": 237
+      },
+      "scale": 0.6742671009771987,
+      "width": 227,
+      "height": 207,
+      "thickness": 7,
+      "outerRadius": 7
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 1003,
+        "height": 593
+      },
+      "scale": 1.1208920187793427,
+      "width": 955,
+      "height": 441,
+      "thickness": 16,
+      "outerRadius": 37
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 219,
+        "height": 49
+      },
+      "scale": 0.02464788732394366,
+      "width": 10,
+      "height": 21,
+      "thickness": 6,
+      "outerRadius": 1
+    },
+    {
+      "screen": {
+        "width": 852,
+        "height": 393
+      },
+      "container": {
+        "width": 472,
+        "height": 371
+      },
+      "scale": 0.5046948356807511,
+      "width": 430,
+      "height": 198,
+      "thickness": 13,
+      "outerRadius": 17
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 1212,
+        "height": 1111
+      },
+      "scale": 1.140557939914163,
+      "width": 490,
+      "height": 1063,
+      "thickness": 16,
+      "outerRadius": 42
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 498,
+        "height": 664
+      },
+      "scale": 0.6609442060085837,
+      "width": 284,
+      "height": 616,
+      "thickness": 16,
+      "outerRadius": 24
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 17
+      },
+      "container": {
+        "width": 1050,
+        "height": 1008
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 17,
+      "thickness": 16,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 425,
+        "height": 1249
+      },
+      "container": {
+        "width": 883,
+        "height": 5
+      },
+      "scale": 1,
+      "width": 425,
+      "height": 1249,
+      "thickness": 6,
+      "outerRadius": 36
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 306,
+        "height": 212
+      },
+      "scale": 0.19527896995708155,
+      "width": 84,
+      "height": 182,
+      "thickness": 7,
+      "outerRadius": 7
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 773
+      },
+      "container": {
+        "width": 78,
+        "height": 74
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 773,
+      "thickness": 6,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 121,
+        "height": 796
+      },
+      "scale": 0.21627906976744185,
+      "width": 93,
+      "height": 202,
+      "thickness": 6,
+      "outerRadius": 8
+    },
+    {
+      "screen": {
+        "width": 0,
+        "height": 695
+      },
+      "container": {
+        "width": 1365,
+        "height": 105
+      },
+      "scale": 1,
+      "width": 0,
+      "height": 695,
+      "thickness": 6,
+      "outerRadius": 0
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 533,
+        "height": 558
+      },
+      "scale": 0.37481698389458273,
+      "width": 384,
+      "height": 512,
+      "thickness": 15,
+      "outerRadius": 13
+    },
+    {
+      "screen": {
+        "width": 393,
+        "height": 852
+      },
+      "container": {
+        "width": 656,
+        "height": 918
+      },
+      "scale": 1.0211267605633803,
+      "width": 401,
+      "height": 870,
+      "thickness": 16,
+      "outerRadius": 34
+    },
+    {
+      "screen": {
+        "width": 1024,
+        "height": 1366
+      },
+      "container": {
+        "width": 1189,
+        "height": 240
+      },
+      "scale": 0.15373352855051245,
+      "width": 157,
+      "height": 210,
+      "thickness": 7,
+      "outerRadius": 5
+    },
+    {
+      "screen": {
+        "width": 430,
+        "height": 932
+      },
+      "container": {
+        "width": 150,
+        "height": 913
+      },
+      "scale": 0.2837209302325581,
+      "width": 122,
+      "height": 264,
+      "thickness": 6,
+      "outerRadius": 10
+    }
+  ],
+  "steppedZoom": [
+    {
+      "current": 2.426,
+      "direction": -1,
+      "out": 1.941
+    },
+    {
+      "current": 0.368,
+      "direction": -1,
+      "out": 0.294
+    },
+    {
+      "current": 4.408,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 1.747,
+      "direction": -1,
+      "out": 1.398
+    },
+    {
+      "current": 0.826,
+      "direction": 1,
+      "out": 1.032
+    },
+    {
+      "current": 4.436,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 2.454,
+      "direction": 1,
+      "out": 3.068
+    },
+    {
+      "current": 1.907,
+      "direction": -1,
+      "out": 1.526
+    },
+    {
+      "current": 4.044,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 1.673,
+      "direction": -1,
+      "out": 1.338
+    },
+    {
+      "current": 2.298,
+      "direction": -1,
+      "out": 1.838
+    },
+    {
+      "current": 3.034,
+      "direction": 1,
+      "out": 3.792
+    },
+    {
+      "current": 3.545,
+      "direction": -1,
+      "out": 2.836
+    },
+    {
+      "current": 0.456,
+      "direction": -1,
+      "out": 0.365
+    },
+    {
+      "current": 4.143,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 3.959,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 2.303,
+      "direction": 1,
+      "out": 2.879
+    },
+    {
+      "current": 1.193,
+      "direction": -1,
+      "out": 0.954
+    },
+    {
+      "current": 4.054,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 2.972,
+      "direction": -1,
+      "out": 2.378
+    },
+    {
+      "current": 4.451,
+      "direction": -1,
+      "out": 3.561
+    },
+    {
+      "current": 4.165,
+      "direction": -1,
+      "out": 3.332
+    },
+    {
+      "current": 1.2,
+      "direction": 1,
+      "out": 1.5
+    },
+    {
+      "current": 3.762,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 3.349,
+      "direction": -1,
+      "out": 2.679
+    },
+    {
+      "current": 0.708,
+      "direction": 1,
+      "out": 0.885
+    },
+    {
+      "current": 3.674,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 2.598,
+      "direction": 1,
+      "out": 3.247
+    },
+    {
+      "current": 2.585,
+      "direction": -1,
+      "out": 2.068
+    },
+    {
+      "current": 3.197,
+      "direction": -1,
+      "out": 2.558
+    },
+    {
+      "current": 3.756,
+      "direction": -1,
+      "out": 3.005
+    },
+    {
+      "current": 3.423,
+      "direction": -1,
+      "out": 2.738
+    },
+    {
+      "current": 4.015,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 1.149,
+      "direction": -1,
+      "out": 0.919
+    },
+    {
+      "current": 3.284,
+      "direction": 1,
+      "out": 4
+    },
+    {
+      "current": 2.026,
+      "direction": 1,
+      "out": 2.532
+    },
+    {
+      "current": 2.007,
+      "direction": 1,
+      "out": 2.509
+    },
+    {
+      "current": 0.655,
+      "direction": -1,
+      "out": 0.524
+    },
+    {
+      "current": 3.12,
+      "direction": -1,
+      "out": 2.496
+    },
+    {
+      "current": 0.704,
+      "direction": -1,
+      "out": 0.563
+    }
+  ],
+  "tweakManifest": "{\"kind\":\"design\",\"title\":\"Tweaks\",\"tweaks\":{\"size\":{\"type\":\"number\",\"default\":12,\"min\":8,\"max\":40,\"step\":1,\"unit\":\"px\"},\"dark\":{\"type\":\"boolean\",\"default\":false},\"accent\":{\"type\":\"color\",\"default\":\"#ff0000\"},\"tone\":{\"type\":\"color\",\"default\":\"#000\",\"options\":[\"#000\",\"#fff\"]},\"plan\":{\"type\":\"select\",\"default\":\"free\",\"options\":[\"free\",\"pro\"]}},\"artboards\":[{\"id\":\"a\",\"label\":\"A\",\"width\":390,\"height\":844}]}",
+  "mergeTweaks": [
+    {
+      "stored": {
+        "plan": -3.5,
+        "other": "#00ff00"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "tone": false,
+        "plan": null
+      },
+      "live": {
+        "size": -3.5,
+        "tone": -3.5,
+        "plan": 12
+      },
+      "out": {
+        "size": -3.5,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "pro",
+        "tone": false,
+        "plan": "gone"
+      },
+      "live": {
+        "size": -3.5,
+        "dark": null,
+        "tone": null,
+        "plan": 0
+      },
+      "out": {
+        "size": -3.5,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": "#00ff00",
+        "plan": false
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "#00ff00",
+        "other": 12
+      },
+      "live": {
+        "size": 0,
+        "dark": "gone",
+        "plan": 0,
+        "other": "gone"
+      },
+      "out": {
+        "size": 0,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "other": 0
+      },
+      "live": {
+        "tone": 12,
+        "plan": "#fff",
+        "other": null
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": -3.5,
+        "other": false
+      },
+      "live": {
+        "dark": "gone",
+        "tone": 12
+      },
+      "out": {
+        "size": -3.5,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": 0
+      },
+      "live": {
+        "dark": "gone",
+        "tone": 12,
+        "other": "#00ff00"
+      },
+      "out": {
+        "size": 0,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": null,
+        "accent": "pro",
+        "plan": 0,
+        "other": "gone"
+      },
+      "live": {
+        "dark": "pro",
+        "tone": -3.5
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "pro",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "accent": null,
+        "plan": "gone",
+        "other": 0
+      },
+      "live": {
+        "accent": false,
+        "plan": 12
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "accent": "#fff",
+        "plan": "#fff",
+        "other": 0
+      },
+      "live": {
+        "tone": 12
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#fff",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": true,
+        "accent": null
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "gone",
+        "plan": "gone"
+      },
+      "live": {
+        "dark": false,
+        "accent": "#00ff00",
+        "plan": "pro",
+        "other": "#00ff00"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#00ff00",
+        "tone": "#000",
+        "plan": "pro"
+      }
+    },
+    {
+      "stored": {
+        "dark": "#00ff00",
+        "tone": -3.5,
+        "plan": 12,
+        "other": true
+      },
+      "live": {
+        "tone": -3.5,
+        "plan": null,
+        "other": "#00ff00"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "other": null
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "gone",
+        "accent": "#fff",
+        "tone": 0,
+        "other": 0
+      },
+      "live": {
+        "dark": -3.5,
+        "tone": 12
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#fff",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": 0,
+        "accent": false
+      },
+      "live": null,
+      "out": {
+        "size": 0,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": null,
+        "accent": "gone"
+      },
+      "live": {
+        "accent": "gone",
+        "plan": "#fff"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "gone",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "#fff",
+        "dark": "gone",
+        "tone": 12,
+        "plan": "#fff"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": false,
+        "accent": 12,
+        "plan": null
+      },
+      "live": {
+        "size": null,
+        "accent": "pro",
+        "tone": "gone"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "pro",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": true,
+        "dark": false,
+        "accent": "#00ff00",
+        "plan": false,
+        "other": "#00ff00"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#00ff00",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": -3.5,
+        "accent": "pro",
+        "tone": "gone",
+        "plan": false,
+        "other": "#00ff00"
+      },
+      "live": {
+        "accent": "#fff"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "pro",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": "pro",
+        "accent": 0
+      },
+      "live": {
+        "accent": false,
+        "plan": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": null,
+        "accent": 0
+      },
+      "live": {
+        "size": "pro",
+        "other": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "#fff",
+        "accent": "pro",
+        "tone": "#fff",
+        "plan": 0
+      },
+      "live": {
+        "dark": "#fff",
+        "tone": -3.5
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "pro",
+        "tone": "#fff",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "accent": "#00ff00",
+        "tone": "#fff",
+        "other": "gone"
+      },
+      "live": {
+        "other": true
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#00ff00",
+        "tone": "#fff",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": false,
+        "accent": "pro"
+      },
+      "live": {
+        "accent": "#00ff00",
+        "plan": "gone",
+        "other": "gone"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "pro",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "tone": "gone"
+      },
+      "live": {
+        "dark": 12,
+        "accent": "#00ff00",
+        "tone": "pro",
+        "other": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#00ff00",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": "gone",
+        "dark": "#fff",
+        "accent": true,
+        "tone": "#fff",
+        "other": "#fff"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#fff",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": true,
+        "plan": "pro"
+      },
+      "live": {
+        "accent": "gone",
+        "tone": null,
+        "plan": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "gone",
+        "tone": "#000",
+        "plan": "pro"
+      }
+    },
+    {
+      "stored": {
+        "size": true,
+        "accent": "gone",
+        "tone": 0,
+        "plan": -3.5,
+        "other": 0
+      },
+      "live": {
+        "accent": "gone",
+        "tone": true,
+        "plan": 0,
+        "other": "#fff"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "gone",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": null,
+        "accent": 12,
+        "plan": null
+      },
+      "live": {
+        "size": 0,
+        "dark": null,
+        "plan": null
+      },
+      "out": {
+        "size": 0,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "accent": false,
+        "tone": 0
+      },
+      "live": {
+        "dark": true,
+        "accent": true,
+        "tone": -3.5,
+        "plan": "gone"
+      },
+      "out": {
+        "size": 12,
+        "dark": true,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {},
+      "live": {
+        "size": "pro",
+        "dark": 12,
+        "plan": 12,
+        "other": -3.5
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": -3.5,
+        "accent": -3.5,
+        "tone": true,
+        "plan": "pro",
+        "other": "gone"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "pro"
+      }
+    },
+    {
+      "stored": {
+        "dark": "#fff",
+        "other": 12
+      },
+      "live": {
+        "dark": null,
+        "accent": false,
+        "plan": 12,
+        "other": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": true,
+        "accent": -3.5,
+        "plan": false,
+        "other": 12
+      },
+      "live": {
+        "size": true,
+        "dark": true,
+        "accent": null,
+        "plan": false
+      },
+      "out": {
+        "size": 12,
+        "dark": true,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": -3.5,
+        "accent": true,
+        "plan": false
+      },
+      "live": {
+        "accent": "gone",
+        "plan": "#fff"
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "gone",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "size": 12,
+        "dark": "#00ff00",
+        "other": "#00ff00"
+      },
+      "live": null,
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    },
+    {
+      "stored": {
+        "dark": 0,
+        "tone": 12
+      },
+      "live": {
+        "dark": "gone",
+        "plan": false,
+        "other": 0
+      },
+      "out": {
+        "size": 12,
+        "dark": false,
+        "accent": "#ff0000",
+        "tone": "#000",
+        "plan": "free"
+      }
+    }
+  ],
+  "parseManifest": [
+    {
+      "text": "",
+      "out": null
+    },
+    {
+      "text": "not json",
+      "out": null
+    },
+    {
+      "text": "[]",
+      "out": null
+    },
+    {
+      "text": "{\"kind\":\"other\"}",
+      "out": null
+    },
+    {
+      "text": "{\"kind\":\"page\"}",
+      "out": {
+        "kind": "page"
+      }
+    },
+    {
+      "text": "{\"kind\":\"doc\",\"title\":\"  Notes  \"}",
+      "out": {
+        "kind": "doc",
+        "title": "Notes"
+      }
+    },
+    {
+      "text": "{\"kind\":\"design\",\"title\":\"Tweaks\",\"tweaks\":{\"size\":{\"type\":\"number\",\"default\":12,\"min\":8,\"max\":40,\"step\":1,\"unit\":\"px\"},\"dark\":{\"type\":\"boolean\",\"default\":false},\"accent\":{\"type\":\"color\",\"default\":\"#ff0000\"},\"tone\":{\"type\":\"color\",\"default\":\"#000\",\"options\":[\"#000\",\"#fff\"]},\"plan\":{\"type\":\"select\",\"default\":\"free\",\"options\":[\"free\",\"pro\"]}},\"artboards\":[{\"id\":\"a\",\"label\":\"A\",\"width\":390,\"height\":844}]}",
+      "out": {
+        "kind": "design",
+        "title": "Tweaks",
+        "tweaks": {
+          "size": {
+            "type": "number",
+            "default": 12,
+            "unit": "px",
+            "min": 8,
+            "max": 40,
+            "step": 1
+          },
+          "dark": {
+            "type": "boolean",
+            "default": false
+          },
+          "accent": {
+            "type": "color",
+            "default": "#ff0000"
+          },
+          "tone": {
+            "type": "color",
+            "default": "#000",
+            "options": ["#000", "#fff"]
+          },
+          "plan": {
+            "type": "select",
+            "default": "free",
+            "options": ["free", "pro"]
+          }
+        },
+        "artboards": [
+          {
+            "id": "a",
+            "label": "A",
+            "width": 390,
+            "height": 844
+          }
+        ]
+      }
+    },
+    {
+      "text": "{\"kind\":\"page\",\"title\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+      "out": {
+        "kind": "page",
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "text": "{\"kind\":\"design\",\"artboards\":[{\"id\":\"a\",\"label\":\"A\",\"width\":100,\"height\":100},{\"id\":\"a\",\"label\":\"dup\",\"width\":100,\"height\":100},{\"id\":\"bad id\",\"label\":\"B\",\"width\":100,\"height\":100},{\"id\":\"c\",\"label\":\"C\",\"width\":-1,\"height\":100}]}",
+      "out": {
+        "kind": "design"
+      }
+    },
+    {
+      "text": "{\"kind\":\"page\",\"tweaks\":{\"1bad\":{\"type\":\"number\",\"default\":1},\"ok\":{\"type\":\"select\",\"default\":\"z\",\"options\":[\"a\"]},\"n\":{\"type\":\"number\",\"default\":\"x\"}}}",
+      "out": {
+        "kind": "page",
+        "tweaks": {
+          "ok": {
+            "type": "select",
+            "default": "a",
+            "options": ["a"]
+          }
+        }
+      }
+    }
+  ]
+}

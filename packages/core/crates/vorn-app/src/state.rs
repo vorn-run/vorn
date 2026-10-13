@@ -143,6 +143,20 @@ pub enum MenuKind {
     PromptProject,
     /// The node panel's More menu.
     NodeMore(String),
+    /// The editor's icon and colour picker.
+    WfIcon,
+    /// The settings shell picker's list.
+    SetShell,
+    /// A settings `<select>`, by the default it writes.
+    SetSelect(String),
+    /// A host's stored-key select.
+    SshKey(String),
+    /// A session's branch switcher.
+    Branch(String),
+    /// The editors a session's project opens in.
+    OpenIn(String),
+    /// A Files pane's list of every open tab.
+    FileTabs(String),
 }
 
 impl MenuKind {
@@ -184,6 +198,14 @@ pub enum Dialog {
     Missed,
     /// The export or import path.
     WfFile,
+    /// GateReviewModal: the review page of a waiting gate.
+    GateReview,
+    /// The Changes panel's CommitDialog.
+    GitCommit,
+    /// WorktreeCleanupDialog.
+    RemoveWorktree,
+    /// "Discard unsaved changes?" before a buffer goes.
+    Discard,
 }
 
 /// A toast in the bottom right.
@@ -354,9 +376,20 @@ pub struct State {
     pub locked: HashSet<String>,
     /// Sidebar projects folded shut.
     pub collapsed: HashSet<String>,
+    /// Cards stowed in the session dock rather than the grid.
+    pub minimized: HashSet<String>,
+    /// The session dock folded into its count chip.
+    pub dock_collapsed: bool,
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
     pub wf: crate::workflows::Workflows,
+    pub settings: crate::settings::Settings,
+    pub git: crate::git::Git,
+    pub side: crate::side::Side,
+    pub editors: crate::editor::Editors,
+    /// The build of the vornd this app talks to, from `server:identity`.
+    pub server_version: Option<String>,
+    pub bench: crate::panes::Workbench,
 }
 
 impl State {
@@ -372,6 +405,7 @@ impl State {
                     .as_deref()
                     .is_none_or(|p| s.info.project_name == p)
                     && self.filter.keeps(s)
+                    && self.side.holder(&s.info.id).is_none()
             })
             .map(|(i, _)| i)
             .collect();
@@ -389,16 +423,48 @@ impl State {
         out
     }
 
-    /// Whether the composer is what the sessions view shows.
-    pub fn composing(&self, store: &Store) -> bool {
+    /// The cards the grid lays out: [`State::visible`] less the minimized,
+    /// which the dock holds instead. The tabs layout shows them all.
+    pub fn gridded(&self, store: &Store) -> Vec<usize> {
+        let mut shown = self.visible(store);
+        if self.layout == LayoutMode::Grid {
+            shown.retain(|&i| !self.minimized.contains(&store.sessions[i].info.id));
+        }
+        shown
+    }
+
+    /// The minimized cards the dock shows, in the grid's order; none in the
+    /// tabs layout, where every session has its tab.
+    pub fn docked(&self, store: &Store) -> Vec<usize> {
+        if self.layout != LayoutMode::Grid {
+            return Vec::new();
+        }
+        let mut shown = self.visible(store);
+        shown.retain(|&i| self.minimized.contains(&store.sessions[i].info.id));
+        shown
+    }
+
+    /// Whether the sessions view has no card to lay out and no filter to
+    /// blame, so the composer stands in for the grid (`PromptLauncher`
+    /// inline).
+    pub fn composer_inline(&self, store: &Store) -> bool {
         self.view == MainView::Sessions
             && self.focused.is_none()
-            && (store.sessions.is_empty() || self.composer_open)
+            && (store.sessions.is_empty()
+                || (self.layout == LayoutMode::Grid
+                    && self.filter == Filter::All
+                    && self.gridded(store).is_empty()))
+    }
+
+    /// Whether the composer is what the sessions view shows.
+    pub fn composing(&self, store: &Store) -> bool {
+        self.composer_inline(store)
+            || (self.view == MainView::Sessions && self.focused.is_none() && self.composer_open)
     }
 
     /// Whether the composer floats over the cards rather than replacing them.
     pub fn composer_overlay(&self, store: &Store) -> bool {
-        self.composing(store) && !store.sessions.is_empty()
+        self.composing(store) && !self.composer_inline(store)
     }
 
     /// Whether any view option differs from its default (the toolbar
