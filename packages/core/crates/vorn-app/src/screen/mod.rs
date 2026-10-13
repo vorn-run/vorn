@@ -216,23 +216,33 @@ impl Screen<'_> {
         }
     }
 
+    /// The sidebar's width: in a narrow terminal it takes under a third of the window.
+    pub fn sidebar_w(&self) -> f32 {
+        if self.ui.is_cells() {
+            look::SIDEBAR_W.min((self.size.0 * 0.3).round())
+        } else {
+            look::SIDEBAR_W
+        }
+    }
+
     /// The grid's size: the window under the top bar, beside the sidebar.
     pub fn grid_size(&self) -> (f32, f32) {
+        let size = self.size;
         let side = if self.st.sidebar {
-            look::SIDEBAR_W
+            self.sidebar_w()
         } else {
             0.0
         };
         let panel = match &self.st.git.panel {
             Some(_) if self.st.view == MainView::Sessions && self.st.git.maximized => {
-                (self.size.0 - 48.0).max(look::MIN_CARD.0)
+                (size.0 - 48.0).max(look::MIN_CARD.0)
             }
             Some(_) if self.st.view == MainView::Sessions => self.st.git.width(),
             _ => 0.0,
         };
         (
-            (self.size.0 - side - panel).max(0.0),
-            (self.size.1 - look::TOP_BAR_H).max(0.0),
+            (size.0 - side - panel).max(0.0),
+            (size.1 - look::TOP_BAR_H).max(0.0),
         )
     }
 }

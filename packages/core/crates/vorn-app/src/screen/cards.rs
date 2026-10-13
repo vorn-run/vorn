@@ -1299,7 +1299,7 @@ fn tab(s: &Screen<'_>, n: usize, session: &Session, active: bool) -> El {
                 ))
                 .child(close),
         )
-    } else if n < 9 && !renaming {
+    } else if n < 9 && !renaming && !s.ui.is_cells() {
         Some(
             div()
                 .px(4.0)
@@ -1412,15 +1412,20 @@ pub(super) fn tabs(s: &Screen<'_>) -> El {
             "More session options",
             12.0,
         ));
-    strip = strip.child(list).child(
-        div()
-            .row()
-            .items_center()
-            .gap(4.0)
-            .pl(8.0)
-            .child(chrome::left_extras(s))
-            .child(chrome::right_cluster(s, false)),
-    );
+    // A terminal keeps the tabs readable: the dock gives up its message first.
+    let extras = div()
+        .row()
+        .items_center()
+        .gap(4.0)
+        .pl(8.0)
+        .child(chrome::left_extras(s))
+        .child(chrome::right_cluster(s, false));
+    let (list, extras) = if s.ui.is_cells() {
+        (list.clip(), extras.max_w(280.0).min_w0())
+    } else {
+        (list, extras)
+    };
+    strip = strip.child(list).child(extras);
     let strip = draggable(
         s,
         div()

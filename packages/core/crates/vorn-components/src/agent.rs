@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use vornui::theme::color;
-use vornui::{image, rasterize_svg_rgba, El, Ui};
+use vornui::{image, rasterize_svg_rgba, El, Rgba, Ui};
 
 use crate::status::Status;
 
@@ -51,9 +51,42 @@ impl AgentMarks {
 /// agent's) terminal, `strokeWidth 1.5` in gray-400.
 pub fn agent_icon(marks: &AgentMarks, agent: &str, size: f32) -> El {
     match marks.get(agent) {
-        Some(id) => image(id, size, size),
+        Some(id) => {
+            let (g, tint) = cell_mark(agent);
+            image(id, size, size).glyph(g).glyph_tint(tint)
+        }
         None => crate::lucide("terminal", size, 1.5, color::GRAY_400),
     }
+}
+
+/// An agent's mark on a cells surface: one character in the mark's own colour.
+fn cell_mark(agent: &str) -> (&'static str, Rgba) {
+    let g = match agent {
+        "claude" => "✳",
+        "copilot" => "◉",
+        "codex" => "◎",
+        "opencode" => "▣",
+        "gemini" => "✦",
+        _ => "›",
+    };
+    let tint = MARKS
+        .iter()
+        .find(|(n, _)| *n == agent)
+        .and_then(|(_, svg)| first_fill(svg))
+        .unwrap_or(color::INK);
+    (g, tint)
+}
+
+/// A mark's first `fill="#rrggbb"` (or `#rgb`).
+fn first_fill(svg: &str) -> Option<Rgba> {
+    let at = svg.find("fill=\"#")? + 7;
+    let hex = &svg[at..at + svg[at..].find('"')?];
+    let full = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect(),
+        6 => hex.to_owned(),
+        _ => return None,
+    };
+    u32::from_str_radix(&full, 16).ok().map(Rgba::hex)
 }
 
 /// `AgentStatusIcon`: the running glyph in `white/85` while an agent
@@ -71,4 +104,16 @@ pub fn status_icon(
         return crate::glyph::running(ui, size, color::WHITE.alpha(0.85 * alpha));
     }
     agent_icon(marks, agent, size).opacity(alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_mark_keeps_its_colour_in_a_terminal() {
+        assert_eq!(cell_mark("claude"), ("✳", Rgba::hex(0xd97757)));
+        assert_eq!(cell_mark("codex").1, Rgba::hex(0xffffff));
+        assert_eq!(cell_mark("shell"), ("›", color::INK));
+    }
 }

@@ -14,6 +14,7 @@
 //! is assertable.
 
 pub mod args;
+pub mod attach;
 pub mod client;
 pub mod exit;
 pub mod js;
@@ -37,6 +38,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const USAGE: &str = "vorn: Vorn from the command line
 
 Usage
+  vorn                                                   Vorn in this terminal
+  vorn attach [<session>]                                One session, full window
   vorn session start --agent <agent> [--prompt <text>]   Start an agent session
   vorn session list [--recent] [--json]                  What is running
   vorn session logs|send|kill <id>                       Read, steer, stop one
@@ -53,8 +56,8 @@ Options common to the commands that talk to a server
   --data-dir <path>   Reach a server started with the same flag
   --timeout <ms>      Give up on a call after this long
 
-Running `vorn` with no command opens the app. With no server running, a command
-starts one and says so.
+Running `vorn` with no command in a terminal opens Vorn there; piped, it prints
+this. With no server running, a command starts one and says so.
 ";
 
 /// The command, wherever it sits.
@@ -76,8 +79,8 @@ pub fn find_command(argv: &[String]) -> Option<&str> {
     None
 }
 
-const COMMANDS: [&str; 7] = [
-    "session", "workflow", "server", "serve", "token", "help", "mcp",
+const COMMANDS: [&str; 8] = [
+    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach",
 ];
 
 /// An option that swallowed the command because its own value was missing:
@@ -131,8 +134,36 @@ async fn client_command(argv: &[String], io: &mut dyn Io, mcp: bool) -> ExitCode
     }
 }
 
-/// Runs one command and returns the process's exit code.
+/// Runs one command and returns the process's exit code, as though no
+/// terminal were attached: `vorn` alone prints its usage.
 pub async fn run(argv: &[String], io: &mut dyn Io) -> ExitCode {
+    match plan(argv, io, false).await {
+        attach::Outcome::Exit(code) => code,
+        attach::Outcome::Tui(_) => ExitCode::Usage,
+    }
+}
+
+/// Runs one command, or answers the TUI it asks for when `tty` (stdin and
+/// stdout are a terminal): `vorn` alone, or `vorn attach`.
+pub async fn plan(argv: &[String], io: &mut dyn Io, tty: bool) -> attach::Outcome {
+    use attach::Outcome;
+    let Some(command) = find_command(argv) else {
+        let asks = |f: &[&str]| argv.iter().any(|a| f.contains(&a.as_str()));
+        if tty && !asks(&["--version", "--help", "-h"]) {
+            if let Some(code) = eaten(io, argv) {
+                return Outcome::Exit(code);
+            }
+            return attach::run(argv, io, true, true).await;
+        }
+        return Outcome::Exit(run_command(argv, io).await);
+    };
+    if command == "attach" {
+        return attach::run(argv, io, false, tty).await;
+    }
+    Outcome::Exit(run_command(argv, io).await)
+}
+
+async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
     let Some(command) = find_command(argv) else {
         if argv.iter().any(|a| a == "--version") {
             io.write(&format!("{VERSION}\n"));

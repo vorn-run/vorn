@@ -23,6 +23,9 @@ arboard = { version = "3", default-features = false }
 unicode-segmentation = "1"
 softbuffer = { version = "0.4", default-features = false }
 rayon = "1"
+unicode-width = "0.2"
+# The Cells backend's terminal: raw mode, diffed writes and input.
+crossterm = "0.29"
 
 # Linux has no single window system: X11 and Wayland are both loaded at run
 # time, and the screen reader is reached over D-Bus.

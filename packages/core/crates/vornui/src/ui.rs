@@ -12,6 +12,7 @@ use taffy::prelude::{AvailableSpace, Dimension, Size, TaffyTree};
 use taffy::{NodeId as LayoutNode, Overflow, Point};
 
 use crate::atlas::Atlases;
+use crate::cells::{self, PaintList};
 use crate::edit::{Clipboard, MemoryClipboard, TextEdit};
 use crate::element::{Action, Content, EditLook, El, Id, Overlay, Place, Sense};
 use crate::gpu::{adapter_name, instance_desc, Gpu};
@@ -19,7 +20,7 @@ use crate::interact::{EditGeom, Hit, State};
 use crate::render::{read_texture, Offscreen, RenderMode, Renderer, OFFSCREEN_FORMAT};
 use crate::scene::{Rect, Rgba, Scene};
 use crate::text::{TextStyle, TextSystem};
-use crate::{a11y, theme};
+use crate::{a11y, icons, theme};
 
 /// What a laid-out frame leaves for the app: where its custom boxes landed
 /// (physical pixels) and the accessibility tree.
@@ -88,6 +89,8 @@ pub struct Ui {
     /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
     /// view holding `&Ui` can ask.
     pub(crate) wake: Cell<Option<Instant>>,
+    /// Set on a cells surface: layout is in cells and frames are recorded here.
+    pub(crate) cells: Option<PaintList>,
 }
 
 enum Measure<'a> {
@@ -111,6 +114,11 @@ struct Cx<'a> {
     nodes: Vec<(NodeId, Node)>,
     clip: Rect,
     layer: u32,
+    /// Painting above the window's flow (an overlay or layered box): on
+    /// cells its frames draw whole rather than sharing edges.
+    float: bool,
+    /// Attributes a selected box gives the text inside it on cells.
+    emph: u8,
     focus_seen: bool,
     /// The transform painting is under, in logical pixels, so what is hit
     /// is where it is drawn.
@@ -211,7 +219,40 @@ impl Ui {
             images: Vec::new(),
             anon: 0,
             wake: Cell::new(None),
+            cells: None,
         }
+    }
+
+    /// A UI on the Cells surface: lengths are laid out in terminal cells
+    /// (one column by one row) and frames are recorded as a [`PaintList`]
+    /// for a cells backend rather than shaped into pixels.
+    pub fn cells(cfg: &UiConfig) -> Ui {
+        let cfg = UiConfig { scale: 1.0, ..*cfg };
+        let mut ui = Ui::build(
+            None,
+            None,
+            RenderMode::Cpu,
+            wgpu::TextureFormat::Bgra8Unorm,
+            &cfg,
+        );
+        ui.text.cells = true;
+        ui.cells = Some(PaintList::default());
+        ui
+    }
+
+    /// Whether this UI lays out and draws in terminal cells.
+    pub fn is_cells(&self) -> bool {
+        self.cells.is_some()
+    }
+
+    /// The last frame's paint list, on a cells surface.
+    pub fn paint_list(&self) -> Option<&PaintList> {
+        self.cells.as_ref()
+    }
+
+    /// The paint list, for the app to add what it paints into its custom boxes.
+    pub fn paint_list_mut(&mut self) -> Option<&mut PaintList> {
+        self.cells.as_mut()
     }
 
     /// A UI for offscreen frames: a headless device unless `mode` is CPU,
@@ -296,6 +337,9 @@ impl Ui {
         self.wake.set(None);
         self.scene.clear();
         self.clear = clear;
+        if let Some(list) = &mut self.cells {
+            list.begin(clear);
+        }
     }
 
     /// The logical size the frame is for: the window's while a window
@@ -311,6 +355,12 @@ impl Ui {
     /// its custom boxes stays under them.
     pub fn layout(&mut self, root: El, size: (f32, f32)) -> Laid {
         self.viewport = size;
+        let size = if self.is_cells() {
+            use cells::units::{COL, ROW};
+            ((size.0 / COL).round(), (size.1 / ROW).round())
+        } else {
+            size
+        };
         let mut cx = Cx {
             taffy: TaffyTree::new(),
             overlays: Vec::new(),
@@ -318,6 +368,8 @@ impl Ui {
             nodes: Vec::new(),
             clip: Rect::EVERYTHING,
             layer: 0,
+            float: false,
+            emph: 0,
             focus_seen: false,
             xf: Xf::IDENTITY,
         };
@@ -327,7 +379,7 @@ impl Ui {
         self.st.ime = None;
         self.anon = 0;
         let main_layer = self.scene.current_layer();
-        let node = self.lay(&mut cx, &root, None, size, AvailableSpace::Definite);
+        let node = self.lay(&mut cx, &root, None, size, AvailableSpace::Definite, false);
         let mut root_children = Vec::new();
         self.paint(
             &mut cx,
@@ -379,9 +431,11 @@ impl Ui {
         min_w: Option<f32>,
         size: (f32, f32),
         space: fn(f32) -> AvailableSpace,
+        float: bool,
     ) -> LayoutNode {
         let mut scrolls = Vec::new();
-        let node = build(&mut cx.taffy, el, &mut scrolls);
+        let cells = self.is_cells();
+        let node = build(&mut cx.taffy, el, &mut scrolls, cells, (false, float));
         if let Some(w) = min_w {
             if let Ok(s) = cx.taffy.style(node) {
                 let mut s = s.clone();
@@ -407,7 +461,7 @@ impl Ui {
             if l.content_size.height + l.border.bottom > l.size.height + 0.5 {
                 if let Ok(s) = cx.taffy.style(n) {
                     let mut s = s.clone();
-                    s.scrollbar_width = theme::scrollbar::WIDTH;
+                    s.scrollbar_width = if cells { 1.0 } else { theme::scrollbar::WIDTH };
                     let _ = cx.taffy.set_style(n, s);
                     again = true;
                 }
@@ -426,12 +480,44 @@ impl Ui {
         avail: Size<AvailableSpace>,
     ) {
         let text = &mut self.text;
+        let cells = text.cells;
         // Layout only fails on unknown node ids, which `build` never makes.
         let _ = t.compute_layout_with_measure(node, avail, |known, avail, _, ctx, _| {
             let Some(m) = ctx else {
                 return Size::ZERO;
             };
             match m {
+                Measure::Text { text: s, wrap, .. } if cells => {
+                    let s = &cells::keys(s);
+                    let w = cells::width(s) as f32;
+                    let max = known.width.unwrap_or(match avail.width {
+                        AvailableSpace::Definite(w) => w,
+                        AvailableSpace::MinContent if *wrap => s
+                            .split_whitespace()
+                            .map(|w| cells::width(w) as f32)
+                            .fold(0.0, f32::max),
+                        // A line that does not wrap truncates rather than holding its
+                        // row open; a short label ("Open", "Alt+1") keeps its width.
+                        AvailableSpace::MinContent if w > 8.0 => 1.0,
+                        _ => f32::MAX,
+                    });
+                    let lines = if *wrap && w > max {
+                        cells::wrap(s, max as usize).len()
+                    } else {
+                        s.lines()
+                            .count()
+                            .max(1)
+                            .min(if *wrap { usize::MAX } else { 1 })
+                    };
+                    Size {
+                        width: known.width.unwrap_or(w.min(max.max(1.0))),
+                        height: known.height.unwrap_or(lines as f32),
+                    }
+                }
+                Measure::Edit { .. } if cells => Size {
+                    width: known.width.unwrap_or(0.0),
+                    height: known.height.unwrap_or(1.0),
+                },
                 Measure::Text {
                     text: s,
                     style,
@@ -473,7 +559,7 @@ impl Ui {
         a11y_parent: &mut Vec<NodeId>,
     ) {
         let min_w = ov.owner_width.then_some(host.w);
-        let node = self.lay(cx, &ov.el, min_w, win, |_| AvailableSpace::MaxContent);
+        let node = self.lay(cx, &ov.el, min_w, win, |_| AvailableSpace::MaxContent, true);
         let Ok(l) = cx.taffy.layout(node) else {
             return;
         };
@@ -493,18 +579,20 @@ impl Ui {
         if !inside {
             // Flip to the other side when there is no room, then keep it on
             // screen.
+            let margin = if self.is_cells() { 0.0 } else { MARGIN };
             if ov.place == Place::Beside {
                 // Slides up to fit rather than flipping above its entry.
-            } else if y + h > win.1 - MARGIN && host.y - g - h >= MARGIN {
+            } else if y + h > win.1 - margin && host.y - g - h >= margin {
                 y = host.y - g - h;
-            } else if y < MARGIN && host.bottom() + g + h <= win.1 - MARGIN {
+            } else if y < margin && host.bottom() + g + h <= win.1 - margin {
                 y = host.bottom() + g;
             }
-            x = x.min(win.0 - MARGIN - w).max(MARGIN);
-            y = y.min(win.1 - MARGIN - h).max(MARGIN);
+            x = x.min(win.0 - margin - w).max(margin);
+            y = y.min(win.1 - margin - h).max(margin);
         }
         self.scene.layer();
         cx.layer += 1;
+        cx.float = true;
         // Inside its owner, it is cut where the owner is.
         let clip = if inside { host_clip } else { Rect::EVERYTHING };
         let clipped = clip != Rect::EVERYTHING;
@@ -544,17 +632,30 @@ impl Ui {
         let (x, y) = (origin.0 + l.location.x, origin.1 + l.location.y);
         let rl = Rect::new(x, y, l.size.width, l.size.height);
         let r = rl.scaled(k);
+        let (was_float, was_emph) = (cx.float, cx.emph);
+        if self.cells.is_some() && el.a11y.selected == Some(true) {
+            cx.emph |= cells::attr::BOLD;
+            if el.a11y.role == Some(Role::Tab) {
+                cx.emph |= cells::attr::UNDERLINE;
+            }
+        }
         if el.layered {
             self.scene.layer();
             cx.layer += 1;
+            cx.float = true;
         }
         let focused = el.id.is_some() && self.st.focus == el.id;
         let ring = focused && self.st.focus_visible && el.ring.is_some();
         if el.opacity < 1.0 {
             self.scene.push_opacity(el.opacity);
+            if let Some(list) = &mut self.cells {
+                list.push_alpha(el.opacity);
+            }
         }
+        let cells = self.cells.is_some();
         let saved_xf = cx.xf;
-        if let Some((s, (dx, dy))) = el.transform {
+        // Motion is dropped on cells: a box draws where it lands.
+        if let Some((s, (dx, dy))) = el.transform.filter(|_| !cells) {
             self.scene
                 .push_transform(s, (r.x + r.w / 2.0, r.y + r.h / 2.0), (dx * k, dy * k));
             cx.xf = Xf {
@@ -573,13 +674,16 @@ impl Ui {
         let snap = cx.xf.scale == 1.0;
         let bx = if snap { r.snapped() } else { r };
         let stroke = |w: f32| if snap { border_px(w, k) } else { w * k };
-        if let Some(sigma) = el.backdrop_blur {
+        if cells {
+            self.record_box(cx, el, rl, ring);
+        }
+        if let Some(sigma) = el.backdrop_blur.filter(|_| !cells) {
             self.scene.backdrop_blur(bx, sigma * k, radius * k);
         }
-        for s in &el.shadows {
+        for s in el.shadows.iter().filter(|_| !cells) {
             self.scene.shadow(bx, radius * k, &s.scaled(k));
         }
-        if el.bg.is_some() || el.border.is_some() {
+        if !cells && (el.bg.is_some() || el.border.is_some()) {
             let fill = el.bg.unwrap_or_default();
             let border = el
                 .border
@@ -587,7 +691,7 @@ impl Ui {
                 .map(|(w, c)| (stroke(w), c));
             self.scene.quad(bx, fill, radius * k, border);
         }
-        if let Some((w, c)) = el.border.filter(|_| el.dashed) {
+        if let Some((w, c)) = el.border.filter(|_| el.dashed && !cells) {
             let svg = format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\"><rect x=\"{h}\" y=\"{h}\" width=\"{}\" height=\"{}\" rx=\"{radius}\" fill=\"none\" stroke=\"#fff\" stroke-width=\"{w}\" stroke-dasharray=\"{d} {d}\"/></svg>",
                 rl.w,
@@ -603,7 +707,7 @@ impl Ui {
                 self.scene.sprite(r, uv, c, false);
             }
         }
-        for (side, rule) in el.rules.iter().enumerate() {
+        for (side, rule) in el.rules.iter().enumerate().filter(|_| !cells) {
             let Some((w, c)) = *rule else { continue };
             let w = stroke(w);
             let line = match side {
@@ -658,7 +762,11 @@ impl Ui {
                 .max(0.0),
         );
         let mut edit_runs = None;
+        let glyph = cell_glyph(el).filter(|_| cells);
         match &el.content {
+            _ if cells && !matches!(el.content, Content::Custom(_)) => {
+                self.record_content(cx, el, glyph, inner, focused);
+            }
             Content::None => {}
             Content::Text {
                 text,
@@ -744,10 +852,17 @@ impl Ui {
             rl.h - l.border.top - l.border.bottom,
         );
         let saved_clip = cx.clip;
-        if el.clip {
+        // On cells a frame is a clip too: content never draws over the box drawing.
+        let clips = el.clip || (cells && el.border.is_some() && l.border.left > 0.0);
+        if clips {
             self.scene.push_clip(clip_box.scaled(k));
             cx.clip = cx.clip.intersect(&cx.xf.apply(clip_box));
         }
+        let children = if glyph.is_some() {
+            &[][..]
+        } else {
+            &el.children[..]
+        };
         let mut scrolled = 0.0;
         let mut max = 0.0;
         if el.scroll {
@@ -779,7 +894,7 @@ impl Ui {
         };
         let role = el.a11y.role.or(custom.as_ref().map(|a| a.0)).or(edit_role);
         let mut own_children = Vec::new();
-        for (i, ce) in el.children.iter().enumerate() {
+        for (i, ce) in children.iter().enumerate() {
             let Ok(c) = cx.taffy.child_at_index(node, i) else {
                 break;
             };
@@ -807,14 +922,23 @@ impl Ui {
             } else {
                 theme::scrollbar::THUMB
             };
+            if cells {
+                let rows = view.round().max(1.0);
+                let len = (rows * rows / (rows + max)).round().clamp(1.0, rows);
+                let at = clip_box.y + ((rows - len) * scrolled / max).round();
+                let thumb = (at as i32, len as i32);
+                let track = Rect::new(clip_box.right() - 1.0, clip_box.y, 1.0, rows);
+                let color = theme::scrollbar::THUMB_HOVER;
+                self.record(cx, cells::Op::Scroll { thumb, color }, track);
+            }
             self.scene
                 .quad(track.scaled(k), c, theme::scrollbar::RADIUS * k, None);
         }
-        if el.clip {
+        if clips {
             self.scene.pop_clip();
             cx.clip = saved_clip;
         }
-        if ring {
+        if ring && !cells {
             let d = theme::focus::OFFSET + theme::focus::WIDTH;
             let w = stroke(theme::focus::WIDTH);
             let outer = rl.outset(d).scaled(k);
@@ -832,8 +956,12 @@ impl Ui {
             self.scene.pop_transform();
         }
         cx.xf = saved_xf;
+        (cx.float, cx.emph) = (was_float, was_emph);
         if el.opacity < 1.0 {
             self.scene.pop_opacity();
+            if let Some(list) = &mut self.cells {
+                list.pop_alpha();
+            }
         }
         let Some(role) = role else {
             return;
@@ -941,6 +1069,152 @@ impl Ui {
         }
         cx.nodes.push((id, n));
         a11y_parent.push(id);
+    }
+
+    /// Records `op` over `rect` in the cells paint list, under the clip and layer painting is in.
+    fn record(&mut self, cx: &Cx<'_>, op: cells::Op, rect: Rect) {
+        if let Some(list) = &mut self.cells {
+            list.clip = Some(cx.clip);
+            list.layer = cx.layer;
+            list.push(op, rect);
+        }
+    }
+
+    /// A box on cells: its fill, its border as box drawing, its rules, and
+    /// keyboard focus as one step brighter.
+    fn record_box(&mut self, cx: &Cx<'_>, el: &El, rl: Rect, ring: bool) {
+        let shape = Shape::of(el);
+        // A chip a pixel surface tints faintly still reads as one in cells.
+        let chip = |c: Rgba| {
+            let small = rl.h <= 1.0 && rl.w <= 24.0 && el.radius > 0.0;
+            if small && c.0[3] > 0.01 && c.0[3] < 0.10 {
+                Rgba([c.0[0], c.0[1], c.0[2], 0.10])
+            } else {
+                c
+            }
+        };
+        if let Some(bg) = el.bg {
+            let op = match shape {
+                Shape::Box => cells::Op::Fill { color: chip(bg) },
+                Shape::HLine => cells::Op::Rule { side: 0, color: bg },
+                Shape::VLine if !cells::is_tint(bg) => cells::Op::Bar { color: bg },
+                Shape::VLine => cells::Op::Rule { side: 3, color: bg },
+                Shape::Dot => cells::Op::Glyph {
+                    glyph: "●".into(),
+                    color: bg,
+                },
+            };
+            self.record(cx, op, rl);
+        }
+        if ring {
+            let color = Rgba::white(0.06);
+            self.record(cx, cells::Op::Fill { color }, rl);
+        }
+        if let Some((_, color)) = el.border.filter(|(w, c)| *w > 0.0 && c.0[3] > 0.0) {
+            let op = if framed(el) {
+                let round = el.radius > 0.0;
+                let open = !cx.float;
+                cells::Op::Frame { color, round, open }
+            } else {
+                cells::Op::Fill { color: chip(color) }
+            };
+            self.record(cx, op, rl);
+        }
+        for (side, rule) in el.rules.iter().enumerate() {
+            if let Some((w, color)) = rule.filter(|(w, c)| *w > 0.0 && c.0[3] > 0.0) {
+                let op = if side == 3 && w >= 2.0 && !cells::is_tint(color) {
+                    cells::Op::Bar { color }
+                } else {
+                    let side = side as u8;
+                    cells::Op::Rule { side, color }
+                };
+                self.record(cx, op, rl);
+            }
+        }
+    }
+
+    /// A box's content on cells: text by role, a glyph for an icon, an edit
+    /// field's text with the terminal cursor at its end.
+    fn record_content(
+        &mut self,
+        cx: &Cx<'_>,
+        el: &El,
+        glyph: Option<&str>,
+        inner: Rect,
+        focused: bool,
+    ) {
+        if let Some(g) = glyph {
+            let color = el.glyph_tint.unwrap_or(match &el.content {
+                Content::Icon { color, .. }
+                | Content::Svg { color, .. }
+                | Content::Text { color, .. } => *color,
+                _ => theme::color::INK,
+            });
+            let glyph = g.to_owned();
+            self.record(cx, cells::Op::Glyph { glyph, color }, inner);
+            return;
+        }
+        match &el.content {
+            Content::Text {
+                text,
+                style,
+                color,
+                wrap,
+                ..
+            } => {
+                let mut attr = cx.emph;
+                if style.weight >= 600 {
+                    attr |= cells::attr::BOLD;
+                }
+                if style.italic {
+                    attr |= cells::attr::ITALIC;
+                }
+                if color.0[3] < 0.6 {
+                    attr |= cells::attr::DIM;
+                }
+                let op = cells::Op::Text {
+                    text: cells::keys(text).into_owned(),
+                    color: *color,
+                    attr,
+                    wrap: *wrap,
+                };
+                self.record(cx, op, inner);
+            }
+            Content::Edit(look) => {
+                let Some(id) = el.id else { return };
+                let value = self.edit_text(id).to_owned();
+                let (text, color, attr) = if value.is_empty() {
+                    (
+                        look.placeholder.clone(),
+                        look.placeholder_color,
+                        cells::attr::DIM,
+                    )
+                } else if look.secure {
+                    let masked = value.chars().map(|_| crate::interact::MASK).collect();
+                    (masked, look.color, 0)
+                } else {
+                    (value.clone(), look.color, 0)
+                };
+                let op = cells::Op::Text {
+                    text,
+                    color,
+                    attr,
+                    wrap: look.multiline && !look.nowrap,
+                };
+                self.record(cx, op, inner);
+                if focused {
+                    let col = inner.x + cells::width(&value) as f32;
+                    if let Some(list) = &mut self.cells {
+                        list.cursor = Some(cells::CursorAt {
+                            col: col.min(inner.right() - 1.0).max(0.0) as u16,
+                            row: inner.y.max(0.0) as u16,
+                            shape: cells::CursorShape::Bar,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Draws edit field `id` into `inner` (logical) and answers its text
@@ -1283,8 +1557,18 @@ fn build<'a>(
     t: &mut TaffyTree<Measure<'a>>,
     el: &'a El,
     scrolls: &mut Vec<LayoutNode>,
+    cells: bool,
+    (in_row, float): (bool, bool),
 ) -> LayoutNode {
     let mut style = el.style.clone();
+    let float = float || el.layered;
+    if cells {
+        to_cells(&mut style, el, in_row, float);
+    }
+    let row = matches!(
+        style.flex_direction,
+        taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse
+    );
     if el.clip {
         style.overflow = Point {
             x: Overflow::Hidden,
@@ -1296,6 +1580,7 @@ fn build<'a>(
         style.scrollbar_width = 0.0;
     }
     let ctx = match &el.content {
+        _ if cells && cell_glyph(el).is_some() => None,
         Content::Text {
             text,
             style: ts,
@@ -1315,7 +1600,15 @@ fn build<'a>(
     let node = match ctx {
         Some(m) => t.new_leaf_with_context(style, m),
         None => {
-            let kids: Vec<LayoutNode> = el.children.iter().map(|c| build(t, c, scrolls)).collect();
+            let kids: &[El] = if cells && cell_glyph(el).is_some() {
+                &[]
+            } else {
+                &el.children
+            };
+            let kids: Vec<LayoutNode> = kids
+                .iter()
+                .map(|c| build(t, c, scrolls, cells, (row, float)))
+                .collect();
             t.new_with_children(style, &kids)
         }
     }
@@ -1324,6 +1617,182 @@ fn build<'a>(
         scrolls.push(node);
     }
     node
+}
+
+/// Rewrites a style's pixel lengths in cells: widths in columns, heights in
+/// rows, borders one cell where they draw and none where they only reserve.
+/// What a box shows on cells in place of its content: its own glyph, or
+/// a Lucide icon's stand-in.
+fn cell_glyph(el: &El) -> Option<&str> {
+    match (&el.glyph, &el.content) {
+        (Some(g), _) => Some(g),
+        (None, Content::Icon { svg, .. }) => icons::glyph_of(svg),
+        _ => None,
+    }
+}
+
+/// How a box with a fill draws on cells, read from its pixel size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shape {
+    Box,
+    /// A hairline divider: a line of box-drawing characters.
+    HLine,
+    VLine,
+    /// A status dot or badge: one `●`.
+    Dot,
+}
+
+impl Shape {
+    fn of(el: &El) -> Shape {
+        let (w, h) = (fixed(el.style.size.width), fixed(el.style.size.height));
+        if el.bg.is_none() || !el.children.is_empty() {
+            return Shape::Box;
+        }
+        match (w, h) {
+            (_, Some(h)) if h <= 2.0 => Shape::HLine,
+            (Some(w), _) if w <= 2.0 => Shape::VLine,
+            (Some(w), Some(h)) if w <= 10.0 && h <= 10.0 => Shape::Dot,
+            _ => Shape::Box,
+        }
+    }
+}
+
+/// A length in pixels, when the style fixes one.
+fn fixed(d: taffy::Dimension) -> Option<f32> {
+    let raw = d.into_raw();
+    (raw.tag() == taffy::CompactLength::LENGTH_TAG).then(|| raw.value())
+}
+
+/// Whether a bordered box keeps its frame on cells: a column taller than
+/// 40 px; rows (chips, pills, buttons) and shorter fields tint instead.
+fn framed(el: &El) -> bool {
+    let column = matches!(
+        el.style.flex_direction,
+        taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse
+    ) || el.style.display != taffy::Display::Flex;
+    if !column {
+        return false;
+    }
+    let h = fixed(el.style.size.height).or(fixed(el.style.min_size.height));
+    match h.filter(|h| *h > 0.0) {
+        Some(h) => h >= 40.0,
+        None => el.children.len() > 1 || el.children.iter().any(|c| !c.children.is_empty()),
+    }
+}
+
+/// Whether `el` draws a frame on cells.
+fn shows_frame(el: &El) -> bool {
+    el.border.is_some_and(|(w, c)| w > 0.0 && c.0[3] > 0.0) && framed(el)
+}
+
+fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
+    use cells::units;
+    use taffy::{CompactLength, Dimension, LengthPercentage as Lp, LengthPercentageAuto as Lpa};
+    fn px(raw: CompactLength) -> Option<f32> {
+        (raw.tag() == CompactLength::LENGTH_TAG).then(|| raw.value())
+    }
+    let dim = |d: Dimension, f: fn(f32) -> f32| match px(d.into_raw()) {
+        Some(v) if v > 0.0 => Dimension::length(f(v)),
+        _ => d,
+    };
+    let lp = |d: Lp, f: fn(f32) -> f32| match px(d.into_raw()) {
+        Some(v) => Lp::length(f(v)),
+        None => d,
+    };
+    let lpa = |d: Lpa, f: fn(f32) -> f32| match px(d.into_raw()) {
+        Some(v) => Lpa::length(f(v)),
+        None => d,
+    };
+    let (w, h, sx, sy) = (
+        units::width as fn(f32) -> f32,
+        units::height as fn(f32) -> f32,
+        units::space_x as fn(f32) -> f32,
+        units::space_y as fn(f32) -> f32,
+    );
+    // An empty box with nothing to draw is spacing, not a control.
+    let spacer = el.children.is_empty()
+        && el.bg.is_none()
+        && el.border.is_none()
+        && el.rules.iter().all(Option::is_none)
+        && matches!(el.content, Content::None);
+    let (w, h) = if spacer { (sx, sy) } else { (w, h) };
+    let glyph = cell_glyph(el);
+    let icon = matches!(
+        el.content,
+        Content::Icon { .. } | Content::Svg { .. } | Content::Image { .. }
+    );
+    match Shape::of(el) {
+        Shape::Box => {}
+        Shape::HLine => s.size.height = Dimension::length(1.0),
+        Shape::VLine => s.size.width = Dimension::length(1.0),
+        Shape::Dot => {
+            s.size = taffy::Size {
+                width: Dimension::length(1.0),
+                height: Dimension::length(1.0),
+            };
+        }
+    }
+    if glyph.is_some() || icon {
+        let gw = glyph.map_or(1, |g| cells::width(g).max(1)) as f32;
+        if icon || px(s.size.width.into_raw()).is_some_and(|v| v <= 24.0) {
+            s.size.width = Dimension::length(gw);
+            s.min_size.width = Dimension::length(gw);
+        }
+        if icon || px(s.size.height.into_raw()).is_some_and(|v| v <= 28.0) {
+            s.size.height = Dimension::length(1.0);
+            s.min_size.height = Dimension::length(1.0);
+        }
+    }
+    s.size.width = dim(s.size.width, w);
+    s.size.height = dim(s.size.height, h);
+    s.min_size.width = dim(s.min_size.width, w);
+    s.min_size.height = dim(s.min_size.height, h);
+    s.max_size.width = dim(s.max_size.width, w);
+    s.max_size.height = dim(s.max_size.height, h);
+    s.flex_basis = dim(s.flex_basis, if in_row { w } else { h });
+    s.padding.left = lp(s.padding.left, sx);
+    s.padding.right = lp(s.padding.right, sx);
+    s.padding.top = lp(s.padding.top, sy);
+    s.padding.bottom = lp(s.padding.bottom, sy);
+    s.margin.left = lpa(s.margin.left, sx);
+    s.margin.right = lpa(s.margin.right, sx);
+    s.margin.top = lpa(s.margin.top, sy);
+    s.margin.bottom = lpa(s.margin.bottom, sy);
+    s.inset.left = lpa(s.inset.left, sx);
+    s.inset.right = lpa(s.inset.right, sx);
+    s.inset.top = lpa(s.inset.top, sy);
+    s.inset.bottom = lpa(s.inset.bottom, sy);
+    s.gap.width = lp(s.gap.width, sx);
+    s.gap.height = lp(s.gap.height, sy);
+    // Frames in the window's flow share edges: each draws its top and left
+    // and touches its neighbours, so a run of cards costs one column each.
+    if !float && el.children.iter().any(shows_frame) {
+        let row = matches!(
+            s.flex_direction,
+            taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse
+        );
+        if row {
+            s.gap.width = Lp::length(0.0);
+        } else {
+            s.gap.height = Lp::length(0.0);
+        }
+    }
+    let shows = |c: Option<(f32, Rgba)>| c.is_some_and(|(w, c)| w > 0.0 && c.0[3] > 0.0);
+    let frame = shows_frame(el);
+    let edge = |i: usize| {
+        let open = !float && (i == 1 || i == 2);
+        if (frame && !open) || shows(el.rules[i]) {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    s.border = taffy::Rect {
+        top: Lp::length(edge(0)),
+        right: Lp::length(edge(1)),
+        bottom: Lp::length(edge(2)),
+        left: Lp::length(edge(3)),
+    };
 }
 
 /// An SVG rendered to a `px`×`px` coverage mask.

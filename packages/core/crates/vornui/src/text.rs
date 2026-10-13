@@ -193,6 +193,8 @@ pub struct TextSystem {
     rasters: HashMap<CacheKey, Option<Raster>>,
     term_size: f32,
     cell: Cell,
+    /// Laid out in terminal cells: the terminal cell is one unit square.
+    pub(crate) cells: bool,
     ascii: Vec<Option<Option<CellPiece>>>,
     clusters: HashMap<(Box<str>, u8), Rc<[CellPiece]>>,
 }
@@ -224,6 +226,7 @@ impl TextSystem {
                 h: 0.0,
                 baseline: 0.0,
             },
+            cells: false,
             ascii: vec![None; 128 * 4],
             clusters: HashMap::new(),
         };
@@ -283,12 +286,20 @@ impl TextSystem {
     }
 
     pub fn cell(&self) -> Cell {
+        if self.cells {
+            return Cell {
+                w: 1.0,
+                h: 1.0,
+                baseline: 1.0,
+            };
+        }
         self.cell
     }
 
     /// The cell in logical pixels, which is what pane sizes are computed in.
     pub fn cell_logical(&self) -> (f32, f32) {
-        (self.cell.w / self.scale, self.cell.h / self.scale)
+        let cell = self.cell();
+        (cell.w / self.scale, cell.h / self.scale)
     }
 
     /// Shapes `text` (cached), wrapping at `max_w` logical pixels if given.

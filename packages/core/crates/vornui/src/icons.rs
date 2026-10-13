@@ -198,6 +198,136 @@ pub fn lucide(name: &str, stroke: f32) -> Option<String> {
     Some(stroke_width(source(name)?, stroke).replace("currentColor", "#ffffff"))
 }
 
+/// A terminal stand-in for Lucide icon `name`: one or two cells of text.
+pub fn glyph(name: &str) -> &'static str {
+    match name {
+        "activity" => "∿",
+        "align-left" | "list" | "list-filter" | "funnel" | "sliders-horizontal" | "list-tree" => {
+            "≡"
+        }
+        "archive" | "archive-restore" | "inbox" => "▤",
+        "arrow-left" | "undo-2" => "←",
+        "arrow-right" | "send" | "log-in" => "→",
+        "arrow-right-left" | "replace" | "repeat" => "⇄",
+        "arrow-up" | "upload" => "↑",
+        "arrow-up-down" => "↕",
+        "download" | "image-down" => "↓",
+        "bell" => "◔",
+        "bold" => "B",
+        "italic" => "I",
+        "heading-1" | "heading-2" | "heading-3" => "H",
+        "braces" => "{}",
+        "code" | "code-xml" => "<>",
+        "check" | "circle-check" | "circle-check-big" | "square-check" | "square-check-big" => "✓",
+        "chevron-down" => "▾",
+        "chevron-up" => "▴",
+        "chevron-left" => "‹",
+        "chevron-right" => "›",
+        "chevrons-left" => "«",
+        "chevrons-right" => "»",
+        "circle" => "○",
+        "circle-alert" | "triangle-alert" => "!",
+        "circle-help" => "?",
+        "circle-x" | "x" => "×",
+        "info" => "i",
+        "clock" | "history" => "◷",
+        "copy" | "clipboard-list" | "clipboard-paste" => "⧉",
+        "corner-down-left" => "↵",
+        "ellipsis" => "…",
+        "external-link" | "square-arrow-out-up-right" | "maximize-2" => "↗",
+        "minimize-2" => "↙",
+        "eye" => "◉",
+        "eye-off" => "◌",
+        "folder" | "folder-git-2" | "folder-tree" | "folder-plus" => "▪",
+        "folder-open" => "▫",
+        "git-branch" | "git-fork" | "split" => "⑂",
+        "git-commit-horizontal" => "◦",
+        "house" => "⌂",
+        "layers" | "group" | "ungroup" => "◫",
+        "layout-dashboard" | "layout-grid" | "grid-4" | "square-kanban" => "▦",
+        "columns-3" => "▥",
+        "panel-left" => "◧",
+        "panel-right" => "◨",
+        "loader-circle" | "refresh-cw" | "rotate-cw" => "↻",
+        "rotate-ccw" => "↺",
+        "lock" => "▣",
+        "lock-open" => "□",
+        "maximize" | "square" | "tab-window" => "□",
+        "minus" => "−",
+        "monitor" => "▭",
+        "list-todo" => "☑",
+        "plus" | "list-plus" | "file-plus-2" | "message-square-plus" | "image-plus" => "+",
+        "pen-line" | "pencil" => "✎",
+        "play" | "step-forward" => "▶",
+        "search" | "scan" => "⌕",
+        "settings" | "settings-2" | "wrench" | "cpu" => "✲",
+        "sparkles" | "star" | "zap" | "lightbulb" => "✦",
+        "terminal" | "square-terminal" => "›",
+        "trash-2" => "⌫",
+        "user" | "users" => "◯",
+        "workflow" | "plug" | "puzzle" | "mcp" => "◇",
+        "rocket" => "▲",
+        "globe" => "◍",
+        "database" | "server" => "≣",
+        "smartphone" => "▯",
+        "package" | "briefcase" => "▤",
+        "file-code" => "<>",
+        "cloud" => "☁",
+        "shield" => "◈",
+        "gamepad-2" => "◎",
+        "music" => "♪",
+        "image" => "▨",
+        "book-open" => "◫",
+        "flask-conical" => "⚗",
+        "heart" => "♥",
+        "coffee" => "◡",
+        "building-2" => "▥",
+        _ => "·",
+    }
+}
+
+/// The glyph for an icon SVG [`lucide`] made, however it was stroked,
+/// tinted or turned; none for an SVG from elsewhere.
+pub fn glyph_of(svg: &str) -> Option<&'static str> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static BY_SHAPE: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
+    let names = BY_SHAPE.get_or_init(|| {
+        ALL.iter()
+            .filter_map(|n| Some((shape(source(n)?), *n)))
+            .collect()
+    });
+    names.get(&shape(svg)).map(|n| glyph(n))
+}
+
+/// What identifies an icon: its children's geometry, without the
+/// attributes [`lucide`], [`stroke`] and [`rotated`] change.
+fn shape(svg: &str) -> String {
+    const GEOMETRY: [&str; 15] = [
+        "d", "cx", "cy", "r", "rx", "ry", "x", "y", "x1", "y1", "x2", "y2", "width", "height",
+        "points",
+    ];
+    let body = svg.find('>').map_or(svg, |i| &svg[i + 1..]);
+    let mut key = String::new();
+    let mut rest = body;
+    while let Some(i) = rest.find("=\"") {
+        let name = rest[..i]
+            .rsplit(|c: char| c.is_whitespace())
+            .next()
+            .unwrap_or("");
+        let after = &rest[i + 2..];
+        let end = after.find('"').unwrap_or(after.len());
+        if GEOMETRY.contains(&name) {
+            key.push_str(name);
+            key.push('=');
+            key.push_str(&after[..end]);
+            key.push(';');
+        }
+        rest = &after[(end + 1).min(after.len())..];
+    }
+    key
+}
+
 /// `svg` drawn with lines `w` units wide (Lucide's `strokeWidth`).
 pub fn stroke(svg: &str, w: f32) -> String {
     svg.replacen("stroke-width=\"2\"", &format!("stroke-width=\"{w}\""), 1)
@@ -228,6 +358,25 @@ pub fn rotated(svg: &str, deg: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_icon_finds_its_glyph_however_it_is_drawn() {
+        let mut seen = std::collections::HashSet::new();
+        for name in ALL {
+            assert!(
+                seen.insert(shape(source(name).unwrap())),
+                "{name} shares a shape"
+            );
+            let svg = lucide(name, 1.5).unwrap();
+            assert_eq!(glyph_of(&svg), Some(glyph(name)), "{name}");
+            assert_eq!(
+                glyph_of(&rotated(&svg, 90.0)),
+                Some(glyph(name)),
+                "{name} turned"
+            );
+        }
+        assert_eq!(glyph_of("<svg><path d=\"M0 0\"/></svg>"), None);
+    }
 
     #[test]
     fn every_icon_loads_and_takes_its_stroke() {

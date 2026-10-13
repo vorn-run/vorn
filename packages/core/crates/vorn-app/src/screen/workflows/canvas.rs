@@ -60,7 +60,7 @@ fn live_status(s: &Screen<'_>, d: &Draft) -> HashMap<String, String> {
 
 /// The canvas pane's size, as the app computes it.
 fn pane_size(s: &Screen<'_>) -> (f32, f32) {
-    let side = if s.st.sidebar { look::SIDEBAR_W } else { 0.0 };
+    let side = if s.st.sidebar { s.sidebar_w() } else { 0.0 };
     (
         (s.size.0 - side - panel_width(&s.st.wf.panel)).max(0.0),
         (s.size.1 - look::TOP_BAR_H).max(0.0),
