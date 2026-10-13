@@ -36,7 +36,8 @@ final class TerminalPainter {
         ctx.translateBy(x: terminalPadX, y: terminalPadY)
         let cw = fonts.cell.width, ch = fonts.cell.height
         ctx.textMatrix = .identity
-        ctx.setShouldSmoothFonts(true)
+        // Stem dilation draws every weight heavier than the font, as no other Vorn terminal does.
+        ctx.setShouldSmoothFonts(false)
         let runs = UnsafeBufferPointer(start: v.runs, count: Int(v.nruns))
         // Backgrounds first, then text, so wide glyphs are not cut.
         for r in runs where r.bg != v.bg {
@@ -46,7 +47,7 @@ final class TerminalPainter {
         for r in runs {
             guard let text = v.text else { break }
             let bytes = UnsafeBufferPointer(start: text + Int(r.text_off), count: Int(r.text_len))
-            let fg = cgColor(r.fg, alpha: r.flags & UInt16(VG_FAINT) != 0 ? 0.6 : 1)
+            let fg = cgColor(r.fg, alpha: r.flags & UInt16(VG_FAINT) != 0 ? 0.5 : 1)
             let x = CGFloat(r.col) * cw, y = CGFloat(r.row) * ch
             if r.flags & UInt16(VG_CLUSTER) == 0 {
                 let table = fonts.ascii[fonts.variant(r.flags)]

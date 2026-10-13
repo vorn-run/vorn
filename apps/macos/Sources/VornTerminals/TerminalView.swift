@@ -46,6 +46,8 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
     private let painter = TerminalPainter()
     private var current: NSEvent?
     var onFocus: ((String) -> Void)?
+    /// Sees the backing store's context after each draw; for tests.
+    var didDraw: ((CGContext) -> Void)?
 
     init(pane: TerminalPane) {
         self.pane = pane
@@ -83,12 +85,21 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        matchBackingScale()
         layoutGrid()
     }
 
     public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
+        matchBackingScale()
         layoutGrid()
+        needsDisplay = true
+    }
+
+    /// AppKit leaves a custom backing layer at 1x; the store follows the window's screen instead.
+    private func matchBackingScale() {
+        guard let layer, let scale = window?.backingScaleFactor, layer.contentsScale != scale else { return }
+        layer.contentsScale = scale
         needsDisplay = true
     }
 
@@ -106,6 +117,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
     public override func draw(_ dirty: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         painter.draw(ctx, pane.view, fonts: fonts, bounds: bounds, focused: pane.focused, marked: pane.marked)
+        didDraw?(ctx)
     }
 
     public override func becomeFirstResponder() -> Bool {
