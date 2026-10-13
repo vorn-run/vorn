@@ -2,16 +2,16 @@
 
 The native app, as a Swift package (`swift build -c release`, or `Vorn.xcodeproj`, generated from `project.yml`). It talks to vornd over JSON-RPC and draws terminals with the grid in `grid-ffi` (build it first with `grid-ffi/build.sh`).
 
-| Module             | Holds                                                                                               |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `VornCore`         | The vornd client: endpoint and credential, JSON-RPC over `/ws`, subscriptions, models and services  |
+| Module             | Holds                                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `VornCore`         | The vornd client: endpoint and credential, JSON-RPC over `/ws`, subscriptions, models and services               |
 | `VornUI`           | Theme tokens from `packages/web/src/renderer/theme.css`, Lucide glyphs, agent and project icons, shared controls |
-| `VornTerminals`    | Terminal panes over vornd's grid socket                                                             |
-| `VornTasks`        | The tasks board: list and kanban, cards, detail panel, new task dialog, view options                |
-| `VornWorkflows`    | Workflows: runs list and detail, gates, the workflow page                                           |
-| `VornApp`          | The shell: sidebar, top bar, and the sessions, tasks and workflows views                            |
-| `VornTasksPreview` | A host that shows `TasksView` alone, for development and screenshots                                |
-| `WorkflowsPreview` | A host that shows `WorkflowsView` alone, from fixtures or a vornd                                   |
+| `VornTerminals`    | Terminal panes over vornd's grid socket                                                                          |
+| `VornTasks`        | The tasks board: list and kanban, cards, detail panel, new task dialog, view options                             |
+| `VornWorkflows`    | Workflows: runs list and detail, gates, the workflow page                                                        |
+| `VornApp`          | The shell: sidebar, top bar, and the sessions, tasks and workflows views                                         |
+| `VornTasksPreview` | A host that shows `TasksView` alone, for development and screenshots                                             |
+| `WorkflowsPreview` | A host that shows `WorkflowsView` alone, from fixtures or a vornd                                                |
 
 ## Offscreen renders
 
