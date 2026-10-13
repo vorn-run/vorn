@@ -296,6 +296,9 @@ pub struct App {
     scrolls: HashMap<String, Scroll>,
     /// The wheel gesture under way: its pane, where it goes, and its last event.
     wheel: Option<(String, Route, Rows, std::time::Instant)>,
+    /// Each terminal's screen as text, for assistive technology; made when
+    /// its view changes.
+    spoken: HashMap<String, String>,
     pub st: State,
     pub acts: Acts,
     preedit: String,
@@ -420,6 +423,7 @@ impl App {
             word_pending: false,
             scrolls: HashMap::new(),
             wheel: None,
+            spoken: HashMap::new(),
             st,
             acts: Acts::default(),
             preedit: String::new(),
@@ -803,6 +807,7 @@ impl App {
                     if self.store.session(&id).is_some_and(|s| s.is_shell()) {
                         shells.push(id.clone());
                     }
+                    self.spoken.insert(id.clone(), v.text());
                     self.views.insert(id, v);
                 }
             }
@@ -2917,10 +2922,12 @@ impl App {
         let root = self.screen(ui).build();
         self.seed_texts(ui);
         ui.custom_a11y.clear();
+        let views = &self.views;
+        self.spoken.retain(|id, _| views.contains_key(id));
         for (i, s) in self.store.sessions.iter().enumerate() {
             let id = crate::screen::CARD_ID_BASE + i as u64;
-            ui.custom_a11y
-                .insert(id, (Role::Terminal, s.title(), String::new()));
+            let text = self.spoken.get(&s.info.id).cloned().unwrap_or_default();
+            ui.custom_a11y.insert(id, (Role::Terminal, s.title(), text));
         }
         root
     }

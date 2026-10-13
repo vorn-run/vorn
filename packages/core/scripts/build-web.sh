@@ -77,6 +77,7 @@ cat > "$out/index.html" <<'HTML'
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<base href="/app/">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#0d0d0f">
 <meta name="mobile-web-app-capable" content="yes">

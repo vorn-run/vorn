@@ -403,6 +403,7 @@ async fn handle(
         if req.method() == Method::GET && crate::serve::http::answers(path) {
             return Ok(crate::serve::http::answer(
                 path,
+                crate::serve::http::takes_brotli(req.headers()),
                 serving.web(),
                 serving.data_dir(),
             ));

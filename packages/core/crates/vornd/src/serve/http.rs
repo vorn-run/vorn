@@ -8,7 +8,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use hyper::header::{self, HeaderValue};
+use hyper::header::{self, HeaderMap, HeaderValue};
 use hyper::{Response, StatusCode};
 use serde_json::{json, Value};
 
@@ -27,8 +27,22 @@ fn is_app(path: &str) -> bool {
     path == APP_PREFIX || path.starts_with("/app/")
 }
 
-/// Answers a GET for `path`; `web` is the web client's build, `data_dir` the server's.
-pub fn answer(path: &str, web: Option<&Path>, data_dir: &Path) -> Response<Body> {
+/// Whether a request's `Accept-Encoding` takes brotli.
+pub fn takes_brotli(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .any(|e| {
+            let mut parts = e.split(';').map(str::trim);
+            parts.next() == Some("br") && !parts.any(|q| q.replace(' ', "") == "q=0")
+        })
+}
+
+/// Answers a GET for `path`; `web` is the web client's build, `data_dir` the
+/// server's. `brotli` serves a file's `.br` copy where the build has one.
+pub fn answer(path: &str, brotli: bool, web: Option<&Path>, data_dir: &Path) -> Response<Body> {
     if path == "/health" {
         return json_reply(StatusCode::OK, &json!({ "status": "ok" }));
     }
@@ -36,13 +50,13 @@ pub fn answer(path: &str, web: Option<&Path>, data_dir: &Path) -> Response<Body>
         return task_image(rest, data_dir);
     }
     match web {
-        Some(web) => app(path, web),
+        Some(web) => app(path, brotli, web),
         None => not_found(),
     }
 }
 
 /// A file of the web client, or its `index.html` for any route it routes itself.
-fn app(path: &str, web: &Path) -> Response<Body> {
+fn app(path: &str, brotli: bool, web: &Path) -> Response<Body> {
     let rest = path.strip_prefix(APP_PREFIX).unwrap_or("");
     let rest = percent_decode(rest.trim_start_matches('/'));
     let file = rest
@@ -50,16 +64,23 @@ fn app(path: &str, web: &Path) -> Response<Body> {
         .and_then(|r| inside(web, r))
         .filter(|f| f.is_file())
         .unwrap_or_else(|| web.join("index.html"));
-    let mut res = match std::fs::read(&file) {
-        Ok(bytes) => {
-            let mut res = Response::new(full(bytes));
-            res.headers_mut()
-                .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime(&file)));
-            res
-        }
-        Err(_) => return not_found(),
+    let packed = brotli
+        .then(|| {
+            let mut name = file.clone().into_os_string();
+            name.push(".br");
+            PathBuf::from(name)
+        })
+        .filter(|p| p.is_file());
+    let Ok(bytes) = std::fs::read(packed.as_ref().unwrap_or(&file)) else {
+        return not_found();
     };
+    let mut res = Response::new(full(bytes));
     let headers = res.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime(&file)));
+    headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    if packed.is_some() {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("br"));
+    }
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
@@ -206,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn says_it_is_up() {
-        let res = answer("/health", None, Path::new("/nowhere"));
+        let res = answer("/health", false, None, Path::new("/nowhere"));
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body(res).await, r#"{"status":"ok"}"#);
         assert!(answers("/health") && answers("/app") && answers("/app/x") && !answers("/apps"));
@@ -219,7 +240,7 @@ mod tests {
         std::fs::create_dir(web.path().join("assets")).unwrap();
         std::fs::write(web.path().join("assets/app.js"), "x()").unwrap();
         let data = tempfile::tempdir().unwrap();
-        let res = answer("/app/assets/app.js", Some(web.path()), data.path());
+        let res = answer("/app/assets/app.js", false, Some(web.path()), data.path());
         assert_eq!(
             res.headers()[header::CONTENT_TYPE],
             "text/javascript; charset=utf-8"
@@ -233,13 +254,40 @@ mod tests {
             "/app/../secret",
             "/app/%2e%2e/x",
         ] {
-            let res = answer(route, Some(web.path()), data.path());
+            let res = answer(route, false, Some(web.path()), data.path());
             assert_eq!(body(res).await, "<html>", "{route}");
         }
         assert_eq!(
-            answer("/app", None, data.path()).status(),
+            answer("/app", false, None, data.path()).status(),
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[tokio::test]
+    async fn serves_the_brotli_copy_to_a_browser_that_takes_it() {
+        let web = tempfile::tempdir().unwrap();
+        std::fs::write(web.path().join("index.html"), "<html>").unwrap();
+        std::fs::write(web.path().join("app.wasm"), "raw").unwrap();
+        std::fs::write(web.path().join("app.wasm.br"), "packed").unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let res = answer("/app/app.wasm", true, Some(web.path()), data.path());
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/wasm");
+        assert_eq!(res.headers()[header::CONTENT_ENCODING], "br");
+        assert_eq!(body(res).await, "packed");
+        let res = answer("/app/app.wasm", false, Some(web.path()), data.path());
+        assert!(res.headers().get(header::CONTENT_ENCODING).is_none());
+        assert_eq!(body(res).await, "raw");
+        let res = answer("/app/", true, Some(web.path()), data.path());
+        assert_eq!(body(res).await, "<html>");
+
+        let takes = |v: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::ACCEPT_ENCODING, HeaderValue::from_str(v).unwrap());
+            takes_brotli(&h)
+        };
+        assert!(takes("gzip, deflate, br, zstd") && takes("br;q=0.5"));
+        assert!(!takes("gzip") && !takes("br;q=0") && !takes("brotli"));
+        assert!(!takes_brotli(&HeaderMap::new()));
     }
 
     #[tokio::test]
@@ -255,7 +303,12 @@ mod tests {
             .to_str()
             .unwrap()
             .to_owned();
-        let res = answer(&format!("/api/task-images/t1/{name}"), None, data.path());
+        let res = answer(
+            &format!("/api/task-images/t1/{name}"),
+            false,
+            None,
+            data.path(),
+        );
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(res.headers()[header::CONTENT_TYPE], "image/png");
         assert_eq!(
@@ -263,9 +316,9 @@ mod tests {
             "default-src 'none'; sandbox"
         );
         assert_eq!(body(res).await, "png");
-        let missing = answer("/api/task-images/t1/none.png", None, data.path());
+        let missing = answer("/api/task-images/t1/none.png", false, None, data.path());
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
-        let climbing = answer("/api/task-images/..%2F/x.png", None, data.path());
+        let climbing = answer("/api/task-images/..%2F/x.png", false, None, data.path());
         assert_eq!(climbing.status(), StatusCode::BAD_REQUEST);
     }
 }
