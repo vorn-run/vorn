@@ -34,7 +34,7 @@ vi.mock('framer-motion', () => ({
   )
 }))
 
-import { toast, ToastContainer } from '../src/renderer/components/Toast'
+import { toast, ToastContainer } from '../packages/web/src/renderer/components/Toast'
 
 describe('toast module', () => {
   beforeEach(() => {

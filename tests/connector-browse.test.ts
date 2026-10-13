@@ -16,13 +16,13 @@ import {
   CALLABLE_FILTER,
   CONNECTED_FILTER,
   type BuiltInConnector
-} from '../src/renderer/lib/connector-browse'
+} from '../packages/web/src/renderer/lib/connector-browse'
 import type {
   ConnectorAuthRung,
   ConnectorCatalogItem,
   InstalledConnectorPack,
   SourceConnection
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 const builtIn = (id: string, name: string): BuiltInConnector => ({
   id,

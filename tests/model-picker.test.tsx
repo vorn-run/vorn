@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { AgentModelCatalog } from '@vornrun/shared/agent-models'
-import { ModelPicker } from '../src/renderer/components/ModelPicker'
+import { ModelPicker } from '../packages/web/src/renderer/components/ModelPicker'
 
 afterEach(cleanup)
 

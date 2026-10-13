@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Terminal as Headless } from '@xterm/headless'
 import type { Terminal } from '@xterm/xterm'
-import { swallowQueries } from '../src/renderer/lib/vornd-replies'
+import { swallowQueries } from '../packages/web/src/renderer/lib/vornd-replies'
 
 /**
  * TP-T12, the client's half: with vornd answering a session's queries, every

@@ -67,10 +67,24 @@ brew tap vorn-run/tap && brew install --cask vorn
 
 Or download directly from [GitHub Releases](https://github.com/vorn-run/vorn/releases).
 
-Each release also ships the native desktop app, built on Vorn's GPU UI, beside the Electron one:
-`Vorn-Native-<version>-mac-arm64.zip` (or `mac-x64`), `-win-x64.zip` and `-linux-x64.tar.gz`. It
-connects to the server the app runs, and starts the one it ships with when none is running. On
-Linux it needs WebKitGTK 4.1 and GTK 3.
+Each release ships Vorn, the desktop app built on Vorn's GPU UI:
+
+| Platform | Download                                                                               |
+| -------- | -------------------------------------------------------------------------------------- |
+| macOS    | `Vorn-<version>-arm64.dmg` or `-x64.dmg` (signed and notarized)                        |
+| Windows  | `Vorn-Setup-<version>.exe`, a per-user installer                                       |
+| Linux    | `Vorn-<version>.AppImage` or `vorn_<version>_amd64.deb`; needs WebKitGTK 4.1 and GTK 3 |
+
+The app updates itself from the release feed for the channel chosen in Settings (stable or
+beta): it downloads in the background, checks the checksum and signature, and swaps itself in
+when you restart. Terminals survive the restart on macOS and Linux. The .deb does not update
+itself; Vorn says when a new one is out. Windows builds are signed only when the release has a
+code-signing certificate, so SmartScreen may ask before the first run.
+
+Coming from 0.8.0-beta.8 or earlier, the update arrives the usual way: the app is the same
+`com.vorn.app`, so permissions, the Dock, login items and the `vorn://` scheme carry over. If you
+installed beta.8 on Windows for all users rather than just yourself, install this version once
+with the setup file and uninstall the old one from Settings → Apps.
 
 ## Command line
 

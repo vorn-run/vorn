@@ -42,7 +42,7 @@ const SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const FILES = [
   'packages/server/src/pty-manager.ts',
   'packages/server/src/vornd-sessions.ts',
-  'src/renderer/lib/terminal-registry.ts',
+  'packages/web/src/renderer/lib/terminal-registry.ts',
   'packages/shared/src/protocol.ts',
   'tests/pty-manager-recovery.test.ts'
 ]

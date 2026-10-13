@@ -2,9 +2,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { CallConnectorActionConfig, ConnectorCatalogItem } from '../src/shared/types'
+import type {
+  CallConnectorActionConfig,
+  ConnectorCatalogItem
+} from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   iconForConnection: () => undefined
 }))
@@ -47,8 +50,9 @@ const listConnectorCatalog = vi.fn(async () => ({
 }
 
 const { CallConnectorActionNodeForm } =
-  await import('../src/renderer/components/workflow-editor/panels/CallConnectorActionNodeForm')
-const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/CallConnectorActionNodeForm')
+const { __resetCatalogCacheForTests } =
+  await import('../packages/web/src/renderer/lib/use-connector-catalog')
 
 beforeEach(() => {
   __resetCatalogCacheForTests()

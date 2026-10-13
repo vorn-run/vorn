@@ -2,8 +2,8 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ProjectIcon } from '../src/renderer/components/project-sidebar/ProjectIcon'
-import { ICON_MAP } from '../src/renderer/components/project-sidebar/icon-map'
+import { ProjectIcon } from '../packages/web/src/renderer/components/project-sidebar/ProjectIcon'
+import { ICON_MAP } from '../packages/web/src/renderer/components/project-sidebar/icon-map'
 
 describe('ProjectIcon', () => {
   it('renders an SVG for each known icon', () => {

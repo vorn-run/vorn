@@ -13,15 +13,15 @@ const hoisted = vi.hoisted(() => {
   }
 })
 
-vi.mock('../src/renderer/lib/terminal-registry', () => hoisted)
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => hoisted)
 
-vi.mock('../src/renderer/components/TerminalContextMenu', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalContextMenu', () => ({
   TerminalContextMenu: ({ terminalId, onClose }: { terminalId: string; onClose: () => void }) => (
     <div data-testid="context-menu" data-terminal-id={terminalId} onClick={onClose} />
   )
 }))
 
-import { TerminalHost } from '../src/renderer/components/TerminalHost'
+import { TerminalHost } from '../packages/web/src/renderer/components/TerminalHost'
 
 describe('TerminalHost', () => {
   afterEach(() => {

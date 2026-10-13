@@ -42,17 +42,17 @@ const mockStore = {
   config: null as { projects?: unknown[]; sessionGroups?: unknown[] } | null
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
 const { GroupSessionsSection } =
-  await import('../src/renderer/components/project-sidebar/GroupSessionsSection')
+  await import('../packages/web/src/renderer/components/project-sidebar/GroupSessionsSection')
 
 const session = (id: string, name: string, project: string, groupId?: string) => [
   id,

@@ -34,7 +34,7 @@ const mockLoading = vi.fn((_msg: string) => 'toast-id')
 const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 const mockToastError = vi.fn()
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: Object.assign(
     (msg: string) => {
       mockLoading(msg)
@@ -55,14 +55,14 @@ vi.mock('../src/renderer/components/Toast', () => ({
 const mockCreateSession = vi.fn()
 const mockCreateShell = vi.fn().mockResolvedValue(undefined)
 
-vi.mock('../src/renderer/lib/session-utils', () => ({
+vi.mock('../packages/web/src/renderer/lib/session-utils', () => ({
   createSessionFromProject: (...args: unknown[]) => mockCreateSession(...args),
   createShellInProject: (...args: unknown[]) => mockCreateShell(...args)
 }))
 
 const mockRequestWorktreeDelete = vi.fn()
 
-vi.mock('../src/renderer/components/WorktreeCleanupDialog', () => ({
+vi.mock('../packages/web/src/renderer/components/WorktreeCleanupDialog', () => ({
   requestWorktreeDelete: (info: unknown) => mockRequestWorktreeDelete(info),
   WorktreeCleanupDialog: () => null
 }))
@@ -80,10 +80,10 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { WorktreeItem } from '../src/renderer/components/project-sidebar/WorktreeItem'
-import type { ProjectConfig, AppConfig } from '../src/shared/types'
-import type { WorktreeInfo } from '../src/renderer/stores/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { WorktreeItem } from '../packages/web/src/renderer/components/project-sidebar/WorktreeItem'
+import type { ProjectConfig, AppConfig } from '../packages/web/src/shared/types'
+import type { WorktreeInfo } from '../packages/web/src/renderer/stores/types'
 
 const project: ProjectConfig = {
   name: 'test-proj',

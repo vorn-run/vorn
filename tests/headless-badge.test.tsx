@@ -2,15 +2,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { HeadlessSession } from '../src/shared/types'
+import type { HeadlessSession } from '../packages/web/src/shared/types'
 
 let headlessSessions: HeadlessSession[] = []
 
-vi.mock('../src/renderer/hooks/useFilteredHeadless', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useFilteredHeadless', () => ({
   useFilteredHeadless: () => headlessSessions
 }))
 
-vi.mock('../src/renderer/components/HeadlessPill', () => ({
+vi.mock('../packages/web/src/renderer/components/HeadlessPill', () => ({
   HeadlessPill: ({ session }: { session: HeadlessSession }) => (
     <div data-testid="headless-pill" data-id={session.id}>
       {session.id}
@@ -18,7 +18,7 @@ vi.mock('../src/renderer/components/HeadlessPill', () => ({
   )
 }))
 
-import { HeadlessBadge } from '../src/renderer/components/HeadlessBadge'
+import { HeadlessBadge } from '../packages/web/src/renderer/components/HeadlessBadge'
 
 function headless(
   id: string,

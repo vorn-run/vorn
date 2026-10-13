@@ -52,8 +52,8 @@ const api = {
 }
 Object.defineProperty(window, 'api', { value: api, writable: true })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { syncBoard } = await import('../src/renderer/lib/board-sync')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { syncBoard } = await import('../packages/web/src/renderer/lib/board-sync')
 
 /** A pane's socket: the attach answer, then the bytes the session prints. */
 class Pane {

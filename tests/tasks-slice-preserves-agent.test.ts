@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 
 import { create } from 'zustand'
-import { createTasksSlice } from '../src/renderer/stores/tasks-slice'
-import type { AppStore } from '../src/renderer/stores/types'
-import type { AppConfig, TaskConfig } from '../src/shared/types'
+import { createTasksSlice } from '../packages/web/src/renderer/stores/tasks-slice'
+import type { AppStore } from '../packages/web/src/renderer/stores/types'
+import type { AppConfig, TaskConfig } from '../packages/web/src/shared/types'
 
 function makeTask(overrides: Partial<TaskConfig> = {}): TaskConfig {
   return {

@@ -6,10 +6,9 @@
    Every @import has to precede everything else in the file, @source included,
    or PostCSS drops it and takes the whole palette with it. */
 @import 'tailwindcss';
-@import '../../../src/renderer/theme.css';
+@import './renderer/theme.css';
 @source "../**/*.{ts,tsx}";
 @source "../index.html";
-@source "../../../src/renderer/**/*.{ts,tsx}";
 @variant dark (&:where(.dark, .dark *));
 
 html,

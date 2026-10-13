@@ -3,25 +3,25 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = { connections: [], workflowExecutions: new Map() }
     return selector ? selector(state) : state
   }
 }))
 
-import { TriggerNode } from '../src/renderer/components/workflow-editor/nodes/TriggerNode'
-import { LaunchAgentNode } from '../src/renderer/components/workflow-editor/nodes/LaunchAgentNode'
-import { ScriptNode } from '../src/renderer/components/workflow-editor/nodes/ScriptNode'
-import { ConditionNode } from '../src/renderer/components/workflow-editor/nodes/ConditionNode'
-import { ApprovalNode } from '../src/renderer/components/workflow-editor/nodes/ApprovalNode'
-import { CreateTaskFromItemNode } from '../src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
-import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
+import { TriggerNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/TriggerNode'
+import { LaunchAgentNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/LaunchAgentNode'
+import { ScriptNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ScriptNode'
+import { ConditionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ConditionNode'
+import { ApprovalNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ApprovalNode'
+import { CreateTaskFromItemNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
+import { CallConnectorActionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
 import {
   NODE_SELECTED,
   NODE_UNSELECTED
-} from '../src/renderer/components/workflow-editor/node-visuals'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
+} from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
 
 /**
  * Every card that can be selected, rendered both ways.

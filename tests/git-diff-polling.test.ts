@@ -31,7 +31,7 @@ Object.defineProperty(window, 'api', {
 })
 
 // Import the store (must come after window.api mock)
-import { useAppStore } from '../src/renderer/stores'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 beforeEach(() => {
   vi.clearAllMocks()

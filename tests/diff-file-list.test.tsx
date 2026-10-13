@@ -3,16 +3,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/components/file-icons', () => ({
+vi.mock('../packages/web/src/renderer/components/file-icons', () => ({
   FileTypeIcon: () => <span data-testid="file-icon" />
 }))
 
-import { DiffFileList } from '../src/renderer/components/DiffSidebar'
-import type { GitFileDiff } from '../src/shared/types'
+import { DiffFileList } from '../packages/web/src/renderer/components/DiffSidebar'
+import type { GitFileDiff } from '../packages/web/src/shared/types'
 
 const file = (over: Partial<GitFileDiff> = {}): GitFileDiff =>
   ({
-    filePath: 'src/renderer/App.tsx',
+    filePath: 'packages/web/src/renderer/App.tsx',
     status: 'modified',
     insertions: 3,
     deletions: 1,
@@ -81,7 +81,7 @@ describe('DiffFileList', () => {
   it('selects the file that was clicked', () => {
     const onSelectFile = vi.fn()
     render(<DiffFileList {...props} onSelectFile={onSelectFile} files={[file()]} />)
-    fireEvent.click(screen.getByText('src/renderer/App.tsx'))
-    expect(onSelectFile).toHaveBeenCalledWith('src/renderer/App.tsx')
+    fireEvent.click(screen.getByText('packages/web/src/renderer/App.tsx'))
+    expect(onSelectFile).toHaveBeenCalledWith('packages/web/src/renderer/App.tsx')
   })
 })

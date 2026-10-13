@@ -2,11 +2,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { TaskKanbanBoard } from '../src/renderer/components/task-board/TaskKanbanBoard'
+import { TaskKanbanBoard } from '../packages/web/src/renderer/components/task-board/TaskKanbanBoard'
 import type { TaskConfig, TaskStatus } from '../packages/shared/src/types'
 
 // Stub TaskCard to a plain div — we're testing column layout, not card internals
-vi.mock('../src/renderer/components/task-board/TaskCard', () => ({
+vi.mock('../packages/web/src/renderer/components/task-board/TaskCard', () => ({
   TaskCard: ({ task }: { task: TaskConfig }) => (
     <div data-testid={`card-${task.id}`}>{task.title}</div>
   )

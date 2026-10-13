@@ -298,11 +298,90 @@ pub unsafe extern "C" fn vg_text(c: *mut VgClient, pane: u32, utf8: *const c_cha
 /// # Safety
 /// `c` is null or a live handle; `utf8` is null or NUL-terminated.
 #[no_mangle]
-pub unsafe extern "C" fn vg_paste(c: *mut VgClient, pane: u32, utf8: *const c_char) {
+pub unsafe extern "C" fn vg_paste(
+    c: *mut VgClient,
+    pane: u32,
+    utf8: *const c_char,
+    confirmed: bool,
+) {
     guard((), || {
         // SAFETY: the caller's contract above.
         if let (Some(g), Some(t)) = unsafe { (grid(c), text_arg(utf8)) } {
-            g.paste(pane, t);
+            g.paste(pane, t, confirmed);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_take_held_paste(c: *mut VgClient, pane: u32) -> *mut c_char {
+    guard(ptr::null_mut(), || {
+        // SAFETY: the caller's contract above.
+        unsafe { grid(c) }
+            .and_then(|g| g.take_held_paste(pane))
+            .map_or(ptr::null_mut(), c_string)
+    })
+}
+
+/// Mirrors `VgHit` in `vorn_grid.h`.
+#[repr(C)]
+pub struct VgHit {
+    pub line: u64,
+    pub from: u16,
+    pub to: u16,
+}
+
+/// # Safety
+/// `c` is null or a live handle; `query` is null or NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn vg_search(c: *mut VgClient, pane: u32, query: *const c_char, case: bool) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let (Some(g), Some(q)) = unsafe { (grid(c), text_arg(query)) } {
+            g.search(pane, q, case);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle; `out` is null or has room for `cap` hits;
+/// `done` is null or writable.
+#[no_mangle]
+pub unsafe extern "C" fn vg_hits(
+    c: *mut VgClient,
+    pane: u32,
+    out: *mut VgHit,
+    cap: u32,
+    done: *mut bool,
+) -> u32 {
+    guard(0, || {
+        // SAFETY: the caller's contract above.
+        let Some((hits, all)) = unsafe { grid(c) }.and_then(|g| g.hits(pane)) else {
+            return 0;
+        };
+        if !done.is_null() {
+            // SAFETY: the caller's contract above.
+            unsafe { done.write(all) };
+        }
+        if !out.is_null() {
+            for (i, &(line, from, to)) in hits.iter().take(cap as usize).enumerate() {
+                // SAFETY: `i` < `cap`, the room the caller gave.
+                unsafe { out.add(i).write(VgHit { line, from, to }) };
+            }
+        }
+        u32::try_from(hits.len()).unwrap_or(u32::MAX)
+    })
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_reveal(c: *mut VgClient, pane: u32, line: u64) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let Some(g) = unsafe { grid(c) } {
+            g.reveal(pane, line);
         }
     });
 }
@@ -504,7 +583,12 @@ mod tests {
             vg_view_free(&mut v);
             vg_view_free(ptr::null_mut());
             vg_key(c, 1, c"KeyA".as_ptr(), 0, ptr::null());
-            vg_paste(c, 1, c"x".as_ptr());
+            vg_paste(c, 1, c"x".as_ptr(), true);
+            assert!(vg_take_held_paste(c, 1).is_null());
+            vg_search(c, 1, c"x".as_ptr(), false);
+            let mut done = false;
+            assert_eq!(vg_hits(c, 1, ptr::null_mut(), 0, &mut done), 0);
+            vg_reveal(c, 1, 0);
             vg_wheel(c, 1, -3, 0.0, 0.0, 0);
             vg_scroll(c, 1, i32::MAX);
             vg_mouse(c, 1, 0, 1, 0, 0.0, 0.0);

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { getProjectHostIds } from '../src/shared/types'
-import { getDisplayName } from '../src/renderer/lib/terminal-display'
-import type { ProjectConfig, TerminalSession } from '../src/shared/types'
+import { getProjectHostIds } from '../packages/web/src/shared/types'
+import { getDisplayName } from '../packages/web/src/renderer/lib/terminal-display'
+import type { ProjectConfig, TerminalSession } from '../packages/web/src/shared/types'
 
 describe('getProjectHostIds', () => {
   it('returns ["local"] when hostIds is undefined', () => {

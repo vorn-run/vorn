@@ -17,13 +17,13 @@ vi.hoisted(() => {
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = NoopResizeObserver
 })
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => 'github',
   useConnectionIconFor: () => undefined
 }))
 
-import { WorkflowCanvas } from '../src/renderer/components/workflow-editor/WorkflowCanvas'
+import { WorkflowCanvas } from '../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)

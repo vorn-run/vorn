@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ConnectorCatalogItem } from '../src/shared/types'
+import type { ConnectorCatalogItem } from '../packages/web/src/shared/types'
 
 const connections: Array<{
   id: string
@@ -16,8 +16,8 @@ const connections: Array<{
 
 const packs: Array<{ id: string }> = []
 
-vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
+vi.mock('../packages/web/src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/web/src/renderer/lib/use-connections')>()),
   useConnections: () => connections,
   useInstalledPacks: () => packs
 }))
@@ -79,10 +79,10 @@ const refreshCatalog = vi.fn()
 }
 
 const { StepLibrary } =
-  await import('../src/renderer/components/workflow-editor/panels/StepLibrary')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/StepLibrary')
 type LibraryScope = Parameters<typeof StepLibrary>[0]['scope']
 const { __resetCatalogCacheForTests, refreshConnectorCatalog } =
-  await import('../src/renderer/lib/use-connector-catalog')
+  await import('../packages/web/src/renderer/lib/use-connector-catalog')
 
 beforeEach(() => {
   __resetCatalogCacheForTests()

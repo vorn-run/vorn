@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveIntentMode, SHELL_BUILTINS } from '../src/renderer/lib/intent-mode'
+import { resolveIntentMode, SHELL_BUILTINS } from '../packages/web/src/renderer/lib/intent-mode'
 
 const KNOWN = new Set(['git', 'yarn', 'ls', 'node', 'rg', ...SHELL_BUILTINS])
 

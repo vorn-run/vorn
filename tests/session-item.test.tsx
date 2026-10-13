@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { useAppStore } from '../src/renderer/stores'
-import { SessionItem } from '../src/renderer/components/project-sidebar/SessionItem'
-import type { SidebarSessionInfo } from '../src/renderer/components/project-sidebar/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { SessionItem } from '../packages/web/src/renderer/components/project-sidebar/SessionItem'
+import type { SidebarSessionInfo } from '../packages/web/src/renderer/components/project-sidebar/types'
 
 const session: SidebarSessionInfo = {
   id: 'sess-1',

@@ -13,8 +13,8 @@ pub use vornui::winit::window::Window as NativeWindow;
 pub use vornui::TextStyle;
 pub use vornui::{
     custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
-    Cursor, El, Event, Id, Input, Laid, Offscreen, Place, Rect, RenderMode, Rgba, Sense, Ui,
-    UiConfig, WindowRequest,
+    Cursor, El, Event, Id, Input, Laid, MemoryClipboard, Offscreen, Place, Rect, RenderMode, Rgba,
+    Sense, Ui, UiConfig, WindowRequest,
 };
 pub use vornui::{icons, menu, theme, widgets};
 pub use vornui::{TextEdit, MOVE_SLOP};

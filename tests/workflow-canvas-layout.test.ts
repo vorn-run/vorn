@@ -8,7 +8,7 @@ import {
   positionsAreSeed,
   stepEdgePath,
   toCanvasElements
-} from '../src/renderer/lib/workflow-canvas-layout'
+} from '../packages/web/src/renderer/lib/workflow-canvas-layout'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 const node = (

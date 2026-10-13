@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldOfferPane } from '../src/renderer/lib/pane-affordance'
+import { shouldOfferPane } from '../packages/web/src/renderer/lib/pane-affordance'
 
 /**
  * Which project panes a session is offered. A browser, a simulator and a panel

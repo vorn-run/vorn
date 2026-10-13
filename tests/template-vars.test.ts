@@ -17,7 +17,7 @@ import type {
   WorkflowNode,
   WorkflowEdge,
   WorkflowExecutionContext
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 import type { StepOutputs } from '@vornrun/shared/template-vars'
 
 function makeNode(id: string, type: string, slug?: string): WorkflowNode {

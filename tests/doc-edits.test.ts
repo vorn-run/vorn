@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeDocEdit, paragraphs } from '../src/renderer/lib/doc-edits'
+import { mergeDocEdit, paragraphs } from '../packages/web/src/renderer/lib/doc-edits'
 
 const DOC = [
   '# Fine-tuning a small model',

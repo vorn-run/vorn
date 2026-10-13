@@ -430,6 +430,11 @@ impl Ui {
         self.st.focus == Some(id)
     }
 
+    /// Whether `id` has focus that keys moved there, its ring showing.
+    pub fn key_focused(&self, id: Id) -> bool {
+        self.focused(id) && self.st.focus_visible
+    }
+
     /// The focused element, if any.
     pub fn focus(&self) -> Option<Id> {
         self.st.focus
@@ -440,6 +445,35 @@ impl Ui {
         if self.st.focus != id {
             self.st.focus = id;
             self.st.blink_from = self.st.now;
+        }
+    }
+
+    /// Moves keyboard focus to `id` with its ring showing, as keys do.
+    pub fn focus_from_keys(&mut self, id: Id) {
+        self.set_focus(Some(id));
+        self.st.focus_visible = true;
+    }
+
+    /// Focuses the first entry of the select `group`, as keys do; false
+    /// while it is not laid out.
+    pub fn focus_first_in(&mut self, group: Id) -> bool {
+        let first = self
+            .st
+            .groups
+            .get(&group)
+            .and_then(|g| g.first())
+            .map(|i| i.0);
+        if let Some(id) = first {
+            self.focus_from_keys(id);
+        }
+        first.is_some()
+    }
+
+    /// The select group and index `id` chooses in, if it is an entry.
+    pub fn select_of(&self, id: Id) -> Option<(Id, usize)> {
+        match self.st.hit(id)?.action {
+            Some(Action::Select { group, index }) => Some((group, index)),
+            _ => None,
         }
     }
 
@@ -538,6 +572,10 @@ impl Ui {
                     .groups
                     .get(&m.id)
                     .is_some_and(|g| g.iter().any(|i| i.0 == f))
+                    // Or an entry of its submenu.
+                    || self.st.hit(f).is_some_and(|h| {
+                        h.layer > 0 && matches!(h.action, Some(Action::Select { .. }))
+                    })
             });
             if inside {
                 self.st.focus = Some(m.trigger);
@@ -1000,7 +1038,17 @@ impl Ui {
                     return true;
                 }
                 "ArrowDown" | "ArrowUp" | "Home" | "End" => {
-                    self.move_in_group(m.id, code);
+                    // Within the submenu when focus is in one.
+                    let group = self
+                        .st
+                        .focus
+                        .and_then(|f| self.st.hit(f))
+                        .and_then(|h| match h.action {
+                            Some(Action::Select { group, .. }) if h.layer > 0 => Some(group),
+                            _ => None,
+                        })
+                        .unwrap_or(m.id);
+                    self.move_in_group(group, code);
                     self.st.focus_visible = true;
                     return true;
                 }
@@ -1157,6 +1205,9 @@ impl Ui {
         let Some(items) = self.st.groups.get(&group) else {
             return;
         };
+        // A gap (a title, a disabled entry) repeats the next entry's id.
+        let mut items = items.clone();
+        items.dedup_by_key(|i| i.0);
         if items.is_empty() {
             return;
         }

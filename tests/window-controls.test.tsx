@@ -25,12 +25,12 @@ Object.defineProperty(window, 'api', {
 })
 
 // Force non-Mac + non-Web so WindowControls renders
-vi.mock('../src/renderer/lib/platform', () => ({
+vi.mock('../packages/web/src/renderer/lib/platform', () => ({
   isMac: false,
   isWeb: false
 }))
 
-import { WindowControls } from '../src/renderer/components/WindowControls'
+import { WindowControls } from '../packages/web/src/renderer/components/WindowControls'
 
 beforeEach(() => {
   windowMinimize.mockClear()

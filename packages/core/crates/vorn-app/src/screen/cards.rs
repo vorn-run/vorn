@@ -567,7 +567,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))
         .on(Action::Click)
-        .sense(Sense::WHEEL)
+        .sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE)
 }
 
 /// The shell's blocks when it shows them, as TerminalPane splits.

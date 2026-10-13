@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
 
@@ -14,7 +14,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { TabIconButton } from '../src/renderer/components/TabView'
+import { TabIconButton } from '../packages/web/src/renderer/components/TabView'
 
 describe('TabIconButton', () => {
   it('fires onClick and prevents bubbling so the tab does not activate', () => {

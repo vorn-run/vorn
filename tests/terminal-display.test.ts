@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getBranchLabel } from '../src/renderer/lib/terminal-display'
+import { getBranchLabel } from '../packages/web/src/renderer/lib/terminal-display'
 
 describe('getBranchLabel', () => {
   it('returns undefined when no branch', () => {

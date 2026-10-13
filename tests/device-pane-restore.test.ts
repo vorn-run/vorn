@@ -9,7 +9,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
 
 const KEY = 'vorn:devicePanes'
 

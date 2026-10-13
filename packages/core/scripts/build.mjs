@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds vornd, vorn-sessiond and the vorn command and copies them to ./vornd,
-// ./vorn-sessiond and ./vorn (with .exe on Windows), where the app looks for
-// them and electron-builder picks them up. On Windows it also fetches the
+// ./vorn-sessiond and ./vorn (with .exe on Windows), where tests and the CLI
+// look for them. On Windows it also fetches the
 // ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
 //
 //   --debug        unoptimized build

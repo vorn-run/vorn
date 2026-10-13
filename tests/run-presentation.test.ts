@@ -7,13 +7,13 @@ import {
   runStatusLine,
   runVerdict,
   stepProgress
-} from '../src/renderer/lib/run-presentation'
+} from '../packages/web/src/renderer/lib/run-presentation'
 import type {
   ConnectorItemContext,
   NodeExecutionState,
   WorkflowExecution,
   WorkflowNode
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 function node(id: string, type: WorkflowNode['type'], label: string, config = {}): WorkflowNode {
   return { id, type, label, config, position: { x: 0, y: 0 } } as WorkflowNode

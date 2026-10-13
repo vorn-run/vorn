@@ -4,7 +4,7 @@ import { renderHook, act } from '@testing-library/react'
 import {
   useSidebarResize,
   COLLAPSED_WIDTH
-} from '../src/renderer/components/project-sidebar/useSidebarResize'
+} from '../packages/web/src/renderer/components/project-sidebar/useSidebarResize'
 
 describe('useSidebarResize', () => {
   it('starts with default width of 256 and not collapsed', () => {

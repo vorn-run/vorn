@@ -16,23 +16,24 @@ Object.defineProperty(window, 'api', {
 
 // The card bodies are heavy (an editor, a <webview>) and covered by their own
 // tests; this file is about what the focus stage decides to render.
-vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
+vi.mock('../packages/web/src/renderer/components/PromotedPaneCard', () => ({
   PromotedPaneCard: ({ cardId }: { cardId: string }) => <div data-testid={`body-${cardId}`} />
 }))
-vi.mock('../src/renderer/components/FocusedTerminal', () => ({
+vi.mock('../packages/web/src/renderer/components/FocusedTerminal', () => ({
   FocusedTerminal: () => <div data-testid="focused-terminal" />
 }))
 // jsdom reports no platform, so `isMac` is false and the header renders with
 // no drag region at all — which made the opt-out assertion below vacuously
 // true. Force the branch that actually has the hazard.
-vi.mock('../src/renderer/lib/platform', async (orig) => ({
-  ...(await orig<typeof import('../src/renderer/lib/platform')>()),
+vi.mock('../packages/web/src/renderer/lib/platform', async (orig) => ({
+  ...(await orig<typeof import('../packages/web/src/renderer/lib/platform')>()),
   isMac: true
 }))
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { FocusedStage } = await import('../src/renderer/components/FocusedStage')
-const { usePromotedCardSubject } = await import('../src/renderer/hooks/usePromotedCards')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { FocusedStage } = await import('../packages/web/src/renderer/components/FocusedStage')
+const { usePromotedCardSubject } =
+  await import('../packages/web/src/renderer/hooks/usePromotedCards')
 const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>

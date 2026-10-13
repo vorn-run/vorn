@@ -2,15 +2,15 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
-import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
+import type { RunListEntry } from '../packages/web/src/renderer/hooks/useAllWorkflowRuns'
 
 const mockState = {
   setMainViewMode: vi.fn(),
   setEditingWorkflowId: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
@@ -31,7 +31,7 @@ beforeEach(() => {
   mockState.setEditingWorkflowId.mockReset()
 })
 
-const { RunsList } = await import('../src/renderer/components/workflow-runs/RunsList')
+const { RunsList } = await import('../packages/web/src/renderer/components/workflow-runs/RunsList')
 
 function makeNode(id: string, label: string, type: WorkflowNode['type'] = 'launchAgent') {
   return { id, type, label, config: {}, position: { x: 0, y: 0 } } as WorkflowNode

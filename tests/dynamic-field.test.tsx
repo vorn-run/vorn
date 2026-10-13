@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { DynamicField } from '../src/renderer/components/settings/DynamicField'
-import type { ConnectorConfigField } from '../src/shared/types'
+import { DynamicField } from '../packages/web/src/renderer/components/settings/DynamicField'
+import type { ConnectorConfigField } from '../packages/web/src/shared/types'
 
 const field = (overrides: Partial<ConnectorConfigField> = {}): ConnectorConfigField =>
   ({ key: 'token', label: 'API token', ...overrides }) as ConnectorConfigField

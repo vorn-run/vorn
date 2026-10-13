@@ -15,7 +15,7 @@ import {
   registerSlot,
   setHostRoot,
   startTerminalOverlaySync
-} from '../../src/renderer/lib/terminal-registry'
+} from '../../packages/web/src/renderer/lib/terminal-registry'
 
 type Listener = (d: { id: string; data: string; seq: number }) => void
 let listener: Listener | null = null

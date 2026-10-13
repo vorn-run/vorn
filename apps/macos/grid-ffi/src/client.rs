@@ -19,7 +19,7 @@ use vorn_term_proto::msg::{
     caps, Attach, AttachMode, ClientKind, ClientMsg, Hello, InputEvent, KeyAction, KeyCode,
     MouseAction, Presence, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
-use vorn_term_proto::screen::{MouseMode, Screen};
+use vorn_term_proto::screen::{flags, MouseMode, Screen};
 
 use crate::view::{self, PaneView, VgTheme};
 
@@ -57,6 +57,21 @@ struct Pane {
     scroll_top: Option<u64>,
     /// The history fetch in flight, as `(sb_epoch, from_line)`.
     fetching: Option<(u32, u64)>,
+    /// A paste vornd holds until the person confirms it.
+    held: Option<String>,
+    find: Option<Find>,
+}
+
+/// A match: `(line, from_col, to_col)`, `to_col` excluded.
+pub type Span = (u64, u16, u16);
+
+/// A search in a pane's screen and history and the matches come so far.
+#[derive(Debug)]
+struct Find {
+    req: u32,
+    /// Oldest first.
+    hits: Vec<Span>,
+    done: bool,
 }
 
 #[derive(Debug)]
@@ -69,6 +84,8 @@ struct State {
     dirty: BTreeSet<u32>,
     next_pane: u32,
     next_req: u32,
+    /// Unconfirmed pastes awaiting InputAck or PasteConfirm, by `(sid, input_seq)`.
+    asked: BTreeMap<(u32, u64), (u32, String)>,
     closed: bool,
     last_error: Option<String>,
 }
@@ -240,6 +257,47 @@ impl State {
                 self.dirty.insert(pane);
                 true
             }
+            Got::Message(ServerMsg::InputAck { sid, input_seq }) => {
+                self.asked.remove(&(sid, input_seq));
+                false
+            }
+            Got::Message(ServerMsg::PasteConfirm { sid, input_seq }) => {
+                let Some((pane, text)) = self.asked.remove(&(sid, input_seq)) else {
+                    return false;
+                };
+                let Some(p) = self.panes.get_mut(&pane) else {
+                    return false;
+                };
+                p.held = Some(text);
+                self.dirty.insert(pane);
+                true
+            }
+            Got::Message(ServerMsg::SearchHits {
+                sid,
+                req,
+                hits,
+                done,
+            }) => {
+                let Some(pane) = self.pane_of(sid) else {
+                    return false;
+                };
+                let Some(f) = self
+                    .panes
+                    .get_mut(&pane)
+                    .and_then(|p| p.find.as_mut())
+                    .filter(|f| f.req == req)
+                else {
+                    return false;
+                };
+                f.hits.extend(
+                    hits.iter()
+                        .filter(|h| h.from.line == h.to.line)
+                        .map(|h| (h.from.line, h.from.col, h.to.col.saturating_add(1))),
+                );
+                f.done |= done;
+                self.dirty.insert(pane);
+                true
+            }
             Got::Welcome(_) | Got::Message(_) => false,
         }
     }
@@ -353,6 +411,7 @@ impl Grid {
                 dirty: BTreeSet::new(),
                 next_pane: 0,
                 next_req: 0,
+                asked: BTreeMap::new(),
                 closed: false,
                 last_error: None,
             }),
@@ -406,6 +465,8 @@ impl Grid {
                     presence: None,
                     scroll_top: None,
                     fetching: None,
+                    held: None,
+                    find: None,
                 },
             );
             st.send_attach(id);
@@ -422,6 +483,7 @@ impl Grid {
                 return;
             };
             st.dirty.remove(&pane);
+            st.asked.retain(|_, (id, _)| *id != pane);
             if let Some(sid) = p.sid {
                 st.client.send(&ClientMsg::Detach { sid });
                 st.client.drop_pane(sid);
@@ -573,19 +635,116 @@ impl Grid {
         );
     }
 
-    /// A paste, line ends as Enter sends them, bracketed if the program asks.
-    pub fn paste(&self, pane: u32, utf8: &str) {
+    /// A paste, bracketed if the program asks. Unbracketed line ends stay
+    /// `\n` so vornd can hold a paste that would run commands until it is
+    /// `confirmed`; bracketed ones become `\r`, as Enter sends them.
+    pub fn paste(&self, pane: u32, utf8: &str, confirmed: bool) {
         if utf8.is_empty() {
             return;
         }
-        let utf8 = utf8.replace("\r\n", "\r").replace('\n', "\r");
-        self.input(
-            pane,
-            InputEvent::Paste {
-                utf8,
-                confirmed: true,
-            },
-        );
+        let bracketed = {
+            let st = lock(&self.shared.state);
+            st.live_sid(pane)
+                .and_then(|sid| st.client.pane(sid))
+                .and_then(|p| p.mirror())
+                .is_some_and(|m| m.term().flags & flags::BRACKETED_PASTE != 0)
+        };
+        let utf8 = utf8.replace("\r\n", "\n");
+        let utf8 = if bracketed {
+            utf8.replace('\n', "\r")
+        } else {
+            utf8
+        };
+        if self.unscroll(pane) {
+            self.shared.wake();
+        }
+        self.send(pane, |st, sid| {
+            let input_seq = st.client.input_seq();
+            if !confirmed {
+                st.asked.insert((sid, input_seq), (pane, utf8.clone()));
+            }
+            Some(ClientMsg::Input {
+                sid,
+                input_seq,
+                event: InputEvent::Paste { utf8, confirmed },
+            })
+        });
+    }
+
+    /// The paste vornd held for confirmation, once.
+    pub fn take_held_paste(&self, pane: u32) -> Option<String> {
+        lock(&self.shared.state).panes.get_mut(&pane)?.held.take()
+    }
+
+    /// Searches the pane's screen and history for `query`; an empty query
+    /// ends the search.
+    pub fn search(&self, pane: u32, query: &str, case: bool) {
+        self.send(pane, |st, sid| {
+            st.next_req = st.next_req.wrapping_add(1);
+            let req = st.next_req;
+            let p = st.panes.get_mut(&pane)?;
+            if query.is_empty() {
+                p.find = None;
+                st.dirty.insert(pane);
+                return None;
+            }
+            p.find = Some(Find {
+                req,
+                hits: Vec::new(),
+                done: false,
+            });
+            Some(ClientMsg::Search {
+                sid,
+                req,
+                query: query.to_owned(),
+                regex: false,
+                case,
+                from_line: None,
+            })
+        });
+    }
+
+    /// The current search's matches so far, and whether all have come.
+    pub fn hits(&self, pane: u32) -> Option<(Vec<Span>, bool)> {
+        let st = lock(&self.shared.state);
+        let f = st.panes.get(&pane)?.find.as_ref()?;
+        Some((f.hits.clone(), f.done))
+    }
+
+    /// Scrolls so `line` shows, centred when it was off screen.
+    pub fn reveal(&self, pane: u32, line: u64) {
+        {
+            let mut st = lock(&self.shared.state);
+            let Some(sid) = st.live_sid(pane) else {
+                return;
+            };
+            let Some(t) = st
+                .client
+                .pane(sid)
+                .and_then(|x| x.mirror())
+                .map(|m| m.term())
+            else {
+                return;
+            };
+            if t.screen == Screen::Alternate {
+                return;
+            }
+            let rows = u64::from(t.rows);
+            let (live, oldest) = (t.top_line, t.top_line.saturating_sub(t.history_lines));
+            let Some(p) = st.panes.get_mut(&pane) else {
+                return;
+            };
+            let shown = p.scroll_top.unwrap_or(live);
+            if (shown..shown + rows).contains(&line) {
+                return;
+            }
+            let top = line.saturating_sub(rows / 2).clamp(oldest, live);
+            p.scroll_top = (top < live).then_some(top);
+            st.dirty.insert(pane);
+            st.fetch_history(pane);
+        }
+        self.shared.flush();
+        self.shared.wake();
     }
 
     /// The viewport's text, rows joined by newlines, trailing blanks trimmed.
@@ -996,18 +1155,85 @@ mod tests {
             Some("h8\nh9\na")
         );
 
-        grid.paste(p, "x\ny");
+        grid.paste(p, "x\r\ny", false);
+        let ClientMsg::Input {
+            event, input_seq, ..
+        } = fake.next()
+        else {
+            panic!("input");
+        };
+        assert_eq!(
+            event,
+            InputEvent::Paste {
+                utf8: "x\ny".into(),
+                confirmed: false
+            }
+        );
+        fake.reply(&ServerMsg::PasteConfirm { sid: 4, input_seq });
+        wait_for("held paste", || {
+            lock(&grid.shared.state).panes[&p].held.is_some()
+        });
+        assert_eq!(grid.take_held_paste(p).as_deref(), Some("x\ny"));
+        assert_eq!(grid.take_held_paste(p), None);
+        grid.paste(p, "x\ny", true);
         let ClientMsg::Input { event, .. } = fake.next() else {
             panic!("input");
         };
         assert_eq!(
             event,
             InputEvent::Paste {
-                utf8: "x\ry".into(),
+                utf8: "x\ny".into(),
                 confirmed: true
             }
         );
+        grid.paste(p, "ok", false);
+        let ClientMsg::Input { input_seq, .. } = fake.next() else {
+            panic!("input");
+        };
+        fake.reply(&ServerMsg::InputAck { sid: 4, input_seq });
+        wait_for("ack", || lock(&grid.shared.state).asked.is_empty());
+
+        grid.search(p, "h", false);
+        let ClientMsg::Search {
+            sid, req, query, ..
+        } = fake.next()
+        else {
+            panic!("a search");
+        };
+        assert_eq!((sid, query.as_str()), (4, "h"));
+        let pt = |line, col| vorn_term_proto::msg::GridPoint {
+            line,
+            col,
+            sb_epoch: 3,
+        };
+        let hit = |line| vorn_term_proto::msg::Hit {
+            from: pt(line, 0),
+            to: pt(line, 0),
+        };
+        fake.reply(&ServerMsg::SearchHits {
+            sid: 4,
+            req,
+            hits: vec![hit(5), hit(6)],
+            done: false,
+        });
+        fake.reply(&ServerMsg::SearchHits {
+            sid: 4,
+            req,
+            hits: vec![hit(7)],
+            done: true,
+        });
+        wait_for("hits", || grid.hits(p).is_some_and(|(_, done)| done));
+        assert_eq!(
+            grid.hits(p),
+            Some((vec![(5, 0, 1), (6, 0, 1), (7, 0, 1)], true))
+        );
+        grid.search(p, "", false);
+        assert_eq!(grid.hits(p), None);
         assert!(!grid.view(p).expect("a screen").scrolled);
+        grid.reveal(p, 11);
+        assert!(!grid.view(p).expect("a screen").scrolled);
+        grid.reveal(p, 6);
+        assert_eq!(grid.view(p).expect("a screen").first_line, 5);
         drop(grid);
         let _ = std::fs::remove_dir_all(&dir);
     }

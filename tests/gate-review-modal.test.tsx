@@ -7,7 +7,7 @@ import type {
   ArtifactComment,
   NodeExecutionState,
   WorkflowNode
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 const ART: Artifact = {
   id: 'g1',
@@ -56,7 +56,8 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { GateReviewModal } = await import('../src/renderer/components/workflow-runs/GateReviewModal')
+const { GateReviewModal } =
+  await import('../packages/web/src/renderer/components/workflow-runs/GateReviewModal')
 
 const node = {
   id: 'review',

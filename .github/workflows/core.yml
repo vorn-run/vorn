@@ -33,7 +33,6 @@ on:
       - 'tests/fixtures/cli-reference.json'
       - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
-      - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
       - '.github/workflows/core.yml'
@@ -164,10 +163,6 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
-      # Fetched once here, so parallel test workers never race to download it.
-      - name: Electron binary
-        run: node node_modules/electron/install.js
-
       - name: Rust format
         if: runner.os == 'Linux'
         working-directory: packages/core
@@ -262,74 +257,31 @@ jobs:
         if: ${{ !inputs.quick }}
         run: yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
 
-      # Every vornd, sessiond and session program the tests above started has ended with them.
-      - name: No processes left behind
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: node scripts/check-leftover-processes.mjs --wait 15 "$TMPDIR" "$GITHUB_WORKSPACE"
-
-      - name: Build app
-        if: ${{ !inputs.quick }}
-        run: yarn build
-
-      # Unsigned and not notarized: this checks that the app packages with the
-      # core in it, not that it is ready to publish. Pull requests stop at the
-      # unpacked app, which is what the checks below look in; the installers
-      # (dmg, nsis, AppImage, deb) are most of the time and are built on main.
-      - name: Package app
-        if: ${{ !inputs.quick }}
-        # bash on Windows too: PowerShell splits -c.mac.notarize=false at the dot.
-        shell: bash
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT" = pull_request ]; then
-            yarn dist --publish never -c.mac.notarize=false --dir
-          else
-            yarn dist --publish never -c.mac.notarize=false
-          fi
-
       # Started the way the app starts it. Stdin is already closed, so it says
-      # where it listens and then stops at once.
-      - name: Packaged vornd runs
+      # where it listens and then stops at once. The packaged app is checked
+      # by native-app.yml, which builds the installers.
+      - name: Built vornd runs
         if: ${{ !inputs.quick }}
         shell: bash
+        working-directory: packages/core
         run: |
-          file=$(find dist -ipath '*/resources/vornd/vornd*' -type f -print -quit)
-          if [ -z "$file" ]; then
-            echo "ERROR: vornd is not in the packaged resources"
-            exit 1
-          fi
-          echo "found $file"
-          out=$("$file" --data-dir "$RUNNER_TEMP/packaged-vornd" --port 0 --exit-with-stdin < /dev/null)
+          x=; [ "$RUNNER_OS" = Windows ] && x=.exe
+          out=$("./vornd$x" --data-dir "$RUNNER_TEMP/built-vornd" --port 0 --exit-with-stdin < /dev/null)
           echo "$out"
           case "$out" in
             '{"port":'*) ;;
             *) echo "ERROR: vornd did not say where it listens"; exit 1 ;;
           esac
-          sessiond=$(find dist -ipath '*/resources/vornd/vorn-sessiond*' -type f -print -quit)
-          if [ -z "$sessiond" ]; then
-            echo "ERROR: vorn-sessiond is not in the packaged resources"
-            exit 1
-          fi
-          echo "found $sessiond"
-          "$sessiond" --version
-          # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
-          cli=$(find dist \( -ipath '*/resources/vornd/vorn' -o -ipath '*/resources/vornd/vorn.exe' \) -type f -print -quit)
-          if [ -z "$cli" ]; then
-            echo "ERROR: vorn is not in the packaged resources"
-            exit 1
-          fi
-          echo "found $cli"
-          "$cli" --version
+          "./vorn-sessiond$x" --version
+          "./vorn$x" --version
           if [ "$RUNNER_OS" = Windows ]; then
             for name in conpty.dll x64/OpenConsole.exe; do
-              file=$(find dist -ipath "*/resources/vornd/$name" -type f -print -quit)
-              if [ -z "$file" ]; then
-                echo "ERROR: $name is not beside vorn-sessiond in the packaged resources"
-                exit 1
-              fi
-              echo "found $file"
+              test -f "$name" || { echo "ERROR: $name is not beside vorn-sessiond"; exit 1; }
             done
           fi
+
+      # Every vornd, sessiond and session program the tests above started has ended with them.
+      - name: No processes left behind
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: node scripts/check-leftover-processes.mjs --wait 15 "$TMPDIR" "$GITHUB_WORKSPACE"

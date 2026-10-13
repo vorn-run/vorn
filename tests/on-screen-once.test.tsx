@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { useRef } from 'react'
-import { useOnScreenOnce } from '../src/renderer/hooks/useOnScreenOnce'
+import { useOnScreenOnce } from '../packages/web/src/renderer/hooks/useOnScreenOnce'
 
 /** Drives the observer by hand, since jsdom has none of its own. */
 let fire: ((intersecting: boolean) => void) | null = null

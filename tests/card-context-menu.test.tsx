@@ -32,15 +32,15 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
-vi.mock('../src/renderer/lib/terminal-close', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-close', () => ({
   closeTerminalSession: vi.fn()
 }))
 
-vi.mock('../src/renderer/hooks/useIsMobile', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useIsMobile', () => ({
   useIsMobile: () => false
 }))
 
@@ -51,8 +51,8 @@ beforeEach(() => {
 })
 // Runs start in the server; these check what the window asks for.
 
-import { useAppStore } from '../src/renderer/stores'
-import { CardContextMenu } from '../src/renderer/components/CardContextMenu'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CardContextMenu } from '../packages/web/src/renderer/components/CardContextMenu'
 
 const mockTerminal = {
   id: 'term-1',

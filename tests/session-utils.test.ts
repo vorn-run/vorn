@@ -6,8 +6,8 @@ import {
   resolveProjectName,
   buildRestorePayload,
   resolveActiveProject
-} from '../src/renderer/lib/session-utils'
-import { useAppStore } from '../src/renderer/stores'
+} from '../packages/web/src/renderer/lib/session-utils'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {

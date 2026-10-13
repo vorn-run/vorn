@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { AgentPicker } from '../src/renderer/components/AgentPicker'
-import type { AiAgentType, LaunchAgentType } from '../src/shared/types'
+import { AgentPicker } from '../packages/web/src/renderer/components/AgentPicker'
+import type { AiAgentType, LaunchAgentType } from '../packages/web/src/shared/types'
 
 // Mock createPortal to render inline
 vi.mock('react-dom', async () => {

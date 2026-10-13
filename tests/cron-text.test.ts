@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { humanCron } from '../src/renderer/lib/cron-text'
+import { humanCron } from '../packages/web/src/renderer/lib/cron-text'
 
 describe('humanCron', () => {
   it('reads a minute interval the way someone would say it', () => {

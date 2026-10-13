@@ -2,13 +2,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ConnectorManifest } from '../src/shared/types'
+import type { ConnectorManifest } from '../packages/web/src/shared/types'
 
 const mockState = {
   config: { projects: [{ name: 'Novum', path: '/Users/someone/dev/novum' }] }
 }
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const useAppStore = (selector?: (s: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
   useAppStore.getState = () => mockState
@@ -33,7 +33,8 @@ beforeEach(() => {
   }
 })
 
-const { AddConnectionForm } = await import('../src/renderer/components/settings/AddConnectionForm')
+const { AddConnectionForm } =
+  await import('../packages/web/src/renderer/components/settings/AddConnectionForm')
 
 /** A connector wanting one plain field and one secret. */
 const manifest = {

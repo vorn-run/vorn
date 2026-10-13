@@ -4,7 +4,7 @@ import {
   type Completion,
   type CompletionSources,
   type DirEntry
-} from '../src/renderer/lib/completions'
+} from '../packages/web/src/renderer/lib/completions'
 
 function makeSources(overrides: Partial<CompletionSources> = {}): CompletionSources {
   return {

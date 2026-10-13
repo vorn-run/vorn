@@ -14,7 +14,7 @@ beforeEach(() => {
   })
 })
 
-import { ConnectorIcon, SourceBadge } from '../src/renderer/components/ConnectorIcon'
+import { ConnectorIcon, SourceBadge } from '../packages/web/src/renderer/components/ConnectorIcon'
 
 describe('ConnectorIcon', () => {
   it('renders the GitHub SVG for the "github" id', () => {

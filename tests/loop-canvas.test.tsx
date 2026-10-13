@@ -22,16 +22,16 @@ vi.hoisted(() => {
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = NoopResizeObserver
 })
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => undefined,
   useConnectionIconFor: () => undefined
 }))
 
-import { WorkflowCanvas } from '../src/renderer/components/workflow-editor/WorkflowCanvas'
-import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
-import type { NodeExecutionStatus } from '../src/shared/types'
+import { WorkflowCanvas } from '../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas'
+import { NODE_SELECTED } from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
+import type { NodeExecutionStatus } from '../packages/web/src/shared/types'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)

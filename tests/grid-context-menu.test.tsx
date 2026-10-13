@@ -25,15 +25,15 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
 // Runs start in the server; these check what the window asks for.
 const mockExecuteWorkflow = vi.fn()
 
-import { useAppStore } from '../src/renderer/stores'
-import { GridContextMenu } from '../src/renderer/components/GridContextMenu'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { GridContextMenu } from '../packages/web/src/renderer/components/GridContextMenu'
 
 const mockConfig = {
   projects: [

@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ConnectionRow } from '../src/renderer/components/settings/ConnectionRow'
-import { useRowAction } from '../src/renderer/lib/use-row-action'
-import type { SdkBrowserSignIn, SourceConnection } from '../src/shared/types'
+import { ConnectionRow } from '../packages/web/src/renderer/components/settings/ConnectionRow'
+import { useRowAction } from '../packages/web/src/renderer/lib/use-row-action'
+import type { SdkBrowserSignIn, SourceConnection } from '../packages/web/src/shared/types'
 
 const browser: SdkBrowserSignIn = {
   signInUrl: 'https://substack.com/sign-in',

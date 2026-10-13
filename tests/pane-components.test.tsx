@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
-import type { FileEntry } from '../src/shared/types'
+import type { FileEntry } from '../packages/web/src/shared/types'
 
 // AgentCard (pulled in by focus mode) reads matchMedia at module load, so it
 // must exist before the dynamic imports below.
@@ -57,17 +57,17 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { activeBrowserUrl } = await import('../src/renderer/stores/types')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { activeBrowserUrl } = await import('../packages/web/src/renderer/stores/types')
 
 /** The page a session's browser is showing, i.e. its active tab. */
 const browserUrl = (id: string): string | null =>
   activeBrowserUrl(useAppStore.getState().browserPanes.get(id))
-const { FilesCard } = await import('../src/renderer/components/FilesCard')
-const { EditorCard } = await import('../src/renderer/components/EditorCard')
-const { BrowserCard } = await import('../src/renderer/components/BrowserCard')
-const { FocusedTerminal } = await import('../src/renderer/components/FocusedTerminal')
-const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
+const { FilesCard } = await import('../packages/web/src/renderer/components/FilesCard')
+const { EditorCard } = await import('../packages/web/src/renderer/components/EditorCard')
+const { BrowserCard } = await import('../packages/web/src/renderer/components/BrowserCard')
+const { FocusedTerminal } = await import('../packages/web/src/renderer/components/FocusedTerminal')
+const { dirtyRefFor, clearDirty } = await import('../packages/web/src/renderer/lib/editor-dirty')
 
 const ENTRIES: FileEntry[] = [
   { name: 'src', path: '/repo/src', isDirectory: true },
@@ -532,7 +532,8 @@ describe('PaneCard drag and double-click', () => {
 
 describe('BrowseFilesButton', () => {
   it("toggles the session's files pane", async () => {
-    const { BrowseFilesButton } = await import('../src/renderer/components/GitChangesIndicator')
+    const { BrowseFilesButton } =
+      await import('../packages/web/src/renderer/components/GitChangesIndicator')
     render(<BrowseFilesButton terminalId="t1" />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Browse files' }))
@@ -858,7 +859,8 @@ describe('BrowserCard', () => {
     // The whole point of storing them. The guest opens on the file's declared
     // defaults every time, so without this a repaint resets every value the
     // moment the agent touches the design — punishing you for its turn.
-    const { saveTweak, resetTweaks } = await import('../src/renderer/lib/design-tweaks')
+    const { saveTweak, resetTweaks } =
+      await import('../packages/web/src/renderer/lib/design-tweaks')
     resetTweaks()
     saveTweak('file:///repo/budget.dc.html', 'plan', 9000)
 

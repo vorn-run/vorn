@@ -17,11 +17,11 @@ import { join } from 'node:path'
  */
 const ALLOWED = new Set([
   // The dialog itself — it runs the workflow after collecting what is missing.
-  'src/renderer/components/SourcePromptDialog.tsx',
+  'packages/web/src/renderer/components/SourcePromptDialog.tsx',
   // The single manual-run entry point.
-  'src/renderer/lib/workflow-menu-items.tsx',
+  'packages/web/src/renderer/lib/workflow-menu-items.tsx',
   // Recovery for a schedule missed while the app was closed; no user to prompt.
-  'src/renderer/components/MissedScheduleDialog.tsx'
+  'packages/web/src/renderer/components/MissedScheduleDialog.tsx'
 ])
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -35,7 +35,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 function rendererFiles(): { path: string; source: string }[] {
   const root = join(__dirname, '..')
-  return walk(join(root, 'src/renderer')).map((f) => ({
+  return walk(join(root, 'packages/web/src/renderer')).map((f) => ({
     path: f.slice(root.length + 1).replace(/\\/g, '/'),
     source: readFileSync(f, 'utf8')
   }))

@@ -3,11 +3,12 @@
 //! ```text
 //! vorn-app [window] [--data-dir D]
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
-//!               [--keys K1,K2] [--chrome off]
+//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //! ```
 //!
-//! `--keys` sends shortcuts before the shot (`Mod+KeyN`, `Alt+Digit2`,
-//! `F2`, `Escape`).
+//! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
+//! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
+//! among them reads `--clipboard`.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -25,9 +26,10 @@ use vorn_app::client::{data_dir, Endpoint};
 use vorn_app::crash::{self, CrashAct};
 use vorn_app::launch::{self, Server};
 use vorn_app::ui::{
-    div, mods, run_with, text, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui,
-    Waker, WindowApp, WindowOptions,
+    div, mods, run_with, text, El, Event, Input, Laid, MemoryClipboard, NativeWindow, Rect,
+    RenderMode, Rgba, Ui, Waker, WindowApp, WindowOptions,
 };
+use vorn_app::update::Updater;
 use vorn_app::{look, ui_config, App};
 
 struct Args {
@@ -41,6 +43,8 @@ impl Args {
         let mut it = std::env::args()
             .skip(1)
             .filter(|a| !a.starts_with("-psn_"))
+            // A vorn:// link opens the window.
+            .filter(|a| !a.starts_with("vorn:"))
             .peekable();
         let mode = match it.peek() {
             Some(m) if !m.starts_with("--") => it.next().unwrap_or_default(),
@@ -96,6 +100,9 @@ fn shot(args: &Args) -> Result<(), String> {
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
+    if let Some(c) = args.get("clipboard") {
+        ui.set_clipboard(Box::new(MemoryClipboard(Some(c.to_owned()))));
+    }
     // The startup calls answer before the first frame is drawn.
     let until = Instant::now() + Duration::from_secs(5);
     while app.busy() && Instant::now() < until {
@@ -155,10 +162,21 @@ fn key(spec: &str) -> Input {
         };
         code = rest;
     }
+    // A bare letter types itself, as a keyboard's would.
+    let text = code
+        .strip_prefix("Key")
+        .filter(|l| l.len() == 1 && m & !mods::SHIFT == 0)
+        .map(|l| {
+            if m & mods::SHIFT == 0 {
+                l.to_lowercase()
+            } else {
+                l.to_owned()
+            }
+        });
     Input::Key {
         code: code.to_owned(),
         mods: m,
-        text: None,
+        text,
     }
 }
 
@@ -250,6 +268,7 @@ struct Win {
     error: Option<String>,
     reconnect: Box<dyn Fn() -> Result<App, String>>,
     window: Option<Arc<NativeWindow>>,
+    updater: Arc<Updater>,
 }
 
 impl Win {
@@ -290,6 +309,7 @@ impl WindowApp for Win {
             if crash::event(ui, &event, error) == Some(CrashAct::Reload) {
                 match (self.reconnect)() {
                     Ok(mut app) => {
+                        app.set_updater(Arc::clone(&self.updater));
                         if let Some(window) = &self.window {
                             app.opened(window);
                         }
@@ -344,6 +364,7 @@ impl WindowApp for Win {
             return Some(w.next);
         };
         self.waiting = None;
+        app.set_updater(Arc::clone(&self.updater));
         if let Some(window) = &self.window {
             app.opened(window);
             // The app draws its own frame outside macOS.
@@ -368,10 +389,19 @@ fn window(args: &Args) -> Result<(), String> {
         }
     });
     let dir = args.data_dir()?;
+    // After an update the running vornd is the last build's: this build's
+    // takes over, and the session holder keeps the terminals.
+    if let Some(server) = Server::locate() {
+        launch::retire_older(&dir, &server);
+    }
+    let updater = Updater::start(Arc::clone(&wake));
     let mut waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
     // Connected before the window opens when vornd runs, so it never shows
     // the waiting screen; otherwise this starts the bundled one.
-    let app = waiting.poll();
+    let mut app = waiting.poll();
+    if let Some(app) = &mut app {
+        app.set_updater(Arc::clone(&updater));
+    }
     let ready = app.is_some();
     let reconnect = Box::new(move || {
         let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
@@ -399,6 +429,7 @@ fn window(args: &Args) -> Result<(), String> {
             error: None,
             reconnect,
             window: None,
+            updater,
         }
     })
 }

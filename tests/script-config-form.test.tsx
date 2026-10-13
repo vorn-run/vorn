@@ -21,34 +21,37 @@ const { projectPickerProps, selectPickerProps, held } = vi.hoisted(() => ({
   selectPickerProps: [] as Array<Record<string, unknown>>,
   held: { keys: [] as Array<{ connectionId: string; name: string }> }
 }))
-vi.mock('../src/renderer/components/ProjectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => {
     projectPickerProps.push(props)
     return <div data-testid="project-picker" />
   }
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/VariableAutocomplete', () => ({
-  VariableAutocomplete: () => <div data-testid="variable-autocomplete" />
-}))
+vi.mock(
+  '../packages/web/src/renderer/components/workflow-editor/panels/VariableAutocomplete',
+  () => ({
+    VariableAutocomplete: () => <div data-testid="variable-autocomplete" />
+  })
+)
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (s: unknown) => unknown) =>
     selector ? selector({ config: { projects: [] } }) : { config: { projects: [] } }
 }))
 
-vi.mock('../src/renderer/components/SelectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/SelectPicker', () => ({
   SelectPicker: (props: Record<string, unknown>) => {
     selectPickerProps.push(props)
     return <div data-testid="select-picker" />
   }
 }))
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnectorKeys: () => held.keys
 }))
 
-import { ScriptConfigForm } from '../src/renderer/components/workflow-editor/panels/ScriptConfigForm'
-import type { ScriptConfig } from '../src/shared/types'
+import { ScriptConfigForm } from '../packages/web/src/renderer/components/workflow-editor/panels/ScriptConfigForm'
+import type { ScriptConfig } from '../packages/web/src/shared/types'
 
 function base(o: Partial<ScriptConfig> = {}): ScriptConfig {
   return { scriptType: 'bash', scriptContent: '', ...o }

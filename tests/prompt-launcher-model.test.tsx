@@ -8,13 +8,13 @@ const state = vi.hoisted(() => ({
   addTerminal: vi.fn(),
   isNewAgentDialogOpen: false
 }))
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (select: (value: typeof state) => unknown) => select(state)
 }))
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({ status: { codex: true } })
 }))
-vi.mock('../src/renderer/hooks/useLaunchSettings', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useLaunchSettings', () => ({
   useLaunchSettings: () => ({
     selectedProject: 'Project',
     selectedAgent: 'codex',
@@ -26,10 +26,10 @@ vi.mock('../src/renderer/hooks/useLaunchSettings', () => ({
     reset: vi.fn()
   })
 }))
-vi.mock('../src/renderer/hooks/usePreferredModel', () => ({
+vi.mock('../packages/web/src/renderer/hooks/usePreferredModel', () => ({
   usePreferredModel: () => ({ model: 'chosen', setModel: vi.fn() })
 }))
-import { PromptLauncher } from '../src/renderer/components/PromptLauncher'
+import { PromptLauncher } from '../packages/web/src/renderer/components/PromptLauncher'
 
 beforeEach(() => {
   Object.defineProperty(window, 'api', {

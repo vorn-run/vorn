@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { shouldNotifyStatus, shouldNotifyBell } from '../src/renderer/lib/notifications'
-import type { AppConfig } from '../src/shared/types'
+import {
+  shouldNotifyStatus,
+  shouldNotifyBell
+} from '../packages/web/src/renderer/lib/notifications'
+import type { AppConfig } from '../packages/web/src/shared/types'
 
 function makeConfig(overrides: Partial<AppConfig['defaults']['notifications']> = {}): AppConfig {
   return {

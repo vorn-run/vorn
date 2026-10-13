@@ -4,14 +4,14 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children, label }: { children: ReactNode; label: string }) => (
     <span data-tooltip-label={label}>{children}</span>
   )
 }))
 
 const waitingMock = vi.fn(() => [] as unknown[])
-vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingMock()
 }))
 
@@ -20,8 +20,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { MainViewPills } from '../src/renderer/components/MainViewPills'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { MainViewPills } from '../packages/web/src/renderer/components/MainViewPills'
 
 const setMainViewMode = vi.fn()
 

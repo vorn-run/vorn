@@ -8,25 +8,31 @@ const hoisted = vi.hoisted(() => ({
   slots: [] as Array<{ fitTo?: { current: HTMLElement | null } }>
 }))
 
-vi.mock('../src/renderer/hooks/useLiveTerminalRows', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useLiveTerminalRows', () => ({
   useLiveTerminalRows: () => hoisted.rows
 }))
-vi.mock('../src/renderer/lib/command-blocks', () => ({
+vi.mock('../packages/web/src/renderer/lib/command-blocks', () => ({
   hasShellIntegration: () => true,
   onCommandBlocksChange: () => () => {}
 }))
-vi.mock('../src/renderer/lib/block-log', () => ({ registerBlockLogView: () => () => {} }))
-vi.mock('../src/renderer/components/BlockLog', () => ({ BlockLog: () => null }))
-vi.mock('../src/renderer/components/RunningCommand', () => ({ RunningCommand: () => null }))
-vi.mock('../src/renderer/components/CommandSpine', () => ({ CommandSpine: () => null }))
-vi.mock('../src/renderer/components/TerminalSlot', () => ({
+vi.mock('../packages/web/src/renderer/lib/block-log', () => ({
+  registerBlockLogView: () => () => {}
+}))
+vi.mock('../packages/web/src/renderer/components/BlockLog', () => ({ BlockLog: () => null }))
+vi.mock('../packages/web/src/renderer/components/RunningCommand', () => ({
+  RunningCommand: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/CommandSpine', () => ({
+  CommandSpine: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/TerminalSlot', () => ({
   TerminalSlot: (props: { fitTo?: { current: HTMLElement | null } }) => {
     hoisted.slots.push(props)
     return <div data-testid="slot" />
   }
 }))
 
-import { TerminalPane } from '../src/renderer/components/TerminalPane'
+import { TerminalPane } from '../packages/web/src/renderer/components/TerminalPane'
 
 afterEach(() => {
   cleanup()

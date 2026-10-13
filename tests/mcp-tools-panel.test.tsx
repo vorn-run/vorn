@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { McpToolsPanel } from '../src/renderer/components/settings/McpToolsPanel'
-import type { SourceConnection } from '../src/shared/types'
+import { McpToolsPanel } from '../packages/web/src/renderer/components/settings/McpToolsPanel'
+import type { SourceConnection } from '../packages/web/src/shared/types'
 
 const refreshMcpTools = vi.fn()
 const executeConnectorAction = vi.fn()

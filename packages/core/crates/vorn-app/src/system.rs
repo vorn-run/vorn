@@ -101,9 +101,10 @@ fn shim_name() -> &'static str {
 
 /// The `vorn` command beside this app, which the shim runs.
 fn cli_beside(exe: &Path) -> Option<PathBuf> {
-    let cli = exe
-        .parent()?
-        .join(format!("vorn{}", std::env::consts::EXE_SUFFIX));
+    let name = format!("vorn{}", std::env::consts::EXE_SUFFIX);
+    let dir = exe.parent()?;
+    let cli = crate::launch::resources(dir)
+        .map_or_else(|| dir.join(&name), |r| r.join("vornd").join(&name));
     cli.is_file().then_some(cli)
 }
 
@@ -202,9 +203,52 @@ pub fn apply_login_item(config: &Value) -> Result<(), String> {
     let Some(on) = login_item_for(config, packaged()) else {
         return Ok(());
     };
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // An AppImage runs from a mount that is gone by the next login.
+    let exe = match std::env::var_os("APPIMAGE").filter(|_| cfg!(target_os = "linux")) {
+        Some(image) => PathBuf::from(image),
+        None => std::env::current_exe().map_err(|e| e.to_string())?,
+    };
+    clear_legacy_login();
     set_login(&exe, on)
 }
+
+/// Removes the login item releases up to 0.8.0-beta.8 registered, which this
+/// app's own record replaces and could not otherwise turn off.
+#[cfg(target_os = "macos")]
+fn clear_legacy_login() {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
+    #[link(name = "ServiceManagement", kind = "framework")]
+    extern "C" {}
+    // SMAppService arrived in macOS 13; before it there is nothing to clear.
+    let Some(class) = AnyClass::get("SMAppService") else {
+        return;
+    };
+    // SAFETY: documented SMAppService selectors with their declared types;
+    // the service is a shared object that is not retained past this scope.
+    unsafe {
+        let service: *mut AnyObject = msg_send![class, mainAppService];
+        if service.is_null() {
+            return;
+        }
+        // 1 enabled, 2 waiting for approval.
+        let status: isize = msg_send![service, status];
+        if status == 1 || status == 2 {
+            let mut error: *mut AnyObject = std::ptr::null_mut();
+            let _: Bool = msg_send![service, unregisterAndReturnError: &mut error];
+        }
+    }
+}
+
+#[cfg(windows)]
+fn clear_legacy_login() {
+    for name in ["com.vorn.app", "electron.app.Vorn"] {
+        let _ = win::set_run_value(name, None);
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn clear_legacy_login() {}
 
 /// `~/x` with the home directory spelled out.
 pub fn expand_home(path: &str) -> PathBuf {

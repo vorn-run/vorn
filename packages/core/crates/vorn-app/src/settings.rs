@@ -107,6 +107,8 @@ pub enum SetAct {
     EditShell,
     InstallCli,
     CheckUpdates,
+    /// Restart into a ready update, download an offered one, or retry.
+    UpdateNow,
     /// The sidebar's update notice put away; the gear keeps a dot.
     DismissUpdate,
     // Worktrees.
@@ -227,16 +229,30 @@ pub fn sigil(family: Option<&str>) -> &'static str {
     }
 }
 
-/// The updater's state (`UpdateStatus`). This build has no updater, so it
-/// stays `Unsupported`, as an unpackaged desktop build does.
+/// The updater's state (`UpdateStatus`); `Unsupported` in a build tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateStatus {
-    Idle { last_checked: Option<f64> },
+    Idle {
+        last_checked: Option<f64>,
+    },
     Checking,
-    Available { version: String },
-    Downloading { version: String, percent: u32 },
-    Ready { version: String },
-    Error { message: String },
+    Available {
+        version: String,
+    },
+    Downloading {
+        version: String,
+        percent: u32,
+    },
+    Ready {
+        version: String,
+    },
+    /// A newer version this install cannot take itself (a .deb).
+    Manual {
+        version: String,
+    },
+    Error {
+        message: String,
+    },
     Unsupported,
 }
 
@@ -329,6 +345,12 @@ pub fn describe_update(status: &UpdateStatus, channel: &str, now: f64) -> Update
             Some("Vorn closes for a few seconds and reopens itself".into()),
             Tone::Blocked,
             Some(UpdateAction::Restart),
+        ),
+        UpdateStatus::Manual { version } => view(
+            format!("Version {version} is available"),
+            Some("Install the new package from the releases page".into()),
+            Tone::Idle,
+            None,
         ),
         UpdateStatus::Error { message } => view(
             "Couldn't update".into(),

@@ -24,14 +24,14 @@ Object.defineProperty(window, 'api', {
 
 // The terminal body is the registry's business and has its own tests; this file
 // is about which shell the panel decides to draw and what its tabs do.
-vi.mock('../src/renderer/components/TerminalPane', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalPane', () => ({
   TerminalPane: ({ terminalId }: { terminalId: string }) => (
     <div data-testid={`terminal-body-${terminalId}`} />
   )
 }))
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { TerminalsCard } = await import('../src/renderer/components/TerminalsCard')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { TerminalsCard } = await import('../packages/web/src/renderer/components/TerminalsCard')
 
 const session = (id: string, displayName = id) =>
   ({

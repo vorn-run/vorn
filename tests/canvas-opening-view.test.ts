@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { openingViewport, topAlignedFit } from '../src/renderer/lib/workflow-canvas-layout'
+import {
+  openingViewport,
+  topAlignedFit
+} from '../packages/web/src/renderer/lib/workflow-canvas-layout'
 
 describe('where a workflow opens', () => {
   const placed = [

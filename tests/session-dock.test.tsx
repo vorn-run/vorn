@@ -2,14 +2,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WaitingApproval } from '../src/renderer/hooks/useWaitingApprovals'
+import type { WaitingApproval } from '../packages/web/src/renderer/hooks/useWaitingApprovals'
 
 let minimizedIds: string[] = []
 let waitingApprovals: WaitingApproval[] = []
 let collapsed = false
 const toggleCollapsed = vi.fn()
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       sessionDockCollapsed: collapsed,
@@ -19,21 +19,21 @@ vi.mock('../src/renderer/stores', () => ({
   }
 }))
 
-vi.mock('../src/renderer/hooks/useVisibleTerminals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useVisibleTerminals', () => ({
   useVisibleTerminals: () => ({ orderedIds: [], minimizedIds })
 }))
-vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingApprovals
 }))
 
-vi.mock('../src/renderer/components/MinimizedPill', () => ({
+vi.mock('../packages/web/src/renderer/components/MinimizedPill', () => ({
   MinimizedPill: ({ terminalId }: { terminalId: string }) => (
     <div data-testid="minimized-pill" data-id={terminalId}>
       {terminalId}
     </div>
   )
 }))
-vi.mock('../src/renderer/components/WaitingApprovalPill', () => ({
+vi.mock('../packages/web/src/renderer/components/WaitingApprovalPill', () => ({
   WaitingApprovalPill: ({
     execution,
     nodeState
@@ -47,7 +47,7 @@ vi.mock('../src/renderer/components/WaitingApprovalPill', () => ({
   )
 }))
 
-import { SessionDock } from '../src/renderer/components/SessionDock'
+import { SessionDock } from '../packages/web/src/renderer/components/SessionDock'
 
 function waiting(workflowId = 'wf-1', nodeId = 'n1'): WaitingApproval {
   return {

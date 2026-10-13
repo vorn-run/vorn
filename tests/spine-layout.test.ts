@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { CommandBlock, MarkerLike } from '../src/renderer/lib/command-blocks'
+import type { CommandBlock, MarkerLike } from '../packages/web/src/renderer/lib/command-blocks'
 import {
   computeSpineMarks,
   isRoutine,
   MIN_MARK_PX,
   type BufferMetrics
-} from '../src/renderer/lib/spine-layout'
+} from '../packages/web/src/renderer/lib/spine-layout'
 
 function marker(line: number, disposed = false): MarkerLike {
   return { line, isDisposed: disposed, dispose: () => {}, onDispose: () => {} }

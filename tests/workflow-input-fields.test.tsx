@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/components/ProjectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => (
     <button
       data-testid="project-picker"
@@ -14,7 +14,7 @@ vi.mock('../src/renderer/components/ProjectPicker', () => ({
   )
 }))
 
-vi.mock('../src/renderer/components/SelectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/SelectPicker', () => ({
   SelectPicker: (props: Record<string, unknown>) => (
     <button
       data-testid="select-picker"
@@ -26,11 +26,12 @@ vi.mock('../src/renderer/components/SelectPicker', () => ({
 }))
 
 const mockState = { config: { projects: [{ name: 'Vorn', path: '/p' }] } }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (s: unknown) => unknown) => (selector ? selector(mockState) : mockState)
 }))
 
-const { WorkflowInputFields } = await import('../src/renderer/components/WorkflowInputFields')
+const { WorkflowInputFields } =
+  await import('../packages/web/src/renderer/components/WorkflowInputFields')
 
 type Def = Parameters<typeof WorkflowInputFields>[0]['defs'][number]
 

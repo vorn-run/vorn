@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { FileStamp } from '../src/shared/types'
+import type { FileStamp } from '../packages/web/src/shared/types'
 import { truncationMarker } from '@vornrun/shared/string-utils'
 
 {
@@ -47,7 +47,7 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { FileEditorPane } = await import('../src/renderer/components/FileTreeExplorer')
+const { FileEditorPane } = await import('../packages/web/src/renderer/components/FileTreeExplorer')
 
 const ON_DISK = 'line one\nline two'
 const STAMP: FileStamp = { size: 17, mtimeMs: 1_700_000_000_000 }

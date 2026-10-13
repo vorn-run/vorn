@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { splitPaneWeights, resizePaneWeights } from '../src/renderer/lib/split-ratio'
+import { splitPaneWeights, resizePaneWeights } from '../packages/web/src/renderer/lib/split-ratio'
 
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
@@ -17,23 +17,24 @@ Object.defineProperty(window, 'api', {
 
 // The three pane bodies are heavy (file trees, editors, a <webview>) and are
 // covered by their own tests; this file is about how the column arranges them.
-vi.mock('../src/renderer/components/FilesCard', () => ({
+vi.mock('../packages/web/src/renderer/components/FilesCard', () => ({
   FilesCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`files-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/EditorCard', () => ({
+vi.mock('../packages/web/src/renderer/components/EditorCard', () => ({
   EditorCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
     <div data-testid={`editor-${paneKey ?? sessionId}`} />
   )
 }))
-vi.mock('../src/renderer/components/BrowserCard', () => ({
+vi.mock('../packages/web/src/renderer/components/BrowserCard', () => ({
   BrowserCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
     <div data-testid={`browser-${paneKey ?? sessionId}`} />
   )
 }))
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { PaneColumn } = await import('../src/renderer/components/PaneColumn')
-const { usePaneColumnEntries } = await import('../src/renderer/hooks/usePaneColumnEntries')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { PaneColumn } = await import('../packages/web/src/renderer/components/PaneColumn')
+const { usePaneColumnEntries } =
+  await import('../packages/web/src/renderer/hooks/usePaneColumnEntries')
 const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>

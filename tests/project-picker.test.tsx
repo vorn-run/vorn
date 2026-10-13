@@ -17,8 +17,8 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-import { ProjectPicker } from '../src/renderer/components/ProjectPicker'
-import type { ProjectConfig } from '../src/shared/types'
+import { ProjectPicker } from '../packages/web/src/renderer/components/ProjectPicker'
+import type { ProjectConfig } from '../packages/web/src/shared/types'
 
 const projects: ProjectConfig[] = [
   { name: 'Vorn', path: '/r/vorn', preferredAgents: [], icon: 'Rocket', iconColor: '#fff' },

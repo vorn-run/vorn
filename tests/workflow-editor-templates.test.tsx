@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowDefinition } from '../src/shared/types'
+import type { WorkflowDefinition } from '../packages/web/src/shared/types'
 
 vi.mock('framer-motion', () => ({
   motion: {
@@ -18,7 +18,7 @@ vi.mock('react-dom', async () => {
   return { ...actual, createPortal: (node: React.ReactNode) => node }
 })
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
@@ -26,28 +26,31 @@ const captured = vi.hoisted(() => ({
   canvasProps: null as Record<string, unknown> | null,
   propertiesProps: null as Record<string, unknown> | null
 }))
-vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
   WorkflowCanvas: (props: Record<string, unknown>) => {
     captured.canvasProps = props
     return <div data-testid="canvas" />
   }
 }))
 
-vi.mock('../src/renderer/components/workflow-editor/panels/StepLibrary', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/StepLibrary', () => ({
   StepLibrary: () => <div data-testid="step-library" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
   NodeConfigPanel: () => <div data-testid="node-config" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
   RunHistoryPanel: () => <div data-testid="run-history" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel', () => ({
-  WorkflowPropertiesPanel: (props: Record<string, unknown>) => {
-    captured.propertiesProps = props
-    return <div data-testid="properties-panel" />
-  }
-}))
+vi.mock(
+  '../packages/web/src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel',
+  () => ({
+    WorkflowPropertiesPanel: (props: Record<string, unknown>) => {
+      captured.propertiesProps = props
+      return <div data-testid="properties-panel" />
+    }
+  })
+)
 
 const toasts = vi.hoisted(() => ({
   success: vi.fn(),
@@ -58,7 +61,7 @@ const toasts = vi.hoisted(() => ({
   dismiss: vi.fn(),
   update: vi.fn()
 }))
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: Object.assign(vi.fn(), toasts)
 }))
 
@@ -142,7 +145,7 @@ const mockState = {
   setImportedRequirements: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const useAppStore = (selector?: (s: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
   useAppStore.getState = () => mockState
@@ -195,9 +198,11 @@ const CONNECTION = {
 
 const { TEMPLATE_SEED } = await import('./helpers/template-seed')
 const { __resetConnectionsCacheForTests, refreshConnections } =
-  await import('../src/renderer/lib/use-connections')
-const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
-const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
+  await import('../packages/web/src/renderer/lib/use-connections')
+const { __resetCatalogCacheForTests } =
+  await import('../packages/web/src/renderer/lib/use-connector-catalog')
+const { WorkflowEditor } =
+  await import('../packages/web/src/renderer/components/workflow-editor/WorkflowEditor')
 
 const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>> }).api
 

@@ -2,8 +2,8 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ConnectorIcon } from '../src/renderer/components/ConnectorIcon'
-import { connectionIcon } from '../src/renderer/lib/connection-icon'
+import { ConnectorIcon } from '../packages/web/src/renderer/components/ConnectorIcon'
+import { connectionIcon } from '../packages/web/src/renderer/lib/connection-icon'
 
 const conn = (filters: Record<string, unknown>) => ({ filters }) as never
 

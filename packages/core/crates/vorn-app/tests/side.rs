@@ -584,7 +584,7 @@ fn a_ready_update_is_offered_in_the_sidebar_until_dismissed() {
     });
     let restart = control(
         "update-notice",
-        Act::Set(vorn_app::settings::SetAct::CheckUpdates),
+        Act::Set(vorn_app::settings::SetAct::UpdateNow),
     );
     shot.frame(&mut app);
     assert!(shot.ui.rect_of(restart).is_some(), "the notice shows");

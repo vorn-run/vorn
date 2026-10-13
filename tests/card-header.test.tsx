@@ -5,20 +5,20 @@ import { render, screen, act, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
-vi.mock('../src/renderer/components/ConfirmPopover', () => ({
+vi.mock('../packages/web/src/renderer/components/ConfirmPopover', () => ({
   ConfirmPopover: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
-vi.mock('../src/renderer/components/GitChangesIndicator', () => ({
+vi.mock('../packages/web/src/renderer/components/GitChangesIndicator', () => ({
   GitChangesIndicator: () => <div data-testid="git-changes" />,
   BrowseFilesButton: () => <div data-testid="browse-files" />
 }))
-vi.mock('../src/renderer/lib/terminal-close', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-close', () => ({
   closeTerminalSession: vi.fn().mockResolvedValue(undefined)
 }))
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
@@ -40,8 +40,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { CardHeader } from '../src/renderer/components/card/CardHeader'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CardHeader } from '../packages/web/src/renderer/components/card/CardHeader'
 
 const mockTerminal = {
   id: 'term-1',

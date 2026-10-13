@@ -53,7 +53,7 @@ afterAll(() => {
 // Stub AgentCard with forwardRef so GridView's ref callback (which calls
 // cardRefs.current.set(id, el)) actually fires. Sessions are the grid's only
 // layout unit now — a session's panes render inside its own card.
-vi.mock('../src/renderer/components/AgentCard', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentCard', () => ({
   AgentCard: forwardRef<
     HTMLDivElement,
     { terminalId: string; index: number; isDragTarget: boolean }
@@ -69,7 +69,7 @@ vi.mock('../src/renderer/components/AgentCard', () => ({
   })
 }))
 
-vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
+vi.mock('../packages/web/src/renderer/components/PromotedPaneCard', () => ({
   PromotedPaneCard: forwardRef<HTMLDivElement, { cardId: string }>(function MockCard(
     { cardId },
     ref
@@ -78,25 +78,25 @@ vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
   })
 }))
 
-vi.mock('../src/renderer/components/PromptLauncher', () => ({
+vi.mock('../packages/web/src/renderer/components/PromptLauncher', () => ({
   PromptLauncher: () => null
 }))
 
-vi.mock('../src/renderer/components/GridContextMenu', () => ({
+vi.mock('../packages/web/src/renderer/components/GridContextMenu', () => ({
   GridContextMenu: () => null
 }))
 
-vi.mock('../src/renderer/hooks/useIsMobile', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useIsMobile', () => ({
   useIsMobile: () => false
 }))
 
-vi.mock('../src/renderer/hooks/useFilteredHeadless', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useFilteredHeadless', () => ({
   useFilteredHeadless: () => []
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { GridView } from '../src/renderer/components/GridView'
-import { pickAutoLayout, fitMaxRows } from '../src/renderer/lib/auto-grid-layout'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { GridView } from '../packages/web/src/renderer/components/GridView'
+import { pickAutoLayout, fitMaxRows } from '../packages/web/src/renderer/lib/auto-grid-layout'
 
 const mockConfig = {
   projects: [

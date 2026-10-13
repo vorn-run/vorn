@@ -6,7 +6,7 @@ vi.stubGlobal('window', { api: { listConnectorCatalog, refreshConnectorCatalog: 
 afterAll(() => vi.unstubAllGlobals())
 
 const { refreshConnectorCatalog, __resetCatalogCacheForTests } =
-  await import('../src/renderer/lib/use-connector-catalog')
+  await import('../packages/web/src/renderer/lib/use-connector-catalog')
 
 const snapshot = (id: string) => ({
   items: [{ id, name: id, description: '', packageName: `p-${id}`, capabilities: [] }],

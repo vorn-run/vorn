@@ -37,9 +37,11 @@ class FakeWorker {
   }
 }
 
-async function load(): Promise<typeof import('../src/renderer/components/code-editor/shiki')> {
+async function load(): Promise<
+  typeof import('../packages/web/src/renderer/components/code-editor/shiki')
+> {
   vi.resetModules()
-  return import('../src/renderer/components/code-editor/shiki')
+  return import('../packages/web/src/renderer/components/code-editor/shiki')
 }
 
 beforeEach(() => {
@@ -129,7 +131,7 @@ describe('the worker itself', () => {
     vi.spyOn(scope, 'postMessage').mockImplementation((m: unknown) => {
       posted.push(m)
     })
-    await import('../src/renderer/components/code-editor/shiki.worker')
+    await import('../packages/web/src/renderer/components/code-editor/shiki.worker')
     return { ask: (data) => scope.onmessage?.({ data }), posted }
   }
 

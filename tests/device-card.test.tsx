@@ -50,7 +50,7 @@ vi.stubGlobal('ResizeObserver', RO)
 
 const toastError = vi.fn()
 const toastSuccess = vi.fn()
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: Object.assign(vi.fn(), {
     error: (m: string) => toastError(m),
     success: (m: string) => toastSuccess(m)
@@ -81,8 +81,8 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { DeviceCard } = await import('../src/renderer/components/DeviceCard')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { DeviceCard } = await import('../packages/web/src/renderer/components/DeviceCard')
 
 /** The still is letterboxed inside the pane, so the click→point mapping has to
  *  go through the drawn box. Fix both boxes so the arithmetic is checkable. */

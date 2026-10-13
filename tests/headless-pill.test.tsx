@@ -2,14 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { HeadlessSession, WorkflowDefinition } from '../src/shared/types'
+import type { HeadlessSession, WorkflowDefinition } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: () => <span data-testid="agent-icon" />
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { HeadlessPill } from '../src/renderer/components/HeadlessPill'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { HeadlessPill } from '../packages/web/src/renderer/components/HeadlessPill'
 
 const baseSession: HeadlessSession = {
   id: 'h-1',

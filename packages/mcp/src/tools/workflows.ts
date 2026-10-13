@@ -1071,7 +1071,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
         // Always an object once the workflow declares inputs, even when every
         // value resolved empty. resolveTemplateVars
-        // (src/renderer/lib/template-vars.ts) skips the whole `inputs`
+        // (packages/web/src/renderer/lib/template-vars.ts) skips the whole `inputs`
         // namespace when context.inputs is absent, which leaves a literal
         // `{{inputs.topic}}` in the agent's prompt; an empty object resolves it
         // to an empty string instead. Wrong-but-blank beats raw template text.

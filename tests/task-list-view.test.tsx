@@ -14,15 +14,15 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-vi.mock('../src/renderer/components/task-board/TaskCard', () => ({
+vi.mock('../packages/web/src/renderer/components/task-board/TaskCard', () => ({
   TaskCard: ({ task }: { task: { id: string; title: string } }) => (
     <div data-testid={`card-${task.id}`}>{task.title}</div>
   )
 }))
 
-import { TaskListView } from '../src/renderer/components/task-board/TaskListView'
-import { TASK_STATUS_TEXT, TASK_STATUS_LABEL } from '../src/renderer/lib/task-status'
-import type { TaskConfig, TaskStatus } from '../src/shared/types'
+import { TaskListView } from '../packages/web/src/renderer/components/task-board/TaskListView'
+import { TASK_STATUS_TEXT, TASK_STATUS_LABEL } from '../packages/web/src/renderer/lib/task-status'
+import type { TaskConfig, TaskStatus } from '../packages/web/src/shared/types'
 
 const task = (id: string, status: TaskStatus): TaskConfig =>
   ({ id, title: `Task ${id}`, status, projectName: 'Vorn', createdAt: '2026-08-01' }) as TaskConfig

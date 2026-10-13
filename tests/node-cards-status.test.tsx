@@ -1,27 +1,29 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 const mockConfig = { remoteHosts: [] as Array<{ id: string; label: string }> }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = { config: mockConfig }
     return selector ? selector(state) : state
   }
 }))
 
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: () => <div data-testid="agent-icon" />
 }))
 
-const { TriggerNode } = await import('../src/renderer/components/workflow-editor/nodes/TriggerNode')
-const { ScriptNode } = await import('../src/renderer/components/workflow-editor/nodes/ScriptNode')
+const { TriggerNode } =
+  await import('../packages/web/src/renderer/components/workflow-editor/nodes/TriggerNode')
+const { ScriptNode } =
+  await import('../packages/web/src/renderer/components/workflow-editor/nodes/ScriptNode')
 const { ConditionNode } =
-  await import('../src/renderer/components/workflow-editor/nodes/ConditionNode')
+  await import('../packages/web/src/renderer/components/workflow-editor/nodes/ConditionNode')
 const { LaunchAgentNode } =
-  await import('../src/renderer/components/workflow-editor/nodes/LaunchAgentNode')
+  await import('../packages/web/src/renderer/components/workflow-editor/nodes/LaunchAgentNode')
 
 describe('node cards — executionStatus dot', () => {
   it('renders a success dot on ScriptNode', () => {

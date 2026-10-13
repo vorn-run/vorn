@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import { loadTweaks, saveTweak, mergeTweaks, resetTweaks } from '../src/renderer/lib/design-tweaks'
+import {
+  loadTweaks,
+  saveTweak,
+  mergeTweaks,
+  resetTweaks
+} from '../packages/web/src/renderer/lib/design-tweaks'
 
 /**
  * What survives a repaint.

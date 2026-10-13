@@ -7,9 +7,9 @@ import type {
   ArtifactComment,
   ArtifactVersion,
   BrowserTabArtifact
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
+vi.mock('../packages/web/src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
   RichMarkdownEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <textarea aria-label="Doc words" value={value} onChange={(e) => onChange(e.target.value)} />
   )
@@ -113,9 +113,9 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { parsePersistedBrowsers } = await import('../src/renderer/stores/ui-slice')
-const { BrowserCard } = await import('../src/renderer/components/BrowserCard')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { parsePersistedBrowsers } = await import('../packages/web/src/renderer/stores/ui-slice')
+const { BrowserCard } = await import('../packages/web/src/renderer/components/BrowserCard')
 
 const TAB: BrowserTabArtifact = { id: 'a1', version: 3, kind: 'page', title: ART.title }
 const url = (n: number): string => `http://127.0.0.1:9000/artifact/a1/${n}?t=tok`

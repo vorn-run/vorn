@@ -21,30 +21,30 @@ const mockState = {
   activeWorkspace: 'personal'
 }
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const useAppStore = (selector?: (s: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
   useAppStore.getState = () => mockState
   return { useAppStore }
 })
 
-vi.mock('../src/renderer/hooks/useWorkspaceProjects', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWorkspaceProjects', () => ({
   useWorkspaceProjects: () => []
 }))
 
-vi.mock('../src/renderer/components/task-board/TaskKanbanBoard', () => ({
+vi.mock('../packages/web/src/renderer/components/task-board/TaskKanbanBoard', () => ({
   TaskKanbanBoard: () => <div data-testid="kanban" />
 }))
 
-vi.mock('../src/renderer/components/task-board/TaskListView', () => ({
+vi.mock('../packages/web/src/renderer/components/task-board/TaskListView', () => ({
   TaskListView: () => <div data-testid="list" />
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }
 }))
 
-const { TaskBoardView } = await import('../src/renderer/components/TaskBoardView')
+const { TaskBoardView } = await import('../packages/web/src/renderer/components/TaskBoardView')
 
 describe('TaskBoardView', () => {
   it('renders the empty state when there are no tasks', () => {

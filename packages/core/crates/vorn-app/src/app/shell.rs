@@ -369,13 +369,14 @@ impl App {
         let k = ui.scale();
         let clip = Rect::new(log.x * k, log.y * k, log.w * k, log.h * k);
         ui.scene.push_clip(clip);
-        paint::pane(ui, &b.view, r, paint::Caret::Hidden, "");
+        paint::pane(ui, &b.view, r, paint::Caret::Hidden, "", &[]);
         ui.scene.pop_clip();
         true
     }
 
     /// A split shell's live rows: its PTY sized to the whole pane, the rows
-    /// from its prompt to the cursor drawn in the box they got.
+    /// from its prompt to the cursor drawn in the box they got. Returns where
+    /// its whole screen sits, for pointer selection.
     pub(super) fn paint_live(
         &self,
         ui: &mut Ui,
@@ -383,14 +384,10 @@ impl App {
         r: Rect,
         caret: paint::Caret,
         preedit: &str,
-    ) -> bool {
-        let Some(session) = self.store.sessions.get(i) else {
-            return false;
-        };
+    ) -> Option<Rect> {
+        let session = self.store.sessions.get(i)?;
         let sid = session.info.id.as_str();
-        let Some(sh) = blocks::split(&self.store.config, session, self.st.shells.get(sid)) else {
-            return false;
-        };
+        let sh = blocks::split(&self.store.config, session, self.st.shells.get(sid))?;
         let cell = ui.text.cell();
         if let (Some(g), Some(pane)) = (&self.grid, ui.rect_of(term_id(sid))) {
             let cols = (r.w / cell.w).floor() as u16;
@@ -400,13 +397,16 @@ impl App {
                 g.resize(sid, cols.max(2), rows.max(1));
             }
         }
-        if let Some(v) = self.views.get(sid) {
-            let at = Rect::new(r.x, r.y - f32::from(sh.live.0) * cell.h, r.w, r.h);
-            ui.scene.push_clip(r);
-            paint::pane(ui, v, at, caret, preedit);
-            ui.scene.pop_clip();
-        }
-        true
+        let v = self.views.get(sid)?;
+        let at = Rect::new(r.x, r.y - f32::from(sh.live.0) * cell.h, r.w, r.h);
+        let sel = match &self.st.sel {
+            Some((s, sel)) if s == sid => sel.rows(v),
+            _ => Vec::new(),
+        };
+        ui.scene.push_clip(r);
+        paint::pane(ui, v, at, caret, preedit, &sel);
+        ui.scene.pop_clip();
+        Some(at)
     }
 }
 

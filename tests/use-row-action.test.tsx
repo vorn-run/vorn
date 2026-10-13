@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { useRowAction, rowState } from '../src/renderer/lib/use-row-action'
+import { useRowAction, rowState } from '../packages/web/src/renderer/lib/use-row-action'
 
 function Probe({ work }: { work: () => Promise<void | { ok: boolean; error?: string }> }) {
   const activity = useRowAction()

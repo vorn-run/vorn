@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useRunsListResize } from '../src/renderer/components/workflow-runs/useRunsListResize'
+import { useRunsListResize } from '../packages/web/src/renderer/components/workflow-runs/useRunsListResize'
 
 function startDrag(handleResizeStart: (e: React.PointerEvent) => void, clientX: number): void {
   act(() =>

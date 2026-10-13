@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { WorkflowExecution } from '../src/shared/types'
+import type { WorkflowExecution } from '../packages/web/src/shared/types'
 
 const sendWorkflowGateNotification = vi.hoisted(() => vi.fn())
 const sendWorkflowSignInNotification = vi.hoisted(() => vi.fn())
-vi.mock('../src/renderer/lib/notifications', () => ({
+vi.mock('../packages/web/src/renderer/lib/notifications', () => ({
   sendWorkflowGateNotification,
   sendWorkflowSignInNotification
 }))
@@ -25,11 +25,11 @@ const mockState = {
   },
   showRun
 }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: { getState: () => mockState }
 }))
 
-import { announceRun, resetAnnouncedRuns } from '../src/renderer/lib/run-notifications'
+import { announceRun, resetAnnouncedRuns } from '../packages/web/src/renderer/lib/run-notifications'
 
 /**
  * The window's half of a run happening in the server.

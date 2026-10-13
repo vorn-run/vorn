@@ -8,7 +8,7 @@
 //! [`Ui::layout`], and reads back [`Event`]s with [`Ui::take_events`]. The
 //! [`Ui`] keeps what the tree does not: hover, focus, open menus, scroll
 //! offsets, split ratios and text being edited. The [`widgets`] build the
-//! app's controls with its look (`src/renderer/theme.css`) and behaviour.
+//! app's controls with its look (`packages/web/src/renderer/theme.css`) and behaviour.
 
 mod a11y;
 pub mod atlas;

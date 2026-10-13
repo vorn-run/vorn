@@ -102,10 +102,10 @@ import {
   disposeGlobalDataListener,
   setLiveReporter,
   setNotLiveReporter
-} from '../src/renderer/lib/terminal-registry'
-import { captureBlock, getBlockLog } from '../src/renderer/lib/block-log'
-import { markPaneEnded, markPaneLive } from '../src/renderer/lib/session-resume'
-import { useAppStore } from '../src/renderer/stores'
+} from '../packages/web/src/renderer/lib/terminal-registry'
+import { captureBlock, getBlockLog } from '../packages/web/src/renderer/lib/block-log'
+import { markPaneEnded, markPaneLive } from '../packages/web/src/renderer/lib/session-resume'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 import type { TerminalSession } from '../packages/shared/src/types'
 
 /**

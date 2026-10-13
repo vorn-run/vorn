@@ -12,7 +12,7 @@ const store = {
   setConfig: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => (selector ? selector(store) : store)
 }))
 
@@ -20,7 +20,7 @@ vi.mock('../src/renderer/stores', () => ({
 // not what this file is about.
 vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn().mockResolvedValue('data:,') } }))
 
-import { NetworkSettings } from '../src/renderer/components/settings/NetworkSettings'
+import { NetworkSettings } from '../packages/web/src/renderer/components/settings/NetworkSettings'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 

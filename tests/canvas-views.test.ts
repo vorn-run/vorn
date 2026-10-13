@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { readCanvasView, writeCanvasView } from '../src/renderer/lib/canvas-views'
+import { readCanvasView, writeCanvasView } from '../packages/web/src/renderer/lib/canvas-views'
 
 beforeEach(() => localStorage.clear())
 

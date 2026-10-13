@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { describeServerRuntime } from '../src/renderer/lib/server-runtime'
-import type { ServerRuntimeStatus } from '../src/shared/types'
+import { describeServerRuntime } from '../packages/web/src/renderer/lib/server-runtime'
+import type { ServerRuntimeStatus } from '../packages/web/src/shared/types'
 
 /** The wording somebody reads while working out why a fix they know shipped did nothing. */
 const base: ServerRuntimeStatus = {

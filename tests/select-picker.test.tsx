@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { SelectPicker } from '../src/renderer/components/SelectPicker'
+import { SelectPicker } from '../packages/web/src/renderer/components/SelectPicker'
 
 const OPTIONS = [
   { value: 'a', label: 'Apple' },

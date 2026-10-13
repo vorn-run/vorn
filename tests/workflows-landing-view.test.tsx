@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { RunBucket } from '../src/renderer/stores/types'
-import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
+import type { RunBucket } from '../packages/web/src/renderer/stores/types'
+import type { RunListEntry } from '../packages/web/src/renderer/hooks/useAllWorkflowRuns'
 
 const mockState = {
   workflowsLandingTab: 'runs' as 'runs' | 'review',
@@ -17,7 +17,7 @@ const mockState = {
   config: { workflows: [] as Array<{ id: string; name: string; nodes: unknown[] }>, tasks: [] }
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
@@ -27,15 +27,15 @@ const runsHookMock = vi.fn(() => ({
   loading: false,
   reload: vi.fn()
 }))
-vi.mock('../src/renderer/hooks/useAllWorkflowRuns', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAllWorkflowRuns', () => ({
   useAllWorkflowRuns: (...args: unknown[]) => runsHookMock(...(args as []))
 }))
 
-vi.mock('../src/renderer/components/LogReplayModal', () => ({
+vi.mock('../packages/web/src/renderer/components/LogReplayModal', () => ({
   LogReplayModal: ({ logs }: { logs: string }) => <div data-testid="log-replay-modal">{logs}</div>
 }))
 
-vi.mock('../src/renderer/components/workflow-runs/RunsList', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-runs/RunsList', () => ({
   RunsList: (props: { filter: string; selectedId: string | null }) => (
     <div
       data-testid="runs-list"
@@ -45,7 +45,7 @@ vi.mock('../src/renderer/components/workflow-runs/RunsList', () => ({
   )
 }))
 
-vi.mock('../src/renderer/components/workflow-runs/RunDetailPane', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-runs/RunDetailPane', () => ({
   RunDetailPane: (props: { run: { runId: string } }) => (
     <div data-testid="run-detail-pane" data-run={props.run.runId} />
   ),
@@ -53,7 +53,7 @@ vi.mock('../src/renderer/components/workflow-runs/RunDetailPane', () => ({
 }))
 
 const { WorkflowsLandingView } =
-  await import('../src/renderer/components/workflow-runs/WorkflowsLandingView')
+  await import('../packages/web/src/renderer/components/workflow-runs/WorkflowsLandingView')
 
 function makeRun(runId: string, status = 'success', nodeStates = [{ nodeId: 'n1', status }]) {
   return {

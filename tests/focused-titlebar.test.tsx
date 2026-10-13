@@ -20,23 +20,23 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
-vi.mock('../src/renderer/components/ConfirmPopover', () => ({
+vi.mock('../packages/web/src/renderer/components/ConfirmPopover', () => ({
   ConfirmPopover: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
-vi.mock('../src/renderer/components/GitChangesIndicator', () => ({
+vi.mock('../packages/web/src/renderer/components/GitChangesIndicator', () => ({
   GitChangesIndicator: () => <div data-testid="git-changes" />,
   BrowseFilesButton: () => <div data-testid="browse-files" />
 }))
-vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
+vi.mock('../packages/web/src/renderer/components/PromotedPaneCard', () => ({
   PromotedPaneCard: ({ cardId }: { cardId: string }) => <div data-testid={`body-${cardId}`} />
 }))
-vi.mock('../src/renderer/lib/terminal-close', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-close', () => ({
   closeTerminalSession: vi.fn().mockResolvedValue(undefined)
 }))
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
@@ -44,8 +44,8 @@ vi.mock('../src/renderer/components/Toast', () => ({
 // hands its titlebar over — which would make every assertion here vacuous.
 // Getters rather than fixed values so one file can walk all four platforms.
 const platform = { isMac: true, isWeb: false }
-vi.mock('../src/renderer/lib/platform', async (orig) => {
-  const actual = await orig<typeof import('../src/renderer/lib/platform')>()
+vi.mock('../packages/web/src/renderer/lib/platform', async (orig) => {
+  const actual = await orig<typeof import('../packages/web/src/renderer/lib/platform')>()
   return {
     ...actual,
     get isMac() {
@@ -57,9 +57,9 @@ vi.mock('../src/renderer/lib/platform', async (orig) => {
   }
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { CardHeader } = await import('../src/renderer/components/card/CardHeader')
-const { FocusedStage } = await import('../src/renderer/components/FocusedStage')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { CardHeader } = await import('../packages/web/src/renderer/components/card/CardHeader')
+const { FocusedStage } = await import('../packages/web/src/renderer/components/FocusedStage')
 
 const session = {
   id: 't1',

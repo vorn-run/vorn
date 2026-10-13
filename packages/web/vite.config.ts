@@ -53,11 +53,9 @@ export default defineConfig({
   base: '/app/',
   resolve: {
     alias: {
-      // The renderer uses relative imports like '../../shared/types'
-      // which resolve to src/shared/ barrel files that re-export @vornrun/shared.
-      // We alias them so Vite can resolve from the web package context.
-      '@renderer': path.resolve(__dirname, '../../src/renderer'),
-      '@shared': path.resolve(__dirname, '../../src/shared')
+      // src/shared holds barrel files that re-export @vornrun/shared.
+      '@renderer': path.resolve(__dirname, 'src/renderer'),
+      '@shared': path.resolve(__dirname, 'src/shared')
     }
   },
   server: {

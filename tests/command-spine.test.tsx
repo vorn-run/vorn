@@ -14,7 +14,7 @@ const registryMocks = vi.hoisted(() => ({
   }),
   onTerminalScroll: vi.fn(() => () => {})
 }))
-vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => registryMocks)
 
 const blockMocks = vi.hoisted(() => ({
   getCommandBlocks: vi.fn(() => [] as unknown[]),
@@ -22,11 +22,11 @@ const blockMocks = vi.hoisted(() => ({
   onCommandBlocksChange: vi.fn(() => () => {}),
   formatDuration: (ms: number) => `${ms}ms`
 }))
-vi.mock('../src/renderer/lib/command-blocks', () => blockMocks)
+vi.mock('../packages/web/src/renderer/lib/command-blocks', () => blockMocks)
 
-import { CommandSpine } from '../src/renderer/components/CommandSpine'
-import { useAppStore } from '../src/renderer/stores'
-import type { TerminalSession } from '../src/shared/types'
+import { CommandSpine } from '../packages/web/src/renderer/components/CommandSpine'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import type { TerminalSession } from '../packages/web/src/shared/types'
 
 const initialState = useAppStore.getState()
 

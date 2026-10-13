@@ -48,7 +48,14 @@ pub fn width(kind: &MenuKind) -> f32 {
 }
 
 /// A panel of `items` in the open menu's group, its submenu in [`SUB`].
-pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
+pub fn panel(
+    ui: &Ui,
+    group: Id,
+    w: f32,
+    name: &str,
+    items: Vec<Item>,
+    sub: crate::ui::menu::Cascade,
+) -> El {
     crate::ui::menu::panel(ui, MENU, group, SUB, w, name, items, sub)
 }
 
@@ -393,9 +400,9 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
 }
 
 fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {
-    let selection = false;
+    let selection = s.st.sel.as_ref().is_some_and(|(sid, _)| sid == id);
     let mut items = vec![
-        Item::new("copy", "Copy", Act::Nothing).disabled(!selection),
+        Item::new("copy", "Copy", Act::CopySelection(id.to_owned())).disabled(!selection),
         Item::new("clipboard-paste", "Paste", Act::Paste(id.to_owned())),
     ];
     let locked = s.st.locked.contains(id);

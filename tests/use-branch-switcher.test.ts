@@ -9,7 +9,7 @@ const { toastError, toastSuccess, loadWorktrees, setBranchForCwd } = vi.hoisted(
   setBranchForCwd: vi.fn()
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { error: toastError, success: toastSuccess }
 }))
 
@@ -18,7 +18,7 @@ type StoreShape = {
   setBranchForCwd: typeof setBranchForCwd
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector: (s: StoreShape) => unknown) =>
     selector({ loadWorktrees, setBranchForCwd })
 }))
@@ -29,7 +29,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useBranchSwitcher } from '../src/renderer/hooks/useBranchSwitcher'
+import { useBranchSwitcher } from '../packages/web/src/renderer/hooks/useBranchSwitcher'
 
 beforeEach(() => {
   toastError.mockReset()

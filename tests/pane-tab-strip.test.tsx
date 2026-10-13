@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { PaneTabStrip, type PaneTab } from '../src/renderer/components/PaneTabStrip'
+import { PaneTabStrip, type PaneTab } from '../packages/web/src/renderer/components/PaneTabStrip'
 
 const TABS: PaneTab[] = [
   { id: 'a', name: 'a.ts' },

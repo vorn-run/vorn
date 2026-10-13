@@ -4,7 +4,7 @@ import {
   clampLiveRows,
   MIN_LIVE_ROWS,
   MAX_LIVE_ROWS
-} from '../src/renderer/hooks/useLiveTerminalRows'
+} from '../packages/web/src/renderer/hooks/useLiveTerminalRows'
 
 /**
  * jsdom, only because importing the hook pulls in terminal-registry, which

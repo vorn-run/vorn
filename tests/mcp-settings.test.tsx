@@ -3,8 +3,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, within, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { McpSettings } from '../src/renderer/components/settings/McpSettings'
-import { AGENT_MCP_SETUPS } from '../src/renderer/lib/mcp-data'
+import { McpSettings } from '../packages/web/src/renderer/components/settings/McpSettings'
+import { AGENT_MCP_SETUPS } from '../packages/web/src/renderer/lib/mcp-data'
 
 /**
  * That the panel shows a whole install, not the first line of one.

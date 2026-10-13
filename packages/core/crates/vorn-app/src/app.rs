@@ -24,7 +24,7 @@ use crate::state::{
     basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
-    decode_png, item_id, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
+    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
     WindowRequest,
 };
 use crate::view::PaneView;
@@ -45,6 +45,7 @@ mod shell;
 mod side;
 pub mod signin;
 mod tasks;
+mod term;
 mod widget;
 mod workflows;
 
@@ -140,6 +141,25 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         }
     })
 }
+
+/// Keys a terminal holding the keyboard takes before the app's shortcuts
+/// and focus traversal: Tab and Shift+Tab with Ctrl or Alt or neither.
+pub fn terminal_key(code: &str, m: u16) -> bool {
+    code == "Tab" && m & mods::SUPER == 0
+}
+
+/// Keys that only hold a modifier: pressing one keeps a terminal's selection.
+const MODIFIER_KEYS: [&str; 9] = [
+    "ShiftLeft",
+    "ShiftRight",
+    "ControlLeft",
+    "ControlRight",
+    "AltLeft",
+    "AltRight",
+    "MetaLeft",
+    "MetaRight",
+    "CapsLock",
+];
 
 /// The card after or before `current` among `n`, wrapping; with none
 /// selected, the first or the last.
@@ -255,6 +275,10 @@ pub struct App {
     /// Why the grid is not there, when it is not.
     pub grid_error: Option<String>,
     views: HashMap<String, PaneView>,
+    /// Where each session's terminal was painted (physical pixels), for the pointer.
+    term_boxes: HashMap<String, crate::ui::Rect>,
+    /// A double-click asked vornd for a word; the click that ends it keeps the selection.
+    word_pending: bool,
     pub st: State,
     pub acts: Acts,
     preedit: String,
@@ -310,6 +334,8 @@ pub struct App {
     widget_wanted: bool,
     /// The OS file picker, while it is open.
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    /// The window's updater; none offscreen.
+    updater: Option<Arc<crate::update::Updater>>,
 }
 
 impl App {
@@ -341,6 +367,8 @@ impl App {
             grid,
             grid_error,
             views: HashMap::new(),
+            term_boxes: HashMap::new(),
+            word_pending: false,
             st,
             acts: Acts::default(),
             preedit: String::new(),
@@ -371,6 +399,7 @@ impl App {
             widget_wanted: false,
             hotkeys: None,
             picking: None,
+            updater: None,
         };
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -443,6 +472,11 @@ impl App {
         self.views.get(session)
     }
 
+    /// Where `session`'s terminal was last painted, in physical pixels.
+    pub fn term_box(&self, session: &str) -> Option<crate::ui::Rect> {
+        self.term_boxes.get(session).copied()
+    }
+
     /// Whether the composer is what the sessions view shows.
     pub fn composing(&self) -> bool {
         self.st.composing(&self.store)
@@ -460,7 +494,50 @@ impl App {
 
     /// Folds in what arrived since the last frame: notifications, answers
     /// to calls, and terminals that changed.
+    /// Gives the settings page and the sidebar the window's updater.
+    pub fn set_updater(&mut self, updater: Arc<crate::update::Updater>) {
+        self.updater = Some(updater);
+        self.sync_update();
+    }
+
+    /// The updater's state, for this frame, and the person's choices, for it.
+    fn sync_update(&mut self) {
+        let Some(updater) = &self.updater else {
+            return;
+        };
+        updater.set_prefs(crate::update::Prefs::from_config(&self.store.config));
+        let status = updater.status();
+        if self.st.settings.update.as_ref() != Some(&status) {
+            self.st.settings.update = Some(status);
+        }
+    }
+
+    /// The update card's or notice's button: restart into a ready update,
+    /// download an offered one, or check again.
+    fn update_action(&mut self) {
+        let Some(updater) = self.updater.clone() else {
+            return;
+        };
+        match updater.status() {
+            crate::settings::UpdateStatus::Ready { .. } => {
+                if updater.install().is_ok() {
+                    std::process::exit(0);
+                }
+            }
+            crate::settings::UpdateStatus::Available { .. } => updater.download(),
+            _ => updater.check(),
+        }
+    }
+
+    /// Check now.
+    fn check_updates(&self) {
+        if let Some(updater) = &self.updater {
+            updater.check();
+        }
+    }
+
     pub fn pump(&mut self) {
+        self.sync_update();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {
@@ -543,6 +620,15 @@ impl App {
                     self.st
                         .last_output
                         .insert(id.clone(), std::time::Instant::now());
+                    // A resize or a cleared history renumbers the lines under a selection.
+                    if self
+                        .st
+                        .sel
+                        .as_ref()
+                        .is_some_and(|(s, sel)| *s == id && sel.from.sb_epoch != v.sb_epoch)
+                    {
+                        self.st.sel = None;
+                    }
                     if self.store.session(&id).is_some_and(|s| s.is_shell()) {
                         shells.push(id.clone());
                     }
@@ -1029,7 +1115,7 @@ impl App {
         self.st.menu = Some(Menu {
             kind,
             at,
-            sub: None,
+            sub: Default::default(),
         });
         ui.open_menu(menus::MENU, trigger.unwrap_or(menus::MENU));
         if self
@@ -1584,11 +1670,9 @@ impl App {
                 };
                 self.call(call, "sessions:resume", json!({ "id": id }));
             }
-            Act::Paste(id) => {
-                if let (Some(g), Some(text)) = (&self.grid, ui.clipboard().get()) {
-                    g.paste(&id, &text);
-                }
-            }
+            Act::Paste(id) => self.paste_clipboard(ui, &id),
+            Act::CopySelection(id) => self.copy_selection(&id),
+            Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
             Act::FitToDevice(id) => {
                 if let Some(g) = &self.grid {
                     g.take_size(&id);
@@ -1963,6 +2047,7 @@ impl App {
             || self.palette_event(ui, &event)
             || self.plug_event(ui, &event)
             || self.net_event(ui, &event)
+            || self.term_event(ui, &event)
         {
             return;
         }
@@ -2173,12 +2258,13 @@ impl App {
             return;
         };
         let items = menus::items(&self.screen(ui), &menu.kind);
-        let Some(item) = menus::chosen(items, menu.sub, group, index) else {
+        let Some(item) = menus::chosen(items, menu.sub.open, group, index) else {
             return;
         };
+        // An entry with a submenu toggles it.
         if group == menus::MENU && !item.sub.is_empty() {
             if let Some(m) = &mut self.st.menu {
-                m.sub = Some(index);
+                m.sub.click(index, ui.now());
             }
             ui.reopen_menu();
             return;
@@ -2206,9 +2292,34 @@ impl App {
         self.run(ui, act, Src::default());
     }
 
+    /// Which of the open menu's entries have a submenu.
+    fn menu_subs(&self, ui: &Ui) -> Option<Vec<bool>> {
+        let menu = self.st.menu.as_ref()?;
+        let items = menus::items(&self.screen(ui), &menu.kind);
+        Some(items.iter().map(|i| !i.sub.is_empty()).collect())
+    }
+
+    /// The open menu's submenu keys: Right and Enter open one, Left and
+    /// Escape close it.
+    fn menu_key(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        let Input::Key { code, .. } = input else {
+            return false;
+        };
+        let Some(subs) = self.menu_subs(ui) else {
+            return false;
+        };
+        let Some(m) = &mut self.st.menu else {
+            return false;
+        };
+        crate::ui::menu::key(ui, &mut m.sub, menus::MENU, menus::SUB, &subs, code)
+    }
+
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.st.menu.is_some() && self.menu_key(ui, input) {
+            return true;
+        }
         if self.palette_key(ui, input) || self.onboard_key(ui, input) {
             return true;
         }
@@ -2227,6 +2338,11 @@ impl App {
                 self.run_edit(ui, crate::editor::EditAct::CancelDiscard);
                 return true;
             }
+            if self.st.dialog == Some(Dialog::Paste) && matches!(code.as_str(), "Escape" | "Enter")
+            {
+                self.confirm_paste(ui, code == "Enter");
+                return true;
+            }
         }
         if self.st.settings.open {
             return false;
@@ -2240,6 +2356,15 @@ impl App {
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
+        if self.terminal_has_keys(ui) {
+            if self.clip_key(ui, code, *m) {
+                return true;
+            }
+            if terminal_key(code, *m) {
+                self.input(input.clone());
+                return true;
+            }
+        }
         // The approve and deny keys exist once an agent has asked for permission.
         let s = shortcut(code, *m)
             .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
@@ -2286,6 +2411,19 @@ impl App {
         true
     }
 
+    /// Whether a terminal holds the keyboard: typing reaches a card and no
+    /// control, dialog, menu or composer has it.
+    pub fn terminal_has_keys(&self, ui: &Ui) -> bool {
+        ui.focus().is_none()
+            && self.st.dialog.is_none()
+            && self.st.menu.is_none()
+            && !self.st.settings.open
+            && self.st.view == MainView::Sessions
+            && !self.composing()
+            && self.grid.is_some()
+            && self.typing_target().is_some()
+    }
+
     /// One key or IME event the UI did not use: the composer's or the
     /// terminal's.
     pub fn input(&mut self, input: Input) {
@@ -2303,10 +2441,16 @@ impl App {
             return;
         };
         match input {
-            Input::Key { code, mods, text } => g.key(&id, &code, mods, text.as_deref()),
+            Input::Key { code, mods, text } => {
+                if !MODIFIER_KEYS.contains(&code.as_str()) {
+                    self.st.sel = None;
+                }
+                g.key(&id, &code, mods, text.as_deref());
+            }
             Input::Preedit(s) => self.preedit = s,
             Input::Commit(s) => {
                 self.preedit.clear();
+                self.st.sel = None;
                 g.text(&id, &s);
             }
         }
@@ -2478,6 +2622,7 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.grid_replies(ui);
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
@@ -2528,18 +2673,11 @@ impl App {
                 .ok()
                 .and_then(|(w, h, rgba)| ui.image(w, h, &rgba));
         }
-        // A hovered entry with a submenu opens it; another closes it.
-        if let Some(menu) = self.st.menu.clone() {
-            let items = menus::items(&self.screen(ui), &menu.kind);
-            let hovered = items
-                .iter()
-                .enumerate()
-                .find(|(i, _)| ui.hovered(item_id(menus::MENU, *i)));
-            if let Some((i, item)) = hovered {
-                let sub = (!item.sub.is_empty()).then_some(i);
-                if let Some(m) = &mut self.st.menu {
-                    m.sub = sub;
-                }
+        // A hovered entry with a submenu opens it, unless the pointer is
+        // on its way to the one open.
+        if let Some(subs) = self.menu_subs(ui) {
+            if let Some(m) = &mut self.st.menu {
+                crate::ui::menu::track(ui, &mut m.sub, menus::MENU, menus::SUB, &subs);
             }
         }
         if self.st.menu.is_some() && !ui.menu_open(menus::MENU) {
@@ -2567,6 +2705,7 @@ impl App {
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
         let current = self.typing_target();
+        self.term_boxes.clear();
         for (id, r) in &laid.customs {
             if let Some(tid) =
                 crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
@@ -2621,15 +2760,22 @@ impl App {
                 ""
             };
             if split {
-                self.paint_live(ui, i, *r, caret, pre);
+                if let Some(at) = self.paint_live(ui, i, *r, caret, pre) {
+                    self.term_boxes.insert(sid.to_owned(), at);
+                }
                 continue;
             }
             if let Some(v) = self.views.get(sid) {
+                let sel = match &self.st.sel {
+                    Some((s, sel)) if s == sid => sel.rows(v),
+                    _ => Vec::new(),
+                };
                 // A screen not yet resized to a narrower box stays inside it.
                 ui.scene.push_clip(*r);
-                paint::pane(ui, v, *r, caret, pre);
+                paint::pane(ui, v, *r, caret, pre, &sel);
                 ui.scene.pop_clip();
             }
+            self.term_boxes.insert(sid.to_owned(), *r);
         }
         self.paint_web(ui, laid);
     }
@@ -2652,7 +2798,7 @@ impl App {
             } else {
                 paint::Caret::Hollow
             };
-            paint::pane(ui, v, r, caret, pre);
+            paint::pane(ui, v, r, caret, pre, &[]);
             ui.scene.pop_clip();
         }
     }
@@ -2707,6 +2853,29 @@ mod tests {
         assert_eq!(shortcut("KeyS", 0), None);
         assert_eq!(shortcut("KeyS", MOD | mods::ALT), None);
         assert_eq!(shortcut("Escape", 0), None);
+    }
+
+    #[test]
+    fn a_terminal_takes_tab_before_focus_and_shortcuts() {
+        for m in [
+            0,
+            mods::SHIFT,
+            mods::CTRL,
+            mods::CTRL | mods::SHIFT,
+            mods::ALT,
+        ] {
+            assert!(terminal_key("Tab", m), "Tab with {m:#b}");
+        }
+        assert!(!terminal_key("Tab", mods::SUPER));
+        assert!(!terminal_key("Escape", 0));
+        assert!(!terminal_key("KeyA", 0));
+        // App shortcuts on the command key stay the app's.
+        for code in ["KeyK", "KeyN", "KeyW", "KeyB", "BracketRight", "Slash"] {
+            assert!(!terminal_key(code, MOD), "{code}");
+        }
+        assert!(!terminal_key("KeyW", MOD | mods::SHIFT));
+        assert!(!terminal_key("Backquote", mods::CTRL));
+        assert!(!terminal_key("KeyJ", MOD));
     }
 
     #[test]

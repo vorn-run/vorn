@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/components/file-icons', () => ({
+vi.mock('../packages/web/src/renderer/components/file-icons', () => ({
   FileTypeIcon: () => <span data-testid="file-icon" />
 }))
 
@@ -13,8 +13,8 @@ import {
   estimateBlockHeight,
   parseDiffRows,
   type DiffComment
-} from '../src/renderer/components/DiffSidebar'
-import type { GitFileDiff } from '../src/shared/types'
+} from '../packages/web/src/renderer/components/DiffSidebar'
+import type { GitFileDiff } from '../packages/web/src/shared/types'
 
 const DIFF = [
   'diff --git a/a.ts b/a.ts',

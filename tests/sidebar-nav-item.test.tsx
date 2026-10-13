@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { SidebarNavItem } from '../src/renderer/components/project-sidebar/SidebarNavItem'
+import { SidebarNavItem } from '../packages/web/src/renderer/components/project-sidebar/SidebarNavItem'
 
 const ICON = <svg data-testid="icon" />
 

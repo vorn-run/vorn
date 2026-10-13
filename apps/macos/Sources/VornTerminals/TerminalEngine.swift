@@ -56,7 +56,7 @@ final class TerminalPainter {
     private var positions = [CGPoint](repeating: .zero, count: 1024)
 
     func draw(_ ctx: CGContext, _ v: VgView?, fonts: TerminalFonts, bounds: CGRect, focused: Bool, marked: String,
-              selection: TerminalSelection? = nil) {
+              selection: TerminalSelection? = nil, matches: ArraySlice<VgHit> = [], current: VgHit? = nil) {
         ctx.setFillColor(cgColor(v?.bg ?? Theme.Terminal.background))
         ctx.fill(bounds)
         guard let v else { return }
@@ -79,6 +79,12 @@ final class TerminalPainter {
                 guard let c = selection.cols(on: v.first_line + UInt64(y), width: v.cols) else { continue }
                 ctx.fill(CGRect(x: CGFloat(c.lowerBound) * cw, y: CGFloat(y) * ch, width: CGFloat(c.count) * cw, height: ch))
             }
+        }
+        for m in matches {
+            let on = current.map { $0.line == m.line && $0.from == m.from } ?? false
+            ctx.setFillColor(cgColor(Theme.Terminal.match, alpha: on ? 0.75 : 0.3))
+            ctx.fill(CGRect(x: CGFloat(m.from) * cw, y: CGFloat(m.line - v.first_line) * ch,
+                            width: CGFloat(max(Int(m.to) - Int(m.from), 0)) * cw, height: ch))
         }
         for r in runs {
             guard let text = v.text else { break }
@@ -167,6 +173,9 @@ final class TerminalPainter {
 @MainActor
 protocol TerminalHost: AnyObject {
     func paneDidChange()
+    func fontDidChange()
+    /// vornd held a paste that would run commands; it goes in once the person agrees.
+    func pasteHeld(_ text: String)
 }
 
 /// One attached session: its pane in the grid client and the latest view of it.
@@ -260,6 +269,11 @@ public final class TerminalPane {
         dropView()
         current = v
         hasView = true
+        if let p = vg_take_held_paste(c, id) {
+            let held = String(cString: p)
+            vg_free_string(p)
+            host?.pasteHeld(held)
+        }
         return true
     }
 
@@ -315,10 +329,39 @@ public final class TerminalPane {
         didSet { if selection != oldValue { host?.paneDidChange() } }
     }
 
-    func paste(_ s: String) {
+    /// Unconfirmed, vornd holds a paste that would run commands and the host asks first.
+    func paste(_ s: String, confirmed: Bool = false) {
         guard !engine.readOnly, id != 0, let c = engine.client else { return }
         claimSize()
-        vg_paste(c, id, s)
+        vg_paste(c, id, s, confirmed)
+    }
+
+    // MARK: Find
+
+    /// Searches screen and history; an empty query ends the search.
+    func search(_ query: String, caseSensitive: Bool = false) {
+        guard id != 0, let c = engine.client else { return }
+        vg_search(c, id, query, caseSensitive)
+    }
+
+    private var hitBuffer = [VgHit](repeating: VgHit(), count: 256)
+
+    /// The search's matches so far, oldest first, and whether all have come.
+    func hits() -> (hits: [VgHit], done: Bool) {
+        guard id != 0, let c = engine.client else { return ([], true) }
+        var done = false
+        var n = Int(vg_hits(c, id, &hitBuffer, UInt32(hitBuffer.count), &done))
+        if n > hitBuffer.count {
+            hitBuffer = [VgHit](repeating: VgHit(), count: n)
+            n = Int(vg_hits(c, id, &hitBuffer, UInt32(n), &done))
+        }
+        return (Array(hitBuffer.prefix(n)), done)
+    }
+
+    /// Scrolls so the line shows.
+    func reveal(line: UInt64) {
+        guard id != 0, let c = engine.client else { return }
+        vg_reveal(c, id, line)
     }
 
     /// A wheel turn of `lines`, negative up, at cell `(x, y)`.
@@ -383,7 +426,13 @@ public final class TerminalPane {
 public final class TerminalEngine: NSObject {
     public let socket: String
     public let readOnly: Bool
-    public let fontSize: CGFloat
+    /// Changing it relays every pane out at the new size, on the same connection.
+    public var fontSize: CGFloat {
+        didSet {
+            guard fontSize != oldValue else { return }
+            for p in panes.values { p.host?.fontDidChange() }
+        }
+    }
     var client: OpaquePointer?
     var panes: [UInt32: TerminalPane] = [:]
     private var link: CADisplayLink?

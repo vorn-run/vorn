@@ -3,7 +3,7 @@ import {
   formatRelativeTime,
   formatRunDuration,
   formatCompactDuration
-} from '../src/renderer/lib/format-time'
+} from '../packages/web/src/renderer/lib/format-time'
 
 const NOW = new Date('2026-04-16T12:00:00Z').getTime()
 

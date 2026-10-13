@@ -5,7 +5,7 @@ import {
   insertConditionBetween,
   insertNodeBetween,
   removeNode
-} from '../src/renderer/lib/workflow-helpers'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
 import type { LoopConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 const node = (

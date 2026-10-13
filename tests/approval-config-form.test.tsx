@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ApprovalConfigForm } from '../src/renderer/components/workflow-editor/panels/ApprovalConfigForm'
-import type { ApprovalConfig, WorkflowNode } from '../src/shared/types'
+import { ApprovalConfigForm } from '../packages/web/src/renderer/components/workflow-editor/panels/ApprovalConfigForm'
+import type { ApprovalConfig, WorkflowNode } from '../packages/web/src/shared/types'
 
 describe('ApprovalConfigForm', () => {
   it('renders message textarea and timeout input', () => {

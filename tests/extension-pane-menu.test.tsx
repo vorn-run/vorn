@@ -10,16 +10,16 @@ vi.hoisted(() => {
   })
 })
 
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({ status: { claude: true } })
 }))
-vi.mock('../src/renderer/hooks/useWorkspaceWorkflows', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWorkspaceWorkflows', () => ({
   useWorkspaceWorkflows: () => []
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { CardContextMenu } from '../src/renderer/components/CardContextMenu'
-import { __resetExtensionsCacheForTests } from '../src/renderer/lib/use-extensions'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CardContextMenu } from '../packages/web/src/renderer/components/CardContextMenu'
+import { __resetExtensionsCacheForTests } from '../packages/web/src/renderer/lib/use-extensions'
 import type { ExtensionActivationState, InstalledConnectorPack } from '../packages/shared/src/types'
 
 const openPane = vi.fn(async () => ({

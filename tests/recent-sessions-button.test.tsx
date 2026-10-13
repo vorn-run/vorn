@@ -4,12 +4,12 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
 
 let lastIsOpen = false
-vi.mock('../src/renderer/components/RecentSessionsPopover', () => ({
+vi.mock('../packages/web/src/renderer/components/RecentSessionsPopover', () => ({
   RecentSessionsPopover: ({ isOpen }: { isOpen: boolean }) => {
     lastIsOpen = isOpen
     return isOpen ? <div data-testid="popover">popover</div> : null
@@ -21,7 +21,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { RecentSessionsButton } from '../src/renderer/components/RecentSessionsButton'
+import { RecentSessionsButton } from '../packages/web/src/renderer/components/RecentSessionsButton'
 
 describe('RecentSessionsButton', () => {
   it('renders a button with accessible label', () => {

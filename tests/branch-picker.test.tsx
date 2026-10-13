@@ -15,7 +15,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { BranchPicker } from '../src/renderer/components/BranchPicker'
+import { BranchPicker } from '../packages/web/src/renderer/components/BranchPicker'
 
 function Harness({
   onClose = () => {},

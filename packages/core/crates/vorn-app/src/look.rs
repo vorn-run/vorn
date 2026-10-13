@@ -1,4 +1,4 @@
-//! Today's look as values: colours from `src/renderer/theme.css` and
+//! Today's look as values: colours from `packages/web/src/renderer/theme.css` and
 //! Tailwind's grays (both from vornui's tokens), sizes from the components'
 //! classes and the logo. Screens read these; nothing
 //! here is redesigned.
@@ -143,6 +143,8 @@ pub mod term {
     pub const FG: Rgb = 0xd4d4d8;
     pub const BG: Rgb = 0x141416;
     pub const CURSOR: Rgb = 0xd4d4d8;
+    /// Behind selected text, as the renderer's terminal theme has it.
+    pub const SELECTION: Rgb = 0x3f3f46;
     pub const ANSI16: [Rgb; 16] = [
         0x27272a, 0xef4444, 0x22c55e, 0xeab308, 0x3b82f6, 0xa855f7, 0x06b6d4, 0xd4d4d8, 0x52525b,
         0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xfafafa,

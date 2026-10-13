@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest'
 import {
   PropertyRow,
   PropertySection
-} from '../src/renderer/components/workflow-editor/panels/PropertyRow'
+} from '../packages/web/src/renderer/components/workflow-editor/panels/PropertyRow'
 
 describe('PropertyRow', () => {
   it('renders label and children', () => {

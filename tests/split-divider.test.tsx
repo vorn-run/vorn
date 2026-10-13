@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { useRef } from 'react'
-import { SplitDivider } from '../src/renderer/components/SplitDivider'
-import { clampSplitRatio } from '../src/renderer/lib/split-ratio'
-import { useAppStore } from '../src/renderer/stores'
+import { SplitDivider } from '../packages/web/src/renderer/components/SplitDivider'
+import { clampSplitRatio } from '../packages/web/src/renderer/lib/split-ratio'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 /** A container with a known rect, so a drag maps to a predictable ratio. */
 function Harness({

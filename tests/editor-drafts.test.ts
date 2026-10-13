@@ -6,7 +6,7 @@ import {
   pruneDrafts,
   readDraft,
   writeDraft
-} from '../src/renderer/lib/editor-drafts'
+} from '../packages/web/src/renderer/lib/editor-drafts'
 
 const KEY = 'vorn:drafts'
 const BASE = { size: 120, mtimeMs: 1_700_000_000_000 }

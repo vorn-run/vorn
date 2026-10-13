@@ -2,9 +2,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
-import { WorkflowPropertiesPanel } from '../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel'
-import type { WorkflowNode, WorkflowExecution } from '../src/shared/types'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
+import { WorkflowPropertiesPanel } from '../packages/web/src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel'
+import type { WorkflowNode, WorkflowExecution } from '../packages/web/src/shared/types'
 
 function makeTrigger(triggerType: 'manual' | 'recurring'): WorkflowNode {
   return {
