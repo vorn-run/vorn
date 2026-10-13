@@ -34,7 +34,7 @@ url = "2"
 wry = "0.57"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 # The UI layer turns winit's defaults off; a Linux window needs a display
 # server, so the app asks for both.
@@ -42,6 +42,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 # WebKitGTK runs on GTK's loop, which the window pumps between frames.
 gtk = "0.18"
+# The approve and deny keys, grabbed on the X11 root window.
+x11rb = { version = "0.13", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

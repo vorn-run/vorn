@@ -242,6 +242,7 @@ impl App {
     /// the agents' browser and device tools.
     pub fn opened(&mut self, window: &Arc<NativeWindow>) {
         self.web.host.attach(window);
+        self.windowed = true;
         self.st.bench.unavailable = self.web.host.unavailable().map(str::to_owned);
         self.answer_agents();
     }

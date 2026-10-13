@@ -293,6 +293,10 @@ pub struct App {
     wake: Wake,
     /// The connections' hidden pages and the calls in flight on them.
     sessions: signin::Sessions,
+    /// A real window is open, so system-wide keys may be held.
+    windowed: bool,
+    /// The system-wide approve and deny keys, once an agent has asked.
+    hotkeys: Option<Option<crate::hotkeys::Presses>>,
     /// The OS file picker, while it is open.
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
@@ -350,6 +354,8 @@ impl App {
             web,
             wake: app_wake,
             sessions: Default::default(),
+            windowed: false,
+            hotkeys: None,
             picking: None,
         };
         app.see_projects();
@@ -872,6 +878,25 @@ impl App {
                     json!({ "allow": allow }),
                 );
             }
+        }
+    }
+
+    /// Holds Mod+Shift+A and D system-wide once an agent has asked, as the
+    /// desktop does, and answers their presses.
+    fn hotkeys_tick(&mut self) {
+        if self.hotkeys.is_none() && self.st.permission_keys && self.windowed {
+            self.hotkeys = Some(crate::hotkeys::register(Arc::clone(&self.wake)));
+        }
+        let presses: Vec<bool> = match &self.hotkeys {
+            Some(Some(rx)) => rx.try_iter().collect(),
+            _ => return,
+        };
+        for allow in presses {
+            self.call(
+                Call::Quiet,
+                "permission:resolve-top",
+                json!({ "allow": allow }),
+            );
         }
     }
 
@@ -2398,6 +2423,7 @@ impl App {
         if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
             self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
         }
+        self.hotkeys_tick();
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }

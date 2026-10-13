@@ -6320,6 +6320,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "wry",
+ "x11rb",
 ]
 
 [[package]]

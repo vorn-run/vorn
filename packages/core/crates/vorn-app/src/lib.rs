@@ -26,6 +26,7 @@ pub mod git;
 pub mod graph;
 pub mod grid;
 pub mod highlight;
+pub mod hotkeys;
 pub mod layout;
 pub mod library;
 pub mod look;
