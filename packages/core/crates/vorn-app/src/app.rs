@@ -1581,6 +1581,33 @@ impl App {
                 self.open_settings(cat);
             }
             Act::Welcome => self.open_onboard(ui),
+            Act::AddGroup => {
+                let mut config = self.store.config.clone();
+                let workspace = config
+                    .pointer("/defaults/activeWorkspace")
+                    .and_then(Value::as_str)
+                    .unwrap_or("personal")
+                    .to_owned();
+                let groups = config["sessionGroups"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let order = groups
+                    .iter()
+                    .filter_map(|g| g["order"].as_i64())
+                    .max()
+                    .unwrap_or(-1)
+                    + 1;
+                let mut groups = groups;
+                groups.push(json!({
+                    "id": settings::new_id(),
+                    "name": "New group",
+                    "order": order,
+                    "workspaceId": workspace,
+                }));
+                config["sessionGroups"] = Value::Array(groups);
+                self.save_config(config, Call::Quiet);
+            }
             Act::SignInClose => self.finish_signin(Err(crate::signin::CLOSED.to_owned())),
             Act::Palette(a) => self.run_palette(ui, a),
             Act::Onboard(a) => self.run_onboard(ui, a),

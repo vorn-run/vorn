@@ -166,6 +166,8 @@ pub enum Act {
     Onboard(crate::onboarding::OnbAct),
     /// The Plugins page's controls.
     Plug(crate::plugins::PlugAct),
+    /// `addSessionGroup`: a group named "New group" at the end of the list.
+    AddGroup,
     /// Closes the sign-in sheet before anyone signed in.
     SignInClose,
     /// The Remote Access page's controls.
