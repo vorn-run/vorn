@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use vorn_protocol::{
     ProjectConfig, SessionGroupConfig, TaskConfig, TerminalSession, WorkflowDefinition,
+    WorkspaceConfig,
 };
 
 use super::rpc::{Pending, Rpc, RpcError, CALL_TIMEOUT};
@@ -158,13 +159,57 @@ impl Store {
             .unwrap_or(DEFAULT_AGENT)
     }
 
-    /// The workspace the screen shows: the first configured, as the
-    /// renderer starts on it, else `personal`.
+    /// The workspace the screen shows: `defaults.activeWorkspace`, which
+    /// every app on this vornd saves on a switch, else `personal`.
     pub fn workspace(&self) -> &str {
-        self.config
-            .pointer("/workspaces/0/id")
-            .and_then(Value::as_str)
-            .unwrap_or(WORKSPACE)
+        active_workspace(&self.config)
+    }
+
+    /// `config.workspaces ?? [DEFAULT_WORKSPACE]`, skipping any it cannot read.
+    pub fn workspaces(&self) -> Vec<WorkspaceConfig> {
+        match self.config.get("workspaces").and_then(Value::as_array) {
+            Some(list) => list
+                .iter()
+                .filter_map(|w| serde_json::from_value(w.clone()).ok())
+                .collect(),
+            None => vec![default_workspace()],
+        }
+    }
+
+    /// The active workspace, else the default one, as the switcher shows it.
+    pub fn current_workspace(&self) -> WorkspaceConfig {
+        let id = self.workspace();
+        self.workspaces()
+            .into_iter()
+            .find(|w| w.id == id)
+            .unwrap_or_else(default_workspace)
+    }
+
+    /// Whether `p` belongs to the active workspace; a project with none
+    /// belongs to `personal`.
+    pub fn in_workspace(&self, p: &ProjectConfig) -> bool {
+        p.workspace_id.as_deref().unwrap_or(WORKSPACE) == self.workspace()
+    }
+
+    /// `useWorkspaceProjects`: the active workspace's projects, in order.
+    pub fn workspace_projects(&self) -> impl Iterator<Item = &ProjectConfig> {
+        self.projects.iter().filter(|p| self.in_workspace(p))
+    }
+
+    /// Whether a session's project is in the active workspace, which is
+    /// what `useSessionScope` lets any surface show. A session outside every
+    /// project (a shell in the home directory) belongs to no workspace, so
+    /// it shows in all of them rather than nowhere.
+    pub fn in_scope(&self, s: &Session) -> bool {
+        match self.projects.iter().find(|p| p.name == s.info.project_name) {
+            Some(p) => self.in_workspace(p),
+            None => true,
+        }
+    }
+
+    /// The active workspace's sessions.
+    pub fn scoped_sessions(&self) -> impl Iterator<Item = &Session> {
+        self.sessions.iter().filter(|s| self.in_scope(s))
     }
 
     /// The group with `id`.
@@ -307,15 +352,32 @@ impl Store {
     }
 }
 
+/// `DEFAULT_WORKSPACE`.
+pub fn default_workspace() -> WorkspaceConfig {
+    WorkspaceConfig {
+        id: WORKSPACE.to_owned(),
+        name: "Personal".to_owned(),
+        icon: Some("User".to_owned()),
+        icon_color: Some("#6b7280".to_owned()),
+        order: 0.0,
+    }
+}
+
 /// The workspace every config has (`DEFAULT_WORKSPACE_ID`).
 pub const WORKSPACE: &str = "personal";
 
-/// `useWorkspaceSessionGroups`: the first workspace's groups by `order`.
-fn groups(config: &Value) -> Vec<SessionGroupConfig> {
-    let workspace = config
-        .pointer("/workspaces/0/id")
+/// `defaults.activeWorkspace`, else `personal`.
+fn active_workspace(config: &Value) -> &str {
+    config
+        .pointer("/defaults/activeWorkspace")
         .and_then(Value::as_str)
-        .unwrap_or(WORKSPACE);
+        .filter(|w| !w.is_empty())
+        .unwrap_or(WORKSPACE)
+}
+
+/// `useWorkspaceSessionGroups`: the active workspace's groups by `order`.
+fn groups(config: &Value) -> Vec<SessionGroupConfig> {
+    let workspace = active_workspace(config);
     let mut out: Vec<SessionGroupConfig> =
         records(config.get("sessionGroups").cloned().unwrap_or_default());
     out.retain(|g| g.workspace_id == workspace);
@@ -442,6 +504,26 @@ mod tests {
         let ids: Vec<&str> = s.groups.iter().map(|g| g.id.as_str()).collect();
         assert_eq!(ids, ["a", "b"]);
         assert_eq!(s.group("b").map(|g| g.order), Some(1.0));
+    }
+
+    #[test]
+    fn sessions_show_in_their_projects_workspace_and_loose_ones_in_all() {
+        let mut s = Store::default();
+        for (id, project) in [("w", "web"), ("a", "api"), ("h", "me")] {
+            let mut v = session(id, "running");
+            v["projectName"] = json!(project);
+            s.apply("session:created", v);
+        }
+        let config = json!({
+            "defaults": { "activeWorkspace": "work" },
+            "projects": [
+                { "name": "web", "path": "/w", "preferredAgents": [], "workspaceId": "work" },
+                { "name": "api", "path": "/a", "preferredAgents": [] },
+            ],
+        });
+        s.apply("config:changed", config);
+        let scoped: Vec<&str> = s.scoped_sessions().map(|s| s.info.id.as_str()).collect();
+        assert_eq!(scoped, ["w", "h"]);
     }
 
     #[test]

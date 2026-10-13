@@ -313,6 +313,7 @@ pub(super) fn headless_panel(s: &Screen<'_>) -> El {
             .bg(white(0.02))
             .role(Role::Group, h.name.as_str())
             .child(div().size(6.0, 6.0).rounded(3.0).bg(c(dot)))
+            .child(super::agent_icon(s, &h.agent, 14.0))
             .child(
                 text(truncate(&h.name, 28), 11.0, c(look::GRAY_200))
                     .line_height(14.0)
@@ -475,7 +476,7 @@ pub(super) fn recent_panel(s: &Screen<'_>) -> El {
             .rounded(8.0)
             .bg(white(0.0).mix(white(0.04), hot))
             .role(Role::Button, title)
-            .child(ico("bot", 14.0, 2.0, c(look::GRAY_400)))
+            .child(super::agent_icon(s, &r.agent, 14.0))
             .child(
                 div()
                     .col()

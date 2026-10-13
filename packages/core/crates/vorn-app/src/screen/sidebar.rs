@@ -10,7 +10,7 @@ use crate::client::Session;
 use crate::look;
 use crate::state::{MenuKind, SidebarMode};
 use crate::ui::{div, field, text, tooltip, tooltip_at, Action, El, Place, Rgba, Role, TextStyle};
-use vorn_protocol::{ProjectConfig, SessionGroupConfig};
+use vorn_protocol::{ProjectConfig, SessionGroupConfig, WorkspaceConfig};
 
 /// A configured colour, `#rrggbb`.
 fn stored_color(hex: Option<&str>) -> Option<Rgba> {
@@ -80,29 +80,41 @@ fn folder_icon(size: f32, color: Rgba) -> El {
 }
 
 fn header(s: &Screen<'_>) -> El {
-    let workspace = s
-        .store
-        .config
-        .pointer("/workspaces/0/name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Personal");
+    let ws = s.store.current_workspace();
+    let open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Workspace);
+    let id = s.acts.on("workspace", Act::Open(MenuKind::Workspace));
+    let hot = s.ui.hover(id);
     let title = div()
+        .id(id)
+        .on(Action::Click)
         .row()
         .items_center()
         .gap(8.0)
         .px(10.0)
         .py(6.0)
+        .rounded(6.0)
+        .bg(white(0.0).mix(white(0.06), hot))
         .grow()
         .min_w0()
-        .role(Role::Label, workspace)
-        .child(ico("user", 14.0, 1.5, c(look::GRAY_500)))
+        .role(Role::Button, ws.name.as_str())
+        .child(workspace_icon(&ws, 14.0))
         .child(
-            text(workspace, 13.0, c(look::GRAY_200))
+            text(ws.name.as_str(), 13.0, c(look::GRAY_200))
                 .weight(500)
                 .line_height(18.0)
                 .truncate()
                 .silent(),
-        );
+        )
+        .child(div().grow())
+        .child(ico(
+            if open { "chevron-up" } else { "chevron-down" },
+            12.0,
+            2.0,
+            c(look::GRAY_500),
+        ));
     let bar = div()
         .row()
         .items_center()
@@ -378,7 +390,8 @@ fn row_count(n: usize, size: f32) -> El {
 /// ProjectItem: icon and name, its quick actions on hover, and under it
 /// while expanded its worktrees or sessions as the view mode arranges them.
 fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
-    let mode = s.st.sidebar_mode;
+    let view = s.st.sidebar_view;
+    let mode = view.view_mode;
     let sessions: Vec<&Session> = s
         .store
         .sessions
@@ -507,14 +520,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
                 .collect();
             kids = kids.child(worktree_row(s, p, main, &mine, nested));
         }
-        let mut rest: Vec<&crate::state::Worktree> = worktrees.iter().filter(|w| !w.main).collect();
-        rest.sort_by(|a, b| a.name.cmp(&b.name));
-        for wt in rest {
-            let mine: Vec<&Session> = sessions
-                .iter()
-                .copied()
-                .filter(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
-                .collect();
+        for (wt, mine) in sorted_worktrees(s, worktrees, &sessions) {
             kids = kids.child(worktree_row(s, p, wt, &mine, nested));
         }
     } else if mode != SidebarMode::Worktrees || !git {
@@ -526,6 +532,43 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         }
     }
     col.child(kids)
+}
+
+/// `sortedWorktrees`: the linked worktrees with their sessions, through
+/// the worktree filter, by name or by their first session's last output.
+fn sorted_worktrees<'a, 's>(
+    s: &Screen<'s>,
+    worktrees: &'a [crate::state::Worktree],
+    sessions: &[&'s Session],
+) -> Vec<(&'a crate::state::Worktree, Vec<&'s Session>)> {
+    use crate::sidebar_view::{WorktreeFilter, WorktreeSort};
+    let view = s.st.sidebar_view;
+    let mut rest: Vec<_> = worktrees
+        .iter()
+        .filter(|w| !w.main)
+        .map(|wt| {
+            let mine: Vec<&Session> = sessions
+                .iter()
+                .copied()
+                .filter(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
+                .collect();
+            (wt, mine)
+        })
+        .filter(|(_, mine)| view.worktree_filter == WorktreeFilter::All || !mine.is_empty())
+        .collect();
+    rest.sort_by_cached_key(|(wt, _)| wt.name.to_lowercase());
+    if view.worktree_sort == WorktreeSort::Recent {
+        // The session `linkedSessionId` names: the first on the worktree's path.
+        let linked = |wt: &crate::state::Worktree| {
+            s.store
+                .sessions
+                .iter()
+                .find(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
+                .and_then(|x| s.st.last_output.get(&x.info.id).copied())
+        };
+        rest.sort_by_key(|(wt, _)| std::cmp::Reverse(linked(wt)));
+    }
+    rest
 }
 
 /// The main checkout's branch row (`group/main`) or a WorktreeItem, with
@@ -685,8 +728,9 @@ fn worktree_row(
 }
 
 /// `ProjectsSectionToolbar`'s Filter & sort: white with a dot while the
-/// view is not the default, which this sidebar never draws.
+/// options differ from `hasNonDefault`'s baseline, else gray-600.
 fn filter_sort(s: &Screen<'_>) -> El {
+    let lit = s.st.sidebar_view.non_default();
     let act = Act::Open(MenuKind::SidebarOptions);
     let id = s.acts.on("sidebar", act);
     let open =
@@ -699,11 +743,29 @@ fn filter_sort(s: &Screen<'_>) -> El {
         .on(Action::Click)
         .p(2.0)
         .rounded(4.0)
-        .bg(white(0.0).mix(white(0.08), if open { 1.0 } else { hot }))
+        .bg(white(0.0).mix(
+            white(0.08),
+            if open {
+                1.0
+            } else if lit {
+                0.0
+            } else {
+                hot
+            },
+        ))
         .role(Role::Button, "Filter & sort")
         .expanded(open)
-        .child(ico("list-filter", 13.0, 1.5, c(look::WHITE)))
-        .child_if((!open).then(|| {
+        .child(ico(
+            "list-filter",
+            13.0,
+            1.5,
+            if open || lit {
+                c(look::WHITE)
+            } else {
+                c(look::GRAY_600).mix(c(look::WHITE), hot)
+            },
+        ))
+        .child_if((lit && !open).then(|| {
             div()
                 .absolute(12.0, -2.0)
                 .size(6.0, 6.0)
@@ -724,14 +786,18 @@ fn quiet(label: &str) -> El {
 
 /// The sessions newest activity first, as the group and flat lists sort.
 fn by_activity<'a>(s: &Screen<'a>) -> Vec<&'a Session> {
-    let mut list: Vec<&Session> = s.store.sessions.iter().collect();
+    let mut list: Vec<&Session> = s
+        .store
+        .scoped_sessions()
+        .filter(|x| s.st.side.holder(&x.info.id).is_none())
+        .collect();
     list.sort_by_key(|x| std::cmp::Reverse(s.st.last_output.get(&x.info.id).copied()));
     list
 }
 
 /// The sessions view's sidebar in its arrangement.
 fn sessions(s: &Screen<'_>) -> El {
-    match s.st.sidebar_mode {
+    match s.st.sidebar_view.view_mode {
         SidebarMode::Worktrees | SidebarMode::WorktreesSessions | SidebarMode::Projects => {
             projects(s)
         }
@@ -765,8 +831,8 @@ fn projects(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.sessions.len())));
-    if s.store.projects.is_empty() {
+    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
+    if s.store.workspace_projects().next().is_none() {
         col = col.child(
             div().px(10.0).py(4.0).child(
                 text("No projects", 13.0, c(look::GRAY_600))
@@ -775,10 +841,42 @@ fn projects(s: &Screen<'_>) -> El {
             ),
         );
     }
-    for p in &s.store.projects {
+    for p in sorted_projects(s) {
         col = col.child(project_row(s, p));
     }
     col
+}
+
+/// `sortedProjects`: the workspace's projects through the filter, in the
+/// chosen order; recent activity is a project's latest output.
+fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
+    use crate::sidebar_view::{ProjectSort, WorktreeFilter};
+    let view = s.st.sidebar_view;
+    fn mine<'b>(
+        s: &'b Screen<'_>,
+        p: &'b ProjectConfig,
+    ) -> impl Iterator<Item = &'b crate::client::Session> {
+        s.store.sessions.iter().filter(move |x| {
+            x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none()
+        })
+    }
+    let mut out: Vec<&ProjectConfig> = s
+        .store
+        .workspace_projects()
+        .filter(|p| view.worktree_filter == WorktreeFilter::All || mine(s, p).next().is_some())
+        .collect();
+    match view.project_sort {
+        ProjectSort::Manual => {}
+        ProjectSort::Name => out.sort_by_cached_key(|p| p.name.to_lowercase()),
+        ProjectSort::Recent => out.sort_by_key(|p| {
+            std::cmp::Reverse(
+                mine(s, p)
+                    .filter_map(|x| s.st.last_output.get(&x.info.id).copied())
+                    .max(),
+            )
+        }),
+    }
+    out
 }
 
 /// FlatSessionsSection: every session, newest activity first.
@@ -794,7 +892,7 @@ fn flat(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.sessions.len())));
+    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
     let mut list = div().col().gap(2.0).mt(4.0);
     let sessions: Vec<&Session> = by_activity(s)
         .into_iter()
@@ -833,7 +931,7 @@ fn groups(s: &Screen<'_>) -> El {
         Act::Group(None),
         |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Sessions",
-        Some(s.store.sessions.len()),
+        Some(s.store.scoped_sessions().count()),
         s.st.project.is_none() && s.st.group.is_none(),
     ));
     let sessions = by_activity(s);
@@ -1006,6 +1104,288 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
     row
 }
 
+/// `WorkspaceIcon`: its stored glyph in its colour, else a gray user.
+fn workspace_icon(ws: &WorkspaceConfig, size: f32) -> El {
+    workspace_glyph(ws.icon.as_deref(), ws.icon_color.as_deref(), size)
+}
+
+fn workspace_glyph(icon: Option<&str>, color: Option<&str>, size: f32) -> El {
+    let glyph = icon
+        .and_then(|n| look::WORKSPACE_ICONS.iter().find(|(name, ..)| *name == n))
+        .map_or("user", |(_, glyph, _)| *glyph);
+    let tint = color
+        .and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
+        .map_or(c(look::GRAY_500), Rgba::hex);
+    ico(glyph, size, 1.5, tint)
+}
+
+/// `WorkspaceSwitcher`'s dropdown: the workspaces with their project
+/// counts, each editable and (but `personal`) deletable, then Create.
+pub(super) fn workspace_panel(s: &Screen<'_>) -> El {
+    let active = s.store.workspace();
+    let form = s.st.ws_form.as_ref();
+    let mut list = div()
+        .id(s.acts.on("workspace-list", Act::Nothing))
+        .col()
+        .scroll_y()
+        .max_h(300.0);
+    for ws in s.store.workspaces() {
+        if form.is_some_and(|f| f.id.as_deref() == Some(ws.id.as_str())) {
+            list = list.child(workspace_form(s));
+            continue;
+        }
+        let count = s
+            .store
+            .projects
+            .iter()
+            .filter(|p| {
+                p.workspace_id
+                    .as_deref()
+                    .unwrap_or(crate::client::store::WORKSPACE)
+                    == ws.id
+            })
+            .count();
+        list = list.child(workspace_row(s, &ws, ws.id == active, count));
+    }
+    let mut panel = div()
+        .col()
+        .w(260.0)
+        .py(4.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Menu, "Workspaces")
+        .child(list)
+        .child(div().h(1.0).mt(4.0).mb(4.0).bg(white(0.06)));
+    if form.is_some_and(|f| f.id.is_none()) {
+        panel = panel.child(workspace_form(s));
+    } else {
+        let id = s.acts.on("workspace", Act::EditWorkspace(None));
+        let hot = s.ui.hover(id);
+        let fg = c(look::GRAY_400).mix(c(look::GRAY_200), hot);
+        panel = panel.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(12.0)
+                .py(8.0)
+                .bg(white(0.0).mix(white(0.04), hot))
+                .role(Role::MenuItem, "Create Workspace")
+                .child(ico("plus", 14.0, 1.5, fg))
+                .child(
+                    text("Create Workspace", 13.0, fg)
+                        .line_height(19.5)
+                        .silent(),
+                ),
+        );
+    }
+    panel
+}
+
+/// A workspace in the switcher: its icon, name and project count, and on
+/// hover Edit and Delete (armed by the first click).
+fn workspace_row(s: &Screen<'_>, ws: &WorkspaceConfig, on: bool, count: usize) -> El {
+    let pick = s.acts.on("workspace", Act::SwitchWorkspace(ws.id.clone()));
+    let row_id = pick.child("row");
+    let hot = s.ui.hovered(row_id);
+    let armed = s.st.confirm_delete.as_deref() == Some(ws.id.as_str());
+    let bg = if on {
+        white(0.08)
+    } else {
+        white(0.0).mix(white(0.04), s.ui.hover(row_id))
+    };
+    let fg = if on {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300)
+    };
+    let button = div()
+        .id(pick)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .grow()
+        .min_w0()
+        .role(Role::MenuItem, ws.name.as_str())
+        .selected(on)
+        .child(workspace_icon(ws, 14.0))
+        .child(
+            text(ws.name.as_str(), 13.0, fg)
+                .line_height(19.5)
+                .truncate()
+                .silent(),
+        )
+        .child(div().grow())
+        .child(
+            text(count.to_string(), 11.0, c(look::GRAY_600))
+                .line_height(16.5)
+                .silent(),
+        );
+    let mut actions = div().row().items_center().gap(2.0).shrink0();
+    if hot || armed {
+        let edit = s
+            .acts
+            .on("workspace", Act::EditWorkspace(Some(ws.id.clone())));
+        let edit_hot = s.ui.hover(edit);
+        actions = actions.child(tooltip(
+            s.ui,
+            div()
+                .id(edit)
+                .on(Action::Click)
+                .p(2.0)
+                .rounded(4.0)
+                .role(Role::Button, "Edit")
+                .child(ico(
+                    "pencil",
+                    11.0,
+                    1.5,
+                    c(look::GRAY_500).mix(c(look::GRAY_300), edit_hot),
+                )),
+            edit,
+            "Edit",
+            None,
+        ));
+        if ws.id != crate::client::store::WORKSPACE {
+            let (act, label, tint, stroke) = if armed {
+                (
+                    Act::DeleteWorkspace(ws.id.clone()),
+                    "Confirm delete",
+                    c(look::RED_400),
+                    2.0,
+                )
+            } else {
+                (
+                    Act::AskDeleteWorkspace(ws.id.clone()),
+                    "Delete",
+                    c(look::GRAY_500),
+                    1.5,
+                )
+            };
+            let del = s.acts.on("workspace", act);
+            let del_hot = s.ui.hover(del);
+            let tint = if armed {
+                tint
+            } else {
+                tint.mix(c(look::RED_400), del_hot)
+            };
+            actions = actions.child(tooltip(
+                s.ui,
+                div()
+                    .id(del)
+                    .on(Action::Click)
+                    .p(2.0)
+                    .rounded(4.0)
+                    .role(Role::Button, label)
+                    .child(ico("trash-2", 11.0, stroke, tint)),
+                del,
+                label,
+                None,
+            ));
+        }
+    }
+    div()
+        .id(row_id)
+        .sense(crate::ui::Sense::HOVER)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(10.0)
+        .py(8.0)
+        .bg(bg)
+        .child(button)
+        .child(actions)
+}
+
+/// The switcher's create or edit row: icon button, name field, save and
+/// cancel, and the icon picker under them when open.
+fn workspace_form(s: &Screen<'_>) -> El {
+    let Some(f) = s.st.ws_form.as_ref() else {
+        return div();
+    };
+    let picker = s.acts.on("workspace", Act::WorkspacePicker);
+    let save = s.acts.on("workspace", Act::SaveWorkspace);
+    let cancel = s.acts.on("workspace", Act::CancelWorkspace);
+    let empty = s.ui.edit_text(crate::app::WS_NAME).trim().is_empty();
+    let focused = s.ui.focused(crate::app::WS_NAME);
+    let input = div()
+        .grow()
+        .min_w0()
+        .px(8.0)
+        .py(4.0)
+        .rounded(4.0)
+        .bg(white(0.06))
+        .border(1.0, if focused { white(0.2) } else { white(0.1) })
+        .child(field(
+            crate::app::WS_NAME,
+            "Workspace name",
+            if f.id.is_none() {
+                "Workspace name..."
+            } else {
+                ""
+            },
+            TextStyle {
+                line_height: 19.5,
+                ..TextStyle::ui(13.0)
+            },
+            c(look::GRAY_200),
+        ));
+    let save_fg = c(look::GREEN_400).alpha(if f.id.is_none() && empty { 0.3 } else { 1.0 });
+    let row = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .child(
+            div()
+                .id(picker)
+                .on(Action::Click)
+                .p(4.0)
+                .rounded(4.0)
+                .bg(white(0.0).mix(white(0.08), s.ui.hover(picker)))
+                .role(Role::Button, "Change icon")
+                .child(workspace_glyph(Some(&f.icon), Some(&f.color), 14.0)),
+        )
+        .child(input)
+        .child(
+            div()
+                .id(save)
+                .on(Action::Click)
+                .p(4.0)
+                .role(Role::Button, "Save")
+                .child(ico("check", 14.0, 2.0, save_fg)),
+        )
+        .child(
+            div()
+                .id(cancel)
+                .on(Action::Click)
+                .p(4.0)
+                .role(Role::Button, "Cancel")
+                .child(ico(
+                    "x",
+                    14.0,
+                    2.0,
+                    c(look::GRAY_500).mix(c(look::GRAY_300), s.ui.hover(cancel)),
+                )),
+        );
+    let mut col = div().col().px(8.0).py(6.0).child(row);
+    if f.picker {
+        col = col.child(div().mt(8.0).child(super::workflows::icon_colors_from(
+            s,
+            "workspace",
+            &look::WORKSPACE_ICONS,
+            26.0,
+            &f.icon,
+            &f.color,
+            Act::WorkspaceIcon,
+            Act::WorkspaceColor,
+        )));
+    }
+    col
+}
+
 /// SessionGroupItem's icon popover: `IconColorPicker` over a Done button.
 pub(super) fn group_icon_picker(s: &Screen<'_>, id: &str) -> El {
     let Some(g) = s.store.group(id) else {
@@ -1120,7 +1500,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
         None,
         s.st.project.is_none(),
     ));
-    if s.store.projects.is_empty() {
+    if s.store.workspace_projects().next().is_none() {
         col = col.child(
             div().px(10.0).py(4.0).child(
                 text("No projects", 13.0, c(look::GRAY_600))
@@ -1129,7 +1509,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
             ),
         );
     }
-    for p in &s.store.projects {
+    for p in s.store.workspace_projects() {
         col = col.child(nav_item(
             s,
             Act::Project(Some(p.name.clone())),

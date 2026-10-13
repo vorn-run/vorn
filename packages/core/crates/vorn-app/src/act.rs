@@ -87,6 +87,12 @@ pub enum Act {
     AddProject,
     /// How the sidebar arranges the sessions.
     SidebarMode(SidebarMode),
+    /// The sidebar's project order.
+    ProjectSort(crate::sidebar_view::ProjectSort),
+    /// The sidebar's worktree order.
+    WorktreeSort(crate::sidebar_view::WorktreeSort),
+    /// Whether the sidebar shows only projects and worktrees with sessions.
+    WorktreeFilter(crate::sidebar_view::WorktreeFilter),
     /// Folds the sessions sidebar's section.
     ToggleSection,
     /// Filters the grid to a group's sessions, or clears it.
@@ -103,6 +109,17 @@ pub enum Act {
     /// Lets every session of a group go.
     UngroupAll(String),
     AskDeleteGroup(String),
+    /// `setActiveWorkspace`.
+    SwitchWorkspace(String),
+    /// Opens the switcher's form: a new workspace, or this one's.
+    EditWorkspace(Option<String>),
+    WorkspaceIcon(String),
+    WorkspaceColor(String),
+    WorkspacePicker,
+    SaveWorkspace,
+    CancelWorkspace,
+    AskDeleteWorkspace(String),
+    DeleteWorkspace(String),
     DeleteGroup(String),
     /// Moves a session into a group, or out of its own.
     MoveToGroup {

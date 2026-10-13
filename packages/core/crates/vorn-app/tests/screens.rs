@@ -148,7 +148,10 @@ fn the_sessions_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
-    assert_eq!(app.st.sidebar_mode, SidebarMode::WorktreesSessions);
+    assert_eq!(
+        app.st.sidebar_view.view_mode,
+        SidebarMode::WorktreesSessions
+    );
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar");
 
@@ -289,7 +292,7 @@ fn session_groups_work_through_their_menus() {
         control("sidebar", Act::Open(MenuKind::SidebarOptions)),
     );
     choose(&mut shot, &mut app, "Groups > Sessions");
-    assert_eq!(app.st.sidebar_mode, SidebarMode::Groups);
+    assert_eq!(app.st.sidebar_view.view_mode, SidebarMode::Groups);
     escape(&mut shot, &mut app);
     park(&mut shot, &mut app);
     shot.save(&mut app, "groups");

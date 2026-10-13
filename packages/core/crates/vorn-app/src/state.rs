@@ -103,13 +103,20 @@ impl LayoutMode {
 
 /// How the sessions view's sidebar arranges its sessions
 /// (`SidebarViewMode`), worktrees and their sessions by default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SidebarMode {
+    #[serde(rename = "worktrees")]
     Worktrees,
     #[default]
+    #[serde(rename = "worktrees-sessions")]
     WorktreesSessions,
+    #[serde(rename = "sessions")]
     Projects,
+    #[serde(rename = "groups-sessions")]
     Groups,
+    #[serde(rename = "sessions-flat")]
     Flat,
 }
 
@@ -131,6 +138,16 @@ impl SidebarMode {
             SidebarMode::Flat => "Sessions (Flat)",
         }
     }
+}
+
+/// The workspace being created (`id` none) or edited, and its icon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceForm {
+    pub id: Option<String>,
+    pub icon: String,
+    pub color: String,
+    /// The icon and colour picker is showing.
+    pub picker: bool,
 }
 
 /// Which menu is open.
@@ -156,6 +173,8 @@ pub enum MenuKind {
     SessionGroups(String),
     /// A group's icon and colour picker.
     GroupIcon(String),
+    /// The sidebar header's workspace switcher.
+    Workspace,
     /// The launcher's pickers.
     LaunchProject,
     LaunchAgent,
@@ -310,6 +329,7 @@ impl Recent {
 pub struct Headless {
     pub id: String,
     pub name: String,
+    pub agent: String,
     pub branch: Option<String>,
     pub status: String,
     pub exit: Option<i64>,
@@ -325,6 +345,11 @@ impl Headless {
         Some(Headless {
             id: v.get("id")?.as_str()?.to_owned(),
             name: name.to_owned(),
+            agent: v
+                .get("agentType")
+                .and_then(Value::as_str)
+                .unwrap_or("shell")
+                .to_owned(),
             branch: v.get("branch").and_then(Value::as_str).map(str::to_owned),
             status: v
                 .get("status")
@@ -411,13 +436,16 @@ pub struct State {
     pub worktree: Option<String>,
     /// Sidebar worktrees whose sessions are folded, as project + path.
     pub worktrees_folded: HashSet<(String, String)>,
-    pub sidebar_mode: SidebarMode,
+    /// The sessions sidebar's arrangement, order and filter.
+    pub sidebar_view: crate::sidebar_view::SidebarView,
     /// The sessions sidebar's section folded shut.
     pub section_folded: bool,
     /// Session groups folded shut.
     pub groups_folded: HashSet<String>,
     /// The group whose name is being edited.
     pub renaming_group: Option<String>,
+    /// The workspace switcher's create or edit form, its name in `WS_NAME`.
+    pub ws_form: Option<WorkspaceForm>,
     pub filter: Filter,
     pub sort: Sort,
     /// 0 for the automatic layout, -1 flexible, else that many columns.
@@ -484,9 +512,11 @@ impl State {
             .iter()
             .enumerate()
             .filter(|(_, s)| {
-                self.project
-                    .as_deref()
-                    .is_none_or(|p| s.info.project_name == p)
+                store.in_scope(s)
+                    && self
+                        .project
+                        .as_deref()
+                        .is_none_or(|p| s.info.project_name == p)
                     && self
                         .group
                         .as_deref()
@@ -541,7 +571,7 @@ impl State {
     pub fn composer_inline(&self, store: &Store) -> bool {
         self.view == MainView::Sessions
             && self.focused.is_none()
-            && (store.sessions.is_empty()
+            && (store.scoped_sessions().next().is_none()
                 || (self.layout == LayoutMode::Grid
                     && self.filter == Filter::All
                     && self.gridded(store).is_empty()))

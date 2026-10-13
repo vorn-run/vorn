@@ -30,6 +30,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Project(_) => 140.0,
         MenuKind::Group(_) | MenuKind::SessionGroups(_) => 176.0,
         MenuKind::GroupIcon(_) => 248.0,
+        MenuKind::Workspace => 260.0,
         MenuKind::LaunchAgent => 160.0,
         MenuKind::LaunchModel => 288.0,
         MenuKind::LaunchProject | MenuKind::LaunchWorktree => 240.0,
@@ -93,7 +94,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::SidebarOptions => sidebar_options(s),
         MenuKind::Group(id) => group(s, id),
         MenuKind::SessionGroups(id) => session_groups(s, id),
-        MenuKind::GroupIcon(_) => Vec::new(),
+        MenuKind::GroupIcon(_) | MenuKind::Workspace => Vec::new(),
         MenuKind::LaunchProject => launch_projects(s),
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
@@ -160,6 +161,12 @@ fn workflows(s: &Screen<'_>, source: Option<&str>) -> Vec<Item> {
         .workflows
         .iter()
         .filter(|w| w.enabled)
+        .filter(|w| {
+            w.workspace_id
+                .as_deref()
+                .unwrap_or(crate::client::store::WORKSPACE)
+                == s.store.workspace()
+        })
         .filter(|w| contextual(&w.nodes) == source.is_some())
         .map(|w| {
             Item::new(
@@ -190,23 +197,17 @@ pub fn contextual(nodes: &serde_json::Value) -> bool {
     })
 }
 
+/// `buildScopedSubmenu`: each of the workspace's projects, under its title
+/// its main checkout and worktrees with their session counts, or the
+/// project alone when it has none.
 fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {
     let mut out = Vec::new();
-    for p in &s.store.projects {
-        let wts = s.st.worktrees.get(&p.path).cloned().unwrap_or_default();
-        let count = |path: &str| {
-            s.store
-                .sessions
-                .iter()
-                .filter(|x| {
-                    x.info
-                        .worktree_path
-                        .as_deref()
-                        .unwrap_or(&x.info.project_path)
-                        == path
-                })
-                .count()
-        };
+    for p in s.store.workspace_projects() {
+        let wts =
+            s.st.worktrees
+                .get(&p.path)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
         let new = |worktree: Option<String>| {
             if shell {
                 Act::NewShellIn(worktree.unwrap_or_else(|| p.path.clone()))
@@ -218,58 +219,83 @@ fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {
                 }
             }
         };
+        let mut title = if wts.is_empty() {
+            let mut it = Item::option(p.name.as_str(), false, new(None));
+            it.icon = None;
+            it
+        } else {
+            Item::header(p.name.as_str())
+        }
+        .mark(super::sidebar::project_icon(p, 12.0, c(look::GRAY_300)));
+        title.separator = !out.is_empty();
+        out.push(title);
         if wts.is_empty() {
-            let mut it = Item::new("folder", p.name.as_str(), new(None)).tint(look::GRAY_400);
-            it.separator = !out.is_empty();
-            out.push(it);
             continue;
         }
-        let mut h = Item::header(p.name.as_str());
-        h.separator = !out.is_empty();
-        out.push(h);
-        for wt in &wts {
-            let n = count(&wt.path);
-            let detail = format!("{n} session{}", if n == 1 { "" } else { "s" });
+        let main = wts.iter().filter(|w| w.main);
+        for wt in main.chain(wts.iter().filter(|w| !w.main)) {
             let (icon, label, tint) = if wt.main {
-                ("git-branch", wt.branch.as_str(), look::GRAY_400)
+                ("git-branch", wt.branch.as_str(), c(look::GRAY_400))
             } else {
-                ("folder-git-2", wt.name.as_str(), look::AMBER_400)
+                (
+                    "folder-git-2",
+                    wt.name.as_str(),
+                    c(look::AMBER_400).alpha(0.7),
+                )
             };
-            out.push(
-                Item::new(icon, label, new((!wt.main).then(|| wt.path.clone())))
-                    .tint(tint)
-                    .detail(detail),
-            );
+            let mut it = Item::option(label, false, new((!wt.main).then(|| wt.path.clone())))
+                .mark(ico(icon, 12.0, 2.0, tint));
+            it.nested = true;
+            let n = worktree_sessions(s, &wt.path);
+            if n > 0 {
+                it = it.detail(format!("{n} session{}", if n == 1 { "" } else { "s" }));
+                it.detail_color = Some(c(look::GREEN_400).alpha(0.7));
+            }
+            out.push(it);
         }
         if !shell {
             // An empty worktree path asks for a new worktree.
-            out.push(Item::new(
-                "plus",
+            let mut it = Item::option(
                 "New worktree",
+                false,
                 Act::NewSessionIn {
                     project: p.name.clone(),
                     worktree: Some(String::new()),
                     agent: None,
                 },
-            ));
+            )
+            .mark(ico("plus", 12.0, 2.0, c(look::GRAY_500)));
+            it.nested = true;
+            out.push(it);
         }
     }
     out
 }
 
+/// `countSessionsByWorktree`: the sessions whose worktree path is `path`.
+fn worktree_sessions(s: &Screen<'_>, path: &str) -> usize {
+    s.store
+        .sessions
+        .iter()
+        .filter(|x| x.info.worktree_path.as_deref() == Some(path))
+        .count()
+}
+
+/// `GridContextMenu`; its submenus are 240 wide.
 fn grid(s: &Screen<'_>) -> Vec<Item> {
+    const SUB_W: f32 = 240.0;
     let mut items = Vec::new();
-    if !s.store.projects.is_empty() {
-        items.push(
-            Item::new("bot", "New session in\u{2026}", Act::Nothing)
-                .tint(look::GRAY_400)
-                .submenu(scoped(s, false)),
-        );
-        items.push(
-            Item::new("terminal", "New terminal in\u{2026}", Act::Nothing)
-                .tint(look::GRAY_400)
-                .submenu(scoped(s, true)),
-        );
+    if s.store.workspace_projects().next().is_some() {
+        let mut session = Item::option("New session in\u{2026}", false, Act::Nothing)
+            .mark(super::agent_icon(s, s.store.default_agent(), 14.0))
+            .submenu(scoped(s, false));
+        session.sub_w = Some(SUB_W);
+        items.push(session);
+        let mut shell = Item::new("terminal", "New terminal in\u{2026}", Act::Nothing)
+            .tint(look::GRAY_400)
+            .submenu(scoped(s, true));
+        shell.sub_w = Some(SUB_W);
+        items.push(shell);
     }
     let mut new = Item::new("plus", "New session...", Act::NewSession);
     new.shortcut = Some(format!("{}N", super::MOD_LABEL));
@@ -277,7 +303,9 @@ fn grid(s: &Screen<'_>) -> Vec<Item> {
     items.push(new);
     let flows = workflows(s, None);
     if !flows.is_empty() {
-        items.push(Item::new("workflow", "Run workflow", Act::Nothing).submenu(flows));
+        let mut run = Item::new("workflow", "Run workflow", Act::Nothing).submenu(flows);
+        run.sub_w = Some(SUB_W);
+        items.push(run);
     }
     items
 }
@@ -301,7 +329,7 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 agent: None,
             },
         )
-        .tint(look::GRAY_400),
+        .mark(super::agent_icon(s, s.store.default_agent(), 14.0)),
         Item::new(
             "terminal",
             "New terminal",
@@ -322,11 +350,15 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                     agent: Some((*k).to_owned()),
                 },
             )
-            .tint(look::GRAY_400)
+            .mark(super::agent_icon(s, k, 12.0))
         })
         .collect();
     if agents.len() > 1 {
-        items.push(Item::new("bot", "New session with\u{2026}", Act::Nothing).submenu(agents));
+        items.push(
+            Item::new("bot", "New session with\u{2026}", Act::Nothing)
+                .mark(super::agent_icon(s, s.store.default_agent(), 14.0))
+                .submenu(agents),
+        );
     }
     let flows = workflows(s, Some(id));
     if !flows.is_empty() {
@@ -464,16 +496,46 @@ fn project(s: &Screen<'_>, name: &str) -> Vec<Item> {
     ]
 }
 
-/// `ProjectsSectionToolbar`'s Show section; the worktree levels are not
-/// drawn by this sidebar, so their modes are not offered.
+/// `ProjectsSectionToolbar`: Show, then Filter and Sort projects while
+/// the mode lists projects, and Sort worktrees while it lists worktrees.
 fn sidebar_options(s: &Screen<'_>) -> Vec<Item> {
+    use crate::sidebar_view::{ProjectSort, WorktreeFilter, WorktreeSort};
+    let v = s.st.sidebar_view;
     let mut items = vec![Item::header("Show")];
     for m in SidebarMode::ALL {
         items.push(Item::option(
             m.label(),
-            s.st.sidebar_mode == m,
+            v.view_mode == m,
             Act::SidebarMode(m),
         ));
+    }
+    if v.by_project() {
+        items.push(Item::header("Filter").sep());
+        for f in WorktreeFilter::ALL {
+            items.push(Item::option(
+                f.label(),
+                v.worktree_filter == f,
+                Act::WorktreeFilter(f),
+            ));
+        }
+        items.push(Item::header("Sort projects").sep());
+        for o in ProjectSort::ALL {
+            items.push(Item::option(
+                o.label(),
+                v.project_sort == o,
+                Act::ProjectSort(o),
+            ));
+        }
+    }
+    if v.by_worktree() {
+        items.push(Item::header("Sort worktrees").sep());
+        for o in WorktreeSort::ALL {
+            items.push(Item::option(
+                o.label(),
+                v.worktree_sort == o,
+                Act::WorktreeSort(o),
+            ));
+        }
     }
     items
 }

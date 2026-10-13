@@ -1,0 +1,268 @@
+//! The sidebar's view options, the workspace switcher, the new-session
+//! menu and each agent's icon, driven against a test vornd and drawn as
+//! `VORN_APP_SHOT=<prefix>` frames to compare with today's screens.
+
+#![cfg(unix)]
+
+mod support;
+
+use serde_json::{json, Value};
+use support::{connect, key, seed_acme, Shot, TestVornd};
+use vorn_app::act::Act;
+use vorn_app::app::WS_NAME;
+use vorn_app::screen::menus::MENU;
+use vorn_app::sidebar_view::{ProjectSort, WorktreeFilter};
+use vorn_app::state::{MenuKind, SidebarMode};
+use vorn_app::ui::{item_id, Id};
+use vorn_app::App;
+
+fn control(place: &str, act: Act) -> Id {
+    App::control(place, &act)
+}
+
+#[track_caller]
+fn choose(shot: &mut Shot, app: &mut App, label: &str) {
+    let labels = app.menu_labels(&shot.ui);
+    let i = labels
+        .iter()
+        .position(|l| l == label)
+        .unwrap_or_else(|| panic!("{label:?} in {labels:?}"));
+    shot.click(app, item_id(MENU, i));
+}
+
+fn menu(app: &App) -> Option<MenuKind> {
+    app.st.menu.as_ref().map(|m| m.kind.clone())
+}
+
+fn escape(shot: &mut Shot, app: &mut App) {
+    shot.send(app, key("Escape", 0, None));
+    shot.frame(app);
+}
+
+fn park(shot: &mut Shot, app: &mut App) {
+    shot.ui.pointer_move(130.0, 600.0);
+    shot.frame(app);
+}
+
+/// A session of `agent` (a plain shell underneath) in `project`.
+fn session(shot: &mut Shot, app: &mut App, agent: &str, project: &str, path: &str) -> String {
+    let made = if agent == "shell" {
+        app.rpc().call("shell:create", json!(path))
+    } else {
+        let params = json!({ "agentType": agent, "projectName": project, "projectPath": path });
+        app.rpc().call("terminal:create", params)
+    }
+    .expect("created");
+    let id = made["id"].as_str().expect("an id").to_owned();
+    shot.until(app, "the session", |app, _| {
+        app.store.session(&id).map(|_| ())
+    });
+    id
+}
+
+fn active_workspace(app: &App) -> String {
+    let c = app.rpc().call("config:load", Value::Null).expect("config");
+    c["defaults"]["activeWorkspace"]
+        .as_str()
+        .unwrap_or("personal")
+        .to_owned()
+}
+
+#[test]
+fn the_sidebar_options_persist_and_rearrange_it() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let repo = seed_acme(&mut app, &v);
+    let path = repo.to_string_lossy().into_owned();
+    shot.until(&mut app, "the worktrees", |app, _| {
+        app.st
+            .worktrees
+            .get(&path)
+            .filter(|w| w.len() > 1)
+            .map(|_| ())
+    });
+    let claude = session(&mut shot, &mut app, "claude", "acme", &path);
+    session(&mut shot, &mut app, "shell", "acme", &path);
+    park(&mut shot, &mut app);
+    shot.save(&mut app, "sidebar-worktrees-sessions");
+    assert!(app.store.session(&claude).is_some());
+
+    let options = control("sidebar", Act::Open(MenuKind::SidebarOptions));
+    shot.click(&mut app, options);
+    assert_eq!(menu(&app), Some(MenuKind::SidebarOptions));
+    let labels = app.menu_labels(&shot.ui);
+    for want in [
+        "Projects > Worktrees",
+        "Projects > Worktrees > Sessions",
+        "Projects > Sessions",
+        "Groups > Sessions",
+        "Sessions (Flat)",
+        "With active sessions",
+        "Recent activity",
+    ] {
+        assert!(labels.iter().any(|l| l == want), "{want:?} in {labels:?}");
+    }
+    shot.save(&mut app, "sidebar-options");
+
+    choose(&mut shot, &mut app, "With active sessions");
+    assert_eq!(app.st.sidebar_view.worktree_filter, WorktreeFilter::Active);
+    if menu(&app).is_none() {
+        shot.click(&mut app, options);
+    }
+    choose(&mut shot, &mut app, "Name");
+    assert_eq!(app.st.sidebar_view.project_sort, ProjectSort::Name);
+    if menu(&app).is_none() {
+        shot.click(&mut app, options);
+    }
+    choose(&mut shot, &mut app, "Sessions (Flat)");
+    assert_eq!(app.st.sidebar_view.view_mode, SidebarMode::Flat);
+    escape(&mut shot, &mut app);
+    park(&mut shot, &mut app);
+    shot.save(&mut app, "sidebar-flat");
+
+    let saved = std::fs::read_to_string(v.home.join("desktop/sidebar.json")).expect("saved");
+    let saved: Value = serde_json::from_str(&saved).expect("json");
+    assert_eq!(saved["viewMode"], "sessions-flat");
+    assert_eq!(saved["worktreeFilter"], "active");
+    assert_eq!(saved["projectSort"], "name");
+
+    let again = connect(&v);
+    assert_eq!(
+        again.st.sidebar_view, app.st.sidebar_view,
+        "reopened, it keeps them"
+    );
+}
+
+#[test]
+fn workspaces_switch_create_rename_and_delete() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    seed_acme(&mut app, &v);
+    assert_eq!(app.store.workspace(), "personal");
+
+    let open = control("workspace", Act::Open(MenuKind::Workspace));
+    if menu(&app) != Some(MenuKind::Workspace) {
+        shot.click(&mut app, open);
+    }
+    assert_eq!(menu(&app), Some(MenuKind::Workspace));
+    shot.save(&mut app, "workspace-menu");
+
+    shot.click(&mut app, control("workspace", Act::EditWorkspace(None)));
+    assert!(shot.ui.focused(WS_NAME));
+    shot.type_text(&mut app, "Work");
+    shot.save(&mut app, "workspace-new");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    let work = shot.until(&mut app, "the new workspace", |app, _| {
+        let ws = app.store.current_workspace();
+        (ws.name == "Work").then(|| ws.id.clone())
+    });
+    shot.until(&mut app, "vornd to hold the switch", |app, _| {
+        (active_workspace(app) == work).then_some(())
+    });
+    assert!(
+        app.store.workspace_projects().next().is_none(),
+        "a new one starts empty"
+    );
+    park(&mut shot, &mut app);
+    shot.save(&mut app, "workspace-work");
+
+    if menu(&app) != Some(MenuKind::Workspace) {
+        shot.click(&mut app, open);
+    }
+    let row = control("workspace", Act::SwitchWorkspace(work.clone()));
+    shot.hover(&mut app, row);
+    shot.save(&mut app, "workspace-row-hover");
+    shot.click(
+        &mut app,
+        control("workspace", Act::EditWorkspace(Some(work.clone()))),
+    );
+    shot.type_text(&mut app, " team");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    shot.until(&mut app, "the rename", |app, _| {
+        (app.store.current_workspace().name == "Work team").then_some(())
+    });
+
+    // Another client switching moves this one with it.
+    let mut c = app.rpc().call("config:load", Value::Null).expect("config");
+    c["defaults"]["activeWorkspace"] = json!("personal");
+    app.rpc().call("config:save", c).expect("saved");
+    shot.until(&mut app, "the outside switch", |app, _| {
+        (app.store.workspace() == "personal").then_some(())
+    });
+    assert!(app.store.workspace_projects().any(|p| p.name == "acme"));
+
+    if menu(&app) != Some(MenuKind::Workspace) {
+        shot.click(&mut app, open);
+    }
+    shot.click(
+        &mut app,
+        control("workspace", Act::SwitchWorkspace(work.clone())),
+    );
+    shot.until(&mut app, "the switch", |app, _| {
+        (app.store.workspace() == work).then_some(())
+    });
+    shot.until(&mut app, "vornd to follow", |app, _| {
+        (active_workspace(app) == work).then_some(())
+    });
+
+    if menu(&app) != Some(MenuKind::Workspace) {
+        shot.click(&mut app, open);
+    }
+    shot.hover(&mut app, row);
+    shot.click(
+        &mut app,
+        control("workspace", Act::AskDeleteWorkspace(work.clone())),
+    );
+    shot.save(&mut app, "workspace-delete");
+    shot.click(
+        &mut app,
+        control("workspace", Act::DeleteWorkspace(work.clone())),
+    );
+    shot.until(&mut app, "the delete", |app, _| {
+        app.store
+            .workspaces()
+            .iter()
+            .all(|w| w.id != work)
+            .then_some(())
+    });
+    assert_eq!(app.store.workspace(), "personal");
+}
+
+#[test]
+fn the_new_session_menu_lists_every_project_and_worktree() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let repo = seed_acme(&mut app, &v);
+    let path = repo.to_string_lossy().into_owned();
+    session(&mut shot, &mut app, "claude", "acme", &path);
+    shot.until(&mut app, "the worktrees", |app, _| {
+        app.st
+            .worktrees
+            .get(&path)
+            .filter(|w| w.len() > 1)
+            .map(|_| ())
+    });
+
+    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::Grid)));
+    assert_eq!(menu(&app), Some(MenuKind::Grid));
+    let labels = app.menu_labels(&shot.ui);
+    for want in ["New session...", "New session in\u{2026}"] {
+        assert!(labels.iter().any(|l| l == want), "{want:?} in {labels:?}");
+    }
+    shot.save(&mut app, "plus-menu");
+    let i = labels
+        .iter()
+        .position(|l| l == "New session in\u{2026}")
+        .expect("the submenu");
+    shot.hover(&mut app, item_id(MENU, i));
+    shot.save(&mut app, "plus-menu-projects");
+}
