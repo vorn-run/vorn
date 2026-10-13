@@ -8,6 +8,7 @@
 //! up to three bytes), then the screen checkpoint and the analyzer's state,
 //! each as a u32 length and its bytes. All integers little-endian.
 
+use vorn_analysis::rules::{Cursor, Rules, Screen};
 use vorn_analysis::Analyzer;
 use vorn_screen::{Checkpoint, Counters, Effect, Emulator, Theme, Uncut};
 
@@ -63,6 +64,12 @@ pub(crate) struct Term {
     pub(crate) fidelity: Fidelity,
     /// The theme colour queries are answered with, kept across a reset.
     colors: Option<Theme>,
+    /// The agent's screen rules, when its status comes from them rather than
+    /// from the analyzer's patterns. Not part of a checkpoint: the session
+    /// sets them.
+    pub(crate) rules: Option<&'static Rules>,
+    /// The rows the rules last read, kept for their allocations.
+    rows: Vec<String>,
 }
 
 impl Term {
@@ -74,6 +81,8 @@ impl Term {
             status: vorn_analysis::STATUS_NONE,
             fidelity: Fidelity::Exact,
             colors: None,
+            rules: None,
+            rows: Vec::new(),
         })
     }
 
@@ -97,12 +106,48 @@ impl Term {
     ) -> Option<u32> {
         self.em.feed(bytes, effects);
         let text = self.decode(bytes);
-        let status = self.analyzer.append_str(&text, analyze);
+        let status = match self.rules {
+            Some(rules) if analyze => {
+                self.analyzer.feed(&text);
+                self.screen_status(rules)
+            }
+            _ => self.analyzer.append_str(&text, analyze),
+        };
         if status == vorn_analysis::STATUS_NONE || status == self.status {
             return None;
         }
         self.status = status;
         Some(status)
+    }
+
+    /// The status the agent's screen rules read on the screen now, or
+    /// `STATUS_NONE` when none holds or a synchronized frame is half drawn.
+    fn screen_status(&mut self, rules: &Rules) -> u32 {
+        if self.em.render_hold().is_some() {
+            return vorn_analysis::STATUS_NONE;
+        }
+        let (row, col, visible) = self.em.cursor();
+        let height = self.em.rows();
+        let top = match rules.span(height, row) {
+            Some((from, to)) => {
+                self.em.rows_text(from, to, &mut self.rows);
+                from
+            }
+            None => {
+                self.rows.clear();
+                0
+            }
+        };
+        let screen = Screen {
+            rows: &self.rows,
+            top,
+            height,
+            cursor: Cursor { row, col, visible },
+            title: self.em.title(),
+        };
+        rules
+            .status(&screen)
+            .map_or(vorn_analysis::STATUS_NONE, |s| s.code())
     }
 
     /// The text the analyzer reads: `bytes` after whatever the last record
@@ -208,6 +253,8 @@ impl Term {
             status: parts.status,
             fidelity: parts.fidelity,
             colors: None,
+            rules: None,
+            rows: Vec::new(),
         };
         Ok((term, cp))
     }
@@ -314,6 +361,65 @@ mod tests {
             t.feed(c, true, &mut fx);
         }
         t
+    }
+
+    fn ruled() -> Term {
+        static RULES: std::sync::OnceLock<Rules> = std::sync::OnceLock::new();
+        let rules = RULES.get_or_init(|| {
+            Rules::parse(
+                r#"
+agent = "test"
+[[rule]]
+status = "waiting"
+any = ['Proceed\?']
+[[rule]]
+status = "working"
+rows = [-2, -1]
+any = ['esc to interrupt']
+[[rule]]
+status = "idle"
+rows = [-1, -1]
+any = ['^>']
+"#,
+            )
+            .unwrap()
+        });
+        let mut t = Term::fresh(30, 4, 0).unwrap();
+        t.rules = Some(rules);
+        t
+    }
+
+    #[test]
+    fn screen_rules_decide_the_status_from_what_is_shown() {
+        let mut t = ruled();
+        let mut fx = Vec::new();
+        let mut feed = |t: &mut Term, b: &[u8]| t.feed(b, true, &mut fx);
+        assert_eq!(feed(&mut t, b"\x1b[4;1H> "), Some(vorn_analysis::STATUS_IDLE));
+        assert_eq!(feed(&mut t, b"x"), None);
+        assert_eq!(
+            feed(&mut t, b"\x1b[3;1H* esc to interrupt\x1b[4;1H\x1b[2K"),
+            Some(vorn_analysis::STATUS_RUNNING)
+        );
+        // Text the analyzer's own patterns take for a prompt is not read.
+        assert_eq!(feed(&mut t, b"\x1b[1;1HContinue? (y/n)"), None);
+        assert_eq!(
+            feed(&mut t, b"\x1b[2;1HProceed?"),
+            Some(vorn_analysis::STATUS_WAITING)
+        );
+    }
+
+    #[test]
+    fn a_synchronized_frame_is_read_once_it_is_drawn() {
+        let mut t = ruled();
+        let mut fx = Vec::new();
+        assert_eq!(t.feed(b"\x1b[?2026h\x1b[4;1H> ", true, &mut fx), None);
+        assert_eq!(
+            t.feed(b"\x1b[?2026l", true, &mut fx),
+            Some(vorn_analysis::STATUS_IDLE)
+        );
+        // Without analysis, the rules are not read either.
+        let mut t = ruled();
+        assert_eq!(t.feed(b"\x1b[4;1H> ", false, &mut fx), None);
     }
 
     #[test]

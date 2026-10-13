@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "idle"
+screen = '''
+  fix the failing test in parser.rs
+
+  I'll run the tests first.
+
+  $ cargo test -p parser
+  test tokens::empty ... FAILED
+
+  The empty-input case returns an error where callers expect an empty list.
+
+
+
+
+
+
+
+
+
+
+
+  Fixed: empty input now returns an empty list; all 12 tests pass.
+
+┃ > add a test for unicode identifiers
+┃
+  enter send                                                   ctrl+x h help
+'''

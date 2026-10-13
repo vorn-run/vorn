@@ -1,0 +1,23 @@
+agent = "opencode"
+
+# A permission request over the prompt.
+[[rule]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  'Permission required',
+  'Allow (once|always)',
+  '\baccept always\b',
+]
+
+# A turn in progress: the footer offers to interrupt it.
+[[rule]]
+status = "working"
+rows = [-6, -1]
+any = ['(?i)\besc (to )?interrupt\b']
+
+# The prompt with its key hints, nothing running.
+[[rule]]
+status = "idle"
+rows = [-6, -1]
+any = ['\benter send\b', '\bctrl\+p commands\b', '\btab (switch )?agent\b']

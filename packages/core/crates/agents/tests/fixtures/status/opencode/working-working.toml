@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "working"
+screen = '''
+  fix the failing test in parser.rs
+
+  I'll run the tests first.
+
+  $ cargo test -p parser
+  test tokens::empty ... FAILED
+
+  The empty-input case returns an error where callers expect an empty list.
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  Build  model
+  ┃
+  ⬝⬝⬝■■■■  esc interrupt                                  tab switch agent
+'''

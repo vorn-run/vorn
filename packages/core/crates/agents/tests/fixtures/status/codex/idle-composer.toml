@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "idle"
+screen = '''
+› run the unit tests and fix what fails
+
+• Ran cargo test -p parser
+  └ running 12 tests
+    test tokens::empty ... FAILED
+
+• The empty-input case returns an error where the callers expect an empty list.
+
+
+
+
+
+
+
+
+
+
+
+• Fixed: empty input now yields an empty token list; all 12 tests pass.
+
+
+› Ask for follow-up changes
+
+  100% context left · ? for shortcuts
+'''

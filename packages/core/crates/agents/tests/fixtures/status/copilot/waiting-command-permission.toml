@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "waiting"
+screen = '''
+> fix the failing test in parser.rs
+
+● I'll run the tests first.
+
+● Run the parser tests
+  $ cargo test -p parser
+  └ 14 lines...
+
+● The empty-input case returns an error where callers expect an empty list.
+
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ Run command                                                              │
+│                                                                          │
+│ ╭──────────────────────────────────────────────────────────────────────╮ │
+│ │ rm -rf target/tmp                                                    │ │
+│ ╰──────────────────────────────────────────────────────────────────────╯ │
+│                                                                          │
+│ Do you want to run this command?                                         │
+│                                                                          │
+│ ❯ 1. Yes                                                                 │
+│   2. Yes, and approve rm for the rest of the running session             │
+│   3. No, and tell Copilot what to do differently (Esc)                   │
+╰──────────────────────────────────────────────────────────────────────────╯
+'''

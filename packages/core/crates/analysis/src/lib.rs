@@ -18,6 +18,7 @@
 //!   2000-character window: a line, or the part of one, further back than that
 //!   is not matched even when it is among the last five.
 
+pub mod rules;
 mod saved;
 pub mod utf16;
 
@@ -42,6 +43,8 @@ pub const STATUS_NONE: u32 = 0;
 pub const STATUS_RUNNING: u32 = 1;
 pub const STATUS_WAITING: u32 = 2;
 pub const STATUS_ERROR: u32 = 3;
+/// Only from an agent's screen rules ([`rules`]): the agent finished and waits for the next prompt.
+pub const STATUS_IDLE: u32 = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {

@@ -22,6 +22,7 @@ pub mod launch;
 pub mod models;
 pub mod paths;
 mod probe;
+pub mod status;
 
 pub use probe::{probe, Probe, ProbeContext, Step};
 

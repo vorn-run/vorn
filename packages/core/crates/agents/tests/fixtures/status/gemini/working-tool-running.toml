@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "working"
+screen = '''
+> fix the failing test in parser.rs
+
+✦ I will run the tests to see which one fails.
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ ✓  Shell cargo test -p parser                                            │
+│                                                                          │
+│    test tokens::empty ... FAILED                                         │
+╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ ⊷  Shell cargo test -p parser                                            │
+╰──────────────────────────────────────────────────────────────────────────╯
+
+⠼ Running the tests again (esc to cancel, 21s)
+
+╭──────────────────────────────────────────────────────────────────────────╮
+│ >   Type your message or @path/to/file                                   │
+╰──────────────────────────────────────────────────────────────────────────╯
+~/dev/parser (main*)        no sandbox (see /docs)        auto (98% context left)
+'''

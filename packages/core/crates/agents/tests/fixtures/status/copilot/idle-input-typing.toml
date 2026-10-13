@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "idle"
+screen = '''
+> fix the failing test in parser.rs
+
+● I'll run the tests first.
+
+● Run the parser tests
+  $ cargo test -p parser
+  └ 14 lines...
+
+● The empty-input case returns an error where callers expect an empty list.
+
+
+
+
+
+
+
+
+● Done.
+
+ ~/dev/parser [⎇ main*]                                                 model
+╭──────────────────────────────────────────────────────────────────────────╮
+│ > add a test for unicode identifiers                                     │
+╰──────────────────────────────────────────────────────────────────────────╯
+ Ctrl+c Exit · Ctrl+r Expand recent
+'''
