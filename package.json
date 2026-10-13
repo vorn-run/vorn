@@ -18,6 +18,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "bench": "node --import tsx bench/run.ts",
+    "bench:panes": "sh packages/core/scripts/many-pane-bench.sh",
     "lint": "eslint .",
     "lint:lockfile": "node scripts/check-lockfile.mjs",
     "format": "prettier --write .",

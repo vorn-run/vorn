@@ -47,6 +47,10 @@ write it down in the PR, and keep going.
    has the full checklist and the sandbox workarounds.
 5. **Never block Node's event loop.** Batch bytes per flush, not one call per
    chunk; anything heavier runs on a Rust thread as a napi async task.
+   **Hot paths scale with what is shown.** On per-byte, per-frame and per-pane
+   paths: no work in panes × bytes, nothing drawn for hidden or offscreen
+   panes, no allocation per byte or per cell per frame, redraws coalesced to
+   the frame clock (`rust-idioms`, Performance).
 6. **No panics across FFI.** Every napi export uses `#[napi(catch_unwind)]` or
    is `async` with the work in `spawn_blocking`; no `unwrap()` on input you do
    not control.

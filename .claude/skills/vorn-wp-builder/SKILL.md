@@ -99,6 +99,10 @@ yarn vitest run tests/<the files the spec names> tests/native-core*.test.ts
 # When the spec has a number.
 yarn bench
 yarn bench --baseline=bench/baselines/<platform>-<arch>.json
+
+# When the change touches a per-byte, per-frame or per-pane path (terminal
+# output, vorn-app's frame, anything run per pane): see rust-idioms.
+yarn bench:panes --panes 8,16
 ```
 
 The toolchain is pinned in `packages/core/rust-toolchain.toml`; a new stable

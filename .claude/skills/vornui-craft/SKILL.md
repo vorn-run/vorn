@@ -214,6 +214,37 @@ builds it from opaque steps, never blur:
   yet; adding one changes `shader.wgsl` and `cpu.rs` together (see the
   implementation notes in `references.md`).
 
+## Performance: per-byte, per-frame and per-pane paths
+
+A person runs 16 agents at once, each streaming. Code that runs per byte a
+terminal sends, per frame, or once per pane is a hot path; these rules bind
+there. The many-pane bench (`yarn bench:panes`, numbers in
+`docs/native-core/benchmarks.md`) measures them.
+
+- **No work that grows with panes × bytes.** A pane's bytes are folded into its
+  own screen once; nothing loops over every pane for each byte or chunk one
+  pane receives. Per frame, touch only the panes marked dirty
+  (`grid.take_dirty()`), never rescan or rebuild every pane.
+- **Hidden and offscreen panes cost nothing to draw.** A card not laid out
+  this frame (paged out of the grid, behind a focused card, in a collapsed
+  group) builds no view, shapes no glyph and pushes no quad. Its bytes still
+  reach its screen model, off the frame path; build its view when it shows.
+- **No allocation per byte, or per cell per frame.** Reuse buffers across
+  frames (`clear()`, not a new `Vec`); intern styles and glyphs; build a row's
+  runs without a `String` per cell. Allocating per row per changed frame is
+  the ceiling.
+- **Coalesce redraws to the frame clock.** Output marks a pane dirty and asks
+  for a frame; it never draws, lays out or wakes the window per chunk. However
+  many chunks arrive between two ticks, the next frame folds them all in once.
+  Animations report `next_wake()` rather than spinning.
+- **Measure before and after.** A change on these paths runs the bench at 8 and
+  16 panes and quotes frame p50/p99 and CPU per pane in the PR; a frame over
+  16.7 ms or CPU per pane that grows with N is a regression.
+
+Known gap: attached panes that are not drawn (behind a focused card, paged
+out) still have their views rebuilt in `App::pump` when dirty; the `hidden`
+case shows the cost. Fixing it is in scope for any change to `pump`.
+
 ## Review loop (every visual change)
 
 1. **Stills.** Render the touched surface before and after, in every state:
@@ -244,4 +275,7 @@ builds it from opaque steps, never blur:
 - [ ] Reduced motion leaves a crossfade or nothing, and still makes sense.
 - [ ] Copy passes the voice rules.
 - [ ] GPU and CPU renderers match (`vornui/tests/parity.rs` passes).
+- [ ] On a per-byte, per-frame or per-pane path: no work in panes × bytes,
+      nothing built for panes not drawn, no allocation per byte or cell,
+      redraws on the frame clock; `yarn bench:panes` before and after.
 - [ ] It looks calm. If something draws the eye without a reason, remove it.

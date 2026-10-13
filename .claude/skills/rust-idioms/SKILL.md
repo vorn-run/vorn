@@ -113,6 +113,24 @@ code and raise it in the PR.
   inputs; the terminal path is usually latency-bound, not throughput-bound.
 - No portable SIMD or nightly features; the toolchain is stable and pinned.
 
+### Per-byte, per-frame and per-pane paths
+
+Terminal output (per byte or chunk), the UI frame, and anything run once per
+pane are hot paths: 16 panes streaming at once is the normal case.
+
+- **No work that grows with panes × bytes.** A chunk for one pane touches that
+  pane only; per frame, visit the dirty panes, not all of them.
+- **Hidden or offscreen panes cost nothing to draw.** Keep feeding their screen
+  model; build no view, shape no text and emit no geometry until they show.
+- **No allocation per byte, or per cell per frame.** Reuse buffers
+  (`clear()` and refill), intern styles, borrow slices; a per-row allocation on
+  a changed frame is the ceiling.
+- **Coalesce redraws to the frame clock.** Output sets a dirty flag and requests
+  one frame; the frame folds in everything since the last. Never redraw or wake
+  per chunk.
+- Measure with the many-pane bench (`yarn bench:panes --panes 8,16`) before
+  and after, and quote frame p50/p99 and CPU per pane in the PR.
+
 ## Tooling and hygiene
 
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must be clean.
@@ -133,7 +151,8 @@ code and raise it in the PR.
 ## Before you push: re-read the diff
 
 1. Any `unwrap`, `expect`, `panic!`, indexing or `as` cast on outside input?
-2. Any allocation or clone per chunk that could be a reused buffer?
+2. Any allocation or clone per chunk that could be a reused buffer? Any work
+   per byte that loops over every pane, or per frame over panes not drawn?
 3. Any blocking call reachable from an async task or from Node's thread?
 4. Any `unsafe` without a `SAFETY` comment, or exposed without a safe wrapper?
 5. Do new public items have docs, and do error messages say what failed?

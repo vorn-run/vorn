@@ -10,8 +10,8 @@
 //!
 //! Each case starts its own vornd on a temporary HOME and data directory
 //! (never `~/.vorn`), opens N shells and runs a workload in each: this
-//! program again, as `feed`. Pane 0 is the probe, which echoes each key it
-//! reads; the rest stream:
+//! program again, as `feed`. One pane on screen is the probe, which echoes
+//! each key it reads; the rest stream:
 //!
 //! - `mixed`: an agent's TUI, a build log and a full-screen redraw at 60 Hz,
 //!   in turn.
@@ -19,6 +19,10 @@
 //!   renderer suite of `yarn bench` gives each terminal.
 //! - `hidden`: as `agent`, with the probe's card expanded, so the other
 //!   panes stream into cards that are not on screen.
+//!
+//! The grid shows at most 16 cards and pages past what fits the window; every
+//! pane is attached, as if the person had paged through them all, and the
+//! report's `Shown` counts those drawn.
 //!
 //! The app is driven offscreen (the GPU when there is one, else the CPU
 //! raster; `VORNUI_RENDERER` picks) on a 60 Hz clock, as a window paces its
