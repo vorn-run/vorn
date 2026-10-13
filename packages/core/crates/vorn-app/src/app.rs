@@ -141,17 +141,9 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
 }
 
 /// Keys a terminal holding the keyboard takes before the app's shortcuts
-/// and focus traversal, as xterm.js does: Tab and Shift+Tab with Ctrl or
-/// Alt or neither, and off macOS the Ctrl letters a shell uses (XOFF,
-/// transpose, newline) and Alt+digits (Meta), which are shortcuts there.
+/// and focus traversal: Tab and Shift+Tab with Ctrl or Alt or neither.
 pub fn terminal_key(code: &str, m: u16) -> bool {
-    let held = m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
-    let off_mac = !cfg!(target_os = "macos");
-    match code {
-        "Tab" => held & mods::SUPER == 0,
-        "KeyS" | "KeyT" | "KeyJ" => off_mac && held == mods::CTRL,
-        _ => off_mac && held == mods::ALT && code.starts_with("Digit"),
-    }
+    code == "Tab" && m & mods::SUPER == 0
 }
 
 /// The card after or before `current` among `n`, wrapping; with none
@@ -2702,7 +2694,7 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_takes_tab_and_the_keys_xterm_would() {
+    fn a_terminal_takes_tab_before_focus_and_shortcuts() {
         for m in [
             0,
             mods::SHIFT,
@@ -2721,11 +2713,7 @@ mod tests {
         }
         assert!(!terminal_key("KeyW", MOD | mods::SHIFT));
         assert!(!terminal_key("Backquote", mods::CTRL));
-        let off_mac = !cfg!(target_os = "macos");
-        assert_eq!(terminal_key("KeyJ", mods::CTRL), off_mac);
-        assert_eq!(terminal_key("KeyS", mods::CTRL), off_mac);
-        assert_eq!(terminal_key("Digit1", mods::ALT), off_mac);
-        assert!(!terminal_key("KeyJ", mods::CTRL | mods::SHIFT));
+        assert!(!terminal_key("KeyJ", MOD));
     }
 
     #[test]
