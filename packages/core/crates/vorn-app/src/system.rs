@@ -101,9 +101,10 @@ fn shim_name() -> &'static str {
 
 /// The `vorn` command beside this app, which the shim runs.
 fn cli_beside(exe: &Path) -> Option<PathBuf> {
-    let cli = exe
-        .parent()?
-        .join(format!("vorn{}", std::env::consts::EXE_SUFFIX));
+    let name = format!("vorn{}", std::env::consts::EXE_SUFFIX);
+    let dir = exe.parent()?;
+    let cli = crate::launch::resources(dir)
+        .map_or_else(|| dir.join(&name), |r| r.join("vornd").join(&name));
     cli.is_file().then_some(cli)
 }
 

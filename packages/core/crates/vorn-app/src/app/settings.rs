@@ -395,7 +395,8 @@ impl App {
                 self.st.settings.cli = Some(crate::system::cli_status());
                 self.st.settings.cli_busy = false;
             }
-            SetAct::CheckUpdates => {}
+            SetAct::CheckUpdates => self.check_updates(),
+            SetAct::UpdateNow => self.update_action(),
             SetAct::DismissUpdate => self.st.settings.update_dismissed = true,
             SetAct::Rescan => self.rescan(),
             SetAct::ToggleWorktree(p) => {

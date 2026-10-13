@@ -28,6 +28,7 @@ use vorn_app::ui::{
     div, mods, run_with, text, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui,
     Waker, WindowApp, WindowOptions,
 };
+use vorn_app::update::Updater;
 use vorn_app::{look, ui_config, App};
 
 struct Args {
@@ -250,6 +251,7 @@ struct Win {
     error: Option<String>,
     reconnect: Box<dyn Fn() -> Result<App, String>>,
     window: Option<Arc<NativeWindow>>,
+    updater: Arc<Updater>,
 }
 
 impl Win {
@@ -290,6 +292,7 @@ impl WindowApp for Win {
             if crash::event(ui, &event, error) == Some(CrashAct::Reload) {
                 match (self.reconnect)() {
                     Ok(mut app) => {
+                        app.set_updater(Arc::clone(&self.updater));
                         if let Some(window) = &self.window {
                             app.opened(window);
                         }
@@ -344,6 +347,7 @@ impl WindowApp for Win {
             return Some(w.next);
         };
         self.waiting = None;
+        app.set_updater(Arc::clone(&self.updater));
         if let Some(window) = &self.window {
             app.opened(window);
             // The app draws its own frame outside macOS.
@@ -368,10 +372,19 @@ fn window(args: &Args) -> Result<(), String> {
         }
     });
     let dir = args.data_dir()?;
+    // After an update the running vornd is the last build's: this build's
+    // takes over, and the session holder keeps the terminals.
+    if let Some(server) = Server::locate() {
+        launch::retire_older(&dir, &server);
+    }
+    let updater = Updater::start(Arc::clone(&wake));
     let mut waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
     // Connected before the window opens when vornd runs, so it never shows
     // the waiting screen; otherwise this starts the bundled one.
-    let app = waiting.poll();
+    let mut app = waiting.poll();
+    if let Some(app) = &mut app {
+        app.set_updater(Arc::clone(&updater));
+    }
     let ready = app.is_some();
     let reconnect = Box::new(move || {
         let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
@@ -399,6 +412,7 @@ fn window(args: &Args) -> Result<(), String> {
             error: None,
             reconnect,
             window: None,
+            updater,
         }
     })
 }

@@ -32,6 +32,10 @@ serde_json = "1"
 url = "2"
 # The browser pane: the OS web view (WKWebView, WebView2, WebKitGTK).
 wry = "0.57"
+# The updater: the release feed, the download and its checksum.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+sha2 = "0.10"
+semver = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

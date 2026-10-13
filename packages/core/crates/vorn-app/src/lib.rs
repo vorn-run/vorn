@@ -52,6 +52,7 @@ pub mod system;
 pub mod tasks;
 pub mod templates;
 pub mod ui;
+pub mod update;
 pub mod vars;
 pub mod view;
 pub mod web;

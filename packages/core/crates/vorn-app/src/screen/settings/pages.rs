@@ -802,7 +802,7 @@ pub(super) fn updates(s: &Screen<'_>) -> El {
             settings::update_cost(
                 live.len(),
                 live.iter().any(|x| x.status() == "running"),
-                true,
+                !crate::update::ENDS_SESSIONS,
             )
         })
         .flatten();
@@ -862,7 +862,7 @@ pub(super) fn updates(s: &Screen<'_>) -> El {
             UpdateAction::Download => ("Download", false),
             UpdateAction::Retry => ("Retry", false),
         };
-        let id = s.acts.on("update-action", set(SetAct::CheckUpdates));
+        let id = s.acts.on("update-action", set(SetAct::UpdateNow));
         let hot = s.ui.hover(id);
         card = card.child(
             div()

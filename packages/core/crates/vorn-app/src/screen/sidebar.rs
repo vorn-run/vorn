@@ -1588,10 +1588,10 @@ fn footer(s: &Screen<'_>) -> El {
     let cost = update_cost(
         live.len(),
         live.iter().any(|x| x.status() == "running"),
-        true,
+        !crate::update::ENDS_SESSIONS,
     );
     let close = s.acts.on("update-notice", Act::Set(SetAct::DismissUpdate));
-    let go = s.acts.on("update-notice", Act::Set(SetAct::CheckUpdates));
+    let go = s.acts.on("update-notice", Act::Set(SetAct::UpdateNow));
     let mut notice = div()
         .col()
         .mx(8.0)
