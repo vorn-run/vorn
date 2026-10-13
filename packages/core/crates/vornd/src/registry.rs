@@ -195,6 +195,7 @@ impl AgentStatus {
             1 => Some(AgentStatus::Running),
             2 => Some(AgentStatus::Waiting),
             3 => Some(AgentStatus::Error),
+            4 => Some(AgentStatus::Idle),
             _ => None,
         }
     }
@@ -2215,6 +2216,16 @@ impl SessionRegistry {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// What session `id` runs (`agentType`), once the registry holds it as a
+    /// terminal or a headless agent.
+    pub fn agent_type(&self, id: &str) -> Option<String> {
+        let fed = self.lock();
+        let r = &fed.registry;
+        r.terminal(id)
+            .map(|(t, _)| t.agent_type.clone())
+            .or_else(|| r.headless_record(id).map(|h| h.agent_type.clone()))
+    }
+
     /// Marks the registry as in use, which the health check then reports on.
     pub fn want(&self) {
         self.wanted.store(true, Ordering::Release);
@@ -2853,6 +2864,22 @@ mod tests {
     }
 
     #[test]
+    fn names_the_agent_a_session_runs_once_it_holds_the_session() {
+        let shared = SessionRegistry::with_gen(Gen(1));
+        assert_eq!(shared.agent_type("a"), None);
+        let snapshot = json!({
+            "op": "snapshot", "terminals": [agent("a"), terminal("sh")], "headless": [],
+        });
+        shared.feed(1, &snapshot).unwrap();
+        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+        assert_eq!(shared.agent_type("sh").as_deref(), Some("shell"));
+        assert_eq!(shared.agent_type("gone"), None);
+        // The server leaving does not forget what each session runs.
+        shared.left(1);
+        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+    }
+
+    #[test]
     fn answers_nothing_until_the_server_has_sent_its_records_or_once_it_left() {
         let shared = SessionRegistry::with_gen(Gen(1));
         let mut notes = shared.subscribe();
@@ -2913,6 +2940,7 @@ mod tests {
     const RUNNING: u32 = 1;
     const WAITING: u32 = 2;
     const ERROR: u32 = 3;
+    const IDLE: u32 = 4;
 
     #[test]
     fn a_head_stamp_comes_after_every_effect_of_the_last_record_and_before_the_next() {
@@ -2952,6 +2980,19 @@ mod tests {
         let mut plain = Registry::new(Gen(1));
         plain.apply(upsert(agent("a"))).unwrap();
         assert!(plain.screen_status("a", WAITING, at(1, 1, 0)).is_none());
+    }
+
+    #[test]
+    fn the_screen_rules_idle_sets_idle_unless_hooks_report_the_status() {
+        let mut r = deciding();
+        r.screen_status("a", RUNNING, at(1, 1, 0));
+        let note = r.screen_status("a", IDLE, at(1, 2, 0)).unwrap();
+        assert_eq!(note["record"]["status"], "idle");
+        r.hook_status(&hook("a", Some("running"), true), Some(at(1, 3, 0)), Instant::now())
+            .unwrap();
+        assert!(r.screen_status("a", IDLE, at(1, 4, 0)).is_none());
+        assert!(r.screen_status("a", WAITING, at(1, 5, 0)).is_none());
+        assert_eq!(status(&r, "a"), AgentStatus::Running);
     }
 
     #[test]

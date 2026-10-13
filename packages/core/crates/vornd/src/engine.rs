@@ -45,7 +45,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{
-    Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool,
+    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool,
     Summary, Viewed,
 };
 use vorn_sessiond_wire::{
@@ -249,16 +249,26 @@ impl Engine {
         // Bytes clients hold a session awake as grid clients do.
         let watching = Arc::clone(&streams);
         let viewed = Viewed(Arc::new(move |id: &str| watching.viewed(id)));
+        let registry = SessionRegistry::new();
+        // An agent's status is read with its screen rules once the registry
+        // says which agent a session runs.
+        let known = Arc::clone(&registry);
+        let agents = Agents(Arc::new(move |id: &str| {
+            known
+                .agent_type(id)
+                .map(|t| vorn_agents::status::rules(&t))
+        }));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
-            registry: SessionRegistry::new(),
+            registry,
             // Every session's records go on to bytes clients.
             cfg: Config {
                 stream: true,
                 colors: cfg.colors.or(Some(DEFAULT_COLORS)),
                 idle: cfg.idle.or(Some(IDLE)),
                 viewed: Some(viewed),
+                agents: cfg.agents.or(Some(agents)),
                 ..cfg
             },
             write_timeout,
