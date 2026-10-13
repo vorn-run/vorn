@@ -10,6 +10,7 @@ public final class FeatureStores {
     public let tasks: TasksStore
     public let workflows: WorkflowsStore
     public let settings: SettingsModel
+    let notifier = AppNotifier()
 
     public init(client: VornClient) {
         tasks = TasksStore(service: client)
@@ -32,6 +33,7 @@ public final class FeatureStores {
                 model.lastError = "This task's session has ended"
             }
         }
+        notifier.bind(store: store, model: model, workflows: workflows)
         tasks.onToast = { [weak model] message, _ in model?.lastError = message }
         settings.toasts = model.toasts
         settings.onToast = { [weak model] message, kind in
@@ -60,6 +62,12 @@ public final class FeatureStores {
             tasks?.selectedTaskId = id
             workflows?.showAllRuns()
         }
+    }
+
+    /// Opens a run from anywhere in the app (showRun).
+    func showRun(_ runId: String, model: AppModel) {
+        model.mainViewMode = .workflows
+        workflows.showRun(runId)
     }
 
     /// The board follows the sidebar: the active project, else the workspace's projects.

@@ -66,6 +66,8 @@ public enum LayoutMode: String, Sendable {
 /// A floating panel the window shows over everything else.
 public enum Overlay: Equatable, Sendable {
     case viewOptions, recent, shortcuts, headless, newMenu, sidebarOptions
+    /// The session dock's popover: everything when collapsed, else what did not fit.
+    case dock
     /// The project's "More" menu.
     case projectMenu(String)
     /// AddProjectDialog.tsx; editing the named project when set.
@@ -139,6 +141,8 @@ public final class AppModel {
     public var selectedSessionID: String?
     public var expandedSessionID: String?
     public var minimizedIDs: Set<String> = []
+    /// The session dock folded into one count button (sessionDockCollapsed).
+    public var sessionDockCollapsed = false
     public var projectsOpen = true
     /// Per-project override of the sidebar's default expansion.
     public var expandedProjects: [String: Bool] = [:]

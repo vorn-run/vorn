@@ -20,7 +20,7 @@ struct TabsView<Empty: View>: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if !model.sidebarOpen {
-                    AppNavCluster(model: model).padding(.leading, 8)
+                    AppNavCluster(model: model, workflows: features.workflows).padding(.leading, 8)
                 }
                 HStack(alignment: .bottom, spacing: 4) {
                     ForEach(tabs) { s in
@@ -37,6 +37,7 @@ struct TabsView<Empty: View>: View {
                 .padding(.horizontal, 4)
                 .frame(minHeight: 40, alignment: .bottom)
                 HStack(spacing: 4) {
+                    SessionDock(model: model, store: store, features: features, includeMinimized: false)
                     HeadlessBadge(model: model, store: store)
                     ViewOptionsButton(model: model, store: store)
                     VDivider().padding(.horizontal, 2)

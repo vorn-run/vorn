@@ -25,7 +25,7 @@ ICONS = {
     "monitor": "monitor",
     "triangleAlert": "triangle-alert",
     "workflow": "workflow",
-    "chevronsRight": "chevrons-right",
+    "chevronsRight": "chevrons-right", "chevronsLeft": "chevrons-left",
     "layers": "layers",
     "folderPlus": "folder-plus",
     "listFilter": "list-filter",

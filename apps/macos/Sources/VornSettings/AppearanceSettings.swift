@@ -116,7 +116,7 @@ struct NotificationSettings: View {
                             Text("\(Int((volume * 100).rounded()))%").font(.ui(12)).foregroundStyle(Theme.gray500).frame(width: 32, alignment: .trailing)
                             QuietButton(label: "Test", bordered: false, fontSize: 11, radius: Theme.radius, fill: Theme.white(0.06),
                                         hoverFill: Theme.white(0.1), color: Theme.gray400, hoverColor: .white, padding: (8, 4)) {
-                                NotificationPermission.bell(volume: volume)
+                                NotificationTone.play(.bell, volume: volume)
                             }
                         }
                         .padding(.horizontal, 16)

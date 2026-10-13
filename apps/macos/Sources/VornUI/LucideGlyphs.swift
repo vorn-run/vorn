@@ -22,6 +22,7 @@ public extension LucideGlyph {
     static let chevronDown = LucideGlyph([.path("m6 9 6 6 6-6")])
     static let chevronLeft = LucideGlyph([.path("m15 18-6-6 6-6")])
     static let chevronRight = LucideGlyph([.path("m9 18 6-6-6-6")])
+    static let chevronsLeft = LucideGlyph([.path("m11 17-5-5 5-5"), .path("m18 17-5-5 5-5")])
     static let chevronsRight = LucideGlyph([.path("m6 17 5-5-5-5"), .path("m13 17 5-5-5-5")])
     static let circle = LucideGlyph([.circle(cx: 12, cy: 12, r: 10)])
     static let circleCheck = LucideGlyph([.circle(cx: 12, cy: 12, r: 10), .path("m9 12 2 2 4-4")])

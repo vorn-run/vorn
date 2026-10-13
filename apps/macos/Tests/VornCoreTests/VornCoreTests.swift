@@ -81,3 +81,58 @@ struct VornEndpointTests {
         #expect(dir.path == "/tmp/vorn-x")
     }
 }
+
+struct NotificationTests {
+    let session = TerminalSession(id: "s1", agentType: .claude, projectName: "api", projectPath: "/p", status: .idle,
+                                  createdAt: 0, pid: 1, displayName: " fix login ")
+
+    @Test func agentNoticesUseTodaysWords() {
+        let bell = AppNotice.agent(session, .bell)
+        #expect(bell.title == "Claude Code notification")
+        #expect(bell.body == "fix login is requesting your attention")
+        #expect(bell.key == "s1")
+        #expect(bell.target == .session("s1"))
+        #expect(AppNotice.agent(session, .waiting).title == "Claude Code needs input")
+        #expect(AppNotice.agent(session, .error).body == "fix login encountered an error")
+        var shell = session
+        shell.agentType = .shell
+        shell.displayName = nil
+        #expect(AppNotice.agent(shell, .bell).title == "Shell notification")
+        #expect(AppNotice.agent(shell, .bell).body == "api is requesting your attention")
+    }
+
+    @Test func aProgramNoticeKeepsItsOwnWords() {
+        let n = AppNotice.program(session, title: "", body: "Done")
+        #expect(n.title == "fix login")
+        #expect(n.body == "Done")
+        #expect(n.key == "notify:s1")
+        #expect(AppNotice.program(session, title: "Build", body: "").title == "Build")
+    }
+
+    @Test func prefsGateBellAndWorkflowWaits() throws {
+        #expect(!NotificationPrefs().wantsBell)
+        #expect(NotificationPrefs(enabled: true).wantsBell)
+        #expect(!NotificationPrefs(enabled: true, onBell: false).wantsBell)
+        #expect(!NotificationPrefs(enabled: true, onWaiting: false).wantsWorkflowWait)
+        let lenient = try JSONDecoder().decode(
+            AppConfigSummary.self, from: Data(#"{"defaults":{"notifications":{"enabled":true,"soundVolume":"loud"}}}"#.utf8))
+        #expect(lenient.defaults?.notifications?.enabled == true)
+        #expect(lenient.defaults?.notifications?.volume == 0.5)
+    }
+
+    @Test func aRepeatWithinTenSecondsIsHeldBack() {
+        var c = NoticeCooldown()
+        let t = Date(timeIntervalSince1970: 1000)
+        let answers = [
+            c.admit("a", at: t), c.admit("a", at: t.addingTimeInterval(9)),
+            c.admit("b", at: t.addingTimeInterval(9)), c.admit("a", at: t.addingTimeInterval(10)),
+        ]
+        #expect(answers == [true, false, true, true])
+    }
+
+    @Test func tonesMatchTheirProfiles() {
+        #expect(NotificationReason.waiting.tone == (880, 0.15))
+        #expect(NotificationReason.error.tone == (330, 0.3))
+        #expect(NotificationReason.bell.tone == (660, 0.2))
+    }
+}

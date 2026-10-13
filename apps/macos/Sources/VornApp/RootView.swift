@@ -74,6 +74,11 @@ public struct RootView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) { ToastStack(center: model.toasts) }
+        .overlay {
+            if let error = store.loadError {
+                ErrorScreen(error: error) { Task { await store.retryLoad() } }
+            }
+        }
         .workflowsMenuHost(features.workflows)
         .runSurfacesHost(features.workflows)
         .environment(\.colorScheme, .dark)
@@ -101,6 +106,9 @@ public struct RootView: View {
             model.panes.onSurfaceCard = { id in model.minimizedIDs.remove(id) }
             actions.bindBrowser()
         }
+        // Waiting gates show in the dock and notify from every view, so runs are followed app-wide.
+        .task { await features.workflows.start() }
+        .onChange(of: store.defaults?.notifications?.enabled, initial: true) { _, _ in features.notifier.requestIfEnabled() }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.
             while !Task.isCancelled {
@@ -166,9 +174,8 @@ public struct RootView: View {
                 .onDisappear { features.tasks.stop() }
         case .workflows:
             WorkflowsView(store: features.workflows) {
-                if !model.sidebarOpen { AppNavCluster(model: model) }
+                if !model.sidebarOpen { AppNavCluster(model: model, workflows: features.workflows) }
             }
-            .onDisappear { features.workflows.stop() }
         }
     }
 
@@ -220,7 +227,7 @@ public struct RootView: View {
         if context.paneColumn != nil { context.fixedColumnWidth = 420 }
         if !model.sidebarOpen {
             context.leadingInset = Theme.trafficLightPad
-            context.headerLeading = AnyView(AppNavCluster(model: model))
+            context.headerLeading = AnyView(AppNavCluster(model: model, workflows: features.workflows))
         }
         let visible = model.visibleSessions(store)
         return AgentCardView(session: s, index: visible.firstIndex(of: s) ?? 0, engine: engines.engine,

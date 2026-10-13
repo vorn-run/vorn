@@ -215,6 +215,7 @@ public struct AppConfigSummary: Decodable, Sendable, Equatable {
         public var layoutMode: String?
         public var reopenSessions: Bool?
         public var showHeadlessAgents: Bool?
+        public var notifications: NotificationPrefs?
 
         public init(defaultAgent: AgentType? = nil, layoutMode: String? = nil, reopenSessions: Bool? = nil,
                     showHeadlessAgents: Bool? = nil) {

@@ -79,6 +79,16 @@ struct OverlayHost: View {
                     .fixedSize()
                     .offset(x: model.layoutMode(store) == .tabs ? r.maxX - 280 : r.minX, y: r.maxY + 6)
             }
+        case .dock:
+            if let r = rect("dock", geo) {
+                let panel = DockPanel(model: model, store: store, features: features,
+                                      includeMinimized: model.layoutMode(store) == .grid)
+                if model.sessionDockCollapsed {
+                    panel.offset(x: r.minX, y: r.maxY + 6)
+                } else {
+                    panel.frame(width: r.maxX, alignment: .trailing).offset(y: r.maxY + 6)
+                }
+            }
         case .shortcuts:
             ShortcutsPanel(model: model)
                 .frame(width: 520)
