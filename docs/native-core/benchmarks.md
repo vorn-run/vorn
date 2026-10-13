@@ -69,10 +69,10 @@ an agent TUI at 32 KB/s (the `spinner` transcript, byte for byte the one the
 renderer suite above feeds each terminal), a build log at 256 KB/s (`bulk`), and
 a full-screen redraw at 60 Hz. One pane on screen echoes keys, for latency.
 
-| Case     | Panes stream                                                        |
-| -------- | ------------------------------------------------------------------- |
-| `mixed`  | agent TUI, build log and full-screen redraw, in turn                |
-| `agent`  | every pane the agent TUI                                            |
+| Case     | Panes stream                                                          |
+| -------- | --------------------------------------------------------------------- |
+| `mixed`  | agent TUI, build log and full-screen redraw, in turn                  |
+| `agent`  | every pane the agent TUI                                              |
 | `hidden` | as `agent`, with the probe's card expanded, so the rest are not drawn |
 
 - **Frame**: one frame's build, layout, paint and GPU submit, including folding in
@@ -96,7 +96,7 @@ Results: `packages/core/bench/many-panes/darwin-arm64*.json`.
 
 1600x1000 (the renderer suite's viewport; 12 of 16 cards fit):
 
-| Case   | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99      | CPU app | CPU vornd | CPU per pane |
+| Case   | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 |      p99 | CPU app | CPU vornd | CPU per pane |
 | ------ | ----: | ----: | --------: | --------: | -----------: | -----------------: | -------: | ------: | --------: | -----------: |
 | mixed  |     8 |     8 |   2.78 ms |   3.13 ms |           0% |           13.48 ms | 23.09 ms |   22.6% |     26.6% |         6.2% |
 | agent  |     8 |     8 |   2.83 ms |   5.24 ms |           0% |           11.42 ms | 22.97 ms |   23.8% |     23.2% |         5.9% |
@@ -107,7 +107,7 @@ Results: `packages/core/bench/many-panes/darwin-arm64*.json`.
 
 2560x1440 (all 16 cards on screen):
 
-| Case   | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99      | CPU app | CPU vornd | CPU per pane |
+| Case   | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 |      p99 | CPU app | CPU vornd | CPU per pane |
 | ------ | ----: | ----: | --------: | --------: | -----------: | -----------------: | -------: | ------: | --------: | -----------: |
 | mixed  |    16 |    16 |   4.82 ms |   8.30 ms |           0% |           13.41 ms | 22.37 ms |   38.2% |     52.7% |         5.7% |
 | agent  |    16 |    16 |   4.53 ms |   6.00 ms |           0% |           13.94 ms | 23.33 ms |   33.6% |     40.3% |         4.6% |
