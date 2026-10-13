@@ -2608,7 +2608,12 @@ impl App {
             let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
             let pre = if focused { self.preedit.as_str() } else { "" };
             ui.scene.push_clip(r);
-            paint::pane(ui, v, r, focused, pre);
+            let caret = if focused {
+                paint::Caret::Live
+            } else {
+                paint::Caret::Hollow
+            };
+            paint::pane(ui, v, r, caret, pre);
             ui.scene.pop_clip();
         }
     }
