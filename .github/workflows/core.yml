@@ -11,14 +11,9 @@ on:
     branches: [main]
     paths: &paths
       - 'packages/core/**'
-      - 'tests/js-reference.test.ts'
       - 'tests/fixtures/js-reference/**'
       - 'tests/fixtures/launch-lines.json'
-      - 'tests/helpers/screen-view.ts'
-      - 'tests/helpers/screen-parity.ts'
       - 'tests/native-server-workflows.test.ts'
-      - 'tests/vornd-app-platforms.test.ts'
-      - 'tests/helpers/vornd-sessions.ts'
       - 'tests/helpers/served.ts'
       - 'packages/shared/src/types.ts'
       - 'packages/shared/src/store-types.ts'
@@ -31,7 +26,6 @@ on:
       - 'tests/native-cli.test.ts'
       - 'tests/helpers/cli-reference.ts'
       - 'tests/fixtures/cli-reference.json'
-      - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
       - 'package.json'
       - 'yarn.lock'

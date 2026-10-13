@@ -3,8 +3,7 @@
 //! Every client draws the session's whole grid, whatever size it is. One
 //! whose box is smaller scales its font down, to a floor, and pans what
 //! still does not fit; one whose box is larger draws at its own font with
-//! room to spare. The renderer and the web client follow the same arithmetic
-//! (`packages/web/src/renderer/lib/grid-fit.ts`).
+//! room to spare.
 
 use crate::Size;
 

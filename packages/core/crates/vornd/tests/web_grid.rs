@@ -3,9 +3,6 @@
 //! own. The socket authenticates as `/ws` does, then carries the grid
 //! protocol: a snapshot and deltas a headless mirror follows, input, and a
 //! resize. A revoked token closes it.
-//!
-//! `VORN_RECORD_GRID_FRAMES=<file>` writes what the browser sent and was
-//! sent, as hex, for the web client's decoder test.
 
 #![cfg(all(feature = "engine", unix))]
 
@@ -88,13 +85,11 @@ impl Desktop {
     }
 }
 
-/// A browser's grid connection: a headless mirror, and what went each way.
+/// A browser's grid connection: a headless mirror.
 struct Browser {
     ws: Socket,
     client: Client,
     got: Vec<Got>,
-    sent: Vec<Vec<u8>>,
-    received: Vec<Vec<u8>>,
 }
 
 impl Browser {
@@ -111,15 +106,12 @@ impl Browser {
             ws,
             client,
             got: Vec::new(),
-            sent: Vec::new(),
-            received: Vec::new(),
         }
     }
 
     async fn flush(&mut self) {
         let out = self.client.take_out();
         if !out.is_empty() {
-            self.sent.push(out.clone());
             self.ws.send(Message::binary(out)).await.unwrap();
         }
     }
@@ -141,7 +133,6 @@ impl Browser {
             let Message::Binary(bytes) = m else {
                 continue;
             };
-            self.received.push(bytes.to_vec());
             for g in self.client.receive(&bytes).unwrap() {
                 if let Got::Frame { sid, rev, .. } = g {
                     self.client.ack(sid, rev);
@@ -167,20 +158,6 @@ impl Browser {
             .and_then(|p| p.mirror())
             .map(|m| m.text().join("\n"))
             .unwrap_or_default()
-    }
-
-    fn record(&self) {
-        let Some(path) = std::env::var_os("VORN_RECORD_GRID_FRAMES") else {
-            return;
-        };
-        let hex = |frames: &[Vec<u8>]| -> Vec<String> {
-            frames
-                .iter()
-                .map(|f| f.iter().map(|b| format!("{b:02x}")).collect())
-                .collect()
-        };
-        let file = json!({ "sent": hex(&self.sent), "received": hex(&self.received) });
-        std::fs::write(path, serde_json::to_string_pretty(&file).unwrap()).unwrap();
     }
 }
 
@@ -297,7 +274,6 @@ async fn a_browser_follows_types_into_and_resizes_a_session_over_grid() {
             .is_some_and(|m| (m.term().cols, m.term().rows) == (100, 30))
     })
     .await;
-    b.record();
 
     // Revoking the token ends the socket.
     let revoked = d.call("token:revoke", json!(token_id)).await;

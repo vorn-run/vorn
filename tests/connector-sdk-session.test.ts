@@ -1,17 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createSessionFetch,
-  ORIGIN_PATTERN,
   SessionRefusedError,
   SessionUnavailableError,
   withinOrigins
 } from '../packages/connector-sdk/src/index'
 import { allowedSessionHeader } from '../packages/connector-sdk/src/origins'
-import {
-  allowedSessionHeader as sharedAllowedSessionHeader,
-  ORIGIN_PATTERN as SHARED_ORIGIN_PATTERN,
-  withinOrigins as sharedWithinOrigins
-} from '../packages/shared/src/connector-origins'
 
 const env = {
   VORN_BROWSER_HOST: 'http://127.0.0.1:4100/connections/c1/session',
@@ -150,13 +144,7 @@ describe('which pages a browser connector may reach', () => {
     expect(withinOrigins(['https://*.substack.com'], 'https://substack.com/')).toBe(false)
   })
 
-  it('draws the same line in the app as in the SDK', () => {
-    expect(SHARED_ORIGIN_PATTERN.source).toBe(ORIGIN_PATTERN.source)
-    expect(sharedWithinOrigins.toString()).toBe(withinOrigins.toString())
-    for (const [url] of cases) {
-      expect([url, sharedWithinOrigins(origins, url)]).toEqual([url, withinOrigins(origins, url)])
-    }
-    expect(sharedAllowedSessionHeader.toString()).toBe(allowedSessionHeader.toString())
+  it('lets only headers that cannot carry credentials through', () => {
     const headers: Array<[string, boolean]> = [
       ['x-csrf-protection', true],
       ['accept', true],
@@ -177,7 +165,6 @@ describe('which pages a browser connector may reach', () => {
     ]
     for (const [name, allowed] of headers) {
       expect([name, allowedSessionHeader(name)]).toEqual([name, allowed])
-      expect([name, sharedAllowedSessionHeader(name)]).toEqual([name, allowed])
     }
   })
 })

@@ -1,5 +1,4 @@
-//! Today's look as values: colours from `packages/web/src/renderer/theme.css` and
-//! Tailwind's grays (both from vornui's tokens), sizes from the components'
+//! Today's look as values: colours and grays from vornui's tokens, sizes from the components'
 //! classes and the logo. Screens read these; nothing
 //! here is redesigned.
 

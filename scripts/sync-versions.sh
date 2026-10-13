@@ -6,7 +6,6 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 ROOT_VERSION=$(node -p "require('$ROOT_DIR/package.json').version")
 
 PACKAGES=(
-  "packages/web"
   "packages/shared"
   "packages/mcp"
   "packages/connector-sdk"
