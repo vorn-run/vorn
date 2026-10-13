@@ -216,7 +216,12 @@ describe('CBOR', () => {
   })
 
   it('writes minimal heads', () => {
-    const w = new CborWriter().uint(23).uint(24).uint(256).uint(65536).uint(2n ** 32n)
+    const w = new CborWriter()
+      .uint(23)
+      .uint(24)
+      .uint(256)
+      .uint(65536)
+      .uint(2n ** 32n)
     expect(Buffer.from(w.finish()).toString('hex')).toBe(
       '17' + '1818' + '190100' + '1a00010000' + '1b0000000100000000'
     )

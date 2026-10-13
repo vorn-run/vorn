@@ -31,3 +31,6 @@ spikes/vornui/results/
 # The Mac app's highlighter bundle and its entry, written by apps/macos/scripts/gen-shiki.sh.
 apps/macos/Sources/VornUI/Resources/shiki.js
 apps/macos/scripts/shiki/
+
+# Grid frames recorded by packages/core/crates/vornd/tests/web_grid.rs.
+tests/fixtures/grid-frames.json
