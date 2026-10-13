@@ -80,6 +80,7 @@ export function feeds({ version, tag, repo: slug, releaseDate, files }) {
     'latest.yml': [a['win-x64']],
     'latest-linux.yml': [a['linux-x64'], a['linux-x64-deb']]
   }
+  /** @type {Record<string, string>} */
   const out = {
     'vorn-update.json':
       JSON.stringify(nativeFeed({ version, tag, repo: slug, releaseDate, files }), null, 2) + '\n'

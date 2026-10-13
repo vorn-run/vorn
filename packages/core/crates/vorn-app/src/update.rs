@@ -681,17 +681,15 @@ impl Updater {
         if inner.prefs.as_ref() == Some(&prefs) {
             return;
         }
-        let first = inner.prefs.is_none();
+        // The first check waits for FIRST_CHECK; a new channel checks now.
         let channel_changed = inner
             .prefs
             .as_ref()
             .is_some_and(|p| p.channel != prefs.channel);
         inner.prefs = Some(prefs);
-        if first || channel_changed {
+        if channel_changed {
             inner.job.get_or_insert(Job::Check);
-            if channel_changed {
-                inner.offered = None;
-            }
+            inner.offered = None;
         }
         self.signal.notify_all();
     }
