@@ -312,6 +312,8 @@ impl Host {
                 popup(url);
                 NewWindowResponse::Deny
             });
+        // An extension's page reaches nothing of the app's, as its sandboxed frame did.
+        let foreign = slot.key.ends_with(crate::extensions::PAGE_SUFFIX);
         match &slot.profile {
             // A connection's pages are the service's own: no pane script, no `vorn` scheme.
             Some(_conn) => {
@@ -322,6 +324,7 @@ impl Host {
                         builder.with_data_store_identifier(crate::signin::profile_uuid(_conn));
                 }
             }
+            None if foreign => {}
             None => {
                 builder = builder
                     .with_initialization_script(PAGE_SCRIPT)

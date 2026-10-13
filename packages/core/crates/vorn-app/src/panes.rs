@@ -29,6 +29,8 @@ pub fn web_index(id: u64) -> Option<usize> {
 pub enum PaneKind {
     Browser,
     Device,
+    /// The pane an extension opened (`ExtensionPaneCard`).
+    Extension,
 }
 
 /// The view keys: a session's page, its compare page, its artboards and

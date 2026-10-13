@@ -293,7 +293,8 @@ impl Toast {
         Toast {
             text: text.into(),
             error,
-            until: now + Duration::from_secs(4),
+            // `DEFAULT_DURATIONS`: errors stay 4 s, the rest 2.5 s.
+            until: now + Duration::from_millis(if error { 4000 } else { 2500 }),
         }
     }
 }
@@ -522,6 +523,7 @@ pub struct State {
     pub onboard: crate::onboarding::Onboard,
     pub plugins: crate::plugins::Plugins,
     pub network: crate::network::Network,
+    pub ext: crate::extensions::Extensions,
     /// The sign-in sheet, while one is open.
     pub signin: Option<crate::signin::Window>,
     /// An agent has asked for permission, so Mod+Shift+A and D answer it.

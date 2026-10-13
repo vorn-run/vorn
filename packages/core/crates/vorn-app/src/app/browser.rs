@@ -963,7 +963,12 @@ impl App {
         self.watch_files(now);
         self.refresh_artifact_tabs();
         self.sync_pollers();
-        let (host, bench, store) = (&mut self.web.host, &self.st.bench, &self.store);
+        let (host, bench, store, ext) = (
+            &mut self.web.host,
+            &self.st.bench,
+            &self.store,
+            &self.st.ext,
+        );
         host.close(|key| {
             // A connection's views go when the connection's work does.
             if crate::signin::connection_of(key).is_some() {
@@ -971,7 +976,9 @@ impl App {
             }
             let session = session_of(key);
             store.session(session).is_none()
-                || if key.ends_with("#device") {
+                || if key.ends_with(crate::extensions::PAGE_SUFFIX) {
+                    !ext.panes.contains_key(session)
+                } else if key.ends_with("#device") {
                     !bench.devices.contains_key(session)
                 } else {
                     bench.browsers.get(session).is_none()
@@ -1644,6 +1651,7 @@ impl App {
                     PaneKind::Device => {
                         self.st.bench.devices.remove(&s);
                     }
+                    PaneKind::Extension => self.ext_close(&s),
                 }
             }
             PaneAct::Maximize(s, kind) => {
@@ -2088,6 +2096,18 @@ impl App {
                     slots.push(WebSlot {
                         key: device_key(session),
                         url,
+                        zoom: 1.0,
+                        profile: None,
+                    });
+                }
+            }
+        }
+        if !covered {
+            for (session, p) in &self.st.ext.panes {
+                if let Some(url) = &p.url {
+                    slots.push(WebSlot {
+                        key: crate::extensions::page_key(session),
+                        url: url.clone(),
                         zoom: 1.0,
                         profile: None,
                     });

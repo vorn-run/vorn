@@ -32,6 +32,7 @@ use vorn_protocol::TerminalSession;
 
 mod browser;
 pub mod canvas;
+mod extensions;
 pub mod forms;
 mod gates;
 mod git;
@@ -199,6 +200,7 @@ enum Call {
     Ignore,
     Pane(browser::PaneCall),
     Plug(plugins::PlugCall),
+    Ext(extensions::ExtCall),
     /// `connection:signedIn` after the sheet saw someone sign in.
     SignedIn(Option<String>),
     Net(network::NetCall),
@@ -496,6 +498,7 @@ impl App {
                     }
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
+                    self.ext_notified(&method, &params);
                     let before = self.store.workspace().to_owned();
                     self.store.apply(&method, params);
                     if self.store.workspace() != before {
@@ -524,7 +527,8 @@ impl App {
                 }
             }
             for id in g.attached() {
-                if self.store.session(&id).is_none() {
+                if self.store.session(&id).is_none() && self.st.ext.owner_of_terminal(&id).is_none()
+                {
                     g.detach(&id);
                     self.views.remove(&id);
                 }
@@ -584,6 +588,7 @@ impl App {
             Call::Ignore => {}
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Plug(c) => self.plug_answered(c, answer),
+            Call::Ext(c) => self.ext_answered(c, answer),
             Call::SignedIn(identity) => {
                 self.finish_signin(answer.map(|_| identity).map_err(|e| e.to_string()))
             }
@@ -778,6 +783,13 @@ impl App {
     /// owner is the current card, else the current card.
     fn typing_target(&self) -> Option<String> {
         let current = self.current();
+        if let (Some(f), Some(c)) = (&self.st.ext.focus, &current) {
+            if f == c {
+                if let Some(t) = self.st.ext.panes.get(f).and_then(|p| p.terminal_id.clone()) {
+                    return Some(t);
+                }
+            }
+        }
         if let Some(t) = &self.st.side.focus {
             if current.as_deref().is_some() && self.st.side.holder(t) == current.as_deref() {
                 return Some(t.clone());
@@ -1378,6 +1390,7 @@ impl App {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
                 self.st.side.focus = None;
+                self.st.ext.focus = None;
                 ui.set_focus(None);
             }
             Act::Git(a) => self.run_git(ui, a, src),
@@ -1581,6 +1594,7 @@ impl App {
                 self.open_settings(cat);
             }
             Act::Welcome => self.open_onboard(ui),
+            Act::Ext(a) => self.run_ext(a),
             Act::AddGroup => {
                 let mut config = self.store.config.clone();
                 let workspace = config
@@ -2451,6 +2465,7 @@ impl App {
             self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
         }
         self.hotkeys_tick();
+        self.ext_tick();
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }
@@ -2517,6 +2532,13 @@ impl App {
         let cell = ui.text.cell();
         let current = self.typing_target();
         for (id, r) in &laid.customs {
+            if let Some(tid) =
+                crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
+            {
+                let tid = tid.clone();
+                self.paint_terminal(ui, &tid, *r, current.as_deref() == Some(tid.as_str()));
+                continue;
+            }
             let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
                 continue;
             };
@@ -2555,6 +2577,24 @@ impl App {
             }
         }
         self.paint_web(ui, laid);
+    }
+
+    /// An extension's program terminal, attached and sized to its box.
+    fn paint_terminal(&self, ui: &mut Ui, id: &str, r: crate::ui::Rect, focused: bool) {
+        let cell = ui.text.cell();
+        if let Some(g) = &self.grid {
+            let cols = (r.w / cell.w).floor() as u16;
+            let rows = (r.h / cell.h).floor() as u16;
+            g.attach(id, cols, rows);
+            g.resize(id, cols.max(2), rows.max(1));
+        }
+        if let Some(v) = self.views.get(id) {
+            let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
+            let pre = if focused { self.preedit.as_str() } else { "" };
+            ui.scene.push_clip(r);
+            paint::pane(ui, v, r, focused, pre);
+            ui.scene.pop_clip();
+        }
     }
 }
 
