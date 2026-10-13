@@ -8,27 +8,35 @@ public struct MenuPanel<Content: View>: View {
     var radius: CGFloat
     var border: Double
     var verticalPadding: CGFloat
+    var glass: Bool
     @ViewBuilder let content: Content
 
+    /// `glass` for a panel hanging from the toolbar, which is navigation rather than content.
     public init(width: CGFloat? = nil, minWidth: CGFloat? = nil, radius: CGFloat = Theme.radiusLg,
-                border: Double = 0.1, verticalPadding: CGFloat = 4, @ViewBuilder content: () -> Content) {
+                border: Double = 0.1, verticalPadding: CGFloat = 4, glass: Bool = false, @ViewBuilder content: () -> Content) {
         self.width = width
         self.minWidth = minWidth
         self.radius = radius
         self.border = border
         self.verticalPadding = verticalPadding
+        self.glass = glass
         self.content = content()
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
+        let body = VStack(alignment: .leading, spacing: 0) { content }
             .padding(.vertical, verticalPadding)
             .frame(width: width)
             .frame(minWidth: minWidth, alignment: .leading)
-            .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: radius))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.white(border), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: radius))
-            .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
+        if glass {
+            body.navigationPanel(radius: radius, border: border)
+        } else {
+            body
+                .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: radius))
+                .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.white(border), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: radius))
+                .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
+        }
     }
 }
 

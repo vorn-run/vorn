@@ -21,7 +21,7 @@ public enum MainViewMode: String, CaseIterable, Sendable {
         switch self {
         case .sessions: "⌘S"
         case .tasks: "⌘T"
-        case .workflows: "⌘⇧W"
+        case .workflows: "⇧⌘W"
         }
     }
 }

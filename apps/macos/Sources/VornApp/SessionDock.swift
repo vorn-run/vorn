@@ -72,41 +72,9 @@ struct SessionDock: View {
 
     var body: some View {
         let items = DockItem.items(model, store, features, includeMinimized: includeMinimized)
-        if !items.isEmpty {
-            if model.sessionDockCollapsed {
-                collapsed(items)
-            } else {
-                expanded(items)
-            }
+        if !items.isEmpty && !model.sessionDockCollapsed {
+            expanded(items)
         }
-    }
-
-    private func collapsed(_ items: [DockItem]) -> some View {
-        let summary = DockItem.summary(items)
-        return Hovering { hover in
-            Button { model.toggle(.dock) } label: {
-                HStack(spacing: 6) {
-                    LucideIcon(.layers, size: 11, strokeWidth: 1.5)
-                    Text("\(items.count)").font(.system(size: 11, weight: .medium, design: .monospaced))
-                }
-                .foregroundStyle(hover ? Color.white : Theme.gray300)
-                .padding(.horizontal, 8)
-                .frame(height: 26)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                    .strokeBorder(hover ? Theme.white(0.12) : Theme.hairline, lineWidth: 1))
-                .overlay(alignment: .topTrailing) {
-                    if items.contains(where: { $0.kind == .waiting }) {
-                        Circle().fill(Theme.bronzo).frame(width: 6, height: 6).offset(x: 2, y: -2)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .tooltip(summary)
-        .accessibilityLabel(summary)
-        .controlAnchor("dock")
     }
 
     private func expanded(_ items: [DockItem]) -> some View {
@@ -147,6 +115,46 @@ struct SessionDock: View {
         }
     }
 }
+/// The collapsed dock in the toolbar's glass group: layers and a count, a dot while a gate waits.
+struct DockButton: View {
+    @Bindable var model: AppModel
+    let store: VornStore
+    let features: FeatureStores
+    let includeMinimized: Bool
+
+    var body: some View {
+        let items = DockItem.items(model, store, features, includeMinimized: includeMinimized)
+        if !items.isEmpty && model.sessionDockCollapsed {
+            let summary = DockItem.summary(items)
+            let open = model.overlay == .dock
+            Hovering { hover in
+                Button { model.toggle(.dock) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.3.layers.3d")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(open || hover ? Theme.ink : Theme.white(0.6))
+                        Text("\(items.count)")
+                            .font(.ui(12, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(open || hover ? Theme.ink : Theme.white(0.45))
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 28)
+                    .background(Capsule().fill(open ? Theme.white(0.1) : .clear))
+                    .overlay(alignment: .topTrailing) {
+                        if items.contains(where: { $0.kind == .waiting }) { StatusDot(Theme.bronzo) }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .tooltip(summary)
+            .accessibilityLabel(summary)
+            .controlAnchor("dock")
+        }
+    }
+}
+
 
 /// A dock item as its pill.
 struct DockPill: View {
@@ -296,9 +304,7 @@ struct DockPanel: View {
         .padding(6)
         .frame(minWidth: 240, alignment: .leading)
         .fixedSize()
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+        .navigationPanel(radius: Theme.radiusLg, fallback: Theme.surfaceRaised)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Dock items")
     }

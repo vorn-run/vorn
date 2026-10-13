@@ -5,8 +5,8 @@ import VornTerminals
 import VornUI
 import VornWorkflows
 
-/// The 40pt bar over the main area (App.tsx): nav cluster when the sidebar is
-/// closed, the dock, the breadcrumb, and the grid's tools.
+/// The title-bar row over the main area: the view switch, the dock, the breadcrumb, and the
+/// view's tools grouped in glass. Content passes under it.
 struct TopBar: View {
     @Bindable var model: AppModel
     let store: VornStore
@@ -15,104 +15,123 @@ struct TopBar: View {
 
     var body: some View {
         ZStack {
-            HStack(spacing: 0) {
-                HStack(spacing: 4) {
-                    if !model.sidebarOpen { AppNavCluster(model: model, workflows: features.workflows) }
-                    if model.mainViewMode == .sessions {
-                        SessionDock(model: model, store: store, features: features,
-                                    includeMinimized: model.layoutMode(store) == .grid)
-                        HeadlessBadge(model: model, store: store)
-                    }
+            HStack(spacing: 8) {
+                AppNavCluster(model: model, workflows: features.workflows, labels: true)
+                if model.mainViewMode == .sessions {
+                    SessionDock(model: model, store: store, features: features,
+                                includeMinimized: model.layoutMode(store) == .grid)
                 }
                 Spacer(minLength: 0)
-                HStack(spacing: 4) {
-                    switch model.mainViewMode {
-                    case .sessions:
-                        ViewOptionsButton(model: model, store: store)
-                        VDivider().padding(.horizontal, 2)
-                        RecentSessionsButton(model: model)
-                        NewSessionButton(model: model)
-                    case .tasks:
-                        TaskViewOptionsButton(store: features.tasks)
-                        IconButton(.plus, size: 16, padding: 4, hoverFill: Theme.white(0.06), help: "Add task") {
-                            features.tasks.openNewTask()
+                NavigationGlassGroup {
+                    ToolbarGroup {
+                        switch model.mainViewMode {
+                        case .sessions:
+                            ViewOptionsButton(model: model, store: store)
+                            DockButton(model: model, store: store, features: features,
+                                       includeMinimized: model.layoutMode(store) == .grid)
+                            HeadlessBadge(model: model, store: store)
+                            RecentSessionsButton(model: model)
+                            NewSessionButton(model: model)
+                        case .tasks:
+                            TaskViewOptionsButton(store: features.tasks)
+                            ToolbarSymbolButton("plus", help: "Add task") { features.tasks.openNewTask() }
+                        case .workflows:
+                            WorkflowsHeader(store: features.workflows)
                         }
-                    case .workflows:
-                        WorkflowsHeader(store: features.workflows)
                     }
                 }
             }
             Breadcrumb(model: model, store: store, actions: actions)
                 .frame(maxWidth: 400)
         }
-        .padding(.leading, model.sidebarOpen ? 12 : Theme.trafficLightPad)
+        .padding(.leading, model.sidebarOpen ? 0 : Theme.trafficLightPad)
         .padding(.trailing, 12)
         .frame(height: Theme.toolbarHeight)
-        .background(Theme.surfaceBase)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
 }
 
+/// A capsule of glass around a row of toolbar controls.
+struct ToolbarGroup<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 2) { content }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .navigationGlass(Capsule())
+    }
+}
+
+/// The sidebar toggle while the sidebar is closed, then the view switch.
 struct AppNavCluster: View {
     @Bindable var model: AppModel
     let workflows: WorkflowsStore
+    var labels = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            IconButton(.panelLeft, size: 16, padding: 4) { model.sidebarOpen.toggle() }
-                .tooltip("Toggle sidebar", shortcut: "⌘B")
-            VDivider().padding(.horizontal, 2)
-            MainViewPills(model: model, waiting: workflows.waitingApprovals.count)
+        NavigationGlassGroup {
+            HStack(spacing: 8) {
+                if !model.sidebarOpen {
+                    ToolbarSymbolButton("sidebar.left", help: "Toggle sidebar", shortcut: "⌘B") { model.sidebarOpen.toggle() }
+                }
+                ViewSwitch(model: model, waiting: workflows.waitingApprovals.count, labels: labels)
+            }
         }
     }
 }
 
-private struct MainViewPills: View {
+/// Sessions, Tasks and Workflows as one glass segmented control; the chosen one raised in a neutral fill.
+struct ViewSwitch: View {
     @Bindable var model: AppModel
     let waiting: Int
+    var labels = true
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(MainViewMode.allCases, id: \.self) { mode in
-                let active = model.mainViewMode == mode
-                Hovering { hover in
-                    Button { model.mainViewMode = mode } label: {
-                        LucideIcon(mode.icon, size: 14)
-                            .foregroundStyle(active ? Color.white : hover ? Theme.gray300 : Theme.gray500)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                                .fill(active ? Theme.white(0.1) : .clear))
-                            .overlay(alignment: .topTrailing) {
-                                if mode == .workflows && waiting > 0 { WaitingBadge(count: waiting) }
-                            }
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .tooltip(mode == .workflows && waiting > 0 ? "Workflows · \(waiting) awaiting review" : mode.label,
-                         shortcut: mode.shortcut)
+                segment(mode)
             }
         }
-        .padding(2)
-        .background(Theme.white(0.04), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
+        .padding(3)
+        .navigationGlass(Capsule())
+    }
+
+    private func segment(_ mode: MainViewMode) -> some View {
+        let active = model.mainViewMode == mode
+        let help = mode == .workflows && waiting > 0 ? "Workflows · \(waiting) awaiting review" : mode.label
+        return Hovering { hover in
+            Button { model.mainViewMode = mode } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: mode.symbol)
+                        .font(.system(size: 12, weight: .regular))
+                        .symbolRenderingMode(.monochrome)
+                    if labels { Text(mode.label).font(.ui(12, weight: .medium)) }
+                }
+                .foregroundStyle(active ? Theme.ink : hover ? Theme.white(0.7) : Theme.white(0.45))
+                .padding(.horizontal, labels ? 12 : 8)
+                .frame(height: 28)
+                .background { if active { RaisedSegment() } }
+                .overlay(alignment: .topTrailing) {
+                    if mode == .workflows && waiting > 0 { StatusDot(Theme.bronzo) }
+                }
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .tooltip(help, shortcut: mode.shortcut)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
-/// The count of gates awaiting review on the Workflows pill.
-private struct WaitingBadge: View {
-    let count: Int
-
+/// The selected segment: a neutral fill with a top highlight and a soft drop.
+private struct RaisedSegment: View {
     var body: some View {
-        Text(count > 9 ? "9+" : "\(count)")
-            .font(.system(size: 9, design: .monospaced))
-            .monospacedDigit()
-            .foregroundStyle(Theme.surfaceBase)
-            .padding(.horizontal, 3)
-            .frame(minWidth: 12, minHeight: 12, maxHeight: 12)
-            .background(Theme.bronzo, in: Capsule())
-            .offset(x: 2, y: -2)
-            .accessibilityHidden(true)
+        Capsule()
+            .fill(Theme.white(0.10))
+            .overlay(Capsule().strokeBorder(
+                LinearGradient(colors: [Theme.white(0.16), .clear], startPoint: .top, endPoint: .center), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.3), radius: 1, y: 1)
     }
 }
 
@@ -244,12 +263,9 @@ private struct NewSessionButton: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        let open = model.overlay == .newMenu
-        IconButton(.plus, size: 16, padding: 4, color: open ? .white : Theme.gray400, hoverFill: Theme.white(0.06)) {
+        ToolbarSymbolButton("plus", help: "New session", shortcut: "⌘N", isOn: model.overlay == .newMenu) {
             model.toggle(.newMenu)
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(open ? Theme.white(0.06) : .clear))
-        .tooltip("New session", shortcut: "⌘N")
         .controlAnchor("newMenu")
     }
 }

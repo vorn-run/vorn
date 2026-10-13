@@ -3,7 +3,7 @@ import VornCore
 import VornTerminals
 import VornUI
 
-/// The tabs layout (TabView.tsx): one strip of sessions that doubles as the top bar, the active one below.
+/// The tabs layout (TabView.tsx): sessions as tabs in the title-bar row, the active one joined to its terminal below.
 struct TabsView<Empty: View>: View {
     @Bindable var model: AppModel
     let store: VornStore
@@ -13,6 +13,10 @@ struct TabsView<Empty: View>: View {
     let context: (TerminalSession) -> CardContext
     @ViewBuilder let empty: () -> Empty
 
+    private let rowHeight: CGFloat = 44
+    private let cardShape = UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10, topTrailingRadius: 10,
+                                                   style: .continuous)
+
     var body: some View {
         let tabs = model.visibleSessions(store, includeMinimized: true)
         let shortcutIDs = model.visibleSessions(store).map(\.id)
@@ -21,11 +25,11 @@ struct TabsView<Empty: View>: View {
         var tabActions = actions.cardActions
         tabActions.close = { id in close(id, tabs: tabs.map(\.id), actions: actions.cardActions) }
         return VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 if !model.sidebarOpen {
-                    AppNavCluster(model: model, workflows: features.workflows).padding(.leading, 8)
+                    ToolbarSymbolButton("sidebar.left", help: "Toggle sidebar", shortcut: "⌘B") { model.sidebarOpen.toggle() }
                 }
-                HStack(alignment: .bottom, spacing: 4) {
+                HStack(alignment: .bottom, spacing: 2) {
                     ForEach(tabs) { s in
                         SessionTab(session: s, isActive: s.id == active?.id,
                                    shortcut: shortcutIDs.firstIndex(of: s.id).flatMap { $0 < 9 ? $0 + 1 : nil },
@@ -33,43 +37,51 @@ struct TabsView<Empty: View>: View {
                             model.showTab(s.id)
                         }
                     }
-                    NewTabButtons(model: model, actions: actions)
+                    NewTabButton(model: model, actions: actions)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 4)
-                .frame(minHeight: 40, alignment: .bottom)
-                HStack(spacing: 4) {
-                    SessionDock(model: model, store: store, features: features, includeMinimized: false)
-                    HeadlessBadge(model: model, store: store)
-                    ViewOptionsButton(model: model, store: store)
-                    VDivider().padding(.horizontal, 2)
-                    RecentSessionsButton(model: model)
-                }
-                .padding(.horizontal, 8)
-            }
-            .padding(.leading, model.sidebarOpen ? 0 : Theme.trafficLightPad)
-            .frame(minHeight: 40)
-            .background(Theme.surfaceOverlay)
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
-
-            if let active {
-                let ctx = context(active)
-                HStack(spacing: 0) {
-                    SessionStage(session: active, engine: engines.engine, focusRequest: model.focusRequests[active.id] ?? 0,
-                                 actions: actions.cardActions, context: ctx)
-                    if let column = ctx.paneColumn {
-                        Rectangle().fill(Theme.hairline).frame(width: 1)
-                        column.frame(width: 380)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                SessionDock(model: model, store: store, features: features, includeMinimized: false)
+                ViewSwitch(model: model, waiting: features.workflows.waitingApprovals.count, labels: false)
+                NavigationGlassGroup {
+                    ToolbarGroup {
+                        ViewOptionsButton(model: model, store: store)
+                        DockButton(model: model, store: store, features: features, includeMinimized: false)
+                        HeadlessBadge(model: model, store: store)
+                        RecentSessionsButton(model: model)
                     }
                 }
-            } else {
-                Group {
-                    if model.statusFilter != .all { NoMatchingAgents() } else { empty() }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(.leading, model.sidebarOpen ? 0 : Theme.trafficLightPad - 8)
+            .padding(.trailing, 4)
+            .frame(height: rowHeight)
+            .zIndex(1)
+
+            Group {
+                if let active {
+                    let ctx = context(active)
+                    HStack(spacing: 0) {
+                        SessionStage(session: active, engine: engines.engine, focusRequest: model.focusRequests[active.id] ?? 0,
+                                     actions: actions.cardActions, context: ctx)
+                        if let column = ctx.paneColumn {
+                            Rectangle().fill(Theme.hairline).frame(width: 1)
+                            column.frame(width: 380)
+                        }
+                    }
+                } else {
+                    Group {
+                        if model.statusFilter != .all { NoMatchingAgents() } else { empty() }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .background(Theme.surfaceSunken)
+            .clipShape(cardShape)
+            .overlay(cardShape.strokeBorder(Theme.white(0.08), lineWidth: 1))
         }
+        .padding(.top, Theme.toolbarHeight - rowHeight)
+        .padding([.leading, .trailing, .bottom], 8)
     }
 
     /// TabView.tsx `handleCloseTab`: the tab beside it becomes active, then the session closes.
@@ -95,6 +107,8 @@ private struct SessionTab: View {
     @State private var confirmClose = false
     @State private var dropTargeted = false
 
+    private static let shape = UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10, style: .continuous)
+
     var body: some View {
         HStack(spacing: 8) {
             AgentStatusIcon(session.agentType, status: session.status, size: 16)
@@ -115,13 +129,15 @@ private struct SessionTab: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.ui(13))
-        .foregroundStyle(isActive ? Color.white : hovering ? Theme.gray300 : Theme.gray500)
+        .font(.ui(12, weight: .medium))
+        .foregroundStyle(isActive || hovering ? Theme.ink : Theme.white(0.45))
         .padding(.leading, 12)
-        .padding(.trailing, 40)
-        .frame(minWidth: 120, maxWidth: 260, minHeight: 36, maxHeight: 36)
-        .overlay(alignment: .trailing) { trailing.padding(.trailing, 8) }
-        .overlay(alignment: .bottom) { Rectangle().fill(isActive ? Color.white : .clear).frame(height: 1) }
+        .padding(.trailing, 10)
+        .frame(minWidth: 120, idealWidth: 196, maxWidth: 196)
+        .frame(height: isActive ? 37 : 36)
+        .overlay(alignment: .trailing) { trailing.padding(.trailing, 10) }
+        .background { if isActive { joinedBackground } }
+        .padding(.bottom, isActive ? -1 : 0)
         .overlay(alignment: .leading) { Rectangle().fill(dropTargeted ? Theme.white(0.5) : .clear).frame(width: 2) }
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
@@ -132,18 +148,27 @@ private struct SessionTab: View {
         .onChange(of: actions.renameRequest == session.id, initial: true) { _, asked in
             if asked { draft = session.title; renaming = true }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isActive ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// The terminal's fill with its border on three sides, so the tab and the card read as one sheet.
+    private var joinedBackground: some View {
+        Self.shape.fill(Theme.surfaceSunken)
+            .overlay(Self.shape.strokeBorder(Theme.white(0.08), lineWidth: 1))
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.surfaceSunken).frame(height: 1).padding(.horizontal, 1) }
     }
 
     @ViewBuilder private var trailing: some View {
         ZStack(alignment: .trailing) {
             if let shortcut, !renaming {
                 Text("⌘\(shortcut)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(Theme.gray500)
-                    .padding(.horizontal, 4)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.gray600)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.white(0.06)))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.white(0.1), lineWidth: 1))
+                    .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.white(0.04)))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.white(0.06), lineWidth: 1))
                     .opacity(hovering ? 0 : 1)
                     .allowsHitTesting(false)
             }
@@ -171,7 +196,7 @@ private struct SessionTab: View {
                     }
             }
             .padding(.leading, 4)
-            .background(hovering ? Theme.surfaceOverlay : .clear)
+            .background(hovering ? (isActive ? Theme.surfaceSunken : Theme.surfaceBase) : .clear)
             .opacity(hovering ? 1 : 0)
         }
     }
@@ -195,34 +220,29 @@ private struct SessionTab: View {
     }
 }
 
-/// "+" for a session in the active place, the chevron for the full menu.
-private struct NewTabButtons: View {
+/// "+" for a session in the active place; right-click for the full menu.
+private struct NewTabButton: View {
     @Bindable var model: AppModel
     let actions: ShellActions
 
     var body: some View {
-        HStack(spacing: 0) {
-            button(.plus, 14, width: 28, "New session") {
-                actions.newSession(actions.activeProject ?? actions.store.projects.first, actions.activeWorktree)
-            }
-            button(.chevronDown, 12, width: 22, "More session options") { model.toggle(.newMenu) }
-                .controlAnchor("newMenu")
-        }
-    }
-
-    private func button(_ icon: LucideGlyph, _ size: CGFloat, width: CGFloat, _ help: String,
-                        action: @escaping () -> Void) -> some View {
         Hovering { hover in
-            Button(action: action) {
-                LucideIcon(icon, size: size, strokeWidth: 1.5)
-                    .foregroundStyle(hover ? Color.white : Theme.gray200)
-                    .frame(width: width, height: 36)
-                    .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(hover ? Theme.white(0.1) : .clear))
+            Button {
+                actions.newSession(actions.activeProject ?? actions.store.projects.first, actions.activeWorktree)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(hover || model.overlay == .newMenu ? Theme.ink : Theme.white(0.6))
+                    .frame(width: 28, height: 36)
+                    .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(hover ? Theme.white(0.06) : .clear))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .help(help)
+        .onRightClick { _ in model.toggle(.newMenu) }
+        .tooltip("New session", shortcut: "⌘N")
+        .accessibilityLabel("New session")
+        .controlAnchor("newMenu")
     }
 }
 
@@ -231,12 +251,9 @@ struct RecentSessionsButton: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        let open = model.overlay == .recent
-        IconButton(.rotateCcw, size: 16, strokeWidth: 1.5, padding: 4, color: open ? .white : Theme.gray400,
-                   hoverColor: Theme.gray200, hoverFill: Theme.white(0.06), help: "Recent sessions") {
+        ToolbarSymbolButton("clock.arrow.circlepath", help: "Recent sessions", isOn: model.overlay == .recent) {
             model.toggle(.recent)
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(open ? Theme.white(0.1) : .clear))
         .controlAnchor("recent")
     }
 }

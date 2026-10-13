@@ -57,8 +57,8 @@ public enum Theme {
     public static let radiusLg: CGFloat = 8
     public static let radiusXl: CGFloat = 12
 
-    public static let toolbarHeight: CGFloat = 40
-    /// Room for the window buttons at `trafficLightPosition {16, 13}`.
+    public static let toolbarHeight: CGFloat = 52
+    /// Room for the window buttons of a unified title bar.
     public static let trafficLightPad: CGFloat = 80
 
     public static let sidebarWidth: CGFloat = 256

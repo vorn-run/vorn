@@ -202,7 +202,7 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
             window.toolbar = NSToolbar(identifier: "main")
-            window.toolbarStyle = .unifiedCompact
+            window.toolbarStyle = .unified
             window.backgroundColor = NSColor(red: 0x0D / 255, green: 0x0D / 255, blue: 0x0F / 255, alpha: 1)
             window.appearance = NSAppearance(named: .darkAqua)
         }

@@ -79,17 +79,14 @@ struct OverlayHost: View {
             if let r = rect("headless", geo) {
                 HeadlessPanel(model: model, store: store, actions: actions)
                     .fixedSize()
-                    .offset(x: model.layoutMode(store) == .tabs ? r.maxX - 280 : r.minX, y: r.maxY + 6)
+                    .frame(width: r.maxX, alignment: .trailing)
+                    .offset(y: r.maxY + 6)
             }
         case .dock:
             if let r = rect("dock", geo) {
                 let panel = DockPanel(model: model, store: store, features: features,
                                       includeMinimized: model.layoutMode(store) == .grid)
-                if model.sessionDockCollapsed {
-                    panel.offset(x: r.minX, y: r.maxY + 6)
-                } else {
-                    panel.frame(width: r.maxX, alignment: .trailing).offset(y: r.maxY + 6)
-                }
+                panel.frame(width: r.maxX, alignment: .trailing).offset(y: r.maxY + 6)
             }
         case .shortcuts:
             ShortcutsPanel(model: model)
@@ -145,7 +142,7 @@ struct ViewOptionsPanel: View {
 
     var body: some View {
         let layout = model.layoutMode(store)
-        MenuPanel(width: 200, border: 0.08, verticalPadding: 0) {
+        MenuPanel(width: 200, border: 0.08, verticalPadding: 0, glass: true) {
             OptionSection(label: "Status") {
                 ForEach(StatusFilter.allCases, id: \.self) { f in
                     MenuOptionRow(f.label, selected: model.statusFilter == f, dot: f.dot) { model.statusFilter = f }
@@ -200,23 +197,10 @@ struct ViewOptionsButton: View {
     var body: some View {
         let open = model.overlay == .viewOptions
         let active = model.hasActiveViewOptions(store)
-        Hovering { hover in
-            Button { model.toggle(.viewOptions) } label: {
-                LucideIcon(.slidersHorizontal, size: 16, strokeWidth: 1.5)
-                    .foregroundStyle(open || active || hover ? Color.white : Theme.gray400)
-                    .padding(4)
-                    .background(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                        .fill(open ? Theme.white(0.1) : active ? Theme.white(0.08) : hover ? Theme.white(0.06) : .clear))
-                    .overlay(alignment: .topTrailing) {
-                        if active && !open {
-                            Circle().fill(Theme.inkSecondary).frame(width: 6, height: 6).offset(x: -2, y: 2)
-                        }
-                    }
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+        ToolbarSymbolButton("slider.horizontal.3", help: "View options", shortcut: "⌘J", isOn: open || active) {
+            model.toggle(.viewOptions)
         }
-        .tooltip("View options", shortcut: "⌘J")
+        .overlay(alignment: .topTrailing) { if active && !open { StatusDot(Theme.inkSecondary) } }
         .controlAnchor("viewOptions")
     }
 }
@@ -263,10 +247,7 @@ struct RecentSessionsPanel: View {
             }
         }
         .frame(width: 380)
-        .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: Theme.radiusXl))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radiusXl).strokeBorder(Theme.white(0.08), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusXl))
-        .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
+        .navigationPanel(radius: Theme.radiusXl)
         .task {
             guard model.recentFixture == nil else { return }
             sessions = (try? await store.recentSessions(projectPath: project?.path)) ?? []
@@ -507,28 +488,26 @@ struct HeadlessBadge: View {
         if !list.isEmpty {
             let running = list.filter(\.isRunning).count
             let errors = list.filter(\.isError).count
+            let open = model.overlay == .headless
             Hovering { hover in
                 Button { model.toggle(.headless) } label: {
                     HStack(spacing: 6) {
-                        LucideIcon(.zap, size: 12, strokeWidth: 1.5)
-                        Text("\(list.count)").font(.system(size: 11, weight: .medium, design: .monospaced))
+                        Image(systemName: "bolt").font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(open || hover ? Theme.ink : Theme.white(0.6))
+                        Text("\(list.count)").font(.ui(12, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(open || hover ? Theme.ink : Theme.white(0.45))
                     }
-                    .font(.ui(11, weight: .medium))
-                    .foregroundStyle(hover ? Color.white : Theme.gray300)
                     .padding(.horizontal, 8)
-                    .frame(height: 26)
-                    .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd)
-                        .strokeBorder(hover ? Theme.white(0.12) : Theme.hairline, lineWidth: 1))
+                    .frame(height: 28)
+                    .background(Capsule().fill(open ? Theme.white(0.1) : .clear))
                     .overlay(alignment: .topTrailing) {
-                        if running > 0 || errors > 0 {
-                            Circle().fill(running > 0 ? Theme.green500 : Theme.red500)
-                                .frame(width: 6, height: 6).offset(x: 2, y: -2)
-                        }
+                        if running > 0 || errors > 0 { StatusDot(running > 0 ? Theme.green500 : Theme.red500) }
                     }
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
+            .accessibilityLabel(tooltip(list.count, running, errors))
             .help(tooltip(list.count, running, errors))
             .controlAnchor("headless")
         }
@@ -555,9 +534,7 @@ struct HeadlessPanel: View {
         }
         .padding(6)
         .frame(minWidth: 280, alignment: .leading)
-        .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+        .navigationPanel(radius: Theme.radiusLg)
     }
 }
 

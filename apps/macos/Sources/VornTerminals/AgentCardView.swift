@@ -326,7 +326,7 @@ struct CardHeader: View {
         .padding(.leading, context.leadingInset)
         .padding(.trailing, 12)
         .padding(.vertical, 10)
-        .frame(height: 41)
+        .frame(height: variant == .focused ? Theme.toolbarHeight : 41)
         .background(Theme.surfaceRaised)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.white(0.04)).frame(height: 1) }
         .onChange(of: actions.renameRequest == session.id, initial: true) { _, asked in

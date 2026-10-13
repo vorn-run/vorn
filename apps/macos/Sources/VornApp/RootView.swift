@@ -14,6 +14,7 @@ public struct RootView: View {
     let engines: EngineHolder
     let features: FeatureStores
     var fauxChrome = false
+    @Environment(\.navigationGlass) private var glass
 
     public init(model: AppModel, store: VornStore, engines: EngineHolder, features: FeatureStores,
                 fauxChrome: Bool = false) {
@@ -31,29 +32,7 @@ public struct RootView: View {
             if model.sidebarOpen {
                 Sidebar(model: model, store: store, actions: actions, features: features)
             }
-            VStack(spacing: 0) {
-                // A workflow's page draws its own bar, as the inline editor does today.
-                if showsTopBar {
-                    TopBar(model: model, store: store, actions: actions, features: features)
-                }
-                HStack(spacing: 0) {
-                    if !(model.panes.diffMaximized && changesSession != nil) {
-                        content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        Color.clear.frame(width: 48)
-                    }
-                    if let s = changesSession {
-                        ChangesPanel(panes: model.panes, session: s, stat: store.diffStats[s.worktreePath ?? s.projectPath],
-                                     project: model.activeProject.flatMap(store.project(named:)), services: actions.paneServices) {
-                            model.commitOpen = true
-                        }
-                        .id(s.id)
-                        .frame(width: model.panes.diffMaximized ? nil : model.panes.diffWidth)
-                        .frame(maxWidth: model.panes.diffMaximized ? .infinity : nil)
-                    }
-                }
-            }
-            .background(Theme.surfaceBase)
+            main
         }
         .background(Theme.surfaceBase)
         .overlay(alignment: .topLeading) { if fauxChrome { FauxTrafficLights() } }
@@ -118,6 +97,38 @@ public struct RootView: View {
         }
     }
 
+    /// The active view and the changes panel; the top bar floats over them in glass, content passing under it.
+    @ViewBuilder private var main: some View {
+        let body = HStack(spacing: 0) {
+            if !(model.panes.diffMaximized && changesSession != nil) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Color.clear.frame(width: 48)
+            }
+            if let s = changesSession {
+                ChangesPanel(panes: model.panes, session: s, stat: store.diffStats[s.worktreePath ?? s.projectPath],
+                             project: model.activeProject.flatMap(store.project(named:)), services: actions.paneServices) {
+                    model.commitOpen = true
+                }
+                .id(s.id)
+                .frame(width: model.panes.diffMaximized ? nil : model.panes.diffWidth)
+                .frame(maxWidth: model.panes.diffMaximized ? .infinity : nil)
+            }
+        }
+        if !showsTopBar {
+            body
+        } else if #available(macOS 26, *), glass {
+            body.safeAreaBar(edge: .top, spacing: 0) {
+                TopBar(model: model, store: store, actions: actions, features: features)
+            }
+        } else {
+            VStack(spacing: 0) {
+                TopBar(model: model, store: store, actions: actions, features: features)
+                body
+            }
+        }
+    }
+
     /// A workflow's page draws its own bar, as do the tabs strip and a focused session's header.
     private var showsTopBar: Bool {
         switch model.mainViewMode {
@@ -175,7 +186,7 @@ public struct RootView: View {
                 .onDisappear { features.tasks.stop() }
         case .workflows:
             WorkflowsView(store: features.workflows) {
-                if !model.sidebarOpen { AppNavCluster(model: model, workflows: features.workflows) }
+                AppNavCluster(model: model, workflows: features.workflows)
             }
         }
     }
@@ -226,10 +237,8 @@ public struct RootView: View {
             context.onNext = { model.cycleFocus(store, by: 1) }
         }
         if context.paneColumn != nil { context.fixedColumnWidth = 420 }
-        if !model.sidebarOpen {
-            context.leadingInset = Theme.trafficLightPad
-            context.headerLeading = AnyView(AppNavCluster(model: model, workflows: features.workflows))
-        }
+        if !model.sidebarOpen { context.leadingInset = Theme.trafficLightPad }
+        context.headerLeading = AnyView(AppNavCluster(model: model, workflows: features.workflows))
         let visible = model.visibleSessions(store)
         return AgentCardView(session: s, index: visible.firstIndex(of: s) ?? 0, engine: engines.engine,
                              isSelected: true, isDimmed: false, isExpanded: true,

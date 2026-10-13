@@ -25,12 +25,18 @@ struct Sidebar: View {
         }
         .frame(width: model.sidebarWidth)
         .frame(maxHeight: .infinity)
-        .background(Theme.surfacePanel)
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Theme.hairline).frame(width: 1)
-        }
+        .clipShape(Self.shape)
+        .navigationGlass(Self.shape, fallback: Theme.surfacePanel)
         .overlay(alignment: .trailing) { ResizeHandle(width: $model.sidebarWidth) }
+        .padding(Self.inset)
     }
+
+    /// The sidebar floats this far in from the window's edges.
+    static let inset: CGFloat = 8
+    /// Concentric with the window's corners: their radius less the inset.
+    static let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+    /// Where the main area starts while the sidebar is open.
+    static func trailingEdge(_ width: CGFloat) -> CGFloat { width + 2 * inset }
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -78,31 +84,19 @@ private struct ResizeHandle: View {
 
 // MARK: Header
 
+/// Traffic lights, the workspace picker and the sidebar toggle, in the title-bar row.
 struct SidebarHeader: View {
     @Bindable var model: AppModel
     let store: VornStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                WorkspaceSwitcher(model: model, store: store)
-                IconButton(.panelLeft, size: 16, padding: 4, help: "Toggle sidebar") { model.sidebarOpen.toggle() }
-                    .tooltip("Toggle sidebar", shortcut: "⌘B")
-            }
-            .padding(.leading, Theme.trafficLightPad)
-            .padding(.trailing, 12)
-            .frame(height: Theme.toolbarHeight)
-
-            HStack(spacing: 4) {
-                ForEach(MainViewMode.allCases, id: \.self) { mode in
-                    ViewModeButton(mode: mode, active: model.mainViewMode == mode) { model.mainViewMode = mode }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+        HStack(spacing: 4) {
+            WorkspaceSwitcher(model: model, store: store)
+            ToolbarSymbolButton("sidebar.left", help: "Toggle sidebar", shortcut: "⌘B") { model.sidebarOpen.toggle() }
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+        .padding(.leading, Theme.trafficLightPad - Sidebar.inset)
+        .padding(.trailing, 8)
+        .frame(height: Theme.toolbarHeight - 2 * Sidebar.inset)
     }
 }
 
@@ -114,30 +108,14 @@ extension MainViewMode {
         case .workflows: .workflow
         }
     }
-}
 
-private struct ViewModeButton: View {
-    let mode: MainViewMode
-    let active: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Hovering { hover in
-            Button(action: action) {
-                HStack(spacing: 6) {
-                    LucideIcon(mode.icon, size: 14)
-                    if active { Text(mode.label).font(.ui(12, weight: .medium)) }
-                }
-                .foregroundStyle(active ? Color.white : hover ? Theme.gray300 : Theme.gray500)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: Theme.radiusLg)
-                    .fill(active ? Theme.white(0.1) : hover ? Theme.white(0.04) : .clear))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+    /// The monochrome SF Symbol in the title bar's view switch.
+    var symbol: String {
+        switch self {
+        case .sessions: "display"
+        case .tasks: "checklist"
+        case .workflows: "flowchart"
         }
-        .tooltip(mode.label, shortcut: mode.shortcut)
     }
 }
 
@@ -726,26 +704,18 @@ struct SidebarFooter: View {
                              onDismiss: { model.updateBannerDismissed = true },
                              onRestart: { settings.updater?.install() })
             }
-            HStack(spacing: 2) {
-                IconButton(.circleHelp, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
-                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Welcome Guide") { model.openOnboarding() }
-                IconButton(.settings, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
-                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04),
-                           help: showDot ? "Settings — update ready  ⌘," : "Settings  ⌘,") {
+            HStack(spacing: 4) {
+                ToolbarSymbolButton("gearshape", help: showDot ? "Settings — update ready" : "Settings", shortcut: "⌘,") {
                     if showDot { settings.category = .updates }
                     model.settingsOpen = true
                 }
-                .overlay(alignment: .topTrailing) {
-                    if showDot {
-                        Circle().fill(Theme.bronzo).frame(width: 5, height: 5)
-                            .overlay(Circle().strokeBorder(Theme.surfacePanel, lineWidth: 2).padding(-2))
-                            .padding(2)
-                    }
-                }
+                .overlay(alignment: .topTrailing) { if showDot { StatusDot(Theme.bronzo) } }
+                ToolbarSymbolButton("questionmark.circle", help: "Welcome Guide") { model.openOnboarding() }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
         }
     }
 }
