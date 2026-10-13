@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stepTimeline } from '../src/renderer/components/workflow-editor/node-visuals'
+import { stepTimeline } from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
 
 /**
  * The timeline is the one place a stalled step accounts for itself, so the

@@ -12,24 +12,24 @@ const registryMocks = vi.hoisted(() => ({
   hydrateTerminal: vi.fn(),
   onTerminalReady: vi.fn().mockReturnValue(() => {})
 }))
-vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => registryMocks)
 
 const resumeMocks = vi.hoisted(() => ({
   resumeEndedSession: vi.fn().mockResolvedValue(undefined),
   showEndedSession: vi.fn().mockResolvedValue(undefined),
   markPaneEnded: vi.fn()
 }))
-vi.mock('../src/renderer/lib/session-resume', () => resumeMocks)
+vi.mock('../packages/web/src/renderer/lib/session-resume', () => resumeMocks)
 
 // Closing a cold pane goes through the same door every other close does.
 const closeMocks = vi.hoisted(() => ({
   closeTerminalSession: vi.fn().mockResolvedValue(undefined)
 }))
-vi.mock('../src/renderer/lib/terminal-close', () => closeMocks)
+vi.mock('../packages/web/src/renderer/lib/terminal-close', () => closeMocks)
 
 // The composer's other branch pulls in the whole intent bar; this file is about
 // which branch is taken, not what the bar does.
-vi.mock('../src/renderer/components/IntentBar', () => ({
+vi.mock('../packages/web/src/renderer/components/IntentBar', () => ({
   IntentBar: ({ terminalId }: { terminalId: string }) => (
     <div data-testid="intent-bar">{terminalId}</div>
   )
@@ -44,8 +44,8 @@ Object.defineProperty(window, 'api', {
 })
 
 import type { TerminalSession } from '../packages/shared/src/types'
-import { useAppStore } from '../src/renderer/stores'
-import { SessionComposer } from '../src/renderer/components/card/SessionComposer'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { SessionComposer } from '../packages/web/src/renderer/components/card/SessionComposer'
 
 /**
  * The row beneath a terminal, when there is nothing behind the terminal.

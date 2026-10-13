@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { OptionRow } from '../src/renderer/components/OptionRow'
+import { OptionRow } from '../packages/web/src/renderer/components/OptionRow'
 
 describe('OptionRow', () => {
   it('renders label text', () => {

@@ -6,7 +6,7 @@ import type {
   ConnectorCatalogItem,
   ExtensionActivationState,
   InstalledConnectorPack
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 /**
  * How many cards an extension is actually on.
@@ -24,13 +24,14 @@ const state = {
   terminalsPanes: new Map<string, { terminals: string[]; activeTab: number }>()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: Object.assign((selector: (s: typeof state) => unknown) => selector(state), {
     getState: () => state
   })
 }))
 
-const { ConnectorSettings } = await import('../src/renderer/components/settings/ConnectorSettings')
+const { ConnectorSettings } =
+  await import('../packages/web/src/renderer/components/settings/ConnectorSettings')
 
 const REVIEW: ConnectorCatalogItem = {
   id: 'review',

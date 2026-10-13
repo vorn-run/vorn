@@ -26,12 +26,12 @@ vi.mock('lucide-react', async (importOriginal) => ({
   X: (p: Record<string, unknown>) => <svg data-testid="x-icon" {...p} />
 }))
 
-vi.mock('../src/renderer/components/LogReplayModal', () => ({
+vi.mock('../packages/web/src/renderer/components/LogReplayModal', () => ({
   LogReplayModal: () => <div data-testid="log-replay" />
 }))
 
-import { RunHistoryPanel } from '../src/renderer/components/workflow-editor/panels/RunHistoryPanel'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
+import { RunHistoryPanel } from '../packages/web/src/renderer/components/workflow-editor/panels/RunHistoryPanel'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
 
 function makeExec(
   startedAt: string,

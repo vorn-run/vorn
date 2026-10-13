@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { captureBlock, clearBlockLog, getBlockLog } from '../src/renderer/lib/block-log'
+import {
+  captureBlock,
+  clearBlockLog,
+  getBlockLog
+} from '../packages/web/src/renderer/lib/block-log'
 
 /**
  * The log backs a useSyncExternalStore subscription, which compares snapshots

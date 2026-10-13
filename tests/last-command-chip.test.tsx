@@ -10,9 +10,9 @@ const blocks: {
   marker: { line: number; isDisposed: boolean }
 }[] = []
 
-vi.mock('../src/renderer/lib/command-blocks', async () => {
+vi.mock('../packages/web/src/renderer/lib/command-blocks', async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
-    '../src/renderer/lib/command-blocks'
+    '../packages/web/src/renderer/lib/command-blocks'
   )
   return {
     ...actual,
@@ -20,7 +20,7 @@ vi.mock('../src/renderer/lib/command-blocks', async () => {
     onCommandBlocksChange: () => () => {}
   }
 })
-vi.mock('../src/renderer/lib/terminal-registry', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => ({
   onTerminalReady: (_id: string, cb: () => void) => {
     cb()
     return () => {}
@@ -28,8 +28,8 @@ vi.mock('../src/renderer/lib/terminal-registry', () => ({
   scrollTerminalToLine: () => {}
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { LastCommandChip } from '../src/renderer/components/card/LastCommandChip'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { LastCommandChip } from '../packages/web/src/renderer/components/card/LastCommandChip'
 
 function seed(): void {
   act(() => {

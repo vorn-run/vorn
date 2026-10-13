@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { readRecentActions, recordRecentAction } from '../src/renderer/lib/step-library-memory'
+import {
+  readRecentActions,
+  recordRecentAction
+} from '../packages/web/src/renderer/lib/step-library-memory'
 
 beforeEach(() => localStorage.clear())
 

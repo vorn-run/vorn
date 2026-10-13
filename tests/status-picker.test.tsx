@@ -25,16 +25,16 @@ const updateTask = vi.fn()
 
 const mockState = { completeTask, cancelTask, reopenTask, reviewTask, updateTask }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() }
 }))
 
-const { StatusPicker } = await import('../src/renderer/components/StatusPicker')
+const { StatusPicker } = await import('../packages/web/src/renderer/components/StatusPicker')
 
 describe('StatusPicker — todo → in_progress routing', () => {
   beforeEach(() => {

@@ -12,12 +12,12 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() }
 }))
 
-import { launchAgentFromShell } from '../src/renderer/lib/session-utils'
-import { useAppStore } from '../src/renderer/stores'
+import { launchAgentFromShell } from '../packages/web/src/renderer/lib/session-utils'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 function shell(over: Partial<TerminalSession> = {}): TerminalSession {
   return {

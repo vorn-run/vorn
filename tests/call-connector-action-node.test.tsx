@@ -2,12 +2,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { CallConnectorActionConfig, WorkflowNode } from '../src/shared/types'
-import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
-import { stepPreview } from '../src/renderer/components/workflow-editor/node-visuals'
-import { estimateNodeHeight } from '../src/renderer/lib/workflow-canvas-layout'
+import type { CallConnectorActionConfig, WorkflowNode } from '../packages/web/src/shared/types'
+import { CallConnectorActionNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
+import { stepPreview } from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
+import { estimateNodeHeight } from '../packages/web/src/renderer/lib/workflow-canvas-layout'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnectorIdFor: () => undefined,
   useConnectionIconFor: () => undefined
 }))

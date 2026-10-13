@@ -20,7 +20,7 @@ const state = {
   setConfig: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state)
 }))
 
@@ -45,7 +45,7 @@ beforeEach(() => {
   state.taskSourceFilter = 'all'
 })
 
-import { TaskToolbar } from '../src/renderer/components/TaskToolbar'
+import { TaskToolbar } from '../packages/web/src/renderer/components/TaskToolbar'
 
 describe('TaskToolbar source filter', () => {
   it('renders the view-options button', () => {

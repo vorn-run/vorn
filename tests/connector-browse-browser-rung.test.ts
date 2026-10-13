@@ -3,7 +3,7 @@ import {
   AUTH_RUNG,
   connectorAuthRungs,
   type ConnectorListing
-} from '../src/renderer/lib/connector-browse'
+} from '../packages/web/src/renderer/lib/connector-browse'
 
 describe('how the directory names a browser sign-in', () => {
   it('offers it among the sign-in filters, before OAuth', () => {

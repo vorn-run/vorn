@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { DeviceRestoreRefusal } from '../src/renderer/stores/types'
+import type { DeviceRestoreRefusal } from '../packages/web/src/renderer/stores/types'
 
 const toast = vi.fn()
-vi.mock('../src/renderer/components/Toast', () => ({ toast: (...a: unknown[]) => toast(...a) }))
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
+  toast: (...a: unknown[]) => toast(...a)
+}))
 
 const restore = vi.fn<() => Promise<DeviceRestoreRefusal[]>>()
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: { getState: () => ({ restoreDevicePanes: restore }) }
 }))
 
-const { restoreDevicePanes } = await import('../src/renderer/lib/device-restore')
+const { restoreDevicePanes } = await import('../packages/web/src/renderer/lib/device-restore')
 
 const device = { udid: 'udid-1', name: 'iPhone 17 Pro' }
 

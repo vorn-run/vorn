@@ -3,16 +3,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/assets/icons/vscode.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/cursor.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/windsurf.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/zed.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/sublime.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/webstorm.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/intellij.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/xcode.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/terminal.svg?raw', () => ({ default: '<svg />' }))
-vi.mock('../src/renderer/assets/icons/finder.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/vscode.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/cursor.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/windsurf.svg?raw', () => ({
+  default: '<svg />'
+}))
+vi.mock('../packages/web/src/renderer/assets/icons/zed.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/sublime.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/webstorm.svg?raw', () => ({
+  default: '<svg />'
+}))
+vi.mock('../packages/web/src/renderer/assets/icons/intellij.svg?raw', () => ({
+  default: '<svg />'
+}))
+vi.mock('../packages/web/src/renderer/assets/icons/xcode.svg?raw', () => ({ default: '<svg />' }))
+vi.mock('../packages/web/src/renderer/assets/icons/terminal.svg?raw', () => ({
+  default: '<svg />'
+}))
+vi.mock('../packages/web/src/renderer/assets/icons/finder.svg?raw', () => ({ default: '<svg />' }))
 
 const detectIDEs = vi.fn()
 const openInIDE = vi.fn()
@@ -33,7 +41,7 @@ afterEach(() => {
 })
 
 async function importButton() {
-  const mod = await import('../src/renderer/components/OpenInButton')
+  const mod = await import('../packages/web/src/renderer/components/OpenInButton')
   return mod.OpenInButton
 }
 

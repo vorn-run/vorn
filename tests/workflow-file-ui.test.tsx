@@ -2,10 +2,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { useAppStore } from '../src/renderer/stores'
-import { WorkflowsSection } from '../src/renderer/components/project-sidebar/WorkflowsSection'
-import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
-import { fileFromWorkflow } from '../src/renderer/lib/workflow-files'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { WorkflowsSection } from '../packages/web/src/renderer/components/project-sidebar/WorkflowsSection'
+import { __resetConnectionsCacheForTests } from '../packages/web/src/renderer/lib/use-connections'
+import { fileFromWorkflow } from '../packages/web/src/renderer/lib/workflow-files'
 import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types'
 
 /**
@@ -20,7 +20,7 @@ const toasts = vi.hoisted(() => ({
   dismissed: [] as string[]
 }))
 
-vi.mock('../src/renderer/components/Toast', () => {
+vi.mock('../packages/web/src/renderer/components/Toast', () => {
   const record = (message: string, opts?: { actions?: typeof toasts.actions }): string => {
     toasts.messages.push(message)
     if (opts?.actions) toasts.actions.push(...opts.actions)

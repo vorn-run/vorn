@@ -12,8 +12,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { ToolbarBreadcrumb } from '../src/renderer/components/ToolbarBreadcrumb'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { ToolbarBreadcrumb } from '../packages/web/src/renderer/components/ToolbarBreadcrumb'
 
 const initialState = useAppStore.getState()
 

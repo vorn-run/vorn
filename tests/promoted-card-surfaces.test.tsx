@@ -24,9 +24,11 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { PromotedPaneCard } = await import('../src/renderer/components/PromotedPaneCard')
-const { MobileSinglePane } = await import('../src/renderer/components/MobileSinglePane')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { PromotedPaneCard } =
+  await import('../packages/web/src/renderer/components/PromotedPaneCard')
+const { MobileSinglePane } =
+  await import('../packages/web/src/renderer/components/MobileSinglePane')
 
 const session = (id: string) =>
   ({

@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { SourceConnection } from '../src/shared/types'
+import type { SourceConnection } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
@@ -14,7 +14,7 @@ const preflightConnection = vi.fn()
   preflightConnection
 }
 
-import { ConnectionRow } from '../src/renderer/components/settings/ConnectionRow'
+import { ConnectionRow } from '../packages/web/src/renderer/components/settings/ConnectionRow'
 
 afterEach(() => {
   cleanup()

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowDefinition } from '../src/shared/types'
+import type { WorkflowDefinition } from '../packages/web/src/shared/types'
 
 const mockStore = {
   setEditingWorkflowId: vi.fn(),
@@ -11,13 +11,15 @@ const mockStore = {
   editingWorkflowId: null as string | null
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
-const { WorkflowItem } = await import('../src/renderer/components/project-sidebar/WorkflowItem')
-const { __resetConnectionsCacheForTests } = await import('../src/renderer/lib/use-connections')
+const { WorkflowItem } =
+  await import('../packages/web/src/renderer/components/project-sidebar/WorkflowItem')
+const { __resetConnectionsCacheForTests } =
+  await import('../packages/web/src/renderer/lib/use-connections')
 
 const PACK_PATH = 'M2 2h9v9z'
 const listConnections = vi.fn()

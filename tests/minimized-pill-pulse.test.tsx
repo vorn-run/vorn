@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { BrowserTabState } from '../src/renderer/stores/types'
+import type { BrowserTabState } from '../packages/web/src/renderer/stores/types'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { TerminalState } from '../src/renderer/stores/types'
-import type { AgentStatus } from '../src/shared/types'
+import type { TerminalState } from '../packages/web/src/renderer/stores/types'
+import type { AgentStatus } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/AgentIcon', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentIcon', () => ({
   AgentIcon: () => <div data-testid="agent-icon" />
 }))
 
@@ -18,7 +18,7 @@ let browserPanes = new Map<
   string,
   { tabs: BrowserTabState[]; activeTab: number; sessionId: string }
 >()
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       terminals: { get: () => terminal },
@@ -31,7 +31,7 @@ vi.mock('../src/renderer/stores', () => ({
   }
 }))
 
-import { MinimizedPill } from '../src/renderer/components/MinimizedPill'
+import { MinimizedPill } from '../packages/web/src/renderer/components/MinimizedPill'
 
 function term(status: AgentStatus): TerminalState {
   return {

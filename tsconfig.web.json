@@ -20,9 +20,9 @@
     }
   },
   "include": [
-    "src/renderer/**/*",
-    "src/renderer/**/*.json",
-    "src/shared/**/*",
+    "packages/web/src/renderer/**/*",
+    "packages/web/src/renderer/**/*.json",
+    "packages/web/src/shared/**/*",
     "packages/shared/src/**/*"
   ]
 }

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowDefinition } from '../src/shared/types'
+import type { WorkflowDefinition } from '../packages/web/src/shared/types'
 
 const mockStore = {
   setEditingWorkflowId: vi.fn(),
@@ -12,7 +12,7 @@ const mockStore = {
   editingWorkflowId: null as string | null
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
@@ -26,7 +26,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { WorkflowItem } = await import('../src/renderer/components/project-sidebar/WorkflowItem')
+const { WorkflowItem } =
+  await import('../packages/web/src/renderer/components/project-sidebar/WorkflowItem')
 
 function makeManual(): WorkflowDefinition {
   return {

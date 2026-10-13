@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
-import { useSessionScope } from '../src/renderer/hooks/useScopedSessionIds'
-import type { AppConfig, TerminalSession } from '../src/shared/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { useSessionScope } from '../packages/web/src/renderer/hooks/useScopedSessionIds'
+import type { AppConfig, TerminalSession } from '../packages/web/src/shared/types'
 
 const setSessionGroup = vi.fn(() => Promise.resolve())
 Object.defineProperty(window, 'api', {

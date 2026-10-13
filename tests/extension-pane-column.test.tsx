@@ -10,36 +10,36 @@ vi.hoisted(() => {
   })
 })
 
-vi.mock('../src/renderer/components/FilesCard', () => ({
+vi.mock('../packages/web/src/renderer/components/FilesCard', () => ({
   FilesCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`files-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/EditorCard', () => ({
+vi.mock('../packages/web/src/renderer/components/EditorCard', () => ({
   EditorCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`editor-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/BrowserCard', () => ({
+vi.mock('../packages/web/src/renderer/components/BrowserCard', () => ({
   BrowserCard: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={`browser-${sessionId}`} />
   )
 }))
-vi.mock('../src/renderer/components/DeviceCard', () => ({
+vi.mock('../packages/web/src/renderer/components/DeviceCard', () => ({
   DeviceCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`device-${sessionId}`} />
 }))
-vi.mock('../src/renderer/components/TerminalsCard', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalsCard', () => ({
   TerminalsCard: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={`terminals-${sessionId}`} />
   )
 }))
 // The pty behind a program pane is real; what matters here is that the pane
 // draws it from the id the host handed back, with no session to look up.
-vi.mock('../src/renderer/components/TerminalPane', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalPane', () => ({
   TerminalPane: ({ terminalId }: { terminalId: string }) => (
     <div data-testid={`terminal-pane-${terminalId}`} />
   )
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { PaneColumn } from '../src/renderer/components/PaneColumn'
-import { extensionPaneId } from '../src/renderer/lib/pane-id'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { PaneColumn } from '../packages/web/src/renderer/components/PaneColumn'
+import { extensionPaneId } from '../packages/web/src/renderer/lib/pane-id'
 import type { ExtensionOpenPane } from '../packages/shared/src/types'
 
 const closePane = vi.fn(async () => ({ closed: true }))

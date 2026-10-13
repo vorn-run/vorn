@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
-import { useVisibleTerminals } from '../src/renderer/hooks/useVisibleTerminals'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { useVisibleTerminals } from '../packages/web/src/renderer/hooks/useVisibleTerminals'
 
 const session = (id: string) =>
   ({

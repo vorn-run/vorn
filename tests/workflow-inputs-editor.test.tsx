@@ -3,10 +3,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import type { WorkflowInputDef } from '../src/shared/types'
+import type { WorkflowInputDef } from '../packages/web/src/shared/types'
 
 // Exposes the option list so type-change behavior can be driven directly.
-vi.mock('../src/renderer/components/SelectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/SelectPicker', () => ({
   SelectPicker: (props: Record<string, unknown>) => (
     <select
       data-testid="type-picker"
@@ -23,7 +23,7 @@ vi.mock('../src/renderer/components/SelectPicker', () => ({
 }))
 
 const { WorkflowInputsEditor } =
-  await import('../src/renderer/components/workflow-editor/panels/WorkflowInputsEditor')
+  await import('../packages/web/src/renderer/components/workflow-editor/panels/WorkflowInputsEditor')
 
 function setup(inputs: WorkflowInputDef[]) {
   const onChange = vi.fn()

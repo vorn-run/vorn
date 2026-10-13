@@ -5,11 +5,11 @@
   // suite and `yarn typecheck` stayed green.
   //
   // Its own project rather than an addition to `tsconfig.web.json`: tests reach
-  // into the renderer, main, mcp and shared -- several in one file -- and
+  // into the renderer, mcp and shared -- several in one file -- and
   // dragging those into a `composite` project the root references would put the
   // same files in two projects with conflicting `rootDir`s.
   //
-  // `src/renderer/env.d.ts` is in `include` deliberately. It declares
+  // `packages/web/src/renderer/env.d.ts` is in `include` deliberately. It declares
   // `Window.api` and references `vite/client` for the `*.css` and `*.svg?raw`
   // module declarations. Leaving it out roughly triples the error count, and
   // every one of the extra errors is phantom -- a property that does exist, on a
@@ -42,5 +42,5 @@
       "@vornrun/shared/*": ["./packages/shared/src/*"]
     }
   },
-  "include": ["tests/**/*", "bench/**/*", "src/renderer/env.d.ts"]
+  "include": ["tests/**/*", "bench/**/*", "packages/web/src/renderer/env.d.ts"]
 }

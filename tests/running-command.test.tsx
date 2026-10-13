@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
   listeners: new Set<() => void>()
 }))
 
-vi.mock('../src/renderer/lib/command-blocks', () => ({
+vi.mock('../packages/web/src/renderer/lib/command-blocks', () => ({
   getRunningBlock: () => state.running,
   onCommandBlocksChange: (_id: string, cb: () => void) => {
     state.listeners.add(cb)
@@ -17,7 +17,7 @@ vi.mock('../src/renderer/lib/command-blocks', () => ({
   formatDuration: (ms: number) => `${Math.round(ms / 1000)}s`
 }))
 
-import { RunningCommand } from '../src/renderer/components/RunningCommand'
+import { RunningCommand } from '../packages/web/src/renderer/components/RunningCommand'
 
 /**
  * A block only appears once its command has finished. While one runs there was

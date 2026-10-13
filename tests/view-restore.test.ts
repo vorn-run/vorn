@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useAppStore } from '../src/renderer/stores'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 const KEY = 'vorn:view'
 
@@ -58,7 +58,7 @@ describe('reading a stored view back', () => {
   it('survives a value that is not the shape it expects', async () => {
     for (const raw of ['{', '[]', 'null', '{"minimized":"term-1"}', '{"activeTabId":42}']) {
       localStorage.setItem(KEY, raw)
-      const { loadViewForTest } = await import('../src/renderer/stores/ui-slice')
+      const { loadViewForTest } = await import('../packages/web/src/renderer/stores/ui-slice')
       expect(() => loadViewForTest()).not.toThrow()
       expect(loadViewForTest().minimized).toEqual([])
       expect(loadViewForTest().activeTabId).toBeNull()
@@ -67,7 +67,7 @@ describe('reading a stored view back', () => {
 
   it('drops entries that are not usable ids', async () => {
     localStorage.setItem(KEY, JSON.stringify({ minimized: ['term-1', '', 7, null, 'term-2'] }))
-    const { loadViewForTest } = await import('../src/renderer/stores/ui-slice')
+    const { loadViewForTest } = await import('../packages/web/src/renderer/stores/ui-slice')
     expect(loadViewForTest().minimized).toEqual(['term-1', 'term-2'])
   })
 })

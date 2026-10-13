@@ -36,14 +36,14 @@ const mockStore = {
   setSidebarViewMode: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
 }))
 
 const { FlatSessionsSection } =
-  await import('../src/renderer/components/project-sidebar/FlatSessionsSection')
+  await import('../packages/web/src/renderer/components/project-sidebar/FlatSessionsSection')
 
 beforeEach(() => {
   mockStore.terminals.clear()

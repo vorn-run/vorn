@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { SessionGroupConfig } from '../src/shared/types'
+import type { SessionGroupConfig } from '../packages/web/src/shared/types'
 
 const mockStore = {
   moveSessionToGroup: vi.fn(),
@@ -16,20 +16,20 @@ const mockStore = {
   }
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
 const toastSuccess = vi.fn()
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: toastSuccess, error: vi.fn() }
 }))
 
 const { GroupContextMenu } =
-  await import('../src/renderer/components/project-sidebar/GroupContextMenu')
+  await import('../packages/web/src/renderer/components/project-sidebar/GroupContextMenu')
 const { SessionContextMenu } =
-  await import('../src/renderer/components/project-sidebar/SessionContextMenu')
+  await import('../packages/web/src/renderer/components/project-sidebar/SessionContextMenu')
 
 const group: SessionGroupConfig = {
   id: 'g1',

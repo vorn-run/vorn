@@ -8,9 +8,9 @@ Object.defineProperty(window, 'api', {
 })
 
 import { create } from 'zustand'
-import { createTerminalsSlice } from '../src/renderer/stores/terminals-slice'
-import type { TerminalsSlice } from '../src/renderer/stores/types'
-import { staleRev, takesCreated } from '../src/renderer/lib/session-rev'
+import { createTerminalsSlice } from '../packages/web/src/renderer/stores/terminals-slice'
+import type { TerminalsSlice } from '../packages/web/src/renderer/stores/types'
+import { staleRev, takesCreated } from '../packages/web/src/renderer/lib/session-rev'
 
 /**
  * One session heard twice: as the answer to the window's own create and as the

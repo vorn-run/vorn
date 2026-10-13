@@ -9,10 +9,10 @@ import type {
   CreateTaskFromItemConfig,
   SourceConnection,
   ConnectorManifest
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 // Zustand store stub: projects for CreateTaskFromItemNodeForm.
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       config: {
@@ -76,9 +76,9 @@ const CONN: SourceConnection = {
   createdAt: '2026-04-24T00:00:00Z'
 }
 
-import { CreateTaskFromItemNodeForm } from '../src/renderer/components/workflow-editor/panels/CreateTaskFromItemNodeForm'
-import { ConnectorPollTriggerForm } from '../src/renderer/components/workflow-editor/panels/ConnectorPollTriggerForm'
-import { CallConnectorActionNodeForm } from '../src/renderer/components/workflow-editor/panels/CallConnectorActionNodeForm'
+import { CreateTaskFromItemNodeForm } from '../packages/web/src/renderer/components/workflow-editor/panels/CreateTaskFromItemNodeForm'
+import { ConnectorPollTriggerForm } from '../packages/web/src/renderer/components/workflow-editor/panels/ConnectorPollTriggerForm'
+import { CallConnectorActionNodeForm } from '../packages/web/src/renderer/components/workflow-editor/panels/CallConnectorActionNodeForm'
 
 describe('CreateTaskFromItemNodeForm', () => {
   const baseConfig: CreateTaskFromItemConfig = {

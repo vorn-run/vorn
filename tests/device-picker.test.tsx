@@ -30,7 +30,7 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-import { DevicePicker } from '../src/renderer/components/DevicePicker'
+import { DevicePicker } from '../packages/web/src/renderer/components/DevicePicker'
 
 const DEVICES = [
   { udid: 'u1', name: 'iPhone 17', runtime: 'iOS 26.2', booted: true },

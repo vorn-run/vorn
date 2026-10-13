@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { AGENT_MCP_SETUPS } from '../src/renderer/lib/mcp-data'
+import { AGENT_MCP_SETUPS } from '../packages/web/src/renderer/lib/mcp-data'
 
 /**
  * The install instructions a person meets first.
@@ -36,7 +36,7 @@ vi.hoisted(() => {
 
 // Detection reaches out to the host, so pin it: these cases are about what the
 // step renders for a given set of agents, not about finding them.
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({
     status: { claude: true, opencode: true, copilot: false, codex: false, gemini: false },
     loading: false,
@@ -44,8 +44,8 @@ vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
   })
 }))
 
-import { OnboardingModal } from '../src/renderer/components/OnboardingModal'
-import { useAppStore } from '../src/renderer/stores'
+import { OnboardingModal } from '../packages/web/src/renderer/components/OnboardingModal'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 const claude = AGENT_MCP_SETUPS.find((s) => s.agentType === 'claude')!
 const opencode = AGENT_MCP_SETUPS.find((s) => s.agentType === 'opencode')!

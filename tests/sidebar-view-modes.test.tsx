@@ -14,13 +14,13 @@ const mockStore = {
   setSidebarViewMode: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
 const { ProjectsSectionToolbar } =
-  await import('../src/renderer/components/project-sidebar/ProjectsSectionToolbar')
+  await import('../packages/web/src/renderer/components/project-sidebar/ProjectsSectionToolbar')
 
 beforeEach(() => {
   vi.clearAllMocks()

@@ -13,15 +13,25 @@ vi.hoisted(() => {
 })
 
 // The tab body's own furniture, stubbed: this is about what the bar says in it.
-vi.mock('../src/renderer/components/TerminalPane', () => ({ TerminalPane: () => null }))
-vi.mock('../src/renderer/components/card/SessionComposer', () => ({ SessionComposer: () => null }))
-vi.mock('../src/renderer/components/PromptLauncher', () => ({ PromptLauncher: () => null }))
-vi.mock('../src/renderer/components/AppNavCluster', () => ({ AppNavCluster: () => null }))
-vi.mock('../src/renderer/components/GridContextMenu', () => ({ GridContextMenu: () => null }))
+vi.mock('../packages/web/src/renderer/components/TerminalPane', () => ({
+  TerminalPane: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/card/SessionComposer', () => ({
+  SessionComposer: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/PromptLauncher', () => ({
+  PromptLauncher: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/AppNavCluster', () => ({
+  AppNavCluster: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/GridContextMenu', () => ({
+  GridContextMenu: () => null
+}))
 
-import { useAppStore } from '../src/renderer/stores'
-import { CardStatusBar } from '../src/renderer/components/card/CardStatusBar'
-import { TabView } from '../src/renderer/components/TabView'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CardStatusBar } from '../packages/web/src/renderer/components/card/CardStatusBar'
+import { TabView } from '../packages/web/src/renderer/components/TabView'
 import type { ExtensionFooterReading } from '../packages/shared/src/types'
 
 const reading = (over: Partial<ExtensionFooterReading> = {}): ExtensionFooterReading => ({

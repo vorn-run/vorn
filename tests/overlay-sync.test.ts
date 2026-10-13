@@ -5,7 +5,7 @@ import {
   SAFETY_INTERVAL_MS,
   startOverlaySync,
   type OverlaySync
-} from '../src/renderer/lib/overlay-sync'
+} from '../packages/web/src/renderer/lib/overlay-sync'
 
 let frames: Array<() => void> = []
 let sync: OverlaySync | null = null

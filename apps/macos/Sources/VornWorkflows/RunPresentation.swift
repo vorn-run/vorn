@@ -1,7 +1,7 @@
 import Foundation
 import VornCore
 
-// Ports of src/renderer/lib/run-presentation.ts, format-time.ts and node-visuals.ts.
+// Ports of packages/web/src/renderer/lib/run-presentation.ts, format-time.ts and node-visuals.ts.
 
 /// Which filter a run falls under; a paused run is waiting, not running.
 public enum RunBucket: String, Sendable, CaseIterable {

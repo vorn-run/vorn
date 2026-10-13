@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { ConnectorItemContext } from '../src/shared/types'
+import type { ConnectorItemContext } from '../packages/web/src/shared/types'
 import {
   schedulerExecutionContext,
   webhookTriggerFromItem
-} from '../src/renderer/lib/workflow-helpers'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
 
 const webhookItem: ConnectorItemContext = {
   connectionId: 'webhook',

@@ -525,7 +525,7 @@ export function createApiShim(wsUrl: string) {
       rpc.on('session:created', callback as (p: unknown) => void),
 
     // ── Configuration ──
-    // See the note in src/preload/index.ts — the same two hooks, so a browser and a
+    // See the note in renderer/api.ts — the same two hooks, so a browser and a
     // desktop pointed at one server each keep their own view.
     loadConfig: async () =>
       loadedWithViewerSettings((await rpc.invoke('config:load')) as AppConfig),

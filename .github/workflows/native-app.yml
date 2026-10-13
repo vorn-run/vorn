@@ -1,8 +1,9 @@
-# Builds the native desktop app, vorn-app, in release with the vornd and
-# vorn-sessiond it starts when none is running, and packages it for each
-# platform with packages/core/scripts/package-native.mjs. The release workflow
-# calls it with the tag to upload the assets to; a pull request that changes
-# the packaging runs it to check every platform still packages.
+# Builds Vorn, the native desktop app (vorn-app), in release with the vornd,
+# vorn-sessiond and vorn it ships and the web client vornd serves, packages
+# it for each platform with packages/core/scripts/package-native.mjs, and
+# writes the release's update feeds with release-feeds.mjs. The release
+# workflow calls it with the tag to upload the assets to; a pull request that
+# changes the packaging runs it to check every platform still packages.
 name: Native app
 
 on:
@@ -17,6 +18,8 @@ on:
     paths:
       - '.github/workflows/native-app.yml'
       - 'packages/core/scripts/package-native.mjs'
+      - 'packages/core/scripts/release-feeds.mjs'
+      - 'packages/core/scripts/vorn.nsi'
 
 jobs:
   package:
@@ -45,9 +48,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Python setuptools
+        run: pip install setuptools
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install
+
+      # vornd serves it from resources/web/dist.
+      - name: Build the web client
+        run: yarn build:web
 
       # vornd's session engine parses with libghostty-vt, which needs Zig 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -85,7 +105,7 @@ jobs:
 
       - name: Build
         working-directory: packages/core
-        run: cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-app
+        run: cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-cli -p vorn-app
 
       # vorn-sessiond hosts Windows sessions in the ConPTY shipped beside it.
       - name: ConPTY
@@ -114,8 +134,20 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
           rm certificate.p12
 
+      # appimagetool runs extracted (APPIMAGE_EXTRACT_AND_RUN), so the runner needs no FUSE.
+      - name: appimagetool
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+
+      # Signed only when a code signing certificate is configured; unsigned otherwise.
       - name: Package
         env:
+          WIN_CERTIFICATE: ${{ secrets.WIN_CERTIFICATE }}
+          WIN_CERTIFICATE_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -125,10 +157,46 @@ jobs:
         if: always() && runner.os == 'macOS'
         run: security delete-keychain build.keychain || true
 
+      # The packaged app's server, helpers and CLI run.
+      - name: Packaged app runs
+        timeout-minutes: 10
+        run: |
+          dir=$(mktemp -d)
+          case "$RUNNER_OS" in
+            macOS) ditto -x -k dist-native/Vorn-*-mac.zip "$dir"; res="$dir/Vorn.app/Contents/Resources"; x= ;;
+            Windows)
+              # The installer itself, silently, as the updater runs it.
+              # MSYS2_ARG_CONV_EXCL: Git Bash would turn /S into a path.
+              MSYS2_ARG_CONV_EXCL="*" ./dist-native/Vorn-Setup-*.exe /S
+              inst="$(cygpath -u "$LOCALAPPDATA")/Programs/vorn"
+              test -f "$inst/Vorn.exe"
+              res="$inst/resources"; x=.exe ;;
+            Linux) dpkg-deb -x dist-native/vorn_*.deb "$dir"; res="$dir/opt/Vorn/resources"; x= ;;
+          esac
+          test -f "$res/web/dist/index.html"
+          # A file, not a pipe: on Windows the sessiond vornd starts inherits a pipe and holds it open.
+          "$res/vornd/vornd$x" --data-dir "$dir/data" --port 0 --exit-with-stdin < /dev/null > "$dir/vornd.out"
+          out=$(head -n 1 "$dir/vornd.out")
+          echo "$out"
+          case "$out" in
+            '{"port":'*) ;;
+            *) echo "ERROR: vornd did not say where it listens"; exit 1 ;;
+          esac
+          "$res/vornd/vorn-sessiond$x" --version
+          "$res/vornd/vorn$x" --version
+          if [ "$RUNNER_OS" = Windows ]; then
+            taskkill //F //IM vorn-sessiond.exe || true
+            MSYS2_ARG_CONV_EXCL="*" "$inst/Uninstall Vorn.exe" /S "_?=$(cygpath -w "$inst")"
+            test ! -e "$inst/Vorn.exe"
+            test ! -e "$inst/resources"
+          fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: vorn-native-${{ matrix.name }}
-          path: dist-native/Vorn-Native-*
+          path: |
+            dist-native/Vorn-*
+            dist-native/vorn_*
           if-no-files-found: error
 
       - name: Upload to release
@@ -136,4 +204,46 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" dist-native/Vorn-Native-* --clobber
+        run: gh release upload "$TAG" dist-native/Vorn-* dist-native/vorn_* --clobber
+
+  # The update feeds, from every platform's assets: the native app's, and the
+  # Electron updater's so the last Electron release updates onto this one.
+  feeds:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Sync version from tag
+        if: inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag }}
+        run: npm pkg set version="${TAG#v}"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: vorn-native-*
+          path: dist-native
+          merge-multiple: true
+
+      - name: Write the feeds
+        run: node packages/core/scripts/release-feeds.mjs --dir dist-native
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vorn-update-feeds
+          path: |
+            dist-native/vorn-update.json
+            dist-native/*.yml
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" dist-native/vorn-update.json dist-native/*.yml --clobber

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Terminal as Headless } from '@xterm/headless'
 import type { Terminal } from '@xterm/xterm'
-import { resizeInOrder } from '../src/renderer/lib/stream-resize'
+import { resizeInOrder } from '../packages/web/src/renderer/lib/stream-resize'
 
 /**
  * A resize from a session's record log lands between the output written for

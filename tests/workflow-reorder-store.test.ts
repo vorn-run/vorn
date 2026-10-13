@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-vi.mock('../src/renderer/lib/preferences', () => ({
+vi.mock('../packages/web/src/renderer/lib/preferences', () => ({
   loadGridSettings: () => ({}),
   loadSidebarSettings: () => ({}),
   loadFlexibleLayouts: () => ({})
@@ -11,7 +11,7 @@ const saveConfig = vi.fn()
   api: { saveConfig }
 }
 
-const { createUISlice } = await import('../src/renderer/stores/ui-slice')
+const { createUISlice } = await import('../packages/web/src/renderer/stores/ui-slice')
 
 interface MinimalState {
   config: {

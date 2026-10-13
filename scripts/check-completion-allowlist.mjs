@@ -17,7 +17,17 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ALLOWLIST = path.join(HERE, 'completion-allowlist.txt')
-const META = path.join(HERE, '..', 'src', 'renderer', 'lib', 'completion-index', 'meta.json')
+const META = path.join(
+  HERE,
+  '..',
+  'packages',
+  'web',
+  'src',
+  'renderer',
+  'lib',
+  'completion-index',
+  'meta.json'
+)
 
 const meta = JSON.parse(fs.readFileSync(META, 'utf8'))
 const actual = crypto.createHash('sha256').update(fs.readFileSync(ALLOWLIST)).digest('hex')

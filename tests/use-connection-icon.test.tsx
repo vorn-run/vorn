@@ -10,7 +10,7 @@ import {
   useConnectorLook,
   useInstalledPacks,
   __resetConnectionsCacheForTests
-} from '../src/renderer/lib/use-connections'
+} from '../packages/web/src/renderer/lib/use-connections'
 
 const listConnections = vi.fn()
 const listConnectorPacks = vi.fn()

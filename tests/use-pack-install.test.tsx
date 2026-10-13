@@ -2,9 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { usePackInstall } from '../src/renderer/lib/use-pack-install'
-import { matchesListing, type ConnectorListing } from '../src/renderer/lib/connector-browse'
-import type { ConnectorPackSummary } from '../src/shared/types'
+import { usePackInstall } from '../packages/web/src/renderer/lib/use-pack-install'
+import {
+  matchesListing,
+  type ConnectorListing
+} from '../packages/web/src/renderer/lib/connector-browse'
+import type { ConnectorPackSummary } from '../packages/web/src/shared/types'
 
 const inspectConnectorPack = vi.fn()
 const installConnectorPack = vi.fn()

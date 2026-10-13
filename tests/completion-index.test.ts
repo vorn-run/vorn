@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { generatedOutlineSource, staticOutlineSource } from '../src/renderer/lib/completion-index'
+import {
+  generatedOutlineSource,
+  staticOutlineSource
+} from '../packages/web/src/renderer/lib/completion-index'
 import {
   getCompletions,
   type CompletionSources,
   type Outline
-} from '../src/renderer/lib/completions'
+} from '../packages/web/src/renderer/lib/completions'
 
 function sources(over: Partial<CompletionSources> = {}): CompletionSources {
   return {

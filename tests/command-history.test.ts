@@ -25,7 +25,7 @@ import {
   searchHistory,
   ghostSuggestion,
   resetCommandHistoryCache
-} from '../src/renderer/lib/command-history'
+} from '../packages/web/src/renderer/lib/command-history'
 
 describe('command-history', () => {
   beforeEach(() => {

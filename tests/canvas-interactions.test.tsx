@@ -17,7 +17,7 @@ vi.hoisted(() => {
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = NoopResizeObserver
 })
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../packages/web/src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => undefined,
   useConnectionIconFor: () => undefined
@@ -26,7 +26,7 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
 import {
   WorkflowCanvas,
   InsertAnchor
-} from '../src/renderer/components/workflow-editor/WorkflowCanvas'
+} from '../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)

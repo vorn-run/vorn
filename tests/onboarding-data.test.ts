@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ONBOARDING_STEPS } from '../src/renderer/lib/onboarding-data'
+import { ONBOARDING_STEPS } from '../packages/web/src/renderer/lib/onboarding-data'
 
 describe('ONBOARDING_STEPS', () => {
   it('has 7 steps', () => {

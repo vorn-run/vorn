@@ -2,8 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { AgentPicker } from '../src/renderer/components/AgentPicker'
-import type { AiAgentType } from '../src/shared/types'
+import { AgentPicker } from '../packages/web/src/renderer/components/AgentPicker'
+import type { AiAgentType } from '../packages/web/src/shared/types'
 
 vi.mock('react-dom', async () => {
   const actual = await vi.importActual<typeof import('react-dom')>('react-dom')

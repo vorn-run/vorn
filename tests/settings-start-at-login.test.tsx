@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { AppConfig } from '../src/shared/types'
+import type { AppConfig } from '../packages/web/src/shared/types'
 
 const config = (defaults: Partial<AppConfig['defaults']> = {}): AppConfig =>
   ({
@@ -12,13 +12,13 @@ const config = (defaults: Partial<AppConfig['defaults']> = {}): AppConfig =>
   }) as unknown as AppConfig
 
 const mockStore = { config: config(), setConfig: vi.fn() }
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
 const platform = { isElectron: true }
-vi.mock('../src/renderer/lib/platform', () => ({
+vi.mock('../packages/web/src/renderer/lib/platform', () => ({
   get isElectron() {
     return platform.isElectron
   },
@@ -27,14 +27,14 @@ vi.mock('../src/renderer/lib/platform', () => ({
   MOD: 'Cmd'
 }))
 
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({ status: {} })
 }))
-vi.mock('../src/renderer/components/settings/ShellPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/settings/ShellPicker', () => ({
   ShellPicker: () => <div />
 }))
 
-import { GeneralSettings } from '../src/renderer/components/settings/GeneralSettings'
+import { GeneralSettings } from '../packages/web/src/renderer/components/settings/GeneralSettings'
 
 const saveConfig = vi.fn()
 beforeEach(() => {

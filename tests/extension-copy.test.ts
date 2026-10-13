@@ -6,8 +6,8 @@ import {
   describePaneKind,
   notAsked,
   permissionRows
-} from '../src/renderer/lib/extension-copy'
-import type { ExtensionPermission } from '../src/shared/types'
+} from '../packages/web/src/renderer/lib/extension-copy'
+import type { ExtensionPermission } from '../packages/web/src/shared/types'
 
 describe('what an extension asks for', () => {
   it('groups a grant under the verb it answers to', () => {

@@ -2,39 +2,55 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { TaskConfig, AppConfig } from '../src/shared/types'
+import type { TaskConfig, AppConfig } from '../packages/web/src/shared/types'
 
 // Heavy / unrelated children are mocked so the test focuses on the
 // refactored state-init machinery (form key, related-runs reset, image-path
 // effect, diff-key reset).
 
-vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
+vi.mock('../packages/web/src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
   RichMarkdownEditor: ({ value }: { value: string }) => (
     <textarea data-testid="rich-editor" defaultValue={value} />
   )
 }))
-vi.mock('../src/renderer/components/AgentPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/AgentPicker', () => ({
   AgentPicker: () => <div data-testid="agent-picker" />
 }))
-vi.mock('../src/renderer/components/DiffSidebar', () => ({
+vi.mock('../packages/web/src/renderer/components/DiffSidebar', () => ({
   DiffFileList: () => null,
   DiffContent: () => null
 }))
-vi.mock('../src/renderer/components/CommitDialog', () => ({ CommitDialog: () => null }))
-vi.mock('../src/renderer/components/StatusPicker', () => ({ StatusPicker: () => null }))
-vi.mock('../src/renderer/components/ProjectPicker', () => ({ ProjectPicker: () => null }))
-vi.mock('../src/renderer/components/ConnectorIcon', () => ({ ConnectorIcon: () => null }))
-vi.mock('../src/renderer/components/workflow-editor/RunEntry', () => ({ RunEntry: () => null }))
-vi.mock('../src/renderer/components/LogReplayModal', () => ({ LogReplayModal: () => null }))
-vi.mock('../src/renderer/components/ConfirmPopover', () => ({ ConfirmPopover: () => null }))
-vi.mock('../src/renderer/components/Toast', () => ({ toast: { success: vi.fn(), info: vi.fn() } }))
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/components/CommitDialog', () => ({
+  CommitDialog: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/StatusPicker', () => ({
+  StatusPicker: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
+  ProjectPicker: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/ConnectorIcon', () => ({
+  ConnectorIcon: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/workflow-editor/RunEntry', () => ({
+  RunEntry: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/LogReplayModal', () => ({
+  LogReplayModal: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/ConfirmPopover', () => ({
+  ConfirmPopover: () => null
+}))
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
+  toast: { success: vi.fn(), info: vi.fn() }
+}))
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({ status: {} })
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { TaskDetailPanel } from '../src/renderer/components/TaskDetailPanel'
-import { TASK_TEMPLATE } from '../src/renderer/components/MarkdownEditor'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { TaskDetailPanel } from '../packages/web/src/renderer/components/TaskDetailPanel'
+import { TASK_TEMPLATE } from '../packages/web/src/renderer/components/MarkdownEditor'
 
 const initialState = useAppStore.getState()
 

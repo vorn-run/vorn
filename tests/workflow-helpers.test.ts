@@ -4,7 +4,7 @@ import type {
   WorkflowNode,
   WorkflowEdge,
   TriggerConfig
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
 // Stub only crypto.randomUUID for deterministic node IDs, preserving the rest
 const originalCrypto = globalThis.crypto
@@ -41,7 +41,7 @@ import {
   computeFlowLayout,
   getWorkflowInputs,
   needsRunPrompt
-} from '../src/renderer/lib/workflow-helpers'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
 
 beforeEach(() => {
   uuidCounter = 0

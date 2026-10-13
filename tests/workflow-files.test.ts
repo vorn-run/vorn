@@ -8,7 +8,7 @@ import {
   workflowFileName,
   MAX_WORKFLOW_FILE_BYTES,
   WORKFLOW_FILE_SUFFIX
-} from '../src/renderer/lib/workflow-files'
+} from '../packages/web/src/renderer/lib/workflow-files'
 import type { SourceConnection, WorkflowDefinition } from '../packages/shared/src/types'
 
 const PROJECT = { name: 'Novum', path: '/Users/someone/dev/novum' }

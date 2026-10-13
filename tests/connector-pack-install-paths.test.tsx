@@ -3,14 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { SdkConnectorForm } from '../src/renderer/components/settings/SdkConnectorForm'
+import { SdkConnectorForm } from '../packages/web/src/renderer/components/settings/SdkConnectorForm'
 import type {
   ConnectorCatalogItem,
   InstalledConnectorPack,
   SdkConnectorManifest
-} from '../src/shared/types'
+} from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({ config: { projects: [{ name: 'vorn', path: '/repo' }] } })
 }))

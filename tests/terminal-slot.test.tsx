@@ -9,11 +9,11 @@ const hoisted = vi.hoisted(() => ({
   focusTerminal: vi.fn()
 }))
 
-vi.mock('../src/renderer/lib/terminal-registry', () => hoisted)
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => hoisted)
 
 const { registerSlot, unregisterSlot, focusTerminal } = hoisted
 
-import { TerminalSlot } from '../src/renderer/components/TerminalSlot'
+import { TerminalSlot } from '../packages/web/src/renderer/components/TerminalSlot'
 
 describe('TerminalSlot', () => {
   let rafCallbacks: Array<() => void> = []

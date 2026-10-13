@@ -3,12 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { FocusedNavHint } from '../src/renderer/components/card/FocusedNavHint'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { FocusedNavHint } from '../packages/web/src/renderer/components/card/FocusedNavHint'
 
 beforeEach(() => {
   useAppStore.setState({

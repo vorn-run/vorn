@@ -5,10 +5,10 @@ import {
   TONE_DOT_MOVING,
   TONE_TEXT,
   type StatusTone
-} from '../src/renderer/lib/status-tone'
-import { STATUS_TONE } from '../src/renderer/lib/status-colors'
-import { WORKFLOW_STATUS_TONE } from '../src/renderer/lib/workflow-status'
-import { TASK_STATUS_TONE } from '../src/renderer/lib/task-status'
+} from '../packages/web/src/renderer/lib/status-tone'
+import { STATUS_TONE } from '../packages/web/src/renderer/lib/status-colors'
+import { WORKFLOW_STATUS_TONE } from '../packages/web/src/renderer/lib/workflow-status'
+import { TASK_STATUS_TONE } from '../packages/web/src/renderer/lib/task-status'
 
 const EVERY_TONE: StatusTone[] = ['blocked', 'broken', 'live', 'settled', 'idle']
 

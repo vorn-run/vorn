@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
+import { WORKFLOW_STATUS_DOT } from '../packages/web/src/renderer/lib/workflow-status'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ApprovalNode } from '../src/renderer/components/workflow-editor/nodes/ApprovalNode'
+import { ApprovalNode } from '../packages/web/src/renderer/components/workflow-editor/nodes/ApprovalNode'
 
 describe('ApprovalNode', () => {
   it('renders label and default subtitle when no timeout', () => {

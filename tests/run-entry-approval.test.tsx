@@ -6,12 +6,12 @@ import '@testing-library/jest-dom/vitest'
 // A gate is answered by asking the server; the entry only makes the request.
 const resolveWorkflowGate = vi.fn()
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-import { RunEntry } from '../src/renderer/components/workflow-editor/RunEntry'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
+import { RunEntry } from '../packages/web/src/renderer/components/workflow-editor/RunEntry'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
 
 function makeExec(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
   return {

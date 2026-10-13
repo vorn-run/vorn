@@ -5,7 +5,7 @@ import {
   writeIntentDraft,
   forgetIntentDraft,
   pruneIntentDrafts
-} from '../src/renderer/lib/intent-drafts'
+} from '../packages/web/src/renderer/lib/intent-drafts'
 
 beforeEach(() => localStorage.clear())
 

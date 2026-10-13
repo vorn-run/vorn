@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { FileEntry } from '../src/shared/types'
+import type { FileEntry } from '../packages/web/src/shared/types'
 
 // Replace Node's experimental localStorage (which needs a file path)
 // with an in-memory shim so the component's getItem/setItem work in tests.
@@ -55,8 +55,8 @@ Object.defineProperty(window, 'api', {
   configurable: true
 })
 
-const { useAppStore } = await import('../src/renderer/stores')
-const { FilesCard } = await import('../src/renderer/components/FilesCard')
+const { useAppStore } = await import('../packages/web/src/renderer/stores')
+const { FilesCard } = await import('../packages/web/src/renderer/components/FilesCard')
 const { truncationMarker } = await import('../packages/shared/src/string-utils')
 
 const ROOT_ENTRIES: FileEntry[] = [

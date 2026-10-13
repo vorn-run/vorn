@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { LoopConfigForm } from '../src/renderer/components/workflow-editor/panels/LoopConfigForm'
-import { ConnectorButton } from '../src/renderer/components/workflow-editor/nodes/AddStepNode'
+import { LoopConfigForm } from '../packages/web/src/renderer/components/workflow-editor/panels/LoopConfigForm'
+import { ConnectorButton } from '../packages/web/src/renderer/components/workflow-editor/nodes/AddStepNode'
 import type { LoopConfig } from '../packages/shared/src/types'
 
 afterEach(cleanup)

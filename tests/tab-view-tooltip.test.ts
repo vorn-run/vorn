@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTooltip } from '../src/renderer/lib/tab-tooltip'
+import { buildTooltip } from '../packages/web/src/renderer/lib/tab-tooltip'
 
 describe('buildTooltip (TabView tab hover)', () => {
   it('contains display name and status header', () => {

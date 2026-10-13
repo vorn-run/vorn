@@ -2,21 +2,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ProjectConfig } from '../src/shared/types'
+import type { ProjectConfig } from '../packages/web/src/shared/types'
 
 const mockStore = {
   activeProject: null as string | null,
   setActiveProject: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
 }))
 
 const { TasksProjectsSection } =
-  await import('../src/renderer/components/project-sidebar/TasksProjectsSection')
+  await import('../packages/web/src/renderer/components/project-sidebar/TasksProjectsSection')
 
 function makeProject(name: string): ProjectConfig {
   return {

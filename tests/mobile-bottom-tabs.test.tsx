@@ -10,11 +10,12 @@ const mockStore = {
   config: { defaults: { mainViewMode: 'sessions' as const } }
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (s: unknown) => unknown) => (selector ? selector(mockStore) : mockStore)
 }))
 
-const { MobileBottomTabs } = await import('../src/renderer/components/MobileBottomTabs')
+const { MobileBottomTabs } =
+  await import('../packages/web/src/renderer/components/MobileBottomTabs')
 
 beforeEach(() => {
   mockStore.setMainViewMode.mockReset()

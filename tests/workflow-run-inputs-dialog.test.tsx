@@ -17,7 +17,7 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-vi.mock('../src/renderer/components/ProjectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => (
     <button
       data-testid="project-picker"
@@ -36,9 +36,9 @@ beforeEach(() => {
 })
 // Runs start in the server; these check what the window asks for.
 
-import { useAppStore } from '../src/renderer/stores'
-import { SourcePromptDialog } from '../src/renderer/components/SourcePromptDialog'
-import type { WorkflowDefinition, WorkflowInputDef } from '../src/shared/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { SourcePromptDialog } from '../packages/web/src/renderer/components/SourcePromptDialog'
+import type { WorkflowDefinition, WorkflowInputDef } from '../packages/web/src/shared/types'
 
 function makeWorkflow(
   inputs: WorkflowInputDef[],

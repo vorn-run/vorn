@@ -166,7 +166,7 @@ import {
   setTerminalSizeLock,
   getPersistentWrapper,
   unregisterSlot
-} from '../src/renderer/lib/terminal-registry'
+} from '../packages/web/src/renderer/lib/terminal-registry'
 import { encodeTerminalFrameV2 } from '../packages/shared/src/terminal-frame'
 
 /**

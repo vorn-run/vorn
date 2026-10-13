@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { ConnectorKey } from '../src/shared/types'
-import { KeysSettings } from '../src/renderer/components/settings/KeysSettings'
-import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
+import type { ConnectorKey } from '../packages/web/src/shared/types'
+import { KeysSettings } from '../packages/web/src/renderer/components/settings/KeysSettings'
+import { __resetConnectionsCacheForTests } from '../packages/web/src/renderer/lib/use-connections'
 
 const PROFILE: ConnectorKey = {
   connectionId: 'conn-1',

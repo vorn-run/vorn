@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { compareTerminalIds } from '../src/renderer/hooks/useVisibleTerminals'
-import type { TerminalState } from '../src/renderer/stores/types'
+import { compareTerminalIds } from '../packages/web/src/renderer/hooks/useVisibleTerminals'
+import type { TerminalState } from '../packages/web/src/renderer/stores/types'
 
 function termState(createdAt: number, lastOutput: number): TerminalState {
   return {

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
-import { shouldShowDeviceButton, isSelectable } from '../src/renderer/lib/device-affordance'
-import type { DeviceInfo } from '../src/shared/types'
+import {
+  shouldShowDeviceButton,
+  isSelectable
+} from '../packages/web/src/renderer/lib/device-affordance'
+import type { DeviceInfo } from '../packages/web/src/shared/types'
 
 const EXPO = { isMobile: true, framework: 'expo' as const, needsDevClient: true }
 const WEB = { isMobile: false, framework: null, needsDevClient: false }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { AGENT_MCP_SETUPS, VORN_PLUGIN_REPO } from '../src/renderer/lib/mcp-data'
-import { AGENT_LIST } from '../src/renderer/lib/agent-definitions'
+import { AGENT_MCP_SETUPS, VORN_PLUGIN_REPO } from '../packages/web/src/renderer/lib/mcp-data'
+import { AGENT_LIST } from '../packages/web/src/renderer/lib/agent-definitions'
 
 /**
  * What a person is told to type.

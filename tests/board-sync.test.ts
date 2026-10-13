@@ -18,9 +18,9 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { syncBoard } from '../src/renderer/lib/board-sync'
-import { showEndedSession } from '../src/renderer/lib/session-resume'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { syncBoard } from '../packages/web/src/renderer/lib/board-sync'
+import { showEndedSession } from '../packages/web/src/renderer/lib/session-resume'
 
 /**
  * Making the board agree with what the server actually has.
@@ -334,8 +334,8 @@ describe('a machine that restarted', () => {
 
 // ── the server hears about sessions coming back ──────────────────────────
 
-import { reportWarmAttach, resetRestoredIds } from '../src/renderer/lib/board-sync'
-import { resumeEndedSession } from '../src/renderer/lib/session-resume'
+import { reportWarmAttach, resetRestoredIds } from '../packages/web/src/renderer/lib/board-sync'
+import { resumeEndedSession } from '../packages/web/src/renderer/lib/session-resume'
 
 describe('what the server is told about a restore', () => {
   beforeEach(() => {

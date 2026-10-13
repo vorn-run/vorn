@@ -4,81 +4,81 @@ import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 
-vi.mock('../src/renderer/components/TerminalSlot', () => ({
+vi.mock('../packages/web/src/renderer/components/TerminalSlot', () => ({
   TerminalSlot: () => <div data-testid="terminal-instance" />
 }))
-vi.mock('../src/renderer/components/PromptLauncher', () => ({
+vi.mock('../packages/web/src/renderer/components/PromptLauncher', () => ({
   PromptLauncher: () => null
 }))
-vi.mock('../src/renderer/components/CardContextMenu', () => ({
+vi.mock('../packages/web/src/renderer/components/CardContextMenu', () => ({
   CardContextMenu: () => null
 }))
-vi.mock('../src/renderer/components/BackgroundTray', () => ({
+vi.mock('../packages/web/src/renderer/components/BackgroundTray', () => ({
   BackgroundTray: () => null
 }))
-vi.mock('../src/renderer/components/MobileFontSizeControl', () => ({
+vi.mock('../packages/web/src/renderer/components/MobileFontSizeControl', () => ({
   MobileFontSizeControl: () => null
 }))
-vi.mock('../src/renderer/components/MobileTerminalKeybar', () => ({
+vi.mock('../packages/web/src/renderer/components/MobileTerminalKeybar', () => ({
   MobileTerminalKeybar: () => null
 }))
-vi.mock('../src/renderer/components/GitChangesIndicator', () => ({
+vi.mock('../packages/web/src/renderer/components/GitChangesIndicator', () => ({
   GitChangesIndicator: () => <div data-testid="git-changes" />,
   BrowseFilesButton: () => <div data-testid="browse-files" />
 }))
-vi.mock('../src/renderer/components/GridContextMenu', () => ({
+vi.mock('../packages/web/src/renderer/components/GridContextMenu', () => ({
   GridContextMenu: () => null
 }))
-vi.mock('../src/renderer/components/GridToolbar', () => ({
+vi.mock('../packages/web/src/renderer/components/GridToolbar', () => ({
   GridToolbar: () => <div data-testid="grid-toolbar" />
 }))
-vi.mock('../src/renderer/components/WindowControls', () => ({
+vi.mock('../packages/web/src/renderer/components/WindowControls', () => ({
   WindowControls: () => <div data-testid="window-controls" />
 }))
-vi.mock('../src/renderer/components/SidebarToggleButton', () => ({
+vi.mock('../packages/web/src/renderer/components/SidebarToggleButton', () => ({
   SidebarToggleButton: () => <button data-testid="sidebar-toggle">sidebar</button>
 }))
-vi.mock('../src/renderer/components/MainViewPills', () => ({
+vi.mock('../packages/web/src/renderer/components/MainViewPills', () => ({
   MainViewPills: () => <div data-testid="main-view-pills" />
 }))
-vi.mock('../src/renderer/components/RecentSessionsButton', () => ({
+vi.mock('../packages/web/src/renderer/components/RecentSessionsButton', () => ({
   RecentSessionsButton: () => <button data-testid="recent-sessions">recent</button>
 }))
 let mockIsMobile = false
-vi.mock('../src/renderer/hooks/useIsMobile', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useIsMobile', () => ({
   useIsMobile: () => mockIsMobile
 }))
-vi.mock('../src/renderer/hooks/useTerminalScrollButton', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useTerminalScrollButton', () => ({
   useTerminalScrollButton: () => ({ showScrollBtn: false, handleScrollToBottom: vi.fn() })
 }))
-vi.mock('../src/renderer/hooks/useTerminalPinchZoom', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useTerminalPinchZoom', () => ({
   useTerminalPinchZoom: vi.fn()
 }))
 let mockOrderedIds = ['term-1']
 let mockMinimizedIds: string[] = []
-vi.mock('../src/renderer/hooks/useVisibleTerminals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useVisibleTerminals', () => ({
   useVisibleTerminals: () => ({ orderedIds: mockOrderedIds, minimizedIds: mockMinimizedIds }),
   compareTerminalIds: (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 }))
 let mockFilteredHeadless: unknown[] = []
-vi.mock('../src/renderer/hooks/useFilteredHeadless', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useFilteredHeadless', () => ({
   useFilteredHeadless: () => mockFilteredHeadless
 }))
-vi.mock('../src/renderer/lib/terminal-close', () => ({
+vi.mock('../packages/web/src/renderer/lib/terminal-close', () => ({
   closeTerminalSession: vi.fn()
 }))
-vi.mock('../src/renderer/lib/session-utils', () => ({
+vi.mock('../packages/web/src/renderer/lib/session-utils', () => ({
   resolveActiveProject: () => null,
   getDisplayPathBasename: (p: string) => p.split('/').filter(Boolean).pop(),
   launchAgentFromShell: vi.fn()
 }))
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>
 }))
-vi.mock('../src/renderer/components/ConfirmPopover', () => ({
+vi.mock('../packages/web/src/renderer/components/ConfirmPopover', () => ({
   // Pass-through that also fires onConfirm whenever the wrapped trigger is clicked —
   // this lets tests exercise the handler (line 454 of TabView) without driving
   // the full confirm-popover UI.
@@ -115,10 +115,10 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-import { useAppStore } from '../src/renderer/stores'
-import { CardStatusBar } from '../src/renderer/components/card/CardStatusBar'
-import { TabView } from '../src/renderer/components/TabView'
-import { FocusedTerminal } from '../src/renderer/components/FocusedTerminal'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { CardStatusBar } from '../packages/web/src/renderer/components/card/CardStatusBar'
+import { TabView } from '../packages/web/src/renderer/components/TabView'
+import { FocusedTerminal } from '../packages/web/src/renderer/components/FocusedTerminal'
 
 const mockTerminal = {
   id: 'term-1',
@@ -338,7 +338,7 @@ describe('TabView renders CardStatusBar below the active terminal', () => {
   })
 
   it('confirming close on the close-session popover closes the terminal session', async () => {
-    const { closeTerminalSession } = await import('../src/renderer/lib/terminal-close')
+    const { closeTerminalSession } = await import('../packages/web/src/renderer/lib/terminal-close')
     render(<TabView />)
     const closeBtn = screen.getByRole('button', { name: /Close session/ })
     // The ConfirmPopover mock in this file propagates click to its onConfirm,

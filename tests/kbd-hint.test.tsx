@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/keyboard-shortcuts', () => ({
+vi.mock('../packages/web/src/renderer/lib/keyboard-shortcuts', () => ({
   getShortcut: (id: string) => {
     const map: Record<string, { display: string }> = {
       'new-session': { display: '\u2318N' },
@@ -13,7 +13,7 @@ vi.mock('../src/renderer/lib/keyboard-shortcuts', () => ({
   }
 }))
 
-import { KbdHint } from '../src/renderer/components/KbdHint'
+import { KbdHint } from '../packages/web/src/renderer/components/KbdHint'
 
 describe('KbdHint', () => {
   it('renders display text for a known shortcut', () => {

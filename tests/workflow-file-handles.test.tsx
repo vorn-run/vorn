@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { pickWorkflowFile, readDroppedWorkflowFile } from '../src/renderer/lib/workflow-files'
+import {
+  pickWorkflowFile,
+  readDroppedWorkflowFile
+} from '../packages/web/src/renderer/lib/workflow-files'
 
 const CONTENTS = '{"version":1,"slug":"x","name":"X","nodes":[],"edges":[]}'
 

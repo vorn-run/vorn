@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { facesRestart, updateCostLine } from '../src/renderer/lib/update-cost'
+import { facesRestart, updateCostLine } from '../packages/web/src/renderer/lib/update-cost'
 
 describe('what restarting for an update costs', () => {
   it('says nothing when there is nothing to lose', () => {

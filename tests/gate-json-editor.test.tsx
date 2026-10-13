@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { NodeExecutionState } from '../src/shared/types'
+import type { NodeExecutionState } from '../packages/web/src/shared/types'
 
 // Stub shiki so the source view's highlighter resolves without WASM in jsdom.
 vi.mock('shiki', () => ({
@@ -22,7 +22,8 @@ beforeEach(() => {
   ;(window as unknown as { api: unknown }).api = { resolveWorkflowGate }
 })
 
-const { GateActions } = await import('../src/renderer/components/workflow-runs/GateActions')
+const { GateActions } =
+  await import('../packages/web/src/renderer/components/workflow-runs/GateActions')
 
 const FINDINGS = [
   { id: 1, title: 'Leaky pool', done: false },

@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { ShellPicker } from '../src/renderer/components/settings/ShellPicker'
-import type { InstalledShell } from '../src/shared/types'
+import { ShellPicker } from '../packages/web/src/renderer/components/settings/ShellPicker'
+import type { InstalledShell } from '../packages/web/src/shared/types'
 
 /**
  * Choosing a shell used to be a free-text path, which only helps someone who

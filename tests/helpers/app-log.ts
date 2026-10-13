@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** Where electron-log puts the app's `main.log` for a given home directory. */
+/** Where the desktop app's `main.log` lives for a given home directory. */
 export function appLogFiles(home: string, env: NodeJS.ProcessEnv = process.env): string[] {
   const files = ['Vorn', 'vorn'].map((name) => {
     if (process.platform === 'darwin') return path.join(home, 'Library', 'Logs', name, 'main.log')

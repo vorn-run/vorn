@@ -3,10 +3,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
-import { StatusBadge } from '../src/renderer/components/StatusBadge'
-import type { AgentStatus } from '../src/shared/types'
+import { StatusBadge } from '../packages/web/src/renderer/components/StatusBadge'
+import type { AgentStatus } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children, label }: { children: ReactNode; label: string }) => (
     <span data-testid="tooltip" data-label={label}>
       {children}

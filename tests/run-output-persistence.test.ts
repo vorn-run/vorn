@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inlineLogTail } from '../src/renderer/components/workflow-editor/node-visuals'
+import { inlineLogTail } from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
 
 describe('inlineLogTail', () => {
   it('returns a short log unchanged', () => {

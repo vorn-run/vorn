@@ -3,13 +3,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import { NodeShell, NodeFooter } from '../src/renderer/components/workflow-editor/nodes/NodeShell'
+import {
+  NodeShell,
+  NodeFooter
+} from '../packages/web/src/renderer/components/workflow-editor/nodes/NodeShell'
 import {
   NODE_SELECTED,
   NODE_UNSELECTED,
   truncate
-} from '../src/renderer/components/workflow-editor/node-visuals'
-import { WORKFLOW_STATUS_DOT_PULSE } from '../src/renderer/lib/workflow-status'
+} from '../packages/web/src/renderer/components/workflow-editor/node-visuals'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../packages/web/src/renderer/lib/workflow-status'
 
 const noop = (): void => {}
 const base = { icon: <span data-testid="icon" />, label: 'A step', subtitle: 'does a thing' }

@@ -18,7 +18,7 @@ vi.hoisted(() => {
   })
 })
 
-vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useAgentInstallStatus', () => ({
   useAgentInstallStatus: () => ({
     claude: true,
     copilot: true,
@@ -28,9 +28,9 @@ vi.mock('../src/renderer/hooks/useAgentInstallStatus', () => ({
   })
 }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { LaunchAgentConfigForm } from '../src/renderer/components/workflow-editor/panels/LaunchAgentConfigForm'
-import type { LaunchAgentConfig } from '../src/shared/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { LaunchAgentConfigForm } from '../packages/web/src/renderer/components/workflow-editor/panels/LaunchAgentConfigForm'
+import type { LaunchAgentConfig } from '../packages/web/src/shared/types'
 
 /**
  * The per-step timeout. Without a bound, a step whose agent never exits holds

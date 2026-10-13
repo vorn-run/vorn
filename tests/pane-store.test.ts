@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
-import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
-import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { activeBrowserUrl, isPromotedPane } from '../packages/web/src/renderer/stores/types'
+import { parsePersistedBrowsers } from '../packages/web/src/renderer/stores/ui-slice'
 import type { DeviceClaimFailure } from '../packages/shared/src/types'
-import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
+import { DEVICE_SPLIT_RATIO } from '../packages/web/src/renderer/lib/split-ratio'
 
 /** The page a session's browser is showing, i.e. its active tab. */
 const browserUrl = (id: string): string | null =>
@@ -112,8 +112,9 @@ describe('pane store actions', () => {
   })
 
   it('keeps an edited preview tab rather than replacing it under its buffer', async () => {
-    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
-    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const { dirtyRefFor, clearDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../packages/web/src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
     act(() => s().openFileTab('t1', '/p/a.ts'))
     dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
@@ -151,8 +152,9 @@ describe('pane store actions', () => {
   })
 
   it('closes every tab but the unsaved ones', async () => {
-    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
-    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const { dirtyRefFor, clearDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../packages/web/src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
     act(() => {
       for (const f of ['/p/a.ts', '/p/b.ts', '/p/c.ts']) s().openFileTab('t1', f, { pin: true })
@@ -165,8 +167,9 @@ describe('pane store actions', () => {
   })
 
   it('asks before a toggle closes a pane holding unsaved tabs', async () => {
-    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
-    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const { dirtyRefFor, clearDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../packages/web/src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
     act(() => s().openFileTab('t1', '/p/a.ts'))
     dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
@@ -208,8 +211,9 @@ describe('pane store actions', () => {
   })
 
   it("clears a tab's dirty flag when its session closes", async () => {
-    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
-    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const { dirtyRefFor, isEditorDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../packages/web/src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
     act(() => s().openFileTab('t1', '/p/a.ts'))
     dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
@@ -345,7 +349,7 @@ describe('pane store actions', () => {
   })
 
   it("carries a card's owner through a persistence round trip", async () => {
-    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedEditors } = await import('../packages/web/src/renderer/stores/ui-slice')
     // The owner is the only thing that makes an entry a card. Lose it and the
     // record reads back as self-owned: it stops being a card, vanishes from the
     // grid, and the next reconcile deletes it outright because `card:t1:0` is
@@ -361,7 +365,7 @@ describe('pane store actions', () => {
   })
 
   it('reads an editor persisted by an older build that stored a bare path', async () => {
-    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedEditors } = await import('../packages/web/src/renderer/stores/ui-slice')
     // Owned by its key, which is what a session-keyed entry always meant — so
     // upgrading neither loses the open file nor mistakes it for a card.
     const panes = parsePersistedEditors({ t1: '/p/legacy.ts' })
@@ -370,7 +374,7 @@ describe('pane store actions', () => {
 
   it('reads a Files pane saved as a bare session id, and turns its one open file into a tab', async () => {
     const { parsePersistedEditors, parsePersistedFiles } =
-      await import('../src/renderer/stores/ui-slice')
+      await import('../packages/web/src/renderer/stores/ui-slice')
     const { filesPanes, editorPanes } = parsePersistedFiles(
       ['t1'],
       parsePersistedEditors({
@@ -387,7 +391,7 @@ describe('pane store actions', () => {
   })
 
   it('drops a saved tab state that no longer adds up', async () => {
-    const { parsePersistedFiles } = await import('../src/renderer/stores/ui-slice')
+    const { parsePersistedFiles } = await import('../packages/web/src/renderer/stores/ui-slice')
     const { filesPanes } = parsePersistedFiles(
       { t1: { tabs: ['/p/a.ts', '/p/a.ts'], active: '/p/gone.ts', preview: '/p/gone.ts' } },
       new Map()
@@ -993,7 +997,8 @@ describe('popping an item out to its own card', () => {
   })
 
   it("releases focus, preview and maximize when a card's session is closed", async () => {
-    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { dirtyRefFor, isEditorDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/popped.ts')
@@ -1033,7 +1038,8 @@ describe('popping an item out to its own card', () => {
   })
 
   it("asks before a close discards a card's unsaved edits", async () => {
-    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { dirtyRefFor, isEditorDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/draft.ts')
@@ -1056,8 +1062,9 @@ describe('popping an item out to its own card', () => {
   })
 
   it("asks before a return discards the card's own buffer, and leaves open tabs alone", async () => {
-    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
-    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const { dirtyRefFor, isEditorDirty } =
+      await import('../packages/web/src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../packages/web/src/renderer/lib/pane-id')
     act(() => s().openFileTab('t1', '/p/open.ts'))
     const openKey = fileTabKey('t1', '/p/open.ts')
     dirtyRefFor(openKey).current = true
@@ -1147,7 +1154,7 @@ describe('popping an item out to its own card', () => {
   })
 
   it('closes a page card without prompting — there is no buffer to lose', async () => {
-    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
+    const { dirtyRefFor } = await import('../packages/web/src/renderer/lib/editor-dirty')
     act(() => s().openBrowserPane('t1', 'example.com'))
     let cardId = ''
     act(() => {

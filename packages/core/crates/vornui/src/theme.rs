@@ -1,4 +1,4 @@
-//! The app's design tokens: the colours in `src/renderer/theme.css`, the
+//! The app's design tokens: the colours in `packages/web/src/renderer/theme.css`, the
 //! Tailwind v4 defaults the components use (grays, type scale, radii,
 //! transitions) and the global rules in `global.css` (focus ring,
 //! scrollbar). Widgets read these instead of literals so a port stays a
@@ -333,7 +333,7 @@ mod tests {
     fn colors_match_theme_css() {
         let css = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../../src/renderer/theme.css"
+            "/../../../web/src/renderer/theme.css"
         ));
         let pairs = [
             ("--color-bronzo:", color::BRONZO),

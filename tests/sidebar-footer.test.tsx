@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-import type { UpdateStatus } from '../src/shared/types'
+import type { UpdateStatus } from '../packages/web/src/shared/types'
 
 const mockStore = {
   setSettingsOpen: vi.fn(),
@@ -16,13 +16,13 @@ const mockStore = {
   terminals: new Map<string, { status: string; ended?: unknown }>()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
 }))
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
@@ -38,7 +38,8 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { SidebarFooter } = await import('../src/renderer/components/project-sidebar/SidebarFooter')
+const { SidebarFooter } =
+  await import('../packages/web/src/renderer/components/project-sidebar/SidebarFooter')
 
 beforeEach(() => {
   mockStore.setSettingsOpen.mockReset()

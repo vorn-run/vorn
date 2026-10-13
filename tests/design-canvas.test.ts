@@ -6,7 +6,7 @@ import {
   artboardUrl,
   fitZoom,
   placeArtboards
-} from '../src/renderer/lib/design-canvas'
+} from '../packages/web/src/renderer/lib/design-canvas'
 
 const BOARDS = [
   { id: 'desktop', label: 'Desktop', width: 1440, height: 900 },

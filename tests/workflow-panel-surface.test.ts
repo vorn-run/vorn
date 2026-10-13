@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const root = join(__dirname, '..')
-const panels = join(root, 'src/renderer/components/workflow-editor/panels')
+const panels = join(root, 'packages/web/src/renderer/components/workflow-editor/panels')
 const read = (name: string): string => readFileSync(join(panels, name), 'utf8')
 
 /** The panels docked to an edge of the editor, each a permanent region of it. */

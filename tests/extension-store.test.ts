@@ -4,14 +4,14 @@ import { act } from '@testing-library/react'
 const destroyTerminal = vi.hoisted(() => vi.fn())
 const toasted = vi.hoisted(() => vi.fn())
 
-vi.mock('../src/renderer/lib/terminal-registry', () => ({ destroyTerminal }))
-vi.mock('../src/renderer/components/Toast', () => ({ toast: toasted }))
+vi.mock('../packages/web/src/renderer/lib/terminal-registry', () => ({ destroyTerminal }))
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({ toast: toasted }))
 
-import { useAppStore } from '../src/renderer/stores'
-import { selectPaneFlags } from '../src/renderer/stores/ui-slice'
-import { extensionPaneId } from '../src/renderer/lib/pane-id'
-import { __resetExtensionsCacheForTests } from '../src/renderer/lib/use-extensions'
-import { __resetExtensionHydrationForTests } from '../src/renderer/lib/extension-hydration'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { selectPaneFlags } from '../packages/web/src/renderer/stores/ui-slice'
+import { extensionPaneId } from '../packages/web/src/renderer/lib/pane-id'
+import { __resetExtensionsCacheForTests } from '../packages/web/src/renderer/lib/use-extensions'
+import { __resetExtensionHydrationForTests } from '../packages/web/src/renderer/lib/extension-hydration'
 import type {
   ExtensionActivationState,
   ExtensionFooterReading,

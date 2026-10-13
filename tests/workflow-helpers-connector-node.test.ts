@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createCallConnectorActionNode } from '../src/renderer/lib/workflow-helpers'
-import type { CallConnectorActionConfig } from '../src/shared/types'
+import { createCallConnectorActionNode } from '../packages/web/src/renderer/lib/workflow-helpers'
+import type { CallConnectorActionConfig } from '../packages/web/src/shared/types'
 
 describe('createCallConnectorActionNode', () => {
   it('produces a node with type callConnectorAction and empty defaults', () => {

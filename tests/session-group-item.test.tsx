@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { SessionGroupConfig } from '../src/shared/types'
+import type { SessionGroupConfig } from '../packages/web/src/shared/types'
 
 const mockStore = {
   activeGroupId: null as string | null,
@@ -14,17 +14,17 @@ const mockStore = {
   terminals: new Map()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
 const { SessionGroupItem } =
-  await import('../src/renderer/components/project-sidebar/SessionGroupItem')
+  await import('../packages/web/src/renderer/components/project-sidebar/SessionGroupItem')
 
 const group: SessionGroupConfig = {
   id: 'g1',

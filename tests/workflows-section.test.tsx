@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowDefinition } from '../src/shared/types'
+import type { WorkflowDefinition } from '../packages/web/src/shared/types'
 
 const mockStore = {
   setWorkflowEditorOpen: vi.fn(),
@@ -17,19 +17,19 @@ const mockStore = {
   isWorkflowEditorOpen: false
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockStore) : mockStore
   }
 }))
 
 const waitingMock = vi.fn(() => [] as unknown[])
-vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
+vi.mock('../packages/web/src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingMock()
 }))
 
 const { WorkflowsSection } =
-  await import('../src/renderer/components/project-sidebar/WorkflowsSection')
+  await import('../packages/web/src/renderer/components/project-sidebar/WorkflowsSection')
 
 function makeWorkflow(id: string, scheduled = false): WorkflowDefinition {
   return {

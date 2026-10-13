@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
-import { normalizeUrl, displayHost } from '../src/renderer/lib/browser-url'
+import { normalizeUrl, displayHost } from '../packages/web/src/renderer/lib/browser-url'
 
 /**
  * The address bar has to guess a scheme, because people type `localhost:5173`

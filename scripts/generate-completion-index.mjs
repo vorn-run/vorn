@@ -26,7 +26,7 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
 const CORPUS = path.join(ROOT, 'node_modules', '@withfig', 'autocomplete')
-const OUT_DIR = path.join(ROOT, 'src', 'renderer', 'lib', 'completion-index')
+const OUT_DIR = path.join(ROOT, 'packages', 'web', 'src', 'renderer', 'lib', 'completion-index')
 const ALLOWLIST = path.join(HERE, 'completion-allowlist.txt')
 
 // Per-command is the budget that matters: outlines load one at a time, so

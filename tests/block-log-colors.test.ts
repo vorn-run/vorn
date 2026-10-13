@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { paletteToCss, colorToCss } from '../src/renderer/lib/block-log'
+import { paletteToCss, colorToCss } from '../packages/web/src/renderer/lib/block-log'
 
 /**
  * xterm reports colour as a palette index or packed RGB. Resolving it wrongly

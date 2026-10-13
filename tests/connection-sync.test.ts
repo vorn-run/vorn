@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { waitForSync } from '../src/renderer/lib/connection-sync'
+import { waitForSync } from '../packages/web/src/renderer/lib/connection-sync'
 
 const listConnections = vi.fn()
 

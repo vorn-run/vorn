@@ -8,7 +8,7 @@ import {
   PANE_MAX_EDGE,
   ZOOM_MAX,
   ZOOM_MIN
-} from '../src/renderer/lib/device-bezel'
+} from '../packages/web/src/renderer/lib/device-bezel'
 
 /**
  * The arithmetic the device pane's tap accuracy rests on.

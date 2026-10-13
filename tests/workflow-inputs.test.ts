@@ -3,8 +3,8 @@ import {
   initialInputValues,
   areInputsValid,
   parseNumberInput
-} from '../src/renderer/lib/workflow-inputs'
-import type { WorkflowInputDef } from '../src/shared/types'
+} from '../packages/web/src/renderer/lib/workflow-inputs'
+import type { WorkflowInputDef } from '../packages/web/src/shared/types'
 
 const def = (over: Partial<WorkflowInputDef> = {}): WorkflowInputDef => ({
   key: 'k',

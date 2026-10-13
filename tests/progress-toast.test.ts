@@ -4,14 +4,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockLoading = vi.fn((_msg: string) => 'toast-id-1')
 const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 
-vi.mock('../src/renderer/components/Toast', () => ({
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({
   toast: {
     loading: (msg: string) => mockLoading(msg),
     update: (id: string, msg: string, type: string) => mockUpdate(id, msg, type)
   }
 }))
 
-import { withProgressToast } from '../src/renderer/lib/progress-toast'
+import { withProgressToast } from '../packages/web/src/renderer/lib/progress-toast'
 
 describe('withProgressToast', () => {
   beforeEach(() => {

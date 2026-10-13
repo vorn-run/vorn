@@ -8,14 +8,14 @@ const mockState = {
   setSidebarWorkflowFilter: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     return selector ? selector(mockState) : mockState
   }
 }))
 
 const { WorkflowFilterToolbar } =
-  await import('../src/renderer/components/project-sidebar/WorkflowFilterToolbar')
+  await import('../packages/web/src/renderer/components/project-sidebar/WorkflowFilterToolbar')
 
 beforeEach(() => {
   mockState.sidebarWorkflowFilter = 'all'

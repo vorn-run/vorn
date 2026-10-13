@@ -18,7 +18,7 @@ vi.mock('framer-motion', () => ({
 }))
 
 const projectPickerProps: Array<Record<string, unknown>> = []
-vi.mock('../src/renderer/components/ProjectPicker', () => ({
+vi.mock('../packages/web/src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => {
     projectPickerProps.push(props)
     return (
@@ -40,9 +40,9 @@ beforeEach(() => {
 })
 // Runs start in the server; these check what the window asks for.
 
-import { useAppStore } from '../src/renderer/stores'
-import { SourcePromptDialog } from '../src/renderer/components/SourcePromptDialog'
-import type { WorkflowDefinition } from '../src/shared/types'
+import { useAppStore } from '../packages/web/src/renderer/stores'
+import { SourcePromptDialog } from '../packages/web/src/renderer/components/SourcePromptDialog'
+import type { WorkflowDefinition } from '../packages/web/src/shared/types'
 
 function makeWorkflow(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
   return {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { glowColorForAgent } from '../src/renderer/lib/widget-glow'
+import { glowColorForAgent } from '../packages/web/src/renderer/lib/widget-glow'
 
 describe('glowColorForAgent', () => {
   it('returns the AI-agent-specific color for each AI agent', () => {

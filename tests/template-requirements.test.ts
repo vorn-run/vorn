@@ -9,8 +9,8 @@ import {
   templateIsReady,
   templateSeed,
   type TemplateRequirement
-} from '../src/renderer/lib/template-requirements'
-import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
+} from '../packages/web/src/renderer/lib/template-requirements'
+import type { ConnectorListing } from '../packages/web/src/renderer/lib/connector-browse'
 import { TEMPLATE_SEED } from './helpers/template-seed'
 import type {
   ConnectorManifest,

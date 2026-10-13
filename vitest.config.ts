@@ -18,26 +18,25 @@ export default defineConfig({
       include: [
         'packages/connector-sdk/src/**/*.ts',
         'packages/shared/src/**/*.ts',
-        'src/renderer/lib/**/*.ts',
-        'src/renderer/components/**/*.tsx'
+        'packages/web/src/renderer/lib/**/*.ts',
+        'packages/web/src/renderer/components/**/*.tsx'
       ],
       exclude: [
-        'src/renderer/lib/terminal-registry.ts',
-        'src/renderer/lib/workflow-execution.ts',
-        'src/renderer/lib/workflow-triggers.ts',
-        'src/renderer/lib/terminal-close.ts',
+        'packages/web/src/renderer/lib/terminal-registry.ts',
+        'packages/web/src/renderer/lib/workflow-execution.ts',
+        'packages/web/src/renderer/lib/workflow-triggers.ts',
+        'packages/web/src/renderer/lib/terminal-close.ts',
         // Heavy settings page dominated by IPC-backed form state —
         // matches the established exclusion pattern for this category.
-        'src/renderer/components/settings/ConnectorSettings.tsx',
+        'packages/web/src/renderer/components/settings/ConnectorSettings.tsx',
         '**/*.d.ts'
       ]
     }
   },
   resolve: {
     alias: {
-      '@shared': path.resolve(__dirname, 'src/shared'),
-      '@main': path.resolve(__dirname, 'src/main'),
-      '@renderer': path.resolve(__dirname, 'src/renderer'),
+      '@shared': path.resolve(__dirname, 'packages/web/src/shared'),
+      '@renderer': path.resolve(__dirname, 'packages/web/src/renderer'),
       // Connector packages depend on the published SDK. Tests must exercise
       // the SDK source, not whatever `dist` a previous build left behind.
       '@vornrun/connector-sdk': path.resolve(__dirname, 'packages/connector-sdk/src/index.ts'),

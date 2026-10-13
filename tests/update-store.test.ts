@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { vi } from 'vitest'
-import type { UpdateStatus } from '../src/shared/types'
+import type { UpdateStatus } from '../packages/web/src/shared/types'
 
-vi.mock('../src/renderer/lib/preferences', () => ({
+vi.mock('../packages/web/src/renderer/lib/preferences', () => ({
   loadGridSettings: () => ({}),
   loadSidebarSettings: () => ({}),
   loadFlexibleLayouts: () => ({})
@@ -11,7 +11,7 @@ vi.mock('../src/renderer/lib/preferences', () => ({
   api: { saveConfig: vi.fn() }
 }
 
-const { createUISlice } = await import('../src/renderer/stores/ui-slice')
+const { createUISlice } = await import('../packages/web/src/renderer/stores/ui-slice')
 
 interface MinimalState {
   appUpdateStatus: UpdateStatus

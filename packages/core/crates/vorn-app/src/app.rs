@@ -308,6 +308,8 @@ pub struct App {
     widget_wanted: bool,
     /// The OS file picker, while it is open.
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    /// The window's updater; none offscreen.
+    updater: Option<Arc<crate::update::Updater>>,
 }
 
 impl App {
@@ -369,6 +371,7 @@ impl App {
             widget_wanted: false,
             hotkeys: None,
             picking: None,
+            updater: None,
         };
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -456,7 +459,50 @@ impl App {
 
     /// Folds in what arrived since the last frame: notifications, answers
     /// to calls, and terminals that changed.
+    /// Gives the settings page and the sidebar the window's updater.
+    pub fn set_updater(&mut self, updater: Arc<crate::update::Updater>) {
+        self.updater = Some(updater);
+        self.sync_update();
+    }
+
+    /// The updater's state, for this frame, and the person's choices, for it.
+    fn sync_update(&mut self) {
+        let Some(updater) = &self.updater else {
+            return;
+        };
+        updater.set_prefs(crate::update::Prefs::from_config(&self.store.config));
+        let status = updater.status();
+        if self.st.settings.update.as_ref() != Some(&status) {
+            self.st.settings.update = Some(status);
+        }
+    }
+
+    /// The update card's or notice's button: restart into a ready update,
+    /// download an offered one, or check again.
+    fn update_action(&mut self) {
+        let Some(updater) = self.updater.clone() else {
+            return;
+        };
+        match updater.status() {
+            crate::settings::UpdateStatus::Ready { .. } => {
+                if updater.install().is_ok() {
+                    std::process::exit(0);
+                }
+            }
+            crate::settings::UpdateStatus::Available { .. } => updater.download(),
+            _ => updater.check(),
+        }
+    }
+
+    /// Check now.
+    fn check_updates(&self) {
+        if let Some(updater) = &self.updater {
+            updater.check();
+        }
+    }
+
     pub fn pump(&mut self) {
+        self.sync_update();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {

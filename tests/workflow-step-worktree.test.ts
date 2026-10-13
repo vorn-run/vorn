@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildStepOutputsMap } from '@vornrun/shared/workflow-graph'
 import { DEFAULT_OUTPUT_KEYS, WORKTREE_OUTPUT_KEY } from '@vornrun/shared/template-vars'
-import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
+import type { WorkflowExecution, WorkflowNode } from '../packages/web/src/shared/types'
 
 // The directory a step worked in, offered to the steps after it.
 

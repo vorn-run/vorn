@@ -2,12 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { SdkConnectorForm } from '../src/renderer/components/settings/SdkConnectorForm'
-import type { ConnectorCatalogItem, SdkConnectorManifest } from '../src/shared/types'
+import { SdkConnectorForm } from '../packages/web/src/renderer/components/settings/SdkConnectorForm'
+import type { ConnectorCatalogItem, SdkConnectorManifest } from '../packages/web/src/shared/types'
 
 // What the connection form asks for, per rung.
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({ config: { projects: [{ name: 'vorn', path: '/repo' }] } })
 }))

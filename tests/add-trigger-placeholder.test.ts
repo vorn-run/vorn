@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkflowNode } from '../src/shared/types'
-import { layoutPositions, toCanvasElements } from '../src/renderer/lib/workflow-canvas-layout'
+import type { WorkflowNode } from '../packages/web/src/shared/types'
+import {
+  layoutPositions,
+  toCanvasElements
+} from '../packages/web/src/renderer/lib/workflow-canvas-layout'
 import {
   autoLayoutNodes,
   createTriggerNode,
   createScriptNode
-} from '../src/renderer/lib/workflow-helpers'
+} from '../packages/web/src/renderer/lib/workflow-helpers'
 
 describe('the add-trigger placeholder', () => {
   it('appears on a canvas with no trigger node', () => {

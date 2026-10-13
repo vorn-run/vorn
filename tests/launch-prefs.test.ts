@@ -23,12 +23,12 @@ import {
   getPreferredAgent,
   loadLaunchSettings,
   setPreferredAgent
-} from '../src/renderer/lib/launch-prefs'
+} from '../packages/web/src/renderer/lib/launch-prefs'
 import {
   getPreferredModel,
   setPreferredModel,
   persistLaunchSettings
-} from '../src/renderer/lib/launch-prefs'
+} from '../packages/web/src/renderer/lib/launch-prefs'
 
 const KEY = 'vorn:lastLaunchSettings'
 

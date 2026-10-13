@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
-import { useAppStore } from '../src/renderer/stores'
+import { useAppStore } from '../packages/web/src/renderer/stores'
 
 const detectMobileProject = vi.fn()
 

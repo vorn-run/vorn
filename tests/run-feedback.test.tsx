@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { WorkflowExecution } from '../src/shared/types'
+import type { WorkflowExecution } from '../packages/web/src/shared/types'
 
 vi.mock('framer-motion', () => ({
   motion: {
@@ -18,33 +18,40 @@ vi.mock('react-dom', async () => {
   return { ...actual, createPortal: (node: React.ReactNode) => node }
 })
 
-vi.mock('../src/renderer/components/Tooltip', () => ({
+vi.mock('../packages/web/src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-vi.mock('../src/renderer/components/SidebarToggleButton', () => ({
+vi.mock('../packages/web/src/renderer/components/SidebarToggleButton', () => ({
   SidebarToggleButton: () => <div />
 }))
-vi.mock('../src/renderer/components/MainViewPills', () => ({ MainViewPills: () => <div /> }))
-vi.mock('../src/renderer/components/WindowControls', () => ({ WindowControls: () => <div /> }))
+vi.mock('../packages/web/src/renderer/components/MainViewPills', () => ({
+  MainViewPills: () => <div />
+}))
+vi.mock('../packages/web/src/renderer/components/WindowControls', () => ({
+  WindowControls: () => <div />
+}))
 
-vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
   WorkflowCanvas: () => <div data-testid="canvas" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
   NodeConfigPanel: () => <div data-testid="node-config" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/StepLibrary', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/StepLibrary', () => ({
   StepLibrary: () => <div data-testid="step-library" />
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel', () => ({
-  WorkflowPropertiesPanel: () => <div data-testid="properties-panel" />
-}))
+vi.mock(
+  '../packages/web/src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel',
+  () => ({
+    WorkflowPropertiesPanel: () => <div data-testid="properties-panel" />
+  })
+)
 
 const captured = vi.hoisted(() => ({
   historyProps: null as Record<string, unknown> | null
 }))
-vi.mock('../src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
+vi.mock('../packages/web/src/renderer/components/workflow-editor/panels/RunHistoryPanel', () => ({
   RunHistoryPanel: (props: Record<string, unknown>) => {
     captured.historyProps = props
     return <div data-testid="run-history" />
@@ -62,7 +69,7 @@ const toastFn = vi.hoisted(() => {
   fn.dismiss = vi.fn()
   return fn
 })
-vi.mock('../src/renderer/components/Toast', () => ({ toast: toastFn }))
+vi.mock('../packages/web/src/renderer/components/Toast', () => ({ toast: toastFn }))
 
 // The editor asks the server to run, retry and stop; these are those requests.
 const executeWorkflow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -115,7 +122,7 @@ const mockState = {
   workflowExecutions: new Map<string, WorkflowExecution>()
 }
 
-vi.mock('../src/renderer/stores', () => {
+vi.mock('../packages/web/src/renderer/stores', () => {
   const useAppStore = (selector?: (s: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
   useAppStore.getState = () => mockState
@@ -140,7 +147,8 @@ vi.mock('../src/renderer/stores', () => {
   }
 }
 
-const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
+const { WorkflowEditor } =
+  await import('../packages/web/src/renderer/components/workflow-editor/WorkflowEditor')
 
 const runningExec = (): WorkflowExecution =>
   ({

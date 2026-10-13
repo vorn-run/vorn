@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { RemoteHost } from '../src/shared/types'
+import type { RemoteHost } from '../packages/web/src/shared/types'
 
 const host: RemoteHost = {
   id: 'h1',
@@ -20,7 +20,7 @@ const mockStore = {
   updateRemoteHost: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
+vi.mock('../packages/web/src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
@@ -33,7 +33,7 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
-const { SSHSettings } = await import('../src/renderer/components/settings/SSHSettings')
+const { SSHSettings } = await import('../packages/web/src/renderer/components/settings/SSHSettings')
 
 beforeEach(() => {
   vi.clearAllMocks()

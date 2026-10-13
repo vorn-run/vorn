@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNewerVersion } from '../src/shared/version-order'
+import { isNewerVersion } from '../packages/web/src/shared/version-order'
 
 describe('isNewerVersion', () => {
   it('compares numeric segments left to right', () => {
