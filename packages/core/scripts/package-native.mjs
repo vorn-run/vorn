@@ -528,7 +528,9 @@ function main() {
   const opts = {
     binDir,
     daemonDir: path.resolve(args['daemon-dir'] ?? binDir),
-    webDir: path.resolve(args['web-dir'] ?? path.join(repo, 'packages', 'core', 'crates', 'vorn-web', 'dist')),
+    webDir: path.resolve(
+      args['web-dir'] ?? path.join(repo, 'packages', 'core', 'crates', 'vorn-web', 'dist')
+    ),
     out,
     version:
       args.version ?? JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).version,

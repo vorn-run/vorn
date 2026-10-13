@@ -14,6 +14,7 @@ export default tseslint.config(
       '**/*.config.cjs',
       'scripts/',
       'packages/core/scripts/',
+      'packages/core/crates/vorn-web/tests/',
       'apps/macos/scripts/',
       'apps/macos/Sources/VornUI/Resources/shiki.js',
       'packages/core/target/',

@@ -50,5 +50,4 @@ describe('the native connector protocol', () => {
     expectTypeOf<ConnectorManifest & { protocol: 1 }>().toExtend<sdk.ConnectorManifestResult>()
     expect(sdk.PROTOCOL_METHODS.poll).toBe('trigger/poll')
   })
-
 })

@@ -86,7 +86,9 @@ async function rpc(port, token) {
     }
   }
   await once(ws, 'open')
-  ws.send(JSON.stringify({ jsonrpc: '2.0', id: next++, method: 'auth:authenticate', params: { token } }))
+  ws.send(
+    JSON.stringify({ jsonrpc: '2.0', id: next++, method: 'auth:authenticate', params: { token } })
+  )
   await ok
   return {
     async call(method, params) {
@@ -103,7 +105,9 @@ async function rpc(port, token) {
 /** The text the client mirrors for its terminals, all of them. */
 const terminalText = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll('[aria-roledescription="terminal"]')].map((e) => e.textContent).join('\n')
+    [...document.querySelectorAll('[aria-roledescription="terminal"]')]
+      .map((e) => e.textContent)
+      .join('\n')
   )
 
 /** Pairs the page with a code, approved from the desktop's side. */
@@ -138,7 +142,9 @@ async function run(what, vornd, server) {
       const device = (await server.call('token:create', { name: `smoke ${what}` })).plaintext
       await page.goto(`http://127.0.0.1:${vornd.port}/app/?renderer=${what}#token=${device}`)
     }
-    const used = await until('a renderer', () => page.evaluate(() => document.querySelector('canvas')?.dataset.renderer))
+    const used = await until('a renderer', () =>
+      page.evaluate(() => document.querySelector('canvas')?.dataset.renderer)
+    )
     if (what !== 'pair' && !used.startsWith(what)) throw new Error(`asked for ${what}, got ${used}`)
     const shown = await until('the client to show its terminal', async () => {
       const box = await page.locator('[aria-roledescription="terminal"]').first().boundingBox()
@@ -151,7 +157,8 @@ async function run(what, vornd, server) {
     if (shots) await page.screenshot({ path: join(shots, `web-${what}.png`) })
     console.log(`ok ${what} (${used})`)
   } catch (e) {
-    if (shots) await page.screenshot({ path: join(shots, `web-${what}-failed.png`) }).catch(() => {})
+    if (shots)
+      await page.screenshot({ path: join(shots, `web-${what}-failed.png`) }).catch(() => {})
     console.error(`page errors: ${errors.join('\n') || 'none'}`)
     console.error(`terminal text: ${await terminalText(page).catch(() => '?')}`)
     throw e
