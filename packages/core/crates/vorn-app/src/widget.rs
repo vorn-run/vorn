@@ -868,7 +868,7 @@ mod tests {
         let cmd = json!({ "type": "addRules", "rules": [{ "ruleContent": "npm run test -- --watch=false --coverage" }] });
         assert_eq!(
             label_suggestion(&cmd, "Bash"),
-            "Always allow `npm run test -- --watch=fals\u{2026}`"
+            "Always allow `npm run test -- --watch=fal\u{2026}`"
         );
         assert_eq!(
             label_suggestion(&json!({ "type": "addRules" }), "Bash"),
