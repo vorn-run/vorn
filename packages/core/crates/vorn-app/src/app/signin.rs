@@ -220,13 +220,17 @@ impl App {
                     }
                 }
             }
-            WebEvent::Message { body, .. } => {
+            WebEvent::Message { key, body } => {
                 let Ok(msg) = serde_json::from_str::<Value>(&body) else {
                     return;
                 };
                 let Some(n) = msg["n"].as_u64().filter(|_| msg["t"] == "session") else {
                     return;
                 };
+                // Only the page a call was sent to may answer it.
+                if self.sessions.waits.get(&n).is_none_or(|w| w.key != key) {
+                    return;
+                }
                 let answer = if msg["ok"] == true {
                     Ok(msg["answer"].clone())
                 } else {
@@ -239,7 +243,14 @@ impl App {
             }
             // Sign-in providers open windows of their own; the sheet follows them.
             WebEvent::NewWindow { key, url } if url.starts_with("https://") => {
-                self.web.host.load(&key, &url);
+                if let Some(w) = self
+                    .st
+                    .signin
+                    .as_mut()
+                    .filter(|w| signin::window_key(&w.connection) == key)
+                {
+                    w.url = url;
+                }
             }
             _ => {}
         }

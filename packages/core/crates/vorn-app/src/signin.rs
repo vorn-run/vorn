@@ -13,6 +13,10 @@ const PROFILE_PREFIX: &str = "vorn-connection-";
 
 /// The largest body a signed-in call hands back.
 pub const MAX_BODY: usize = 4 * 1024 * 1024;
+/// The largest answer handed back as bytes; a bigger one is refused, never cut short.
+pub const MAX_BYTES: usize = 16 * 1024 * 1024;
+/// What a call over that limit is refused with, as the desktop words it.
+pub const BYTES_REFUSAL: &str = "The answer is over the 16 MiB a signed-in call carries";
 
 /// How often the sign-in window asks whether anyone signed in.
 pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
@@ -232,12 +236,28 @@ pub fn fetch_script(n: u64, request: &Value) -> String {
     }
     let url = request.get("url").and_then(Value::as_str).unwrap_or("");
     let url = Value::String(url.to_owned());
+    let refusal = Value::String(BYTES_REFUSAL.to_owned());
+    // Bytes are counted as they arrive, so a chunked or compressed answer stops at the limit too.
+    let read = if request.get("binaryBody") == Some(&Value::Bool(true)) {
+        format!(
+            "const refuse = (size) => {{ if (size > {MAX_BYTES}) throw new Error({refusal}) }};
+    refuse(Number(res.headers.get('content-length')));
+    const reader = res.body && res.body.getReader();
+    const parts = []; let total = 0;
+    while (reader) {{ const {{ done, value }} = await reader.read(); if (done) break;
+      total += value.byteLength; if (total > {MAX_BYTES}) await reader.cancel(); refuse(total); parts.push(value); }}
+    let bin = ''; for (const part of parts) for (let i = 0; i < part.length; i += 32768) bin += String.fromCharCode.apply(null, part.subarray(i, i + 32768));
+    const out = {{ body: '', bodyBase64: btoa(bin) }};"
+        )
+    } else {
+        format!("const text = await res.text(); const out = {{ body: text.slice(0, {MAX_BODY}) }};")
+    };
     format!(
         "(async () => {{ const post = (m) => window.ipc.postMessage(JSON.stringify(Object.assign({{ t: 'session', n: {n} }}, m)));
   try {{
     const res = await fetch({url}, {init});
-    const text = await res.text();
-    post({{ ok: true, answer: {{ status: res.status, headers: Object.fromEntries(res.headers), body: text.slice(0, {MAX_BODY}) }} }});
+    {read}
+    post({{ ok: true, answer: Object.assign({{ status: res.status, headers: Object.fromEntries(res.headers) }}, out) }});
   }} catch (e) {{ post({{ ok: false, error: String(e && e.message || e) }}); }}
 }})()"
     )
@@ -364,6 +384,9 @@ mod tests {
         assert!(js.contains(r#""method":"POST""#));
         assert!(!js.contains("Cookie"));
         assert!(js.contains("n: 7"));
+        assert!(!js.contains("bodyBase64"));
+        let bin = fetch_script(8, &json!({ "url": "https://a.io/f", "binaryBody": true }));
+        assert!(bin.contains("bodyBase64") && bin.contains(BYTES_REFUSAL));
     }
 
     #[test]
