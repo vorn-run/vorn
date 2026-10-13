@@ -216,3 +216,38 @@ public struct DevicePickerList: View {
         }
     }
 }
+
+/// The card's phone button (CardActionCluster): hides the pane, else opens the picker; spins while a claim boots.
+public struct DeviceCardButton: View {
+    let model: BrowserModel
+    let session: TerminalSession
+
+    public init(model: BrowserModel, session: TerminalSession) {
+        self.model = model
+        self.session = session
+    }
+
+    public var body: some View {
+        if model.showsDeviceButton(session) {
+            let claiming = model.claiming.contains(session.id)
+            let shown = model.hasDevicePane(session.id)
+            Group {
+                if claiming {
+                    SpinningGlyph(glyph: .loaderCircle, size: 14, strokeWidth: 2, active: true)
+                        .foregroundStyle(Theme.ink)
+                        .padding(4)
+                        .opacity(0.5)
+                        .help("Booting the simulator…")
+                } else {
+                    IconButton(.smartphone, size: 14, padding: 4, radius: Theme.radius, color: Theme.ink, hoverColor: Theme.ink,
+                               hoverFill: Theme.white(0.10), help: shown ? "Hide device" : "Open device") {
+                        model.deviceButton(session.id)
+                    }
+                }
+            }
+            .popover(isPresented: model.pickerBinding(session.id, fromPane: false), arrowEdge: .bottom) {
+                DevicePickerList(model: model)
+            }
+        }
+    }
+}

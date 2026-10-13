@@ -90,6 +90,7 @@ public struct RootView: View {
             if let s = model.selectedSessionID, !live.contains(s) { model.selectedSessionID = nil }
             if let s = model.expandedSessionID, !live.contains(s) { model.expandedSessionID = nil }
         }
+        .onChange(of: Set(store.sessions.map(\.projectPath)), initial: true) { _, paths in model.panes.browser.detectMobile(Array(paths)) }
         .onChange(of: features.scope(model, store), initial: true) { _, scope in features.tasks.scope = scope }
         .onChange(of: model.activeWorkspace, initial: true) { _, id in features.workflows.workspaceId = id }
         .onChange(of: store.projects, initial: true) { _, list in features.workflows.projects = list }
@@ -98,6 +99,7 @@ public struct RootView: View {
             features.bind(store: store, model: model)
             store.onWorktreeCleanup = { p, w in actions.offerWorktreeCleanup(projectPath: p, worktreePath: w) }
             model.panes.onSurfaceCard = { id in model.minimizedIDs.remove(id) }
+            bindBrowser()
         }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.
@@ -225,6 +227,16 @@ public struct RootView: View {
                              isSelected: true, isDimmed: false, isExpanded: true,
                              focusRequest: model.focusRequests[s.id] ?? 0, actions: actions.cardActions,
                              context: context, variant: .focused)
+    }
+
+    /// Gives the browser panes the daemon and the sessions, and starts answering the agents' browser tools.
+    private func bindBrowser() {
+        let b = model.panes.browser
+        b.session = { [weak store] id in store?.session(id) }
+        b.liveSessions = { [weak store] in store?.sessions ?? [] }
+        b.write = { [weak store] id, data in Task { try? await store?.write(id, data) } }
+        b.toast = { [weak model] message, isError in model?.toasts.show(message, isError ? .error : .success) }
+        b.start(client: store.client, answerAgents: !store.readOnly)
     }
 
     /// Double-click on the empty grid: the default agent in the active project.

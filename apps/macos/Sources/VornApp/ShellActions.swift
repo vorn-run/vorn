@@ -81,6 +81,8 @@ struct ShellActions {
         a.endRename = { model.renamingSessionID = nil }
         a.browseFiles = { id in model.panes.toggleFilesPane(id) }
         a.addTerminal = addPanelTerminal
+        a.openBrowser = { id in model.panes.browser.toggle(id) }
+        a.deviceButton = { [browser = model.panes.browser] s in AnyView(DeviceCardButton(model: browser, session: s)) }
         a.showChanges = { id in model.panes.diffSessionID = id }
         a.git = gitActions
         return a

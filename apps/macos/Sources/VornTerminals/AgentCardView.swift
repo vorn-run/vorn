@@ -13,6 +13,9 @@ public struct CardActions {
     public var contextMenu: (String, CGPoint) -> Void = { _, _ in }
     public var browseFiles: (String) -> Void = { _ in }
     public var addTerminal: (String) -> Void = { _ in }
+    public var openBrowser: (String) -> Void = { _ in }
+    /// The card's simulator button and its picker, where the session's project is a mobile app.
+    public var deviceButton: (TerminalSession) -> AnyView = { _ in AnyView(EmptyView()) }
     public var resume: (String) -> Void = { _ in }
     /// Writes bytes to the session's terminal.
     public var write: (String, String) -> Void = { _, _ in }
@@ -285,8 +288,9 @@ struct CardActionCluster: View {
             button(.folderOpen, "Browse files") { actions.browseFiles(session.id) }
             if session.agentType != .shell {
                 button(.squareTerminal, "Add a terminal") { actions.addTerminal(session.id) }
-                button(.globe, "Open browser") {}
+                button(.globe, "Open browser") { actions.openBrowser(session.id) }
             }
+            actions.deviceButton(session)
             if !isExpanded {
                 button(.minus, "Minimize") { actions.minimize(session.id) }
             }
