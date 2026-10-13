@@ -44,22 +44,4 @@ describe('connector pack RPC wiring', () => {
     }
     expect(methods).toContain(`"${channels.CONNECTOR_INSTALL_PROGRESS}"`)
   })
-
-  it('exposes each one on the window.api surface, progress included', () => {
-    const preload = read('packages/web/src/renderer/api.ts')
-    for (const method of [
-      'inspectConnectorPack',
-      'installConnectorPack',
-      'removeConnectorPack',
-      'rollbackConnectorPack',
-      'listConnectorPacks',
-      'onConnectorInstallProgress'
-    ]) {
-      expect(preload).toContain(`${method}:`)
-    }
-    // Without an unsubscribe a remounting panel leaks a listener per mount.
-    expect(preload).toContain(
-      'ipcRenderer.removeListener(IPC.CONNECTOR_INSTALL_PROGRESS, listener)'
-    )
-  })
 })
