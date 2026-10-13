@@ -1065,15 +1065,20 @@ pub(super) fn open_url(url: &str) {
     if !web {
         return;
     }
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(windows) {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    // spawn-visible: the system opener shows the link; nothing to do without one.
-    let _ = std::process::Command::new(opener).arg(url).spawn();
+    #[cfg(target_arch = "wasm32")]
+    crate::page::open_tab(url);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(windows) {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        // spawn-visible: the system opener shows the link; nothing to do without one.
+        let _ = std::process::Command::new(opener).arg(url).spawn();
+    }
 }
 
 #[cfg(test)]

@@ -158,7 +158,7 @@ fn a_template_requirement_is_fixed_in_the_start_from_panel() {
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
     let mut shot = Shot::new();
-    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     shot.click(
         &mut app,
         App::control("sidebar", &Act::Workflow(WfAct::New)),

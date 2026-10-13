@@ -269,9 +269,12 @@ impl Sink for Os {
     /// never holds up a frame. Failing to show one is not worth reporting.
     fn show(&self, notice: Notice) {
         OS_SHOWN.fetch_add(1, Ordering::Relaxed);
+        #[cfg(not(target_arch = "wasm32"))]
         std::thread::spawn(move || {
             let _ = command(&notice.title, &notice.body).status();
         });
+        #[cfg(target_arch = "wasm32")]
+        crate::page::notify(&notice.title, &notice.body);
     }
 }
 
@@ -296,6 +299,7 @@ impl Sink for Recorded {
 
 /// The OS's own notifier, given the text as arguments or environment so
 /// nothing in it is ever read as script.
+#[cfg(not(target_arch = "wasm32"))]
 fn command(title: &str, body: &str) -> std::process::Command {
     use std::process::Stdio;
     let mut c = if cfg!(target_os = "macos") {
@@ -328,6 +332,7 @@ fn command(title: &str, body: &str) -> std::process::Command {
     c
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A toast under PowerShell's registered app id, which needs no install step.
 const WINDOWS_TOAST: &str = r"
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null

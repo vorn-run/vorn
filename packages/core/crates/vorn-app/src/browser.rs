@@ -517,7 +517,7 @@ pub fn loadable_url(input: &str, root: Option<&Path>) -> Option<String> {
     if parsed.host_str().is_some_and(|h| !h.is_empty()) {
         return None;
     }
-    let real = parsed.to_file_path().ok()?.canonicalize().ok()?;
+    let real = file_path(&parsed)?.canonicalize().ok()?;
     real.starts_with(real_root?).then_some(normalized)
 }
 
@@ -535,11 +535,18 @@ pub fn parse_cursor(cursor: Option<&str>, generation: u32) -> usize {
 
 /// The design file a `file:` address shows, which its tweaks are kept by.
 pub fn design_path(url: &str) -> Option<std::path::PathBuf> {
-    Url::parse(url)
-        .ok()
-        .filter(|u| u.scheme() == "file")?
-        .to_file_path()
-        .ok()
+    file_path(&Url::parse(url).ok().filter(|u| u.scheme() == "file")?)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn file_path(url: &Url) -> Option<std::path::PathBuf> {
+    url.to_file_path().ok()
+}
+
+/// A page has no files of its own to show.
+#[cfg(target_arch = "wasm32")]
+fn file_path(_url: &Url) -> Option<std::path::PathBuf> {
+    None
 }
 
 #[cfg(test)]

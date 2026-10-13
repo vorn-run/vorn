@@ -1,22 +1,20 @@
-//! JSON-RPC 2.0 over vornd's `/ws`: one I/O thread owns the socket, calls
+//! JSON-RPC 2.0 over vornd's `/ws`: the [`link`] owns the socket, calls
 //! answer through a [`Pending`] the caller waits on or polls, and
 //! notifications arrive in order on a channel. Nothing here blocks the UI
 //! thread unless it chooses to wait.
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc as std_mpsc, Arc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc as std_mpsc, Arc, Mutex, MutexGuard, PoisonError};
 use web_time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::Message;
 
 use super::endpoint::Endpoint;
+use super::link::{self, Ended, Frame, Inbound, Transport};
 
 /// How long a call may take before [`Rpc::call`] gives up on it.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -30,6 +28,8 @@ pub enum RpcError {
     Closed,
     /// No answer within the time asked for.
     Timeout,
+    /// vornd refused the credential.
+    Rejected,
     /// vornd answered with an error.
     Server { code: i64, message: String },
     /// The answer was not the shape asked for.
@@ -42,6 +42,7 @@ impl fmt::Display for RpcError {
             RpcError::Connect(e) => write!(f, "could not connect to vornd: {e}"),
             RpcError::Closed => f.write_str("the connection to vornd closed"),
             RpcError::Timeout => f.write_str("vornd did not answer in time"),
+            RpcError::Rejected => f.write_str("vornd did not accept this device's key"),
             RpcError::Server { message, .. } => f.write_str(message),
             RpcError::Decode(e) => write!(f, "unexpected answer: {e}"),
         }
@@ -70,23 +71,6 @@ pub enum Event {
 
 type Reply = std_mpsc::Sender<Result<Value, RpcError>>;
 
-enum Out {
-    Call {
-        id: u64,
-        method: String,
-        params: Value,
-        reply: Reply,
-    },
-    Notify {
-        method: String,
-        params: Value,
-    },
-    Respond {
-        id: Value,
-        result: Result<Value, String>,
-    },
-}
-
 /// The calls vornd makes of the desktop's main process once it holds the
 /// bridge: the browser pane and the device pane.
 pub fn answers_for_vornd(method: &str) -> bool {
@@ -101,12 +85,29 @@ pub fn answers_for_vornd(method: &str) -> bool {
 pub struct Pending(std_mpsc::Receiver<Result<Value, RpcError>>);
 
 impl Pending {
-    /// Blocks for the answer, at most `timeout`.
+    /// Blocks for the answer, at most `timeout`. Never in a browser, whose
+    /// one thread is the one the answer arrives on: use [`Pending::answer`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn wait(self, timeout: Duration) -> Result<Value, RpcError> {
         match self.0.recv_timeout(timeout) {
             Ok(r) => r,
             Err(std_mpsc::RecvTimeoutError::Timeout) => Err(RpcError::Timeout),
             Err(std_mpsc::RecvTimeoutError::Disconnected) => Err(RpcError::Closed),
+        }
+    }
+
+    /// The answer, waited for without holding the thread, at most `timeout`.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn answer(self, timeout: Duration) -> Result<Value, RpcError> {
+        let started = web_time::Instant::now();
+        loop {
+            if let Some(r) = self.poll() {
+                return r;
+            }
+            if started.elapsed() >= timeout {
+                return Err(RpcError::Timeout);
+            }
+            crate::page::sleep(Duration::from_millis(5)).await;
         }
     }
 
@@ -120,9 +121,89 @@ impl Pending {
     }
 }
 
+/// What both ends of the link share: the calls waiting for answers.
+struct Core {
+    waiting: Mutex<HashMap<u64, Reply>>,
+    events: std_mpsc::Sender<Event>,
+    /// Taken when the [`Rpc`] drops, which closes the link once no
+    /// [`Responder`] holds it either.
+    out: Mutex<Option<mpsc::UnboundedSender<Frame>>>,
+    rejected: AtomicBool,
+    wake: Wake,
+}
+
+impl Core {
+    fn waiting(&self) -> MutexGuard<'_, HashMap<u64, Reply>> {
+        self.waiting.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn out(&self) -> Option<mpsc::UnboundedSender<Frame>> {
+        self.out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn send(&self, frame: Value) -> bool {
+        self.out()
+            .is_some_and(|out| out.send(Frame::Text(frame.to_string())).is_ok())
+    }
+
+    /// Settles what one frame from vornd says; false once the link is gone.
+    fn incoming(&self, text: &str) -> bool {
+        match classify(text) {
+            Incoming::Answer { id, result } => {
+                if let Some(reply) = self.waiting().remove(&id) {
+                    let _ = reply.send(result);
+                    (self.wake)();
+                }
+            }
+            Incoming::Notification { method, params } => {
+                if self
+                    .events
+                    .send(Event::Notification { method, params })
+                    .is_ok()
+                {
+                    (self.wake)();
+                }
+            }
+            Incoming::Call { id, method, params } if answers_for_vornd(&method) => {
+                if self
+                    .events
+                    .send(Event::Request { id, method, params })
+                    .is_ok()
+                {
+                    (self.wake)();
+                }
+            }
+            Incoming::Call { id, method, .. } => {
+                return self.send(json!({"jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32601, "message": format!("Method not found: {method}")}}));
+            }
+            Incoming::Ignored => {}
+        }
+        true
+    }
+
+    fn ended(&self, why: Ended) {
+        let rejected = why == Ended::Rejected;
+        self.rejected.store(rejected, Ordering::Relaxed);
+        let error = if rejected {
+            RpcError::Rejected
+        } else {
+            RpcError::Closed
+        };
+        for (_, reply) in self.waiting().drain() {
+            let _ = reply.send(Err(error.clone()));
+        }
+        let _ = self.events.send(Event::Closed);
+        (self.wake)();
+    }
+}
+
 /// A connection to vornd. Dropping it closes the socket.
 pub struct Rpc {
-    out: mpsc::UnboundedSender<Out>,
+    core: Arc<Core>,
     next_id: AtomicU64,
 }
 
@@ -137,94 +218,137 @@ impl Rpc {
         ep: &Endpoint,
         wake: Wake,
     ) -> Result<(Rpc, std_mpsc::Receiver<Event>), RpcError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .map_err(|e| RpcError::Connect(e.to_string()))?;
-        let mut req = ep
-            .ws_url()
-            .into_client_request()
-            .map_err(|e| RpcError::Connect(e.to_string()))?;
-        let auth = format!("Bearer {}", ep.token)
-            .parse()
-            .map_err(|_| RpcError::Connect("the token is not a header value".into()))?;
-        req.headers_mut().insert("authorization", auth);
-        let ws = rt
-            .block_on(async {
-                tokio::time::timeout(CALL_TIMEOUT, tokio_tungstenite::connect_async(req)).await
-            })
-            .map_err(|_| RpcError::Timeout)?
-            .map_err(|e| RpcError::Connect(e.to_string()))?
-            .0;
+        #[cfg(not(target_arch = "wasm32"))]
+        let link = link::Socket {
+            url: ep.ws_url(),
+            token: ep.token.clone(),
+        };
+        #[cfg(target_arch = "wasm32")]
+        let link = link::PageSocket {
+            url: ep.ws_url(),
+            token: ep.token.clone(),
+        };
+        Rpc::over(Box::new(link), wake)
+    }
+
+    /// Speaks JSON-RPC over `link`.
+    pub fn over(
+        link: Box<dyn Transport>,
+        wake: Wake,
+    ) -> Result<(Rpc, std_mpsc::Receiver<Event>), RpcError> {
         let (out, rx) = mpsc::unbounded_channel();
         let (events_tx, events) = std_mpsc::channel();
-        std::thread::Builder::new()
-            .name("vornd-rpc".into())
-            .spawn(move || rt.block_on(io(ws, rx, events_tx, wake)))
-            .map_err(|e| RpcError::Connect(e.to_string()))?;
+        let core = Arc::new(Core {
+            waiting: Mutex::default(),
+            events: events_tx,
+            out: Mutex::new(Some(out)),
+            rejected: AtomicBool::new(false),
+            wake,
+        });
+        let (rd, end) = (Arc::clone(&core), Arc::clone(&core));
+        link.start(
+            rx,
+            Inbound {
+                frame: Box::new(move |f| match f {
+                    Frame::Text(t) => rd.incoming(&t),
+                    Frame::Binary(_) => true,
+                }),
+                ended: Box::new(move |why| end.ended(why)),
+            },
+        )
+        .map_err(RpcError::Connect)?;
         Ok((
             Rpc {
-                out,
+                core,
                 next_id: AtomicU64::new(1),
             },
             events,
         ))
     }
 
+    /// Whether vornd refused this connection's credential.
+    pub fn rejected(&self) -> bool {
+        self.core.rejected.load(Ordering::Relaxed)
+    }
+
     /// Sends a call; its answer comes through the [`Pending`].
     pub fn request(&self, method: &str, params: Value) -> Pending {
         let (reply, rx) = std_mpsc::channel();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let call = Out::Call {
-            id,
-            method: method.to_owned(),
-            params,
-            reply,
-        };
-        if let Err(mpsc::error::SendError(Out::Call { reply, .. })) = self.out.send(call) {
-            let _ = reply.send(Err(RpcError::Closed));
+        self.core.waiting().insert(id, reply);
+        let sent = self
+            .core
+            .send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        if !sent {
+            if let Some(reply) = self.core.waiting().remove(&id) {
+                let _ = reply.send(Err(if self.rejected() {
+                    RpcError::Rejected
+                } else {
+                    RpcError::Closed
+                }));
+            }
         }
         Pending(rx)
     }
 
     /// Calls `method` and waits up to [`CALL_TIMEOUT`] for its result.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
         self.request(method, params).wait(CALL_TIMEOUT)
     }
 
     /// [`Rpc::call`], its result read as `T`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn call_as<T: DeserializeOwned>(&self, method: &str, params: Value) -> Result<T, RpcError> {
         decode(self.call(method, params)?)
     }
 
     /// Sends a notification, which has no answer.
     pub fn notify(&self, method: &str, params: Value) {
-        let _ = self.out.send(Out::Notify {
-            method: method.to_owned(),
-            params,
-        });
+        self.core
+            .send(json!({"jsonrpc": "2.0", "method": method, "params": params}));
     }
 
     /// Answers vornd's [`Event::Request`] `id`: its result, or an error
     /// message it hands to whoever asked.
     pub fn respond(&self, id: Value, result: Result<Value, String>) {
-        let _ = self.out.send(Out::Respond { id, result });
+        respond(self.core.out(), id, result);
     }
 
     /// A handle that answers vornd's requests from another thread.
     pub fn responder(&self) -> Responder {
-        Responder(self.out.clone())
+        Responder(self.core.out())
     }
+}
+
+impl Drop for Rpc {
+    fn drop(&mut self) {
+        self.core
+            .out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+    }
+}
+
+fn respond(out: Option<mpsc::UnboundedSender<Frame>>, id: Value, result: Result<Value, String>) {
+    let Some(out) = out else { return };
+    let frame = match result {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        Err(message) => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})
+        }
+    };
+    let _ = out.send(Frame::Text(frame.to_string()));
 }
 
 /// [`Rpc::respond`] for work that finishes off the UI thread.
 #[derive(Clone)]
-pub struct Responder(mpsc::UnboundedSender<Out>);
+pub struct Responder(Option<mpsc::UnboundedSender<Frame>>);
 
 impl Responder {
     pub fn respond(&self, id: Value, result: Result<Value, String>) {
-        let _ = self.0.send(Out::Respond { id, result });
+        respond(self.0.clone(), id, result);
     }
 }
 
@@ -301,87 +425,10 @@ fn classify(text: &str) -> Incoming {
     }
 }
 
-type Socket =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
-
-async fn io(
-    mut ws: Socket,
-    mut rx: mpsc::UnboundedReceiver<Out>,
-    events: std_mpsc::Sender<Event>,
-    wake: Wake,
-) {
-    let mut waiting: HashMap<u64, Reply> = HashMap::new();
-    loop {
-        tokio::select! {
-            msg = ws.next() => {
-                let text = match msg {
-                    Some(Ok(Message::Text(t))) => t,
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                    Some(Ok(_)) => continue,
-                };
-                match classify(text.as_str()) {
-                    Incoming::Answer { id, result } => {
-                        if let Some(reply) = waiting.remove(&id) {
-                            let _ = reply.send(result);
-                            wake();
-                        }
-                    }
-                    Incoming::Notification { method, params } => {
-                        if events.send(Event::Notification { method, params }).is_ok() {
-                            wake();
-                        }
-                    }
-                    Incoming::Call { id, method, params } if answers_for_vornd(&method) => {
-                        if events.send(Event::Request { id, method, params }).is_ok() {
-                            wake();
-                        }
-                    }
-                    Incoming::Call { id, method, .. } => {
-                        let refusal = json!({"jsonrpc": "2.0", "id": id,
-                            "error": {"code": -32601, "message": format!("Method not found: {method}")}});
-                        if ws.send(Message::text(refusal.to_string())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Incoming::Ignored => {}
-                }
-            }
-            out = rx.recv() => {
-                let Some(out) = out else {
-                    let _ = ws.close(None).await;
-                    break;
-                };
-                let frame = match out {
-                    Out::Call { id, method, params, reply } => {
-                        waiting.insert(id, reply);
-                        json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-                    }
-                    Out::Notify { method, params } => {
-                        json!({"jsonrpc": "2.0", "method": method, "params": params})
-                    }
-                    Out::Respond { id, result: Ok(result) } => {
-                        json!({"jsonrpc": "2.0", "id": id, "result": result})
-                    }
-                    Out::Respond { id, result: Err(message) } => {
-                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})
-                    }
-                };
-                if ws.send(Message::text(frame.to_string())).await.is_err() {
-                    break;
-                }
-            }
-        }
-    }
-    for (_, reply) in waiting.drain() {
-        let _ = reply.send(Err(RpcError::Closed));
-    }
-    let _ = events.send(Event::Closed);
-    wake();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn answers_carry_their_id() {
@@ -443,18 +490,58 @@ mod tests {
         assert_eq!(classify(r#"{"id":"str"}"#), Incoming::Ignored);
     }
 
+    /// A link that answers each call with its own method, or ends at once.
+    struct Fake(Option<link::Ended>);
+
+    impl Transport for Fake {
+        fn start(
+            self: Box<Self>,
+            mut out: mpsc::UnboundedReceiver<Frame>,
+            mut inbound: Inbound,
+        ) -> Result<(), String> {
+            std::thread::spawn(move || {
+                if let Some(why) = self.0 {
+                    return (inbound.ended)(why);
+                }
+                while let Some(Frame::Text(t)) = out.blocking_recv() {
+                    let v: Value = serde_json::from_str(&t).unwrap();
+                    let reply = json!({"jsonrpc": "2.0", "id": v["id"], "result": v["method"]});
+                    (inbound.frame)(Frame::Text(reply.to_string()));
+                }
+                (inbound.ended)(link::Ended::Closed);
+            });
+            Ok(())
+        }
+    }
+
     #[test]
-    fn a_closed_connection_fails_calls() {
-        let (out, rx) = mpsc::unbounded_channel();
-        drop(rx);
-        let rpc = Rpc {
-            out,
-            next_id: AtomicU64::new(1),
-        };
+    fn calls_are_answered_over_a_transport() {
+        let (rpc, _events) = Rpc::over(Box::new(Fake(None)), Arc::new(|| {})).unwrap();
         assert_eq!(
             rpc.request("config:load", Value::Null)
-                .wait(Duration::from_secs(1)),
-            Err(RpcError::Closed)
+                .wait(Duration::from_secs(5)),
+            Ok(json!("config:load"))
         );
+    }
+
+    #[test]
+    fn a_closed_or_refused_link_fails_calls() {
+        for (why, err) in [
+            (link::Ended::Closed, RpcError::Closed),
+            (link::Ended::Rejected, RpcError::Rejected),
+        ] {
+            let (rpc, _events) = Rpc::over(Box::new(Fake(Some(why))), Arc::new(|| {})).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !matches!(rpc.core.out.lock().unwrap().as_ref(), Some(o) if o.is_closed())
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                rpc.request("config:load", Value::Null)
+                    .wait(Duration::from_secs(5)),
+                Err(err)
+            );
+        }
     }
 }

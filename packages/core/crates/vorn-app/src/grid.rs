@@ -6,7 +6,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use vorn_grid_client::{Client, Got};
 use vorn_term_proto::msg::{
@@ -17,6 +16,7 @@ use vorn_term_proto::screen::Screen;
 
 use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
 
+use crate::client::link::{self, Frame, Inbound, Transport};
 use crate::client::rpc::Wake;
 use crate::scroll::Route;
 use crate::view::{self, PaneView};
@@ -147,20 +147,40 @@ impl State {
 /// The grid connection. Shared between the UI and its I/O thread.
 pub struct Grid {
     state: Mutex<State>,
-    out: mpsc::UnboundedSender<Vec<u8>>,
+    out: mpsc::UnboundedSender<Frame>,
     wake: Wake,
 }
 
 impl Grid {
     /// Connects to `endpoint` (a Unix socket path, or a named pipe on
-    /// Windows) and says hello; `wake` runs whenever a pane changes.
-    pub fn connect(endpoint: &str, wake: Wake) -> std::io::Result<Arc<Grid>> {
+    /// Windows; in a browser, the page's `/grid` WebSocket admitting `token`)
+    /// and says hello; `wake` runs whenever a pane changes.
+    pub fn connect(endpoint: &str, token: &str, wake: Wake) -> std::io::Result<Arc<Grid>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let link = {
+            let _ = token;
+            link::LocalSocket(endpoint.to_owned())
+        };
+        #[cfg(target_arch = "wasm32")]
+        let link = link::PageSocket {
+            url: endpoint.to_owned(),
+            token: token.to_owned(),
+        };
+        Grid::over(Box::new(link), wake)
+    }
+
+    /// Speaks the grid protocol over `link`.
+    pub fn over(link: Box<dyn Transport>, wake: Wake) -> std::io::Result<Arc<Grid>> {
         let mut client = Client::new();
         client.send(&ClientMsg::Hello(Hello {
             proto_major: PROTO_MAJOR,
             proto_minor: PROTO_MINOR,
             caps: caps::ALL,
-            client: ClientKind::Native,
+            client: if cfg!(target_arch = "wasm32") {
+                ClientKind::Web
+            } else {
+                ClientKind::Native
+            },
             build: concat!("vorn-app ", env!("CARGO_PKG_VERSION")).into(),
         }));
         let (tx, rx) = mpsc::unbounded_channel();
@@ -179,16 +199,22 @@ impl Grid {
             out: tx,
             wake,
         });
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()?;
-        let conn = rt.block_on(open(endpoint))?;
         grid.flush();
-        let g = Arc::clone(&grid);
-        std::thread::Builder::new()
-            .name("grid-io".into())
-            .spawn(move || rt.block_on(g.io(conn, rx)))?;
+        let (rd, end) = (Arc::clone(&grid), Arc::clone(&grid));
+        link.start(
+            rx,
+            Inbound {
+                frame: Box::new(move |f| match f {
+                    Frame::Binary(bytes) => rd.receive(&bytes),
+                    Frame::Text(_) => true,
+                }),
+                ended: Box::new(move |_| {
+                    end.lock().closed = true;
+                    (end.wake)();
+                }),
+            },
+        )
+        .map_err(std::io::Error::other)?;
         Ok(grid)
     }
 
@@ -580,35 +606,8 @@ impl Grid {
     fn flush(&self) {
         let out = self.lock().client.take_out();
         if !out.is_empty() {
-            let _ = self.out.send(out);
+            let _ = self.out.send(Frame::Binary(out));
         }
-    }
-
-    /// Reads and writes on one task: a synchronous Windows pipe handle
-    /// would serialize a blocking read against every write.
-    async fn io(self: Arc<Self>, conn: Conn, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
-        let (mut rd, mut wr) = tokio::io::split(conn);
-        let mut buf = vec![0u8; 256 << 10];
-        loop {
-            tokio::select! {
-                r = rd.read(&mut buf) => match r {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if !self.receive(&buf[..n]) {
-                            break;
-                        }
-                    }
-                },
-                bytes = rx.recv() => {
-                    let Some(bytes) = bytes else { break };
-                    if wr.write_all(&bytes).await.is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-        self.lock().closed = true;
-        (self.wake)();
     }
 
     /// Applies what came in; false once the stream cannot be decoded.
@@ -735,40 +734,11 @@ impl Grid {
         let out = st.client.take_out();
         drop(st);
         if !out.is_empty() {
-            let _ = self.out.send(out);
+            let _ = self.out.send(Frame::Binary(out));
         }
         if changed {
             (self.wake)();
         }
         true
-    }
-}
-
-trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
-type Conn = Box<dyn Duplex>;
-
-#[cfg(unix)]
-async fn open(endpoint: &str) -> std::io::Result<Conn> {
-    Ok(Box::new(tokio::net::UnixStream::connect(endpoint).await?))
-}
-
-#[cfg(windows)]
-async fn open(endpoint: &str) -> std::io::Result<Conn> {
-    use web_time::{Duration, Instant};
-    use tokio::net::windows::named_pipe::ClientOptions;
-    const ERROR_PIPE_BUSY: i32 = 231;
-    let started = Instant::now();
-    loop {
-        match ClientOptions::new().open(endpoint) {
-            Ok(c) => return Ok(Box::new(c)),
-            Err(e)
-                if e.raw_os_error() == Some(ERROR_PIPE_BUSY)
-                    && started.elapsed() < Duration::from_secs(5) =>
-            {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Err(e) => return Err(e),
-        }
     }
 }

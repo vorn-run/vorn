@@ -412,7 +412,7 @@ fn key(spec: &str) -> Input {
     let mut code = spec;
     while let Some((head, rest)) = code.split_once('+') {
         m |= match head {
-            "Mod" => vorn_app::app::MOD,
+            "Mod" => vorn_app::app::MOD(),
             "Ctrl" => mods::CTRL,
             "Alt" => mods::ALT,
             "Shift" => mods::SHIFT,

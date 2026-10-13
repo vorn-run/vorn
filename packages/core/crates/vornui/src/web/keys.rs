@@ -35,10 +35,7 @@ pub enum KeyAction {
         text: Option<String>,
     },
     /// Send it, and let the browser act on it too (copy, cut).
-    Share {
-        code: String,
-        mods: u16,
-    },
+    Share { code: String, mods: u16 },
     /// Leave it to the textarea and the browser.
     Pass,
 }
@@ -203,7 +200,10 @@ mod tests {
                 mods: mods::SUPER
             }
         );
-        assert_eq!(kd("k", "KeyK", mods::SUPER), send("KeyK", mods::SUPER, None));
+        assert_eq!(
+            kd("k", "KeyK", mods::SUPER),
+            send("KeyK", mods::SUPER, None)
+        );
         assert_eq!(kd("Shift", "ShiftLeft", mods::SHIFT), KeyAction::Pass);
         assert_eq!(kd("Unidentified", "", 0), KeyAction::Pass);
         let composing = KeyDown {

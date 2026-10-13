@@ -77,6 +77,9 @@ pub fn set_autostart_file(file: &Path, exe: &Path, on: bool, mac: bool) -> std::
 
 /// `applyLoginItem`: makes the OS record match the config.
 pub fn apply_login_item(config: &Value) -> Result<(), String> {
+    if cfg!(target_arch = "wasm32") {
+        return Ok(());
+    }
     let Some(on) = login_item_for(config, packaged()) else {
         return Ok(());
     };
@@ -87,6 +90,19 @@ pub fn apply_login_item(config: &Value) -> Result<(), String> {
     };
     clear_legacy_login();
     set_login(&exe, on)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_legacy_login() {}
+
+#[cfg(target_arch = "wasm32")]
+fn kill(_pid: i64) -> Result<(), String> {
+    Err("a browser cannot stop a session holder".to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_login(_exe: &Path, _on: bool) -> Result<(), String> {
+    Ok(())
 }
 
 /// Removes the login item releases up to 0.8.0-beta.8 registered, which this
@@ -332,11 +348,15 @@ pub type Picker = std::sync::Arc<dyn Fn(Pick) -> Option<PathBuf> + Send + Sync>;
 
 /// The system's own dialogs.
 pub fn os_picker() -> Picker {
-    std::sync::Arc::new(run_picker)
+    #[cfg(not(target_arch = "wasm32"))]
+    return std::sync::Arc::new(run_picker);
+    #[cfg(target_arch = "wasm32")]
+    std::sync::Arc::new(|_| None)
 }
 
 /// Runs `picker` on a thread, waking the app with the answer; `None` when
 /// the picker was cancelled or this system has none.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn pick(
     picker: &Picker,
     what: Pick,
@@ -351,6 +371,22 @@ pub fn pick(
     rx
 }
 
+/// The page's file picker for a workflow file; the browser has no folder or save dialogs.
+#[cfg(target_arch = "wasm32")]
+pub fn pick(
+    _picker: &Picker,
+    what: Pick,
+    wake: crate::client::rpc::Wake,
+) -> std::sync::mpsc::Receiver<Option<PathBuf>> {
+    if let Pick::Workflow(_) = what {
+        return crate::page::pick_file(".json,application/json", wake);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = tx.send(None);
+    rx
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn run_picker(what: Pick) -> Option<PathBuf> {
     let attempts: Vec<std::process::Command> = if cfg!(target_os = "macos") {
         let script = match &what {
@@ -418,6 +454,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
 }
 
 /// The dialog's title, then, when saving, the name and folder offered.
+#[cfg(not(target_arch = "wasm32"))]
 fn pick_args(what: &Pick) -> Vec<String> {
     match what {
         Pick::Pack(t) | Pick::Folder(t) | Pick::Workflow(t) => vec![t.clone()],
@@ -429,8 +466,10 @@ fn pick_args(what: &Pick) -> Vec<String> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const WORKFLOW_FILTER: &str = "Vorn workflow (*.json)|*.json|All files (*.*)|*.*";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The system's open dialog; its title and filter come from the environment so they are never read as script.
 const WINDOWS_OPEN: &str = r"
 Add-Type -AssemblyName System.Windows.Forms
@@ -440,6 +479,7 @@ $d.Filter = $env:VORN_PICK_FILTER
 if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }
 ";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The system's folder dialog.
 const WINDOWS_FOLDER: &str = r"
 Add-Type -AssemblyName System.Windows.Forms
@@ -448,6 +488,7 @@ $d.Description = $env:VORN_PICK_TITLE
 if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }
 ";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The system's save dialog.
 const WINDOWS_SAVE: &str = r"
 Add-Type -AssemblyName System.Windows.Forms

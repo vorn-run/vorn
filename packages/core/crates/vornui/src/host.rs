@@ -95,7 +95,6 @@ impl Waker {
         Waker(proxy)
     }
 
-
     pub fn wake(&self) {
         // Only fails once the loop has exited, when no frame is wanted.
         let _ = self.0.send_event(UserEvent::Wake);

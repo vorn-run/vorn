@@ -35,6 +35,9 @@ pub const ROOT_NODE: NodeId = NodeId(0);
 /// Accessibility content of a custom box: role, label, value.
 pub type CustomA11y = (Role, String, String);
 
+/// A CPU frame's bytes, its size and the rows that changed.
+pub type CpuPixels<'a> = (&'a [u8], (u32, u32), &'a [(u32, u32)]);
+
 /// Fonts and sizes a [`Ui`] starts with.
 #[derive(Clone, Copy, Debug)]
 pub struct UiConfig {
@@ -1532,7 +1535,7 @@ impl Ui {
     /// The CPU renderer's last frame (4 bytes a pixel, in the order its
     /// format names), its size and the rows that changed, for a host that
     /// presents the bytes itself: a browser's 2D canvas.
-    pub fn cpu_pixels(&self) -> Option<(&[u8], (u32, u32), &[(u32, u32)])> {
+    pub fn cpu_pixels(&self) -> Option<CpuPixels<'_>> {
         let r = self.renderer.cpu_frame()?;
         Some((r.bytes(), r.size(), r.damage()))
     }

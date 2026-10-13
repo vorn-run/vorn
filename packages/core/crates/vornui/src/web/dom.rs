@@ -3,8 +3,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId, TreeUpdate};
 use crate::ROOT_NODE;
+use accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId, TreeUpdate};
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Element, HtmlElement};
 

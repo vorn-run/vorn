@@ -546,12 +546,19 @@ async fn renderer(
     } else {
         format!(" ({})", tried.join("; "))
     };
-    Ok((canvas, None, Present::Cpu { ctx, whole: true }, format!("cpu{why}")))
+    Ok((
+        canvas,
+        None,
+        Present::Cpu { ctx, whole: true },
+        format!("cpu{why}"),
+    ))
 }
 
 /// The page's own elements: the canvas filling it, the hidden textarea keys
 /// and composition arrive in, and the accessibility mirror's root.
-fn page(doc: &web_sys::Document) -> Result<(HtmlCanvasElement, HtmlTextAreaElement, HtmlElement), JsValue> {
+fn page(
+    doc: &web_sys::Document,
+) -> Result<(HtmlCanvasElement, HtmlTextAreaElement, HtmlElement), JsValue> {
     let body = doc.body().ok_or("no body")?;
     let canvas: HtmlCanvasElement = doc.create_element("canvas")?.dyn_into()?;
     canvas.set_id("vorn-canvas");
@@ -591,7 +598,12 @@ fn page(doc: &web_sys::Document) -> Result<(HtmlCanvasElement, HtmlTextAreaEleme
 /// Opens the app in the page and returns at once; the renderer is picked
 /// and the app made on the page's own time. `?renderer=webgpu|webgl|cpu`
 /// in the page's address overrides the choice.
-pub fn run_with<A, F>(title: &str, _opts: WindowOptions, cfg: UiConfig, make: F) -> Result<(), String>
+pub fn run_with<A, F>(
+    title: &str,
+    _opts: WindowOptions,
+    cfg: UiConfig,
+    make: F,
+) -> Result<(), String>
 where
     A: App,
     F: FnOnce(&mut Ui, Waker) -> A + 'static,
@@ -718,9 +730,14 @@ fn listen<A: App>(
         let what = keys::on_input(&e.input_type(), e.data().as_deref(), e.is_composing());
         s.inserted(what);
     })?;
-    on(input, "compositionupdate", shared, |s, e: CompositionEvent| {
-        s.send(Input::Preedit(e.data().unwrap_or_default()));
-    })?;
+    on(
+        input,
+        "compositionupdate",
+        shared,
+        |s, e: CompositionEvent| {
+            s.send(Input::Preedit(e.data().unwrap_or_default()));
+        },
+    )?;
     on(input, "compositionend", shared, |s, e: CompositionEvent| {
         s.send(Input::Preedit(String::new()));
         let text = e.data().unwrap_or_default();

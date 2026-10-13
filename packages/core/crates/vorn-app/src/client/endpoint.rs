@@ -41,8 +41,11 @@ pub struct Endpoint {
     pub port: u16,
     pub pid: u32,
     pub token: String,
-    /// The grid endpoint: a Unix socket path, or a named pipe on Windows.
+    /// The grid endpoint: a Unix socket path, or a named pipe on Windows;
+    /// in a browser, the page's `/grid` WebSocket.
     pub grid: String,
+    /// The JSON-RPC WebSocket.
+    pub ws: String,
 }
 
 // The token is a credential: keep it out of logs and panics.
@@ -52,6 +55,7 @@ impl fmt::Debug for Endpoint {
             .field("port", &self.port)
             .field("pid", &self.pid)
             .field("grid", &self.grid)
+            .field("ws", &self.ws)
             .finish_non_exhaustive()
     }
 }
@@ -80,12 +84,27 @@ impl Endpoint {
             pid: ports.pid,
             token,
             grid: grid_endpoint(data_dir, ports.pid),
+            ws: format!("ws://127.0.0.1:{}/ws", ports.port),
         })
+    }
+
+    /// The vornd that served this page, admitting `token`.
+    #[cfg(target_arch = "wasm32")]
+    pub fn page(token: String) -> Endpoint {
+        let at = crate::page::location();
+        let scheme = if at.secure { "wss" } else { "ws" };
+        Endpoint {
+            port: at.port,
+            pid: 0,
+            token,
+            grid: format!("{scheme}://{}/grid", at.host),
+            ws: format!("{scheme}://{}/ws", at.host),
+        }
     }
 
     /// The WebSocket URL.
     pub fn ws_url(&self) -> String {
-        format!("ws://127.0.0.1:{}/ws", self.port)
+        self.ws.clone()
     }
 }
 
@@ -102,7 +121,7 @@ pub fn data_dir() -> Result<PathBuf, FindError> {
 
 /// vornd's grid endpoint for process `pid` serving `data_dir`; one per
 /// process, so a vornd handing over never takes another's.
-#[cfg(unix)]
+#[cfg(not(windows))]
 pub fn grid_endpoint(data_dir: &Path, pid: u32) -> String {
     data_dir
         .join("run")

@@ -22,9 +22,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::edit::Clipboard;
-pub use crate::host::{App, UserEvent, Waker, WindowOptions};
-use crate::host::{cursor_icon, draw};
 use crate::gpu::{adapter_name, instance_desc, Gpu};
+use crate::host::{cursor_icon, draw};
+pub use crate::host::{App, UserEvent, Waker, WindowOptions};
 use crate::input::{from_winit, mods_of};
 use crate::interact::WindowRequest;
 use crate::interact::{WheelPhase, WHEEL_LINE};
@@ -607,4 +607,3 @@ fn configure(
     surface.configure(&gpu.device, &config);
     Ok((surface, config))
 }
-

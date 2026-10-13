@@ -61,7 +61,10 @@ impl Gpu {
 
     /// [`Gpu::open`] for a host that cannot block. WebGL2 lacks some of
     /// the downlevel defaults, so the limits are the adapter's own there.
-    pub async fn open_async(instance: wgpu::Instance, adapter: wgpu::Adapter) -> Result<Gpu, String> {
+    pub async fn open_async(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+    ) -> Result<Gpu, String> {
         let base = if adapter.get_info().backend == wgpu::Backend::Gl {
             wgpu::Limits::downlevel_webgl2_defaults()
         } else {

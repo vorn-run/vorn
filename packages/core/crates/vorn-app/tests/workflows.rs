@@ -61,7 +61,7 @@ fn workflows_view(v: &TestVornd) -> (App, Shot) {
     let mut app = connect(v);
     add_project(&mut app, v, "web", json!({}));
     let mut shot = Shot::new();
-    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     (app, shot)
 }
@@ -137,7 +137,7 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
             vars: true,
         }),
     );
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_text(&mut app, "echo hello");
     shot.click(
         &mut app,
@@ -168,7 +168,7 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
     shot.send(&mut app, key("Escape", 0, None));
 
     shot.click(&mut app, wf::field_id(None, "name"));
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_text(&mut app, "Hello flow");
     shot.click(&mut app, control("wf-editor", WfAct::Save));
     let w = shot.until(&mut app, "the workflow saved", |app, _| {
@@ -757,7 +757,7 @@ fn the_canvas_lays_out_forks_and_loops_pans_zooms_drags_and_connects() {
     );
 
     // Undo puts the seed positions back.
-    shot.send(&mut app, key("KeyZ", MOD, None));
+    shot.send(&mut app, key("KeyZ", MOD(), None));
     let d = app.st.wf.editor.as_ref().expect("editor");
     assert_eq!(d.node("h").unwrap()["position"]["x"], 0);
 }
@@ -884,7 +884,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     shot.save(&mut app, "icons-projects");
 
     // The task dialog's project picker draws `ProjectPicker`'s own icons.
-    shot.send(&mut app, key("KeyT", MOD, None));
+    shot.send(&mut app, key("KeyT", MOD(), None));
     shot.click(
         &mut app,
         App::control("toolbar", &Act::Task(TaskAct::New("todo".into()))),
@@ -915,7 +915,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     ] {
         app.rpc().call("workflowRun:save", run).expect("run saved");
     }
-    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     shot.click(
         &mut app,

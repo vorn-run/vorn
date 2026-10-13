@@ -359,8 +359,8 @@ pub struct App {
     /// Answers the file pickers; the OS dialogs outside tests.
     picker: crate::system::Picker,
     /// When `headless:list` was last asked, and exited sessions last pruned.
-    headless_polled: std::time::Instant,
-    headless_pruned: std::time::Instant,
+    headless_polled: web_time::Instant,
+    headless_pruned: web_time::Instant,
     /// The sidebar's left edge while its handle is dragged.
     sidebar_left: Option<f32>,
     /// The window's updater; none offscreen.
@@ -374,13 +374,29 @@ pub struct App {
 impl App {
     /// Connects to the vornd at `ep`, loads the models and opens the grid;
     /// `wake` runs whenever either has news for the next frame.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
-        let app_wake = Arc::clone(&wake);
         let store = Store::load(&rpc)?;
+        Ok(App::with(ep, wake, rpc, events, store))
+    }
+
+    /// [`App::connect`] without holding the page's one thread.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn connect_async(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
+        let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
+        let store = Store::load_async(&rpc).await?;
+        let mut app = App::with(ep, wake, rpc, events, store);
+        app.chrome = false;
+        app.traffic = false;
+        Ok(app)
+    }
+
+    fn with(ep: &Endpoint, wake: Wake, rpc: Rpc, events: Receiver<Event>, store: Store) -> App {
+        let app_wake = Arc::clone(&wake);
         let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
-        let (grid, grid_error) = match Grid::connect(&ep.grid, wake) {
+        let (grid, grid_error) = match Grid::connect(&ep.grid, &ep.token, wake) {
             Ok(g) => (Some(g), None),
             Err(e) => (None, Some(format!("grid {}: {e}", ep.grid))),
         };
@@ -436,8 +452,8 @@ impl App {
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),
-            headless_polled: std::time::Instant::now(),
-            headless_pruned: std::time::Instant::now(),
+            headless_polled: web_time::Instant::now(),
+            headless_pruned: web_time::Instant::now(),
             sidebar_left: None,
             updater: None,
             cli_launch: None,
@@ -447,7 +463,7 @@ impl App {
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:detectInstalled", Value::Null);
-        Ok(app)
+        app
     }
 
     /// `useState(sessionCount > 0)`: a project first seen without sessions
@@ -3133,7 +3149,10 @@ mod tests {
             shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        assert_eq!(shortcut("KeyT", MOD()), Some(Shortcut::View(MainView::Tasks)));
+        assert_eq!(
+            shortcut("KeyT", MOD()),
+            Some(Shortcut::View(MainView::Tasks))
+        );
         assert_eq!(
             shortcut("KeyW", MOD() | mods::SHIFT),
             Some(Shortcut::View(MainView::Workflows))
