@@ -92,6 +92,10 @@ pub enum WindowRequest {
 
 /// How long the pointer rests on an element before its tooltip shows.
 pub const TOOLTIP_DELAY: Duration = Duration::from_millis(400);
+
+/// How long after a shown tooltip is left a neighbour's shows at once, as a
+/// toolbar's tooltips hand over on macOS.
+pub const TOOLTIP_WARM: Duration = Duration::from_millis(500);
 /// How long a menu takes to grow in.
 pub const MENU_IN: Duration = Duration::from_millis(200);
 /// Half a caret blink.
@@ -179,6 +183,8 @@ pub(crate) struct State {
     pub fades: HashMap<Id, Fade>,
     /// The tooltip owner under the pointer, and since when.
     pub tip: Option<(Id, Instant)>,
+    /// Until when a newly hovered tooltip skips [`TOOLTIP_DELAY`].
+    pub tip_warm: Option<Instant>,
     pub menu: Option<Menu>,
     /// The menu last closed, for [`Ui::reopen_menu`].
     pub closed_menu: Option<Menu>,
@@ -219,6 +225,7 @@ impl State {
             focus_visible: false,
             fades: HashMap::new(),
             tip: None,
+            tip_warm: None,
             menu: None,
             closed_menu: None,
             scroll: HashMap::new(),
@@ -313,7 +320,19 @@ impl State {
             None => cursor,
         };
         if self.tip.map(|t| t.0) != tip {
-            self.tip = tip.map(|t| (t, now));
+            if self
+                .tip
+                .is_some_and(|(_, since)| now >= since + TOOLTIP_DELAY)
+            {
+                self.tip_warm = Some(now + TOOLTIP_WARM);
+            }
+            let warm = self.tip_warm.is_some_and(|w| now < w);
+            let since = if warm {
+                now.checked_sub(TOOLTIP_DELAY).unwrap_or(now)
+            } else {
+                now
+            };
+            self.tip = tip.map(|t| (t, since));
         }
     }
 
@@ -890,6 +909,7 @@ impl Ui {
             s.offset = (s.offset + dy).clamp(0.0, s.max);
             // A tooltip anchored to something that moved would float loose.
             self.st.tip = None;
+            self.st.tip_warm = None;
             return;
         }
         let wheel = self

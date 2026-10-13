@@ -137,18 +137,44 @@ pub(super) fn node_glyph(s: &Screen<'_>, n: &Value, size: f32) -> El {
     ico(glyph, size, 2.0, secondary())
 }
 
-/// The editor's icon picker: `PROJECT_ICON_OPTIONS` eight across, then
-/// `ICON_COLOR_PALETTE`.
+/// The editor's icon picker in its popover.
 pub fn icon_picker(s: &Screen<'_>) -> El {
     let Some(d) = &s.st.wf.editor else {
         return div();
     };
     let icon = sv(&d.wf, "icon").unwrap_or("Workflow");
     let color = sv(&d.wf, "iconColor").unwrap_or("#3b82f6");
+    div()
+        .w(220.0)
+        .p(8.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Dialog, "Change icon")
+        .child(icon_colors(
+            s,
+            "wf-icon",
+            icon,
+            color,
+            |n| act(WfAct::Icon(n)),
+            |h| act(WfAct::IconColor(h)),
+        ))
+}
+
+/// `IconColorPicker`: `PROJECT_ICON_OPTIONS` eight across, then
+/// `ICON_COLOR_PALETTE`, choosing through `on_icon` and `on_color`.
+pub fn icon_colors(
+    s: &Screen<'_>,
+    place: &'static str,
+    icon: &str,
+    color: &str,
+    on_icon: impl Fn(String) -> Act,
+    on_color: impl Fn(String) -> Act,
+) -> El {
     let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
     let mut grid = div().row().wrap_children().gap(4.0);
     for (name, glyph, label) in look::ICON_OPTIONS {
-        let id = s.acts.on("wf-icon", act(WfAct::Icon(name.to_owned())));
+        let id = s.acts.on(place, on_icon(name.to_owned()));
         let on = icon == name;
         let hot = s.ui.hover(id);
         let b = div()
@@ -171,9 +197,7 @@ pub fn icon_picker(s: &Screen<'_>) -> El {
     let mut swatches = div().row().gap(6.0);
     for rgb in look::ICON_COLORS {
         let hexs = format!("#{rgb:06x}");
-        let id = s
-            .acts
-            .on("wf-icon-color", act(WfAct::IconColor(hexs.clone())));
+        let id = s.acts.on(place, on_color(hexs.clone()));
         let on = color.eq_ignore_ascii_case(&hexs);
         let hot = s.ui.hover(id);
         let size = if on { 22.0 } else { 20.0 };
@@ -198,17 +222,7 @@ pub fn icon_picker(s: &Screen<'_>) -> El {
             ),
         );
     }
-    div()
-        .col()
-        .gap(8.0)
-        .w(220.0)
-        .p(8.0)
-        .rounded(8.0)
-        .border(1.0, white(0.08))
-        .bg(c(look::SURFACE_OVERLAY))
-        .role(Role::Dialog, "Change icon")
-        .child(grid)
-        .child(swatches)
+    div().col().gap(8.0).child(grid).child(swatches)
 }
 
 /// `SOURCE_ICONS`.

@@ -73,9 +73,8 @@ them.
   press and focus start changing on the next frame; never wait for a fetch,
   another thread, or the end of another animation.
 - Press feedback is instant (no fade in); the release fades out.
-- Tooltips wait `TOOLTIP_DELAY` (400 ms). Target: once one is up, a
-  neighbour's shows without the delay (vornui restarts it today,
-  `interact.rs:303`).
+- Tooltips wait `TOOLTIP_DELAY` (400 ms); once one is up, a neighbour's
+  shows without the delay for `TOOLTIP_WARM` (500 ms) after it is left.
 
 ### Durations
 

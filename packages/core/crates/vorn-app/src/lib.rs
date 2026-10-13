@@ -29,6 +29,7 @@ pub mod layout;
 pub mod library;
 pub mod look;
 pub mod markdown;
+pub mod models;
 pub mod paint;
 pub mod panes;
 pub mod runs;

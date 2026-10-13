@@ -738,7 +738,8 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
             Some(header(s, session, pos, dim, hot)),
             term_body(s, i, session, true),
             status_bar(s, session, dim),
-        ));
+        ))
+        .child(div().h(look::CARD_FOOT_H).shrink0());
     s.acts
         .click(el, "card-box", Act::Select(sid.to_owned()))
         .sense(Sense::HOVER)

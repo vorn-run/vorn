@@ -333,6 +333,49 @@ fn tooltip_shows_after_the_delay_and_hides_on_press() {
 }
 
 #[test]
+fn a_neighbour_tooltip_shows_at_once_while_one_was_just_up() {
+    let (a, b, far) = (Id::new("a"), Id::new("b"), Id::new("far"));
+    let build = |ui: &Ui| {
+        div()
+            .row()
+            .pt(60.0)
+            .pl(200.0)
+            .gap(40.0)
+            .child(widgets::icon_button(ui, a, widgets::icons::X, 14.0, "A"))
+            .child(widgets::icon_button(ui, b, widgets::icons::X, 14.0, "B"))
+            .child(widgets::icon_button(
+                ui,
+                far,
+                widgets::icons::X,
+                14.0,
+                "Far",
+            ))
+    };
+    let mut r = Rig::new();
+    r.frame(&build);
+    let ((ax, ay), (bx, by), (fx, fy)) = (r.center(a), r.center(b), r.center(far));
+    // A cold neighbour waits the full delay.
+    r.ui.pointer_move(ax, ay);
+    r.frame(&build);
+    r.wait(100);
+    r.ui.pointer_move(bx, by);
+    r.frame(&build);
+    assert!(!r.ui.tooltip_shown(b));
+    r.wait(400);
+    assert!(r.ui.tooltip_shown(b));
+    // Once one is up, the next shows on the frame the pointer reaches it.
+    r.ui.pointer_move(ax, ay);
+    r.frame(&build);
+    assert!(r.ui.tooltip_shown(a));
+    r.ui.pointer_move(ax, 400.0);
+    r.frame(&build);
+    r.wait(vornui::TOOLTIP_WARM.as_millis() as u64 + 1);
+    r.ui.pointer_move(fx, fy);
+    r.frame(&build);
+    assert!(!r.ui.tooltip_shown(far), "the handoff cools off");
+}
+
+#[test]
 fn hover_transitions_over_150ms() {
     let b = Id::new("b");
     let build = |ui: &Ui| widgets::button(ui, b, "Run");

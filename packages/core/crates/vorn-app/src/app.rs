@@ -14,13 +14,14 @@ use crate::client::rpc::{decode, Wake};
 use crate::client::{Endpoint, Event, Pending, Rpc, RpcError, Store};
 use crate::grid::Grid;
 use crate::look;
+use crate::models::Catalog;
 use crate::paint;
 use crate::screen::{
     card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_NAME,
     PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use crate::state::{
-    basename, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
+    basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
     decode_png, item_id, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
@@ -169,6 +170,8 @@ enum Call {
     Installed,
     Worktrees(String),
     Branches(String),
+    /// `agent:listModels` for an agent in a project.
+    Models(String, String),
     /// A `config:save`; the next one waits for it.
     Saved(Box<Call>),
     Task(tasks::TaskCall),
@@ -179,6 +182,24 @@ enum Call {
     /// Nothing to do with the answer, an error included.
     Ignore,
     Pane(browser::PaneCall),
+}
+
+/// The launcher model picker's id field.
+pub const MODEL_ID: Id = Id(0x6d6f_6465_6c00_0001);
+
+/// The field a group's name is edited in.
+pub const GROUP_NAME: Id = Id(0x6772_6f75_7000_0001);
+
+/// Appends `group` to the config's `sessionGroups`, making the list when
+/// there is none.
+fn push_group(config: &mut Value, group: Value) {
+    match config
+        .get_mut("sessionGroups")
+        .and_then(Value::as_array_mut)
+    {
+        Some(list) => list.push(group),
+        None => config["sessionGroups"] = Value::Array(vec![group]),
+    }
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -283,10 +304,27 @@ impl App {
             discarding: false,
             web,
         };
+        app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:detectInstalled", Value::Null);
         Ok(app)
+    }
+
+    /// `useState(sessionCount > 0)`: a project first seen without sessions
+    /// starts folded and stays so until opened.
+    fn see_projects(&mut self) {
+        for p in &self.store.projects {
+            if self.st.seen_projects.insert(p.name.clone())
+                && !self
+                    .store
+                    .sessions
+                    .iter()
+                    .any(|s| s.info.project_name == p.name)
+            {
+                self.st.collapsed.insert(p.name.clone());
+            }
+        }
     }
 
     /// Where vornd keeps its data: the session holders announce themselves
@@ -347,6 +385,10 @@ impl App {
                             .map(str::to_owned);
                         continue;
                     }
+                    if method == "connector:catalogChanged" {
+                        self.wf_catalog(&params);
+                        continue;
+                    }
                     if method == "scheduler:missed" {
                         self.wf_missed(&params);
                         continue;
@@ -361,6 +403,7 @@ impl App {
                 Event::Closed => self.closed = true,
             }
         }
+        self.see_projects();
         let calls = std::mem::take(&mut self.calls);
         for (kind, pending) in calls {
             match pending.poll() {
@@ -420,6 +463,7 @@ impl App {
             Call::Created => match answer.and_then(decode::<TerminalSession>) {
                 Ok(info) => {
                     self.st.selected = Some(info.id.clone());
+                    self.st.focus_terminal = true;
                     if self.st.focused.is_some() {
                         self.st.focused = Some(info.id.clone());
                     }
@@ -476,6 +520,12 @@ impl App {
                     .filter_map(Worktree::from_value)
                     .collect();
                 self.st.worktrees.insert(path, wts);
+            }
+            Call::Models(agent, path) => {
+                let catalog = answer.map_or_else(|_| Catalog::failed(), |v| Catalog::from_json(&v));
+                let listing = self.st.models.lists.entry((agent, path)).or_default();
+                listing.catalog = Some(catalog);
+                listing.loading = false;
             }
             Call::Branches(path) => {
                 let Ok(v) = answer else { return };
@@ -635,6 +685,7 @@ impl App {
             self.st.focused = Some(id.clone());
         }
         self.st.selected = Some(id);
+        self.st.focus_terminal = true;
     }
 
     /// The project new things start in: the sidebar's, else the selected
@@ -680,7 +731,7 @@ impl App {
                     self.go_to(id);
                 }
             }
-            Shortcut::Sidebar => self.st.sidebar = !self.st.sidebar,
+            Shortcut::Sidebar => self.run(ui, Act::ToggleSidebar, Src::default()),
             Shortcut::Shortcuts => {
                 self.st.dialog = match self.st.dialog {
                     Some(Dialog::Shortcuts) => None,
@@ -721,14 +772,30 @@ impl App {
             return;
         }
         let w = menus::width(&kind);
-        let rect = src.id.and_then(|id| ui.rect_of(id));
+        // Opened from the group's menu, under (and kept alive by) the group's row.
+        let trigger = match &kind {
+            MenuKind::GroupIcon(g) => Some(Acts::id("sidebar-group", &Act::Group(Some(g.clone())))),
+            _ => src.id,
+        };
+        let rect = trigger.and_then(|id| ui.rect_of(id));
         let mut at = match (src.at, rect) {
+            // `right-0 top-full mt-1` of an empty box at the row's end, so
+            // from the row's middle; the row ends 8 px past its More.
+            (None, Some(r)) if matches!(kind, MenuKind::Group(_) | MenuKind::Project(_)) => {
+                (r.x + r.w + 8.0 - w, r.y + r.h / 2.0 + 4.0)
+            }
+            (None, Some(r)) if matches!(kind, MenuKind::SessionGroups(_)) => {
+                (r.x + r.w - w, r.y + r.h / 2.0 + 4.0)
+            }
             (Some(p), _) => p,
             (None, Some(r)) if kind.is_launch() => (r.x, r.y - 4.0),
             (None, Some(r))
                 if matches!(
                     kind,
-                    MenuKind::Grid | MenuKind::TaskOptions | MenuKind::TaskCard(_)
+                    MenuKind::Grid
+                        | MenuKind::ViewOptions
+                        | MenuKind::TaskOptions
+                        | MenuKind::TaskCard(_)
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -762,6 +829,12 @@ impl App {
                 );
             }
             MenuKind::Headless => self.call(Call::Headless, "headless:list", Value::Null),
+            MenuKind::LaunchModel => {
+                self.st.models.invalid = None;
+                self.st.models.opened_at = now_ms() as u64;
+                ui.set_edit_text(MODEL_ID, "");
+                self.list_models(false);
+            }
             MenuKind::LaunchWorktree => {
                 if let Some((_, path)) = self.composer_project() {
                     self.call(
@@ -779,7 +852,47 @@ impl App {
             at,
             sub: None,
         });
-        ui.open_menu(menus::MENU, src.id.unwrap_or(menus::MENU));
+        ui.open_menu(menus::MENU, trigger.unwrap_or(menus::MENU));
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::LaunchModel)
+        {
+            ui.set_focus(Some(MODEL_ID));
+        }
+    }
+
+    /// Enter in the model picker's id field: the listed model it names,
+    /// else the id as typed once it passes `validate_id`.
+    fn choose_typed_model(&mut self, ui: &mut Ui) {
+        let query = ui.edit_text(MODEL_ID).to_owned();
+        if query.trim().is_empty() {
+            return;
+        }
+        let key = (
+            self.launch_agent().to_owned(),
+            self.composer_project().map(|p| p.1).unwrap_or_default(),
+        );
+        let exact = self
+            .st
+            .models
+            .lists
+            .get(&key)
+            .and_then(|l| l.exact(&query))
+            .map(|c| c.id.clone());
+        let pick = match exact {
+            Some(id) => id,
+            None => match crate::models::validate_id(&query) {
+                Ok(id) => id.to_owned(),
+                Err(why) => {
+                    self.st.models.invalid = Some(why);
+                    return;
+                }
+            },
+        };
+        self.st.models.picked.insert(key.0, pick);
+        self.close_menu(ui);
     }
 
     fn close_menu(&mut self, ui: &mut Ui) {
@@ -808,6 +921,144 @@ impl App {
                 );
             }
         }
+        self.list_models(false);
+    }
+
+    /// The agent the launcher starts.
+    fn launch_agent(&self) -> &str {
+        self.st
+            .launch
+            .agent
+            .as_deref()
+            .unwrap_or(self.store.default_agent())
+    }
+
+    /// Asks the launcher's agent for the models it runs in the launcher's
+    /// project, once unless `refresh`, as the picker prefetches.
+    fn list_models(&mut self, refresh: bool) {
+        let agent = self.launch_agent().to_owned();
+        let Some((_, path)) = self.composer_project() else {
+            return;
+        };
+        if !crate::models::selects_models(&agent) {
+            return;
+        }
+        let listing = self
+            .st
+            .models
+            .lists
+            .entry((agent.clone(), path.clone()))
+            .or_default();
+        if listing.loading || (listing.catalog.is_some() && !refresh) {
+            return;
+        }
+        listing.loading = true;
+        self.call(
+            Call::Models(agent.clone(), path.clone()),
+            "agent:listModels",
+            json!({ "agentType": agent, "projectPath": path, "refresh": refresh }),
+        );
+    }
+
+    /// `addSessionGroup`: "New group" after the last, its name being
+    /// edited, holding `session` when one asked for it.
+    fn new_group(&mut self, ui: &mut Ui, session: Option<String>) {
+        let id = crate::graph::new_id();
+        let order = self
+            .store
+            .groups
+            .iter()
+            .map(|g| g.order)
+            .fold(-1.0, f64::max)
+            + 1.0;
+        let group = json!({
+            "id": id,
+            "name": "New group",
+            "order": order,
+            "workspaceId": self.store.workspace(),
+        });
+        let mut config = self.store.config.clone();
+        push_group(&mut config, group);
+        self.save_config(config, Call::Quiet);
+        if let Some(sid) = session {
+            self.move_to_group(sid, Some(id.clone()), Call::Quiet);
+        }
+        self.run(ui, Act::RenameGroup(id), Src::default());
+    }
+
+    fn rename_group(&mut self, ui: &mut Ui) {
+        let Some(id) = self.st.renaming_group.take() else {
+            return;
+        };
+        ui.set_focus(None);
+        let name = ui.edit_text(GROUP_NAME).trim().to_owned();
+        if !name.is_empty() && self.store.group(&id).is_some_and(|g| g.name != name) {
+            self.patch_group(&id, "name", name);
+        }
+    }
+
+    /// `updateSessionGroup`: one field of a group, saved quietly.
+    fn patch_group(&mut self, id: &str, key: &str, value: String) {
+        let mut config = self.store.config.clone();
+        let Some(g) = config
+            .get_mut("sessionGroups")
+            .and_then(Value::as_array_mut)
+            .and_then(|l| {
+                l.iter_mut()
+                    .find(|g| g.get("id").and_then(Value::as_str) == Some(id))
+            })
+        else {
+            return;
+        };
+        g[key] = Value::String(value);
+        self.save_config(config, Call::Quiet);
+    }
+
+    /// `removeSessionGroup`: the group goes, its sessions let go through
+    /// the server, which owns membership.
+    fn delete_group(&mut self, id: &str) {
+        let Some(name) = self.store.group(id).map(|g| g.name.clone()) else {
+            return;
+        };
+        let mut config = self.store.config.clone();
+        if let Some(list) = config
+            .get_mut("sessionGroups")
+            .and_then(Value::as_array_mut)
+        {
+            list.retain(|g| g.get("id").and_then(Value::as_str) != Some(id));
+        }
+        if self.st.group.as_deref() == Some(id) {
+            self.st.group = None;
+        }
+        self.st.groups_folded.remove(id);
+        self.save_config(config, Call::Toast(format!("Group \"{name}\" deleted")));
+        let members: Vec<String> = self
+            .store
+            .sessions
+            .iter()
+            .filter(|s| s.info.group_id.as_deref() == Some(id))
+            .map(|s| s.info.id.clone())
+            .collect();
+        for sid in members {
+            self.move_to_group(sid, None, Call::Quiet);
+        }
+    }
+
+    /// `moveSessionToGroup`: shown at once, then told to the server.
+    fn move_to_group(&mut self, session: String, group: Option<String>, call: Call) {
+        if let Some(s) = self
+            .store
+            .sessions
+            .iter_mut()
+            .find(|s| s.info.id == session)
+        {
+            s.info.group_id = group.clone();
+        }
+        self.call(
+            call,
+            "terminal:setGroup",
+            json!({ "id": session, "groupId": group }),
+        );
     }
 
     fn save_config(&mut self, config: Value, call: Call) {
@@ -841,7 +1092,16 @@ impl App {
                     self.wf_refresh();
                 }
             }
-            Act::ToggleSidebar => self.st.sidebar = !self.st.sidebar,
+            Act::ToggleSidebar => {
+                self.st.sidebar = !self.st.sidebar;
+                if self.st.sidebar {
+                    // Reopened, the projects take their first fold again, as
+                    // today's remounted ProjectItems do.
+                    self.st.seen_projects.clear();
+                    self.st.collapsed.clear();
+                    self.see_projects();
+                }
+            }
             Act::Select(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
@@ -1044,8 +1304,27 @@ impl App {
             Act::Welcome => self.st.dialog = None,
             Act::Project(p) => {
                 self.st.project = p;
+                self.st.group = None;
+                self.st.worktree = None;
                 if self.st.view == MainView::Workflows {
                     self.st.view = MainView::Sessions;
+                }
+            }
+            Act::Worktree { project, path } => {
+                let again = self.st.project.as_deref() == Some(project.as_str())
+                    && self.st.worktree.as_deref() == Some(path.as_str());
+                self.st.project = Some(project);
+                self.st.worktree = (!again).then_some(path);
+                self.st.group = None;
+                self.st.focused = None;
+                if self.st.view == MainView::Workflows {
+                    self.st.view = MainView::Sessions;
+                }
+            }
+            Act::ToggleWorktree { project, path } => {
+                let key = (project, path);
+                if !self.st.worktrees_folded.remove(&key) {
+                    self.st.worktrees_folded.insert(key);
                 }
             }
             Act::AddProject => {
@@ -1056,7 +1335,21 @@ impl App {
                 self.st.dialog = Some(Dialog::Project(None));
             }
             Act::ToggleProject(name) => {
-                if !self.st.collapsed.remove(&name) {
+                if self.st.collapsed.remove(&name) {
+                    let path = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|p| p.name == name)
+                        .map(|p| p.path.clone());
+                    if let Some(path) = path {
+                        self.call(
+                            Call::Worktrees(path.clone()),
+                            "git:listWorktrees",
+                            json!(path),
+                        );
+                    }
+                } else {
                     self.st.collapsed.insert(name);
                 }
             }
@@ -1074,6 +1367,52 @@ impl App {
                 };
                 self.st.dialog = Some(Dialog::Project(Some(name)));
             }
+            Act::SidebarMode(m) => self.st.sidebar_mode = m,
+            Act::ToggleSection => self.st.section_folded = !self.st.section_folded,
+            Act::Group(g) => {
+                // A group row toggles its filter; All Sessions clears both.
+                self.st.group = g.filter(|g| self.st.group.as_ref() != Some(g));
+                self.st.project = None;
+                self.st.worktree = None;
+                self.st.focused = None;
+            }
+            Act::ToggleGroup(id) => {
+                if !self.st.groups_folded.remove(&id) {
+                    self.st.groups_folded.insert(id);
+                }
+            }
+            Act::NewGroup(session) => self.new_group(ui, session),
+            Act::RenameGroup(id) => {
+                let Some(name) = self.store.group(&id).map(|g| g.name.clone()) else {
+                    return;
+                };
+                ui.set_edit_text(GROUP_NAME, &name);
+                ui.set_focus(Some(GROUP_NAME));
+                self.st.renaming_group = Some(id);
+            }
+            Act::GroupIcon(id) => self.open_menu(ui, MenuKind::GroupIcon(id), src),
+            Act::GroupIconName(id, icon) => self.patch_group(&id, "icon", icon),
+            Act::GroupIconColor(id, color) => self.patch_group(&id, "iconColor", color),
+            Act::UngroupAll(id) => {
+                let name = self.store.group(&id).map(|g| g.name.clone());
+                let members: Vec<String> = self
+                    .store
+                    .sessions
+                    .iter()
+                    .filter(|s| s.info.group_id.as_deref() == Some(id.as_str()))
+                    .map(|s| s.info.id.clone())
+                    .collect();
+                for sid in members {
+                    self.move_to_group(sid, None, Call::Quiet);
+                }
+                if let Some(name) = name {
+                    self.st
+                        .toast(format!("Sessions moved out of \"{name}\""), false);
+                }
+            }
+            Act::AskDeleteGroup(id) => self.st.confirm_delete = Some(id),
+            Act::DeleteGroup(id) => self.delete_group(&id),
+            Act::MoveToGroup { session, group } => self.move_to_group(session, group, Call::Quiet),
             Act::AskDeleteProject(name) => self.st.confirm_delete = Some(name),
             Act::DeleteProject(name) => {
                 let mut config = self.store.config.clone();
@@ -1128,7 +1467,19 @@ impl App {
             Act::HideHeadless(id) => self.st.headless.retain(|h| h.id != id),
             Act::ToggleHeadless(_) => {}
             Act::PickProject(name) => self.pick_project(name),
-            Act::PickAgent(agent) => self.st.launch.agent = Some(agent),
+            Act::PickAgent(agent) => {
+                self.st.launch.agent = Some(agent);
+                self.list_models(false);
+            }
+            Act::PickModel(model) => {
+                let agent = self.launch_agent().to_owned();
+                match model {
+                    Some(m) => self.st.models.picked.insert(agent, m),
+                    None => self.st.models.picked.remove(&agent),
+                };
+                self.close_menu(ui);
+            }
+            Act::RefreshModels => self.list_models(true),
             Act::PickWorktree(path) => {
                 self.st.launch.worktree = path;
                 self.st.launch.new_worktree = false;
@@ -1239,6 +1590,10 @@ impl App {
                                             | crate::workflows::WfAct::IconColor(_)
                                     )
                                 )
+                            || matches!(m.kind, MenuKind::GroupIcon(_))
+                                && matches!(act, Act::GroupIconName(..) | Act::GroupIconColor(..))
+                            || matches!(m.kind, MenuKind::SidebarOptions)
+                                && matches!(act, Act::SidebarMode(_))
                     });
                     if !keep && self.st.menu.is_some() {
                         self.close_menu(ui);
@@ -1334,6 +1689,7 @@ impl App {
             UiEvent::ResizeEnd { id, ratio } => {
                 self.pane_resized(ui, id, ratio, true);
             }
+            UiEvent::Changed(id) if id == MODEL_ID => self.st.models.invalid = None,
             UiEvent::Changed(id) if id == PROJECT_PATH => {
                 // The folder's name, until another name is typed.
                 let name = ui.edit_text(PROJECT_NAME).to_owned();
@@ -1350,6 +1706,14 @@ impl App {
     fn submit(&mut self, ui: &mut Ui, id: Id) {
         if id == PROJECT_NAME || id == PROJECT_PATH {
             self.save_project(ui);
+            return;
+        }
+        if id == GROUP_NAME {
+            self.rename_group(ui);
+            return;
+        }
+        if id == MODEL_ID {
+            self.choose_typed_model(ui);
             return;
         }
         if let Some(sid) = self.st.renaming.clone().filter(|s| rename_id(s) == id) {
@@ -1411,6 +1775,8 @@ impl App {
                 | Act::Columns(_)
                 | Act::Layout(_)
                 | Act::AskDeleteProject(_)
+                | Act::AskDeleteGroup(_)
+                | Act::SidebarMode(_)
                 | Act::Task(crate::tasks::TaskAct::AskDelete(_))
         );
         if stays {
@@ -1472,6 +1838,9 @@ impl App {
             ui.set_focus(None);
         } else if self.st.renaming.is_some() {
             self.st.renaming = None;
+            ui.set_focus(None);
+        } else if self.st.renaming_group.is_some() {
+            self.st.renaming_group = None;
             ui.set_focus(None);
         } else if self.st.confirm_close.is_some() {
             self.st.confirm_close = None;
@@ -1635,6 +2004,9 @@ impl App {
         if let Some(b) = &l.branch {
             params["branch"] = json!(b);
         }
+        if let Some(m) = self.st.models.picked.get(self.launch_agent()) {
+            params["model"] = json!(m);
+        }
         let prompt = self.st.composer.text.trim();
         if !prompt.is_empty() {
             params["initialPrompt"] = json!(prompt);
@@ -1673,6 +2045,9 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        if std::mem::take(&mut self.st.focus_terminal) {
+            ui.set_focus(None);
+        }
         self.git_tick();
         self.panes_tick(ui);
         self.tasks_tick(ui);
@@ -1755,14 +2130,24 @@ impl App {
                 }
             }
             if let Some(v) = self.views.get(sid) {
-                let focused = current.as_deref() == Some(sid)
-                    && self.st.renaming.is_none()
+                let caret = if current.as_deref() != Some(sid) {
+                    paint::Caret::Hidden
+                } else if self.st.renaming.is_none()
                     && self.st.dialog.is_none()
-                    && ui.focus().is_none();
-                let pre = if focused { self.preedit.as_str() } else { "" };
+                    && ui.focus().is_none()
+                {
+                    paint::Caret::Live
+                } else {
+                    paint::Caret::Hollow
+                };
+                let pre = if caret == paint::Caret::Live {
+                    self.preedit.as_str()
+                } else {
+                    ""
+                };
                 // A screen not yet resized to a narrower box stays inside it.
                 ui.scene.push_clip(*r);
-                paint::pane(ui, v, *r, focused, pre);
+                paint::pane(ui, v, *r, caret, pre);
                 ui.scene.pop_clip();
             }
         }

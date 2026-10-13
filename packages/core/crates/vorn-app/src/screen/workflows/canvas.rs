@@ -13,7 +13,9 @@ use crate::look;
 use crate::runs::{self, s as sv};
 use crate::screen::dashed;
 use crate::screen::{c, ico, white, Screen};
-use crate::ui::{div, shape, text, tooltip, Action, Cursor, El, Id, Rgba, Role, Sense};
+use crate::ui::{
+    div, shape, text, tooltip, tooltip_at, Action, Cursor, El, Id, Place, Rgba, Role, Sense,
+};
 use crate::workflows::{self as wf, Anchor, Draft, Gesture, Panel, WfAct};
 
 fn ink(a: f32) -> Rgba {
@@ -553,7 +555,7 @@ fn hover_tools(
                 2.0,
                 c(look::GRAY_400).mix(c(look::WHITE), hv),
             ));
-        tooltip(s.ui, b, bid, label, None)
+        tooltip_at(s.ui, b, bid, label, None, Place::Right)
     };
     let mut col = div().col().gap(4.0);
     let mut count = 0.0;

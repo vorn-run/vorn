@@ -28,8 +28,11 @@ pub const SIDEBAR_W: f32 = 256.0;
 pub const COMPOSER_MAX_W: f32 = 800.0;
 /// The terminal font size, in points.
 pub const TERM_FONT: f32 = 12.0;
-/// A card's header (`py-2.5` around an 18 px icon, its border included).
-pub const CARD_HEADER_H: f32 = 39.0;
+/// A card's header (`py-2.5` around the 22 px action cluster, which keeps
+/// its space while hidden; its border included).
+pub const CARD_HEADER_H: f32 = 43.0;
+/// The grid card's `RowResizeHandle` strip under its status bar.
+pub const CARD_FOOT_H: f32 = 6.0;
 /// The card's status bar and its `border-t`.
 pub const CARD_STATUS_H: f32 = 22.0;
 /// The terminal's `pt-0.5` inside the card body.

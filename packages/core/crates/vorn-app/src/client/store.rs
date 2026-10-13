@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
-use vorn_protocol::{ProjectConfig, TaskConfig, TerminalSession, WorkflowDefinition};
+use vorn_protocol::{
+    ProjectConfig, SessionGroupConfig, TaskConfig, TerminalSession, WorkflowDefinition,
+};
 
 use super::rpc::{Pending, Rpc, RpcError, CALL_TIMEOUT};
 
@@ -21,6 +23,7 @@ pub const TOPICS: &[&str] = &[
     "worktree:confirmCleanup",
     "artifact:published",
     "artifact:commentsChanged",
+    "connector:catalogChanged",
 ];
 
 /// The agent a new composer session starts when the config names none, as
@@ -99,6 +102,8 @@ pub struct Store {
     pub sessions: Vec<Session>,
     pub tasks: Vec<TaskConfig>,
     pub workflows: Vec<WorkflowDefinition>,
+    /// The active workspace's session groups, in their order.
+    pub groups: Vec<SessionGroupConfig>,
     /// Steps waiting on an approval, by run id: what the session dock counts.
     pub approvals: HashMap<String, usize>,
     /// The latest of every run vornd reported since loading, by run id.
@@ -130,6 +135,7 @@ impl Store {
             workflows: records(workflows?),
             ..Store::default()
         };
+        store.groups = groups(&store.config);
         for info in records::<TerminalSession>(sessions?) {
             store.upsert(info);
         }
@@ -150,6 +156,20 @@ impl Store {
             .and_then(Value::as_str)
             .filter(|a| !a.is_empty())
             .unwrap_or(DEFAULT_AGENT)
+    }
+
+    /// The workspace the screen shows: the first configured, as the
+    /// renderer starts on it, else `personal`.
+    pub fn workspace(&self) -> &str {
+        self.config
+            .pointer("/workspaces/0/id")
+            .and_then(Value::as_str)
+            .unwrap_or(WORKSPACE)
+    }
+
+    /// The group with `id`.
+    pub fn group(&self, id: &str) -> Option<&SessionGroupConfig> {
+        self.groups.iter().find(|g| g.id == id)
     }
 
     /// The session with `id`.
@@ -187,10 +207,16 @@ impl Store {
         before.unwrap_or(0) != waiting
     }
 
-    /// Adds a session, or replaces the one with its id in place.
-    pub fn upsert(&mut self, info: TerminalSession) {
+    /// Adds a session, or replaces the one with its id in place; a record
+    /// without a branch keeps the one already learned.
+    pub fn upsert(&mut self, mut info: TerminalSession) {
         match self.sessions.iter_mut().find(|s| s.info.id == info.id) {
-            Some(s) => s.info = info,
+            Some(s) => {
+                if info.branch.is_none() {
+                    info.branch = s.info.branch.take();
+                }
+                s.info = info;
+            }
             None => self.sessions.push(Session {
                 info,
                 exited: None,
@@ -273,11 +299,28 @@ impl Store {
                 self.projects = records(self.config.get("projects").cloned().unwrap_or_default());
                 self.tasks = records(self.config.get("tasks").cloned().unwrap_or_default());
                 self.workflows = records(self.config.get("workflows").cloned().unwrap_or_default());
+                self.groups = groups(&self.config);
                 Change::Config
             }
             _ => Change::Nothing,
         }
     }
+}
+
+/// The workspace every config has (`DEFAULT_WORKSPACE_ID`).
+pub const WORKSPACE: &str = "personal";
+
+/// `useWorkspaceSessionGroups`: the first workspace's groups by `order`.
+fn groups(config: &Value) -> Vec<SessionGroupConfig> {
+    let workspace = config
+        .pointer("/workspaces/0/id")
+        .and_then(Value::as_str)
+        .unwrap_or(WORKSPACE);
+    let mut out: Vec<SessionGroupConfig> =
+        records(config.get("sessionGroups").cloned().unwrap_or_default());
+    out.retain(|g| g.workspace_id == workspace);
+    out.sort_by(|a, b| a.order.total_cmp(&b.order));
+    out
 }
 
 /// The entries of a list that read as `T`; one malformed record should not
@@ -388,6 +431,17 @@ mod tests {
         assert_eq!(s.default_agent(), "codex");
         assert_eq!(s.projects.len(), 1);
         assert_eq!(s.projects[0].name, "web");
+    }
+
+    #[test]
+    fn groups_are_the_workspaces_own_in_order() {
+        let mut s = Store::default();
+        let g = |id: &str, order: f64, ws: &str| json!({ "id": id, "name": id, "order": order, "workspaceId": ws });
+        let config = json!({ "sessionGroups": [g("b", 1.0, "personal"), g("x", 0.0, "work"), g("a", 0.0, "personal")] });
+        s.apply("config:changed", config);
+        let ids: Vec<&str> = s.groups.iter().map(|g| g.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"]);
+        assert_eq!(s.group("b").map(|g| g.order), Some(1.0));
     }
 
     #[test]

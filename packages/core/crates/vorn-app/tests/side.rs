@@ -514,9 +514,17 @@ fn a_worktree_whose_last_session_ends_is_offered_for_removal() {
     app.click(&mut shot.ui, App::control("sidebar-worktree", &remove));
     shot.frame(&mut app);
     if app.st.dialog.is_none() {
+        // First seen without sessions, the project starts folded.
+        app.st.collapsed.remove("acme");
         shot.hover(
             &mut app,
-            vorn_app::act::Acts::id("sidebar-worktree", &Act::Nothing).child(&wt),
+            vorn_app::act::Acts::id(
+                "sidebar-worktree",
+                &Act::Worktree {
+                    project: "acme".into(),
+                    path: wt.clone(),
+                },
+            ),
         );
         shot.click(&mut app, control("sidebar-worktree", remove));
     }

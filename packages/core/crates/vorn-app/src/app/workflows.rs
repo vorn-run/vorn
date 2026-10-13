@@ -107,14 +107,7 @@ impl App {
             }
             WfCall::Catalog => {
                 if let Ok(v) = answer {
-                    let take = |k: &str| {
-                        v.get(k)
-                            .and_then(Value::as_array)
-                            .cloned()
-                            .unwrap_or_default()
-                    };
-                    self.st.wf.lib.catalog = take("items");
-                    self.st.wf.lib.templates = take("templates");
+                    self.wf_catalog(&v);
                 }
             }
             WfCall::Packs => self.st.wf.lib.packs = list(answer),
@@ -688,6 +681,19 @@ impl App {
             .projects
             .first()
             .map(|p| (p.name.clone(), p.path.clone()))
+    }
+
+    /// Keeps a catalog snapshot: `connector:catalog`'s answer, or the
+    /// refreshed one `connector:catalogChanged` brings.
+    pub(super) fn wf_catalog(&mut self, v: &Value) {
+        let take = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        };
+        self.st.wf.lib.catalog = take("items");
+        self.st.wf.lib.templates = take("templates");
     }
 
     /// What the library and start-from draw: the catalog, packs,

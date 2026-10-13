@@ -153,7 +153,7 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
     shot.click(&mut app, control("wf-icon", WfAct::Icon("Rocket".into())));
     shot.click(
         &mut app,
-        control("wf-icon-color", WfAct::IconColor("#22c55e".into())),
+        control("wf-icon", WfAct::IconColor("#22c55e".into())),
     );
     assert_eq!(
         app.st.menu.as_ref().map(|m| &m.kind),
