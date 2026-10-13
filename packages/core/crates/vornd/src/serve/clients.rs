@@ -7,6 +7,7 @@
 //! watch reads ([`super::idle`]).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -95,10 +96,20 @@ struct Client {
     token: Option<String>,
 }
 
+/// A `/grid` socket, which is sent no notifications.
+#[derive(Debug)]
+struct GridSocket {
+    /// Ends the socket with [`CLOSE_CREDENTIAL_REJECTED`].
+    revoked: Arc<Notify>,
+    token: Option<String>,
+}
+
 /// Every admitted client.
 #[derive(Debug)]
 pub struct Clients {
     clients: Mutex<HashMap<u64, Client>>,
+    grids: Mutex<HashMap<u64, GridSocket>>,
+    next_grid: AtomicU64,
     last_activity: Mutex<Instant>,
 }
 
@@ -106,6 +117,8 @@ impl Default for Clients {
     fn default() -> Self {
         Clients {
             clients: Mutex::new(HashMap::new()),
+            grids: Mutex::new(HashMap::new()),
+            next_grid: AtomicU64::new(1),
             last_activity: Mutex::new(Instant::now()),
         }
     }
@@ -142,6 +155,34 @@ impl Clients {
         let mut clients = self.lock();
         if clients.remove(&id).is_some() {
             info!(total = clients.len(), "a client disconnected");
+        }
+    }
+
+    fn grids(&self) -> std::sync::MutexGuard<'_, HashMap<u64, GridSocket>> {
+        self.grids.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Admits a `/grid` socket that authenticated with `token`; answers its
+    /// id and what is notified when that token is revoked.
+    pub fn add_grid(&self, token: Option<String>) -> (u64, Arc<Notify>) {
+        let id = self.next_grid.fetch_add(1, Ordering::Relaxed);
+        let revoked = Arc::new(Notify::new());
+        let mut grids = self.grids();
+        grids.insert(
+            id,
+            GridSocket {
+                revoked: Arc::clone(&revoked),
+                token,
+            },
+        );
+        info!(total = grids.len(), "a grid socket connected");
+        (id, revoked)
+    }
+
+    pub fn remove_grid(&self, id: u64) {
+        let mut grids = self.grids();
+        if grids.remove(&id).is_some() {
+            info!(total = grids.len(), "a grid socket disconnected");
         }
     }
 
@@ -208,6 +249,15 @@ impl Clients {
                 .out
                 .send_message_now(close(CLOSE_CREDENTIAL_REJECTED, "token revoked"));
             client.ended.notify_one();
+            closed += 1;
+        }
+        drop(clients);
+        for grid in self
+            .grids()
+            .values()
+            .filter(|g| g.token.as_deref() == Some(token))
+        {
+            grid.revoked.notify_one();
             closed += 1;
         }
         if closed > 0 {
@@ -321,6 +371,17 @@ mod tests {
         assert!(b.drain_now().is_empty());
         // Its read loop is told to stop too, whether or not the client closes.
         assert!(futures_util::FutureExt::now_or_never(ended.notified()).is_some());
+
+        // A grid socket of that token is ended too; another token's and a
+        // removed one's are not.
+        let (_, revoked) = clients.add_grid(Some("tok".into()));
+        let (_, kept) = clients.add_grid(Some("other".into()));
+        let (gone, untold) = clients.add_grid(Some("tok".into()));
+        clients.remove_grid(gone);
+        assert_eq!(clients.disconnect_token("tok"), 2);
+        assert!(futures_util::FutureExt::now_or_never(revoked.notified()).is_some());
+        assert!(futures_util::FutureExt::now_or_never(kept.notified()).is_none());
+        assert!(futures_util::FutureExt::now_or_never(untold.notified()).is_none());
     }
 
     #[test]

@@ -218,15 +218,11 @@ fn serve_grid(cfg: &HolderConfig, holder: &Holder) -> Option<String> {
     let endpoint = vornd::grid::endpoint(&cfg.home);
     match vorn_sessiond::os::Listener::bind(&cfg.home, &endpoint) {
         Ok(listener) => {
-            let instance = u64::from(std::process::id())
-                ^ std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_nanos() as u64);
             tokio::spawn(vornd::grid::serve(
                 listener,
                 engine,
-                env!("CARGO_PKG_VERSION").into(),
-                instance,
+                vornd::grid::BUILD.into(),
+                vornd::grid::instance(),
             ));
             info!(%endpoint, "grid endpoint");
             Some(endpoint)

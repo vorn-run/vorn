@@ -14,9 +14,13 @@
 //! the actor answers. A client that stops reading is disconnected once its
 //! queue fills ([`crate::engine::GRID_QUEUE`]), and resumes with a snapshot.
 //!
+//! Browsers reach the same protocol over the `/grid` WebSocket
+//! ([`crate::serve::grid_ws`]), once authenticated as on `/ws`.
+//!
 //! Its attachments' views, presence, input and size requests also go to the
-//! size rule ([`crate::size`]), where every grid client counts as a
-//! desktop: only this user can open the socket.
+//! size rule ([`crate::size`]), where a grid client on the local socket
+//! counts as a desktop (only this user can open it) and one from a browser
+//! does not, unless it opened with the desktop's launch token.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -69,6 +73,21 @@ pub fn endpoint(home: &Path) -> String {
             os::user_sid().unwrap_or_else(|_| "user".into())
         )
     }
+}
+
+/// The build every grid client is welcomed with.
+pub const BUILD: &str = env!("CARGO_PKG_VERSION");
+
+/// This process's grid instance, the same on every endpoint it serves, so a
+/// client can tell a restarted vornd from the one it knew.
+pub fn instance() -> u64 {
+    static INSTANCE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *INSTANCE.get_or_init(|| {
+        u64::from(std::process::id())
+            ^ std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64)
+    })
 }
 
 /// The answer to a client's Hello: Welcome with the capabilities both
@@ -139,6 +158,34 @@ pub async fn serve_conn_with<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    serve_stream(stream, engine, build, instance, write_timeout, true).await
+}
+
+/// [`serve_conn`] for a connection that is not a desktop's
+/// ([`crate::size::Sizes::remote_grid`]).
+pub async fn serve_remote_conn<S>(
+    stream: S,
+    engine: Arc<Engine>,
+    build: &str,
+    instance: u64,
+) -> String
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    serve_stream(stream, engine, build, instance, WRITE_TIMEOUT, false).await
+}
+
+async fn serve_stream<S>(
+    stream: S,
+    engine: Arc<Engine>,
+    build: &str,
+    instance: u64,
+    write_timeout: Duration,
+    desktop: bool,
+) -> String
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (mut rd, mut wr) = tokio::io::split(stream);
     let mut reader = FrameReader::new();
     let mut buf = vec![0u8; 64 << 10];
@@ -191,6 +238,9 @@ where
     }
 
     let (conn, mut queue) = engine.grid_open();
+    if !desktop {
+        engine.sizes().remote_grid(conn);
+    }
     let mut c = Conn {
         engine: &engine,
         conn,
