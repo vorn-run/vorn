@@ -182,6 +182,14 @@ jobs:
         working-directory: packages/core
         run: cargo clippy --release --locked --workspace --all-targets -- -D warnings
 
+      # Its own temporary directory (TMP and TEMP on Windows), so what the tests leave there can be told from the runner's.
+      - name: Test temporary directory
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/vorn-tests"
+          mkdir -p "$dir"
+          { echo "TMPDIR=$dir"; echo "TMP=$dir"; echo "TEMP=$dir"; } >> "$GITHUB_ENV"
+
       # nextest runs the test binaries side by side instead of one after another; doc tests run separately.
       - uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2.87.19
         with:
@@ -253,6 +261,12 @@ jobs:
       - name: Sessions through vornd
         if: ${{ !inputs.quick }}
         run: yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
+
+      # Every vornd, sessiond and session program the tests above started has ended with them.
+      - name: No processes left behind
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: node scripts/check-leftover-processes.mjs --wait 15 "$TMPDIR" "$GITHUB_WORKSPACE"
 
       - name: Build app
         if: ${{ !inputs.quick }}

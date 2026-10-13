@@ -6,7 +6,7 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Helper processes without a console window on Windows, for every crate that starts one"
+description = "Helper processes without a console window on Windows, for every crate that starts one, and ending with another process"
 
 [features]
 # The same extension for tokio's Command, for crates that spawn from async code.
@@ -14,3 +14,9 @@ tokio = ["dep:tokio"]
 
 [dependencies]
 tokio = { version = "1", default-features = false, features = ["process"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

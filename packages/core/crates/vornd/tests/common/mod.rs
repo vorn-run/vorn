@@ -36,6 +36,8 @@ impl Drop for Served {
 pub fn serve() -> Served {
     let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let mut child = Command::new(env!("CARGO_BIN_EXE_vornd"))
+        .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+        .env("VORN_TAILSCALE", "none")
         .arg("--data-dir")
         .arg(data.path())
         .args(["--port", "0"])

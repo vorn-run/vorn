@@ -150,8 +150,18 @@ jobs:
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
         run: yarn build:core
 
+      # Its own temporary directory, so what the tests leave there can be told from the runner's.
+      - name: Test temporary directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/vorn-tests"
+          echo "TMPDIR=$RUNNER_TEMP/vorn-tests" >> "$GITHUB_ENV"
+
       - name: Test
         run: yarn vitest run --coverage --reporter=default --reporter=blob --shard=${{ matrix.shard }}/3
+
+      - name: No processes left behind
+        if: ${{ !cancelled() }}
+        run: node scripts/check-leftover-processes.mjs --wait 15 "$TMPDIR" "$GITHUB_WORKSPACE"
 
       # Failed runs too, so the ci job's merged report lists every failure.
       - uses: actions/upload-artifact@v7

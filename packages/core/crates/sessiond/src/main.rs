@@ -11,6 +11,9 @@
 //!
 //! `VORN_SESSIOND_HANDOFF_FAULT=<step>:<fail|stall>` (Unix) makes a handoff
 //! fail or hang at that step, for tests that check nothing is lost when it does.
+//!
+//! It ends every session and stops when its home is removed, or when the
+//! process `VORN_EXIT_WITH` names ends (a test run's, so it leaves none behind).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -73,6 +76,10 @@ fn main() {
         idle_exit: Duration::from_secs(idle),
         spool_cap: 512 << 20,
     });
+    if let Some(pid) = vorn_spawn::watch::exit_with() {
+        let d = std::sync::Arc::clone(&d);
+        vorn_spawn::watch::on_exit(pid, move || d.end());
+    }
     #[cfg(unix)]
     if let Some(f) = std::env::var("VORN_SESSIOND_HANDOFF_FAULT")
         .ok()

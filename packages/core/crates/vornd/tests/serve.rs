@@ -31,6 +31,8 @@ impl Drop for Served {
 
 fn serve(data: &Path, home: &Path) -> Served {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vornd"))
+        .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+        .env("VORN_TAILSCALE", "none")
         .args(["--data-dir"])
         .arg(data)
         .args(["--port", "0"])
@@ -213,6 +215,8 @@ fn a_second_vornd_on_the_directory_stands_down() {
     let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let _first = serve(data.path(), home.path());
     let second = Command::new(env!("CARGO_BIN_EXE_vornd"))
+        .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+        .env("VORN_TAILSCALE", "none")
         .arg("--data-dir")
         .arg(data.path())
         .args(["--port", "0"])
@@ -231,6 +235,8 @@ fn a_debug_build_will_not_touch_the_default_data_directory() {
     let home = tempfile::tempdir().unwrap();
     let default = home.path().join(".vorn");
     let out = Command::new(env!("CARGO_BIN_EXE_vornd"))
+        .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+        .env("VORN_TAILSCALE", "none")
         .arg("--data-dir")
         .arg(&default)
         .env("HOME", home.path())

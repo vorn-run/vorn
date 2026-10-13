@@ -72,6 +72,8 @@ impl Vornd {
     fn start_with(home: &Path, bundled: &Path, env: &[(&str, &str)]) -> Vornd {
         let log = home.join("vornd.log");
         let mut cmd = Command::new(VORND);
+        cmd.env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string());
+        cmd.env("VORN_TAILSCALE", "none");
         cmd.arg("--data-dir")
             .arg(home)
             .args(["--port", "0", "--exit-with-stdin", "--sessiond"])

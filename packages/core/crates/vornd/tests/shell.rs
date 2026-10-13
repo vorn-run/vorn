@@ -48,6 +48,8 @@ impl Vornd {
     fn start() -> Vornd {
         let home = tempfile::tempdir().unwrap();
         let mut child = Command::new(VORND)
+            .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+            .env("VORN_TAILSCALE", "none")
             .arg("--data-dir")
             .arg(home.path())
             .args(["--port", "0", "--exit-with-stdin", "--sessiond"])

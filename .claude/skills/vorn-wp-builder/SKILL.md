@@ -105,6 +105,12 @@ yarn bench --baseline=bench/baselines/<platform>-<arch>.json
 yarn bench:panes --panes 8,16
 ```
 
+A test that starts vornd or vorn-sessiond gives it a temp HOME and data dir,
+`VORN_EXIT_WITH=<the test's pid>` (it and the sessions it starts end with the
+test run) and, for vornd, `VORN_TAILSCALE=none`. The vitest sandbox sets both.
+CI fails when one outlives the suite:
+`node scripts/check-leftover-processes.mjs <temp root> <checkout>`.
+
 The toolchain is pinned in `packages/core/rust-toolchain.toml`; a new stable
 lint cannot turn clippy red on its own, so a clippy failure is yours.
 

@@ -150,6 +150,21 @@ impl Sessiond {
         self.stop.notify_waiters();
     }
 
+    /// Kills every program it holds, each with its process group, then
+    /// stops: for when whoever it runs for is gone.
+    pub fn end(&self) {
+        let held: Vec<Arc<Session>> = self.sessions().values().cloned().collect();
+        for s in held {
+            s.kill_group();
+        }
+        self.shut_down();
+    }
+
+    /// Whether its home was removed, which leaves it where no vornd finds it.
+    fn home_gone(&self) -> bool {
+        matches!(std::fs::metadata(&self.cfg.home), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+    }
+
     /// Where vornd connects: a Unix socket path or a named pipe name.
     pub fn endpoint(&self) -> String {
         endpoint(&self.cfg.home, self.cfg.instance)
@@ -903,6 +918,11 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
             }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
                 if d.idle_for(idle) || d.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                if d.home_gone() {
+                    eprintln!("vorn-sessiond: {} is gone; ending its sessions", d.cfg.home.display());
+                    d.end();
                     break;
                 }
                 #[cfg(unix)]

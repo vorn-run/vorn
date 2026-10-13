@@ -104,15 +104,20 @@ impl Reach {
         if let Some(found) = &*cached {
             return found.clone();
         }
-        let found = tailscale::BINARY_PATHS
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| is_executable(p))
-            .or_else(|| {
-                run("which", &["tailscale"], env, TAILSCALE_TIMEOUT)
-                    .filter(|s| !s.is_empty())
-                    .map(PathBuf::from)
-            });
+        // VORN_TAILSCALE names the program instead; tests name none, so they never run this machine's.
+        let found = if let Some(bin) = std::env::var_os("VORN_TAILSCALE") {
+            Some(PathBuf::from(bin)).filter(|p| is_executable(p))
+        } else {
+            tailscale::BINARY_PATHS
+                .iter()
+                .map(PathBuf::from)
+                .find(|p| is_executable(p))
+                .or_else(|| {
+                    run("which", &["tailscale"], env, TAILSCALE_TIMEOUT)
+                        .filter(|s| !s.is_empty())
+                        .map(PathBuf::from)
+                })
+        };
         *cached = Some(found.clone());
         found
     }

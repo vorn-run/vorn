@@ -76,6 +76,8 @@ impl TestVornd {
         let dir = bin_dir().expect("bin dir");
         let (vornd, sessiond) = (exe(&dir, "vornd"), exe(&dir, "vorn-sessiond"));
         let mut child = Command::new(&vornd)
+            .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
+            .env("VORN_TAILSCALE", "none")
             .arg("--data-dir")
             .arg(&home)
             .args(["--port", "0", "--exit-with-stdin"])
