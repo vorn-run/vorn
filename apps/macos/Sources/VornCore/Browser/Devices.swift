@@ -33,6 +33,7 @@ public enum Devices {
         public var udid: String
         public var name: String
         public var bootedHere: Bool
+        public init(udid: String, name: String, bootedHere: Bool) { self.udid = udid; self.name = name; self.bootedHere = bootedHere }
     }
 
     /// Free, or already this session's.

@@ -88,6 +88,16 @@ struct ShellActions {
         return a
     }
 
+    /// Gives the browser panes the daemon and the sessions, and starts answering the agents' browser tools.
+    func bindBrowser() {
+        let b = model.panes.browser
+        b.session = { [weak store] id in store?.session(id) }
+        b.liveSessions = { [weak store] in store?.sessions ?? [] }
+        b.write = { [weak store] id, data in Task { try? await store?.write(id, data) } }
+        b.toast = { [weak model] message, isError in model?.toasts.show(message, isError ? .error : .success) }
+        b.start(client: store.client, answerAgents: !store.readOnly)
+    }
+
     var gitActions: GitActions {
         var g = GitActions()
         let client = store.client

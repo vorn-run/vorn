@@ -99,7 +99,7 @@ public struct RootView: View {
             features.bind(store: store, model: model)
             store.onWorktreeCleanup = { p, w in actions.offerWorktreeCleanup(projectPath: p, worktreePath: w) }
             model.panes.onSurfaceCard = { id in model.minimizedIDs.remove(id) }
-            bindBrowser()
+            actions.bindBrowser()
         }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.
@@ -227,16 +227,6 @@ public struct RootView: View {
                              isSelected: true, isDimmed: false, isExpanded: true,
                              focusRequest: model.focusRequests[s.id] ?? 0, actions: actions.cardActions,
                              context: context, variant: .focused)
-    }
-
-    /// Gives the browser panes the daemon and the sessions, and starts answering the agents' browser tools.
-    private func bindBrowser() {
-        let b = model.panes.browser
-        b.session = { [weak store] id in store?.session(id) }
-        b.liveSessions = { [weak store] in store?.sessions ?? [] }
-        b.write = { [weak store] id, data in Task { try? await store?.write(id, data) } }
-        b.toast = { [weak model] message, isError in model?.toasts.show(message, isError ? .error : .success) }
-        b.start(client: store.client, answerAgents: !store.readOnly)
     }
 
     /// Double-click on the empty grid: the default agent in the active project.
