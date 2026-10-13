@@ -8,65 +8,7 @@ import VornUI
 public let terminalPadX: CGFloat = 8
 public let terminalPadY: CGFloat = 4
 
-// MARK: - Fonts and colours
-
-/// The terminal font in its four variants, with the cell metrics they share.
-final class TerminalFonts {
-    let regular: CTFont, bold: CTFont, italic: CTFont, boldItalic: CTFont
-    let cell: CGSize
-    let ascent: CGFloat
-    /// Glyphs of printable ASCII per variant: plain runs skip typesetting.
-    let ascii: [[CGGlyph]]
-
-    nonisolated(unsafe) private static var cache: [CGFloat: TerminalFonts] = [:]
-
-    static func of(size: CGFloat) -> TerminalFonts {
-        if let f = cache[size] { return f }
-        let f = TerminalFonts(size: size)
-        cache[size] = f
-        return f
-    }
-
-    private init(size: CGFloat) {
-        let base = CTFontCreateWithName(Theme.Terminal.fontName as CFString, size, nil)
-        func variant(_ t: CTFontSymbolicTraits) -> CTFont {
-            CTFontCreateCopyWithSymbolicTraits(base, size, nil, t, t) ?? base
-        }
-        regular = base
-        bold = variant(.traitBold)
-        italic = variant(.traitItalic)
-        boldItalic = variant([.traitBold, .traitItalic])
-        var glyph = CGGlyph(0)
-        var ch = UniChar(77) // "M"
-        CTFontGetGlyphsForCharacters(base, &ch, &glyph, 1)
-        var adv = CGSize.zero
-        CTFontGetAdvancesForGlyphs(base, .horizontal, &glyph, &adv, 1)
-        // Rows as tall as the browser's line box for the font (15pt for Menlo 13).
-        ascent = round(CTFontGetAscent(base))
-        let h = round(CTFontGetAscent(base) + CTFontGetDescent(base) + CTFontGetLeading(base))
-        cell = CGSize(width: adv.width, height: h)
-        ascii = [regular, bold, italic, boldItalic].map { f in
-            var chars = (0..<128).map { UniChar($0) }
-            var glyphs = [CGGlyph](repeating: 0, count: 128)
-            CTFontGetGlyphsForCharacters(f, &chars, &glyphs, 128)
-            return glyphs
-        }
-    }
-
-    func variant(_ flags: UInt16) -> Int {
-        (flags & UInt16(VG_BOLD) != 0 ? 1 : 0) + (flags & UInt16(VG_ITALIC) != 0 ? 2 : 0)
-    }
-
-    func font(_ flags: UInt16) -> CTFont {
-        [regular, bold, italic, boldItalic][variant(flags)]
-    }
-
-    /// The grid that fits `size` points inside the padding.
-    func grid(for size: CGSize) -> (cols: UInt16, rows: UInt16) {
-        (UInt16(clamping: max(2, Int((size.width - 2 * terminalPadX) / cell.width))),
-         UInt16(clamping: max(1, Int((size.height - 2 * terminalPadY) / cell.height))))
-    }
-}
+// MARK: - Colours
 
 nonisolated(unsafe) private var colorCache: [UInt32: CGColor] = [:]
 
@@ -101,8 +43,6 @@ final class TerminalPainter {
             ctx.setFillColor(cgColor(r.bg))
             ctx.fill(CGRect(x: CGFloat(r.col) * cw, y: CGFloat(r.row) * ch, width: CGFloat(r.ncols) * cw, height: ch))
         }
-        let fgKey = NSAttributedString.Key(kCTForegroundColorAttributeName as String)
-        let fontKey = NSAttributedString.Key(kCTFontAttributeName as String)
         for r in runs {
             guard let text = v.text else { break }
             let bytes = UnsafeBufferPointer(start: text + Int(r.text_off), count: Int(r.text_len))
@@ -121,14 +61,20 @@ final class TerminalPainter {
                     ctx.translateBy(x: x, y: y + fonts.ascent)
                     ctx.scaleBy(x: 1, y: -1)
                     ctx.setFillColor(fg)
+                    ctx.textPosition = .zero
                     CTFontDrawGlyphs(fonts.font(r.flags), glyphs, positions, n, ctx)
                     ctx.restoreGState()
                 }
             } else {
-                // Anything else is typeset, so fallback fonts and emoji work.
-                let s = NSAttributedString(string: String(decoding: bytes, as: UTF8.self),
-                                           attributes: [fontKey: fonts.font(r.flags), fgKey: fg])
-                line(ctx, CTLineCreateWithAttributedString(s), x, y, fonts)
+                let cluster = String(decoding: bytes, as: UTF8.self)
+                let scalars = cluster.unicodeScalars
+                ctx.setFillColor(fg)
+                if scalars.count == 1, let c = scalars.first, TerminalSprites.covers(c.value) {
+                    let cell = CGRect(x: x, y: y, width: CGFloat(r.ncols) * cw, height: ch)
+                    TerminalSprites.draw(c.value, in: cell, color: fg, scale: fonts.scale, ctx: ctx)
+                } else {
+                    line(ctx, fonts.line(for: cluster, flags: r.flags), x, y, fonts)
+                }
             }
             if r.flags & UInt16(VG_UNDERLINE) != 0 {
                 ctx.setFillColor(fg)
@@ -141,8 +87,11 @@ final class TerminalPainter {
         }
         let cx = CGFloat(v.cursor_x) * cw, cy = CGFloat(v.cursor_y) * ch
         if !marked.isEmpty {
-            let s = NSAttributedString(string: marked, attributes: [fontKey: fonts.regular, fgKey: cgColor(v.fg)])
-            let l = CTLineCreateWithAttributedString(s)
+            ctx.setFillColor(cgColor(v.fg))
+            let l = CTLineCreateWithAttributedString(NSAttributedString(string: marked, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): fonts.regular,
+                NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+            ]))
             let w = CTLineGetTypographicBounds(l, nil, nil, nil)
             ctx.setFillColor(cgColor(v.bg))
             ctx.fill(CGRect(x: cx, y: cy, width: w, height: ch))
@@ -388,7 +337,8 @@ public final class TerminalEngine: NSObject {
         return String(cString: p)
     }
 
-    var fonts: TerminalFonts { TerminalFonts.of(size: fontSize) }
+    /// Fonts for offscreen renders, which draw at 2x.
+    var fonts: TerminalFonts { TerminalFonts.of(size: fontSize, scale: 2) }
 
     /// Stops the frame loop and closes the connection; panes keep their sessions to attach again elsewhere.
     public func shutdown() {

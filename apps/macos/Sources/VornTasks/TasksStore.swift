@@ -1,5 +1,7 @@
+import AppKit
 import SwiftUI
 import VornCore
+import VornWorkflows
 
 /// Which projects' tasks the board shows: the active project, or every project in the workspace.
 public enum TasksScope: Equatable, Sendable {
@@ -52,7 +54,14 @@ public final class TasksStore {
     public var includeArchived = false
 
     /// The open detail panel: a task id, or `newTaskId` while creating one.
-    public var selectedTaskId: String?
+    public var selectedTaskId: String? {
+        didSet {
+            guard selectedTaskId != oldValue else { return }
+            detail = selectedTaskId.map { TaskDetailModel(store: self, taskId: $0 == Self.newTaskId ? nil : $0) }
+        }
+    }
+    /// The open panel's images, runs and review of changes.
+    public private(set) var detail: TaskDetailModel?
     public static let newTaskId = "new"
 
     /// The quick-add dialog; `dialogTask` is set when it edits rather than creates.
@@ -70,9 +79,22 @@ public final class TasksStore {
     public var isSessionLive: (VornTask) -> Bool = { _ in false }
     public var openSession: ((VornTask) -> Void)?
     public var onToast: (String, ToastKind) -> Void = { _, _ in }
+    /// Starting a session (`terminal:create`), focusing one, and typing into one.
+    public var launchSession: ((CreateTerminalPayload) async throws -> TerminalSession)?
+    public var focusSession: ((String) -> Void)?
+    public var writeSession: ((String, String) async throws -> Void)?
+    public var copyText: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     let service: any TaskService
+    /// The detail panel's extras, when the service answers them.
+    var extras: (any TaskExtrasService)? { service as? any TaskExtrasService }
     @ObservationIgnored private var watch: Task<Void, Never>?
+
+    // Task detail extras: the shell's workflows store, which the panel's run cards act through.
+    public var workflows: WorkflowsStore?
 
     public init(service: any TaskService) {
         self.service = service
@@ -185,6 +207,7 @@ public final class TasksStore {
             if task.status == .todo { setStatus(taskId, .inProgress) }
         case .inReview:
             setStatus(taskId, .inReview)
+            if task.assignedSessionId != nil { patchConfig(taskId, ["assignedSessionId": .null]) { $0.assignedSessionId = nil } }
         case .done:
             complete(taskId)
         case .cancelled:
@@ -260,6 +283,9 @@ public final class TasksStore {
     }
 
     func delete(_ id: String) {
+        if task(id: id)?.images?.isEmpty == false, let extras {
+            Task { try? await extras.cleanupTaskImages(taskId: id) }
+        }
         tasks.removeAll { $0.id == id }
         if selectedTaskId == id { selectedTaskId = nil }
         run { try await $0.deleteTask(id: id) }
@@ -295,6 +321,98 @@ public final class TasksStore {
         let rest = stripped
         run { _ = try await $0.updateTask(id: id, rest) }
         if let toast { onToast(toast, .success) }
+    }
+
+    // MARK: - Sessions (TaskDetailPanel.tsx handleResumeSession, tasks-slice.ts startTask)
+
+    /// A finished agent conversation that can be picked up again where it stopped.
+    public func canResume(_ task: VornTask) -> Bool {
+        guard launchSession != nil, !isSessionLive(task), task.agentSessionId != nil, let agent = task.assignedAgent else {
+            return false
+        }
+        return agent.supportsExactSessionResume
+    }
+
+    /// Reopens the task's agent conversation in a new session and focuses it; the answer is the session.
+    @discardableResult
+    public func resumeSession(_ task: VornTask, initialPrompt: String? = nil) async -> TerminalSession? {
+        guard let launch = launchSession, let agentSessionId = task.agentSessionId, let agent = task.assignedAgent,
+              agent.supportsExactSessionResume, let project = projects.first(where: { $0.name == task.projectName })
+        else { return nil }
+        var payload = CreateTerminalPayload(agentType: AgentType(rawValue: agent.rawValue), projectName: task.projectName,
+                                            projectPath: project.path, branch: task.branch, useWorktree: task.useWorktree,
+                                            initialPrompt: initialPrompt)
+        payload.resumeSessionId = agentSessionId
+        do {
+            let session = try await launch(payload)
+            if initialPrompt != nil || task.status == .inProgress {
+                startTask(task.id, sessionId: session.id, agent: agent, worktreePath: initialPrompt != nil ? session.worktreePath : nil)
+            }
+            focusSession?(session.id)
+            return session
+        } catch {
+            fail(error)
+            return nil
+        }
+    }
+
+    /// Resumes a workflow step's agent conversation (TaskDetailPanel.tsx handleRunResumeSession).
+    /// A task's project, branch and worktree choice, for resuming a run step it started.
+    public func runTaskContext(_ id: String) -> RunTaskContext? {
+        task(id: id).map { RunTaskContext(projectName: $0.projectName, branch: $0.branch, useWorktree: $0.useWorktree) }
+    }
+
+    public func resumeStep(_ r: RunResumeRequest) {
+        guard let launch = launchSession, r.agentType != .gemini, r.agentType != .shell else { return }
+        var payload = CreateTerminalPayload(agentType: r.agentType, projectName: r.projectName, projectPath: r.projectPath,
+                                            branch: r.branch, useWorktree: r.useWorktree)
+        payload.resumeSessionId = r.agentSessionId
+        Task {
+            do {
+                let session = try await launch(payload)
+                focusSession?(session.id)
+            } catch {
+                fail(error)
+            }
+        }
+    }
+
+    /// startTask: the task is in progress on `sessionId`, saved through the configuration as today.
+    func startTask(_ id: String, sessionId: String, agent: AgentKind, worktreePath: String?) {
+        var fields: [String: JSONValue] = [
+            "status": .string(TaskStatus.inProgress.rawValue), "assignedSessionId": .string(sessionId),
+            "assignedAgent": .string(agent.rawValue), "updatedAt": .string(Self.now()), "archivedAt": .null,
+        ]
+        if let worktreePath { fields["worktreePath"] = .string(worktreePath) }
+        patchConfig(id, fields) {
+            $0.status = .inProgress
+            $0.assignedSessionId = sessionId
+            $0.assignedAgent = agent
+            $0.archivedAt = nil
+            if let worktreePath { $0.worktreePath = worktreePath }
+        }
+    }
+
+    // MARK: - Images
+
+    /// The task's image list, saved through the configuration since `task:update` does not take it.
+    func setImages(_ id: String, _ images: [String]) {
+        patchConfig(id, ["images": images.isEmpty ? .null : .array(images.map(JSONValue.string))]) {
+            $0.images = images.isEmpty ? nil : images
+        }
+    }
+
+    private func patchConfig(_ id: String, _ fields: [String: JSONValue], local: (inout VornTask) -> Void) {
+        mutate(id, local)
+        guard let extras else { return }
+        Task {
+            do {
+                try await extras.patchTaskConfig(id: id, fields)
+            } catch {
+                fail(error)
+                await reload()
+            }
+        }
     }
 
     // MARK: - Plumbing

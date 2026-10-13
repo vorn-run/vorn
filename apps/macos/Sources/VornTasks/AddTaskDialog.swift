@@ -88,26 +88,6 @@ struct BareField: View {
     }
 }
 
-/// The markdown body as plain text, with its placeholder.
-struct DescriptionEditor: View {
-    @Binding var text: String
-    let placeholder: String
-
-    var body: some View {
-        TextEditor(text: $text)
-            .font(.system(size: 14))
-            .foregroundStyle(Theme.ink)
-            .scrollContentBackground(.hidden)
-            .background(.clear)
-            .padding(.horizontal, -5)
-            .overlay(alignment: .topLeading) {
-                if text.isEmpty {
-                    Text(placeholder).font(.system(size: 14)).foregroundStyle(Theme.inkFaint).allowsHitTesting(false)
-                }
-            }
-    }
-}
-
 /// AddTaskDialog: the floating quick-add form.
 struct AddTaskDialog: View {
     let store: TasksStore
@@ -145,8 +125,7 @@ struct AddTaskDialog: View {
                 BareField(placeholder: "Task title", text: $form.title, font: .system(size: 15, weight: .medium))
                     .focused($titleFocused)
                     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
-                DescriptionEditor(text: $form.description, placeholder: "Add description...")
-                    .frame(minHeight: 120, maxHeight: 300)
+                RichMarkdownEditor(value: $form.description, placeholder: "Add description...")
                     .padding(.horizontal, 16).padding(.bottom, 12)
             }
 

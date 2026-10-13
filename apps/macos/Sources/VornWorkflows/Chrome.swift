@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import VornCore
 import VornUI
 
@@ -6,6 +7,7 @@ import VornUI
 public struct WorkflowsHeader: View {
     @Bindable var store: WorkflowsStore
     @State private var filterFrame = CGRect.zero
+    @State private var fileOver = false
 
     public init(store: WorkflowsStore) {
         self.store = store
@@ -85,6 +87,7 @@ public struct WorkflowsHeader: View {
 public struct WorkflowsSidebarSection: View {
     @Bindable var store: WorkflowsStore
     @State private var filterFrame = CGRect.zero
+    @State private var fileOver = false
 
     public init(store: WorkflowsStore) {
         self.store = store
@@ -93,8 +96,10 @@ public struct WorkflowsSidebarSection: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if store.sidebarSectionOpen {
-                VStack(alignment: .leading, spacing: 2) {
+            // Wraps the list so a dropped file lands anywhere in it, empty included.
+            VStack(alignment: .leading, spacing: 2) {
+                if fileOver { dropHint }
+                if store.sidebarSectionOpen {
                     AllRunsRow(store: store)
                     let list = store.sidebarWorkflows
                     if list.isEmpty {
@@ -107,7 +112,39 @@ public struct WorkflowsSidebarSection: View {
                     ForEach(list) { wf in WorkflowRow(store: store, workflow: wf) }
                 }
             }
+            .onDrop(of: [.fileURL], isTargeted: $fileOver) { providers in
+                Task { store.importDroppedWorkflow(await droppedURLs(providers)) }
+                return true
+            }
         }
+    }
+
+    private var dropHint: some View {
+        Text("Drop to import a workflow file")
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.gray400)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius)
+                    .strokeBorder(Theme.white(0.14), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            )
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+    }
+
+    private func droppedURLs(_ providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers {
+            guard let item = try? await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) else { continue }
+            if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                urls.append(url)
+            } else if let url = item as? URL {
+                urls.append(url)
+            }
+        }
+        return urls
     }
 
     private var header: some View {
@@ -115,7 +152,7 @@ public struct WorkflowsSidebarSection: View {
             Hovering { hovered in
                 Button { store.sidebarSectionOpen.toggle() } label: {
                     HStack(spacing: 6) {
-                        Icon(.chevronRight, size: 10, weight: .semibold)
+                        LucideIcon(.chevronRight, size: 10, strokeWidth: 2)
                             .foregroundStyle(Theme.gray600)
                             .rotationEffect(.degrees(store.sidebarSectionOpen ? 90 : 0))
                         Text("WORKFLOWS")
@@ -130,12 +167,12 @@ public struct WorkflowsSidebarSection: View {
             Spacer(minLength: 0)
             HStack(spacing: 2) {
                 let filterOpen = store.menu?.kind == .sidebarFilter
-                headerAction(.filterList, help: "Filter workflows", lit: filterOpen || store.sidebarFilter != .all) {
+                headerAction(.listFilter, help: "Filter workflows", lit: filterOpen || store.sidebarFilter != .all) {
                     store.menu = filterOpen ? nil : WorkflowsMenu(kind: .sidebarFilter, anchor: filterFrame, edge: .trailing)
                 }
                 .trackFrame($filterFrame)
-                headerAction(.download, help: "Import workflow file", disabled: true) {}
-                headerAction(.workflow, help: "New workflow", disabled: true) {}
+                headerAction(.download, help: "Import workflow file") { store.importWorkflow() }
+                headerAction(.workflow, help: "New workflow") { store.newWorkflow() }
             }
         }
         .padding(.top, 12)
@@ -143,12 +180,12 @@ public struct WorkflowsSidebarSection: View {
     }
 
     private func headerAction(
-        _ glyph: Glyph, help: String, lit: Bool = false, disabled: Bool = false, action: @escaping () -> Void
+        _ glyph: LucideGlyph, help: String, lit: Bool = false, disabled: Bool = false, action: @escaping () -> Void
     ) -> some View {
         Hovering { hovered in
             let hot = hovered && !disabled
             Button(action: action) {
-                Icon(glyph, size: 13, weight: .light)
+                LucideIcon(glyph, size: 13, strokeWidth: 1.5)
                     .foregroundStyle(hot || lit ? Color.white : Theme.gray600)
                     .padding(2)
                     .background(hot || lit ? Theme.white(0.08) : .clear, in: RoundedRectangle(cornerRadius: Theme.radius))
@@ -170,6 +207,7 @@ private struct SidebarRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 8) { content(hovered) }
+            .frame(minHeight: 19.5)
             .font(.system(size: 13))
             .foregroundStyle(selected || hovered ? Color.white : Theme.gray300)
             .padding(.horizontal, 8)
@@ -188,8 +226,8 @@ private struct AllRunsRow: View {
     let store: WorkflowsStore
 
     var body: some View {
-        SidebarRow(selected: store.editingWorkflowId == nil) { _ in
-            Icon(.activity, size: 14, weight: .light).foregroundStyle(Theme.gray400)
+        SidebarRow(selected: store.editingWorkflowId == nil && !store.editorOpen) { _ in
+            LucideIcon(.activity, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray400)
             Text("All runs").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             if store.waitingCount > 0 {
                 Text("\(store.waitingCount)")
@@ -206,7 +244,6 @@ private struct AllRunsRow: View {
 private struct WorkflowRow: View {
     let store: WorkflowsStore
     let workflow: WorkflowDefinition
-    @State private var rowFrame = CGRect.zero
     @State private var moreFrame = CGRect.zero
 
     private enum Dot { case waiting, scheduled, disabled, error }
@@ -223,33 +260,21 @@ private struct WorkflowRow: View {
             selected: store.editingWorkflowId == workflow.id, dimmed: workflow.isScheduled && !workflow.enabled
         ) { hovered in
             ZStack(alignment: .bottomTrailing) {
-                Icon(symbol: WorkflowIcons.symbolOrWorkflow(workflow.icon), size: 14, weight: .light)
-                    .foregroundStyle(WorkflowIcons.color(workflow.iconColor))
+                WorkflowIconView(name: workflow.icon, color: workflow.iconColor, size: 14)
                 if let dot { dotView(dot).offset(x: 2, y: 2) }
             }
             Text(workflow.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             Group {
-                rowAction(.play, size: 11, weight: .semibold, help: "Run") { store.runNow(workflow) }
-                rowAction(.more, size: 12, weight: .semibold, help: "More") {
-                    store.menu = menuOpen ? nil : WorkflowsMenu(kind: .workflow(workflow.id), anchor: moreFrame, edge: .leading)
+                rowAction(.play, size: 11, help: "Run") { store.runNow(workflow) }
+                rowAction(.ellipsis, size: 12, help: "More") {
+                    store.menu = menuOpen ? nil : WorkflowsMenu(kind: .workflow(workflow.id), at: CGPoint(x: moreFrame.maxX, y: moreFrame.maxY))
                 }
                 .trackFrame($moreFrame)
             }
             .opacity(hovered || menuOpen ? 1 : 0)
         }
-        .trackFrame($rowFrame)
         .onTapGesture { store.openWorkflow(workflow.id) }
-        .contextMenu {
-            Button("Edit Workflow") { store.openWorkflow(workflow.id) }
-            if workflow.isScheduled {
-                Button(workflow.enabled ? "Disable Schedule" : "Enable Schedule") {
-                    store.setEnabled(workflow, !workflow.enabled)
-                }
-            }
-            Button("Export as file…") {}.disabled(true)
-            Divider()
-            Button("Delete Workflow", role: .destructive) { store.delete(workflow) }
-        }
+        .onRightClick { p in store.menu = WorkflowsMenu(kind: .workflow(workflow.id), at: p) }
     }
 
     @ViewBuilder private func dotView(_ dot: Dot) -> some View {
@@ -266,11 +291,11 @@ private struct WorkflowRow: View {
     }
 
     private func rowAction(
-        _ glyph: Glyph, size: CGFloat, weight: Font.Weight, help: String, action: @escaping () -> Void
+        _ glyph: LucideGlyph, size: CGFloat, help: String, action: @escaping () -> Void
     ) -> some View {
         Hovering { hovered in
             Button(action: action) {
-                Icon(glyph, size: size, weight: weight)
+                LucideIcon(glyph, size: size, strokeWidth: 2)
                     .foregroundStyle(hovered ? Color.white : Theme.gray500)
                     .padding(2)
                     .background(hovered ? Theme.white(0.08) : .clear, in: RoundedRectangle(cornerRadius: Theme.radius))

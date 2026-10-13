@@ -46,9 +46,13 @@ public struct RootView: View {
         }
         .overlay(alignment: .bottom) { ErrorToast(model: model) }
         .workflowsMenuHost(features.workflows)
+        .runSurfacesHost(features.workflows)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.endpoint, initial: true) { _, ep in
-            engines.update(socket: ep?.gridSocket, readOnly: store.readOnly)
+            engines.update(socket: ep?.gridSocket, readOnly: store.readOnly, fontSize: store.defaults?.fontSize)
+        }
+        .onChange(of: store.defaults?.fontSize) { _, size in
+            engines.update(socket: store.endpoint?.gridSocket, readOnly: store.readOnly, fontSize: size)
         }
         .onChange(of: store.sessions.map(\.id)) { _, ids in
             let live = Set(ids)
@@ -58,6 +62,8 @@ public struct RootView: View {
         }
         .onChange(of: features.scope(model, store), initial: true) { _, scope in features.tasks.scope = scope }
         .onChange(of: model.activeWorkspace, initial: true) { _, id in features.workflows.workspaceId = id }
+        .onChange(of: store.projects, initial: true) { _, list in features.workflows.projects = list }
+        .onChange(of: model.activeProject, initial: true) { _, p in features.workflows.activeProjectName = p }
         .onAppear { features.bind(store: store, model: model) }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.
@@ -71,7 +77,7 @@ public struct RootView: View {
     /// A workflow's page draws its own bar, as do the tabs strip and a focused session's header.
     private var showsTopBar: Bool {
         switch model.mainViewMode {
-        case .workflows: features.workflows.editingWorkflow == nil
+        case .workflows: !features.workflows.isEditing
         case .tasks: true
         case .sessions: model.layoutMode(store) == .grid && focusedSession == nil
         }

@@ -326,6 +326,7 @@ struct GateActions: View {
     let state: NodeExecutionState
     let config: JSONValue?
     let nodes: [WorkflowNode]
+    var onOpenReview: (() -> Void)?
 
     private enum Mode { case changes, reject, edit }
     @State private var mode: Mode?
@@ -348,6 +349,9 @@ struct GateActions: View {
             HStack(spacing: 6) {
                 if state.editableText != nil {
                     small(.pencil, edited == nil ? "Edit" : "Edited", tone: .neutral) { mode = .edit }
+                }
+                if state.viewToken != nil, let onOpenReview {
+                    small(.eye, "Open review", tone: .neutral, action: onOpenReview)
                 }
                 Spacer(minLength: 0)
                 if GateRounds.canRequestChanges(config, round: state.round) {

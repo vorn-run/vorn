@@ -4,16 +4,25 @@ import VornUI
 
 /// A run's glyph: its workflow's icon and colour, else how it was triggered.
 struct RunIconView: View {
+    static func sourceGlyph(_ source: RunSource) -> LucideGlyph {
+        switch source {
+        case .manual: return .zap
+        case .schedule: return .clock
+        case .task: return .squareCheckBig
+        case .connector: return .play
+        case .restore: return .rotateCcw
+        }
+    }
+
     let presentation: RunPresentation
     var size: CGFloat = 13
     var fallbackTint: Color = Theme.gray400
 
     var body: some View {
-        if let symbol = WorkflowIcons.symbol(presentation.iconName) {
-            Icon(symbol: symbol, size: size, weight: .light)
-                .foregroundStyle(WorkflowIcons.color(presentation.iconColor))
+        if WorkflowIcons.known(presentation.iconName) != nil {
+            WorkflowIconView(name: presentation.iconName, color: presentation.iconColor, size: size)
         } else {
-            Icon(Glyph.source(presentation.source), size: size, weight: .light)
+            LucideIcon(Self.sourceGlyph(presentation.source), size: size, strokeWidth: 1.5)
                 .foregroundStyle(fallbackTint)
         }
     }
@@ -186,7 +195,8 @@ struct RunDetailPane: View {
                         .padding(.bottom, 16)
                 }
 
-                RunStepsList(store: store, run: run, nodes: nodes, includeTrigger: true)
+                RunStepsList(store: store, run: run, nodes: nodes, includeTrigger: true, taskTitles: store.taskTitles(),
+                             onViewFullOutput: { store.showFullOutput($0) })
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
             }
@@ -218,10 +228,16 @@ struct RunDetailPane: View {
                     GateComposer(
                         store: store, run: run, state: state, config: gate.config, nodes: nodes, kind: .changes,
                         edited: saved, large: true, onDone: { composingFor = nil })
-                } else if state.editableText != nil || GateRounds.canRequestChanges(gate.config, round: state.round) {
+                } else if state.editableText != nil || state.viewToken != nil
+                    || GateRounds.canRequestChanges(gate.config, round: state.round) {
                     HStack(spacing: 6) {
                         if state.editableText != nil {
                             neutral(.pencil, saved == nil ? "Edit" : "Edited") { editingFor = key }
+                        }
+                        if state.viewToken != nil {
+                            neutral(.eye, "Open review") {
+                                store.openReview(run, nodeId: state.nodeId, workflowName: store.ref(for: run)?.name)
+                            }
                         }
                         if GateRounds.canRequestChanges(gate.config, round: state.round) {
                             neutral(.messageSquare, "Request changes") { composingFor = key }
@@ -230,7 +246,7 @@ struct RunDetailPane: View {
                 }
             }
             if signIn {
-                SignInButton()
+                SignInButton(store: store, connectionId: SignInButton.connectionId(nodes.first { $0.id == state.nodeId }))
             } else {
                 Button { answer(state, .approve, edited: saved) } label: {
                     HStack(spacing: 8) {

@@ -1,0 +1,343 @@
+{
+  "importProject": { "name": "Other Project", "path": "/Users/other/code/novum2/" },
+  "cases": [
+    {
+      "name": "novum",
+      "typed": true,
+      "projectPath": "/Users/someone/dev/novum",
+      "connections": [],
+      "importConnections": [],
+      "existing": [
+        { "id": "import:other-project:novum-ai-weekly-edition", "name": "Something else" }
+      ],
+      "workflow": {
+        "id": "abc-123",
+        "name": "Novum AI — weekly edition",
+        "icon": "Newspaper",
+        "iconColor": "#c9a227",
+        "enabled": true,
+        "nodes": [
+          {
+            "id": "trigger-1",
+            "type": "trigger",
+            "label": "Manual",
+            "config": { "triggerType": "manual" },
+            "position": { "x": 0, "y": 0 }
+          },
+          {
+            "id": "fetch-1",
+            "type": "script",
+            "label": "Pull feeds",
+            "config": {
+              "projectName": "Novum",
+              "projectPath": "/Users/someone/dev/novum",
+              "scriptContent": "python3 scripts/fetch_feeds.py",
+              "scriptType": "bash"
+            },
+            "position": { "x": 0, "y": 110 }
+          },
+          {
+            "id": "write-1",
+            "type": "launchAgent",
+            "label": "Write",
+            "config": {
+              "agentType": "claude",
+              "existingWorktreePath": "/Users/someone/dev/novum/wt/draft",
+              "headless": true,
+              "model": "opus[1m]",
+              "projectName": "Novum",
+              "projectPath": "/Users/someone/dev/novum",
+              "remoteHostId": "host-uuid-local"
+            },
+            "position": { "x": 0, "y": 220.5 }
+          }
+        ],
+        "edges": [
+          { "id": "e1", "source": "trigger-1", "target": "fetch-1" },
+          { "id": "e2", "source": "fetch-1", "target": "write-1" }
+        ]
+      }
+    },
+    {
+      "name": "connectors",
+      "typed": true,
+      "projectPath": "/Users/someone/dev/novum",
+      "connections": [
+        { "id": "conn-1", "name": "workspace-eng", "connectorId": "github" },
+        {
+          "id": "pack-1",
+          "name": "Sandbox",
+          "connectorId": "mcp",
+          "filters": { "sdkConnectorId": "packdemo" }
+        }
+      ],
+      "importConnections": [
+        { "id": "gh-here", "name": "my github", "connectorId": "github" },
+        {
+          "id": "pd-a",
+          "name": "Sandbox",
+          "connectorId": "mcp",
+          "filters": { "sdkConnectorId": "packdemo" }
+        },
+        {
+          "id": "pd-b",
+          "name": "Prod",
+          "connectorId": "mcp",
+          "filters": { "sdkConnectorId": "packdemo" }
+        }
+      ],
+      "existing": [],
+      "workflow": {
+        "id": "w-2",
+        "name": "Issues → tasks",
+        "icon": "Github",
+        "iconColor": "#22c55e",
+        "enabled": false,
+        "staggerDelayMs": 250,
+        "nodes": [
+          {
+            "id": "trigger-1",
+            "type": "trigger",
+            "label": "Poll",
+            "config": {
+              "connectionId": "conn-1",
+              "cron": "*/5 * * * *",
+              "event": "issueCreated",
+              "triggerType": "connectorPoll"
+            },
+            "position": { "x": 0, "y": 0 }
+          },
+          {
+            "id": "act-1",
+            "type": "callConnectorAction",
+            "label": "Create issue",
+            "config": {
+              "action": "createIssue",
+              "args": {},
+              "connectionId": "conn-1",
+              "nodeType": "callConnectorAction"
+            },
+            "position": { "x": 0, "y": 110 }
+          },
+          {
+            "id": "act-2",
+            "type": "callConnectorAction",
+            "label": "Pack action",
+            "config": {
+              "action": "ping",
+              "args": { "a": [1, 2.5, "x"], "b": null },
+              "connectionId": "pack-1",
+              "nodeType": "callConnectorAction"
+            },
+            "position": { "x": 0, "y": 220 }
+          }
+        ],
+        "edges": [
+          { "id": "e1", "source": "trigger-1", "target": "act-1" },
+          { "id": "e2", "source": "act-1", "target": "act-2", "conditionBranch": "true" }
+        ]
+      }
+    },
+    {
+      "name": "requirements",
+      "typed": true,
+      "projectPath": "/Users/someone/dev/novum",
+      "connections": [
+        { "id": "prof-1", "name": "reporting API", "connectorId": "http" },
+        {
+          "id": "slack-1",
+          "name": "Sandbox Slack",
+          "connectorId": "mcp",
+          "filters": { "sdkConnectorId": "slack" }
+        }
+      ],
+      "importConnections": [
+        { "id": "prof-here", "name": "whatever", "connectorId": "http" },
+        {
+          "id": "slack-here",
+          "name": "Sandbox Slack",
+          "connectorId": "mcp",
+          "filters": { "sdkConnectorId": "slack" }
+        }
+      ],
+      "existing": [],
+      "workflow": {
+        "id": "w-3",
+        "name": "  Report & post!!  ",
+        "icon": "",
+        "iconColor": "#6366f1",
+        "enabled": true,
+        "nodes": [
+          {
+            "id": "t",
+            "type": "trigger",
+            "label": "Manual",
+            "config": { "triggerType": "manual" },
+            "position": { "x": 0, "y": 0 }
+          },
+          {
+            "id": "http-1",
+            "type": "httpRequest",
+            "label": "Report",
+            "config": {
+              "body": "",
+              "headers": {},
+              "method": "POST",
+              "nodeType": "httpRequest",
+              "profileConnectionId": "prof-1",
+              "url": "/report"
+            },
+            "position": { "x": 0, "y": 110 }
+          },
+          {
+            "id": "http-2",
+            "type": "httpRequest",
+            "label": "Public",
+            "config": {
+              "body": "",
+              "headers": {},
+              "method": "GET",
+              "nodeType": "httpRequest",
+              "url": "https://example.test"
+            },
+            "position": { "x": 0, "y": 220 }
+          },
+          {
+            "id": "run",
+            "type": "script",
+            "label": "Run",
+            "config": {
+              "cwd": "/Users/someone/dev/novum/tools",
+              "scriptContent": "echo hi",
+              "scriptType": "bash",
+              "secretsFrom": "slack-1"
+            },
+            "position": { "x": 0, "y": 330 }
+          },
+          {
+            "id": "act-2",
+            "type": "callConnectorAction",
+            "label": "Post message",
+            "config": {
+              "action": "post",
+              "args": {},
+              "connectionId": "",
+              "connectorId": "slack",
+              "nodeType": "callConnectorAction"
+            },
+            "position": { "x": 0, "y": 440 }
+          },
+          {
+            "id": "anon-1",
+            "type": "callConnectorAction",
+            "label": "Connector Action",
+            "config": {
+              "action": "",
+              "args": {},
+              "connectionId": "",
+              "nodeType": "callConnectorAction"
+            },
+            "position": { "x": 0, "y": 550 }
+          }
+        ],
+        "edges": [{ "id": "e1", "source": "t", "target": "http-1" }]
+      }
+    },
+    {
+      "name": "windows-webhook",
+      "typed": true,
+      "projectPath": "C:\\Users\\someone\\novum\\",
+      "connections": [],
+      "importConnections": [],
+      "existing": [],
+      "workflow": {
+        "id": "w-4",
+        "name": "Hook",
+        "icon": "Webhook",
+        "iconColor": "#000",
+        "enabled": true,
+        "nodes": [
+          {
+            "id": "hook",
+            "type": "trigger",
+            "label": "Webhook",
+            "config": { "token": "secret-123", "triggerType": "webhook" },
+            "position": { "x": 0, "y": 0 }
+          },
+          {
+            "id": "agent",
+            "type": "launchAgent",
+            "label": "Agent",
+            "config": {
+              "agentType": "codex",
+              "existingWorktreePath": "C:\\Users\\someone\\novum\\wt\\a",
+              "projectName": "Novum",
+              "projectPath": "C:\\Users\\someone\\novum",
+              "prompt": "Read D:\\data\\in.csv and \\\\share\\drop\\x then /home/me/notes"
+            },
+            "position": { "x": -12.25, "y": 1e21 }
+          }
+        ],
+        "edges": [{ "id": "e1", "source": "hook", "target": "agent" }]
+      }
+    },
+    {
+      "name": "key-order",
+      "typed": false,
+      "projectPath": "/home/dev/proj",
+      "connections": [],
+      "importConnections": [],
+      "existing": [],
+      "workflow": {
+        "name": "Ordered ✓ \"quoted\"\n\tline",
+        "id": "w-5",
+        "staggerDelayMs": 0,
+        "iconColor": "",
+        "edges": [],
+        "nodes": [
+          {
+            "position": { "y": 0.1, "x": 3 },
+            "config": {
+              "triggerType": "webhook",
+              "zeta": 1,
+              "alpha": { "z": 1, "a": [{ "q": true, "b": 1e-7 }] }
+            },
+            "label": "Hook",
+            "type": "trigger",
+            "id": "h"
+          },
+          {
+            "id": "s",
+            "onError": "continue",
+            "type": "script",
+            "slug": "my-script",
+            "label": "Script",
+            "config": {
+              "scriptType": "bash",
+              "remoteHostId": "r",
+              "projectPath": "/home/dev/proj",
+              "cwd": "/home/dev/projX",
+              "projectName": "",
+              "scriptContent": "cd /home/dev/proj && ls\u0001"
+            },
+            "position": { "x": 0, "y": -0 }
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    "",
+    "{not json",
+    "[]",
+    "null",
+    "{\"version\": 2, \"name\": \"x\", \"nodes\": [], \"edges\": []}",
+    "{\"version\": \"1\", \"name\": \"x\", \"nodes\": [], \"edges\": []}",
+    "{\"version\": 1, \"name\": \"\", \"nodes\": [], \"edges\": []}",
+    "{\"version\": 1, \"name\": \"x\", \"nodes\": {}, \"edges\": []}",
+    "{\"version\": 1, \"name\": \"x\", \"nodes\": [\"oops\"], \"edges\": []}",
+    "{\"version\": 1, \"name\": \"x\", \"nodes\": [{\"id\": \"a\", \"type\": \"trigger\"}, {\"id\": \"a\", \"type\": \"script\"}], \"edges\": []}",
+    "{\"version\": 1, \"name\": \"x\", \"nodes\": [{\"id\": \"a\", \"type\": \"trigger\"}], \"edges\": [{}]}",
+    "{\"version\": 1, \"name\": \"x\", \"nodes\": [{\"id\": \"a\", \"type\": \"trigger\"}], \"edges\": [{\"source\": \"a\", \"target\": \"b\"}]}"
+  ]
+}

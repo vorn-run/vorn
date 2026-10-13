@@ -2,6 +2,19 @@ import Foundation
 import Observation
 import VornCore
 
+public enum ToastTone: Sendable { case error, success, warning }
+
+/// A labelled button on a toast.
+public struct ToastAction {
+    public let label: String
+    public let run: @MainActor () -> Void
+
+    public init(label: String, run: @escaping @MainActor () -> Void) {
+        self.label = label
+        self.run = run
+    }
+}
+
 public enum WorkflowsTab: String, Sendable { case runs, review }
 
 public enum SidebarWorkflowFilter: String, Sendable, CaseIterable {
@@ -29,17 +42,46 @@ public final class WorkflowsStore {
     public var sidebarFilter: SidebarWorkflowFilter = .all
     public var selectedRunId: String?
     public private(set) var editingWorkflowId: String?
-    public var historyOpen = true
+    /// A new workflow's editor is open (it has no id yet).
+    public private(set) var editorOpen = false
+    /// The open workflow's draft; one editor serves every workflow, reloaded per open.
+    public private(set) var editor: WorkflowEditorModel?
+    /// Canvas views and the step library's memory; renders and tests use an ephemeral one.
+    @ObservationIgnored public var editorMemory: EditorMemory = .userDefaults
+    public var historyOpen = false
     public var listWidth: CGFloat = 420
     public private(set) var loading = 0
     /// One transient message, shown like the app's error toast.
-    public var toast: String?
+    public var toast: String? {
+        didSet {
+            toastTone = nextTone ?? .error
+            nextTone = nil
+            toastAction = nextAction
+            nextAction = nil
+        }
+    }
+    /// The toast's one button, like a toast's `actions` entry; it dismisses the toast itself.
+    public private(set) var toastAction: ToastAction?
+    @ObservationIgnored private var nextAction: ToastAction?
+    public private(set) var toastTone: ToastTone = .error
+    @ObservationIgnored private var nextTone: ToastTone?
     /// The open dropdown, drawn by `workflowsMenuHost`.
     public var menu: WorkflowsMenu?
     public var sidebarSectionOpen = true
     public private(set) var connectionError: String?
+    /// The shell's projects and the sidebar's active one, for forms that pick a project.
+    public var projects: [Project] = []
+    public var activeProjectName: String?
+    /// The shell's tasks, for run chips and resume: title and place by task id.
+    @ObservationIgnored public var taskTitles: () -> [String: String] = { [:] }
+    @ObservationIgnored public var taskContext: (String) -> RunTaskContext? = { _ in nil }
+    /// Opens a task from a run's chip, and reopens a step's agent conversation.
+    @ObservationIgnored public var openTask: ((String) -> Void)?
+    @ObservationIgnored public var resumeSession: ((RunResumeRequest) -> Void)?
+    /// The run prompt, full output, review page and missed schedules drawn over the window.
+    public let surfaces = RunSurfaces()
 
-    @ObservationIgnored private let backend: WorkflowsBackend
+    @ObservationIgnored let backend: WorkflowsBackend
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var reloadTask: Task<Void, Never>?
 
@@ -108,12 +150,30 @@ public final class WorkflowsStore {
 
     public var editingWorkflow: WorkflowDefinition? { editingWorkflowId.flatMap(workflow) }
 
+    /// The editor page shows: an open workflow, or a new one.
+    public var isEditing: Bool { editorOpen || editingWorkflow != nil }
+
     /// The row's workflow, or what the run remembers of a deleted one.
     public func ref(for run: WorkflowExecution) -> RunWorkflowRef? {
         if let w = workflow(run.workflowId) { return RunWorkflowRef(w) }
         if let d = run.definition { return RunWorkflowRef(d) }
         if let name = run.workflowName { return RunWorkflowRef(name: name) }
         return nil
+    }
+
+    public func findRun(_ id: String) -> WorkflowExecution? {
+        runs.first { $0.runId == id } ?? workflowRuns.first { $0.runId == id }
+    }
+
+    /// The address of a gate's review page for this round (gate-view-url.ts).
+    public func gateViewURL(runId: String, nodeId: String, token: String) async -> URL? {
+        guard let base = await backend.serverURL() else { return nil }
+        let segment: (String) -> String = { $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? $0 }
+        return URL(string: "\(base.absoluteString)/gate-view/\(segment(runId))/\(segment(nodeId))?t=\(segment(token))")
+    }
+
+    public func openReview(_ run: WorkflowExecution, nodeId: String, workflowName: String? = nil) {
+        surfaces.review = GateReviewTarget(runId: run.runId, nodeId: nodeId, workflowName: workflowName)
     }
 
     public func isDeleted(_ run: WorkflowExecution) -> Bool { workflow(run.workflowId) == nil }
@@ -161,12 +221,63 @@ public final class WorkflowsStore {
     public func openWorkflow(_ id: String) -> Task<Void, Never> {
         editingWorkflowId = id
         workflowRuns = runs.filter { $0.workflowId == id }
+        editorModel().load(workflow(id))
         return Task { await loadWorkflowRuns(id) }
     }
 
-    public func showAllRuns() {
+    /// The sidebar's New workflow: a blank editor, offered a template first.
+    public func newWorkflow() {
         editingWorkflowId = nil
         workflowRuns = []
+        editorModel().load(nil)
+        editorOpen = true
+    }
+
+    public func showAllRuns() {
+        closeEditor()
+    }
+
+    /// Leaves the editor for the runs landing; an import's leftovers go with it.
+    public func closeEditor() {
+        editingWorkflowId = nil
+        workflowRuns = []
+        editorOpen = false
+        importedRequirements = nil
+    }
+
+    /// A new workflow's first save makes it the open one.
+    func adoptEditing(_ id: String) {
+        editingWorkflowId = id
+        editorOpen = false
+    }
+
+    private func editorModel() -> WorkflowEditorModel {
+        if let editor { return editor }
+        let made = WorkflowEditorModel(store: self)
+        editor = made
+        return made
+    }
+
+    /// Writes a definition through vornd and keeps the local list in step.
+    func saveWorkflow(_ wf: WorkflowDefinition, isNew: Bool) async {
+        if let i = workflows.firstIndex(where: { $0.id == wf.id }) { workflows[i] = wf } else { workflows.append(wf) }
+        do {
+            let json = try JSONValue.from(wf)
+            if isNew {
+                _ = try await backend.rpc("workflow:create", .object(["workflow": json]))
+            } else {
+                _ = try await backend.rpc("workflow:update", .object(["id": .string(wf.id), "updates": json]))
+            }
+        } catch {
+            notify(String(describing: error))
+        }
+    }
+
+    /// Shows one toast; errors stay red, the rest carry their own tone.
+    public func notify(_ message: String, tone: ToastTone = .error, action: ToastAction? = nil) {
+        nextTone = tone
+        nextAction = action
+        toast = message
     }
 
     private func loadWorkflowRuns(_ id: String) async {
@@ -182,15 +293,9 @@ public final class WorkflowsStore {
 
     // MARK: Actions
 
-    /// Starts a manual run, the same checks as every manual surface.
-    public func runNow(_ workflow: WorkflowDefinition) {
-        guard workflow.triggerNode != nil else {
-            toast = "\"\(workflow.name)\" has no trigger — add one in the editor first"
-            return
-        }
-        perform { [backend] in
-            if let run = try await backend.run(workflowId: workflow.id, inputs: nil) { self.upsert(run) }
-        }
+    /// Starts a manual run, the same checks as every manual surface; asks first when it needs inputs or a source.
+    public func runNow(_ workflow: WorkflowDefinition, context: ManualRunContext? = nil, targetNodeId: String? = nil) {
+        startManualRun(workflow, context: context, targetNodeId: targetNodeId)
     }
 
     public func setEnabled(_ workflow: WorkflowDefinition, _ enabled: Bool) {
@@ -244,7 +349,7 @@ public final class WorkflowsStore {
         }
     }
 
-    private func perform(_ work: @escaping @MainActor () async throws -> Void) {
+    func perform(_ work: @escaping @MainActor () async throws -> Void) {
         Task {
             do { try await work() } catch { toast = String(describing: error) }
         }
@@ -265,6 +370,11 @@ public final class WorkflowsStore {
             if let list { workflows = list } else { scheduleReload() }
         case .disconnected(let why):
             connectionError = why
+        case .catalogChanged:
+            catalogGeneration += 1
+        case .schedulerMissed:
+            // App-level: `followMissedSchedules` shows these whether or not this view is open.
+            break
         }
     }
 
@@ -304,7 +414,7 @@ public final class WorkflowsStore {
         runs.sort { $0.startedAt > $1.startedAt }
     }
 
-    private func scheduleReload() {
+    func scheduleReload() {
         reloadTask?.cancel()
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
@@ -312,4 +422,13 @@ public final class WorkflowsStore {
             await self?.reload()
         }
     }
+
+    /// Bumped when the connector catalog refreshes, so the Start from list reads it again.
+    public var catalogGeneration = 0
+
+    // Panels: workflow files (WorkflowFiles.swift).
+    /// An import's unbound steps, waiting for the editor to show them.
+    public var importedRequirements: ImportedRequirements?
+    /// The save and open dialogs, replaced in tests and renders.
+    @ObservationIgnored public var workflowFiles: WorkflowFileIO = .panels
 }

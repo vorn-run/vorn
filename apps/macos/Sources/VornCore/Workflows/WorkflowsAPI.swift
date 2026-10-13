@@ -81,8 +81,12 @@ public enum WorkflowEvent: Sendable {
     /// The config changed; carries its workflows when the push included them.
     case workflowsChanged([WorkflowDefinition]?)
     case disconnected(String)
+    /// Schedules that came due while no instance ran: `[{workflowId, workflowName, missedAt}]`.
+    case schedulerMissed(JSONValue)
+    /// The connector catalog refreshed in the background.
+    case catalogChanged
 
-    public static let topics = ["workflow:*", "config:changed"]
+    public static let topics = ["workflow:*", "config:changed", "scheduler:missed", "connector:catalogChanged"]
 
     public init?(_ event: VornEvent) {
         switch event {
@@ -101,6 +105,10 @@ public enum WorkflowEvent: Sendable {
                     runId: params["runId"]?.stringValue ?? "", nodeId: params["nodeId"]?.stringValue ?? "")
             case "config:changed":
                 self = .workflowsChanged(try? params["workflows"]?.decode([WorkflowDefinition].self))
+            case "scheduler:missed":
+                self = .schedulerMissed(params)
+            case "connector:catalogChanged":
+                self = .catalogChanged
             default:
                 return nil
             }
