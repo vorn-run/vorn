@@ -6,7 +6,7 @@
 mod support;
 
 use serde_json::json;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::app::MOD;
 use vorn_app::screen::term_id;
@@ -355,11 +355,12 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     shot.until(&mut app, "the shell's first screen", |app, _| {
         app.pane(&id).map(|_| ())
     });
+    let typed = Instant::now();
     shot.type_line(&mut app, "seq 1 5000; sleep 15; seq 7001 7040");
-    let live = shot.until(&mut app, "5000 lines, some in history", |app, _| {
+    shot.until(&mut app, "5000 lines, some in history", |app, _| {
         app.pane(&id)
             .filter(|p| p.text().lines().any(|l| l.trim() == "5000") && p.history > 200)
-            .map(|p| p.live_line)
+            .map(|_| ())
     });
     shot.hover(&mut app, term_id(&id));
     let row = shot.ui.text.cell().h;
@@ -396,11 +397,11 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     shot.save(&mut app, "scroll-rested");
 
     // New output does not move a view scrolled back.
-    shot.until(&mut app, "the late output", |app, _| {
-        app.pane(&id)
-            .filter(|p| p.live_line >= live + 40)
-            .map(|_| ())
-    });
+    while typed.elapsed() < Duration::from_secs(18) {
+        app.pump();
+        shot.frame(&mut app);
+        std::thread::sleep(Duration::from_millis(50));
+    }
     let t = app.pane(&id).expect("pane").text();
     assert_eq!(
         t.lines().next().map(str::trim),
@@ -428,6 +429,11 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     assert!(!app.scrolled_back(&id));
     assert_eq!(app.pane(&id).expect("pane").back(), 0);
     shot.send(&mut app, key("Backspace", 0, None));
+    shot.until(&mut app, "the late output on the live screen", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().lines().any(|l| l.trim() == "7040"))
+            .map(|_| ())
+    });
 
     // Pulled down at the live screen it stretches and springs back.
     pad(&mut shot, &mut app, 0.0, WheelPhase::Began);

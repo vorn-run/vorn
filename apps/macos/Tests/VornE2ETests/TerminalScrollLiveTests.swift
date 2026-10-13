@@ -79,9 +79,9 @@ struct TerminalScrollLiveTests {
             return pane.text(of: row).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        let lateBy = Date().addingTimeInterval(18)
         pane.text("seq 1 5000; sleep 15; seq 7001 7040\r")
         #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 200 })
-        let live = pane.view?.live_line ?? 0
         let row = view.scroll.row
 
         // Fingers up the trackpad: the view follows by the point, between rows.
@@ -104,7 +104,7 @@ struct TerminalScrollLiveTests {
         shoot("rested")
 
         // New output does not move a view scrolled back.
-        #expect(await settled { (pane.view?.live_line ?? 0) >= live + 40 })
+        #expect(await settled { Date() >= lateBy })
         #expect(firstLine() == top)
         #expect(view.scroll.scrolled)
 
@@ -123,6 +123,7 @@ struct TerminalScrollLiveTests {
         #expect(!view.scroll.scrolled)
         #expect(await settled { pane.view?.back == 0 })
         pane.text("\u{7f}")
+        #expect(await settled { pane.screenText().contains("7040") })
 
         // Pulled down at the live screen it stretches and springs back.
         await pad(0, scroll: began)
