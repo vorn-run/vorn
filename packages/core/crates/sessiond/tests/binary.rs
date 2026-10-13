@@ -293,3 +293,120 @@ async fn an_idle_session_costs_under_8_mib() {
     }
     launch::kill(i.pid).unwrap();
 }
+
+/// The pid macOS holds responsible for `pid`: the app a program counts as,
+/// whose Dock icon and privacy permissions it shares.
+#[cfg(target_os = "macos")]
+fn responsible_for(pid: u32) -> u32 {
+    type Get = unsafe extern "C" fn(libc::pid_t) -> libc::pid_t;
+    let f = macos_symbol(c"responsibility_get_pid_responsible_for_pid");
+    // SAFETY: the symbol is that function, which takes and returns a pid.
+    let r = unsafe { std::mem::transmute::<*mut libc::c_void, Get>(f)(pid as libc::pid_t) };
+    r as u32
+}
+
+#[cfg(target_os = "macos")]
+fn macos_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
+    // SAFETY: dlsym with a NUL-terminated name.
+    let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+    assert!(!p.is_null(), "libSystem has {name:?}");
+    p
+}
+
+/// Start sessiond responsible for itself, as an app is: what it starts then
+/// counts as sessiond unless it disclaims too.
+#[cfg(target_os = "macos")]
+fn start_responsible(home: &Path) -> Instance {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    type SetDisclaim =
+        unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+    let bin = launch::install(Path::new(BIN), home, "test").expect("install");
+    let c = |b: &[u8]| CString::new(b).unwrap();
+    let argv = [
+        c(bin.as_os_str().as_bytes()),
+        c(b"--home"),
+        c(home.as_os_str().as_bytes()),
+    ];
+    let mut ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr().cast_mut()).collect();
+    ptrs.push(std::ptr::null_mut());
+    let env: Vec<CString> = std::env::vars_os()
+        .map(|(k, v)| c(&[k.as_bytes(), b"=", v.as_bytes()].concat()))
+        .collect();
+    let mut envp: Vec<*mut libc::c_char> = env.iter().map(|e| e.as_ptr().cast_mut()).collect();
+    envp.push(std::ptr::null_mut());
+    let disclaim = macos_symbol(c"responsibility_spawnattrs_setdisclaim");
+    // SAFETY: attributes and file actions this frame initialises and
+    // destroys; argv and envp are null-terminated and outlive the call; the
+    // symbol is that function.
+    unsafe {
+        let mut attr: libc::posix_spawnattr_t = std::mem::zeroed();
+        let mut acts: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+        libc::posix_spawnattr_init(&mut attr);
+        libc::posix_spawn_file_actions_init(&mut acts);
+        for fd in 0..3 {
+            libc::posix_spawn_file_actions_addopen(
+                &mut acts,
+                fd,
+                c"/dev/null".as_ptr(),
+                libc::O_RDWR,
+                0,
+            );
+        }
+        let set = std::mem::transmute::<*mut libc::c_void, SetDisclaim>(disclaim);
+        assert_eq!(set(&mut attr, 1), 0);
+        let mut pid = 0;
+        let rc = libc::posix_spawn(
+            &mut pid,
+            argv[0].as_ptr(),
+            &acts,
+            &attr,
+            ptrs.as_ptr(),
+            envp.as_ptr(),
+        );
+        libc::posix_spawn_file_actions_destroy(&mut acts);
+        libc::posix_spawnattr_destroy(&mut attr);
+        assert_eq!(rc, 0, "sessiond starts");
+    }
+    let t = Instant::now();
+    loop {
+        if let Some(i) = launch::running(home).pop() {
+            return i;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "sessiond announces itself"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A program in a terminal or run headless is responsible for itself, not
+/// for the app that started sessiond, so it never shows in the Dock as that
+/// app; sessiond keeps the app's.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn programs_are_responsible_for_themselves() {
+    let home = tempfile::tempdir().unwrap();
+    let i = start_responsible(home.path());
+    // Ends sessiond, and with it the programs, even when an assert fails.
+    struct Kill(u32);
+    impl Drop for Kill {
+        fn drop(&mut self) {
+            let _ = launch::kill(self.0);
+        }
+    }
+    let _kill = Kill(i.pid);
+    assert_eq!(responsible_for(i.pid), i.pid);
+    let mut v = V::hello(&i).await;
+    for io in [
+        Io::Pty { cols: 80, rows: 24 },
+        Io::Piped { stdin: Stdin::Null },
+    ] {
+        let ToVornd::Spawned(s) = v.spawn(LONG, io).await else {
+            panic!("spawn failed");
+        };
+        assert_eq!(responsible_for(s.pid), s.pid, "{}", s.session);
+    }
+    assert_eq!(responsible_for(i.pid), i.pid, "sessiond keeps its own");
+}
