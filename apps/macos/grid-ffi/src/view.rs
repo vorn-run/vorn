@@ -4,7 +4,9 @@
 
 use vorn_term_mirror::Mirror;
 use vorn_term_proto::row;
-use vorn_term_proto::screen::{attrs, Color, CursorStyle, StyleDef, Underline};
+use vorn_term_proto::screen::{
+    attrs, row_flags, Color, CursorStyle, MouseMode, Row, Screen, StyleDef, Underline,
+};
 
 /// Bits of [`VgRun::flags`].
 pub mod flags {
@@ -75,6 +77,13 @@ pub struct PaneView {
     pub cursor_color: u32,
     pub runs: Vec<VgRun>,
     pub text: Vec<u8>,
+    /// Absolute line of the view's first row.
+    pub first_line: u64,
+    /// The program tracks the mouse.
+    pub mouse: bool,
+    pub alternate: bool,
+    /// Scrolled back into history.
+    pub scrolled: bool,
 }
 
 /// The xterm 256-colour palette, with the theme's first sixteen.
@@ -164,17 +173,117 @@ impl<'a> Palette<'a> {
     }
 }
 
-/// Builds the view of a mirror against `theme`.
-pub fn build(m: &Mirror, theme: &VgTheme) -> PaneView {
+/// The first line of a view scrolled back to `top`: `top` kept within the
+/// history, or the live screen's when there is nothing to scroll back to.
+pub fn first_line(m: &Mirror, top: Option<u64>) -> u64 {
+    let t = m.term();
+    let oldest = t.top_line.saturating_sub(t.history_lines);
+    match top {
+        Some(top) if t.screen == Screen::Primary => top.clamp(oldest, t.top_line),
+        _ => t.top_line,
+    }
+}
+
+/// The row showing absolute `line`: history above the screen, if cached.
+fn row_at(m: &Mirror, line: u64) -> Option<&Row> {
+    let top = m.term().top_line;
+    if line < top {
+        m.history_line(line)
+    } else {
+        m.rows().get(usize::try_from(line - top).ok()?)
+    }
+}
+
+/// A row's cells as `(col, width, text)`, a blank cell's text a space.
+fn cells(r: &Row) -> Vec<(u16, u16, String)> {
+    let mut out = Vec::new();
+    let mut col: u16 = 0;
+    for run in row::decode(&r.cells).unwrap_or_default() {
+        for cell in run.cells {
+            let w: u16 = if cell.wide { 2 } else { 1 };
+            let text = if cell.text.is_empty() {
+                " ".to_owned()
+            } else {
+                cell.text
+            };
+            out.push((col, w, text));
+            col = col.saturating_add(w);
+        }
+    }
+    out
+}
+
+/// The text from `(from_line, from_col)` up to `(to_line, to_col)`, end
+/// excluded: lines end in a newline unless they wrap, trailing blanks trimmed.
+pub fn text_range(m: &Mirror, from: (u64, u16), to: (u64, u16)) -> String {
+    let (from, to) = if from <= to { (from, to) } else { (to, from) };
+    let t = m.term();
+    let oldest = t.top_line.saturating_sub(t.history_lines);
+    let last = t.top_line + u64::from(t.rows.max(1)) - 1;
+    let (from, to) = (from.max((oldest, 0)), to.min((last, u16::MAX)));
+    let mut out = String::new();
+    if from > to {
+        return out;
+    }
+    for line in from.0..=to.0 {
+        let start = if line == from.0 { from.1 } else { 0 };
+        let end = if line == to.0 { to.1 } else { u16::MAX };
+        let row = row_at(m, line);
+        let mut s = String::new();
+        for (col, w, text) in row.map(cells).unwrap_or_default() {
+            if col.saturating_add(w) > start && col < end {
+                s.push_str(&text);
+            }
+        }
+        let wraps = row.is_some_and(|r| r.flags & row_flags::WRAPPED != 0);
+        if line < to.0 && wraps {
+            out.push_str(&s);
+        } else {
+            out.push_str(s.trim_end_matches(' '));
+            if line < to.0 {
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+/// The columns `[from, to)` of the word at `col` on `line`, as a double
+/// click selects it; the cell alone when it is a separator.
+pub fn word_at(m: &Mirror, line: u64, col: u16) -> (u16, u16) {
+    const SEPARATORS: &str = " ()[]{}',\"`";
+    let cs = row_at(m, line).map(cells).unwrap_or_default();
+    let Some(i) = cs.iter().position(|(c, w, _)| col >= *c && col < c + w) else {
+        return (col, col.saturating_add(1));
+    };
+    let word = |j: usize| !cs[j].2.chars().all(|ch| SEPARATORS.contains(ch));
+    if !word(i) {
+        return (cs[i].0, cs[i].0 + cs[i].1);
+    }
+    let (mut a, mut b) = (i, i);
+    while a > 0 && word(a - 1) {
+        a -= 1;
+    }
+    while b + 1 < cs.len() && word(b + 1) {
+        b += 1;
+    }
+    (cs[a].0, cs[b].0 + cs[b].1)
+}
+
+/// Builds the view of a mirror against `theme`, scrolled back to `top`.
+pub fn build(m: &Mirror, theme: &VgTheme, top: Option<u64>) -> PaneView {
     let t = m.term();
     let pal = Palette::of(m, theme);
+    let first = first_line(m, top);
+    let back = t.top_line - first;
+    let cursor_y = u64::from(t.cursor.y) + back;
     let mut v = PaneView {
         rev: m.rev(),
         cols: t.cols,
         rows: t.rows,
         cursor_x: t.cursor.x,
-        cursor_y: t.cursor.y,
-        cursor_visible: t.cursor.visible,
+        cursor_y: u16::try_from(cursor_y).unwrap_or(u16::MAX),
+        cursor_visible: t.cursor.visible && cursor_y < u64::from(t.rows),
         cursor_style: match t.cursor.style {
             CursorStyle::BlockHollow => 1,
             CursorStyle::Bar => 2,
@@ -186,9 +295,15 @@ pub fn build(m: &Mirror, theme: &VgTheme) -> PaneView {
         cursor_color: t.colors.cursor.map_or(theme.cursor, rgb),
         runs: Vec::with_capacity(usize::from(t.rows) * 2),
         text: Vec::with_capacity(usize::from(t.rows) * usize::from(t.cols)),
+        first_line: first,
+        mouse: t.mouse != MouseMode::None,
+        alternate: t.screen == Screen::Alternate,
+        scrolled: back > 0,
     };
-    for (y, r) in m.rows().iter().enumerate() {
-        let Ok(y) = u16::try_from(y) else { break };
+    for y in 0..t.rows {
+        let Some(r) = row_at(m, first + u64::from(y)) else {
+            continue;
+        };
         let Ok(runs) = row::decode(&r.cells) else {
             continue;
         };
@@ -316,7 +431,11 @@ pub(crate) mod tests {
     }
 
     fn view_of(snap: Snapshot, theme: &VgTheme) -> PaneView {
-        build(&Mirror::from_snapshot(snap).expect("valid snapshot"), theme)
+        build(
+            &Mirror::from_snapshot(snap).expect("valid snapshot"),
+            theme,
+            None,
+        )
     }
 
     fn run_text<'a>(v: &'a PaneView, r: &VgRun) -> &'a str {
@@ -448,5 +567,67 @@ pub(crate) mod tests {
             .map(|r| (r.row, r.col, run_text(&v, r)))
             .collect();
         assert_eq!(got, vec![(0, 3, "  "), (1, 0, "hi")]);
+    }
+
+    /// Three screen rows at lines 2..5 under two lines of history.
+    fn scrolled_mirror() -> Mirror {
+        let at = |y: u16, l: u64, text: &str| Row {
+            line: l,
+            ..line(y, &[(0, text)])
+        };
+        let mut snap = snapshot(
+            1,
+            vec![plain()],
+            vec![at(0, 2, "two"), at(1, 3, "three"), at(2, 4, "four")],
+        );
+        snap.term.top_line = 2;
+        snap.term.history_lines = 2;
+        snap.term.cursor.y = 2;
+        snap.term.cursor.visible = true;
+        snap.history = vec![at(0, 0, "zero"), at(0, 1, "one")];
+        Mirror::from_snapshot(snap).expect("valid snapshot")
+    }
+
+    fn row_texts(v: &PaneView) -> Vec<(u16, &str)> {
+        v.runs.iter().map(|r| (r.row, run_text(v, r))).collect()
+    }
+
+    #[test]
+    fn a_scrolled_view_shows_history_and_hides_the_cursor_below_it() {
+        let m = scrolled_mirror();
+        let t = VgTheme::default();
+        let live = build(&m, &t, None);
+        assert_eq!(
+            (live.first_line, live.scrolled, live.cursor_visible),
+            (2, false, true)
+        );
+        let back = build(&m, &t, Some(1));
+        assert_eq!((back.first_line, back.scrolled), (1, true));
+        assert_eq!(row_texts(&back), vec![(0, "one"), (1, "two"), (2, "three")]);
+        assert!(!back.cursor_visible);
+        // Past the oldest line it stops at the oldest; at the live line it is live.
+        assert_eq!(build(&m, &t, Some(0)).first_line, 0);
+        assert!(!build(&m, &t, Some(9)).scrolled);
+    }
+
+    #[test]
+    fn text_ranges_span_history_and_trim_line_ends() {
+        let m = scrolled_mirror();
+        assert_eq!(text_range(&m, (1, 1), (3, 3)), "ne\ntwo\nthr");
+        assert_eq!(text_range(&m, (3, 3), (1, 1)), "ne\ntwo\nthr");
+        assert_eq!(text_range(&m, (4, 0), (4, 10)), "four");
+        assert_eq!(
+            text_range(&m, (0, 0), (u64::MAX, u16::MAX)),
+            "zero\none\ntwo\nthree\nfour"
+        );
+    }
+
+    #[test]
+    fn words_stop_at_separators() {
+        let rows = vec![line(0, &[(0, "a fo.b(x)")])];
+        let m = Mirror::from_snapshot(snapshot(1, vec![plain()], rows)).expect("valid");
+        assert_eq!(word_at(&m, 0, 3), (2, 6));
+        assert_eq!(word_at(&m, 0, 6), (6, 7));
+        assert_eq!(word_at(&m, 0, 50), (50, 51));
     }
 }

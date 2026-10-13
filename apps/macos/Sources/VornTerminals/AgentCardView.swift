@@ -116,7 +116,6 @@ public struct AgentCardView: View {
                                 .padding(.top, 2)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .background(Theme.surfaceSunken)
-                                .onRightClick { p in actions.contextMenu(session.id, p) }
                             SessionComposer(session: session, ended: context.ended, compact: variant == .mini, actions: actions)
                             statusBar
                         }
@@ -461,7 +460,6 @@ public struct SessionStage: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onRightClick { p in actions.contextMenu(session.id, p) }
             SessionComposer(session: session, ended: context.ended, compact: !showsStatusBar, actions: actions)
             if showsStatusBar {
                 CardStatusBar(session: session, diffStat: context.diffStat, git: actions.git) { actions.showChanges(session.id) }

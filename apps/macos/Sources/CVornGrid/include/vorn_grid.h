@@ -20,13 +20,18 @@ enum {
 typedef struct {
     uint64_t rev;
     uint16_t cols, rows, cursor_x, cursor_y;
-    uint8_t cursor_visible, cursor_style /* 0 block, 1 hollow, 2 bar, 3 underline */, _pad0, _pad1;
+    uint8_t cursor_visible, cursor_style /* 0 block, 1 hollow, 2 bar, 3 underline */;
+    uint8_t mouse;  /* 1 when the program tracks the mouse */
+    uint8_t screen; /* VG_ALTERNATE | VG_SCROLLED */
     uint32_t fg, bg, cursor_color, nruns;
     const VgRun *runs;
     const uint8_t *text;
     uint32_t text_len;
     void *owner; /* private, freed by vg_view_free */
+    uint64_t first_line; /* absolute line of row 0: selections are (line, col) */
 } VgView;
+
+enum { VG_ALTERNATE = 1, VG_SCROLLED = 2 };
 
 typedef struct {
     uint32_t fg, bg, cursor;
@@ -58,6 +63,22 @@ void vg_view_free(VgView *v);
 void vg_key(VgClient *c, uint32_t pane, const char *code, uint16_t mods, const char *text);
 /* Committed text or a paste. */
 void vg_text(VgClient *c, uint32_t pane, const char *utf8);
+/* A paste: \n becomes \r, bracketed when the program asks for it. */
+void vg_paste(VgClient *c, uint32_t pane, const char *utf8);
+/* A wheel turn of lines (negative up) at cell (x, y): sent to a program tracking the mouse, as arrow
+   keys on the alternate screen, else scrolls the view through history. */
+void vg_wheel(VgClient *c, uint32_t pane, int32_t lines, float x, float y, uint16_t mods);
+/* Scrolls the view through history (negative up); INT32_MAX returns to the live screen.
+   Typing also returns to it. */
+void vg_scroll(VgClient *c, uint32_t pane, int32_t lines);
+/* For a program tracking the mouse: action 0 press, 1 release, 2 motion; button 0 none, 1 left,
+   2 middle, 3 right; x, y in cells. */
+void vg_mouse(VgClient *c, uint32_t pane, uint8_t action, uint8_t button, uint16_t mods, float x, float y);
+/* Text from (from_line, from_col) to (to_line, to_col), end excluded; free with vg_free_string. */
+char *vg_text_range(VgClient *c, uint32_t pane, uint64_t from_line, uint16_t from_col, uint64_t to_line,
+                    uint16_t to_col);
+/* The columns [from, to) of the word at (line, col). */
+bool vg_word_at(VgClient *c, uint32_t pane, uint64_t line, uint16_t col, uint16_t *from, uint16_t *to);
 /* The pane's viewport changed (what fits): sends Viewport only. */
 void vg_viewport(VgClient *c, uint32_t pane, uint16_t cols, uint16_t rows);
 /* "Fit to this pane": sends TakeSize. */

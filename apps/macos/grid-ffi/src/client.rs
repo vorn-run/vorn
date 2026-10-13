@@ -17,8 +17,9 @@ use std::thread::JoinHandle;
 use vorn_grid_client::{Client, Got};
 use vorn_term_proto::msg::{
     caps, Attach, AttachMode, ClientKind, ClientMsg, Hello, InputEvent, KeyAction, KeyCode,
-    Presence, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
+    MouseAction, Presence, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
+use vorn_term_proto::screen::{MouseMode, Screen};
 
 use crate::view::{self, PaneView, VgTheme};
 
@@ -52,6 +53,10 @@ struct Pane {
     /// The viewport vornd last heard for this pane.
     sent_view: Size,
     presence: Option<Presence>,
+    /// The absolute line the view starts at when scrolled back.
+    scroll_top: Option<u64>,
+    /// The history fetch in flight, as `(sb_epoch, from_line)`.
+    fetching: Option<(u32, u64)>,
 }
 
 #[derive(Debug)]
@@ -63,11 +68,47 @@ struct State {
     pending: VecDeque<(u32, String)>,
     dirty: BTreeSet<u32>,
     next_pane: u32,
+    next_req: u32,
     closed: bool,
     last_error: Option<String>,
 }
 
 impl State {
+    /// Asks for the first history lines a page around the scrolled view
+    /// lacks, one fetch at a time.
+    fn fetch_history(&mut self, pane: u32) {
+        let Some(p) = self.panes.get(&pane) else {
+            return;
+        };
+        let (Some(sid), Some(top), None) = (p.sid, p.scroll_top, p.fetching) else {
+            return;
+        };
+        let Some(m) = self.client.pane(sid).and_then(|x| x.mirror()) else {
+            return;
+        };
+        let t = m.term();
+        let rows = u64::from(t.rows);
+        let oldest = t.top_line.saturating_sub(t.history_lines);
+        let from = top.saturating_sub(rows).max(oldest);
+        let to = top.saturating_add(rows * 2).min(t.top_line);
+        let Some(&(from_line, count)) = m.gaps(from, to).first() else {
+            return;
+        };
+        let sb_epoch = t.sb_epoch;
+        self.next_req = self.next_req.wrapping_add(1);
+        let req = self.next_req;
+        if let Some(p) = self.panes.get_mut(&pane) {
+            p.fetching = Some((sb_epoch, from_line));
+        }
+        self.client.send(&ClientMsg::FetchHistory {
+            sid,
+            req,
+            sb_epoch,
+            from_line,
+            count: u16::try_from(count).unwrap_or(u16::MAX).min(1000),
+        });
+    }
+
     fn pane_of(&self, sid: u32) -> Option<u32> {
         self.panes
             .iter()
@@ -173,6 +214,31 @@ impl State {
                     }
                     None => false,
                 }
+            }
+            Got::Message(ServerMsg::History {
+                sid,
+                sb_epoch,
+                from_line,
+                ..
+            }) => {
+                let Some(pane) = self.pane_of(sid) else {
+                    return false;
+                };
+                let Some(p) = self.panes.get_mut(&pane) else {
+                    return false;
+                };
+                // A reply that filled nothing is not asked for again.
+                let again = p.fetching != Some((sb_epoch, from_line));
+                p.fetching = None;
+                if again {
+                    self.fetch_history(pane);
+                } else if let Some(m) = self.client.pane(sid).and_then(|x| x.mirror()) {
+                    if m.gaps(from_line, from_line + 1).is_empty() {
+                        self.fetch_history(pane);
+                    }
+                }
+                self.dirty.insert(pane);
+                true
             }
             Got::Welcome(_) | Got::Message(_) => false,
         }
@@ -286,6 +352,7 @@ impl Grid {
                 pending: VecDeque::new(),
                 dirty: BTreeSet::new(),
                 next_pane: 0,
+                next_req: 0,
                 closed: false,
                 last_error: None,
             }),
@@ -337,6 +404,8 @@ impl Grid {
                     view,
                     sent_view: view,
                     presence: None,
+                    scroll_top: None,
+                    fetching: None,
                 },
             );
             st.send_attach(id);
@@ -388,8 +457,135 @@ impl Grid {
 
     pub fn view(&self, pane: u32) -> Option<PaneView> {
         let st = lock(&self.shared.state);
+        let top = st.panes.get(&pane)?.scroll_top;
         let m = st.client.pane(st.live_sid(pane)?)?.mirror()?;
-        Some(view::build(m, &self.shared.theme))
+        Some(view::build(m, &self.shared.theme, top))
+    }
+
+    /// The text between two points of the pane, `(line, col)`, end excluded.
+    pub fn text_range(&self, pane: u32, from: (u64, u16), to: (u64, u16)) -> Option<String> {
+        let st = lock(&self.shared.state);
+        let m = st.client.pane(st.live_sid(pane)?)?.mirror()?;
+        Some(view::text_range(m, from, to))
+    }
+
+    /// The columns of the word at `(line, col)`.
+    pub fn word_at(&self, pane: u32, line: u64, col: u16) -> Option<(u16, u16)> {
+        let st = lock(&self.shared.state);
+        let m = st.client.pane(st.live_sid(pane)?)?.mirror()?;
+        Some(view::word_at(m, line, col))
+    }
+
+    /// Moves the view `lines` through history, negative towards older lines;
+    /// `i32::MAX` returns to the live screen.
+    pub fn scroll(&self, pane: u32, lines: i32) {
+        {
+            let mut st = lock(&self.shared.state);
+            let Some(sid) = st.live_sid(pane) else {
+                return;
+            };
+            let Some(t) = st
+                .client
+                .pane(sid)
+                .and_then(|x| x.mirror())
+                .map(|m| m.term())
+            else {
+                return;
+            };
+            if t.screen == Screen::Alternate {
+                return;
+            }
+            let (live, oldest) = (t.top_line, t.top_line.saturating_sub(t.history_lines));
+            let Some(p) = st.panes.get_mut(&pane) else {
+                return;
+            };
+            let at = p.scroll_top.unwrap_or(live).clamp(oldest, live);
+            let next = at
+                .saturating_add_signed(i64::from(lines))
+                .clamp(oldest, live);
+            let top = (next < live).then_some(next);
+            if top == p.scroll_top {
+                return;
+            }
+            p.scroll_top = top;
+            st.dirty.insert(pane);
+            st.fetch_history(pane);
+        }
+        self.shared.flush();
+        self.shared.wake();
+    }
+
+    /// A wheel turn of `lines` at cell `(x, y)`: the program's when it
+    /// tracks the mouse, arrow keys on the alternate screen, else scrollback.
+    pub fn wheel(&self, pane: u32, lines: i32, x: f32, y: f32, mods: u16) {
+        let modes = {
+            let st = lock(&self.shared.state);
+            st.live_sid(pane)
+                .and_then(|sid| st.client.pane(sid))
+                .and_then(|p| p.mirror())
+                .map(|m| (m.term().mouse != MouseMode::None, m.term().screen))
+        };
+        let Some((tracking, screen)) = modes else {
+            return;
+        };
+        let up = lines < 0;
+        for _ in 0..lines.unsigned_abs().min(100) {
+            if tracking {
+                let dy = if up { -1.0 } else { 1.0 };
+                self.input(
+                    pane,
+                    InputEvent::Wheel {
+                        dx: 0.0,
+                        dy,
+                        mods,
+                        x,
+                        y,
+                    },
+                );
+            } else if screen == Screen::Alternate {
+                let code = if up { "ArrowUp" } else { "ArrowDown" };
+                self.input(pane, key_event(code, 0, None));
+            }
+        }
+        if !tracking && screen == Screen::Primary {
+            self.scroll(pane, lines);
+        }
+    }
+
+    /// A button press (`action` 0), release (1) or drag (2) at cell `(x, y)`,
+    /// for a program tracking the mouse; `button` 1 left, 2 middle, 3 right.
+    pub fn mouse(&self, pane: u32, action: u8, button: u8, mods: u16, x: f32, y: f32) {
+        let action = match action {
+            0 => MouseAction::Press,
+            1 => MouseAction::Release,
+            _ => MouseAction::Motion,
+        };
+        let button = (button != 0).then_some(button);
+        self.input(
+            pane,
+            InputEvent::Mouse {
+                action,
+                button,
+                mods,
+                x,
+                y,
+            },
+        );
+    }
+
+    /// A paste, line ends as Enter sends them, bracketed if the program asks.
+    pub fn paste(&self, pane: u32, utf8: &str) {
+        if utf8.is_empty() {
+            return;
+        }
+        let utf8 = utf8.replace("\r\n", "\r").replace('\n', "\r");
+        self.input(
+            pane,
+            InputEvent::Paste {
+                utf8,
+                confirmed: true,
+            },
+        );
     }
 
     /// The viewport's text, rows joined by newlines, trailing blanks trimmed.
@@ -422,7 +618,15 @@ impl Grid {
         );
     }
 
+    /// Input returns a scrolled view to the live screen.
     fn input(&self, pane: u32, event: InputEvent) {
+        let typed = !matches!(
+            event,
+            InputEvent::Mouse { .. } | InputEvent::Wheel { .. } | InputEvent::Focus { .. }
+        );
+        if typed && self.unscroll(pane) {
+            self.shared.wake();
+        }
         self.send(pane, |st, sid| {
             let input_seq = st.client.input_seq();
             Some(ClientMsg::Input {
@@ -431,6 +635,18 @@ impl Grid {
                 event,
             })
         });
+    }
+
+    fn unscroll(&self, pane: u32) -> bool {
+        let mut st = lock(&self.shared.state);
+        let Some(p) = st.panes.get_mut(&pane) else {
+            return false;
+        };
+        if p.scroll_top.take().is_none() {
+            return false;
+        }
+        st.dirty.insert(pane);
+        true
     }
 
     pub fn viewport(&self, pane: u32, cols: u16, rows: u16) {
@@ -701,6 +917,97 @@ mod tests {
         drop(fake);
         wait_for("closed", || grid.closed());
         assert_eq!(grid.pane_state(c), Some(PaneState::Closed));
+        drop(grid);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scrolling_back_fetches_history_and_typing_returns_live() {
+        let dir = std::env::temp_dir().join(format!("vorn-grid-ffi-sb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("grid.sock");
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).expect("bind");
+        let grid = Grid::connect(path.to_str().expect("utf-8"), "test", VgTheme::default())
+            .expect("connect");
+        let (conn, _) = listener.accept().expect("accept");
+        let mut fake = Fake {
+            conn,
+            reader: FrameReader::new(),
+        };
+        assert!(matches!(fake.next(), ClientMsg::Hello(_)));
+        let p = grid.attach("s1", 10, 3);
+        assert!(matches!(fake.next(), ClientMsg::Attach(_)));
+        fake.reply(&ServerMsg::Attached(Attached {
+            sid: 4,
+            session: "s1".into(),
+            epoch: 0,
+            owner: true,
+            fidelity: vorn_term_proto::msg::Fidelity::Exact,
+        }));
+        let at = |y: u16, l: u64, text: &str| vorn_term_proto::screen::Row {
+            line: l,
+            ..line(y, &[(0, text)])
+        };
+        let mut snap = snapshot(
+            1,
+            vec![style(0, Color::Default, Color::Default, 0)],
+            vec![at(0, 10, "a"), at(1, 11, "b"), at(2, 12, "c")],
+        );
+        snap.term.top_line = 10;
+        snap.term.history_lines = 10;
+        snap.term.sb_epoch = 3;
+        fake.reply(&ServerMsg::Snapshot {
+            sid: 4,
+            snap: Box::new(snap),
+        });
+        assert_eq!(fake.next(), ClientMsg::Ack { sid: 4, rev: 1 });
+        wait_for("live", || grid.pane_state(p) == Some(PaneState::Live));
+
+        grid.wheel(p, -2, 0.0, 0.0, 0);
+        let ClientMsg::FetchHistory {
+            sid,
+            req,
+            sb_epoch,
+            from_line,
+            count,
+        } = fake.next()
+        else {
+            panic!("a history fetch");
+        };
+        assert_eq!((sid, sb_epoch, from_line, count), (4, 3, 5, 5));
+        fake.reply(&ServerMsg::History {
+            sid: 4,
+            req,
+            sb_epoch: 3,
+            from_line: 5,
+            rows: (5..10).map(|l| at(0, l, &format!("h{l}"))).collect(),
+            oldest_line: 0,
+            styles: vec![],
+            links: vec![],
+        });
+        wait_for("history", || {
+            grid.text_range(p, (8, 0), (8, 9)).as_deref() == Some("h8")
+        });
+        let v = grid.view(p).expect("a screen");
+        assert_eq!((v.first_line, v.scrolled), (8, true));
+        assert_eq!(
+            grid.text_range(p, (8, 0), (10, 1)).as_deref(),
+            Some("h8\nh9\na")
+        );
+
+        grid.paste(p, "x\ny");
+        let ClientMsg::Input { event, .. } = fake.next() else {
+            panic!("input");
+        };
+        assert_eq!(
+            event,
+            InputEvent::Paste {
+                utf8: "x\ry".into(),
+                confirmed: true
+            }
+        );
+        assert!(!grid.view(p).expect("a screen").scrolled);
         drop(grid);
         let _ = std::fs::remove_dir_all(&dir);
     }
