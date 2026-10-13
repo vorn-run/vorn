@@ -13,6 +13,8 @@
 
 pub mod clients;
 pub mod files;
+#[cfg(feature = "engine")]
+pub mod grid_ws;
 pub mod http;
 pub mod idle;
 pub mod port;

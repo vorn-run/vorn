@@ -329,6 +329,40 @@ impl Daemon {
     pub(crate) fn answered_here(&self, conn: u64, reply: &Forwarder, text: &str) -> bool {
         answered_here(self, conn, reply, text)
     }
+
+    /// Whether `/grid` is served: only while vornd keeps the sessions.
+    fn serves_grid(&self) -> bool {
+        #[cfg(feature = "engine")]
+        return self.holder.as_ref().and_then(|h| h.engine()).is_some();
+        #[cfg(not(feature = "engine"))]
+        false
+    }
+
+    /// Serves a `/grid` socket until it closes.
+    async fn serve_grid<C>(
+        &self,
+        serving: Arc<crate::serve::Serving>,
+        client: WebSocketStream<C>,
+        desktop: bool,
+        credential: Option<String>,
+    ) where
+        C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        #[cfg(feature = "engine")]
+        if let Some(engine) = self.holder.as_ref().and_then(|h| h.engine()) {
+            crate::serve::grid_ws::run(
+                Arc::clone(&self.native),
+                serving,
+                Arc::clone(engine),
+                client,
+                desktop,
+                credential,
+            )
+            .await;
+        }
+        #[cfg(not(feature = "engine"))]
+        let _ = (serving, client, desktop, credential);
+    }
 }
 
 /// Serves one accepted connection's requests, upgrades included.
@@ -423,20 +457,27 @@ async fn handle(
 /// The routes a peer on another machine may reach.
 fn public_route(path: &str) -> bool {
     path == "/ws"
+        || path == GRID_PATH
         || crate::serve::http::answers(path)
         || crate::pair::is_pair_path(path)
         || path.starts_with("/artifact/")
         || path.starts_with("/gate-view/")
 }
 
-/// A WebSocket with vornd as the server: only `/ws`, from a page it trusts.
+/// Grid mode for browsers (`crate::serve::grid_ws`).
+const GRID_PATH: &str = "/grid";
+
+/// A WebSocket with vornd as the server: `/ws`, or `/grid` while vornd
+/// keeps the sessions, from a page it trusts.
 async fn serve_websocket(
     daemon: Arc<Daemon>,
     serving: Arc<crate::serve::Serving>,
     mut req: Request<Incoming>,
     peer: SocketAddr,
 ) -> Response<Body> {
-    if req.uri().path() != "/ws" {
+    let path = req.uri().path();
+    let grid = path == GRID_PATH;
+    if path != "/ws" && !(grid && daemon.serves_grid()) {
         return crate::serve::http::not_found();
     }
     let Some(key) = req.headers().get(header::SEC_WEBSOCKET_KEY).cloned() else {
@@ -479,6 +520,13 @@ async fn serve_websocket(
         .await;
         daemon.open.fetch_add(1, Ordering::Relaxed);
         daemon.served.fetch_add(1, Ordering::Relaxed);
+        if grid {
+            daemon
+                .serve_grid(serving, client, desktop, credential)
+                .await;
+            daemon.open.fetch_sub(1, Ordering::Relaxed);
+            return;
+        }
         crate::serve::socket::run(
             Arc::clone(&daemon),
             serving,

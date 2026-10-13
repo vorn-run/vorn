@@ -67,6 +67,10 @@ export default defineConfig({
         target: 'ws://127.0.0.1:3456',
         ws: true
       },
+      '/grid': {
+        target: 'ws://127.0.0.1:3456',
+        ws: true
+      },
       '/health': {
         target: 'http://127.0.0.1:3456'
       },

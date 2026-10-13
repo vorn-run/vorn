@@ -8,11 +8,12 @@
 //! here as [`Ev`]s under the client's [`Who`].
 //!
 //! Who is a desktop is decided from the connection, never from what the
-//! client says: every grid client is on this user's local socket, and a
-//! bytes connection is the desktop's only when it opened with the desktop's
-//! launch token ([`Sizes::desktop`],
-//! [`crate::endpoint::is_desktop_credential`]). A phone over the tunnel cannot claim
-//! it. So is who opened a session: the connection whose `terminal:create`
+//! client says: a grid client on this user's local socket is one, a grid
+//! client on the `/grid` WebSocket is not ([`Sizes::remote_grid`]) unless
+//! it opened with the desktop's launch token, and a bytes connection is the
+//! desktop's only when it opened with that token ([`Sizes::desktop`],
+//! [`crate::endpoint::is_desktop_credential`]). A phone over the tunnel
+//! cannot claim it. So is who opened a session: the connection whose `terminal:create`
 //! (or `shell:create`, `sessions:resume`) answered with it ([`Sizes::opened_by`]).
 //!
 //! The policy decides; the engine's driver sends. It asks [`Sizes::due`]
@@ -103,6 +104,8 @@ struct Inner {
     sessions: HashMap<String, Held>,
     /// Bytes connections that opened with the desktop's launch token.
     desktops: HashSet<u64>,
+    /// Grid connections from a browser, which are not desktops.
+    remote_grids: HashSet<u64>,
     /// Who asked for each session not open yet, oldest first.
     openers: VecDeque<(String, u64)>,
     /// Every session with something due, by when: the driver asks after
@@ -210,6 +213,12 @@ impl Sizes {
         self.inner().desktops.insert(conn);
     }
 
+    /// Grid connection `conn` came over the `/grid` WebSocket without the
+    /// desktop's launch token: it is not a desktop.
+    pub fn remote_grid(&self, conn: u64) {
+        self.inner().remote_grids.insert(conn);
+    }
+
     /// One client's event for `session`. A client the policy has not seen
     /// is attached first, so an event never depends on an attach arriving
     /// before it. Nothing for a session without a PTY, which has no size.
@@ -217,7 +226,7 @@ impl Sizes {
         {
             let mut inner = self.inner();
             let desktop = match who {
-                Who::Grid(_) => true,
+                Who::Grid(p) => !inner.remote_grids.contains(&p.conn),
                 Who::Bytes { conn, .. } => inner.desktops.contains(&conn),
             };
             let Some(h) = inner.sessions.get_mut(session) else {
@@ -298,6 +307,7 @@ impl Sizes {
     /// Grid connection `conn` closed: each of its attachments detaches.
     pub fn grid_gone(&self, conn: u64, now: Instant) {
         self.gone(|w| matches!(w, Who::Grid(p) if p.conn == conn), now);
+        self.inner().remote_grids.remove(&conn);
     }
 
     fn gone(&self, which: impl Fn(Who) -> bool, now: Instant) {
@@ -460,6 +470,35 @@ mod tests {
             sizes.state(S).unwrap().1,
             Some(Who::Bytes { conn: 1, pane: 0 })
         );
+    }
+
+    /// A grid client over the `/grid` WebSocket is remote, as a bytes one
+    /// without the token is: it loses ties to a local grid client, and is
+    /// forgotten as remote once it goes.
+    #[test]
+    fn a_grid_client_from_a_browser_is_remote() {
+        let sizes = Sizes::new();
+        sizes.opened(S, Size::new(100, 30));
+        sizes.remote_grid(2);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let view = |cols, rows| Ev::Attach {
+            viewport: Some(Size::new(cols, rows)),
+            presence: Presence::Watching,
+        };
+        let (local, browser) = (peer(1, 1), peer(2, 1));
+        sizes.on(S, browser, view(50, 30), t0);
+        sizes.on(S, local, view(120, 40), t0);
+        sizes.on(S, browser, Ev::Input, t0);
+        sizes.on(S, local, Ev::Input, at(500));
+        sizes.on(S, browser, Ev::Input, at(1000));
+        assert!(sizes
+            .poll(at(2000))
+            .iter()
+            .all(|(_, d)| d.owner == Some(local)));
+        assert_eq!(sizes.state(S).unwrap().1, Some(local));
+        sizes.grid_gone(2, at(3000));
+        assert!(sizes.inner().remote_grids.is_empty());
     }
 
     #[test]
