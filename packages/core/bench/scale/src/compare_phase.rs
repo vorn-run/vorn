@@ -78,12 +78,13 @@ pub async fn run(spec: &Spec, out: &mut Comparison, save: &dyn Fn(&Comparison)) 
     }
     for (shell, n) in configs {
         let responds = shell == "dash" && n == spec.response;
+        let kept = spec.sizes.contains(&n) || shell == "bash";
         let mut m = Memory {
             shell: shell.to_owned(),
             terminals: n,
             ..Memory::default()
         };
-        if let Err(e) = one(spec, shell, n, responds, &mut m, out).await {
+        if let Err(e) = one(spec, shell, n, responds, kept, &mut m, out).await {
             eprintln!("vorn-scale-bench: compare {shell} × {n}: {e}");
             out.limits.push(Limit {
                 phase: format!("{shell} memory"),
@@ -91,7 +92,7 @@ pub async fn run(spec: &Spec, out: &mut Comparison, save: &dyn Fn(&Comparison)) 
                 what: e.to_string(),
             });
         }
-        if spec.sizes.contains(&n) || shell == "bash" {
+        if kept {
             out.memory.push(m);
         }
         save(out);
@@ -103,12 +104,13 @@ async fn one(
     shell: &str,
     n: usize,
     responds: bool,
+    kept: bool,
     m: &mut Memory,
     out: &mut Comparison,
 ) -> Result<(), Error> {
     let home = spec.work.join(format!("compare-{shell}-{n}"));
     let (mut vornd, line) = start(&spec.vornd, &spec.sessiond, &home).await?;
-    let res = match measure(spec, shell, n, responds, &home, &vornd, &line, m, out).await {
+    let res = match measure(spec, shell, n, responds, kept, &home, &vornd, &line, m, out).await {
         Err(e) => Err(explain(e, std::slice::from_mut(&mut vornd))),
         ok => ok,
     };
@@ -127,6 +129,7 @@ async fn measure(
     shell: &str,
     n: usize,
     responds: bool,
+    kept: bool,
     home: &Path,
     vornd: &Daemon,
     line: &str,
@@ -173,18 +176,30 @@ async fn measure(
             grid.detach(sid);
         }
     }
+    if kept {
+        idle(&roots, ready.port, m).await;
+    }
+    if responds {
+        respond(spec, &mut app, &ready.grid, &ids, out).await?;
+    }
+    Ok(())
+}
+
+/// The live memory reading, then the idle one once the terminals sat
+/// untouched for [`IDLE`] and the sum stopped moving.
+async fn idle(roots: &[u32; 2], port: u16, m: &mut Memory) {
     let quiet_at = Instant::now();
-    let (live, processes) = rss(&roots);
+    let (live, processes) = rss(roots);
     m.live = Some(live.total());
     m.live_parts = Some(live);
     m.processes = processes;
 
     tokio::time::sleep(IDLE).await;
-    let mut last = rss(&roots).0.total();
+    let mut last = rss(roots).0.total();
     let until = Instant::now() + IDLE_SETTLE;
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
-        let (now, _) = rss(&roots);
+        let (now, _) = rss(roots);
         if now.total().abs_diff(last) * 100 < last || Instant::now() > until {
             m.idle = Some(now.total());
             m.idle_parts = Some(now);
@@ -193,12 +208,7 @@ async fn measure(
         last = now.total();
     }
     m.idle_after_secs = quiet_at.elapsed().as_secs_f64();
-    m.asleep = asleep(ready.port).await.ok();
-
-    if responds {
-        respond(spec, &mut app, &ready.grid, &ids, out).await?;
-    }
-    Ok(())
+    m.asleep = asleep(port).await.ok();
 }
 
 /// Times commands typed into the first terminal while more and more of
@@ -225,7 +235,8 @@ async fn respond(
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
         grid.drain(Duration::from_millis(100)).await?;
-        let cpu0 = procfs::machine_ticks()?;
+        // Off Linux there is no /proc/stat: the CPU column stays empty.
+        let cpu0 = procfs::machine_ticks().ok();
         let mut took = Vec::with_capacity(spec.probes);
         for _ in 0..spec.probes {
             nonce += 1;
@@ -236,12 +247,12 @@ async fn respond(
             );
             grid.drain(Duration::from_millis(20)).await?;
         }
-        let cpu1 = procfs::machine_ticks()?;
+        let cpu1 = procfs::machine_ticks().ok();
         out.response.push(Response {
             terminals: ids.len(),
             busy,
             latency: Some(Latency::of(&mut took)),
-            cpu: share(cpu0, cpu1),
+            cpu: cpu0.zip(cpu1).and_then(|(a, b)| share(a, b)),
         });
     }
     Ok(())

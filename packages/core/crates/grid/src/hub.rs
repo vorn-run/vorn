@@ -6,6 +6,11 @@
 //!   update if a frame interval (8 ms) has passed since the last; otherwise
 //!   it says when one is [`Hub::due`], and its owner calls [`Hub::tick`]
 //!   then. Nothing is rendered while no attachment is visible.
+//! - **Input-driven frames.** Output that follows input written to the
+//!   program within [`HubConfig::typed`] is the program answering a person:
+//!   up to [`HubConfig::typed_frames`] frames are cut as soon as it comes,
+//!   without waiting for the clock. Output nobody typed for, and whatever
+//!   follows past those frames, keeps the clock's pace.
 //! - **Credits.** Each attachment has two frames in flight at most. A full
 //!   window leaves it behind; its next ack sends one delta covering
 //!   everything since. Per attachment the hub keeps what the client holds
@@ -142,6 +147,10 @@ pub struct HubConfig {
     pub sync_hold: Duration,
     /// Frames in flight per attachment.
     pub credits: u8,
+    /// How long after input is written its program's output skips the clock.
+    pub typed: Duration,
+    /// Frames each input may cut off the clock.
+    pub typed_frames: u8,
 }
 
 impl Default for HubConfig {
@@ -150,6 +159,8 @@ impl Default for HubConfig {
             frame: Duration::from_millis(8),
             sync_hold: Duration::from_millis(150),
             credits: 2,
+            typed: Duration::from_millis(100),
+            typed_frames: 4,
         }
     }
 }
@@ -188,6 +199,10 @@ pub struct Hub {
     live: bool,
     /// When the records waiting began to wait.
     pending_at: Option<Instant>,
+    /// When input was last written to the program.
+    typed_at: Option<Instant>,
+    /// Frames the last input may still cut off the clock.
+    typed_left: u8,
 }
 
 impl Hub {
@@ -226,13 +241,27 @@ impl Hub {
         if !self.live || !self.pending || !self.atts.iter().any(|a| a.visible) {
             return None;
         }
-        let mut at = self.last_render.map(|t| t + self.cfg.frame);
+        let mut at = if self.answering() {
+            None
+        } else {
+            self.last_render.map(|t| t + self.cfg.frame)
+        };
         if let Some((_, since)) = self.sync {
             let end = since + self.cfg.sync_hold;
             at = Some(at.map_or(end, |a| a.max(end)));
         }
-        // Never rendered: due since the records came.
+        // Never rendered, or answering input: due since the records came.
         at.or(self.pending_at)
+    }
+
+    /// Whether the records waiting answer recent input and that input may
+    /// still cut a frame off the clock.
+    fn answering(&self) -> bool {
+        self.typed_left > 0
+            && self
+                .typed_at
+                .zip(self.pending_at)
+                .is_some_and(|(typed, came)| came.saturating_duration_since(typed) < self.cfg.typed)
     }
 
     /// Renders if a frame is due by `now`.
@@ -313,7 +342,7 @@ impl Hub {
                 peer,
                 input_seq,
                 event,
-            } => self.input(peer, input_seq, &event, ctx, out),
+            } => self.input(peer, input_seq, &event, ctx, now, out),
             GridIn::FetchHistory {
                 peer,
                 req,
@@ -470,7 +499,7 @@ impl Hub {
     /// pane shown all want the newest state without waiting for the clock.
     fn catch_up(&mut self, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
         let never = self.grid.as_ref().is_none_or(|g| !g.rendered());
-        let clock = self.last_render.is_none_or(|t| now >= t + self.cfg.frame);
+        let clock = self.answering() || self.last_render.is_none_or(|t| now >= t + self.cfg.frame);
         if self.pending && (never || clock) {
             self.render(ctx, now, out);
         } else {
@@ -521,6 +550,10 @@ impl Hub {
 
     /// One render update; false when none could be made.
     fn update(&mut self, ctx: &Ctx<'_>, now: Instant) -> bool {
+        // Spent by every attempt, so failing ones cannot keep the frame due at once.
+        if self.answering() {
+            self.typed_left -= 1;
+        }
         if self.grid.is_none() {
             match Grid::new() {
                 Ok(g) => self.grid = Some(g),
@@ -535,6 +568,7 @@ impl Hub {
             // A read from Ghostty failed part way: trust nothing, and try
             // again at the next frame.
             g.distrust_dirty();
+            self.typed_left = 0;
             return false;
         }
         self.pending = false;
@@ -607,6 +641,7 @@ impl Hub {
         input_seq: u64,
         event: &InputEvent,
         ctx: &Ctx<'_>,
+        now: Instant,
         out: &mut Vec<HubOut>,
     ) {
         if self.input.is_none() {
@@ -614,10 +649,14 @@ impl Hub {
         }
         let Some(enc) = &mut self.input else { return };
         match enc.encode(ctx.em.terminal(), event) {
-            Ok(Encoded::Bytes(bytes)) => out.push(HubOut::Write {
-                bytes,
-                ack: Some((peer, input_seq)),
-            }),
+            Ok(Encoded::Bytes(bytes)) => {
+                self.typed_at = Some(now);
+                self.typed_left = self.cfg.typed_frames;
+                out.push(HubOut::Write {
+                    bytes,
+                    ack: Some((peer, input_seq)),
+                });
+            }
             Ok(Encoded::Confirm) => out.push(send(
                 peer,
                 ServerMsg::PasteConfirm {
@@ -850,5 +889,117 @@ mod tests {
         hub.records(&ctx(&em, true), ms(120), &mut out);
         assert_eq!(hub.due(), None, "released at once");
         assert!(out.iter().any(|o| matches!(o, HubOut::Send { .. })));
+    }
+
+    fn frames(out: &[HubOut]) -> usize {
+        out.iter()
+            .filter(|o| {
+                matches!(
+                    o,
+                    HubOut::Send {
+                        msg: ServerMsg::Delta { .. } | ServerMsg::Snapshot { .. },
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    /// A hub with one visible attachment that has a first frame, and
+    /// credit enough that only the clock decides when frames go.
+    fn shown(em: &Emulator, t0: Instant) -> (Hub, Peer) {
+        let mut hub = Hub::new(HubConfig {
+            credits: u8::MAX,
+            ..HubConfig::default()
+        });
+        let attach = Attach {
+            session: "s".into(),
+            mode: AttachMode::Grid,
+            view: Size::default(),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        };
+        let peer = Peer { conn: 1, sid: 1 };
+        let mut out = Vec::new();
+        hub.handle(
+            GridIn::Attach { peer, attach },
+            &ctx(em, true),
+            t0,
+            &mut out,
+        );
+        hub.records(&ctx(em, true), t0, &mut out);
+        assert_eq!(frames(&out), 1);
+        (hub, peer)
+    }
+
+    fn typed(hub: &mut Hub, em: &Emulator, peer: Peer, at: Instant) {
+        let mut out = Vec::new();
+        let input = GridIn::Input {
+            peer,
+            input_seq: 1,
+            event: InputEvent::Raw {
+                bytes: b"x".to_vec(),
+            },
+        };
+        hub.handle(input, &ctx(em, true), at, &mut out);
+        assert!(out.iter().any(|o| matches!(o, HubOut::Write { .. })));
+    }
+
+    /// Output that answers input is framed as it comes, even just after a
+    /// frame, for a few frames; then the clock paces it again.
+    #[test]
+    fn output_answering_input_skips_the_clock() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let (mut hub, peer) = shown(&em, t0);
+        let cfg = HubConfig::default();
+
+        typed(&mut hub, &em, peer, ms(1));
+        for n in 0..u64::from(cfg.typed_frames) {
+            em.feed(b"a", &mut Vec::new());
+            let mut out = Vec::new();
+            hub.records(&ctx(&em, true), ms(2 + n), &mut out);
+            assert_eq!(frames(&out), 1, "answer {n} framed at once");
+            assert_eq!(hub.due(), None);
+        }
+        em.feed(b"b", &mut Vec::new());
+        let mut out = Vec::new();
+        let last = ms(1 + u64::from(cfg.typed_frames));
+        hub.records(&ctx(&em, true), last + Duration::from_millis(1), &mut out);
+        assert_eq!(frames(&out), 0, "past the input's frames the clock paces");
+        assert_eq!(hub.due(), Some(last + cfg.frame));
+    }
+
+    /// Output with no input before it, or long after the input, keeps the
+    /// clock's pace.
+    #[test]
+    fn output_nobody_typed_for_keeps_the_clock() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let (mut hub, peer) = shown(&em, t0);
+        let cfg = HubConfig::default();
+
+        em.feed(b"a", &mut Vec::new());
+        let mut out = Vec::new();
+        hub.records(&ctx(&em, true), ms(1), &mut out);
+        assert_eq!(frames(&out), 0);
+        assert_eq!(hub.due(), Some(t0 + cfg.frame));
+        hub.tick(&ctx(&em, true), t0 + cfg.frame, &mut out);
+        assert_eq!(frames(&out), 1);
+
+        let late = t0 + cfg.frame + cfg.typed;
+        typed(&mut hub, &em, peer, t0 + cfg.frame);
+        em.feed(b"b", &mut Vec::new());
+        let mut out = Vec::new();
+        hub.records(&ctx(&em, true), late, &mut out);
+        assert_eq!(frames(&out), 1, "the clock had come round anyway");
+        em.feed(b"c", &mut Vec::new());
+        let mut out = Vec::new();
+        hub.records(&ctx(&em, true), late + Duration::from_millis(1), &mut out);
+        assert_eq!(frames(&out), 0, "too long after the input to answer it");
+        assert_eq!(hub.due(), Some(late + cfg.frame));
     }
 }
