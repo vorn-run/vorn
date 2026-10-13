@@ -57,6 +57,10 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         pane.host = self
         registerForDraggedTypes([.fileURL])
+        bottomButton.target = self
+        bottomButton.action = #selector(scrollToBottom(_:))
+        bottomButton.isHidden = true
+        addSubview(bottomButton)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -79,8 +83,24 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     }
 
     func paneDidChange() {
+        if let v = pane.view {
+            // New output: a view scrolled back stays on its lines.
+            if v.alternate || v.live_line < liveLine {
+                scroll.reset()
+            } else {
+                scroll.grew(v.live_line - liveLine)
+            }
+            liveLine = v.live_line
+        }
         if findBar != nil, !found.done { loadMatches() }
         needsDisplay = true
+        updateBottomButton()
+    }
+
+    public override func layout() {
+        super.layout()
+        let s = ScrollToBottomButton.size
+        bottomButton.frame = CGRect(x: bounds.maxX - s - 8, y: bounds.maxY - s - 8, width: s, height: s)
     }
 
     func fontDidChange() {
@@ -145,7 +165,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         painter.draw(ctx, pane.view, fonts: fonts, bounds: bounds, focused: pane.focused, marked: pane.marked,
                      selection: pane.selection, matches: visibleMatches,
-                     current: found.at.map { found.hits[$0] })
+                     current: found.at.map { found.hits[$0] }, offset: scrollOffset)
         didDraw?(ctx)
     }
 
@@ -157,7 +177,71 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
 
     public override func resignFirstResponder() -> Bool {
         pane.setFocus(false)
+        updateBottomButton()
         return true
+    }
+
+    // MARK: Scroll
+
+    private var scroll = TerminalScroll()
+    private var rows = WheelRows()
+    /// Where the gesture under way goes, and when it was last heard.
+    private var gesture: (route: WheelRoute, at: TimeInterval)?
+    private var liveLine: UInt64 = 0
+    private let bottomButton = ScrollToBottomButton()
+
+    /// Points to draw the view down by: the scroll's offset from the view's rows,
+    /// on whole device pixels.
+    private var scrollOffset: CGFloat {
+        guard let v = pane.view else { return 0 }
+        let k = window?.backingScaleFactor ?? 2
+        return ((scroll.pos - CGFloat(v.back) * fonts.cell.height) * k).rounded() / k
+    }
+
+    private func syncScroll() {
+        guard let v = pane.view else { return }
+        scroll.setMetrics(row: fonts.cell.height, span: bounds.height, historyRows: v.alternate ? 0 : v.history_lines)
+        scroll.reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Lines the view up with the scroll: the rows it starts at come from the client.
+    private func applyScroll() {
+        if let v = pane.view, scroll.split.back != v.back {
+            pane.scrollTo(scroll.split.back)
+            liveLine = pane.view?.live_line ?? liveLine
+        }
+        needsDisplay = true
+        updateBottomButton()
+    }
+
+    func scrollFrame() -> Bool {
+        guard window != nil, !isHiddenOrHasHiddenAncestor else { return false }
+        syncScroll()
+        let moving = scroll.tick(CACurrentMediaTime())
+        applyScroll()
+        return moving
+    }
+
+    /// Scrolls `n` rows with a notch's ease, negative up.
+    private func scrollRows(_ n: Int) {
+        guard let v = pane.view, !v.alternate else { return }
+        syncScroll()
+        scroll.wheel(CGFloat(n) / TerminalScroll.notchRows, .line, now: CACurrentMediaTime())
+        pane.engine.animate(pane)
+    }
+
+    /// Back to the live screen at once, as typing does.
+    private func returnToLive() {
+        guard scroll.scrolled || !scroll.resting else { return }
+        scroll.reset()
+        applyScroll()
+    }
+
+    @objc func scrollToBottom(_ sender: Any?) { returnToLive() }
+
+    private func updateBottomButton() {
+        let show = scroll.scrolled && !pane.focused
+        if bottomButton.isHidden == show { bottomButton.isHidden = !show }
     }
 
     // MARK: Input
@@ -169,7 +253,6 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     private var anchor: TerminalSelection?
     /// The press went to a program tracking the mouse.
     private var tracking = false
-    private var wheelRest: CGFloat = 0
 
     /// Where an event is: the cell fraction the program hears, and the absolute
     /// cell boundary nearest it, kept on the screen.
@@ -177,8 +260,8 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         guard let v = pane.view else { return nil }
         let p = convert(e.locationInWindow, from: nil)
         let x = max(0, (p.x - terminalPadX) / fonts.cell.width)
-        let y = (p.y - terminalPadY) / fonts.cell.height
-        let row = min(max(Int(y.rounded(.down)), 0), Int(v.rows) - 1)
+        let y = (p.y - terminalPadY - scrollOffset) / fonts.cell.height
+        let row = min(max(Int(y.rounded(.down)), 0), Int(v.drawnRows) - 1)
         let col = min(UInt16(x.rounded()), v.cols)
         return (Float(x), Float(max(0, y)), GridPoint(line: v.first_line + UInt64(row), col: col))
     }
@@ -225,7 +308,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         guard let anchor, let v = pane.view else { return }
         // Dragging past an edge scrolls history a line at a time.
         let local = convert(e.locationInWindow, from: nil).y
-        if local < 0 { pane.scroll(-1) } else if local > bounds.height { pane.scroll(1) }
+        if local < 0 { scrollRows(-1) } else if local > bounds.height { scrollRows(1) }
         let at: TerminalSelection
         switch unit {
         case .cell: at = TerminalSelection(p, p)
@@ -247,20 +330,44 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         TerminalSelection(GridPoint(line: l, col: 0), GridPoint(line: l, col: cols ?? pane.view?.cols ?? 0))
     }
 
+    /// A trackpad's touch and momentum phases, or a wheel's notches.
+    static func phase(of e: NSEvent) -> TerminalScroll.Phase? {
+        guard e.hasPreciseScrollingDeltas else { return .line }
+        let p = e.momentumPhase.isEmpty ? e.phase : e.momentumPhase
+        if p.isEmpty { return .moved }
+        if p.contains(.began) { return .began }
+        if p.contains(.changed) { return .moved }
+        if p.contains(.ended) || p.contains(.cancelled) { return .ended }
+        return nil
+    }
+
     public override func scrollWheel(with e: NSEvent) {
-        guard let (x, y, _) = cell(at: e), let v = pane.view else { return super.scrollWheel(with: e) }
-        // A trackpad reports points, a wheel notches; a notch moves three lines.
-        wheelRest += e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / fonts.cell.height : e.scrollingDeltaY * 3
-        let lines = Int32(wheelRest.rounded(.towardZero))
-        guard lines != 0 else { return }
-        wheelRest -= CGFloat(lines)
-        // Down at the live screen with nothing to take it: the page around scrolls instead.
-        let local = v.mouse == 0 && v.screen & UInt8(VG_ALTERNATE) == 0
-        if local, lines < 0, v.screen & UInt8(VG_SCROLLED) == 0 {
-            wheelRest = 0
+        guard let (x, y, _) = cell(at: e), let v = pane.view, let phase = Self.phase(of: e) else {
             return super.scrollWheel(with: e)
         }
-        pane.wheel(-lines, x: x, y: y, mods: wireMods(e.modifierFlags))
+        let now = CACurrentMediaTime()
+        // Points, or notches; positive towards the live screen.
+        let dy = -e.scrollingDeltaY
+        // A gesture stays where it began, momentum and all.
+        let route: WheelRoute
+        if phase != .line, let g = gesture, now - g.at < 0.2 {
+            route = g.route
+        } else {
+            route = pane.engine.readOnly ? .history : WheelRoute(mouse: v.mouse == 1, alternate: v.alternate)
+        }
+        gesture = (route, now)
+        guard route == .history else {
+            let n = rows.take(dy, phase, row: fonts.cell.height, route: route)
+            if n != 0 { pane.wheel(n, x: x, y: y, mods: wireMods(e.modifierFlags)) }
+            return
+        }
+        if v.alternate { return }
+        // A wheel down at the live screen: the page around scrolls instead.
+        if phase == .line, dy > 0, !scroll.scrolled { return super.scrollWheel(with: e) }
+        syncScroll()
+        scroll.wheel(dy, phase, now: now)
+        applyScroll()
+        pane.engine.animate(pane)
     }
 
     // MARK: Copy and paste
@@ -276,12 +383,14 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     @objc func paste(_ sender: Any?) {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
         pane.selection = nil
+        returnToLive()
         pane.paste(text)
     }
 
     /// Ctrl-L for the program: a shell clears its screen and draws the prompt again.
     @objc public func clearScreen(_ sender: Any?) {
         pane.selection = nil
+        returnToLive()
         pane.text("\u{0c}")
     }
 
@@ -301,6 +410,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         let files = droppedFiles(info)
         guard !files.isEmpty else { return false }
         window?.makeFirstResponder(self)
+        returnToLive()
         pane.paste(TerminalKeys.quotedPaths(files), confirmed: true)
         return true
     }
@@ -476,14 +586,16 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         switch pane.marked.isEmpty ? route(e) : .encode {
         case .page(let up):
             // Shift-Page Up and Down page through history, as the shell never sees them.
-            let page = Int32(max(Int(pane.view?.rows ?? 2) - 1, 1))
-            pane.scroll(up ? -page : page)
+            let page = max(Int(pane.view?.rows ?? 2) - 1, 1)
+            scrollRows(up ? -page : page)
             return
         case .send(let bytes):
+            returnToLive()
             pane.text(bytes)
             return
         case .encode: break
         }
+        returnToLive()
         // A synthesized event in a window that is not key has no input
         // context to compose with: send it as the key it is.
         if inputContext == nil || window?.isKeyWindow != true {
@@ -500,6 +612,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     }
 
     public func insertText(_ string: Any, replacementRange: NSRange) {
+        returnToLive()
         let s = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
         let composed = !pane.marked.isEmpty
         if composed { pane.setMarked("") }
@@ -549,6 +662,56 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     public override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
     public override func accessibilityLabel() -> String? { "Terminal" }
     public override func accessibilityValue() -> Any? { pane.screenText() }
+}
+
+// MARK: - Scroll to bottom
+
+/// The arrow over a terminal scrolled back into its history, unfocused:
+/// straight back to the live screen.
+final class ScrollToBottomButton: NSButton {
+    static let size: CGFloat = 32
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init() {
+        super.init(frame: .zero)
+        isBordered = false
+        title = ""
+        toolTip = "Scroll to bottom"
+        setAccessibilityLabel("Scroll to bottom")
+    }
+
+    override var isFlipped: Bool { true }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    override func draw(_ dirty: NSRect) {
+        let fill = isHighlighted ? 0.2 : hovering ? 0.15 : 0.08
+        NSColor.white.withAlphaComponent(fill).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        // A 12 pt arrow down, centred.
+        let o = CGPoint(x: (bounds.width - 12) / 2, y: (bounds.height - 12) / 2)
+        let arrow = NSBezierPath()
+        arrow.move(to: CGPoint(x: o.x + 6, y: o.y + 2.5))
+        arrow.line(to: CGPoint(x: o.x + 6, y: o.y + 9.5))
+        arrow.move(to: CGPoint(x: o.x + 3, y: o.y + 7))
+        arrow.line(to: CGPoint(x: o.x + 6, y: o.y + 10))
+        arrow.line(to: CGPoint(x: o.x + 9, y: o.y + 7))
+        arrow.lineWidth = 1.5
+        arrow.lineCapStyle = .round
+        arrow.lineJoinStyle = .round
+        (hovering ? NSColor.white : NSColor(Theme.gray400)).setStroke()
+        arrow.stroke()
+    }
 }
 
 // MARK: - SwiftUI

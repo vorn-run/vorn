@@ -106,9 +106,10 @@ impl State {
         let t = m.term();
         let rows = u64::from(t.rows);
         let oldest = t.top_line.saturating_sub(t.history_lines);
-        let from = top.saturating_sub(rows).max(oldest);
-        let to = top.saturating_add(rows * 2).min(t.top_line);
-        let Some(&(from_line, count)) = m.gaps(from, to).first() else {
+        // Far enough ahead that a fling does not outrun it.
+        let from = top.saturating_sub((rows * 4).max(200)).max(oldest);
+        let to = top.saturating_add(rows + 1).min(t.top_line);
+        let Some(&(from_line, count)) = m.gaps(from, to).last() else {
             return;
         };
         let sb_epoch = t.sb_epoch;
@@ -566,6 +567,34 @@ impl Grid {
                 .saturating_add_signed(i64::from(lines))
                 .clamp(oldest, live);
             let top = (next < live).then_some(next);
+            if top == p.scroll_top {
+                return;
+            }
+            p.scroll_top = top;
+            st.dirty.insert(pane);
+            st.fetch_history(pane);
+        }
+        self.shared.flush();
+        self.shared.wake();
+    }
+
+    /// Shows the view `back` lines above the live screen, 0 being live.
+    pub fn scroll_to(&self, pane: u32, back: u64) {
+        {
+            let mut st = lock(&self.shared.state);
+            let Some(t) = st
+                .live_sid(pane)
+                .and_then(|sid| st.client.pane(sid))
+                .and_then(|x| x.mirror())
+                .map(|m| m.term())
+            else {
+                return;
+            };
+            let top = (back > 0 && t.screen == Screen::Primary)
+                .then(|| t.top_line - back.min(t.history_lines));
+            let Some(p) = st.panes.get_mut(&pane) else {
+                return;
+            };
             if top == p.scroll_top {
                 return;
             }
@@ -1134,13 +1163,14 @@ mod tests {
         else {
             panic!("a history fetch");
         };
-        assert_eq!((sid, sb_epoch, from_line, count), (4, 3, 5, 5));
+        // The whole gap a fling could reach, not just the page in view.
+        assert_eq!((sid, sb_epoch, from_line, count), (4, 3, 0, 10));
         fake.reply(&ServerMsg::History {
             sid: 4,
             req,
             sb_epoch: 3,
-            from_line: 5,
-            rows: (5..10).map(|l| at(0, l, &format!("h{l}"))).collect(),
+            from_line: 0,
+            rows: (0..10).map(|l| at(0, l, &format!("h{l}"))).collect(),
             oldest_line: 0,
             styles: vec![],
             links: vec![],
@@ -1150,6 +1180,12 @@ mod tests {
         });
         let v = grid.view(p).expect("a screen");
         assert_eq!((v.first_line, v.scrolled), (8, true));
+        assert_eq!((v.live_line, v.history_lines), (10, 10));
+        grid.scroll_to(p, 4);
+        assert_eq!(grid.view(p).expect("a screen").first_line, 6);
+        grid.scroll_to(p, 99);
+        assert_eq!(grid.view(p).expect("a screen").first_line, 0);
+        grid.scroll_to(p, 2);
         assert_eq!(
             grid.text_range(p, (8, 0), (10, 1)).as_deref(),
             Some("h8\nh9\na")

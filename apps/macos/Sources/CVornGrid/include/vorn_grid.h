@@ -29,6 +29,8 @@ typedef struct {
     uint32_t text_len;
     void *owner; /* private, freed by vg_view_free */
     uint64_t first_line; /* absolute line of row 0: selections are (line, col) */
+    uint64_t live_line;     /* absolute line of the live screen's row 0 */
+    uint64_t history_lines; /* lines the view can scroll back through (0 on the alternate screen) */
 } VgView;
 
 enum { VG_ALTERNATE = 1, VG_SCROLLED = 2 };
@@ -85,6 +87,9 @@ void vg_wheel(VgClient *c, uint32_t pane, int32_t lines, float x, float y, uint1
 /* Scrolls the view through history (negative up); INT32_MAX returns to the live screen.
    Typing also returns to it. */
 void vg_scroll(VgClient *c, uint32_t pane, int32_t lines);
+/* Shows the view `back` lines above the live screen (0 is live), fetching history around it. Scrolled
+   back, a view has rows + 1 rows so it can be drawn between rows. */
+void vg_scroll_to(VgClient *c, uint32_t pane, uint64_t back);
 /* For a program tracking the mouse: action 0 press, 1 release, 2 motion; button 0 none, 1 left,
    2 middle, 3 right; x, y in cells. */
 void vg_mouse(VgClient *c, uint32_t pane, uint8_t action, uint8_t button, uint16_t mods, float x, float y);

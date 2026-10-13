@@ -2746,13 +2746,15 @@ impl App {
         };
         let k = ui.scale();
         let cell = ui.text.cell();
+        let Some(r) = ui.rect_of(id) else { return };
         if route == Route::History {
-            self.scrolls
-                .entry(session.clone())
-                .or_default()
-                .wheel(dy * k, phase, now);
+            let history = self.views.get(&session).map_or(0, |v| v.history);
+            let s = self.scrolls.entry(session.clone()).or_default();
+            s.set_metrics(cell.h, r.h * k, history);
+            s.reduced = ui.reduced_motion();
+            s.wheel(dy * k, phase, now);
             ui.wake_at(now);
-        } else if let Some(r) = ui.rect_of(id) {
+        } else {
             let n = rows.take(dy * k, phase, cell.h, route);
             let col = ((x - r.x) * k / cell.w).floor().max(0.0);
             let row = ((y - r.y) * k / cell.h).floor().max(0.0);

@@ -72,6 +72,8 @@ pub struct Scroll {
     motion: Motion,
     /// A spring took over at an edge: the rest of the momentum is ignored.
     spent: bool,
+    /// Reduce motion: a notch jumps instead of easing.
+    pub reduced: bool,
 }
 
 impl Default for Scroll {
@@ -85,6 +87,7 @@ impl Default for Scroll {
             last: None,
             motion: Motion::Rest,
             spent: false,
+            reduced: false,
         }
     }
 }
@@ -161,6 +164,10 @@ impl Scroll {
             _ => self.pos,
         };
         let to = self.snapped(base - notches * NOTCH_ROWS * self.row);
+        if self.reduced {
+            self.rest_at(to);
+            return;
+        }
         self.vel = 0.0;
         self.motion = Motion::Ease {
             from: self.pos,
@@ -577,6 +584,15 @@ mod tests {
         s.wheel(vornui::WHEEL_LINE * 9.0, WheelPhase::Line, at(t0, 500));
         run(&mut s, t0, 500);
         assert_eq!(s.pos(), 0.0);
+    }
+
+    #[test]
+    fn reduced_motion_jumps_a_notch() {
+        let t0 = Instant::now();
+        let mut s = scroll();
+        s.reduced = true;
+        s.wheel(-vornui::WHEEL_LINE, WheelPhase::Line, t0);
+        assert_eq!((s.pos(), s.resting()), (3.0 * ROW, true));
     }
 
     #[test]
