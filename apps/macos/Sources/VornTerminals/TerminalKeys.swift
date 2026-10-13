@@ -1,0 +1,70 @@
+import AppKit
+
+/// What a key press in a terminal does before the grid's key encoder sees it.
+enum TerminalKey: Equatable {
+    /// The encoder's: the input method composes, then vornd encodes for the program's modes.
+    case encode
+    /// Bytes for the program as they are.
+    case send(String)
+    /// A page of history, up or down.
+    case page(up: Bool)
+}
+
+/// The terminal's own commands, taken before the app's menus.
+enum TerminalShortcut: Equatable {
+    case find, findNext, findPrevious, clear
+}
+
+/// The Mac editing chords a shell does not know as keys, sent as the readline
+/// and zle bytes they mean (as the desktop app's terminal sends them), and Option as Meta.
+enum TerminalKeys {
+    static let esc = "\u{1b}"
+
+    static func route(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, unmodified: String?,
+                      alternateScreen: Bool, optionAsMeta: Bool) -> TerminalKey {
+        let mods = modifiers.intersection([.shift, .option, .control, .command])
+        switch (mods, keyCode) {
+        case (.shift, 116) where !alternateScreen: return .page(up: true)
+        case (.shift, 121) where !alternateScreen: return .page(up: false)
+        case (.option, 123): return .send(esc + "b")          // word left
+        case (.option, 124): return .send(esc + "f")          // word right
+        case (.option, 51): return .send(esc + "\u{7f}")      // delete word before
+        case (.command, 123): return .send("\u{01}")          // line start
+        case (.command, 124): return .send("\u{05}")          // line end
+        case (.command, 51): return .send("\u{15}")           // delete to line start
+        default: break
+        }
+        guard optionAsMeta, mods.contains(.option), mods.isDisjoint(with: [.command, .control]),
+              let s = unmodified, !s.isEmpty, s.unicodeScalars.allSatisfy(isPrintable)
+        else { return .encode }
+        return .send(esc + s)
+    }
+
+    /// ⌘F find, ⌘G and ⇧⌘G next and previous match, ⌥⌘K clear (⌘K stays the command palette).
+    static func shortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> TerminalShortcut? {
+        switch (modifiers.intersection([.shift, .option, .control, .command]), keyCode) {
+        case (.command, 3): .find
+        case (.command, 5): .findNext
+        case ([.command, .shift], 5): .findPrevious
+        case ([.command, .option], 40): .clear
+        default: nil
+        }
+    }
+
+    /// Not a control character, nor one of the private-use characters AppKit gives named keys.
+    private static func isPrintable(_ c: Unicode.Scalar) -> Bool {
+        c.value >= 0x20 && c.value != 0x7f && !(0xF700...0xF8FF).contains(c.value)
+    }
+
+    /// Paths as a shell reads them, space separated, with a trailing space to type on after.
+    static func quotedPaths(_ urls: [URL]) -> String {
+        urls.map { shellQuoted($0.path) }.joined(separator: " ") + " "
+    }
+
+    static func shellQuoted(_ s: String) -> String {
+        let plain = CharacterSet(charactersIn:
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-")
+        if !s.isEmpty, s.unicodeScalars.allSatisfy(plain.contains) { return s }
+        return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}

@@ -6,6 +6,7 @@ import VornUI
 struct AppearanceSettings: View {
     @Bindable var model: SettingsModel
     @State private var rowDraft: Double?
+    @AppStorage(TerminalPreferences.optionAsMetaKey) private var optionAsMeta = false
 
     var body: some View {
         if model.config != nil {
@@ -21,6 +22,9 @@ struct AppearanceSettings: View {
                             Text("\(font)").font(.ui(14)).foregroundStyle(Theme.gray200).frame(width: 32)
                             stepButton("+") { model.updateDefaults(["fontSize": .number(Double(min(24, font + 1)))]) }
                         }
+                    }
+                    SettingRow(label: "Use Option as Meta", description: "Option+key sends Esc then the key, for shell word moves") {
+                        ToggleSwitch(checked: optionAsMeta) { optionAsMeta = $0 }
                     }
                     SettingRow(label: "Card Row Height", description: "Terminal card height in pixels (\(Int(row.rounded()))px)") {
                         HStack(spacing: 12) {

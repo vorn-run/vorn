@@ -72,6 +72,8 @@ public enum Theme {
         public static let background: UInt32 = 0x141416
         public static let cursor: UInt32 = 0xD4D4D8
         public static let selection: UInt32 = 0x3F3F46
+        /// Find matches, the current one stronger.
+        public static let match: UInt32 = 0xC9972A
         public static let ansi: [UInt32] = [
             0x27272A, 0xEF4444, 0x22C55E, 0xEAB308, 0x3B82F6, 0xA855F7, 0x06B6D4, 0xD4D4D8,
             0x52525B, 0xF87171, 0x4ADE80, 0xFACC15, 0x60A5FA, 0xC084FC, 0x22D3EE, 0xFAFAFA,
