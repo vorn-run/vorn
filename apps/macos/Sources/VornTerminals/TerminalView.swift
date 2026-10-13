@@ -85,13 +85,14 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     func paneDidChange() {
         if let v = pane.view {
             // New output: a view scrolled back stays on its lines; renumbered history keeps its distance from live.
+            let renumbered = v.live_line < liveLine
             if v.alternate {
                 scroll.reset()
             } else if v.live_line > liveLine {
                 scroll.grew(v.live_line - liveLine)
             }
             liveLine = v.live_line
-            if !v.alternate, scroll.split.back != v.back {
+            if renumbered, !v.alternate, scroll.split.back != v.back {
                 pane.scrollTo(scroll.split.back)
                 liveLine = pane.view?.live_line ?? liveLine
             }
