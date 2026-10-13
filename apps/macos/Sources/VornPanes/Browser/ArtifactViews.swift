@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VornCore
 import VornUI
@@ -378,11 +379,12 @@ private struct TweakControl: View {
                 }
                 .accessibilityLabel(label)
             } else {
-                ColorPicker("", selection: Binding(get: { Color(css: colour) ?? .white }, set: { onChange(.string(Self.hex($0))) }),
-                            supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 20, height: 20)
-                    .accessibilityLabel(label)
+                Button { ColorPanelTarget.shared.open(Color(css: colour) ?? .white) { onChange(.string(Self.hex($0))) } } label: {
+                    RoundedRectangle(cornerRadius: Theme.radiusSm).fill(Color(css: colour) ?? .clear).frame(width: 20, height: 20)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.white(0.2)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
             }
         }
     }
@@ -472,7 +474,7 @@ struct DesignCanvasView: View {
                         Button { model.selectBoard(s, b.id) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(b.label).foregroundStyle(isSelected ? Theme.ink : Theme.inkSecondary)
-                                Text("\(b.width) \u{d7} \(b.height)")
+                                Text(verbatim: "\(b.width) \u{d7} \(b.height)")
                             }
                             .font(mono11).foregroundStyle(Theme.inkFaint).fixedSize()
                             .frame(height: DesignCanvas.labelHeight - 4, alignment: .bottomLeading)
@@ -546,4 +548,24 @@ private struct ZoomPill: View {
         .help(label)
         .accessibilityLabel(label)
     }
+}
+
+/// Opens the shared colour panel for one swatch at a time.
+@MainActor
+final class ColorPanelTarget: NSObject {
+    static let shared = ColorPanelTarget()
+    private var onPick: ((Color) -> Void)?
+
+    func open(_ colour: Color, onPick: @escaping (Color) -> Void) {
+        self.onPick = nil
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        panel.color = NSColor(colour)
+        panel.setTarget(self)
+        panel.setAction(#selector(changed(_:)))
+        self.onPick = onPick
+        panel.orderFront(nil)
+    }
+
+    @objc private func changed(_ panel: NSColorPanel) { onPick?(Color(nsColor: panel.color)) }
 }

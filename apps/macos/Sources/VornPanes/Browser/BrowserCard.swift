@@ -97,7 +97,7 @@ public struct BrowserCard: View {
                 if comparing, let art { versionHeader(art.version) }
                 GeometryReader { geo in
                     ZStack {
-                        WebSlot(model: model, key: s, token: tab.url)
+                        WebSlot(model: model, key: s, token: tab.url, covered: boards != nil && editing == nil)
                         if let editing, let art {
                             DocEditor(draft: editing, drafts: model.comments(s).drafts.count,
                                       next: (st?.artifact.latestVersion ?? art.version) + 1, agent: agent, saving: l.saving,
@@ -241,7 +241,7 @@ struct ArtifactBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Version \(art.version), choose another")
         }
-        .popover(isPresented: Binding(get: { versionsOpen }, set: { if !$0 { model.closeMenus(s) } }), arrowEdge: .bottom) {
+        .panePopover(isPresented: Binding(get: { versionsOpen }, set: { if !$0 { model.closeMenus(s) } })) {
             menu(versions, comments)
         }
         Text(VersionTime.byline(st?.version(art.version), agent: agent))
@@ -381,5 +381,66 @@ struct TextAction: View {
             .buttonStyle(.plain)
         }
         .fixedSize()
+    }
+}
+
+extension BrowserModel {
+    /// Draws pane popovers in place, for offscreen renders that can't capture their windows.
+    @MainActor public static var inlinePopovers = false
+}
+
+extension View {
+    /// A popover below the view, or, in renders, the same content drawn under it.
+    @MainActor func panePopover(isPresented: Binding<Bool>, trailing: Bool = false,
+                                @ViewBuilder content: @escaping () -> some View) -> some View {
+        modifier(PanePopover(isPresented: isPresented, trailing: trailing, body: content))
+    }
+}
+
+private struct PanePopover<Body: View>: ViewModifier {
+    @Binding var isPresented: Bool
+    let trailing: Bool
+    let body: () -> Body
+
+    func body(content: Content) -> some View {
+        if BrowserModel.inlinePopovers {
+            content.anchorPreference(key: InlinePopoverKey.self, value: .bounds) { anchor in
+                guard isPresented else { return [] }
+                return [InlinePopover(anchor: anchor, trailing: trailing, view: AnyView(body()
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surfaceOverlay))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.white(0.12)))
+                    .floatingShadow()))]
+            }
+        } else {
+            content.popover(isPresented: $isPresented, arrowEdge: .bottom, content: body)
+        }
+    }
+}
+
+struct InlinePopover {
+    let anchor: Anchor<CGRect>
+    let trailing: Bool
+    let view: AnyView
+}
+
+struct InlinePopoverKey: PreferenceKey {
+    static var defaultValue: [InlinePopover] { [] }
+    static func reduce(value: inout [InlinePopover], nextValue: () -> [InlinePopover]) { value += nextValue() }
+}
+
+extension View {
+    /// Draws the pane popovers open beneath this view, above everything in it.
+    public func inlinePopoverHost() -> some View {
+        overlayPreferenceValue(InlinePopoverKey.self) { items in
+            GeometryReader { g in
+                ForEach(items.indices, id: \.self) { i in
+                    let r = g[items[i].anchor], trailing = items[i].trailing
+                    items[i].view.fixedSize()
+                        .frame(width: trailing ? r.maxX : g.size.width - r.minX, alignment: trailing ? .trailing : .leading)
+                        .offset(x: trailing ? 0 : r.minX, y: r.maxY + 6)
+                        .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+                }
+            }
+        }
     }
 }

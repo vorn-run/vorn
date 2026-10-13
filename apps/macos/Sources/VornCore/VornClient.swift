@@ -25,6 +25,7 @@ public actor VornClient {
         "auth:authenticate", "subscribe:set", "config:load", "agent:detectInstalled", "git:isGitRepo",
         "sessions:restored", "git:diffStat", "git:diffFull", "git:worktreeDirty", "connector:catalog", "webhook:info",
         "core:status", "credential:safeStorageAvailable", "worktree:inventory", "file:readContent", "file:stamp", "ide:detect",
+        "artifact:versionUrl", "artifact:readComments", "artifact:readSource", "project:detectMobile",
     ]
 
     /// Whether a read-only connection may send `method`.

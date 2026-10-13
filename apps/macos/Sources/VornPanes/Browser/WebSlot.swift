@@ -9,11 +9,14 @@ struct WebSlot: NSViewRepresentable {
     /// Changes when the slot should look for its view again.
     var token: String = ""
     var zoom: Double?
+    /// Kept loaded but not drawn, while something covers it.
+    var covered = false
 
     func makeNSView(context: Context) -> SlotView { SlotView() }
 
     func updateNSView(_ slot: SlotView, context: Context) {
         model.syncViews()
+        slot.isHidden = covered
         slot.show(model.host.pages[key]?.view, zoom: zoom)
     }
 

@@ -94,6 +94,39 @@ public struct DeviceBackend: Sendable {
                                              shutdown: { await Devices.shutdown($0) },
                                              screenshot: { try await Devices.screenshot($0) })
 
+    /// A booted phone with a drawn home screen, for offscreen renders.
+    public static let renderingDevice = Device(udid: "RENDER-1", name: "iPhone 17 Pro", runtime: "iOS 26.2", booted: true, claimedBy: nil)
+    public static let rendering = DeviceBackend(
+        list: { claims in
+            [Device(udid: renderingDevice.udid, name: renderingDevice.name, runtime: renderingDevice.runtime, booted: true,
+                    claimedBy: claims[renderingDevice.udid]),
+             Device(udid: "RENDER-2", name: "iPad Air 13-inch (M3)", runtime: "iOS 26.2", booted: false, claimedBy: claims["RENDER-2"])]
+        },
+        claim: { udid, _, _ in Devices.Claimed(udid: udid, name: renderingDevice.name, bootedHere: false) },
+        shutdown: { _ in },
+        screenshot: { _ in await MainActor.run { renderedHomeScreen() } })
+
+    @MainActor private static func renderedHomeScreen() -> Data {
+        let w = 1206, h = 2622
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return Data() }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        NSGradient(colors: [NSColor(red: 0.16, green: 0.2, blue: 0.36, alpha: 1), NSColor(red: 0.42, green: 0.26, blue: 0.4, alpha: 1)])?
+            .draw(in: NSRect(x: 0, y: 0, width: w, height: h), angle: -70)
+        let clock: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 300, weight: .semibold), .foregroundColor: NSColor.white]
+        let text = NSAttributedString(string: "9:41", attributes: clock)
+        text.draw(at: NSPoint(x: (CGFloat(w) - text.size().width) / 2, y: CGFloat(h) - 900))
+        for i in 0..<16 {
+            let x = 110 + (i % 4) * 260, y = 900 - (i / 4) * 300
+            NSColor.white.withAlphaComponent(0.22).setFill()
+            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 200, height: 200), xRadius: 46, yRadius: 46).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:]) ?? Data()
+    }
+
     public init(list: @escaping @Sendable ([String: String]) async throws -> [Device],
                 claim: @escaping @Sendable (String, String, [String: String]) async throws -> Devices.Claimed,
                 shutdown: @escaping @Sendable (String) async -> Void, screenshot: @escaping @Sendable (String) async throws -> Data) {
@@ -833,6 +866,20 @@ public final class BrowserModel {
     }
 
     // MARK: Devices
+
+    /// Puts `s`'s pane in a state for an offscreen render: comments, versions, edit, compare, board:ID, picker or claim:UDID.
+    public func renderStep(_ s: String, _ step: String) async {
+        switch step {
+        case "comments": toggleComments(s)
+        case "versions": toggleVersions(s)
+        case "edit": edit(s)
+        case "compare": toggleCompare(s)
+        case "picker": openPicker(s, fromPane: devices[s] != nil)
+        case _ where step.hasPrefix("board:"): selectBoard(s, String(step.dropFirst(6)))
+        case _ where step.hasPrefix("claim:"): _ = await claim(s, String(step.dropFirst(6)), open: true, reply: false)
+        default: break
+        }
+    }
 
     /// The card's phone button: closes the device pane, else opens the picker.
     public func deviceButton(_ s: String) {

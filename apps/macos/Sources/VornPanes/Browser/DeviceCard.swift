@@ -40,7 +40,7 @@ public struct DeviceCard: View {
                         .help("Switch simulator")
                         .accessibilityLabel("Switch simulator, currently \(name)")
                     }
-                    .popover(isPresented: model.pickerBinding(s, fromPane: true), arrowEdge: .bottom) { DevicePickerList(model: model) }
+                    .panePopover(isPresented: model.pickerBinding(s, fromPane: true)) { DevicePickerList(model: model) }
                     Spacer(minLength: 0)
                     PaneIconButton(icon: .mousePointerClick, help: "Point at an element to describe it to this session's agent") {
                         model.deviceControl(s, "pick", area: nil)
@@ -245,7 +245,7 @@ public struct DeviceCardButton: View {
                     }
                 }
             }
-            .popover(isPresented: model.pickerBinding(session.id, fromPane: false), arrowEdge: .bottom) {
+            .panePopover(isPresented: model.pickerBinding(session.id, fromPane: false), trailing: true) {
                 DevicePickerList(model: model)
             }
         }
