@@ -14,6 +14,7 @@
 pub mod act;
 pub mod app;
 pub mod artifact;
+pub mod blocks;
 pub mod browser;
 pub mod canvas;
 pub mod client;
@@ -27,6 +28,7 @@ pub mod git;
 pub mod graph;
 pub mod grid;
 pub mod highlight;
+pub mod intent;
 pub mod hotkeys;
 pub mod launch;
 pub mod layout;

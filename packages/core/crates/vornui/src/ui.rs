@@ -727,7 +727,11 @@ impl Ui {
                 }
                 let s = self.st.scroll.entry(id).or_default();
                 s.max = max;
-                s.offset = s.offset.clamp(0.0, max);
+                s.offset = if s.follow && s.at_end {
+                    max
+                } else {
+                    s.offset.clamp(0.0, max)
+                };
                 scrolled = s.offset;
             }
         }

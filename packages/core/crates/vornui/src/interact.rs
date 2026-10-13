@@ -165,6 +165,17 @@ pub(crate) struct Menu {
 pub(crate) struct Scroll {
     pub offset: f32,
     pub max: f32,
+    /// Keeps to the end as the content grows, until scrolled away from it.
+    pub follow: bool,
+    pub at_end: bool,
+}
+
+impl Scroll {
+    fn moved(&mut self) {
+        if self.follow {
+            self.at_end = self.offset >= self.max - 1.0;
+        }
+    }
 }
 
 /// What a secure field draws in place of each character.
@@ -586,6 +597,24 @@ impl Ui {
         } else {
             offset.max(0.0)
         };
+        s.moved();
+    }
+
+    /// Makes scroll view `id` keep to its end as its content grows, until
+    /// it is scrolled away; scrolling back to the end follows again.
+    pub fn follow_end(&mut self, id: Id) {
+        let s = self.st.scroll.entry(id).or_default();
+        if !s.follow {
+            s.follow = true;
+            s.at_end = true;
+        }
+    }
+
+    /// Scrolls scroll view `id` to its end, and follows it there.
+    pub fn scroll_to_end(&mut self, id: Id) {
+        let s = self.st.scroll.entry(id).or_default();
+        s.at_end = true;
+        s.offset = s.max;
     }
 
     /// The events since the last call, oldest first.
@@ -929,6 +958,7 @@ impl Ui {
         if let Some(id) = target {
             let s = self.st.scroll.entry(id).or_default();
             s.offset = (s.offset + dy).clamp(0.0, s.max);
+            s.moved();
             // A tooltip anchored to something that moved would float loose.
             self.st.tip = None;
             self.st.tip_warm = None;
@@ -1061,6 +1091,7 @@ impl Ui {
                         -40.0
                     };
                     s.offset = (s.offset + step).clamp(0.0, s.max);
+                    s.moved();
                 }
             }
             _ => {}

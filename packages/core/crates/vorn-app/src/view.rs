@@ -4,7 +4,7 @@
 
 use vorn_term_mirror::Mirror;
 use vorn_term_proto::row;
-use vorn_term_proto::screen::{attrs, row_flags, Color, CursorStyle, StyleDef, Underline};
+use vorn_term_proto::screen::{attrs, row_flags, Color, CursorStyle, Row, StyleDef, Underline};
 
 use crate::look::{term, Rgb};
 
@@ -153,28 +153,37 @@ impl Palette {
 /// The view of a mirror as it is now.
 pub fn build(m: &Mirror) -> PaneView {
     let t = m.term();
+    let mut v = rows(m, m.rows());
+    v.rows = t.rows;
+    v.cursor_x = t.cursor.x;
+    v.cursor_y = t.cursor.y;
+    v.cursor_visible = t.cursor.visible;
+    v.cursor = match t.cursor.style {
+        CursorStyle::BlockHollow => Cursor::Hollow,
+        CursorStyle::Bar => Cursor::Bar,
+        CursorStyle::Underline => Cursor::Underline,
+        _ => Cursor::Block,
+    };
+    v.cursor_color = t.colors.cursor.map_or(term::CURSOR, rgb);
+    v
+}
+
+/// A view of `rows`, one a line from the top, without a cursor: a finished
+/// command's lines, cut from wherever the mirror holds them.
+pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView {
+    let t = m.term();
     let pal = Palette::of(m);
     let mut v = PaneView {
         rev: m.rev(),
         cols: t.cols,
-        rows: t.rows,
-        cursor_x: t.cursor.x,
-        cursor_y: t.cursor.y,
-        cursor_visible: t.cursor.visible,
-        cursor: match t.cursor.style {
-            CursorStyle::BlockHollow => Cursor::Hollow,
-            CursorStyle::Bar => Cursor::Bar,
-            CursorStyle::Underline => Cursor::Underline,
-            _ => Cursor::Block,
-        },
         fg: pal.fg,
         bg: pal.bg,
-        cursor_color: t.colors.cursor.map_or(term::CURSOR, rgb),
-        runs: Vec::with_capacity(t.rows as usize * 2),
-        text: Vec::with_capacity(t.rows as usize * t.cols as usize),
-        prompts: Vec::new(),
+        cursor_color: term::CURSOR,
+        ..PaneView::default()
     };
-    for (y, r) in m.rows().iter().enumerate() {
+    let mut n: u16 = 0;
+    for (y, r) in rows.into_iter().enumerate() {
+        n = y as u16 + 1;
         if r.flags & row_flags::PROMPT != 0 && r.flags & row_flags::PROMPT_CONTINUATION == 0 {
             v.prompts.push(y as u16);
         }
@@ -231,6 +240,7 @@ pub fn build(m: &Mirror) -> PaneView {
             }
         }
     }
+    v.rows = n;
     // Runs that are only blanks on the default background draw nothing.
     let (text, bg) = (&v.text, v.bg);
     v.runs.retain(|r| {

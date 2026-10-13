@@ -501,6 +501,10 @@ pub struct State {
     pub last_output: HashMap<String, Instant>,
     /// Panes whose size this device does not drive.
     pub locked: HashSet<String>,
+    /// Each shell's command blocks.
+    pub shells: HashMap<String, crate::blocks::Shell>,
+    /// Each shell's typed commands, and the composer's menu.
+    pub intent: crate::intent::Intent,
     /// Sidebar projects folded shut.
     pub collapsed: HashSet<String>,
     /// Projects the sidebar has drawn, so only a new one takes its fold.

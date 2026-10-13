@@ -2564,7 +2564,7 @@ impl App {
                     // Whole cells only; f32 to u16 saturates.
                     let cols = (r.w / cell.w).floor() as u16;
                     let rows = (r.h / cell.h).floor() as u16;
-                    g.attach(sid, cols, rows);
+                    g.attach(sid, cols, rows, if session.is_shell() { crate::grid::SHELL_HISTORY } else { 0 });
                     if !self.st.locked.contains(sid) {
                         g.resize(sid, cols.max(2), rows.max(1));
                     }
@@ -2601,7 +2601,7 @@ impl App {
         if let Some(g) = &self.grid {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
-            g.attach(id, cols, rows);
+            g.attach(id, cols, rows, 0);
             g.resize(id, cols.max(2), rows.max(1));
         }
         if let Some(v) = self.views.get(id) {
