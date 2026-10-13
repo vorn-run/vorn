@@ -26,6 +26,7 @@ pub const TOPICS: &[&str] = &[
     "artifact:commentsChanged",
     "connector:*",
     "connection:*",
+    "extension:*",
     "pairing:*",
     "terminal:bell",
     "terminal:notify",
