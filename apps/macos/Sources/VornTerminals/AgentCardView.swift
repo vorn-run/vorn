@@ -13,6 +13,10 @@ public struct CardActions {
     public var contextMenu: (String, CGPoint) -> Void = { _, _ in }
     public var browseFiles: (String) -> Void = { _ in }
     public var addTerminal: (String) -> Void = { _ in }
+    /// Whether the session's terminals panel is open, so its button closes it.
+    public var terminalsOpen: (String) -> Bool = { _ in false }
+    /// Whether the session's browser pane is open, which keeps its button on a shell.
+    public var browserOpen: (String) -> Bool = { _ in false }
     public var openBrowser: (String) -> Void = { _ in }
     /// The card's simulator button and its picker, where the session's project is a mobile app.
     public var deviceButton: (TerminalSession) -> AnyView = { _ in AnyView(EmptyView()) }
@@ -27,6 +31,8 @@ public struct CardActions {
     /// F2: the session whose name field should open, cleared through `endRename`.
     public var renameRequest: String?
     public var endRename: () -> Void = {}
+    /// Manual sort: drops the dragged session (first) into the slot of another (second); nil when sorted otherwise.
+    public var reorder: ((String, String) -> Void)?
 
     public init() {}
 }
@@ -138,7 +144,11 @@ public struct AgentCardView: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.2), value: hovering)
         .simultaneousGesture(TapGesture().onEnded { if !isSelected { actions.select(session.id) } })
+        .modifier(SessionDropTarget(sessionID: session.id, reorder: variant == .mini ? actions.reorder : nil,
+                                    targeted: $dropTargeted))
     }
+
+    @State private var dropTargeted = false
 
     @State private var dragRatio: Double?
 
@@ -176,7 +186,58 @@ public struct AgentCardView: View {
     private var borderColor: Color {
         if variant == .focused { return .clear }
         if isExpanded || context.shownElsewhere { return Theme.white(0.4) }
+        if dropTargeted { return Theme.white(0.25) }
         return hovering ? Theme.white(0.12) : Theme.hairline
+    }
+}
+
+/// Makes a card or tab a drop slot for a session dragged in manual sort (`reorderTerminals`).
+public struct SessionDropTarget: ViewModifier {
+    let sessionID: String
+    let reorder: ((String, String) -> Void)?
+    @Binding var targeted: Bool
+
+    public init(sessionID: String, reorder: ((String, String) -> Void)?, targeted: Binding<Bool>) {
+        self.sessionID = sessionID
+        self.reorder = reorder
+        _targeted = targeted
+    }
+
+    public func body(content: Content) -> some View {
+        if let reorder {
+            content.dropDestination(for: String.self) { ids, _ in
+                guard let id = ids.first, id != sessionID else { return false }
+                reorder(id, sessionID)
+                return true
+            } isTargeted: { targeted = $0 }
+        } else {
+            content
+        }
+    }
+}
+
+/// The handle a session is dragged by in manual sort.
+public struct SessionDragSource: ViewModifier {
+    let sessionID: String
+    let title: String
+    let enabled: Bool
+
+    public init(sessionID: String, title: String, enabled: Bool) {
+        self.sessionID = sessionID
+        self.title = title
+        self.enabled = enabled
+    }
+
+    public func body(content: Content) -> some View {
+        if enabled {
+            content.draggable(sessionID) {
+                Text(title).font(.ui(12)).foregroundStyle(Color.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.surfaceOverlay))
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -236,6 +297,8 @@ struct CardHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { actions.expand(session.id) }
+            .modifier(SessionDragSource(sessionID: session.id, title: session.title,
+                                        enabled: variant == .mini && actions.reorder != nil && !renaming))
 
             if variant == .focused, let nav = context.nav {
                 FocusedNavHint(index: nav.index, total: nav.total, onPrevious: context.onPrevious, onNext: context.onNext)
@@ -286,8 +349,11 @@ struct CardActionCluster: View {
             }
             .reportFrame($moreFrame)
             button(.folderOpen, "Browse files") { actions.browseFiles(session.id) }
-            if session.agentType != .shell {
-                button(.squareTerminal, "Add a terminal") { actions.addTerminal(session.id) }
+            let terminalsOpen = actions.terminalsOpen(session.id)
+            if session.agentType != .shell || terminalsOpen {
+                button(.squareTerminal, terminalsOpen ? "Close terminals" : "Add a terminal") { actions.addTerminal(session.id) }
+            }
+            if session.agentType != .shell || actions.browserOpen(session.id) {
                 button(.globe, "Open browser") { actions.openBrowser(session.id) }
             }
             actions.deviceButton(session)

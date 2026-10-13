@@ -127,8 +127,9 @@ public struct RootView: View {
         }
     }
 
+    /// FocusedTerminal.tsx looks the session up directly, so filters never hide an expanded card.
     private var focusedSession: TerminalSession? {
-        model.expandedSessionID.flatMap { id in model.visibleSessions(store, includeMinimized: true).first { $0.id == id } }
+        model.expandedSessionID.flatMap(store.session)
     }
 
     private var diffPaths: [String] {

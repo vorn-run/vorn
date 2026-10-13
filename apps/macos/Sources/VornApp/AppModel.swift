@@ -271,17 +271,55 @@ public final class AppModel {
         statusFilter != .all || sortMode != .manual || gridColumns != 0 || layoutMode(store) != .grid
     }
 
-    /// ⌘] / ⌘[: the next or previous session in scope, wrapping.
+    /// ⌘] / ⌘[: expanded, the next session in scope; tabs, the next tab; grid, the next card selected.
     public func cycleFocus(_ store: VornStore, by step: Int) {
-        let ids = scopedSessions(store).map(\.id)
+        if let expanded = expandedSessionID {
+            let ids = scopedSessions(store).map(\.id)
+            guard !ids.isEmpty else { return }
+            let next = ids.firstIndex(of: expanded).map { ids[wrap($0 + step, ids.count)] } ?? ids[0]
+            setFocused(next)
+            return
+        }
+        let ids = visibleSessions(store).map(\.id)
         guard !ids.isEmpty else { return }
-        let current = expandedSessionID ?? selectedSessionID
-        let start = current.flatMap { ids.firstIndex(of: $0) } ?? (step > 0 ? -1 : 0)
-        let next = ids[((start + step) % ids.count + ids.count) % ids.count]
-        minimizedIDs.remove(next)
-        if expandedSessionID != nil { expandedSessionID = next }
-        if layoutMode(store) == .tabs { activeTabID = next }
-        focus(next)
+        let first = step > 0 ? 0 : ids.count - 1
+        if layoutMode(store) == .tabs {
+            let current = activeTabID.flatMap { ids.firstIndex(of: $0) }
+            showTab(current.map { ids[wrap($0 + step, ids.count)] } ?? ids[first])
+        } else {
+            let current = selectedSessionID.flatMap { ids.firstIndex(of: $0) }
+            focus(current.map { ids[wrap($0 + step, ids.count)] } ?? ids[first])
+        }
+    }
+
+    private func wrap(_ i: Int, _ n: Int) -> Int { (i % n + n) % n }
+
+    /// ui-slice `setFocusedTerminal`: expands a card (nil collapses) and selects it.
+    public func setFocused(_ id: String?) {
+        expandedSessionID = id
+        selectedSessionID = id
+        if let id { focusRequests[id, default: 0] += 1 }
+    }
+
+    /// The tabs layout's active tab, with its terminal taking the keyboard.
+    public func showTab(_ id: String) {
+        activeTabID = id
+        focus(id)
+    }
+
+    /// SessionItem.tsx click: the session's tab in the tabs layout, else its card expanded.
+    public func reveal(_ id: String, _ store: VornStore) {
+        if layoutMode(store) == .tabs {
+            expandedSessionID = nil
+            showTab(id)
+        } else {
+            setFocused(id)
+        }
+    }
+
+    /// Whether the sidebar marks a session as the one on screen (SessionItem.tsx `isActive`).
+    public func isShowing(_ id: String, _ store: VornStore) -> Bool {
+        layoutMode(store) == .tabs ? activeTabID == id : expandedSessionID == id
     }
 
     /// Esc: the innermost open thing closes first.
@@ -295,10 +333,15 @@ public final class AppModel {
             overlay = nil
         } else if settingsOpen {
             settingsOpen = false
+        } else if panes.maximizedPaneId != nil {
+            panes.maximizedPaneId = nil
+        } else if panes.diffSessionID != nil {
+            panes.diffSessionID = nil
         } else if renamingSessionID != nil {
             renamingSessionID = nil
-        } else if expandedSessionID != nil {
+        } else if let expanded = expandedSessionID {
             expandedSessionID = nil
+            selectedSessionID = expanded
         } else if selectedSessionID != nil {
             selectedSessionID = nil
         } else {
@@ -327,14 +370,35 @@ public final class AppModel {
         overlay = .onboarding
     }
 
-    /// ⌘1-9: the session at a position, in whichever surface is showing.
+    /// ⌘1-9: the session at a position: expanded if a card is, the tab in tabs, else selected.
     public func jump(to position: Int, _ store: VornStore) {
         let ids = visibleSessions(store).map(\.id)
         guard position >= 1, position <= ids.count else { return }
         let id = ids[position - 1]
-        if expandedSessionID != nil { expandedSessionID = id }
-        if layoutMode(store) == .tabs { activeTabID = id }
-        focus(id)
+        if expandedSessionID != nil {
+            setFocused(id)
+        } else if layoutMode(store) == .tabs {
+            showTab(id)
+        } else {
+            focus(id)
+        }
+    }
+
+    /// ui-slice `reorderTerminals`: `dragged` takes the slot of `target`; nil when nothing moves.
+    public static func reordered(_ ids: [String], moving dragged: String, onto target: String) -> [String]? {
+        guard let from = ids.firstIndex(of: dragged), let to = ids.firstIndex(of: target), from != to else { return nil }
+        var order = ids
+        order.insert(order.remove(at: from), at: to)
+        return order
+    }
+
+    /// ⌘W while a card is expanded: collapses it and keeps it selected.
+    @discardableResult
+    public func collapse() -> Bool {
+        guard let expanded = expandedSessionID else { return false }
+        expandedSessionID = nil
+        selectedSessionID = expanded
+        return true
     }
 
     /// F2: renames the focused or selected session.
@@ -352,9 +416,20 @@ public final class AppModel {
         focusRequests[id, default: 0] += 1
     }
 
+    /// ProjectItem / "All Projects": filters the grid to a project and collapses any expanded card.
     public func select(project name: String?) {
         activeProject = name
         activeWorktreePath = nil
+        setFocused(nil)
+    }
+
+    /// WorktreeItem click: the project and one of its worktrees (`mainWorktree` for the checkout),
+    /// toggling off when already chosen.
+    public func toggle(worktree path: String, in project: String) {
+        let same = activeProject == project && activeWorktreePath == path
+        activeProject = project
+        activeWorktreePath = same ? nil : path
+        setFocused(nil)
     }
 }
 

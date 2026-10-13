@@ -532,9 +532,7 @@ private struct MainWorktreeRow: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture {
-            model.activeProject = project.name
-            model.activeWorktreePath = active ? nil : AppModel.mainWorktree
-            model.expandedSessionID = nil
+            model.toggle(worktree: AppModel.mainWorktree, in: project.name)
         }
     }
 }
@@ -629,9 +627,7 @@ private struct WorktreeItem: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture {
-            model.activeProject = project.name
-            model.activeWorktreePath = active ? nil : worktree.path
-            model.expandedSessionID = nil
+            model.toggle(worktree: worktree.path, in: project.name)
         }
     }
 }
@@ -644,35 +640,69 @@ struct SessionItem: View {
     let showBranch: Bool
     @State private var hover = false
 
-    private var selected: Bool { model.selectedSessionID == session.id }
+    private var selected: Bool { model.isShowing(session.id, store) }
+    private var filesOpen: Bool { model.panes.filesPanes[session.id] != nil }
+    private var terminalsOpen: Bool { model.panes.terminalsPanes[session.id] != nil }
+    private var browserOpen: Bool { model.panes.browser.isOpen(session.id) }
+    private var isShell: Bool { session.agentType == .shell }
 
     var body: some View {
         HStack(spacing: 8) {
             AgentStatusIcon(session.agentType, status: session.status, size: 14)
-            Text(session.title).lineLimit(1).truncationMode(.tail)
-            if showBranch, let b = session.branch {
-                Text(b).font(.ui(10)).foregroundStyle(Theme.gray600).lineLimit(1)
+                .help("\(session.agentType.rawValue) · \(session.status.rawValue.capitalized)")
+            VStack(alignment: .leading, spacing: 0) {
+                Text(session.title).lineLimit(1).truncationMode(.tail)
+                if showBranch, let b = session.branch {
+                    Text(b).font(.ui(10)).foregroundStyle(Theme.gray600).lineLimit(1).truncationMode(.tail)
+                }
             }
             Spacer(minLength: 0)
-            if hover {
-                IconButton(.x, size: 12, padding: 2, radius: Theme.radius, color: Theme.gray500,
-                           hoverColor: Theme.red400, help: "Close session") { actions.close(session.id) }
+            HStack(spacing: 2) {
+                paneToggle(.folderTree, filesOpen ? "Hide files" : "Show files", on: filesOpen) {
+                    model.panes.toggleFilesPane(session.id)
+                }
+                if !isShell || terminalsOpen {
+                    paneToggle(.squareTerminal, terminalsOpen ? "Close these terminals" : "Add a terminal", on: terminalsOpen) {
+                        actions.toggleTerminalsPanel(session.id)
+                    }
+                }
+                if !isShell || browserOpen {
+                    paneToggle(.globe, browserOpen ? "Hide browser" : "Show browser", on: browserOpen) {
+                        model.panes.browser.toggle(session.id)
+                    }
+                }
+                if hover {
+                    IconButton(.x, size: 12, padding: 2, radius: Theme.radius, color: Theme.gray500,
+                               hoverColor: Theme.red400, hoverFill: Theme.white(0.08), help: "Close session") {
+                        actions.close(session.id)
+                        model.toasts.show("Session closed", .success)
+                    }
+                }
             }
         }
         .font(.ui(12))
         .foregroundStyle(selected || hover ? Color.white : Theme.gray400)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(hover ? Theme.white(0.04) : .clear))
+        .frame(minHeight: 26)
+        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(hover && !selected ? Theme.white(0.04) : .clear))
         .overlay(alignment: .leading) {
             if selected { Rectangle().fill(Color.white).frame(width: 1).padding(.vertical, 4) }
         }
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture {
-            model.minimizedIDs.remove(session.id)
-            model.focus(session.id)
+        .onTapGesture { model.reveal(session.id, store) }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { model.reveal(session.id, store) }
+    }
+
+    /// A pane control: shown on hover, and kept lit while its pane is open.
+    @ViewBuilder private func paneToggle(_ icon: LucideGlyph, _ help: String, on: Bool,
+                                         action: @escaping () -> Void) -> some View {
+        if on || hover {
+            IconButton(icon, size: 12, padding: 2, radius: Theme.radius, color: on ? Theme.ink : Theme.gray500,
+                       hoverColor: Theme.gray200, hoverFill: Theme.white(0.08), help: help, action: action)
         }
     }
 }

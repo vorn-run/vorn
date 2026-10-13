@@ -115,7 +115,9 @@ struct ShellCommands: Commands {
             Button("Next Session") { model.cycleFocus(store, by: 1) }.keyboardShortcut("]")
             Button("Previous Session") { model.cycleFocus(store, by: -1) }.keyboardShortcut("[")
             Button("Expand Selected") {
-                if model.layoutMode(store) == .grid, let id = model.selectedSessionID { model.expandedSessionID = id }
+                if model.layoutMode(store) == .grid, model.expandedSessionID == nil, let id = model.selectedSessionID {
+                    model.setFocused(id)
+                }
             }
             .keyboardShortcut("o")
             Button("Rename Session") { model.startRename() }
@@ -138,11 +140,7 @@ final class KeyMonitor {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 13, mods == .command, model.expandedSessionID != nil {
-                model.selectedSessionID = model.expandedSessionID
-                model.expandedSessionID = nil
-                return nil
-            }
+            if event.keyCode == 13, mods == .command, model.collapse() { return nil }
             if event.keyCode == 40, mods == .command {
                 model.toggle(.commandPalette)
                 return nil
@@ -150,7 +148,7 @@ final class KeyMonitor {
             guard event.keyCode == 53, mods.isEmpty else { return event }
             let responder = event.window?.firstResponder
             let typing = responder is TerminalNSView || responder is NSTextView
-            if typing, model.contextMenu == nil, model.overlay == nil { return event }
+            if typing, model.contextMenu == nil, model.overlay == nil, !model.settingsOpen { return event }
             return model.escape() ? nil : event
         }
     }

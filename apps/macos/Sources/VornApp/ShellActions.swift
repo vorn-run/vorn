@@ -63,12 +63,16 @@ struct ShellActions {
     var cardActions: CardActions {
         var a = CardActions()
         a.select = { id in model.selectedSessionID = id }
-        a.expand = { id in model.expandedSessionID = model.expandedSessionID == id ? nil : id }
+        a.expand = { id in model.setFocused(model.expandedSessionID == id ? nil : id) }
         a.minimize = { id in
             model.minimizedIDs.insert(id)
             if model.selectedSessionID == id { model.selectedSessionID = nil }
         }
-        a.close = close
+        a.close = { id in
+            let name = store.session(id)?.title ?? "Session"
+            close(id)
+            model.toasts.show("Session \"\(name)\" closed", .success)
+        }
         a.rename = rename
         a.contextMenu = { id, point in
             model.overlay = nil
@@ -80,11 +84,19 @@ struct ShellActions {
         a.renameRequest = model.renamingSessionID
         a.endRename = { model.renamingSessionID = nil }
         a.browseFiles = { id in model.panes.toggleFilesPane(id) }
-        a.addTerminal = addPanelTerminal
+        a.addTerminal = toggleTerminalsPanel
+        a.terminalsOpen = { id in model.panes.terminalsPanes[id] != nil }
+        a.browserOpen = { id in model.panes.browser.isOpen(id) }
         a.openBrowser = { id in model.panes.browser.toggle(id) }
         a.deviceButton = { [browser = model.panes.browser] s in AnyView(DeviceCardButton(model: browser, session: s)) }
         a.showChanges = { id in model.panes.diffSessionID = id }
         a.git = gitActions
+        if model.sortMode == .manual {
+            a.reorder = { dragged, target in
+                guard let order = AppModel.reordered(store.sessions.map(\.id), moving: dragged, onto: target) else { return }
+                run { try await store.reorder(order) }
+            }
+        }
         return a
     }
 
@@ -152,6 +164,13 @@ struct ShellActions {
                 model.toasts.show("Failed to start terminal: \(error.localizedDescription)", .error)
             }
         }
+    }
+
+    /// toggleTerminalsPanel: closes the panel with its shells, or opens it with a new one.
+    func toggleTerminalsPanel(_ ownerID: String) {
+        guard let held = model.panes.terminalsPanes[ownerID]?.terminals else { return addPanelTerminal(ownerID) }
+        model.panes.closeTerminalsPane(ownerID)
+        for id in held { close(id) }
     }
 
     /// The services the panes are drawn with.
