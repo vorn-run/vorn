@@ -117,7 +117,11 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     var confirmPaste: ((String, @escaping (Bool) -> Void) -> Void)?
 
     func pasteHeld(_ text: String) {
-        let send: (Bool) -> Void = { [weak self] ok in if ok { self?.pane.paste(text, confirmed: true) } }
+        let send: (Bool) -> Void = { [weak self] ok in
+            guard ok, let self else { return }
+            self.returnToLive()
+            self.pane.paste(text, confirmed: true)
+        }
         if let confirmPaste { return confirmPaste(text, send) }
         guard let window else { return }
         let lines = text.split(whereSeparator: \.isNewline).count
