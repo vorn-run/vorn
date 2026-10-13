@@ -6604,7 +6604,9 @@ version = "0.7.5"
 name = "vorn-spawn"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

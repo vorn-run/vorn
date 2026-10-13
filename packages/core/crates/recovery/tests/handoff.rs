@@ -53,6 +53,7 @@ struct Holder {
 impl Holder {
     fn start(home: &Path, fault: Option<&str>) -> Holder {
         let mut cmd = Command::new(sessiond_bin());
+        cmd.env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string());
         cmd.arg("--home")
             .arg(home)
             .args(["--idle-exit", "600"])

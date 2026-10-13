@@ -441,6 +441,22 @@ impl Session {
         ok
     }
 
+    /// Kills the program and, on Unix, the rest of its process group,
+    /// which it leads.
+    pub fn kill_group(&self) {
+        #[cfg(unix)]
+        {
+            let st = self.lock();
+            if self.pid != 0 && st.reaped.is_none() && st.mode != Mode::HandedOff {
+                // SAFETY: kill(2) on the group of a program this process
+                // spawned or adopted, and has not reaped; it leads its own.
+                unsafe { libc::kill(-(self.pid as libc::pid_t), libc::SIGKILL) };
+            }
+        }
+        #[cfg(windows)]
+        self.signal(Sig::Kill);
+    }
+
     pub fn signal(&self, sig: Sig) {
         #[cfg(unix)]
         {

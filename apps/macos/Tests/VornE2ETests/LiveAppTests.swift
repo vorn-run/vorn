@@ -130,7 +130,9 @@ struct TestVornd {
             "--data-dir", data.path, "--port", "\(Int.random(in: 52000..<60000))", "--host", "127.0.0.1",
             "--sessiond", sessiond, "--exit-with-stdin", "--log-file", root.appendingPathComponent("vornd.log").path,
         ]
-        process.environment = env.merging(["HOME": home.path, "SHELL": "/bin/zsh"]) { $1 }
+        // It and its sessiond end with this test run, and never run this machine's Tailscale.
+        let tied = ["VORN_EXIT_WITH": String(ProcessInfo.processInfo.processIdentifier), "VORN_TAILSCALE": "none"]
+        process.environment = env.merging(["HOME": home.path, "SHELL": "/bin/zsh"].merging(tied) { $1 }) { $1 }
         process.standardInput = Pipe()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

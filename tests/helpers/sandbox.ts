@@ -163,6 +163,9 @@ export function installSandbox(options: {
   // Both are inherited when the suite runs in a Vorn terminal and name the live app's data.
   delete process.env.VORN_DATA_DIR
   delete process.env.VORN_SESSION_ID
+  // A vornd or sessiond a test starts ends with this worker, and never runs this machine's Tailscale.
+  process.env.VORN_EXIT_WITH = String(process.pid)
+  process.env.VORN_TAILSCALE = 'none'
   return home
 }
 

@@ -41,7 +41,8 @@ const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web D
                keeping 5 files; VORND_LOG sets the level
   --exit-with-stdin
                stop when stdin closes, so vornd ends with whoever started it,
-               even if that process is killed
+               even if that process is killed; VORN_EXIT_WITH=PID stops it
+               when that process ends
   --sessiond   the vorn-sessiond binary this build ships: keep one running under
                the data directory (its run/ directory is where running ones are
                found)
@@ -142,6 +143,21 @@ async fn stdin_closed() {
         let _ = tx.send(());
     });
     let _ = rx.await;
+}
+
+/// Resolves once process `pid` has ended; never without one, or when it
+/// cannot be watched.
+async fn process_ended(pid: Option<u32>) {
+    let Some(pid) = pid else {
+        return std::future::pending().await;
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    vorn_spawn::watch::on_exit(pid, move || {
+        let _ = tx.send(());
+    });
+    if rx.await.is_err() {
+        std::future::pending::<()>().await;
+    }
 }
 
 fn init_logging(log_file: Option<&str>) -> Result<(), String> {
@@ -431,18 +447,13 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     #[cfg(not(feature = "engine"))]
     drop(carry);
     let asked = Arc::clone(&serving);
+    let exit_with = vorn_spawn::watch::exit_with();
     let stop = async move {
-        if exit_with_stdin {
-            tokio::select! {
-                () = shutdown_signal() => {}
-                () = stdin_closed() => info!("stdin closed; stopping"),
-                () = asked.stopped() => {}
-            }
-        } else {
-            tokio::select! {
-                () = shutdown_signal() => {}
-                () = asked.stopped() => {}
-            }
+        tokio::select! {
+            () = shutdown_signal() => {}
+            () = stdin_closed(), if exit_with_stdin => info!("stdin closed; stopping"),
+            () = process_ended(exit_with) => info!(pid = ?exit_with, "the process to end with ended; stopping"),
+            () = asked.stopped() => {}
         }
         #[cfg(feature = "engine")]
         if let Some((engine, file)) = saving {

@@ -410,3 +410,99 @@ async fn programs_are_responsible_for_themselves() {
     }
     assert_eq!(responsible_for(i.pid), i.pid, "sessiond keeps its own");
 }
+
+/// A sessiond started straight from the binary, with `env`, reaped on drop.
+struct Direct {
+    child: std::process::Child,
+    i: Instance,
+}
+
+impl Direct {
+    fn start(home: &Path, env: &[(&str, String)]) -> Direct {
+        let mut cmd = std::process::Command::new(BIN);
+        cmd.arg("--home")
+            .arg(home)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null());
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.spawn().expect("start sessiond");
+        let t = Instant::now();
+        loop {
+            if let Some(i) = launch::running(home).pop() {
+                return Direct { child, i };
+            }
+            assert!(child.try_wait().unwrap().is_none(), "sessiond exited");
+            assert!(
+                t.elapsed() < Duration::from_secs(10),
+                "sessiond announces itself"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn ended_within(&mut self, d: Duration) -> bool {
+        let t = Instant::now();
+        while t.elapsed() < d {
+            if self.child.try_wait().unwrap().is_some() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+}
+
+impl Drop for Direct {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// With `VORN_EXIT_WITH`, a sessiond and its sessions end with that process,
+/// so what a test run starts never outlives it.
+#[tokio::test]
+async fn it_ends_its_sessions_with_the_process_it_ends_with() {
+    let home = tempfile::tempdir().unwrap();
+    let mut run = vorn_spawn::command(LONG[0])
+        .args(&LONG[1..])
+        .spawn()
+        .expect("a stand-in test run");
+    let mut d = Direct::start(
+        home.path(),
+        &[(vorn_spawn::watch::EXIT_WITH, run.id().to_string())],
+    );
+    let mut v = V::hello(&d.i).await;
+    let ToVornd::Spawned(s) = v.spawn(LONG, Io::Pty { cols: 80, rows: 24 }).await else {
+        panic!("spawn failed");
+    };
+    assert!(!d.ended_within(Duration::from_millis(300)), "still serving");
+    run.kill().unwrap();
+    run.wait().unwrap();
+    assert!(d.ended_within(Duration::from_secs(5)), "sessiond ended");
+    assert!(
+        gone_within(s.pid, Duration::from_secs(5)),
+        "its session ended"
+    );
+}
+
+/// A sessiond whose home is removed, as a test's temporary one is, ends its
+/// sessions and stops.
+#[cfg(unix)]
+#[tokio::test]
+async fn it_stops_when_its_home_is_removed() {
+    let home = tempfile::tempdir().unwrap();
+    let mut d = Direct::start(home.path(), &[]);
+    let mut v = V::hello(&d.i).await;
+    let ToVornd::Spawned(s) = v.spawn(LONG, Io::Pty { cols: 80, rows: 24 }).await else {
+        panic!("spawn failed");
+    };
+    drop(home);
+    assert!(d.ended_within(Duration::from_secs(5)), "sessiond ended");
+    assert!(
+        gone_within(s.pid, Duration::from_secs(5)),
+        "its session ended"
+    );
+}
