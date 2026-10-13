@@ -28,7 +28,7 @@ public final class FeatureStores {
             guard let store, let model else { return }
             if let id = task.assignedSessionId, store.sessions.contains(where: { $0.id == id }) {
                 model.mainViewMode = .sessions
-                model.focus(id)
+                model.setFocused(id)
             } else {
                 model.lastError = "This task's session has ended"
             }
@@ -53,7 +53,7 @@ public final class FeatureStores {
         }
         tasks.focusSession = { [weak model] id in
             model?.mainViewMode = .sessions
-            model?.focus(id)
+            model?.setFocused(id)
         }
         tasks.writeSession = { [weak store] id, data in try await store?.write(id, data) }
         workflows.taskTitles = { [weak tasks] in

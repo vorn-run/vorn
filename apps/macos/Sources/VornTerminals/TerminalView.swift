@@ -41,7 +41,7 @@ func wireMods(_ f: NSEvent.ModifierFlags) -> UInt16 {
 
 /// A session's terminal: draws the pane's grid with CoreText and sends keys,
 /// text and IME composition to vornd.
-public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
+public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalHost {
     let pane: TerminalPane
     private let painter = TerminalPainter()
     private var current: NSEvent?
@@ -116,7 +116,8 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
 
     public override func draw(_ dirty: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        painter.draw(ctx, pane.view, fonts: fonts, bounds: bounds, focused: pane.focused, marked: pane.marked)
+        painter.draw(ctx, pane.view, fonts: fonts, bounds: bounds, focused: pane.focused, marked: pane.marked,
+                     selection: pane.selection)
         didDraw?(ctx)
     }
 
@@ -133,8 +134,138 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
 
     // MARK: Input
 
+    /// How a drag grows the selection: by cell, word (double click) or line (triple).
+    private enum Unit { case cell, word, line }
+    private var unit = Unit.cell
+    /// What the drag started on; the selection always keeps it.
+    private var anchor: TerminalSelection?
+    /// The press went to a program tracking the mouse.
+    private var tracking = false
+    private var wheelRest: CGFloat = 0
+
+    /// Where an event is: the cell fraction the program hears, and the absolute
+    /// cell boundary nearest it, kept on the screen.
+    private func cell(at e: NSEvent) -> (x: Float, y: Float, point: GridPoint)? {
+        guard let v = pane.view else { return nil }
+        let p = convert(e.locationInWindow, from: nil)
+        let x = max(0, (p.x - terminalPadX) / fonts.cell.width)
+        let y = (p.y - terminalPadY) / fonts.cell.height
+        let row = min(max(Int(y.rounded(.down)), 0), Int(v.rows) - 1)
+        let col = min(UInt16(x.rounded()), v.cols)
+        return (Float(x), Float(max(0, y)), GridPoint(line: v.first_line + UInt64(row), col: col))
+    }
+
+    private var tracksMouse: Bool { pane.view?.mouse == 1 }
+
     public override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
+        guard let (x, y, p) = cell(at: e) else { return }
+        // Option forces a selection over a program that tracks the mouse.
+        tracking = tracksMouse && !e.modifierFlags.contains(.option)
+        if tracking {
+            pane.selection = nil
+            pane.mouse(0, button: 1, mods: wireMods(e.modifierFlags), x: x, y: y)
+            return
+        }
+        switch e.clickCount {
+        case 2:
+            unit = .word
+            anchor = pane.word(at: p)
+        case 3...:
+            unit = .line
+            anchor = line(p.line)
+        default:
+            unit = .cell
+            // Shift-click moves the selection's nearer end to the click.
+            if e.modifierFlags.contains(.shift), let s = pane.selection {
+                let kept = p < s.from ? s.to : s.from
+                anchor = TerminalSelection(kept, kept)
+                pane.selection = TerminalSelection(kept, p)
+                return
+            }
+            anchor = TerminalSelection(p, p)
+        }
+        pane.selection = anchor
+    }
+
+    public override func mouseDragged(with e: NSEvent) {
+        guard let (x, y, p) = cell(at: e) else { return }
+        if tracking {
+            pane.mouse(2, button: 1, mods: wireMods(e.modifierFlags), x: x, y: y)
+            return
+        }
+        guard let anchor, let v = pane.view else { return }
+        // Dragging past an edge scrolls history a line at a time.
+        let local = convert(e.locationInWindow, from: nil).y
+        if local < 0 { pane.scroll(-1) } else if local > bounds.height { pane.scroll(1) }
+        let at: TerminalSelection
+        switch unit {
+        case .cell: at = TerminalSelection(p, p)
+        case .word: at = pane.word(at: p)
+        case .line: at = line(p.line, cols: v.cols)
+        }
+        pane.selection = at.from < anchor.from ? TerminalSelection(at.from, anchor.to) : TerminalSelection(anchor.from, at.to)
+    }
+
+    public override func mouseUp(with e: NSEvent) {
+        if tracking, let (x, y, _) = cell(at: e) {
+            pane.mouse(1, button: 1, mods: wireMods(e.modifierFlags), x: x, y: y)
+        }
+        tracking = false
+        if pane.selection?.isEmpty == true { pane.selection = nil }
+    }
+
+    private func line(_ l: UInt64, cols: UInt16? = nil) -> TerminalSelection {
+        TerminalSelection(GridPoint(line: l, col: 0), GridPoint(line: l, col: cols ?? pane.view?.cols ?? 0))
+    }
+
+    public override func scrollWheel(with e: NSEvent) {
+        guard let (x, y, _) = cell(at: e), let v = pane.view else { return super.scrollWheel(with: e) }
+        // A trackpad reports points, a wheel notches; a notch moves three lines.
+        wheelRest += e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / fonts.cell.height : e.scrollingDeltaY * 3
+        let lines = Int32(wheelRest.rounded(.towardZero))
+        guard lines != 0 else { return }
+        wheelRest -= CGFloat(lines)
+        // Down at the live screen with nothing to take it: the page around scrolls instead.
+        let local = v.mouse == 0 && v.screen & UInt8(VG_ALTERNATE) == 0
+        if local, lines < 0, v.screen & UInt8(VG_SCROLLED) == 0 {
+            wheelRest = 0
+            return super.scrollWheel(with: e)
+        }
+        pane.wheel(-lines, x: x, y: y, mods: wireMods(e.modifierFlags))
+    }
+
+    // MARK: Copy and paste
+
+    @objc func copy(_ sender: Any?) {
+        guard let s = pane.selection, !s.isEmpty else { return }
+        let text = pane.text(of: s)
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        pane.selection = nil
+        pane.paste(text)
+    }
+
+    public override func selectAll(_ sender: Any?) {
+        pane.selection = TerminalSelection(GridPoint(line: 0, col: 0), GridPoint(line: .max, col: .max))
+    }
+
+    @objc func fitToWindow(_ sender: Any?) { pane.takeSize() }
+
+    public override func menu(for event: NSEvent) -> NSMenu? {
+        window?.makeFirstResponder(self)
+        let m = NSMenu()
+        m.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        m.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        m.addItem(.separator())
+        m.addItem(withTitle: "Fit to This Window", action: #selector(fitToWindow(_:)), keyEquivalent: "")
+        for item in m.items { item.target = self }
+        return m
     }
 
     public override func performKeyEquivalent(with e: NSEvent) -> Bool {
@@ -147,6 +278,14 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
     }
 
     public override func keyDown(with e: NSEvent) {
+        pane.selection = nil
+        // Shift-Page Up and Down page through history, as the shell never sees them.
+        if e.modifierFlags.contains(.shift), e.keyCode == 116 || e.keyCode == 121,
+           let v = pane.view, v.screen & UInt8(VG_ALTERNATE) == 0 {
+            let page = Int32(max(Int(v.rows) - 1, 1))
+            pane.scroll(e.keyCode == 116 ? -page : page)
+            return
+        }
         // A synthesized event in a window that is not key has no input
         // context to compose with: send it as the key it is.
         if inputContext == nil || window?.isKeyWindow != true {
@@ -195,6 +334,15 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
         let local = pane.cursorRect(fonts: fonts)
         guard let w = window else { return local }
         return w.convertToScreen(convert(local, to: nil))
+    }
+
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)): return pane.selection.map { !$0.isEmpty } ?? false
+        case #selector(paste(_:)): return !pane.engine.readOnly && NSPasteboard.general.string(forType: .string) != nil
+        case #selector(fitToWindow(_:)): return !pane.engine.readOnly
+        default: return true
+        }
     }
 
     // MARK: Accessibility: the screen as a text area.

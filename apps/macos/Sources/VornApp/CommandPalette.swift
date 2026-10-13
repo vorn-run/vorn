@@ -384,8 +384,7 @@ struct PaletteRunner {
         case .focus(let id):
             model.mainViewMode = .sessions
             model.minimizedIDs.remove(id)
-            model.expandedSessionID = id
-            model.focus(id)
+            model.setFocused(id)
         case .focusCard(let id):
             model.mainViewMode = .sessions
             model.minimizedIDs.remove(id)

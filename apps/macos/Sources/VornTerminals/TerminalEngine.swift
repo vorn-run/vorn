@@ -23,11 +23,40 @@ func cgColor(_ rgb: UInt32, alpha: CGFloat = 1) -> CGColor {
 // MARK: - Painter
 
 /// Draws a grid view with CoreText into a top-down context.
+/// A cell by absolute line, the coordinate scrolling does not move.
+struct GridPoint: Comparable {
+    var line: UInt64
+    var col: UInt16
+
+    static func < (a: GridPoint, b: GridPoint) -> Bool { (a.line, a.col) < (b.line, b.col) }
+}
+
+/// Selected cells from `from` up to `to`, excluded, in order whichever way it was dragged.
+struct TerminalSelection: Equatable {
+    let from: GridPoint
+    let to: GridPoint
+
+    init(_ a: GridPoint, _ b: GridPoint) {
+        (from, to) = a <= b ? (a, b) : (b, a)
+    }
+
+    var isEmpty: Bool { from == to }
+
+    /// The selected columns of `line`, or nil.
+    func cols(on line: UInt64, width: UInt16) -> Range<UInt16>? {
+        guard line >= from.line, line <= to.line else { return nil }
+        let a = line == from.line ? min(from.col, width) : 0
+        let b = line == to.line ? min(to.col, width) : width
+        return a < b ? a..<b : nil
+    }
+}
+
 final class TerminalPainter {
     private var glyphs = [CGGlyph](repeating: 0, count: 1024)
     private var positions = [CGPoint](repeating: .zero, count: 1024)
 
-    func draw(_ ctx: CGContext, _ v: VgView?, fonts: TerminalFonts, bounds: CGRect, focused: Bool, marked: String) {
+    func draw(_ ctx: CGContext, _ v: VgView?, fonts: TerminalFonts, bounds: CGRect, focused: Bool, marked: String,
+              selection: TerminalSelection? = nil) {
         ctx.setFillColor(cgColor(v?.bg ?? Theme.Terminal.background))
         ctx.fill(bounds)
         guard let v else { return }
@@ -43,6 +72,13 @@ final class TerminalPainter {
         for r in runs where r.bg != v.bg {
             ctx.setFillColor(cgColor(r.bg))
             ctx.fill(CGRect(x: CGFloat(r.col) * cw, y: CGFloat(r.row) * ch, width: CGFloat(r.ncols) * cw, height: ch))
+        }
+        if let selection, !selection.isEmpty {
+            ctx.setFillColor(cgColor(Theme.Terminal.selection))
+            for y in 0..<v.rows {
+                guard let c = selection.cols(on: v.first_line + UInt64(y), width: v.cols) else { continue }
+                ctx.fill(CGRect(x: CGFloat(c.lowerBound) * cw, y: CGFloat(y) * ch, width: CGFloat(c.count) * cw, height: ch))
+            }
         }
         for r in runs {
             guard let text = v.text else { break }
@@ -235,6 +271,13 @@ public final class TerminalPane {
 
     // MARK: Input (never sent on a read-only connection)
 
+    /// "Fit to this window": the session takes this pane's size.
+    func takeSize() {
+        guard !engine.readOnly, id != 0, let c = engine.client else { return }
+        ownsSize = true
+        vg_take_size(c, id)
+    }
+
     private func claimSize() {
         guard !ownsSize, id != 0, let c = engine.client else { return }
         ownsSize = true
@@ -263,6 +306,52 @@ public final class TerminalPane {
     func setMarked(_ s: String) {
         marked = s
         host?.paneDidChange()
+    }
+
+    // MARK: Scroll, mouse, selection
+
+    /// The selection, in absolute lines; `to` excluded.
+    var selection: TerminalSelection? {
+        didSet { if selection != oldValue { host?.paneDidChange() } }
+    }
+
+    func paste(_ s: String) {
+        guard !engine.readOnly, id != 0, let c = engine.client else { return }
+        claimSize()
+        vg_paste(c, id, s)
+    }
+
+    /// A wheel turn of `lines`, negative up, at cell `(x, y)`.
+    func wheel(_ lines: Int32, x: Float, y: Float, mods: UInt16) {
+        guard id != 0, let c = engine.client else { return }
+        // A read-only window still scrolls its own view; the program never hears it.
+        if engine.readOnly { vg_scroll(c, id, lines) } else { vg_wheel(c, id, lines, x, y, mods) }
+    }
+
+    func scroll(_ lines: Int32) {
+        guard id != 0, let c = engine.client else { return }
+        vg_scroll(c, id, lines)
+    }
+
+    /// For a program tracking the mouse: 0 press, 1 release, 2 motion.
+    func mouse(_ action: UInt8, button: UInt8, mods: UInt16, x: Float, y: Float) {
+        guard !engine.readOnly, id != 0, let c = engine.client else { return }
+        vg_mouse(c, id, action, button, mods, x, y)
+    }
+
+    func text(of s: TerminalSelection) -> String {
+        guard let c = engine.client, id != 0,
+              let p = vg_text_range(c, id, s.from.line, s.from.col, s.to.line, s.to.col) else { return "" }
+        defer { vg_free_string(p) }
+        return String(cString: p)
+    }
+
+    func word(at p: GridPoint) -> TerminalSelection {
+        var a: UInt16 = 0, b: UInt16 = 0
+        guard let c = engine.client, id != 0, vg_word_at(c, id, p.line, p.col, &a, &b) else {
+            return TerminalSelection(p, GridPoint(line: p.line, col: p.col &+ 1))
+        }
+        return TerminalSelection(GridPoint(line: p.line, col: a), GridPoint(line: p.line, col: b))
     }
 
     // MARK: Accessibility

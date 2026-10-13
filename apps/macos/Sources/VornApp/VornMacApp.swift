@@ -115,7 +115,9 @@ struct ShellCommands: Commands {
             Button("Next Session") { model.cycleFocus(store, by: 1) }.keyboardShortcut("]")
             Button("Previous Session") { model.cycleFocus(store, by: -1) }.keyboardShortcut("[")
             Button("Expand Selected") {
-                if model.layoutMode(store) == .grid, let id = model.selectedSessionID { model.expandedSessionID = id }
+                if model.layoutMode(store) == .grid, model.expandedSessionID == nil, let id = model.selectedSessionID {
+                    model.setFocused(id)
+                }
             }
             .keyboardShortcut("o")
             Button("Rename Session") { model.startRename() }
@@ -137,22 +139,28 @@ final class KeyMonitor {
     func install(model: AppModel) {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if event.keyCode == 13, mods == .command, model.expandedSessionID != nil {
-                model.selectedSessionID = model.expandedSessionID
-                model.expandedSessionID = nil
-                return nil
-            }
-            if event.keyCode == 40, mods == .command {
-                model.toggle(.commandPalette)
-                return nil
-            }
-            guard event.keyCode == 53, mods.isEmpty else { return event }
             let responder = event.window?.firstResponder
             let typing = responder is TerminalNSView || responder is NSTextView
-            if typing, model.contextMenu == nil, model.overlay == nil { return event }
-            return model.escape() ? nil : event
+            return KeyRouting.handle(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                                     typing: typing, model: model) ? nil : event
         }
+    }
+}
+
+/// The window-level keys, decided before the focused view sees them.
+@MainActor
+enum KeyRouting {
+    /// True when the app takes the key; false sends it on to the focused view (a terminal keeps Tab, Esc, Ctrl chords).
+    static func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, typing: Bool, model: AppModel) -> Bool {
+        let mods = modifiers.intersection([.command, .shift, .option, .control])
+        if keyCode == 13, mods == .command { return model.collapse() }
+        if keyCode == 40, mods == .command {
+            model.toggle(.commandPalette)
+            return true
+        }
+        guard keyCode == 53, mods.isEmpty else { return false }
+        if typing, model.contextMenu == nil, model.overlay == nil, !model.settingsOpen { return false }
+        return model.escape()
     }
 }
 
@@ -443,11 +451,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     }
 
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
-    if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) {
-        model.selectedSessionID = visible[n].id
-        model.expandedSessionID = visible[n].id
-    }
     if model.layoutMode(store) == .tabs { model.activeTabID = visible.first?.id }
+    // As a sidebar click: the card expanded in the grid, the tab in tabs.
+    if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) { model.reveal(visible[n].id, store) }
     if let engine = engines.engine, !visible.isEmpty {
         let gridW = size.width - (model.sidebarOpen ? model.sidebarWidth : 0)
         let body: CGSize

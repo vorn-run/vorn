@@ -16,8 +16,11 @@ struct TabsView<Empty: View>: View {
     var body: some View {
         let tabs = model.visibleSessions(store, includeMinimized: true)
         let shortcutIDs = model.visibleSessions(store).map(\.id)
-        let active = tabs.first { $0.id == model.activeTabID } ?? tabs.first
-        VStack(spacing: 0) {
+        // chooseActiveTab: a live session stays active even when the filters hide its tab.
+        let active = model.activeTabID.flatMap(store.session) ?? tabs.first
+        var tabActions = actions.cardActions
+        tabActions.close = { id in close(id, tabs: tabs.map(\.id), actions: actions.cardActions) }
+        return VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if !model.sidebarOpen {
                     AppNavCluster(model: model, workflows: features.workflows).padding(.leading, 8)
@@ -26,9 +29,8 @@ struct TabsView<Empty: View>: View {
                     ForEach(tabs) { s in
                         SessionTab(session: s, isActive: s.id == active?.id,
                                    shortcut: shortcutIDs.firstIndex(of: s.id).flatMap { $0 < 9 ? $0 + 1 : nil },
-                                   actions: actions.cardActions) {
-                            model.activeTabID = s.id
-                            model.focus(s.id)
+                                   actions: tabActions) {
+                            model.showTab(s.id)
                         }
                     }
                     NewTabButtons(model: model, actions: actions)
@@ -69,6 +71,15 @@ struct TabsView<Empty: View>: View {
             }
         }
     }
+
+    /// TabView.tsx `handleCloseTab`: the tab beside it becomes active, then the session closes.
+    private func close(_ id: String, tabs: [String], actions: CardActions) {
+        if model.expandedSessionID == id { model.setFocused(nil) }
+        if model.activeTabID == id, let i = tabs.firstIndex(of: id) {
+            model.activeTabID = tabs.indices.contains(i + 1) ? tabs[i + 1] : i > 0 ? tabs[i - 1] : nil
+        }
+        actions.close(id)
+    }
 }
 
 /// One tab: status, name, and on hover the session's controls in place of its ⌘N badge.
@@ -82,6 +93,7 @@ private struct SessionTab: View {
     @State private var renaming = false
     @State private var draft = ""
     @State private var confirmClose = false
+    @State private var dropTargeted = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -110,10 +122,13 @@ private struct SessionTab: View {
         .frame(minWidth: 120, maxWidth: 260, minHeight: 36, maxHeight: 36)
         .overlay(alignment: .trailing) { trailing.padding(.trailing, 8) }
         .overlay(alignment: .bottom) { Rectangle().fill(isActive ? Color.white : .clear).frame(height: 1) }
+        .overlay(alignment: .leading) { Rectangle().fill(dropTargeted ? Theme.white(0.5) : .clear).frame(width: 2) }
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onRightClick { p in actions.contextMenu(session.id, p) }
         .onHover { hovering = $0 }
+        .modifier(SessionDragSource(sessionID: session.id, title: session.title, enabled: actions.reorder != nil && !renaming))
+        .modifier(SessionDropTarget(sessionID: session.id, reorder: actions.reorder, targeted: $dropTargeted))
         .onChange(of: actions.renameRequest == session.id, initial: true) { _, asked in
             if asked { draft = session.title; renaming = true }
         }
@@ -135,8 +150,11 @@ private struct SessionTab: View {
             HStack(spacing: 4) {
                 if !renaming {
                     tabButton(.folderOpen, "Browse files") { actions.browseFiles(session.id) }
-                    if session.agentType != .shell {
-                        tabButton(.squareTerminal, "Add a terminal") { actions.addTerminal(session.id) }
+                    let terminalsOpen = actions.terminalsOpen(session.id)
+                    if session.agentType != .shell || terminalsOpen {
+                        tabButton(.squareTerminal, terminalsOpen ? "Close terminals" : "Add a terminal") { actions.addTerminal(session.id) }
+                    }
+                    if session.agentType != .shell || actions.browserOpen(session.id) {
                         tabButton(.globe, "Open browser") { actions.openBrowser(session.id) }
                     }
                     tabButton(.pencil, "Rename session") {

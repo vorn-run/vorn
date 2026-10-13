@@ -587,8 +587,7 @@ final class WidgetController {
 
     /// index.ts `widget:focus-terminal`: brings the window forward on that session.
     func focus(_ id: String) {
-        model.expandedSessionID = id
-        model.focus(id)
+        model.setFocused(id)
         showApp()
     }
 

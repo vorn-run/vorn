@@ -167,7 +167,7 @@ struct DockPill: View {
             MinimizedPill(session: s) {
                 model.overlay = nil
                 model.minimizedIDs.remove(s.id)
-                model.focus(s.id)
+                model.showTab(s.id)
             }
         }
     }

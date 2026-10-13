@@ -28,8 +28,10 @@ pub struct VgView {
     pub cursor_y: u16,
     pub cursor_visible: u8,
     pub cursor_style: u8,
-    pub _pad0: u8,
-    pub _pad1: u8,
+    /// 1 when the program tracks the mouse.
+    pub mouse: u8,
+    /// Bits of [`screen`]: alternate screen, scrolled back.
+    pub screen: u8,
     pub fg: u32,
     pub bg: u32,
     pub cursor_color: u32,
@@ -39,6 +41,14 @@ pub struct VgView {
     pub text_len: u32,
     /// The [`PaneView`] the pointers borrow from; freed by `vg_view_free`.
     pub owner: *mut c_void,
+    /// Absolute line of the first row, the coordinate selections use.
+    pub first_line: u64,
+}
+
+/// Bits of [`VgView::screen`].
+pub mod screen {
+    pub const ALTERNATE: u8 = 1;
+    pub const SCROLLED: u8 = 2;
 }
 
 /// Runs `f`, answering `fallback` if it panics.
@@ -213,8 +223,9 @@ pub unsafe extern "C" fn vg_view(c: *mut VgClient, pane: u32, out: *mut VgView) 
             cursor_y: v.cursor_y,
             cursor_visible: u8::from(v.cursor_visible),
             cursor_style: v.cursor_style,
-            _pad0: 0,
-            _pad1: 0,
+            mouse: u8::from(v.mouse),
+            screen: if v.alternate { screen::ALTERNATE } else { 0 }
+                | if v.scrolled { screen::SCROLLED } else { 0 },
             fg: v.fg,
             bg: v.bg,
             cursor_color: v.cursor_color,
@@ -223,6 +234,7 @@ pub unsafe extern "C" fn vg_view(c: *mut VgClient, pane: u32, out: *mut VgView) 
             runs: v.runs.as_ptr(),
             text: v.text.as_ptr(),
             text_len: v.text.len() as u32,
+            first_line: v.first_line,
             owner: Box::into_raw(v).cast(),
         };
         // SAFETY: `out` points at a VgView the caller owns.
@@ -281,6 +293,116 @@ pub unsafe extern "C" fn vg_text(c: *mut VgClient, pane: u32, utf8: *const c_cha
             g.text(pane, t);
         }
     });
+}
+
+/// # Safety
+/// `c` is null or a live handle; `utf8` is null or NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn vg_paste(c: *mut VgClient, pane: u32, utf8: *const c_char) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let (Some(g), Some(t)) = unsafe { (grid(c), text_arg(utf8)) } {
+            g.paste(pane, t);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_wheel(
+    c: *mut VgClient,
+    pane: u32,
+    lines: i32,
+    x: f32,
+    y: f32,
+    mods: u16,
+) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let Some(g) = unsafe { grid(c) } {
+            g.wheel(pane, lines, x, y, mods);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_scroll(c: *mut VgClient, pane: u32, lines: i32) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let Some(g) = unsafe { grid(c) } {
+            g.scroll(pane, lines);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_mouse(
+    c: *mut VgClient,
+    pane: u32,
+    action: u8,
+    button: u8,
+    mods: u16,
+    x: f32,
+    y: f32,
+) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let Some(g) = unsafe { grid(c) } {
+            g.mouse(pane, action, button, mods, x, y);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn vg_text_range(
+    c: *mut VgClient,
+    pane: u32,
+    from_line: u64,
+    from_col: u16,
+    to_line: u64,
+    to_col: u16,
+) -> *mut c_char {
+    guard(ptr::null_mut(), || {
+        // SAFETY: the caller's contract above.
+        unsafe { grid(c) }
+            .and_then(|g| g.text_range(pane, (from_line, from_col), (to_line, to_col)))
+            .map_or(ptr::null_mut(), c_string)
+    })
+}
+
+/// # Safety
+/// `c` is null or a live handle; `from` and `to` are null or writable.
+#[no_mangle]
+pub unsafe extern "C" fn vg_word_at(
+    c: *mut VgClient,
+    pane: u32,
+    line: u64,
+    col: u16,
+    from: *mut u16,
+    to: *mut u16,
+) -> bool {
+    guard(false, || {
+        if from.is_null() || to.is_null() {
+            return false;
+        }
+        // SAFETY: the caller's contract above.
+        let Some((a, b)) = unsafe { grid(c) }.and_then(|g| g.word_at(pane, line, col)) else {
+            return false;
+        };
+        // SAFETY: both point at u16s the caller owns.
+        unsafe {
+            from.write(a);
+            to.write(b);
+        }
+        true
+    })
 }
 
 /// # Safety
@@ -382,6 +504,13 @@ mod tests {
             vg_view_free(&mut v);
             vg_view_free(ptr::null_mut());
             vg_key(c, 1, c"KeyA".as_ptr(), 0, ptr::null());
+            vg_paste(c, 1, c"x".as_ptr());
+            vg_wheel(c, 1, -3, 0.0, 0.0, 0);
+            vg_scroll(c, 1, i32::MAX);
+            vg_mouse(c, 1, 0, 1, 0, 0.0, 0.0);
+            assert!(vg_text_range(c, 1, 0, 0, 1, 0).is_null());
+            let (mut a, mut b) = (0u16, 0u16);
+            assert!(!vg_word_at(c, 1, 0, 0, &mut a, &mut b));
             assert!(vg_read_text(c, 1).is_null());
             assert!(vg_last_error(c).is_null());
             vg_free_string(ptr::null_mut());
@@ -394,7 +523,8 @@ mod tests {
         assert_eq!(std::mem::size_of::<VgRun>(), 24);
         assert_eq!(std::mem::offset_of!(VgView, fg), 20);
         assert_eq!(std::mem::offset_of!(VgView, runs), 40);
-        assert_eq!(std::mem::size_of::<VgView>(), 72);
+        assert_eq!(std::mem::offset_of!(VgView, first_line), 72);
+        assert_eq!(std::mem::size_of::<VgView>(), 80);
         assert_eq!(std::mem::size_of::<VgTheme>(), 76);
     }
 }
