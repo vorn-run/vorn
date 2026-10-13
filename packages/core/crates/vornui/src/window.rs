@@ -32,7 +32,6 @@ use crate::pace::Pacer;
 use crate::render::RenderMode;
 use crate::ui::{Ui, UiConfig};
 
-
 /// The system clipboard; a failed read or write is an empty clipboard,
 /// as in a browser without the permission.
 struct System(arboard::Clipboard);

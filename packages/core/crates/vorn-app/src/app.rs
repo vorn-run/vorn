@@ -295,7 +295,7 @@ pub struct App {
     /// Each terminal's scroll through its history; only painted ones move.
     scrolls: HashMap<String, Scroll>,
     /// The wheel gesture under way: its pane, where it goes, and its last event.
-    wheel: Option<(String, Route, Rows, std::time::Instant)>,
+    wheel: Option<(String, Route, Rows, web_time::Instant)>,
     /// Each terminal's screen as text, for assistive technology; made when
     /// its view changes.
     spoken: HashMap<String, String>,

@@ -33,14 +33,11 @@ use crate::edit::Clipboard;
 use crate::gpu::Gpu;
 use crate::host::{cursor_icon, draw, App, UserEvent, Waker, WindowOptions};
 use crate::input::{mods, Input};
-use crate::interact::WindowRequest;
+use crate::interact::{WheelPhase, WindowRequest, WHEEL_LINE};
 use crate::pace::Pacer;
 use crate::render::RenderMode;
 use crate::ui::{Ui, UiConfig};
 use keys::{Inserted, KeyAction, KeyDown};
-
-/// Pixels a wheel line scrolls, as on the desktop.
-const LINE: f32 = 40.0;
 
 enum Present {
     Gpu {
@@ -388,11 +385,12 @@ impl<A: App> ApplicationHandler<UserEvent> for Runner<A> {
                 s.dispatch();
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * LINE,
-                    MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / k,
+                // A page's pixel deltas carry the browser's own momentum, phaseless.
+                let (dy, phase) = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => (-y * WHEEL_LINE, WheelPhase::Line),
+                    MouseScrollDelta::PixelDelta(p) => (-(p.y as f32) / k, WheelPhase::Moved),
                 };
-                s.ui.wheel(dy);
+                s.ui.wheel_phase(dy, phase);
                 s.dispatch();
             }
             // A finger is a pointer that is down while it touches.
