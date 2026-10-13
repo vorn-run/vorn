@@ -127,7 +127,7 @@ fn summary(s: &Screen<'_>, projects: &[WtProject]) -> El {
                             .silent(),
                         )
                         .child(
-                            text(format_bytes(artifacts), 20.0, c(0x8ec5ff))
+                            text(format_bytes(artifacts), 20.0, c(look::BLUE_300))
                                 .weight(600)
                                 .line_height(28.0)
                                 .mt(4.0)
@@ -147,13 +147,13 @@ fn summary(s: &Screen<'_>, projects: &[WtProject]) -> El {
                     div()
                         .h_full()
                         .w_pct(art_pct as f32)
-                        .bg(Rgba::hexa(0x51a2ff, 0.7)),
+                        .bg(Rgba::hexa(look::BLUE_400, 0.7)),
                 )
                 .child(
                     div()
                         .h_full()
                         .w_pct(rem_pct as f32)
-                        .bg(Rgba::hexa(0x51a2ff, 0.25)),
+                        .bg(Rgba::hexa(look::BLUE_400, 0.25)),
                 ),
         )
         .child(
@@ -199,12 +199,12 @@ fn summary(s: &Screen<'_>, projects: &[WtProject]) -> El {
             .role(Role::Button, label.as_str());
         let fg = if confirming {
             b = b
-                .bg(Rgba::hexa(0x2b7fff, 0.25 + 0.1 * hot))
-                .border(1.0, Rgba::hexa(0x2b7fff, 0.3));
+                .bg(Rgba::hexa(look::BLUE_500, 0.25 + 0.1 * hot))
+                .border(1.0, Rgba::hexa(look::BLUE_500, 0.3));
             c(look::WHITE)
         } else {
-            b = b.bg(Rgba::hexa(0x2b7fff, 0.12 + 0.08 * hot));
-            c(0x8ec5ff)
+            b = b.bg(Rgba::hexa(look::BLUE_500, 0.12 + 0.08 * hot));
+            c(look::BLUE_300)
         };
         b = b
             .child(ico("trash-2", 13.0, 2.0, fg))
@@ -245,10 +245,10 @@ fn checkbox(s: &Screen<'_>, e: &WtEntry, checked: bool) -> El {
         .role(Role::CheckBox, format!("Select {}", e.name))
         .toggled(checked);
     b = if checked {
-        b.bg(c(0x2b7fff))
+        b.bg(c(look::BLUE_500))
             .child(ico("check", 11.0, 3.0, c(look::WHITE)).ml(1.0).mt(1.0))
     } else {
-        b.bg(c(0xffffff)).border(1.0, c(0x767676))
+        b.bg(c(look::WHITE)).border(1.0, c(0x767676))
     };
     if e.selectable() {
         b.on(Action::Click)
@@ -313,7 +313,7 @@ fn worktree_row(s: &Screen<'_>, e: &WtEntry, last: bool) -> El {
                     div()
                         .h_full()
                         .w_pct(pct as f32)
-                        .bg(Rgba::hexa(0x51a2ff, 0.6)),
+                        .bg(Rgba::hexa(look::BLUE_400, 0.6)),
                 ),
         );
     }
@@ -417,9 +417,9 @@ fn stale_strip(s: &Screen<'_>, p: &WtProject) -> El {
         let hot = s.ui.hover(id);
         let (border, bg, fg) = if on {
             (
-                Rgba::hexa(0xff6467, 0.4),
-                Rgba::hexa(0xfb2c36, 0.15),
-                c(0xffc9c9),
+                Rgba::hexa(look::RED_400, 0.4),
+                Rgba::hexa(look::RED_500, 0.15),
+                c(look::RED_200),
             )
         } else if b.merged {
             (
@@ -429,9 +429,9 @@ fn stale_strip(s: &Screen<'_>, p: &WtProject) -> El {
             )
         } else {
             (
-                Rgba::hexa(0xfe9a00, 0.25),
-                Rgba::hexa(0xfe9a00, 0.06),
-                Rgba::hexa(0xffd230, 0.8),
+                Rgba::hexa(look::AMBER_500, 0.25),
+                Rgba::hexa(look::AMBER_500, 0.06),
+                Rgba::hexa(look::AMBER_300, 0.8),
             )
         };
         let tip = if b.merged {
@@ -464,9 +464,9 @@ fn stale_strip(s: &Screen<'_>, p: &WtProject) -> El {
         .px(10.0)
         .py(4.0)
         .rounded(6.0)
-        .bg(Rgba::hexa(0xfb2c36, 0.1 + 0.1 * hot))
+        .bg(Rgba::hexa(look::RED_500, 0.1 + 0.1 * hot))
         .role(Role::Button, "Delete branches")
-        .child(ico("trash-2", 11.0, 2.0, c(0xffa2a2)))
+        .child(ico("trash-2", 11.0, 2.0, c(look::RED_300)))
         .child(small(
             format!(
                 "Delete {}branch{}",
@@ -477,7 +477,7 @@ fn stale_strip(s: &Screen<'_>, p: &WtProject) -> El {
                 },
                 if chosen == 1 { "" } else { "es" }
             ),
-            c(0xffa2a2),
+            c(look::RED_300),
         ));
     del_btn = if chosen == 0 || page.busy {
         del_btn.opacity(0.4)
@@ -679,10 +679,14 @@ pub(super) fn selection_bar(s: &Screen<'_>) -> Option<El> {
                         .child(ico("triangle-alert", 11.0, 2.0, c(look::AMBER_400))),
                 )
                 .child(
-                    text(warnings.join(" \u{b7} "), 11.0, Rgba::hexa(0xffd230, 0.85))
-                        .line_height(16.5)
-                        .wrapping()
-                        .silent(),
+                    text(
+                        warnings.join(" \u{b7} "),
+                        11.0,
+                        Rgba::hexa(look::AMBER_300, 0.85),
+                    )
+                    .line_height(16.5)
+                    .wrapping()
+                    .silent(),
                 ),
         );
     }
@@ -704,12 +708,16 @@ pub(super) fn selection_bar(s: &Screen<'_>) -> Option<El> {
     };
     let (bg, border, fg) = if confirming {
         (
-            Rgba::hexa(0xfb2c36, 0.3 + 0.15 * hot),
-            Some(Rgba::hexa(0xff6467, 0.4)),
+            Rgba::hexa(look::RED_500, 0.3 + 0.15 * hot),
+            Some(Rgba::hexa(look::RED_400, 0.4)),
             c(look::WHITE),
         )
     } else {
-        (Rgba::hexa(0xfb2c36, 0.12 + 0.08 * hot), None, c(0xffa2a2))
+        (
+            Rgba::hexa(look::RED_500, 0.12 + 0.08 * hot),
+            None,
+            c(look::RED_300),
+        )
     };
     let mut rb = div()
         .id(remove)

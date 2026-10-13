@@ -1073,7 +1073,12 @@ pub(in crate::screen) fn project_items(s: &Screen<'_>, form: Form) -> Vec<Item> 
                 "folder",
                 &p.name,
                 Act::Task(TaskAct::PickProject(form, p.name.clone())),
-            );
+            )
+            .mark(crate::screen::sidebar_project_icon(
+                p,
+                14.0,
+                c(look::GRAY_300),
+            ));
             it.checked = &p.name == current;
             it
         })
@@ -1198,8 +1203,8 @@ pub(super) fn project_picker(s: &Screen<'_>, form: Form) -> El {
         "task-project-picker",
         MenuKind::TaskProject(form),
         s.store.projects.iter().find(|q| &q.name == p).map_or_else(
-            || ico("folder", 14.0, 1.5, c(look::GRAY_500)),
-            |q| crate::screen::sidebar_project_icon(q, 14.0),
+            || crate::screen::folder_icon(14.0, c(look::GRAY_300)),
+            |q| crate::screen::sidebar_project_icon(q, 14.0, c(look::GRAY_300)),
         ),
         label,
         if p.is_empty() {

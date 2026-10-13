@@ -80,7 +80,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                         .items_center()
                         .gap(8.0)
                         .child(
-                            text(a.name, 14.0, c(0xf3f4f6))
+                            text(a.name, 14.0, c(look::GRAY_100))
                                 .weight(500)
                                 .line_height(20.0)
                                 .silent(),
@@ -286,7 +286,7 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
             crate::ui::tooltip(s.ui, b, id, label, None)
         };
         let copy_icon = if copied {
-            ico("circle-check-big", 14.0, 2.0, c(0x00d492))
+            ico("circle-check-big", 14.0, 2.0, c(look::EMERALD_400))
         } else {
             ico("copy", 14.0, 2.0, c(look::GRAY_500))
         };
@@ -423,7 +423,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
                 .row()
                 .items_center()
                 .gap(8.0)
-                .child(div().size(8.0, 8.0).rounded(4.0).bg(c(0x00d492)))
+                .child(div().size(8.0, 8.0).rounded(4.0).bg(c(look::EMERALD_400)))
                 .child(
                     text(have.len().to_string(), 12.0, c(look::GRAY_200))
                         .weight(500)

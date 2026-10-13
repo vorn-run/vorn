@@ -551,10 +551,12 @@ pub fn choice_width(t: &str) -> f32 {
     parse_token(t).0.max(180.0)
 }
 
-fn project_glyph(s: &Screen<'_>, name: &str, size: f32) -> El {
+/// `ProjectIcon` on the form trigger, whose text is white.
+fn project_glyph(s: &Screen<'_>, name: &str) -> El {
+    let white = c(look::WHITE);
     match s.store.projects.iter().find(|p| p.name == name) {
-        Some(p) => super::super::sidebar_project_icon(p, size),
-        None => ico("folder", size, 1.5, c(0x6b7280)),
+        Some(p) => super::super::sidebar_project_icon(p, 14.0, white),
+        None => super::super::folder_icon(14.0, white),
     }
 }
 
@@ -562,10 +564,11 @@ fn project_glyph(s: &Screen<'_>, name: &str, size: f32) -> El {
 fn project(s: &Screen<'_>, node: &str, path: &str, current: &str, from_context: bool) -> El {
     let (label, glyph) = if from_context {
         (Some("From Context"), ico("zap", 13.0, 1.5, c(0x60a5fa)))
-    } else if current.is_empty() {
-        (None, ico("folder", 13.0, 1.5, c(0x6b7280)))
     } else {
-        (Some(current), project_glyph(s, current, 13.0))
+        (
+            (!current.is_empty()).then_some(current),
+            project_glyph(s, current),
+        )
     };
     let mut b = select(
         s,
@@ -662,10 +665,9 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
                 )));
             }
             for p in &s.store.projects {
-                out.push(
-                    pick(&p.name, &p.name, !from_ctx && p.name == cur)
-                        .mark(super::super::sidebar_project_icon(p, 13.0)),
-                );
+                out.push(pick(&p.name, &p.name, !from_ctx && p.name == cur).mark(
+                    super::super::sidebar_project_icon(p, 14.0, c(look::GRAY_300)),
+                ));
             }
             out
         }
@@ -1134,7 +1136,7 @@ fn toggle(s: &Screen<'_>, a: WfAct, on: bool, disabled: bool, label: &str) -> El
         .w(40.0)
         .h(24.0)
         .rounded(12.0)
-        .bg(if on { c(0x2b7fff) } else { white(0.10) })
+        .bg(if on { c(look::BLUE_500) } else { white(0.10) })
         .role(Role::Switch, label)
         .toggled(on)
         .disabled(disabled)

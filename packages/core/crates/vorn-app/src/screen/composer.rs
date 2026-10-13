@@ -513,7 +513,7 @@ fn hint(s: &Screen<'_>) -> El {
     }
     if let Some(e) = &s.st.composer.error {
         // text-xs text-red-400
-        return text(truncate(e, 120), 12.0, c(0xff6467))
+        return text(truncate(e, 120), 12.0, c(look::RED_400))
             .line_height(16.0)
             .mt(8.0)
             .role(Role::Alert, e.as_str());

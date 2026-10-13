@@ -270,7 +270,9 @@ fn row<T>(ui: &Ui, group: Id, i: usize, item: Item<T>, sub_open: Option<El>) -> 
                 .shrink0(),
         );
     }
-    if let Some((name, color)) = item.icon {
+    if let Some(m) = item.mark {
+        r = r.child(div().shrink0().child(m));
+    } else if let Some((name, color)) = item.icon {
         let color = if item.danger { rgb::DANGER } else { color };
         r = r.child(ico(name, 14.0, 1.5, Rgba::hex(color)).shrink0());
     }

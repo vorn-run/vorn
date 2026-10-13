@@ -520,6 +520,7 @@ fn session_groups(s: &Screen<'_>, sid: &str) -> Vec<Item> {
             g.icon.as_deref(),
             g.icon_color.as_deref(),
             12.0,
+            c(if on { look::WHITE } else { look::GRAY_300 }),
         ));
         it.checked = on;
         items.push(it);
