@@ -79,6 +79,7 @@ struct ShellCommands: Commands {
         }
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") { model.sidebarOpen.toggle() }.keyboardShortcut("b")
+            Button("Command Palette") { model.toggle(.commandPalette) }.keyboardShortcut("k")
             Divider()
             Button("Sessions") { model.mainViewMode = .sessions }.keyboardShortcut("s")
             Button("Tasks") { model.mainViewMode = .tasks }.keyboardShortcut("t")
@@ -116,7 +117,7 @@ struct ShellCommands: Commands {
     }
 }
 
-/// Esc and ⌘W, which the terminal keeps when it has focus (useKeyboardShortcuts.ts).
+/// Esc, ⌘W and ⌘K, which the terminal keeps when it has focus (useKeyboardShortcuts.ts).
 @MainActor
 final class KeyMonitor {
     private var token: Any?
@@ -128,6 +129,10 @@ final class KeyMonitor {
             if event.keyCode == 13, mods == .command, model.expandedSessionID != nil {
                 model.selectedSessionID = model.expandedSessionID
                 model.expandedSessionID = nil
+                return nil
+            }
+            if event.keyCode == 40, mods == .command {
+                model.toggle(.commandPalette)
                 return nil
             }
             guard event.keyCode == 53, mods.isEmpty else { return event }
@@ -164,7 +169,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME` (`--palette-query TEXT` types into the command palette), `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -414,7 +419,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     if let name = value("--overlay") {
         let overlays: [String: Overlay] = [
             "view-options": .viewOptions, "recent": .recent, "shortcuts": .shortcuts,
-            "new-menu": .newMenu, "sidebar-options": .sidebarOptions,
+            "new-menu": .newMenu, "sidebar-options": .sidebarOptions, "command-palette": .commandPalette,
             "add-project": .addProject(editing: nil), "edit-project": .addProject(editing: store.projects.first?.name),
             "project-menu": .projectMenu(store.projects.first?.name ?? ""),
             "remove-worktree": store.sessions.first(where: { $0.worktreePath != nil }).map {
@@ -425,7 +430,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             FileHandle.standardError.write(Data("unknown overlay \(name)\n".utf8))
             return 2
         }
-        if overlay == .recent {
+        CommandPaletteView.renderQuery = value("--palette-query")
+        if overlay == .recent || overlay == .commandPalette {
             let now = Date().timeIntervalSince1970 * 1000
             let path = store.projects.first?.path ?? "/tmp/vorn"
             model.recentFixture = [
@@ -477,7 +483,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
-    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
+    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent
+        || model.overlay == .commandPalette || model.settingsOpen
         || model.panes.diffSessionID != nil || !model.panes.filesPanes.isEmpty || !model.panes.terminalsPanes.isEmpty
         || !model.panes.editorCards.isEmpty || usesBrowser
     let editorState = value("--editor")

@@ -54,7 +54,7 @@ struct OverlayHost: View {
     private var backdrop: Color {
         switch model.overlay {
         case .addProject?: Color.black.opacity(0.5)
-        case .shortcuts?, .removeWorktree?: Color.black.opacity(0.4)
+        case .shortcuts?, .removeWorktree?, .commandPalette?: Color.black.opacity(0.4)
         default: Color.white.opacity(0.001)
         }
     }
@@ -83,6 +83,9 @@ struct OverlayHost: View {
             ShortcutsPanel(model: model)
                 .frame(width: 520)
                 .offset(x: (size.width - 520) / 2, y: size.height * 0.15)
+        case .commandPalette:
+            CommandPaletteView(model: model, store: store, actions: actions, features: features)
+                .offset(x: (size.width - CommandPaletteView.width) / 2, y: size.height * 0.2)
         case .sidebarOptions:
             if let r = rect("sidebarOptions", geo) {
                 SidebarOptionsPanel(model: model).offset(x: r.minX, y: r.maxY + 4)

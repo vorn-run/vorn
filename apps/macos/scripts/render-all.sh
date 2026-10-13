@@ -51,9 +51,11 @@ export VORN_DATA_DIR=$data
 "$bin/Vorn" --render "$out/shell-grid-menu.png" --context grid
 "$bin/Vorn" --render "$out/shell-card-menu.png" --context card:0
 "$bin/Vorn" --render "$out/shell-card-menu-sub.png" --context card:0 --submenu new-with
-for overlay in view-options recent shortcuts new-menu sidebar-options add-project edit-project project-menu; do
+for overlay in view-options recent shortcuts new-menu sidebar-options add-project edit-project project-menu command-palette; do
   "$bin/Vorn" --render "$out/overlay-$overlay.png" --overlay "$overlay"
 done
+"$bin/Vorn" --render "$out/palette-query.png" --overlay command-palette --palette-query term
+"$bin/Vorn" --render "$out/palette-empty.png" --overlay command-palette --palette-query zzzz
 for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
