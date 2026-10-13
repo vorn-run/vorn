@@ -282,10 +282,38 @@ fn window(args: &Args) -> Result<(), String> {
     })
 }
 
+/// The floating widget, a window of its own over other apps.
+fn widget(args: &Args) -> Result<(), String> {
+    let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
+    let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
+    let w = Arc::clone(&waker);
+    let wake: vorn_app::client::rpc::Wake = Arc::new(move || {
+        if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
+            w.wake();
+        }
+    });
+    let widget = vorn_app::widget::Widget::connect(&ep, wake)?;
+    let opts = WindowOptions {
+        decorations: false,
+        always_on_top: true,
+        skip_taskbar: true,
+        transparent: true,
+        corner: Some((20.0, 20.0)),
+        ..WindowOptions::sized(vorn_app::widget::FULL)
+    };
+    run_with("Vorn widget", opts, ui_config(1.0), move |_, wake| {
+        if let Ok(mut slot) = waker.lock() {
+            *slot = Some(wake);
+        }
+        vorn_app::widget::WidgetWindow { widget }
+    })
+}
+
 fn main() {
     let result = Args::parse().and_then(|args| match args.mode.as_str() {
         "shot" => shot(&args),
         "window" => window(&args),
+        "widget" => widget(&args),
         other => Err(format!("unknown mode {other:?}")),
     });
     if let Err(e) = result {

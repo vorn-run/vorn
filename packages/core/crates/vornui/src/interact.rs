@@ -80,7 +80,7 @@ pub(crate) struct Moving {
 }
 
 /// What the app asks of the window it runs in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WindowRequest {
     Minimize,
     ToggleMaximize,
@@ -88,6 +88,11 @@ pub enum WindowRequest {
     /// Starts moving the window with the pressed pointer (a title bar).
     Drag,
     ToggleFullscreen,
+    /// Brings the window forward, out of the Dock or taskbar if minimized.
+    Focus,
+    /// Resizes to this logical size, keeping the bottom right corner where
+    /// it is (the floating widget folding to a pill).
+    Resize(f32, f32),
 }
 
 /// How long the pointer rests on an element before its tooltip shows.

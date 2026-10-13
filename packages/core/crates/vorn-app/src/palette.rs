@@ -339,6 +339,13 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
         .keys(&["new group", "create group", "sidebar"]),
         Entry::new(
             Cat::Actions,
+            "Toggle Widget",
+            Glyph::Icon("layout-dashboard"),
+            Act::ToggleWidget,
+        )
+        .keys(&["widget", "floating", "status"]),
+        Entry::new(
+            Cat::Actions,
             "Add Workflow",
             Glyph::Icon("workflow"),
             Act::Workflow(WfAct::New),

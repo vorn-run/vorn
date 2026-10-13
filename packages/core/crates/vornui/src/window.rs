@@ -153,6 +153,15 @@ pub struct WindowOptions {
     /// Dock and the window switcher.
     pub inset_title: Option<(f32, f32)>,
     pub maximized: bool,
+    /// Floats over every other window.
+    pub always_on_top: bool,
+    /// Kept out of the taskbar and the window switcher (Windows).
+    pub skip_taskbar: bool,
+    /// Clears to the app's background alpha where the surface allows it.
+    pub transparent: bool,
+    /// Opens this far (logical pixels) from the screen's bottom right
+    /// corner rather than where the system places it.
+    pub corner: Option<(f32, f32)>,
 }
 
 impl WindowOptions {
@@ -163,6 +172,10 @@ impl WindowOptions {
             decorations: true,
             inset_title: None,
             maximized: false,
+            always_on_top: false,
+            skip_taskbar: false,
+            transparent: false,
+            corner: None,
         }
     }
 }
@@ -229,6 +242,29 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         if let Some((w, h)) = o.min_size {
             attrs = attrs.with_min_inner_size(LogicalSize::new(w, h));
         }
+        if o.always_on_top {
+            attrs = attrs.with_window_level(winit::window::WindowLevel::AlwaysOnTop);
+        }
+        if o.transparent {
+            attrs = attrs.with_transparent(true);
+        }
+        #[cfg(windows)]
+        if o.skip_taskbar {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_skip_taskbar(true);
+        }
+        if let (Some((mx, my)), Some(m)) = (
+            o.corner,
+            el.primary_monitor()
+                .or_else(|| el.available_monitors().next()),
+        ) {
+            let k = m.scale_factor();
+            let size = m.size().to_logical::<f64>(k);
+            let at = m.position().to_logical::<f64>(k);
+            let x = at.x + size.width - f64::from(o.size.0 + mx);
+            let y = at.y + size.height - f64::from(o.size.1 + my);
+            attrs = attrs.with_position(winit::dpi::LogicalPosition::new(x, y));
+        }
         #[cfg(target_os = "macos")]
         if o.inset_title.is_some() {
             use winit::platform::macos::WindowAttributesExtMacOS;
@@ -251,7 +287,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         let (present, mut ui) = match adapter {
             Some(a) if mode.wants_device(&a) => {
                 let gpu = Gpu::open(instance, a)?;
-                let (surface, config) = configure(&gpu, surface, &window)?;
+                let (surface, config) = configure(&gpu, surface, &window, o.transparent)?;
                 let ui = Ui::new(Some(gpu), RenderMode::Gpu, config.format, &cfg);
                 (Present::Gpu { surface, config }, ui)
             }
@@ -497,6 +533,32 @@ impl<A: App> Live<A> {
                     self.window
                         .set_fullscreen((!full).then_some(Fullscreen::Borderless(None)));
                 }
+                WindowRequest::Focus => {
+                    self.window.set_visible(true);
+                    self.window.set_minimized(false);
+                    self.window.focus_window();
+                }
+                WindowRequest::Resize(w, h) => {
+                    let k = self.window.scale_factor();
+                    let old = self.window.outer_size().to_logical::<f64>(k);
+                    let at = self
+                        .window
+                        .outer_position()
+                        .ok()
+                        .map(|p| p.to_logical::<f64>(k));
+                    let _ = self
+                        .window
+                        .request_inner_size(LogicalSize::new(f64::from(w), f64::from(h)));
+                    if let Some(at) = at {
+                        let x = at.x + old.width - f64::from(w);
+                        let y = at.y + old.height - f64::from(h);
+                        self.window
+                            .set_outer_position(winit::dpi::LogicalPosition::new(
+                                x.max(0.0),
+                                y.max(0.0),
+                            ));
+                    }
+                }
             }
         }
         close
@@ -607,6 +669,7 @@ fn configure(
     gpu: &Gpu,
     surface: wgpu::Surface<'static>,
     window: &Window,
+    transparent: bool,
 ) -> Result<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration), String> {
     let caps = surface.get_capabilities(&gpu.adapter);
     // A non-sRGB target blends in sRGB space, as CSS colors do.
@@ -624,6 +687,14 @@ fn configure(
         wgpu::PresentMode::Fifo
     };
     let px = window.inner_size();
+    // See-through only where the compositor blends the frame's alpha.
+    let alpha_mode = [
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::PostMultiplied,
+    ]
+    .into_iter()
+    .find(|m| transparent && caps.alpha_modes.contains(m))
+    .unwrap_or(caps.alpha_modes[0]);
     // Copying from the frame is what backdrop blur reads; without it blurs
     // are skipped.
     let usage =
@@ -635,7 +706,7 @@ fn configure(
         height: px.height.max(1),
         present_mode,
         desired_maximum_frame_latency: 1,
-        alpha_mode: caps.alpha_modes[0],
+        alpha_mode,
         view_formats: vec![],
     };
     surface.configure(&gpu.device, &config);

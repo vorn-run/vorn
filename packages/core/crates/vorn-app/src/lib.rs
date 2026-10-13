@@ -54,6 +54,7 @@ pub mod ui;
 pub mod vars;
 pub mod view;
 pub mod web;
+pub mod widget;
 pub mod workflows;
 
 /// Vorn's composed components, built on [`ui`].

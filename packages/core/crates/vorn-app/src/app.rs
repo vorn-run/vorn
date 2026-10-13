@@ -44,6 +44,7 @@ mod settings;
 mod side;
 pub mod signin;
 mod tasks;
+mod widget;
 mod workflows;
 
 /// The modifier the renderer's shortcuts use (`modKey`).
@@ -299,6 +300,12 @@ pub struct App {
     windowed: bool,
     /// The system-wide approve and deny keys, once an agent has asked.
     hotkeys: Option<Option<crate::hotkeys::Presses>>,
+    /// The floating widget's process, while it runs.
+    widget: Option<widget::Running>,
+    /// `defaults.widgetEnabled` last frame, to hide the widget when it turns off.
+    widget_was_enabled: bool,
+    /// A permission request arrived; the frame decides whether the widget shows.
+    widget_wanted: bool,
     /// The OS file picker, while it is open.
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
@@ -357,6 +364,9 @@ impl App {
             wake: app_wake,
             sessions: Default::default(),
             windowed: false,
+            widget: None,
+            widget_was_enabled: false,
+            widget_wanted: false,
             hotkeys: None,
             picking: None,
         };
@@ -495,6 +505,7 @@ impl App {
                     self.notices.extend(heard);
                     if method == "widget:permission-request" {
                         self.st.permission_keys = true;
+                        self.widget_wanted = true;
                     }
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
@@ -1595,6 +1606,7 @@ impl App {
             }
             Act::Welcome => self.open_onboard(ui),
             Act::Ext(a) => self.run_ext(a),
+            Act::ToggleWidget => self.toggle_widget(),
             Act::AddGroup => {
                 let mut config = self.store.config.clone();
                 let workspace = config
@@ -2466,6 +2478,10 @@ impl App {
         }
         self.hotkeys_tick();
         self.ext_tick();
+        if std::mem::take(&mut self.widget_wanted) {
+            self.widget_asked(ui);
+        }
+        self.widget_tick(ui);
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }

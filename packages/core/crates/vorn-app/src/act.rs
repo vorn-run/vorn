@@ -168,6 +168,8 @@ pub enum Act {
     Plug(crate::plugins::PlugAct),
     /// Extension panes.
     Ext(crate::extensions::ExtAct),
+    /// Shows or hides the floating widget.
+    ToggleWidget,
     /// `addSessionGroup`: a group named "New group" at the end of the list.
     AddGroup,
     /// Closes the sign-in sheet before anyone signed in.
