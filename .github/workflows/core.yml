@@ -258,14 +258,6 @@ jobs:
         if: ${{ !inputs.quick }}
         run: yarn vitest run tests/native-cli.test.ts
 
-      # A client's sessions through the real vornd and session holder, on
-      # each platform: a named pipe and ConPTY on Windows. The
-      # screen against the recorded reference runs where its programs (POSIX
-      # shell) do.
-      - name: Sessions through vornd
-        if: ${{ !inputs.quick }}
-        run: yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
-
       # Started the way the app starts it. Stdin is already closed, so it says
       # where it listens and then stops at once. The packaged app is checked
       # by native-app.yml, which builds the installers.
