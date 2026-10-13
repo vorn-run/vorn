@@ -404,13 +404,7 @@ struct ShortcutsPanel: View {
     }
 
     private func row<K: View>(_ label: String, @ViewBuilder key: () -> K) -> some View {
-        HStack {
-            Text(label).font(.ui(13)).foregroundStyle(Theme.gray300)
-            Spacer()
-            key()
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        ShortcutRow(label: label, key: key())
     }
 
     private func kbd(_ key: String) -> some View {
@@ -421,6 +415,26 @@ struct ShortcutsPanel: View {
             .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.white(0.04)))
             .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// A shortcut row, lit on hover like the renderer's `hover:bg-white/[0.03]`.
+private struct ShortcutRow<K: View>: View {
+    let label: String
+    let key: K
+    @State private var hovered = false
+
+    var body: some View {
+        HStack {
+            Text(label).font(.ui(13)).foregroundStyle(Theme.gray300)
+            Spacer()
+            key
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(Theme.white(hovered ? 0.03 : 0)))
+        .onHover { hovered = $0 }
+        .animation(.easeInOut(duration: 0.15), value: hovered)
     }
 }
 
