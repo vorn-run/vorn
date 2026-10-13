@@ -15,11 +15,7 @@ const ENTRY_SHEETS = [
 ] as const
 
 /** Every ground painted before a client's stylesheet has loaded. */
-const PRE_MOUNT_GROUNDS = [
-  'packages/web/src/renderer/index.html',
-  'packages/web/index.html',
-  'packages/web/public/offline.html'
-] as const
+const PRE_MOUNT_GROUNDS = ['packages/web/index.html', 'packages/web/public/offline.html'] as const
 
 function token(name: string): string {
   const match = css.match(new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{3,8});`))

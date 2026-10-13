@@ -333,7 +333,7 @@ mod tests {
     fn colors_match_theme_css() {
         let css = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../../src/renderer/theme.css"
+            "/../../../web/src/renderer/theme.css"
         ));
         let pairs = [
             ("--color-bronzo:", color::BRONZO),
