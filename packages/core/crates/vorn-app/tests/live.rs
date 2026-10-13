@@ -141,24 +141,28 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     shot.until(&mut app, "the shell's fitted screen", |app, _| {
         app.pane(&id).filter(|p| p.sb_epoch > 0).map(|_| ())
     });
+    // Each command prints what its own text does not contain, so an answer
+    // is found even after a prompt the shell printed ahead of it.
     let shows = |line: &'static str| {
         let id = id.clone();
         move |app: &mut vorn_app::App, _: &vorn_app::ui::Ui| {
             screen(app, &id)
                 .iter()
-                .any(|l| l.trim() == line)
+                .any(|l| l.trim_end().ends_with(line))
                 .then_some(())
         }
     };
 
     // One line goes straight in, as typing would.
-    shot.ui.clipboard().set("echo pasted-1");
+    shot.ui.clipboard().set("echo pasted-$((0+1))");
     shot.send(&mut app, paste.clone());
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     shot.until(&mut app, "the pasted command's answer", shows("pasted-1"));
 
     // The shell would run each line of this as it arrives: the app asks first.
-    shot.ui.clipboard().set("echo two-a\necho two-b\n");
+    shot.ui
+        .clipboard()
+        .set("echo two-$((0+1))\necho two-$((0+2))\n");
     shot.send(&mut app, paste.clone());
     shot.until(&mut app, "the paste confirm", |app, _| {
         (app.st.dialog == Some(Dialog::Paste)).then_some(())
@@ -175,10 +179,10 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
         (app.st.dialog == Some(Dialog::Paste)).then_some(())
     });
     shot.send(&mut app, key("Enter", 0, Some("\r")));
-    shot.until(&mut app, "the confirmed paste's answer", shows("two-b"));
+    shot.until(&mut app, "the confirmed paste's answer", shows("two-2"));
     let ran = screen(&app, &id)
         .iter()
-        .filter(|l| l.trim() == "two-a")
+        .filter(|l| l.trim_end().ends_with("two-1"))
         .count();
     assert_eq!(ran, 1, "only the confirmed paste ran");
     assert_eq!(app.st.dialog, None);
@@ -203,7 +207,7 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     // The drag's press is a click too: wait until it no longer pairs.
     std::thread::sleep(std::time::Duration::from_millis(600));
     shot.frame(&mut app);
-    let row = row_of(&app, &id, "two-b");
+    let row = row_of(&app, &id, "pasted-1");
     let (x, y) = cell_xy(&app, &shot, &id, 1, row);
     shot.ui.pointer_move(x, y);
     shot.ui.pointer_down();
@@ -223,7 +227,7 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     assert_eq!(app.menu_labels(&shot.ui)[0], "Copy");
     shot.ui.clipboard().set("");
     choose(&mut shot, &mut app, "Copy");
-    assert_eq!(copied(&mut shot, &mut app, "the copied word"), "two-b");
+    assert_eq!(copied(&mut shot, &mut app, "the copied word"), "pasted-1");
 
     // The menu's Paste pastes; Ctrl-C with nothing selected still interrupts.
     shot.ui.clipboard().set("sleep 30");
@@ -232,12 +236,8 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     std::thread::sleep(std::time::Duration::from_millis(300));
     shot.send(&mut app, key("KeyC", mods::CTRL, Some("c")));
-    shot.type_line(&mut app, "echo after-interrupt");
-    shot.until(
-        &mut app,
-        "the shell back from sleep",
-        shows("after-interrupt"),
-    );
+    shot.type_line(&mut app, "echo after-$((0+9))");
+    shot.until(&mut app, "the shell back from sleep", shows("after-9"));
 }
 
 /// What the copy put on the clipboard, once it has; the caller empties it

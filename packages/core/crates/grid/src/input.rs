@@ -406,9 +406,11 @@ mod tests {
         assert_eq!(bytes(send(&t, "Home", 0)), b"\x1b[H");
         assert_eq!(bytes(send(&t, "End", 0)), b"\x1b[F");
         assert_eq!(bytes(send(&t, "Home", shift)), b"\x1b[1;2H");
-        // Cmd with a letter is the app's: nothing reaches the program.
+        // Cmd with a letter is the app's on a Mac: nothing reaches the program.
         let cmd_v = key("V", sup, Some("v"));
-        assert_eq!(enc.encode(&t, &cmd_v).unwrap(), Encoded::Nothing);
+        if cfg!(target_os = "macos") {
+            assert_eq!(enc.encode(&t, &cmd_v).unwrap(), Encoded::Nothing);
+        }
         // Kitty key reports keep every modifier.
         let mut t = t;
         t.vt_write(b"\x1b[>1u");
