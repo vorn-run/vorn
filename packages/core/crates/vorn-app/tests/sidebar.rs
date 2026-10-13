@@ -10,10 +10,10 @@ use serde_json::{json, Value};
 use support::{connect, key, seed_acme, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::WS_NAME;
-use vorn_app::screen::menus::MENU;
+use vorn_app::screen::menus::{MENU, SUB};
 use vorn_app::sidebar_view::{ProjectSort, WorktreeFilter};
 use vorn_app::state::{MenuKind, SidebarMode};
-use vorn_app::ui::{item_id, Id};
+use vorn_app::ui::{self, item_id, Id};
 use vorn_app::App;
 
 fn control(place: &str, act: Act) -> Id {
@@ -264,5 +264,82 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
         .position(|l| l == "New session in\u{2026}")
         .expect("the submenu");
     shot.hover(&mut app, item_id(MENU, i));
+    assert_eq!(open_sub(&app), Some(i), "hovering opens the submenu");
     shot.save(&mut app, "plus-menu-projects");
+
+    // Beside its entry, level with it, covering none of the menu.
+    let row = shot.ui.rect_of(item_id(MENU, i)).expect("the entry");
+    let sub = shot
+        .ui
+        .rect_of(ui::menu::sub_panel_id(SUB))
+        .expect("the submenu");
+    let slack = ui::menu::OVERLAP + 1.5;
+    assert!(
+        sub.x >= row.right() - slack || sub.right() <= row.x + slack,
+        "{sub:?} beside {row:?}"
+    );
+    assert!(
+        sub.y <= row.y && sub.y >= row.y - 8.0,
+        "{sub:?} level with {row:?}"
+    );
+
+    // Heading for it across the next entry keeps it open.
+    if let Some(next) = shot.ui.rect_of(item_id(MENU, i + 1)) {
+        let toward = if sub.x > row.x { 1.0 } else { -1.0 };
+        let (x0, y0) = (row.x + row.w / 2.0, row.y + row.h / 2.0);
+        let (x1, y1) = (x0 + toward * 40.0, next.y + next.h / 2.0);
+        for k in 1..=4 {
+            let t = k as f32 / 4.0;
+            shot.ui.pointer_move(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            shot.frame(&mut app);
+        }
+        assert_eq!(open_sub(&app), Some(i), "held while heading for it");
+        let near = if toward > 0.0 { sub.x + 20.0 } else { sub.right() - 20.0 };
+        let (x2, y2) = (near, (y1 + 10.0).min(sub.bottom() - 10.0));
+        for k in 1..=3 {
+            let t = k as f32 / 3.0;
+            shot.ui.pointer_move(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+            shot.frame(&mut app);
+        }
+        assert_eq!(open_sub(&app), Some(i), "and reached");
+        shot.save(&mut app, "plus-menu-heading");
+        assert_eq!(open_sub(&app), Some(i), "resting in it keeps it");
+    }
+
+    // A click on the entry toggles its submenu; the menu stays.
+    shot.click(&mut app, item_id(MENU, i));
+    assert_eq!(open_sub(&app), None);
+    assert_eq!(menu(&app), Some(MenuKind::Grid));
+    shot.click(&mut app, item_id(MENU, i));
+    assert_eq!(open_sub(&app), Some(i));
+
+    // Keys: Left closes one level, Right opens into it, Escape closes one level.
+    shot.send(&mut app, key("Escape", 0, None));
+    assert_eq!(open_sub(&app), None);
+    assert_eq!(menu(&app), Some(MenuKind::Grid), "Escape closed one level");
+    for _ in 0..labels.len() {
+        if shot.ui.focused(item_id(MENU, i)) {
+            break;
+        }
+        shot.send(&mut app, key("ArrowDown", 0, None));
+    }
+    assert!(shot.ui.focused(item_id(MENU, i)), "Down reaches the entry");
+    shot.send(&mut app, key("ArrowRight", 0, None));
+    shot.frame(&mut app);
+    shot.frame(&mut app);
+    assert_eq!(open_sub(&app), Some(i));
+    assert!(
+        shot.ui.focused(item_id(SUB, 1)),
+        "focus goes into the submenu, past its header"
+    );
+    shot.save(&mut app, "plus-menu-keys");
+    shot.send(&mut app, key("ArrowLeft", 0, None));
+    assert_eq!(open_sub(&app), None);
+    assert!(shot.ui.focused(item_id(MENU, i)), "focus back on the entry");
+    escape(&mut shot, &mut app);
+    assert_eq!(menu(&app), None);
+}
+
+fn open_sub(app: &App) -> Option<usize> {
+    app.st.menu.as_ref().and_then(|m| m.sub.open)
 }

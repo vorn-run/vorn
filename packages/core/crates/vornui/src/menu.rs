@@ -204,6 +204,15 @@ impl<T> Default for Item<T> {
     }
 }
 
+/// How lit an entry is: the pointer over it, or keys on it.
+fn hot(ui: &Ui, id: Id) -> f32 {
+    if ui.key_focused(id) {
+        1.0
+    } else {
+        ui.hover(id)
+    }
+}
+
 fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>) -> El {
     if let Some(r) = item.row {
         return r;
@@ -259,7 +268,7 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
     if item.plain {
         return plain_row(ui, group, i, id, item);
     }
-    let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
+    let hot = hot(ui, id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
     if item.card_row {
         return card_row(group, i, id, hot, item);
     }
@@ -379,7 +388,7 @@ fn card_row<T>(group: Id, i: usize, id: Id, hot: f32, item: Item<T>) -> El {
 /// A plain menu button: `text-[12px] text-gray-300` (danger at 80 %), the
 /// icon in the text's colour.
 fn plain_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
-    let hot = ui.hover(id);
+    let hot = hot(ui, id);
     let (fg, bg) = if item.danger {
         let fg = Rgba::hexa(rgb::DANGER, 0.8).mix(Rgba::hex(rgb::DANGER), hot);
         (fg, Rgba::white(0.0).mix(Rgba::white(0.06), hot))
@@ -430,7 +439,7 @@ fn plain_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
 /// `SessionContextMenu`): `text-[13px] text-gray-300`, a 12 px icon; a
 /// checked danger entry is the armed "Confirm delete?".
 fn side_row<T>(ui: &Ui, group: Id, i: usize, id: Id, inset: Inset, item: Item<T>) -> El {
-    let hot = ui.hover(id);
+    let hot = hot(ui, id);
     let (fg, bg) = match (item.danger, item.checked) {
         (true, true) => (
             Rgba::hex(rgb::DANGER),
@@ -484,7 +493,7 @@ fn side_row<T>(ui: &Ui, group: Id, i: usize, id: Id, inset: Inset, item: Item<T>
 /// `SelectPicker`'s option: the check (or its room), the mark, the label
 /// and a hint.
 fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
-    let hot = ui.hover(id);
+    let hot = hot(ui, id);
     let fg = if item.checked {
         Rgba::hex(rgb::WHITE)
     } else {

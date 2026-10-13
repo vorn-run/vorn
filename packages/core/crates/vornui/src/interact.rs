@@ -419,6 +419,11 @@ impl Ui {
         self.st.focus == Some(id)
     }
 
+    /// Whether `id` has focus that keys moved there, its ring showing.
+    pub fn key_focused(&self, id: Id) -> bool {
+        self.focused(id) && self.st.focus_visible
+    }
+
     /// The focused element, if any.
     pub fn focus(&self) -> Option<Id> {
         self.st.focus

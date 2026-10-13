@@ -27,7 +27,8 @@ impl Id {
 
     /// An id under this one, for the parts of a widget (`menu.child(3)`).
     pub fn child(self, part: impl Hash) -> Id {
-        let mut h = Fnv(self.0);
+        // The parent hashed whole first: seeding with it raw let `a.child(i)` meet `b.child(j)`.
+        let mut h = Fnv(fnv(FNV_OFFSET, &self.0.to_le_bytes()));
         part.hash(&mut h);
         Id(h.0 | 1)
     }

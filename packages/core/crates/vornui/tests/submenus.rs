@@ -311,3 +311,14 @@ fn keys_open_walk_and_close_submenus() {
     assert!(!r.ui.menu_open(menu_id()), "and then the menu");
     assert!(r.chosen.is_empty());
 }
+
+#[test]
+fn entries_of_a_menu_and_its_submenu_never_share_an_id() {
+    // Groups an app names by hand, one bit apart.
+    let (menu, sub) = (Id(0x6d65_6e75_0000_0001), Id(0x6d65_6e75_0000_0003));
+    for i in 0..64 {
+        for j in 0..64 {
+            assert_ne!(item_id(menu, i), item_id(sub, j), "entry {i} and submenu entry {j}");
+        }
+    }
+}
