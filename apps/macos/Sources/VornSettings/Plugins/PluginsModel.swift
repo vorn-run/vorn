@@ -56,6 +56,8 @@ public final class PluginsModel {
     @ObservationIgnored public var openWorkflowEditor: (@MainActor (String?) -> Void)?
 
     @ObservationIgnored let api: ConnectorsAPI
+    /// What `probeSdk` answers in renders and tests that cannot start a package.
+    @ObservationIgnored var probeFixture: SdkManifest?
     @ObservationIgnored private var watching: [Task<Void, Never>] = []
     @ObservationIgnored private var tabChosen = false
 
@@ -182,7 +184,51 @@ public final class PluginsModel {
         loaded = true
     }
 
+    func probe(_ launch: LaunchSpec) async -> ConnectorsAPI.Outcome<SdkManifest> {
+        if let probeFixture { return .ok(probeFixture) }
+        return await api.probeSdk(launch)
+    }
+
     // MARK: Navigation
+
+    /// Loads, then opens the state named by `--settings-hints`: `plugins-installed|connections|browse`,
+    /// `plugins-detail:<id>`, `plugins-add:<id>` and `plugins-confirm:<id>`.
+    public func render(hints: Set<String>) async {
+        await load()
+        for tab in Tab.allCases where hints.contains("plugins-\(tab.rawValue)") { show(tab) }
+        func listing(_ prefix: String) -> ConnectorListing? {
+            hints.first { $0.hasPrefix(prefix) }.flatMap { hint in
+                let id = String(hint.dropFirst(prefix.count))
+                return listings.first { $0.id == id }
+            }
+        }
+        if let found = listing("plugins-detail:") { selectedKey = found.key }
+        if let found = listing("plugins-add:") {
+            adding = found
+            // A render client is read-only, so the add form reads the installed pack's manifest instead of starting it.
+            if let pack = found.pack {
+                probeFixture = SdkManifest(id: pack.id, name: pack.name, version: pack.version, description: pack.description, icon: pack.icon,
+                                           auth: pack.auth, triggers: pack.triggers, actions: pack.actions, env: pack.env)
+            }
+        }
+        if let found = listing("plugins-confirm:") {
+            pending = Pending(preview: Self.preview(of: found), rowId: found.id, rowKey: found.key)
+        }
+    }
+
+    /// What staging this listing's pack would describe, without fetching it.
+    static func preview(of listing: ConnectorListing) -> PackPreview {
+        if let pack = listing.pack {
+            return PackPreview(id: pack.id, name: pack.name, version: pack.version, kind: pack.kind, description: pack.description,
+                               icon: pack.icon, auth: pack.auth, triggers: pack.triggers, actions: pack.actions, env: pack.env,
+                               contributes: pack.contributes, permissions: pack.permissions, activates: pack.activates)
+        }
+        let item = listing.catalogItem
+        return PackPreview(id: listing.id, name: listing.name, version: item?.verified?.version ?? item?.version ?? "1.0.0",
+                           kind: listing.kind, description: listing.description, icon: listing.icon,
+                           actions: item?.actions ?? [], env: item?.env ?? [], contributes: listing.contributes,
+                           permissions: listing.permissions, activates: listing.activates)
+    }
 
     public func show(_ next: Tab) {
         tab = next

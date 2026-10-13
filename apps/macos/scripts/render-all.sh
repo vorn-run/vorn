@@ -15,6 +15,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/vr.XXXXXX")
 data=$tmp/d
 mkdir -p "$tmp/home" "$data"
 printf "PS1='%%1~ %%# '\n" >"$tmp/home/.zshrc"
+node "$here/scripts/seed-plugins.mjs" files "$tmp/home" "$data"
 port=$((52000 + RANDOM % 8000))
 HOME=$tmp/home SHELL=/bin/zsh "$vornd" --data-dir "$data" --port "$port" --host 127.0.0.1 \
   --sessiond "$sessiond" --log-file "$tmp/vornd.log" </dev/null &
@@ -60,6 +61,11 @@ done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
 for page in appearance general updates notifications worktrees agents ssh mcp keys about; do
   "$bin/Vorn" --render "$out/settings-$page.png" --settings "$page"
+done
+node "$here/scripts/seed-plugins.mjs" connections "$data"
+"$bin/Vorn" --render "$out/settings-connectors.png" --settings connectors
+for hint in installed connections browse detail:acme-tickets detail:focus-timer detail:kusto add:acme-tickets add:http add:filesystem confirm:focus-timer; do
+  "$bin/Vorn" --render "$out/settings-plugins-${hint/:/-}.png" --settings connectors --settings-hints "plugins-$hint"
 done
 "$bin/Vorn" --render "$out/shell-update-ready.png" --update-status ready:0.8.1
 "$bin/Vorn" --render "$out/panes-files.png" --files 0 --claim 0:1

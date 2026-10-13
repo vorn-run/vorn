@@ -208,7 +208,7 @@ struct SdkConnectorForm: View {
         manifest = nil
         probing = true
         defer { probing = false }
-        switch await model.api.probeSdk(target) {
+        switch await model.probe(target) {
         case .ok(let found):
             manifest = found
             launch = target
