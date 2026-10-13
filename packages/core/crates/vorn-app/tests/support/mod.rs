@@ -181,6 +181,13 @@ impl TestVornd {
         }
     }
 
+    /// vornd's process and its session holders', whose CPU time a bench reads.
+    pub fn pids(&self) -> Vec<u32> {
+        let mut pids = vec![self.child.id()];
+        pids.extend(self.holder_pids());
+        pids
+    }
+
     fn holder_pids(&self) -> Vec<u32> {
         let Ok(dir) = std::fs::read_dir(self.home.join("run")) else {
             return Vec::new();

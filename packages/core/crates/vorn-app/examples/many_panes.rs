@@ -1,0 +1,767 @@
+//! Many panes at once: the app's frame time, input-to-pixel latency and CPU
+//! per pane with N terminals streaming, against a test vornd.
+//!
+//! ```text
+//! many_panes [--panes 8,16] [--cases mixed,agent,hidden] [--seconds 5]
+//!            [--size 1600x1000] [--scale 1] [--out results.json]
+//!            [--agent-rate 32768] [--log-rate 262144]
+//! many_panes feed agent|log|redraw|echo [--rate B/s]
+//! ```
+//!
+//! Each case starts its own vornd on a temporary HOME and data directory
+//! (never `~/.vorn`), opens N shells and runs a workload in each: this
+//! program again, as `feed`. Pane 0 is the probe, which echoes each key it
+//! reads; the rest stream:
+//!
+//! - `mixed`: an agent's TUI, a build log and a full-screen redraw at 60 Hz,
+//!   in turn.
+//! - `agent`: every pane an agent's TUI at `--agent-rate`, the feed the
+//!   renderer suite of `yarn bench` gives each terminal.
+//! - `hidden`: as `agent`, with the probe's card expanded, so the other
+//!   panes stream into cards that are not on screen.
+//!
+//! The app is driven offscreen (the GPU when there is one, else the CPU
+//! raster; `VORNUI_RENDERER` picks) on a 60 Hz clock, as a window paces its
+//! frames. **Frame time** is one frame's build, layout, paint and draw, which
+//! includes folding in what the terminals sent. **Input to pixel** is from a
+//! key sent to the probe until a frame showing its echo has been drawn.
+//! **CPU** is the app process plus vornd and its holders over the run, in per
+//! cent of one core; the programs in the panes are the workload, not counted.
+
+#[cfg(unix)]
+#[path = "../tests/support/mod.rs"]
+mod support;
+
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("many_panes: the workloads need a POSIX terminal");
+    std::process::exit(1);
+}
+
+#[cfg(unix)]
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let result = match args.first().map(String::as_str) {
+        Some("feed") => feed::run(&args[1..]),
+        _ => bench::run(&args),
+    };
+    if let Err(e) = result {
+        eprintln!("many_panes: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// The value after `--key`.
+#[cfg(unix)]
+fn flag<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|w| w[0].strip_prefix("--") == Some(key))
+        .map(|w| w[1].as_str())
+}
+
+/// The terminal output the workloads write, ported from
+/// `bench/lib/transcripts.ts` with its seeds, so both benches feed the same
+/// bytes.
+#[cfg(unix)]
+mod transcript {
+    /// mulberry32, as the TypeScript generator.
+    struct Rng(u32);
+
+    impl Rng {
+        fn next(&mut self) -> f64 {
+            self.0 = self.0.wrapping_add(0x6d2b_79f5);
+            let mut t = self.0;
+            t = (t ^ (t >> 15)).wrapping_mul(t | 1);
+            t ^= t.wrapping_add((t ^ (t >> 7)).wrapping_mul(t | 61));
+            f64::from(t ^ (t >> 14)) / 4_294_967_296.0
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() * n as f64) as usize
+        }
+    }
+
+    const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    const FILES: [&str; 5] = [
+        "packages/server/src/pty-manager.ts",
+        "packages/server/src/vornd-sessions.ts",
+        "src/renderer/lib/terminal-registry.ts",
+        "packages/shared/src/protocol.ts",
+        "tests/pty-manager-recovery.test.ts",
+    ];
+    const WORDS: [&str; 7] = ["the", "flush", "buffer", "screen", "model", "per", "chunk"];
+
+    /// An agent's TUI: a status line redrawn in place, tool calls between.
+    fn spinner_frames(target: usize, seed: u32) -> Vec<String> {
+        let mut rand = Rng(seed);
+        let mut frames = vec!["\x1b]0;✳ claude\x07\x1b[?2004h\x1b[?25l".to_owned()];
+        let mut bytes = frames[0].len();
+        let mut tick = 0usize;
+        while bytes < target {
+            tick += 1;
+            let r = rand.next();
+            let frame = if r < 0.04 {
+                let file = FILES[rand.below(FILES.len())];
+                let lines = 50 + rand.below(900);
+                format!(
+                    "\r\x1b[2K\r\n\x1b[1m\x1b[38;5;114m⏺\x1b[39m Read\x1b[22m({file})\r\n  \x1b[2m⎿  Read {lines} lines\x1b[22m\r\n\r\n"
+                )
+            } else if r < 0.06 {
+                let words = (8.0 + rand.next() * 40.0) as usize;
+                let text: Vec<&str> = (0..words).map(|i| WORDS[i % WORDS.len()]).collect();
+                format!("\r\x1b[2K\x1b[38;5;231m⏺\x1b[39m {}\r\n", text.join(" "))
+            } else if r < 0.061 {
+                "\x1b[?2004l\x1b[?25h\r\n> \x1b[?2004h\x1b[?25l".to_owned()
+            } else {
+                let s = tick / 10;
+                // toFixed(1) of tokens / 1000, which rounds halves up.
+                let tenths = ((tick * 13) % 9000 + 50) / 100;
+                format!(
+                    "\r\x1b[2K\x1b[38;5;174m{}\x1b[39m \x1b[38;5;174mThinking…\x1b[39m \x1b[2m({s}s · ↑ {}.{}k tokens · esc to interrupt)\x1b[22m",
+                    SPINNER[tick % SPINNER.len()],
+                    tenths / 10,
+                    tenths % 10
+                )
+            };
+            bytes += frame.len();
+            frames.push(frame);
+        }
+        frames
+    }
+
+    /// Frames grouped into reads as a PTY delivers them.
+    fn group_into_reads(frames: &[String], seed: u32) -> Vec<String> {
+        let mut rand = Rng(seed);
+        let mut reads = Vec::new();
+        let mut i = 0;
+        while i < frames.len() {
+            let r = rand.next();
+            let n = if r < 0.7 {
+                1
+            } else if r < 0.95 {
+                2 + rand.below(9)
+            } else {
+                20 + rand.below(41)
+            };
+            reads.push(frames[i..(i + n).min(frames.len())].concat());
+            i += n;
+        }
+        reads
+    }
+
+    /// `spinner`: 1 MB of an agent's TUI in reads of one to sixty frames.
+    pub fn spinner() -> Vec<String> {
+        group_into_reads(&spinner_frames(1024 * 1024, 7), 11)
+    }
+
+    /// `bulk`: 2 MB of build log in 4 KB reads.
+    pub fn bulk() -> Vec<String> {
+        let mut rand = Rng(3);
+        let mut text = String::new();
+        let mut line = 0usize;
+        while text.len() < 2 * 1024 * 1024 {
+            line += 1;
+            let file = FILES[line % FILES.len()];
+            let kind = rand.next();
+            if kind < 0.1 {
+                text += &format!("\x1b[33mwarning\x1b[0m: unused variable in {file}:{line}\r\n");
+            } else if kind < 0.12 {
+                text += &format!("\x1b[31merror\x1b[0m TS2345: {file}({line},7)\r\n");
+            } else {
+                let dots = ".".repeat(rand.below(60));
+                text += &format!("  compiling {file} [{line}] {dots}\r\n");
+            }
+        }
+        text.as_bytes()
+            .chunks(4096)
+            .map(|c| String::from_utf8_lossy(c).into_owned())
+            .collect()
+    }
+}
+
+/// The programs the panes run.
+#[cfg(unix)]
+mod feed {
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+
+    use super::{flag, transcript};
+
+    /// The server's flush beat, on which the renderer suite feeds too.
+    const BEAT: Duration = Duration::from_millis(8);
+    const FRAME: Duration = Duration::from_micros(16_667);
+
+    pub fn run(args: &[String]) -> Result<(), String> {
+        let rate = |default: usize| {
+            flag(args, "rate")
+                .and_then(|r| r.parse().ok())
+                .unwrap_or(default)
+        };
+        let out = std::io::stdout();
+        let mut out = out.lock();
+        // A closed terminal ends the program: the write fails.
+        let _ = match args.first().map(String::as_str) {
+            Some("agent") => stream(&mut out, &transcript::spinner(), rate(32 * 1024)),
+            Some("log") => stream(&mut out, &transcript::bulk(), rate(256 * 1024)),
+            Some("redraw") => redraw(&mut out),
+            Some("echo") => echo(&mut out),
+            other => return Err(format!("unknown feed {other:?}")),
+        };
+        Ok(())
+    }
+
+    /// `chunks` round and round at `rate` bytes a second, a beat's share
+    /// at a time.
+    fn stream(out: &mut impl Write, chunks: &[String], rate: usize) -> std::io::Result<()> {
+        let per_beat = (rate as f64 * BEAT.as_secs_f64()).max(1.0) as usize;
+        let mut at = 0;
+        let mut next = Instant::now();
+        let mut buf = Vec::with_capacity(per_beat * 2);
+        loop {
+            buf.clear();
+            while buf.len() < per_beat {
+                buf.extend_from_slice(chunks[at].as_bytes());
+                at = (at + 1) % chunks.len();
+            }
+            out.write_all(&buf)?;
+            out.flush()?;
+            next += BEAT;
+            sleep_until(&mut next, BEAT);
+        }
+    }
+
+    /// Every cell rewritten 60 times a second, as a full-screen program
+    /// repaints.
+    fn redraw(out: &mut impl Write) -> std::io::Result<()> {
+        const GLYPHS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        out.write_all(b"\x1b[?1049h\x1b[?25l")?;
+        let mut buf = Vec::new();
+        let mut next = Instant::now();
+        let mut n = 0u64;
+        loop {
+            let (cols, rows) = size();
+            buf.clear();
+            buf.extend_from_slice(b"\x1b[H");
+            for row in 0..u64::from(rows) {
+                write!(buf, "\x1b[38;5;{}m", 16 + (n + row) % 216)?;
+                for col in 0..u64::from(cols) {
+                    buf.push(GLYPHS[((n + row * 7 + col) % GLYPHS.len() as u64) as usize]);
+                }
+                if row + 1 < u64::from(rows) {
+                    buf.extend_from_slice(b"\r\n");
+                }
+            }
+            out.write_all(&buf)?;
+            out.flush()?;
+            n += 1;
+            next += FRAME;
+            sleep_until(&mut next, FRAME);
+        }
+    }
+
+    /// The probe: raw input, each key answered on one line as `key <k>`.
+    fn echo(out: &mut impl Write) -> std::io::Result<()> {
+        raw_stdin();
+        out.write_all(b"\x1b[?25l")?;
+        out.flush()?;
+        let mut input = std::io::stdin().lock();
+        let mut buf = [0u8; 64];
+        loop {
+            let n = input.read(&mut buf)?;
+            if n == 0 {
+                return Ok(());
+            }
+            for &b in &buf[..n] {
+                // Raw mode turns signals off; ^C still ends the probe.
+                if b == 3 {
+                    return Ok(());
+                }
+                if b.is_ascii_alphanumeric() {
+                    write!(out, "\r\x1b[2Kkey {}", b as char)?;
+                }
+            }
+            out.flush()?;
+        }
+    }
+
+    /// Sleeps to `next`; a program that fell behind skips ahead instead of
+    /// bursting to catch up.
+    fn sleep_until(next: &mut Instant, period: Duration) {
+        let now = Instant::now();
+        if *next > now {
+            std::thread::sleep(*next - now);
+        } else {
+            *next = now + period;
+        }
+    }
+
+    /// The terminal's size, 80x24 when it does not say.
+    fn size() -> (u16, u16) {
+        // SAFETY: winsize is plain data, and TIOCGWINSZ only fills it.
+        let ws = unsafe {
+            let mut ws: libc::winsize = std::mem::zeroed();
+            (libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0).then_some(ws)
+        };
+        match ws {
+            Some(ws) if ws.ws_col > 0 && ws.ws_row > 0 => (ws.ws_col, ws.ws_row),
+            _ => (80, 24),
+        }
+    }
+
+    fn raw_stdin() {
+        // SAFETY: termios is plain data; tcgetattr fills it before it is used.
+        unsafe {
+            let mut t: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(libc::STDIN_FILENO, &mut t) == 0 {
+                libc::cfmakeraw(&mut t);
+                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &t);
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+mod bench {
+    use std::fmt::Write as _;
+    use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    use serde_json::{json, Value};
+    use vorn_app::ui::{Offscreen, RenderMode, Ui};
+    use vorn_app::{ui_config, App};
+
+    use super::flag;
+    use super::support::{connect, wait_for, TestVornd};
+
+    /// The frame clock: a 60 Hz display.
+    const FRAME: Duration = Duration::from_micros(16_667);
+    /// The pause between one probe's answer and the next key.
+    const PROBE_GAP: Duration = Duration::from_millis(60);
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+    const WARMUP: Duration = Duration::from_secs(2);
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Case {
+        Mixed,
+        Agent,
+        Hidden,
+    }
+
+    impl Case {
+        fn parse(s: &str) -> Result<Case, String> {
+            match s {
+                "mixed" => Ok(Case::Mixed),
+                "agent" => Ok(Case::Agent),
+                "hidden" => Ok(Case::Hidden),
+                _ => Err(format!("unknown case {s:?} (mixed, agent, hidden)")),
+            }
+        }
+
+        fn name(self) -> &'static str {
+            match self {
+                Case::Mixed => "mixed",
+                Case::Agent => "agent",
+                Case::Hidden => "hidden",
+            }
+        }
+
+        /// What pane `i` runs; pane 0 is the probe.
+        fn feed(self, i: usize) -> &'static str {
+            match (self, i) {
+                (_, 0) => "echo",
+                (Case::Mixed, i) => ["agent", "log", "redraw"][(i - 1) % 3],
+                _ => "agent",
+            }
+        }
+    }
+
+    struct Opts {
+        panes: Vec<usize>,
+        cases: Vec<Case>,
+        seconds: f64,
+        size: (f32, f32),
+        scale: f32,
+        out: Option<String>,
+        agent_rate: usize,
+        log_rate: usize,
+    }
+
+    impl Opts {
+        fn parse(args: &[String]) -> Result<Opts, String> {
+            let list = |key: &str, default: &str| -> Vec<String> {
+                flag(args, key)
+                    .unwrap_or(default)
+                    .split(',')
+                    .map(str::to_owned)
+                    .collect()
+            };
+            let num = |key: &str, default: f64| -> Result<f64, String> {
+                flag(args, key).map_or(Ok(default), |v| {
+                    v.parse().map_err(|_| format!("bad --{key} {v:?}"))
+                })
+            };
+            let panes = list("panes", "8,16")
+                .iter()
+                .map(|n| match n.parse::<usize>() {
+                    Ok(n) if n >= 1 => Ok(n),
+                    _ => Err(format!("bad --panes {n:?}")),
+                })
+                .collect::<Result<_, _>>()?;
+            let cases = list("cases", "mixed,agent,hidden")
+                .iter()
+                .map(|c| Case::parse(c))
+                .collect::<Result<_, _>>()?;
+            let size = match flag(args, "size").map(|s| s.split_once('x')) {
+                None => (1600.0, 1000.0),
+                Some(Some((w, h))) => (
+                    w.parse().map_err(|_| "bad --size")?,
+                    h.parse().map_err(|_| "bad --size")?,
+                ),
+                Some(None) => return Err("--size is WxH".into()),
+            };
+            Ok(Opts {
+                panes,
+                cases,
+                seconds: num("seconds", 5.0)?,
+                size,
+                scale: num("scale", 1.0)? as f32,
+                out: flag(args, "out").map(str::to_owned),
+                agent_rate: num("agent-rate", 32.0 * 1024.0)? as usize,
+                log_rate: num("log-rate", 256.0 * 1024.0)? as usize,
+            })
+        }
+    }
+
+    pub fn run(args: &[String]) -> Result<(), String> {
+        let opts = Opts::parse(args)?;
+        // The bench's own HOME is a temporary one too, so nothing it starts
+        // reads or writes the user's.
+        let home = std::env::temp_dir().join(format!("vorn-many-panes-{}", std::process::id()));
+        std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+        std::env::set_var("HOME", &home);
+        std::env::set_var("VORN_HOME", &home);
+        std::env::remove_var("VORN_DATA_DIR");
+        let result = run_all(&opts);
+        let _ = std::fs::remove_dir_all(&home);
+        let results = result?;
+        print!("{}", table(&results));
+        if let Some(out) = &opts.out {
+            let doc = json!({ "machine": machine(), "results": results });
+            let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+            std::fs::write(out, text + "\n").map_err(|e| format!("{out}: {e}"))?;
+        }
+        Ok(())
+    }
+
+    fn run_all(opts: &Opts) -> Result<Vec<Value>, String> {
+        let mut results = Vec::new();
+        for &n in &opts.panes {
+            for &case in &opts.cases {
+                eprintln!("many_panes: {n} panes, {}", case.name());
+                results.push(run_case(opts, n, case)?);
+            }
+        }
+        Ok(results)
+    }
+
+    fn run_case(opts: &Opts, n: usize, case: Case) -> Result<Value, String> {
+        let v = TestVornd::start()
+            .ok_or("build vornd and vorn-sessiond into this profile's target directory first")?;
+        let mut app = connect(&v);
+        let ids: Vec<String> = (0..n)
+            .map(|_| {
+                let info = app
+                    .rpc()
+                    .call("shell:create", json!(v.home))
+                    .map_err(|e| format!("shell:create: {e:?}"))?;
+                info["id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "shell:create gave no id".to_owned())
+            })
+            .collect::<Result<_, _>>()?;
+
+        let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(opts.scale));
+        let px = (
+            (opts.size.0 * opts.scale).round() as u32,
+            (opts.size.1 * opts.scale).round() as u32,
+        );
+        let target = ui.offscreen(px);
+        // Each card attaches its terminal the first time it is laid out.
+        wait_for("every pane's first screen", || {
+            app.frame(&mut ui, opts.size);
+            ids.iter().all(|id| app.pane(id).is_some()).then_some(())
+        });
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let grid = app.grid().ok_or("no grid connection")?.clone();
+        for (i, id) in ids.iter().enumerate() {
+            let feed = case.feed(i);
+            let rate = if feed == "log" {
+                opts.log_rate
+            } else {
+                opts.agent_rate
+            };
+            grid.text(
+                id,
+                &format!("exec {} feed {feed} --rate {rate}\r", quote(&exe)),
+            );
+        }
+        if case == Case::Hidden {
+            app.st.focused = Some(ids[0].clone());
+        }
+        let probe = &ids[0];
+        let warm = Instant::now() + WARMUP;
+        while Instant::now() < warm {
+            draw(&mut app, &mut ui, &target, opts.size);
+            std::thread::sleep(FRAME);
+        }
+        // The probe answers before the clock starts.
+        wait_for("the probe's first answer", || {
+            grid.text(probe, "z");
+            draw(&mut app, &mut ui, &target, opts.size);
+            std::thread::sleep(Duration::from_millis(20));
+            shows(&app, probe, 'z').then_some(())
+        });
+
+        let revs = |app: &App| -> Vec<u64> {
+            ids.iter()
+                .map(|id| app.pane(id).map_or(0, |p| p.rev))
+                .collect()
+        };
+        let revs_before = revs(&app);
+        let pids = v.pids();
+        let cpu_app = self_cpu();
+        let cpu_daemons = procs_cpu(&pids);
+        let started = Instant::now();
+        let until = started + Duration::from_secs_f64(opts.seconds);
+
+        let mut frames: Vec<f64> = Vec::new();
+        let mut latencies: Vec<f64> = Vec::new();
+        let mut timeouts = 0usize;
+        let mut seq = 0usize;
+        let mut pending: Option<(char, Instant)> = None;
+        let mut probe_at = started + PROBE_GAP;
+        let mut next = started;
+        while Instant::now() < until {
+            // Between frames: the probe's key goes when it is due.
+            loop {
+                let now = Instant::now();
+                if pending.is_none() && now >= probe_at {
+                    // a..y; the warm-up's z never matches a stale answer.
+                    let c = char::from(b'a' + (seq % 25) as u8);
+                    seq += 1;
+                    grid.text(probe, &c.to_string());
+                    pending = Some((c, now));
+                    continue;
+                }
+                if now >= next {
+                    break;
+                }
+                let wake = if pending.is_none() {
+                    next.min(probe_at)
+                } else {
+                    next
+                };
+                std::thread::sleep(wake - now);
+            }
+            let t0 = Instant::now();
+            // A late frame moves the clock rather than bursting to catch up.
+            next = if next + FRAME > t0 {
+                next + FRAME
+            } else {
+                t0 + FRAME
+            };
+            draw(&mut app, &mut ui, &target, opts.size);
+            let t1 = Instant::now();
+            frames.push(ms(t1 - t0));
+            let Some((c, sent)) = pending else {
+                continue;
+            };
+            if shows(&app, probe, c) {
+                latencies.push(ms(t1 - sent));
+            } else if t1 - sent < PROBE_TIMEOUT {
+                continue;
+            } else {
+                timeouts += 1;
+            }
+            pending = None;
+            // Spread the keys over the frame so they land at every phase.
+            let phase = Duration::from_micros((seq as u64 * 3_701) % 16_667);
+            probe_at = t1 + PROBE_GAP + phase;
+        }
+        let wall = started.elapsed().as_secs_f64();
+        let app_cpu = (self_cpu() - cpu_app) / wall * 100.0;
+        let daemon_cpu = (procs_cpu(&pids) - cpu_daemons) / wall * 100.0;
+        let streaming = revs(&app)
+            .iter()
+            .zip(&revs_before)
+            .filter(|(a, b)| a != b)
+            .count();
+        let shown = if case == Case::Hidden { 1 } else { n };
+        let over = frames.iter().filter(|&&f| f > ms(FRAME)).count();
+        Ok(json!({
+            "case": case.name(),
+            "panes": n,
+            "shown": shown,
+            "streaming": streaming,
+            "renderer": ui.renderer_name(),
+            "size": format!("{}x{}@{}", opts.size.0, opts.size.1, opts.scale),
+            "seconds": round(wall),
+            "frames": frames.len(),
+            "frame_ms": { "p50": pct(&frames, 50.0), "p99": pct(&frames, 99.0), "max": pct(&frames, 100.0) },
+            "over_budget_pct": round(100.0 * over as f64 / frames.len().max(1) as f64),
+            "input_to_pixel_ms": {
+                "p50": pct(&latencies, 50.0),
+                "p99": pct(&latencies, 99.0),
+                "samples": latencies.len(),
+                "timeouts": timeouts,
+            },
+            "cpu_pct": {
+                "app": round(app_cpu),
+                "daemons": round(daemon_cpu),
+                "per_pane": round((app_cpu + daemon_cpu) / n as f64),
+            },
+        }))
+    }
+
+    /// One frame: build, lay out, paint and draw, as the window does.
+    fn draw(app: &mut App, ui: &mut Ui, target: &Offscreen, size: (f32, f32)) {
+        app.frame(ui, size);
+        // A full atlas empties itself; the second pass fits one frame.
+        if !ui.render_offscreen(target) {
+            app.frame(ui, size);
+            ui.render_offscreen(target);
+        }
+    }
+
+    /// Whether the probe's screen shows its answer to `c`.
+    fn shows(app: &App, probe: &str, c: char) -> bool {
+        let want = format!("key {c}");
+        app.pane(probe)
+            .is_some_and(|p| p.text().lines().any(|l| l.trim_end() == want))
+    }
+
+    fn quote(p: &Path) -> String {
+        format!("'{}'", p.display().to_string().replace('\'', r"'\''"))
+    }
+
+    fn ms(d: Duration) -> f64 {
+        d.as_secs_f64() * 1000.0
+    }
+
+    fn round(x: f64) -> f64 {
+        (x * 100.0).round() / 100.0
+    }
+
+    /// The nearest-rank percentile, 0 for no samples.
+    fn pct(values: &[f64], p: f64) -> f64 {
+        if values.is_empty() {
+            return 0.0;
+        }
+        let mut v = values.to_vec();
+        v.sort_by(f64::total_cmp);
+        let rank = ((p / 100.0) * v.len() as f64).ceil() as usize;
+        round(v[rank.clamp(1, v.len()) - 1])
+    }
+
+    /// This process's CPU time, in seconds.
+    fn self_cpu() -> f64 {
+        // SAFETY: rusage is plain data, and getrusage only fills it.
+        let ru = unsafe {
+            let mut ru: libc::rusage = std::mem::zeroed();
+            libc::getrusage(libc::RUSAGE_SELF, &mut ru);
+            ru
+        };
+        let t = |tv: libc::timeval| tv.tv_sec as f64 + tv.tv_usec as f64 / 1e6;
+        t(ru.ru_utime) + t(ru.ru_stime)
+    }
+
+    /// The CPU time of `pids` together, in seconds.
+    fn procs_cpu(pids: &[u32]) -> f64 {
+        if cfg!(target_os = "linux") {
+            // SAFETY: sysconf has no preconditions.
+            let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64;
+            return pids
+                .iter()
+                .filter_map(|p| std::fs::read_to_string(format!("/proc/{p}/stat")).ok())
+                .filter_map(|s| {
+                    // utime and stime, counted after the command, whose name may hold spaces.
+                    let f: Vec<&str> = s.rsplit_once(')')?.1.split_whitespace().collect();
+                    let tick = |i: usize| f.get(i)?.parse::<f64>().ok();
+                    Some((tick(11)? + tick(12)?) / hz)
+                })
+                .sum();
+        }
+        let list = pids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let Ok(out) = std::process::Command::new("ps")
+            .args(["-o", "time=", "-p", &list])
+            .output()
+        else {
+            return 0.0;
+        };
+        // `[[hh:]mm:]ss.cc` per process.
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| {
+                l.trim().split(':').fold(0.0, |acc, part| {
+                    acc * 60.0 + part.parse::<f64>().unwrap_or(0.0)
+                })
+            })
+            .sum()
+    }
+
+    fn machine() -> Value {
+        let sysctl = |k: &str| {
+            std::process::Command::new("sysctl")
+                .args(["-n", k])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .filter(|s| !s.is_empty())
+        };
+        json!({
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "cpu": sysctl("machdep.cpu.brand_string"),
+            "cores": std::thread::available_parallelism().map_or(0, |n| n.get()),
+        })
+    }
+
+    /// The results as a Markdown table.
+    fn table(results: &[Value]) -> String {
+        let mut s = String::from(
+            "| Case | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99 | CPU app | CPU vornd | CPU per pane |\n\
+             | ---- | ----: | ----: | --------: | --------: | -----------: | -----------------: | --: | ------: | --------: | -----------: |\n",
+        );
+        for r in results {
+            let _ = writeln!(
+                s,
+                "| {} | {} | {} | {} ms | {} ms | {}% | {} ms | {} ms | {}% | {}% | {}% |",
+                r["case"].as_str().unwrap_or_default(),
+                r["panes"],
+                r["shown"],
+                r["frame_ms"]["p50"],
+                r["frame_ms"]["p99"],
+                r["over_budget_pct"],
+                r["input_to_pixel_ms"]["p50"],
+                r["input_to_pixel_ms"]["p99"],
+                r["cpu_pct"]["app"],
+                r["cpu_pct"]["daemons"],
+                r["cpu_pct"]["per_pane"],
+            );
+        }
+        if let Some(r) = results.first() {
+            let _ = writeln!(
+                s,
+                "\nRenderer: {}, {}.",
+                r["renderer"].as_str().unwrap_or_default(),
+                r["size"].as_str().unwrap_or_default()
+            );
+        }
+        s
+    }
+}
