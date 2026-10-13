@@ -17,6 +17,7 @@ public struct VornMacApp: App {
     @State private var model = AppModel()
     @State private var engines = EngineHolder()
     @State private var keys = KeyMonitor()
+    @State private var widget: WidgetController?
 
     public init() {
         let store = VornStore()
@@ -33,6 +34,14 @@ public struct VornMacApp: App {
                 .onAppear {
                     store.start()
                     keys.install(model: model)
+                    OnboardingGate.bind(model: model, store: store)
+                    Task { _ = await OnboardingGate.openIfUnseen(model: model, store: store) }
+                    if widget == nil {
+                        let controller = WidgetController(store: store, model: model)
+                        controller.install()
+                        model.toggleWidget = { controller.toggle() }
+                        widget = controller
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -76,6 +85,9 @@ struct ShellCommands: Commands {
             Divider()
             Button("Stop Sessions and Server") { actions.stopSessionsAndServer() }
             Divider()
+        }
+        CommandGroup(after: .windowArrangement) {
+            Button("Toggle Widget") { model.toggleWidget?() }
         }
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") { model.sidebarOpen.toggle() }.keyboardShortcut("b")

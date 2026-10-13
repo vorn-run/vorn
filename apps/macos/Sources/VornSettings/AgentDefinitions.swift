@@ -3,20 +3,20 @@ import VornCore
 import VornUI
 
 /// agent-definitions.ts and agent-defaults.ts: what the settings pages say about each agent.
-struct AgentDefinition {
-    let type: AgentType
+public struct AgentDefinition {
+    public let type: AgentType
     let color: UInt32
     let bgAlpha: Double
     let description: String
-    let installCommand: String
+    public let installCommand: String
     let installUrl: String
     let command: String
     let headlessArgs: [String]
 
     var tint: Color { Color(hex: color) }
-    var bg: Color { Color(hex: color, opacity: bgAlpha) }
+    public var bg: Color { Color(hex: color, opacity: bgAlpha) }
 
-    static let all: [AgentDefinition] = [
+    public static let all: [AgentDefinition] = [
         AgentDefinition(type: .claude, color: 0xD97757, bgAlpha: 0x20 / 255, description: "Anthropic Claude Code CLI",
                         installCommand: "npm install -g @anthropic-ai/claude-code",
                         installUrl: "https://docs.anthropic.com/en/docs/claude-code",
@@ -37,7 +37,7 @@ struct AgentDefinition {
                         command: "gemini", headlessArgs: ["-y"]),
     ]
 
-    static func of(_ type: AgentType) -> AgentDefinition? { all.first { $0.type == type } }
+    public static func of(_ type: AgentType) -> AgentDefinition? { all.first { $0.type == type } }
 
     /// The default `AgentCommandConfig` as JSON, as `DEFAULT_AGENT_COMMANDS` holds it.
     var defaultCommand: JSONValue {
@@ -48,14 +48,14 @@ struct AgentDefinition {
 }
 
 /// mcp-data.ts: how each agent installs the Vorn plugin.
-struct AgentMcpSetup {
-    let agent: AgentType
-    let commands: [String]
-    var inAgent = false
-    var note: String?
+public struct AgentMcpSetup {
+    public let agent: AgentType
+    public let commands: [String]
+    public var inAgent = false
+    public var note: String?
 
     static let repo = "vorn-run/plugin"
-    static let all: [AgentMcpSetup] = {
+    public static let all: [AgentMcpSetup] = {
         let url = "https://github.com/\(repo)"
         let mcpOnly = "mcp add vorn -- npx -y @vornrun/mcp@latest"
         return [

@@ -699,7 +699,7 @@ struct SidebarFooter: View {
             }
             HStack(spacing: 2) {
                 IconButton(.circleHelp, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
-                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Welcome Guide") {}
+                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Welcome Guide") { model.openOnboarding() }
                 IconButton(.settings, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
                            hoverColor: Theme.gray200, hoverFill: Theme.white(0.04),
                            help: showDot ? "Settings — update ready  ⌘," : "Settings  ⌘,") {
