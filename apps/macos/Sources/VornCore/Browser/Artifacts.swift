@@ -297,14 +297,14 @@ public enum Tweak: Equatable, Sendable {
     public func usable(_ v: JSONValue?) -> JSONValue? {
         guard let v else { return nil }
         switch self {
-        case .number: return v.numberValue.map { $0.isFinite ? v : nil } ?? nil
-        case .boolean: return v.boolValue == nil ? nil : v
+        case .number: return v.numberValue?.isFinite == true ? v : Optional.none
+        case .boolean: return v.boolValue == nil ? Optional.none : v
         case .color(_, _, let options):
             guard let s = v.stringValue else { return nil }
-            return options.map { $0.contains(s) } ?? true ? v : nil
+            return options.map { $0.contains(s) } ?? true ? v : Optional.none
         case .select(_, _, let options):
             guard let s = v.stringValue else { return nil }
-            return options.contains(s) ? v : nil
+            return options.contains(s) ? v : Optional.none
         }
     }
 }
