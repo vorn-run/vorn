@@ -235,6 +235,10 @@ impl Grid {
         let mut rows: Vec<&Row> = (from..to.min(top))
             .filter_map(|l| m.history_line(l))
             .collect();
+        // History still on its way: not cut yet, rather than cut short.
+        if rows.len() as u64 != to.min(top).saturating_sub(from) {
+            return None;
+        }
         rows.extend(
             m.rows()
                 .iter()
@@ -242,7 +246,10 @@ impl Grid {
         );
         let blank = |r: &&Row| vorn_term_mirror::row_text(r).trim().is_empty();
         let first = rows.iter().position(|r| !blank(r)).unwrap_or(rows.len());
-        let last = rows.iter().rposition(|r| !blank(r)).map_or(first, |i| i + 1);
+        let last = rows
+            .iter()
+            .rposition(|r| !blank(r))
+            .map_or(first, |i| i + 1);
         Some(view::rows(m, rows[first..last].iter().copied()))
     }
 

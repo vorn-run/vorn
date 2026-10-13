@@ -609,7 +609,10 @@ mod tests {
             a(" rust borrow checker ").as_deref(),
             Some("https://www.google.com/search?q=rust+borrow+checker")
         );
-        assert_eq!(a("a&b").as_deref(), Some("https://www.google.com/search?q=a%26b"));
+        assert_eq!(
+            a("a&b").as_deref(),
+            Some("https://www.google.com/search?q=a%26b")
+        );
         assert_eq!(a("google.com").as_deref(), Some("https://google.com/"));
         assert_eq!(
             a("https://example.com/a?b=1").as_deref(),
@@ -620,7 +623,10 @@ mod tests {
             a("localhost:3000/x").as_deref(),
             Some("http://localhost:3000/x")
         );
-        assert_eq!(a("127.0.0.1:8080").as_deref(), Some("http://127.0.0.1:8080/"));
+        assert_eq!(
+            a("127.0.0.1:8080").as_deref(),
+            Some("http://127.0.0.1:8080/")
+        );
         assert_eq!(a("about:blank").as_deref(), Some("about:blank"));
         assert_eq!(a("javascript:alert(1)"), None);
         assert_eq!(a(""), None);

@@ -35,11 +35,7 @@ pub fn parse(p: &Value) -> Option<(String, Mark, u64)> {
     let at = p.get("at").and_then(Value::as_u64).unwrap_or(0);
     let mark = match p.get("phase")?.as_str()? {
         "prompt" => Mark::Prompt,
-        "start" => Mark::Start(
-            p.get("command")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        ),
+        "start" => Mark::Start(p.get("command").and_then(Value::as_str).map(str::to_owned)),
         "end" => Mark::End {
             exit_code: p
                 .get("exitCode")
@@ -118,6 +114,22 @@ pub struct Shell {
     cache: HashMap<(u32, u64, u64), Arc<PaneView>>,
 }
 
+/// Whether `session` shows its finished commands as blocks over a live
+/// region: an integrated shell, outside a full-screen program.
+pub fn split<'a>(
+    config: &Value,
+    session: &crate::client::Session,
+    shell: Option<&'a Shell>,
+) -> Option<&'a Shell> {
+    let on = config
+        .pointer("/defaults/domBlockRendering")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    shell.filter(|sh| {
+        on && session.is_shell() && !session.ended() && sh.integrated() && !sh.lines.alt
+    })
+}
+
 impl Shell {
     /// Takes a mark the shell reported at `at` (epoch ms), seen at `now`
     /// with the screen as `lines` and the directory as `cwd`.
@@ -157,8 +169,9 @@ impl Shell {
                 e.start_at = at;
                 e.since = Some(now);
                 e.line = line;
-                if e.cwd.is_none() {
-                    e.cwd = cwd.filter(|c| !c.is_empty()).map(str::to_owned);
+                // The prompt's directory, by now surely reported.
+                if let Some(c) = cwd.filter(|c| !c.is_empty()) {
+                    e.cwd = Some(c.to_owned());
                 }
             }
             Mark::End {
@@ -224,9 +237,9 @@ impl Shell {
         let mut cache = HashMap::new();
         let n = lines.prompts.len();
         let first = n.saturating_sub(MAX_ENTRIES);
-        for i in first..n.saturating_sub(1) {
-            let (start, end) = (lines.prompts[i], lines.prompts[i + 1]);
-            let entry = paired[i].map(|j| &self.entries[j]);
+        for (w, p) in lines.prompts.windows(2).zip(&paired).skip(first) {
+            let (start, end) = (w[0], w[1]);
+            let entry = p.map(|j| &self.entries[j]);
             // A prompt left without a command: Enter on an empty line, or ^C.
             if entry.is_some_and(|e| !e.started) {
                 continue;
@@ -273,9 +286,7 @@ pub fn live(l: &Lines) -> (u16, u16) {
     let first = u16::try_from(start.saturating_sub(l.top))
         .unwrap_or(u16::MAX)
         .min(l.cursor_y);
-    let count = (l.cursor_y - first + 1)
-        .max(MIN_LIVE_ROWS)
-        .min(rows);
+    let count = (l.cursor_y - first + 1).max(MIN_LIVE_ROWS).min(rows);
     (first.min(rows - count), count)
 }
 

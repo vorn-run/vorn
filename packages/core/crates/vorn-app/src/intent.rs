@@ -105,11 +105,7 @@ impl History {
         let here = |e: &Entry| e.project_path.as_deref() == project;
         if q.is_empty() {
             let mut all: Vec<&Entry> = self.shell().collect();
-            all.sort_by(|a, b| {
-                here(b)
-                    .cmp(&here(a))
-                    .then(b.timestamp.cmp(&a.timestamp))
-            });
+            all.sort_by(|a, b| here(b).cmp(&here(a)).then(b.timestamp.cmp(&a.timestamp)));
             return all.into_iter().take(MAX_HISTORY).cloned().collect();
         }
         let mut scored: Vec<(i64, &Entry)> = Vec::new();
@@ -132,7 +128,7 @@ impl History {
             }
             scored.push((score - i as i64, e));
         }
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|s| std::cmp::Reverse(s.0));
         scored
             .into_iter()
             .take(MAX_HISTORY)
@@ -240,7 +236,10 @@ fn git() -> Outline {
     use Arg::{Branch, None as No, Path};
     o(Some("version control"), None).sub(vec![
         ("status", o(Some("working tree status"), Some(No))),
-        ("add", o(Some("stage changes"), Some(Path)).flags(&[("-p", Some("stage hunks"))])),
+        (
+            "add",
+            o(Some("stage changes"), Some(Path)).flags(&[("-p", Some("stage hunks"))]),
+        ),
         (
             "commit",
             o(Some("record staged changes"), Some(No)).flags(&[
@@ -258,14 +257,18 @@ fn git() -> Outline {
                 ("--tags", Some("push tags")),
             ]),
         ),
-        ("pull", o(Some("fetch and merge"), Some(No)).flags(&[("--rebase", None)])),
+        (
+            "pull",
+            o(Some("fetch and merge"), Some(No)).flags(&[("--rebase", None)]),
+        ),
         (
             "fetch",
             o(Some("download refs"), Some(No)).flags(&[("--all", None), ("--prune", None)]),
         ),
         (
             "checkout",
-            o(Some("switch branch or restore"), Some(Branch)).flags(&[("-b", Some("create branch"))]),
+            o(Some("switch branch or restore"), Some(Branch))
+                .flags(&[("-b", Some("create branch"))]),
         ),
         (
             "switch",
@@ -329,7 +332,10 @@ fn git() -> Outline {
                 ("remove", o(Some("delete worktree"), Some(Path))),
             ]),
         ),
-        ("remote", o(Some("manage remotes"), Some(No)).flags(&[("-v", None)])),
+        (
+            "remote",
+            o(Some("manage remotes"), Some(No)).flags(&[("-v", None)]),
+        ),
         ("tag", o(Some("manage tags"), Some(No))),
         ("show", o(Some("inspect objects"), Some(No))),
         ("blame", o(Some("line authorship"), Some(Path))),
@@ -387,7 +393,8 @@ fn outlines() -> &'static [(&'static str, Outline)] {
             ("mkdir", o(Some("create directory"), Some(Dir))),
             (
                 "rm",
-                o(Some("remove"), Some(Path)).flags(&[("-r", Some("recursive")), ("-f", Some("force"))]),
+                o(Some("remove"), Some(Path))
+                    .flags(&[("-r", Some("recursive")), ("-f", Some("force"))]),
             ),
             ("cp", o(Some("copy"), Some(Path))),
             ("mv", o(Some("move or rename"), Some(Path))),
@@ -611,7 +618,11 @@ pub fn complete(
         let mut names: Vec<&str> = outlines().iter().map(|(n, _)| *n).collect();
         let curated = names.len();
         let mut seen: HashSet<&str> = names.iter().copied().collect();
-        names.extend(exes.iter().map(|(n, _)| n.as_str()).filter(|n| seen.insert(n)));
+        names.extend(
+            exes.iter()
+                .map(|(n, _)| n.as_str())
+                .filter(|n| seen.insert(n)),
+        );
         let mut matches: Vec<(bool, &str)> = starts(names.iter().copied(), current)
             .into_iter()
             .map(|n| (names[..curated].contains(&n), n))
@@ -676,16 +687,19 @@ pub fn complete(
         let Some(need) = need else {
             return Vec::new();
         };
-        starts(src.get(need, now, wants).iter().map(|(n, _)| n.as_str()), current)
-            .into_iter()
-            .map(|n| Completion {
-                insert: n.to_owned(),
-                label: n.to_owned(),
-                detail: detail.map(str::to_owned),
-                kind,
-                continues: false,
-            })
-            .collect::<Vec<_>>()
+        starts(
+            src.get(need, now, wants).iter().map(|(n, _)| n.as_str()),
+            current,
+        )
+        .into_iter()
+        .map(|n| Completion {
+            insert: n.to_owned(),
+            label: n.to_owned(),
+            detail: detail.map(str::to_owned),
+            kind,
+            continues: false,
+        })
+        .collect::<Vec<_>>()
     };
     match arg {
         Some(Arg::Branch) => out.extend(listed(
@@ -714,9 +728,9 @@ pub fn complete(
 
 /// `applyCompletion`: `input` with its last token replaced.
 pub fn apply(input: &str, c: &Completion) -> String {
-    let cut = input
-        .rfind(char::is_whitespace)
-        .map_or(0, |i| i + input[i..].chars().next().map_or(1, char::len_utf8));
+    let cut = input.rfind(char::is_whitespace).map_or(0, |i| {
+        i + input[i..].chars().next().map_or(1, char::len_utf8)
+    });
     let space = if c.continues { "" } else { " " };
     format!("{}{}{space}", &input[..cut], c.insert)
 }
@@ -804,9 +818,23 @@ impl Menu {
         if n == 0 {
             return;
         }
-        let at = self.highlight.map_or(if by > 0 { -1 } else { 0 }, |h| h as isize);
+        let at = self
+            .highlight
+            .map_or(if by > 0 { -1 } else { 0 }, |h| h as isize);
         self.highlight = Some((at + by).clamp(0, n as isize - 1) as usize);
     }
+}
+
+/// What a block's or the composer menu's controls do.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum IntentAct {
+    /// Copies a block's command and output.
+    Copy {
+        session: String,
+        key: (u32, u64, u64),
+    },
+    /// Runs or fills in menu row `index`.
+    Pick { session: String, index: usize },
 }
 
 /// History, caches and every shell's menu.
@@ -815,6 +843,10 @@ pub struct Intent {
     pub history: History,
     pub sources: Sources,
     pub menus: HashMap<String, Menu>,
+    /// The block whose Copy was last pressed, and when.
+    pub copied: Option<((u32, u64, u64), Instant)>,
+    /// Shells whose composer stood aside for a running command while focused.
+    pub stood_aside: HashSet<String>,
 }
 
 /// Relative time for a history row: now, m, h, d.
@@ -851,7 +883,11 @@ mod tests {
         h.record("echo git", Some("/b"), 2);
         h.record("grep -i t", Some("/a"), 3);
         h.record("git status", Some("/a"), 4);
-        let found: Vec<_> = h.search("git", Some("/a")).into_iter().map(|e| e.text).collect();
+        let found: Vec<_> = h
+            .search("git", Some("/a"))
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
         assert_eq!(found, vec!["git status", "echo git", "grep -i t"]);
         assert!(h.search("git status", Some("/a")).is_empty());
         assert_eq!(h.search("", Some("/b"))[0].text, "echo git");
@@ -940,16 +976,18 @@ mod tests {
 
     #[test]
     fn the_menu_moves_within_its_rows() {
-        let mut m = Menu::default();
-        m.history = vec![
-            Entry {
-                text: "a".into(),
-                kind: "shell".into(),
-                timestamp: 0,
-                project_path: None,
-            };
-            2
-        ];
+        let mut m = Menu {
+            history: vec![
+                Entry {
+                    text: "a".into(),
+                    kind: "shell".into(),
+                    timestamp: 0,
+                    project_path: None,
+                };
+                2
+            ],
+            ..Menu::default()
+        };
         m.step(1);
         assert_eq!(m.highlight, Some(0));
         m.step(5);

@@ -33,7 +33,9 @@ use crate::state::{LayoutMode, State};
 use crate::ui::{div, icon, El, Place, Rgba, Ui};
 use crate::view::PaneView;
 
-pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
+pub use cards::{
+    block_of, card_index, intent_id, log_id, rename_id, term_id, CARD_ID_BASE, SETTLE,
+};
 pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
 pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};

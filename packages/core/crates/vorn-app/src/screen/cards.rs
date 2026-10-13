@@ -6,13 +6,18 @@
 use super::chrome::{self, divider, draggable};
 use super::panes;
 use super::{c, ico, truncate, white, Screen, MOD_LABEL};
+use std::time::Duration;
+
 use crate::act::{Act, Acts};
+use crate::blocks::{self, Block, Running, Shell};
 use crate::client::Session;
+use crate::intent::{self, IntentAct, Row};
 use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
+use crate::ui::widgets::scroll_view;
 use crate::ui::{
-    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
+    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -40,6 +45,38 @@ pub fn intent_id(session: &str) -> Id {
 pub fn term_id(session: &str) -> Id {
     Id::new("term").child(session)
 }
+
+/// Custom ids at and above this are a shell's finished commands: id
+/// `BLOCK_ID_BASE + i * MAX_BLOCKS + j` is block `j` of `store.sessions[i]`.
+pub const BLOCK_ID_BASE: u64 = 4_000_000;
+
+pub fn block_custom(i: usize, j: usize) -> u64 {
+    BLOCK_ID_BASE + (i * blocks::MAX_BLOCKS + j) as u64
+}
+
+/// The session index and block a custom box paints, if it is a block.
+pub fn block_of(id: u64) -> Option<(usize, usize)> {
+    let n = usize::try_from(id.checked_sub(BLOCK_ID_BASE)?).ok()?;
+    Some((n / blocks::MAX_BLOCKS, n % blocks::MAX_BLOCKS))
+}
+
+/// A shell's block log, which scrolls.
+pub fn log_id(session: &str) -> Id {
+    Id::new("block-log").child(session)
+}
+
+/// One block in the log, for its hover.
+fn block_id(session: &str, j: usize) -> Id {
+    Id::new("block").child((session, j))
+}
+
+/// A shell composer's menu.
+pub fn intent_menu_id(session: &str) -> Id {
+    Id::new("intent-menu").child(session)
+}
+
+/// How long a command runs before the composer stands aside for it.
+pub const SETTLE: Duration = Duration::from_millis(120);
 
 /// Which cards a frame shows: all of them when they fit; otherwise the
 /// page of rows holding the selected card, since the grid does not scroll.
@@ -510,16 +547,203 @@ fn spine(s: &Screen<'_>, session: &Session) -> El {
 fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     let sid = session.info.id.as_str();
     let id = term_id(sid);
+    s.acts.bind(id, Act::Select(sid.to_owned()));
+    if let Some(sh) = split(s, session) {
+        // The log scrolls itself; the live rows show no history to wheel through.
+        return s
+            .acts
+            .context(
+                split_body(s, i, sh),
+                id,
+                Act::Open(MenuKind::Terminal(sid.to_owned())),
+            )
+            .on(Action::Click);
+    }
     let mut inner = div().row().grow().min_h(0.0);
     if session.is_shell() {
         inner = inner.child(spine(s, session)).child(div().w(8.0).shrink0());
     }
     let inner = inner.child(custom(CARD_ID_BASE + i as u64).grow());
-    s.acts.bind(id, Act::Select(sid.to_owned()));
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))
         .on(Action::Click)
         .sense(Sense::WHEEL)
+}
+
+/// The shell's blocks when it shows them, as TerminalPane splits.
+pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
+    blocks::split(&s.store.config, session, s.st.shells.get(&session.info.id))
+}
+
+/// TerminalPane's split: the finished commands (BlockLog), the running
+/// one (RunningCommand), then the live rows, all held to the bottom.
+fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
+    let sid = s.store.sessions[i].info.id.as_str();
+    let cell_h = s.ui.text.cell_logical().1;
+    let mut col = div().col().grow().min_h(0.0).justify_end();
+    if !sh.blocks.is_empty() {
+        let mut log = scroll_view(log_id(sid))
+            .min_h(0.0)
+            .role(Role::List, "Finished commands");
+        for (j, b) in sh.blocks.iter().enumerate() {
+            log = log.child(block(s, i, j, sid, b, cell_h));
+        }
+        col = col.child(log);
+    }
+    if let Some(r) = sh.running() {
+        col = col.child(running_row(s, &r));
+    }
+    col.child(
+        div().px(12.0).shrink0().child(
+            custom(CARD_ID_BASE + i as u64)
+                .w_full()
+                .h(f32::from(sh.live.1) * cell_h),
+        ),
+    )
+}
+
+/// A finished command: its title, where and how it ended, its output.
+fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) -> El {
+    let hid = block_id(sid, j);
+    let hot = s.ui.hover(hid);
+    let faint = white(0.25);
+    let meta_text = |t: String, color: Rgba| text(t, 10.0, color).mono().line_height(19.0);
+    let mut meta = div().row().items_center().gap(8.0).shrink0();
+    if let Some(cwd) = b.cwd.as_deref() {
+        meta = meta.child(meta_text(blocks::shorten_cwd(cwd), faint));
+    }
+    if let Some(code) = b.exit_code.filter(|_| b.failed()) {
+        meta = meta.child(meta_text(format!("exit {code}"), c(look::RED_400)));
+    }
+    if let Some(ms) = b.duration_ms {
+        meta = meta.child(meta_text(blocks::format_duration(ms), faint));
+    }
+    let copied =
+        s.st.intent
+            .copied
+            .is_some_and(|(k, at)| k == b.key && s.ui.now().duration_since(at) < COPIED);
+    let copy_id = s.acts.on(
+        "block-copy",
+        Act::Intent(IntentAct::Copy {
+            session: sid.to_owned(),
+            key: b.key,
+        }),
+    );
+    let copy = div()
+        .id(copy_id)
+        .on(Action::Click)
+        .p(2.0)
+        .rounded(3.0)
+        .role(Role::Button, if copied { "Copied" } else { "Copy" })
+        .opacity(if copied { 1.0 } else { hot })
+        .child(ico(
+            if copied { "check" } else { "copy" },
+            11.0,
+            2.0,
+            c(look::GRAY_500).mix(c(look::GRAY_200), s.ui.hover(copy_id)),
+        ));
+    let meta = meta.child(copy);
+    let rows = f32::from(b.view.rows);
+    let output = (rows > 0.0).then(|| custom(block_custom(i, j)).grow().h(rows * cell_h));
+    let mut el = div()
+        .id(hid)
+        .sense(Sense::HOVER)
+        .col()
+        .shrink0()
+        .pl(10.0)
+        .pr(12.0)
+        .py(8.0)
+        .border_left(
+            2.0,
+            if b.failed() {
+                c(look::RED_400)
+            } else {
+                white(0.0)
+            },
+        )
+        .bg(white(0.03 * hot))
+        .role(Role::ListItem, b.command.as_deref().unwrap_or("Command"));
+    if j > 0 {
+        el = el.border_top(1.0, white(0.06));
+    }
+    match &b.command {
+        Some(cmd) => el
+            .child(
+                div()
+                    .row()
+                    .gap(12.0)
+                    .child(
+                        text(cmd.as_str(), 13.0, c(look::GRAY_100))
+                            .mono()
+                            .weight(600)
+                            .line_height(19.0)
+                            .wrapping()
+                            .grow()
+                            .min_w0(),
+                    )
+                    .child(meta),
+            )
+            .child_if(output.map(|o| div().row().child(o))),
+        None => el.child(
+            div()
+                .row()
+                .gap(12.0)
+                .items_start()
+                .child(output.unwrap_or_else(|| div().grow()))
+                .child(meta),
+        ),
+    }
+}
+
+/// How long Copy shows its check.
+const COPIED: Duration = Duration::from_millis(1200);
+
+/// RunningCommand: the command, a pulse and how long it has run.
+fn running_row(s: &Screen<'_>, r: &Running) -> El {
+    let elapsed = s.ui.now().saturating_duration_since(r.since);
+    s.ui.wake_at(r.since + Duration::from_secs(elapsed.as_secs() + 1));
+    let faint = white(0.25);
+    let label = r.command.as_deref().unwrap_or("Running");
+    div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(6.0)
+        .shrink0()
+        .border_top(1.0, white(0.06))
+        .role(Role::Status, format!("Running {label}"))
+        .child(
+            div()
+                .size(6.0, 6.0)
+                .rounded(3.0)
+                .shrink0()
+                .bg(c(look::BLUE_400).alpha(crate::components::glyph::pulse(s.ui))),
+        )
+        .child(
+            text(label, 13.0, c(look::GRAY_100))
+                .mono()
+                .weight(600)
+                .line_height(19.0)
+                .truncate()
+                .grow(),
+        )
+        .child(
+            text(
+                blocks::format_duration(elapsed.as_millis() as u64),
+                10.0,
+                faint,
+            )
+            .mono()
+            .line_height(14.0)
+            .silent(),
+        )
+        .child(
+            text("\u{2303}C to interrupt", 10.0, faint)
+                .mono()
+                .line_height(14.0)
+                .silent(),
+        )
 }
 
 /// EndedStrip: why the session ended, and how to pick it back up.
@@ -606,11 +830,14 @@ fn ended_strip(s: &Screen<'_>, session: &Session, compact: bool) -> El {
         )
 }
 
-/// IntentBar, command mode: a line typed here runs in the shell on Enter.
+/// IntentBar, command mode: a line typed here runs in the shell on Enter,
+/// with the commands typed before and completions over it.
 fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     let sid = session.info.id.as_str();
     let id = intent_id(sid);
     let focused = s.ui.focused(id);
+    let typed = s.ui.edit_text(id);
+    let menu = s.st.intent.menus.get(sid);
     let glyph = text(
         "\u{276f}",
         13.0,
@@ -623,18 +850,45 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     .mono()
     .line_height(19.0)
     .role(Role::Label, "Command mode");
+    let style = TextStyle {
+        line_height: 19.0,
+        ..TextStyle::mono(13.0)
+    };
     let input = field(
         id,
         "Type a command",
         "Type a command or send a prompt for the agent",
-        TextStyle {
-            line_height: 19.0,
-            ..TextStyle::mono(13.0)
-        },
+        style,
         c(look::GRAY_200),
     )
     .grow()
     .min_w0();
+    // The ghost: what is typed, unseen, then the rest of a past command.
+    let ghost = (focused && menu.is_none_or(|m| m.highlight.is_none()))
+        .then(|| {
+            s.st.intent
+                .history
+                .ghost(typed, Some(session.info.project_path.as_str()))
+        })
+        .flatten()
+        .map(|g| {
+            div()
+                .absolute(0.0, 0.0)
+                .row()
+                .child(
+                    text(typed, 13.0, white(0.0))
+                        .mono()
+                        .line_height(19.0)
+                        .silent(),
+                )
+                .child(
+                    text(&g[typed.len()..], 13.0, c(look::GRAY_600))
+                        .mono()
+                        .line_height(19.0)
+                        .silent(),
+                )
+        });
+    let input = div().row().grow().min_w0().child(input).child_if(ghost);
     let row = div()
         .row()
         .gap(8.0)
@@ -656,8 +910,9 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
         .child(row);
     if !compact {
         let cwd = session.info.shell_cwd.as_deref().unwrap_or("");
-        let shown = focused || !s.ui.edit_text(id).is_empty();
+        let shown = focused || !typed.is_empty();
         let tone = Rgba::hexa(look::GRAY_700, if shown { 1.0 } else { 0.0 });
+        let hint = |t: &str| text(t, 10.0, tone).line_height(12.0).silent();
         col = col.child(
             div()
                 .row()
@@ -666,18 +921,131 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
                 .pl(16.0)
                 .pr(8.0)
                 .pb(4.0)
-                .child(ico("folder", 9.0, 2.0, tone))
                 .child(
-                    text(truncate(cwd, 40), 10.0, tone)
-                        .mono()
-                        .line_height(12.0)
-                        .silent(),
+                    div()
+                        .row()
+                        .items_center()
+                        .gap(4.0)
+                        .max_w(200.0)
+                        .min_w0()
+                        .child(ico("folder", 9.0, 2.0, tone))
+                        .child(
+                            text(crate::state::basename(cwd), 10.0, tone)
+                                .mono()
+                                .line_height(12.0)
+                                .truncate()
+                                .silent(),
+                        ),
                 )
                 .child(div().grow())
-                .child(text("\u{21b5} run", 10.0, tone).line_height(12.0).silent()),
+                .child(hint("\u{2191} history"))
+                .child(hint("\u{21e5} complete"))
+                .child(hint("\u{21b5} run")),
         );
     }
-    col
+    match menu.filter(|m| m.shown() && focused) {
+        Some(m) => col.dropdown(intent_menu(s, sid, m), Place::AboveStart, 4.0),
+        None => col,
+    }
+}
+
+/// The composer's menu: past commands, then completions.
+fn intent_menu(s: &Screen<'_>, sid: &str, m: &intent::Menu) -> El {
+    let now = crate::state::now_ms() as u64;
+    let mut list = scroll_view(intent_menu_id(sid))
+        .w_full()
+        .max_h(192.0)
+        .py(2.0)
+        .rounded(3.0)
+        .border(1.0, white(0.07))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::ListBox, "Suggestions");
+    for (k, row) in m.rows().into_iter().enumerate() {
+        let hi = m.highlight == Some(k);
+        let id = s.acts.on(
+            "intent-row",
+            Act::Intent(IntentAct::Pick {
+                session: sid.to_owned(),
+                index: k,
+            }),
+        );
+        let (icon, label, side) = match row {
+            Row::History(e) => (
+                "history",
+                e.text.as_str(),
+                if hi {
+                    "\u{21b5}".to_owned()
+                } else {
+                    intent::ago(e.timestamp, now)
+                },
+            ),
+            Row::Completion(c) => (
+                c.kind.icon(c.continues),
+                c.label.as_str(),
+                if hi {
+                    "\u{21e5}".to_owned()
+                } else {
+                    c.detail.clone().unwrap_or_default()
+                },
+            ),
+        };
+        list = list.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(10.0)
+                .py(4.0)
+                .bg(if hi {
+                    white(0.08)
+                } else {
+                    white(0.0).mix(white(0.04), s.ui.hover(id))
+                })
+                .role(Role::ListBoxOption, label)
+                .selected(hi)
+                .child(ico(icon, 11.0, 2.0, c(look::GRAY_500)))
+                .child(
+                    text(
+                        label,
+                        12.0,
+                        c(if hi { look::GRAY_100 } else { look::GRAY_400 }),
+                    )
+                    .mono()
+                    .line_height(16.0)
+                    .truncate()
+                    .grow()
+                    .silent(),
+                )
+                .child(
+                    text(side, 10.0, c(look::GRAY_600))
+                        .line_height(14.0)
+                        .shrink0()
+                        .silent(),
+                ),
+        );
+    }
+    list
+}
+
+/// Whether a shell's composer stands aside: a full-screen program has the
+/// keys, or a command has run long enough to be typed into itself.
+pub fn stands_aside(s: &Screen<'_>, session: &Session) -> bool {
+    let Some(sh) = s.st.shells.get(&session.info.id) else {
+        return false;
+    };
+    if sh.lines.alt {
+        return true;
+    }
+    let Some(r) = sh.running() else {
+        return false;
+    };
+    let ran = s.ui.now().saturating_duration_since(r.since);
+    if ran < SETTLE {
+        s.ui.wake_at(r.since + SETTLE);
+    }
+    ran >= SETTLE
 }
 
 /// SessionComposer: the ended strip, or a shell's intent bar.
@@ -685,7 +1053,7 @@ pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Opti
     if session.ended() {
         return Some(ended_strip(s, session, compact));
     }
-    session.is_shell().then(|| intent_bar(s, session, compact))
+    (session.is_shell() && !stands_aside(s, session)).then(|| intent_bar(s, session, compact))
 }
 
 /// The terminal and its composer: what every layout shows of a session
