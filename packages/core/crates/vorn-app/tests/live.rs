@@ -84,6 +84,169 @@ fn tab_and_its_variants_reach_a_focused_terminal() {
     assert!(shot.ui.focus().is_some(), "Tab focuses a settings control");
 }
 
+/// The rows of `id`'s screen, trailing blanks dropped.
+fn screen(app: &vorn_app::App, id: &str) -> Vec<String> {
+    app.pane(id)
+        .map(|p| p.text().lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// The middle of cell `(col, row)` in `id`'s terminal, in window pixels.
+fn cell_xy(app: &vorn_app::App, shot: &Shot, id: &str, col: u16, row: usize) -> (f32, f32) {
+    let r = app.term_box(id).expect("the terminal is painted");
+    let cell = shot.ui.text.cell();
+    let s = shot.ui.scale();
+    (
+        (r.x.round() + (f32::from(col) + 0.5) * cell.w) / s,
+        (r.y.round() + (row as f32 + 0.5) * cell.h) / s,
+    )
+}
+
+/// The first row whose text is `line`.
+fn row_of(app: &vorn_app::App, id: &str, line: &str) -> usize {
+    screen(app, id)
+        .iter()
+        .position(|l| l.trim() == line)
+        .unwrap_or_else(|| panic!("{line:?} on {:#?}", screen(app, id)))
+}
+
+#[cfg(unix)]
+#[test]
+fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
+    use vorn_app::screen::term_id;
+    use vorn_app::state::Dialog;
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mac = cfg!(target_os = "macos");
+    let (copy, paste) = if mac {
+        (
+            key("KeyC", mods::SUPER, Some("c")),
+            key("KeyV", mods::SUPER, Some("v")),
+        )
+    } else {
+        (
+            key("KeyC", mods::CTRL | mods::SHIFT, Some("C")),
+            key("KeyV", mods::CTRL | mods::SHIFT, Some("V")),
+        )
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's first screen", |app, _| {
+        app.pane(&id).map(|_| ())
+    });
+    let shows = |line: &'static str| {
+        let id = id.clone();
+        move |app: &mut vorn_app::App, _: &vorn_app::ui::Ui| {
+            screen(app, &id)
+                .iter()
+                .any(|l| l.trim() == line)
+                .then_some(())
+        }
+    };
+
+    // One line goes straight in, as typing would.
+    shot.ui.clipboard().set("echo pasted-1");
+    shot.send(&mut app, paste.clone());
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    shot.until(&mut app, "the pasted command's answer", shows("pasted-1"));
+
+    // The shell would run each line of this as it arrives: the app asks first.
+    shot.ui.clipboard().set("echo two-a\necho two-b\n");
+    shot.send(&mut app, paste.clone());
+    shot.until(&mut app, "the paste confirm", |app, _| {
+        (app.st.dialog == Some(Dialog::Paste)).then_some(())
+    });
+    shot.save(&mut app, "paste-confirm");
+    assert!(
+        !app.terminal_has_keys(&shot.ui),
+        "the dialog holds the keys"
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    assert_eq!(app.st.dialog, None);
+    shot.send(&mut app, key("Insert", mods::SHIFT, None));
+    shot.until(&mut app, "the paste confirm again", |app, _| {
+        (app.st.dialog == Some(Dialog::Paste)).then_some(())
+    });
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    shot.until(&mut app, "the confirmed paste's answer", shows("two-b"));
+    let ran = screen(&app, &id)
+        .iter()
+        .filter(|l| l.trim() == "two-a")
+        .count();
+    assert_eq!(ran, 1, "only the confirmed paste ran");
+    assert_eq!(app.st.dialog, None);
+
+    // A drag across a row selects it; the copy key copies it.
+    let row = row_of(&app, &id, "pasted-1");
+    let (x0, y) = cell_xy(&app, &shot, &id, 0, row);
+    let (x1, _) = cell_xy(&app, &shot, &id, 20, row);
+    shot.ui.pointer_move(x0, y);
+    shot.ui.pointer_down();
+    shot.ui.pointer_move(x1, y);
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    assert!(app.st.sel.is_some(), "the drag selected");
+    shot.save(&mut app, "selection");
+    shot.send(&mut app, copy.clone());
+    assert!(app.st.sel.is_none(), "copying clears the selection");
+    assert_eq!(copied(&mut shot, &mut app, "the copied row"), "pasted-1");
+
+    // A double-click selects the word under it; the menu's Copy copies it.
+    let row = row_of(&app, &id, "two-b");
+    let (x, y) = cell_xy(&app, &shot, &id, 1, row);
+    shot.ui.pointer_move(x, y);
+    for _ in 0..2 {
+        shot.ui.pointer_down();
+        shot.ui.pointer_up();
+    }
+    app.events(&mut shot.ui);
+    shot.until(&mut app, "the word's selection", |app, _| {
+        app.st.sel.as_ref().map(|_| ())
+    });
+    shot.right_click(&mut app, term_id(&id));
+    assert_eq!(app.menu_labels(&shot.ui)[0], "Copy");
+    choose(&mut shot, &mut app, "Copy");
+    assert_eq!(copied(&mut shot, &mut app, "the copied word"), "two-b");
+
+    // The menu's Paste pastes; Ctrl-C with nothing selected still interrupts.
+    shot.ui.clipboard().set("sleep 30");
+    shot.right_click(&mut app, term_id(&id));
+    choose(&mut shot, &mut app, "Paste");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    shot.send(&mut app, key("KeyC", mods::CTRL, Some("c")));
+    shot.type_line(&mut app, "echo after-interrupt");
+    shot.until(
+        &mut app,
+        "the shell back from sleep",
+        shows("after-interrupt"),
+    );
+}
+
+/// What the copy put on the clipboard, once it has.
+fn copied(shot: &mut Shot, app: &mut vorn_app::App, what: &str) -> String {
+    shot.ui.clipboard().set("");
+    wait_for(what, || {
+        shot.frame(app);
+        shot.ui.clipboard().get().filter(|t| !t.is_empty())
+    })
+}
+
+fn choose(shot: &mut Shot, app: &mut vorn_app::App, label: &str) {
+    let labels = app.menu_labels(&shot.ui);
+    let i = labels
+        .iter()
+        .position(|l| l == label)
+        .unwrap_or_else(|| panic!("{label:?} in {labels:?}"));
+    shot.click(app, vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i));
+}
+
 #[cfg(unix)]
 #[test]
 fn the_composer_starts_the_default_agent_in_the_chosen_project() {

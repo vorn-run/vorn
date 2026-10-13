@@ -465,6 +465,11 @@ impl App {
         self.views.get(session)
     }
 
+    /// Where `session`'s terminal was last painted, in physical pixels.
+    pub fn term_box(&self, session: &str) -> Option<crate::ui::Rect> {
+        self.term_boxes.get(session).copied()
+    }
+
     /// Whether the composer is what the sessions view shows.
     pub fn composing(&self) -> bool {
         self.st.composing(&self.store)
