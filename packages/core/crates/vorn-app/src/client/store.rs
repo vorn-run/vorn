@@ -158,13 +158,33 @@ impl Store {
             .unwrap_or(DEFAULT_AGENT)
     }
 
-    /// The workspace the screen shows: the first configured, as the
-    /// renderer starts on it, else `personal`.
+    /// The workspace the screen shows: `defaults.activeWorkspace`, which
+    /// every app on this vornd saves on a switch, else `personal`.
     pub fn workspace(&self) -> &str {
-        self.config
-            .pointer("/workspaces/0/id")
-            .and_then(Value::as_str)
-            .unwrap_or(WORKSPACE)
+        active_workspace(&self.config)
+    }
+
+    /// Whether `p` belongs to the active workspace; a project with none
+    /// belongs to `personal`.
+    pub fn in_workspace(&self, p: &ProjectConfig) -> bool {
+        p.workspace_id.as_deref().unwrap_or(WORKSPACE) == self.workspace()
+    }
+
+    /// `useWorkspaceProjects`: the active workspace's projects, in order.
+    pub fn workspace_projects(&self) -> impl Iterator<Item = &ProjectConfig> {
+        self.projects.iter().filter(|p| self.in_workspace(p))
+    }
+
+    /// Whether a session's project is in the active workspace, which is
+    /// what `useSessionScope` lets any surface show.
+    pub fn in_scope(&self, s: &Session) -> bool {
+        self.workspace_projects()
+            .any(|p| p.name == s.info.project_name)
+    }
+
+    /// The active workspace's sessions.
+    pub fn scoped_sessions(&self) -> impl Iterator<Item = &Session> {
+        self.sessions.iter().filter(|s| self.in_scope(s))
     }
 
     /// The group with `id`.
@@ -310,12 +330,18 @@ impl Store {
 /// The workspace every config has (`DEFAULT_WORKSPACE_ID`).
 pub const WORKSPACE: &str = "personal";
 
-/// `useWorkspaceSessionGroups`: the first workspace's groups by `order`.
-fn groups(config: &Value) -> Vec<SessionGroupConfig> {
-    let workspace = config
-        .pointer("/workspaces/0/id")
+/// `defaults.activeWorkspace`, else `personal`.
+fn active_workspace(config: &Value) -> &str {
+    config
+        .pointer("/defaults/activeWorkspace")
         .and_then(Value::as_str)
-        .unwrap_or(WORKSPACE);
+        .filter(|w| !w.is_empty())
+        .unwrap_or(WORKSPACE)
+}
+
+/// `useWorkspaceSessionGroups`: the active workspace's groups by `order`.
+fn groups(config: &Value) -> Vec<SessionGroupConfig> {
+    let workspace = active_workspace(config);
     let mut out: Vec<SessionGroupConfig> =
         records(config.get("sessionGroups").cloned().unwrap_or_default());
     out.retain(|g| g.workspace_id == workspace);

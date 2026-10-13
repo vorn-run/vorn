@@ -87,6 +87,12 @@ pub enum Act {
     AddProject,
     /// How the sidebar arranges the sessions.
     SidebarMode(SidebarMode),
+    /// The sidebar's project order.
+    ProjectSort(crate::sidebar_view::ProjectSort),
+    /// The sidebar's worktree order.
+    WorktreeSort(crate::sidebar_view::WorktreeSort),
+    /// Whether the sidebar shows only projects and worktrees with sessions.
+    WorktreeFilter(crate::sidebar_view::WorktreeFilter),
     /// Folds the sessions sidebar's section.
     ToggleSection,
     /// Filters the grid to a group's sessions, or clears it.

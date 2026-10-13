@@ -334,7 +334,27 @@ impl App {
         self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
         self.st.editors.drafts =
             crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
+        self.st.sidebar_view =
+            crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
         self.data_dir = Some(dir);
+    }
+
+    /// `setActiveWorkspace`'s reset: a selection from the last workspace
+    /// would narrow the new one to nothing.
+    fn workspace_switched(&mut self) {
+        self.st.project = None;
+        self.st.group = None;
+        self.st.worktree = None;
+        self.st.focused = None;
+    }
+
+    /// Changes the sidebar's view options and writes them down, as
+    /// `saveSidebarSettings` does on every change.
+    fn set_sidebar_view(&mut self, change: impl FnOnce(&mut crate::sidebar_view::SidebarView)) {
+        change(&mut self.st.sidebar_view);
+        if let Some(dir) = &self.data_dir {
+            self.st.sidebar_view.save(&crate::sidebar_view::file(dir));
+        }
     }
 
     /// The vornd connection, for calls the screen does not make itself.
@@ -397,7 +417,11 @@ impl App {
                         self.git_offer(&params);
                         continue;
                     }
+                    let before = self.store.workspace().to_owned();
                     self.store.apply(&method, params);
+                    if self.store.workspace() != before {
+                        self.workspace_switched();
+                    }
                 }
                 Event::Request { id, method, params } => self.bridge(id, &method, params),
                 Event::Closed => self.closed = true,
@@ -1367,7 +1391,10 @@ impl App {
                 };
                 self.st.dialog = Some(Dialog::Project(Some(name)));
             }
-            Act::SidebarMode(m) => self.st.sidebar_mode = m,
+            Act::SidebarMode(m) => self.set_sidebar_view(|v| v.view_mode = m),
+            Act::ProjectSort(m) => self.set_sidebar_view(|v| v.project_sort = m),
+            Act::WorktreeSort(m) => self.set_sidebar_view(|v| v.worktree_sort = m),
+            Act::WorktreeFilter(f) => self.set_sidebar_view(|v| v.worktree_filter = f),
             Act::ToggleSection => self.st.section_folded = !self.st.section_folded,
             Act::Group(g) => {
                 // A group row toggles its filter; All Sessions clears both.
@@ -1593,7 +1620,13 @@ impl App {
                             || matches!(m.kind, MenuKind::GroupIcon(_))
                                 && matches!(act, Act::GroupIconName(..) | Act::GroupIconColor(..))
                             || matches!(m.kind, MenuKind::SidebarOptions)
-                                && matches!(act, Act::SidebarMode(_))
+                                && matches!(
+                                    act,
+                                    Act::SidebarMode(_)
+                                        | Act::ProjectSort(_)
+                                        | Act::WorktreeSort(_)
+                                        | Act::WorktreeFilter(_)
+                                )
                     });
                     if !keep && self.st.menu.is_some() {
                         self.close_menu(ui);
@@ -1777,6 +1810,9 @@ impl App {
                 | Act::AskDeleteProject(_)
                 | Act::AskDeleteGroup(_)
                 | Act::SidebarMode(_)
+                | Act::ProjectSort(_)
+                | Act::WorktreeSort(_)
+                | Act::WorktreeFilter(_)
                 | Act::Task(crate::tasks::TaskAct::AskDelete(_))
         );
         if stays {

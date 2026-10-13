@@ -378,7 +378,8 @@ fn row_count(n: usize, size: f32) -> El {
 /// ProjectItem: icon and name, its quick actions on hover, and under it
 /// while expanded its worktrees or sessions as the view mode arranges them.
 fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
-    let mode = s.st.sidebar_mode;
+    let view = s.st.sidebar_view;
+    let mode = view.view_mode;
     let sessions: Vec<&Session> = s
         .store
         .sessions
@@ -507,14 +508,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
                 .collect();
             kids = kids.child(worktree_row(s, p, main, &mine, nested));
         }
-        let mut rest: Vec<&crate::state::Worktree> = worktrees.iter().filter(|w| !w.main).collect();
-        rest.sort_by(|a, b| a.name.cmp(&b.name));
-        for wt in rest {
-            let mine: Vec<&Session> = sessions
-                .iter()
-                .copied()
-                .filter(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
-                .collect();
+        for (wt, mine) in sorted_worktrees(s, worktrees, &sessions) {
             kids = kids.child(worktree_row(s, p, wt, &mine, nested));
         }
     } else if mode != SidebarMode::Worktrees || !git {
@@ -526,6 +520,43 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         }
     }
     col.child(kids)
+}
+
+/// `sortedWorktrees`: the linked worktrees with their sessions, through
+/// the worktree filter, by name or by their first session's last output.
+fn sorted_worktrees<'a, 's>(
+    s: &Screen<'s>,
+    worktrees: &'a [crate::state::Worktree],
+    sessions: &[&'s Session],
+) -> Vec<(&'a crate::state::Worktree, Vec<&'s Session>)> {
+    use crate::sidebar_view::{WorktreeFilter, WorktreeSort};
+    let view = s.st.sidebar_view;
+    let mut rest: Vec<_> = worktrees
+        .iter()
+        .filter(|w| !w.main)
+        .map(|wt| {
+            let mine: Vec<&Session> = sessions
+                .iter()
+                .copied()
+                .filter(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
+                .collect();
+            (wt, mine)
+        })
+        .filter(|(_, mine)| view.worktree_filter == WorktreeFilter::All || !mine.is_empty())
+        .collect();
+    rest.sort_by_cached_key(|(wt, _)| wt.name.to_lowercase());
+    if view.worktree_sort == WorktreeSort::Recent {
+        // The session `linkedSessionId` names: the first on the worktree's path.
+        let linked = |wt: &crate::state::Worktree| {
+            s.store
+                .sessions
+                .iter()
+                .find(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
+                .and_then(|x| s.st.last_output.get(&x.info.id).copied())
+        };
+        rest.sort_by_key(|(wt, _)| std::cmp::Reverse(linked(wt)));
+    }
+    rest
 }
 
 /// The main checkout's branch row (`group/main`) or a WorktreeItem, with
@@ -685,8 +716,9 @@ fn worktree_row(
 }
 
 /// `ProjectsSectionToolbar`'s Filter & sort: white with a dot while the
-/// view is not the default, which this sidebar never draws.
+/// options differ from `hasNonDefault`'s baseline, else gray-600.
 fn filter_sort(s: &Screen<'_>) -> El {
+    let lit = s.st.sidebar_view.non_default();
     let act = Act::Open(MenuKind::SidebarOptions);
     let id = s.acts.on("sidebar", act);
     let open =
@@ -699,11 +731,29 @@ fn filter_sort(s: &Screen<'_>) -> El {
         .on(Action::Click)
         .p(2.0)
         .rounded(4.0)
-        .bg(white(0.0).mix(white(0.08), if open { 1.0 } else { hot }))
+        .bg(white(0.0).mix(
+            white(0.08),
+            if open {
+                1.0
+            } else if lit {
+                0.0
+            } else {
+                hot
+            },
+        ))
         .role(Role::Button, "Filter & sort")
         .expanded(open)
-        .child(ico("list-filter", 13.0, 1.5, c(look::WHITE)))
-        .child_if((!open).then(|| {
+        .child(ico(
+            "list-filter",
+            13.0,
+            1.5,
+            if open || lit {
+                c(look::WHITE)
+            } else {
+                c(look::GRAY_600).mix(c(look::WHITE), hot)
+            },
+        ))
+        .child_if((lit && !open).then(|| {
             div()
                 .absolute(12.0, -2.0)
                 .size(6.0, 6.0)
@@ -724,14 +774,18 @@ fn quiet(label: &str) -> El {
 
 /// The sessions newest activity first, as the group and flat lists sort.
 fn by_activity<'a>(s: &Screen<'a>) -> Vec<&'a Session> {
-    let mut list: Vec<&Session> = s.store.sessions.iter().collect();
+    let mut list: Vec<&Session> = s
+        .store
+        .scoped_sessions()
+        .filter(|x| s.st.side.holder(&x.info.id).is_none())
+        .collect();
     list.sort_by_key(|x| std::cmp::Reverse(s.st.last_output.get(&x.info.id).copied()));
     list
 }
 
 /// The sessions view's sidebar in its arrangement.
 fn sessions(s: &Screen<'_>) -> El {
-    match s.st.sidebar_mode {
+    match s.st.sidebar_view.view_mode {
         SidebarMode::Worktrees | SidebarMode::WorktreesSessions | SidebarMode::Projects => {
             projects(s)
         }
@@ -765,8 +819,8 @@ fn projects(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.sessions.len())));
-    if s.store.projects.is_empty() {
+    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
+    if s.store.workspace_projects().next().is_none() {
         col = col.child(
             div().px(10.0).py(4.0).child(
                 text("No projects", 13.0, c(look::GRAY_600))
@@ -775,10 +829,43 @@ fn projects(s: &Screen<'_>) -> El {
             ),
         );
     }
-    for p in &s.store.projects {
+    for p in sorted_projects(s) {
         col = col.child(project_row(s, p));
     }
     col
+}
+
+/// `sortedProjects`: the workspace's projects through the filter, in the
+/// chosen order; recent activity is a project's latest output.
+fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
+    use crate::sidebar_view::{ProjectSort, WorktreeFilter};
+    let view = s.st.sidebar_view;
+    fn mine<'b>(
+        s: &'b Screen<'_>,
+        p: &'b ProjectConfig,
+    ) -> impl Iterator<Item = &'b crate::client::Session> {
+        s.store
+            .sessions
+            .iter()
+            .filter(move |x| x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none())
+    }
+    let mut out: Vec<&ProjectConfig> = s
+        .store
+        .workspace_projects()
+        .filter(|p| view.worktree_filter == WorktreeFilter::All || mine(s, p).next().is_some())
+        .collect();
+    match view.project_sort {
+        ProjectSort::Manual => {}
+        ProjectSort::Name => out.sort_by_cached_key(|p| p.name.to_lowercase()),
+        ProjectSort::Recent => out.sort_by_key(|p| {
+            std::cmp::Reverse(
+                mine(s, p)
+                    .filter_map(|x| s.st.last_output.get(&x.info.id).copied())
+                    .max(),
+            )
+        }),
+    }
+    out
 }
 
 /// FlatSessionsSection: every session, newest activity first.
@@ -794,7 +881,7 @@ fn flat(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.sessions.len())));
+    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
     let mut list = div().col().gap(2.0).mt(4.0);
     let sessions: Vec<&Session> = by_activity(s)
         .into_iter()
@@ -833,7 +920,7 @@ fn groups(s: &Screen<'_>) -> El {
         Act::Group(None),
         |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Sessions",
-        Some(s.store.sessions.len()),
+        Some(s.store.scoped_sessions().count()),
         s.st.project.is_none() && s.st.group.is_none(),
     ));
     let sessions = by_activity(s);
@@ -1120,7 +1207,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
         None,
         s.st.project.is_none(),
     ));
-    if s.store.projects.is_empty() {
+    if s.store.workspace_projects().next().is_none() {
         col = col.child(
             div().px(10.0).py(4.0).child(
                 text("No projects", 13.0, c(look::GRAY_600))
@@ -1129,7 +1216,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
             ),
         );
     }
-    for p in &s.store.projects {
+    for p in s.store.workspace_projects() {
         col = col.child(nav_item(
             s,
             Act::Project(Some(p.name.clone())),

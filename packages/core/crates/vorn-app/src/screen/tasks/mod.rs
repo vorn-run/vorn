@@ -225,7 +225,7 @@ fn list_row(s: &Screen<'_>, t: &TaskConfig) -> El {
         white(0.0)
     };
     let agent = match &t.assigned_agent {
-        Some(_) => ico("bot", 14.0, 1.5, secondary()),
+        Some(a) => super::agent_icon(s, a, 14.0),
         None => text("---", 10.0, faint()).line_height(14.0).silent(),
     };
     let mut short = div().row().items_center().gap(6.0).shrink0().child(
@@ -539,8 +539,8 @@ fn kanban_card(s: &Screen<'_>, t: &TaskConfig, ghost: bool) -> El {
         primary()
     };
     let mut foot = div().row().items_center().gap(6.0);
-    if t.assigned_agent.is_some() {
-        foot = foot.child(ico("bot", 13.0, 1.5, secondary()));
+    if let Some(a) = &t.assigned_agent {
+        foot = foot.child(super::agent_icon(s, a, 13.0));
         if live(s, t) {
             foot = foot.child(div().size(6.0, 6.0).rounded(3.0).bg(c(tasks::SAGE)));
         }
@@ -1097,7 +1097,7 @@ pub(in crate::screen) fn agent_items(s: &Screen<'_>, form: Form) -> Vec<Item> {
             name,
             Act::Task(TaskAct::PickAgent(form, Some(k.to_owned()))),
         )
-        .tint(look::GRAY_400)
+        .mark(crate::screen::agent_icon(s, k, 14.0))
         .disabled(!ok);
         it.checked = current == Some(k);
         if !ok {

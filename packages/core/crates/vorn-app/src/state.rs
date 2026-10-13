@@ -103,13 +103,18 @@ impl LayoutMode {
 
 /// How the sessions view's sidebar arranges its sessions
 /// (`SidebarViewMode`), worktrees and their sessions by default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SidebarMode {
+    #[serde(rename = "worktrees")]
     Worktrees,
     #[default]
+    #[serde(rename = "worktrees-sessions")]
     WorktreesSessions,
+    #[serde(rename = "sessions")]
     Projects,
+    #[serde(rename = "groups-sessions")]
     Groups,
+    #[serde(rename = "sessions-flat")]
     Flat,
 }
 
@@ -411,7 +416,8 @@ pub struct State {
     pub worktree: Option<String>,
     /// Sidebar worktrees whose sessions are folded, as project + path.
     pub worktrees_folded: HashSet<(String, String)>,
-    pub sidebar_mode: SidebarMode,
+    /// The sessions sidebar's arrangement, order and filter.
+    pub sidebar_view: crate::sidebar_view::SidebarView,
     /// The sessions sidebar's section folded shut.
     pub section_folded: bool,
     /// Session groups folded shut.
@@ -484,7 +490,8 @@ impl State {
             .iter()
             .enumerate()
             .filter(|(_, s)| {
-                self.project
+                store.in_scope(s)
+                    && self.project
                     .as_deref()
                     .is_none_or(|p| s.info.project_name == p)
                     && self
@@ -541,7 +548,7 @@ impl State {
     pub fn composer_inline(&self, store: &Store) -> bool {
         self.view == MainView::Sessions
             && self.focused.is_none()
-            && (store.sessions.is_empty()
+            && (store.scoped_sessions().next().is_none()
                 || (self.layout == LayoutMode::Grid
                     && self.filter == Filter::All
                     && self.gridded(store).is_empty()))

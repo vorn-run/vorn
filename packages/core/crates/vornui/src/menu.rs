@@ -59,6 +59,12 @@ pub struct Item<T> {
     pub card_row: bool,
     /// Drawn as a sidebar menu's `text-[13px]` button (`side_row`).
     pub side: Option<Inset>,
+    /// A scoped submenu's entry under its project title: `pl-7`, mono.
+    pub nested: bool,
+    /// The detail's colour, when not gray-600.
+    pub detail_color: Option<Rgba>,
+    /// Its submenu's width, when not 200.
+    pub sub_w: Option<f32>,
 }
 
 /// A sidebar menu row's padding: its left edge and above and below.
@@ -189,11 +195,14 @@ impl<T> Default for Item<T> {
             option_row: Default::default(),
             card_row: Default::default(),
             side: Default::default(),
+            nested: Default::default(),
+            detail_color: Default::default(),
+            sub_w: Default::default(),
         }
     }
 }
 
-fn row<T>(ui: &Ui, group: Id, i: usize, item: Item<T>, sub_open: Option<El>) -> El {
+fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>) -> El {
     if let Some(r) = item.row {
         return r;
     }
@@ -212,6 +221,24 @@ fn row<T>(ui: &Ui, group: Id, i: usize, item: Item<T>, sub_open: Option<El>) -> 
                 .line_height(15.0)
                 .role(Role::Label, item.label.as_str()),
         );
+    }
+    if let Some(m) = item.header.then(|| item.mark.take()).flatten() {
+        // A scoped submenu's project title: its icon, `font-medium tracking-wider`.
+        return div()
+            .row()
+            .items_center()
+            .gap(8.0)
+            .px(12.0)
+            .pt(8.0)
+            .pb(4.0)
+            .child(m)
+            .child(
+                text(item.label.to_uppercase(), 10.0, Rgba::hex(rgb::GRAY_500))
+                    .weight(500)
+                    .tracking(0.05)
+                    .line_height(15.0)
+                    .role(Role::Label, item.label.as_str()),
+            );
     }
     if item.header {
         return div().px(12.0).pt(6.0).pb(4.0).child(
@@ -252,6 +279,7 @@ fn row<T>(ui: &Ui, group: Id, i: usize, item: Item<T>, sub_open: Option<El>) -> 
         .items_center()
         .gap(10.0)
         .px(12.0)
+        .pl(if item.nested { 28.0 } else { 12.0 })
         .h(32.0)
         .bg(bg)
         .role(Role::MenuItem, item.label.as_str())
@@ -280,13 +308,13 @@ fn row<T>(ui: &Ui, group: Id, i: usize, item: Item<T>, sub_open: Option<El>) -> 
         .line_height(16.0)
         .truncate()
         .silent();
-    if item.mono {
+    if item.mono || item.nested {
         label = label.mono();
     }
     r = r.child(div().row().grow().min_w(0.0).child(label));
     if let Some(d) = &item.detail {
         r = r.child(
-            text(d, 10.0, Rgba::hex(rgb::GRAY_600))
+            text(d, 10.0, item.detail_color.unwrap_or(Rgba::hex(rgb::GRAY_600)))
                 .line_height(14.0)
                 .silent(),
         );
@@ -550,13 +578,14 @@ pub fn panel<T>(
         let sub_items = std::mem::take(&mut item.sub);
         let open = sub == Some(i) && !sub_items.is_empty();
         let has_sub = !sub_items.is_empty();
+        let sub_w = item.sub_w.unwrap_or(200.0);
         let sub_panel = open.then(|| {
             div()
                 .id(sub_group.child("scroll"))
                 .col()
                 .scroll_y()
                 .max_h(320.0)
-                .child(panel_inner(ui, sub_group, sub_items))
+                .child(panel_inner(ui, sub_group, sub_w, sub_items))
         });
         if has_sub {
             // Keeps the chevron while the entries live in the submenu.
@@ -567,10 +596,10 @@ pub fn panel<T>(
     col
 }
 
-fn panel_inner<T>(ui: &Ui, group: Id, items: Vec<Item<T>>) -> El {
+fn panel_inner<T>(ui: &Ui, group: Id, w: f32, items: Vec<Item<T>>) -> El {
     let mut col = div()
         .col()
-        .w(200.0)
+        .w(w)
         .py(4.0)
         .bg(Rgba::hex(rgb::SURFACE_OVERLAY))
         .border(1.0, Rgba::white(0.10))
