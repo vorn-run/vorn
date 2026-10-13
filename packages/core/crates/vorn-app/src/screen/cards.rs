@@ -464,7 +464,7 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
 }
 
 /// CommandSpine: an 8 px gutter with its hairline and a mark per command
-/// block, from each prompt to the next.
+/// block, from each prompt to the next. Only shells have one.
 fn spine(s: &Screen<'_>, session: &Session) -> El {
     let mut gutter = div()
         .col()
@@ -475,7 +475,7 @@ fn spine(s: &Screen<'_>, session: &Session) -> El {
     let Some(view) = s.panes.get(&session.info.id) else {
         return gutter;
     };
-    if !session.is_shell() || view.prompts.is_empty() {
+    if view.prompts.is_empty() {
         return gutter;
     }
     let cell = s.ui.text.cell().h;
@@ -505,18 +505,18 @@ fn spine(s: &Screen<'_>, session: &Session) -> El {
     gutter
 }
 
-/// The terminal beside its spine, in a box that takes the right-click and
-/// the wheel.
+/// The terminal beside a shell's spine, in a box that takes the
+/// right-click and the wheel. An agent's terminal fills the box, as today.
 fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     let sid = session.info.id.as_str();
     let id = term_id(sid);
-    let inner = div()
-        .row()
-        .grow()
-        .min_h(0.0)
-        .child(spine(s, session))
-        .child(div().w(8.0).shrink0())
-        .child(custom(CARD_ID_BASE + i as u64).grow());
+    let mut inner = div().row().grow().min_h(0.0);
+    if session.is_shell() {
+        inner = inner
+            .child(spine(s, session))
+            .child(div().w(8.0).shrink0());
+    }
+    let inner = inner.child(custom(CARD_ID_BASE + i as u64).grow());
     s.acts.bind(id, Act::Select(sid.to_owned()));
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))

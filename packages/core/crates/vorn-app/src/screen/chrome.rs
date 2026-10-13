@@ -313,6 +313,7 @@ pub(super) fn headless_panel(s: &Screen<'_>) -> El {
             .bg(white(0.02))
             .role(Role::Group, h.name.as_str())
             .child(div().size(6.0, 6.0).rounded(3.0).bg(c(dot)))
+            .child(super::agent_icon(s, &h.agent, 14.0))
             .child(
                 text(truncate(&h.name, 28), 11.0, c(look::GRAY_200))
                     .line_height(14.0)

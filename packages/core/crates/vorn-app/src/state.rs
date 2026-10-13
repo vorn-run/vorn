@@ -327,6 +327,7 @@ impl Recent {
 pub struct Headless {
     pub id: String,
     pub name: String,
+    pub agent: String,
     pub branch: Option<String>,
     pub status: String,
     pub exit: Option<i64>,
@@ -342,6 +343,11 @@ impl Headless {
         Some(Headless {
             id: v.get("id")?.as_str()?.to_owned(),
             name: name.to_owned(),
+            agent: v
+                .get("agentType")
+                .and_then(Value::as_str)
+                .unwrap_or("shell")
+                .to_owned(),
             branch: v.get("branch").and_then(Value::as_str).map(str::to_owned),
             status: v
                 .get("status")
