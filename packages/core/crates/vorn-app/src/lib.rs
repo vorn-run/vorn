@@ -17,6 +17,7 @@ pub mod artifact;
 pub mod blocks;
 pub mod browser;
 pub mod canvas;
+pub mod cli_link;
 pub mod client;
 pub mod crash;
 pub mod device;

@@ -224,7 +224,7 @@ impl App {
                         Value::Null,
                     );
                 }
-                self.st.settings.cli = Some(crate::system::cli_status());
+                self.st.settings.cli = Some(crate::cli_link::state());
             }
             Category::Worktrees => {
                 if s.worktrees.projects.is_none() {
@@ -252,8 +252,43 @@ impl App {
         }
     }
 
+    /// After Install or Remove: the row's state, and what happened as a toast.
+    fn cli_done(&mut self, done: Result<String, String>) {
+        self.st.cli_notice = None;
+        self.st.settings.cli_error = done.as_ref().err().cloned();
+        match done {
+            Ok(text) => self.st.toast(text, false),
+            Err(e) => self.st.toast(e, true),
+        }
+        self.st.settings.cli = Some(crate::cli_link::state());
+    }
+
+    /// Takes in the `vorn` command's launch notice and the PATH prompt's answer.
+    fn cli_tick(&mut self) {
+        if let Some(rx) = &self.cli_launch {
+            if let Ok(notice) = rx.try_recv() {
+                self.st.cli_notice = notice;
+                self.cli_launch = None;
+            }
+        }
+        let Some(rx) = &self.cli_prompt else { return };
+        let Ok(answer) = rx.try_recv() else { return };
+        self.cli_prompt = None;
+        self.st.settings.cli_busy = false;
+        match answer {
+            Ok(true) => {
+                self.st.cli_notice = None;
+                self.st.toast("New terminals find the vorn command.", false);
+            }
+            Ok(false) => {}
+            Err(e) => self.st.toast(e, true),
+        }
+        self.st.settings.cli = Some(crate::cli_link::state());
+    }
+
     /// Takes in the health check once it answers.
     pub(super) fn settings_tick(&mut self, now: std::time::Instant) {
+        self.cli_tick();
         if let Some(rx) = &self.health {
             if let Ok(v) = rx.try_recv() {
                 self.st.settings.holders = v.as_ref().and_then(settings::Holders::from_health);
@@ -390,11 +425,26 @@ impl App {
                 ui.set_focus(Some(SHELL_PATH));
             }
             SetAct::InstallCli => {
-                self.st.settings.cli_busy = true;
-                self.st.settings.cli_error = crate::system::install_cli().err();
-                self.st.settings.cli = Some(crate::system::cli_status());
-                self.st.settings.cli_busy = false;
+                let done = crate::cli_link::install(self.data_dir.as_deref());
+                self.cli_done(done.map(|at| {
+                    format!(
+                        "The vorn command is installed at {}.",
+                        crate::cli_link::tidy(&at)
+                    )
+                }));
             }
+            SetAct::RemoveCli => {
+                let done = crate::cli_link::remove(self.data_dir.as_deref());
+                self.cli_done(done.map(|()| "Removed the vorn command.".to_owned()));
+            }
+            SetAct::CliAddToPath(dir) => {
+                if self.cli_prompt.is_none() {
+                    let wake = std::sync::Arc::clone(&self.wake);
+                    self.cli_prompt = Some(crate::cli_link::add_to_path(dir, wake));
+                    self.st.settings.cli_busy = true;
+                }
+            }
+            SetAct::DismissCliNotice => self.st.cli_notice = None,
             SetAct::CheckUpdates => self.check_updates(),
             SetAct::UpdateNow => self.update_action(),
             SetAct::DismissUpdate => self.st.settings.update_dismissed = true,

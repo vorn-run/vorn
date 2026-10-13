@@ -336,6 +336,10 @@ pub struct App {
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
     /// The window's updater; none offscreen.
     updater: Option<Arc<crate::update::Updater>>,
+    /// The launch step's notice about the `vorn` command, on its way.
+    cli_launch: Option<std::sync::mpsc::Receiver<Option<crate::cli_link::Notice>>>,
+    /// The administrator prompt that adds the command's folder to PATH, while it is up.
+    cli_prompt: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
 }
 
 impl App {
@@ -400,6 +404,8 @@ impl App {
             hotkeys: None,
             picking: None,
             updater: None,
+            cli_launch: None,
+            cli_prompt: None,
         };
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -427,6 +433,14 @@ impl App {
     /// Where vornd keeps its data: the session holders announce themselves
     /// there, and this app keeps its own view of it (open panes, drafts)
     /// beside them.
+    /// The launch step's answer, which `cli_link::start` sends.
+    pub fn set_cli_launch(
+        &mut self,
+        rx: std::sync::mpsc::Receiver<Option<crate::cli_link::Notice>>,
+    ) {
+        self.cli_launch = Some(rx);
+    }
+
     pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
         self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
         self.st.editors.drafts =

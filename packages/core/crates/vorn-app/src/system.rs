@@ -1,12 +1,10 @@
-//! What the desktop's main process does for settings, done here: the
-//! `vorn` command on PATH (`cli-shim.ts`) and starting at sign-in
-//! (`login-item.ts`), each the way this platform does it.
+//! What the desktop's main process does for settings, done here: starting
+//! at sign-in (`login-item.ts`), the way this platform does it. The `vorn`
+//! command on PATH is `cli_link`'s.
 
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-
-use crate::settings::CliState;
 
 /// Whether this copy runs from an install rather than a build tree: a
 /// dev build would register a path into `target/`.
@@ -14,130 +12,9 @@ pub fn packaged() -> bool {
     std::env::current_exe().is_ok_and(|exe| !exe.components().any(|c| c.as_os_str() == "target"))
 }
 
-/// Whether a shell would find a command in `dir`; case-folded on Windows.
-pub fn on_path(dir: &Path, path_var: &str) -> bool {
-    let fold = |p: &Path| {
-        let s = p.to_string_lossy().trim_end_matches(['/', '\\']).to_owned();
-        if cfg!(windows) {
-            s.to_lowercase()
-        } else {
-            s
-        }
-    };
-    let wanted = fold(dir);
-    std::env::split_paths(path_var).any(|e| !e.as_os_str().is_empty() && fold(&e) == wanted)
-}
-
-/// Whether this user may write in `dir` (`accessSync(dir, W_OK)`): a mode
-/// with any write bit is not enough when another user owns it.
-#[cfg(unix)]
-fn writable(dir: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
-        return false;
-    };
-    // SAFETY: `c` is a valid NUL-terminated path that outlives the call.
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
-}
-
-#[cfg(not(unix))]
-fn writable(dir: &Path) -> bool {
-    std::fs::metadata(dir).is_ok_and(|m| !m.permissions().readonly())
-}
-
-/// `shimDirectory`: beside the app on Windows; elsewhere the first
-/// writable directory the shell searches, else `~/.local/bin`.
-pub fn shim_dir(exe: &Path, home: &Path, path_var: &str) -> PathBuf {
-    if cfg!(windows) {
-        return exe.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-    }
-    let user = home.join(".local").join("bin");
-    let candidates: Vec<PathBuf> = [PathBuf::from("/usr/local/bin"), user.clone()]
-        .into_iter()
-        .filter(|d| writable(d))
-        .collect();
-    candidates
-        .iter()
-        .find(|d| on_path(d, path_var))
-        .or(candidates.first())
-        .cloned()
-        .unwrap_or(user)
-}
-
-/// `shimScript`: no arguments opens the app, anything else runs `vorn`.
-pub fn shim_script(app: &Path, cli: &Path, windows: bool) -> String {
-    if windows {
-        return [
-            "@echo off".to_owned(),
-            "setlocal".to_owned(),
-            "if \"%~1\"==\"\" (".to_owned(),
-            format!("  start \"\" \"{}\"", app.display()),
-            "  exit /b".to_owned(),
-            ")".to_owned(),
-            format!("\"{}\" %*", cli.display()),
-            String::new(),
-        ]
-        .join("\r\n");
-    }
-    format!(
-        "#!/bin/sh\n# No command: open the app, which is what typing `vorn` should mean.\nif [ \"$#\" -eq 0 ]; then\n  exec \"{}\"\nfi\n\nexec \"{}\" \"$@\"\n",
-        app.display(),
-        cli.display()
-    )
-}
-
 fn home() -> PathBuf {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map_or_else(PathBuf::new, PathBuf::from)
-}
-
-fn shim_name() -> &'static str {
-    if cfg!(windows) {
-        "vorn.cmd"
-    } else {
-        "vorn"
-    }
-}
-
-/// The `vorn` command beside this app, which the shim runs.
-fn cli_beside(exe: &Path) -> Option<PathBuf> {
-    let name = format!("vorn{}", std::env::consts::EXE_SUFFIX);
-    let dir = exe.parent()?;
-    let cli = crate::launch::resources(dir)
-        .map_or_else(|| dir.join(&name), |r| r.join("vornd").join(&name));
-    cli.is_file().then_some(cli)
-}
-
-/// `cliShimStatus`.
-pub fn cli_status() -> CliState {
-    let exe = std::env::current_exe().unwrap_or_default();
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    let dir = shim_dir(&exe, &home(), &path_var);
-    let target = dir.join(shim_name());
-    CliState {
-        available: packaged() && cli_beside(&exe).is_some(),
-        installed: target.is_file(),
-        path: target.to_string_lossy().into_owned(),
-        on_path: on_path(&dir, &path_var),
-    }
-}
-
-/// `installCliShim`: writes the shim, executable, and says where.
-pub fn install_cli() -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let cli = cli_beside(&exe).ok_or("This build has no vorn command beside it")?;
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    let dir = shim_dir(&exe, &home(), &path_var);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let target = dir.join(shim_name());
-    std::fs::write(&target, shim_script(&exe, &cli, cfg!(windows))).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(target.to_string_lossy().into_owned())
 }
 
 /// `loginItemFor`: what the OS record should say, or none to leave it
@@ -531,27 +408,5 @@ mod tests {
         assert!(set_autostart_file(&file, exe, false, false).expect("remove"));
         assert!(!set_autostart_file(&file, exe, false, false).expect("gone"));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn shims_open_the_app_or_run_the_command() {
-        let sh = shim_script(Path::new("/a/vorn-app"), Path::new("/a/vorn"), false);
-        assert!(sh.starts_with("#!/bin/sh"));
-        assert!(sh.contains("exec \"/a/vorn\" \"$@\""));
-        let cmd = shim_script(
-            Path::new("C:\\V\\vorn-app.exe"),
-            Path::new("C:\\V\\vorn.exe"),
-            true,
-        );
-        assert!(cmd.contains("start \"\" \"C:\\V\\vorn-app.exe\""));
-        assert!(cmd.contains("\r\n\"C:\\V\\vorn.exe\" %*"));
-    }
-
-    #[test]
-    fn path_entries_match_with_or_without_a_trailing_separator() {
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let var = format!("/usr/bin{sep}/home/u/.local/bin/");
-        assert!(on_path(Path::new("/home/u/.local/bin"), &var));
-        assert!(!on_path(Path::new("/opt/bin"), &var));
     }
 }
