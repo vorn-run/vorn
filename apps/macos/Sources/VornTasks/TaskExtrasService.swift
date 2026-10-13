@@ -1,59 +1,6 @@
 import Foundation
 import VornCore
 
-/// `GitFileDiff` in types.ts: one file of a worktree's changes.
-public struct GitFileDiff: Codable, Hashable, Sendable, Identifiable {
-    public enum Status: String, Codable, Sendable { case added, modified, deleted, renamed }
-
-    public var filePath: String
-    public var status: Status
-    public var insertions: Int
-    public var deletions: Int
-    public var diff: String
-
-    public var id: String { filePath }
-
-    public init(filePath: String, status: Status, insertions: Int, deletions: Int, diff: String) {
-        self.filePath = filePath
-        self.status = status
-        self.insertions = insertions
-        self.deletions = deletions
-        self.diff = diff
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        filePath = try c.decode(String.self, forKey: .filePath)
-        status = (try? c.decode(Status.self, forKey: .status)) ?? .modified
-        insertions = (try? c.decode(Int.self, forKey: .insertions)) ?? 0
-        deletions = (try? c.decode(Int.self, forKey: .deletions)) ?? 0
-        diff = (try? c.decode(String.self, forKey: .diff)) ?? ""
-    }
-}
-
-/// `GitDiffResult` in types.ts: what `git:diffFull` answers.
-public struct GitDiffResult: Codable, Hashable, Sendable {
-    public struct Stat: Codable, Hashable, Sendable {
-        public var filesChanged: Int
-        public var insertions: Int
-        public var deletions: Int
-
-        public init(filesChanged: Int, insertions: Int, deletions: Int) {
-            self.filesChanged = filesChanged
-            self.insertions = insertions
-            self.deletions = deletions
-        }
-    }
-
-    public var stat: Stat
-    public var files: [GitFileDiff]
-
-    public init(stat: Stat, files: [GitFileDiff]) {
-        self.stat = stat
-        self.files = files
-    }
-}
-
 /// What `git:commit` and `git:push` answer.
 public struct GitOutcome: Codable, Hashable, Sendable {
     public var success: Bool

@@ -221,11 +221,11 @@ func showReview(_ store: TasksStore) async -> String? {
     await detail.loadRuns()
     await detail.loadImagePaths()
     guard let file = detail.diff?.files.first else { return "no sample diff" }
-    let rows = DiffReview.rows(file.diff).filter { $0.kind == .add }
+    let rows = DiffRow.parse(file.diff).filter { $0.kind == .add }
     if rows.count >= 2 {
-        detail.comment(filePath: file.filePath, lineIndex: rows[0].index, lineContent: rows[0].text,
+        detail.review.comment(filePath: file.filePath, lineIndex: rows[0].index, lineContent: rows[0].text,
                        "Keep the header pinned while the list scrolls.")
-        detail.clickLine(filePath: file.filePath, lineIndex: rows[1].index, lineContent: rows[1].text)
+        detail.review.clickLine(filePath: file.filePath, lineIndex: rows[1].index, lineContent: rows[1].text)
     }
     if options.state == "commit" { detail.commitDialogOpen = true }
     return nil

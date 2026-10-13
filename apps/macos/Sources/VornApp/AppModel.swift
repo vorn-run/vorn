@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 import VornCore
+import VornPanes
 import VornTerminals
 import VornUI
 
@@ -143,7 +144,21 @@ public final class AppModel {
     public var expandedProjects: [String: Bool] = [:]
     /// Bumped to pull keyboard focus into a session's terminal.
     public var focusRequests: [String: Int] = [:]
-    public var lastError: String?
+    /// The panes sessions own, popped-out cards and the changes panel.
+    public var panes = PanesModel()
+    /// The changes panel's commit dialog is open.
+    public var commitOpen = false
+    /// The window's toasts (Toast.tsx).
+    public let toasts = ToastCenter()
+    /// An error for the toast stack; set it and it is shown and cleared.
+    public var lastError: String? {
+        didSet { if let m = lastError { toasts.show(m, .error); lastError = nil } }
+    }
+    /// SettingsPage.tsx covers the window while open.
+    public var settingsOpen = false
+    /// The sidebar's update notice was waved away; the gear keeps a dot.
+    public var updateBannerDismissed = false
+
     /// The composer tip an offscreen render shows; a live window picks one at random.
     public var launcherTip = 1
     public var statusFilter: StatusFilter = .all
@@ -205,7 +220,9 @@ public final class AppModel {
     public func scopedSessions(_ store: VornStore) -> [TerminalSession] {
         let workspaceProjects = Set(store.projects.filter { $0.workspace == activeWorkspace }.map(\.name))
         let known = Set(store.projects.map(\.name))
+        let claimed = panes.claimedTerminalIDs
         return sorted(store.sessions.filter { s in
+            if claimed.contains(s.id) { return false }
             if let activeProject { return s.projectName == activeProject }
             return workspaceProjects.contains(s.projectName) || !known.contains(s.projectName)
         }, store)
@@ -260,6 +277,8 @@ public final class AppModel {
             contextMenu = nil
         } else if overlay != nil {
             overlay = nil
+        } else if settingsOpen {
+            settingsOpen = false
         } else if renamingSessionID != nil {
             renamingSessionID = nil
         } else if expandedSessionID != nil {

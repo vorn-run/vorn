@@ -1,5 +1,6 @@
 import SwiftUI
 import VornCore
+import VornSettings
 import VornUI
 import VornWorkflows
 
@@ -20,7 +21,7 @@ struct Sidebar: View {
             } else {
                 ScrollView { list }.scrollIndicators(.never)
             }
-            SidebarFooter()
+            SidebarFooter(model: model, store: store, settings: features.settings)
         }
         .frame(width: model.sidebarWidth)
         .frame(maxHeight: .infinity)
@@ -679,15 +680,43 @@ struct SessionItem: View {
 // MARK: Footer
 
 struct SidebarFooter: View {
+    @Bindable var model: AppModel
+    let store: VornStore
+    @Bindable var settings: SettingsModel
+
     var body: some View {
-        HStack(spacing: 2) {
-            IconButton(.circleHelp, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
-                       hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Welcome Guide") {}
-            IconButton(.settings, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
-                       hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Settings") {}
-            Spacer(minLength: 0)
+        let status = settings.updater?.status ?? settings.updateStatus
+        let pending = status.isPending
+        let showDot = pending && model.updateBannerDismissed
+        VStack(spacing: 0) {
+            if pending && !model.updateBannerDismissed {
+                let live = store.sessions.filter { store.ended[$0.id] == nil }
+                UpdateBanner(status: status,
+                             cost: updateCostLine(sessionCount: live.count, aTurnIsRunning: live.contains { $0.status == .running },
+                                                  sessionsSurvive: true),
+                             onDismiss: { model.updateBannerDismissed = true },
+                             onRestart: { settings.updater?.install() })
+            }
+            HStack(spacing: 2) {
+                IconButton(.circleHelp, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
+                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04), help: "Welcome Guide") {}
+                IconButton(.settings, size: 16, strokeWidth: 1.5, padding: 6, color: Theme.gray500,
+                           hoverColor: Theme.gray200, hoverFill: Theme.white(0.04),
+                           help: showDot ? "Settings — update ready  ⌘," : "Settings  ⌘,") {
+                    if showDot { settings.category = .updates }
+                    model.settingsOpen = true
+                }
+                .overlay(alignment: .topTrailing) {
+                    if showDot {
+                        Circle().fill(Theme.bronzo).frame(width: 5, height: 5)
+                            .overlay(Circle().strokeBorder(Theme.surfacePanel, lineWidth: 2).padding(-2))
+                            .padding(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
     }
 }

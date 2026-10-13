@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import VornCore
+import VornPanes
 import VornTerminals
 import VornUI
 
@@ -34,8 +35,13 @@ struct ShellActions {
         }
     }
 
+    /// closeTerminalSession: the shells held in its panel end with it.
     func close(_ id: String) {
+        let held = model.panes.terminalsPanes[id]?.terminals ?? []
+        model.panes.releaseTerminal(id)
+        model.panes.closeTerminalsPane(id)
         run {
+            for h in held { try? await store.close(h) }
             try await store.close(id)
             if model.selectedSessionID == id { model.selectedSessionID = nil }
             if model.expandedSessionID == id { model.expandedSessionID = nil }
@@ -73,7 +79,76 @@ struct ShellActions {
         a.prompt = prompt
         a.renameRequest = model.renamingSessionID
         a.endRename = { model.renamingSessionID = nil }
+        a.browseFiles = { id in model.panes.toggleFilesPane(id) }
+        a.addTerminal = addPanelTerminal
+        a.showChanges = { id in model.panes.diffSessionID = id }
+        a.git = gitActions
         return a
+    }
+
+    var gitActions: GitActions {
+        var g = GitActions()
+        let client = store.client
+        g.listBranches = { path in (try? await store.listBranches(path).local) ?? [] }
+        g.listRemoteBranches = { path in (try? await client.listRemoteBranches(path)) ?? [] }
+        g.checkout = { session, branch in
+            let cwd = session.worktreePath ?? session.projectPath
+            do {
+                if let err = try await client.checkout(cwd: cwd, branch: branch) { return err }
+                store.setBranch(branch, forCwd: cwd)
+                await store.loadGitInfo(session.projectPath)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        g.detectIDEs = { (try? await client.detectIDEs()) ?? [] }
+        g.openIn = { ide, path in run { try await client.openInIDE(ide, path: path) } }
+        g.toast = { message, isError in model.toasts.show(message, isError ? .error : .success) }
+        return g
+    }
+
+    /// CommitDialog.handleContinue for a session's tree: commit, then push if asked; answers the error to show.
+    func commit(_ session: TerminalSession, message: String, includeUnstaged: Bool, push: Bool) async -> String? {
+        let cwd = session.worktreePath ?? session.projectPath
+        do {
+            if let err = try await store.client.commit(cwd: cwd, message: message, includeUnstaged: includeUnstaged) { return err }
+            if push, let err = try await store.client.push(cwd: cwd) { return "Committed, but push failed: \(err)" }
+        } catch {
+            return String(describing: error)
+        }
+        model.toasts.show(push ? "Committed and pushed" : "Changes committed", .success)
+        // The panel remounts so it fetches the diff again, as onCommitted does.
+        model.commitOpen = false
+        model.panes.diffSessionID = nil
+        await store.refreshDiffStat(cwd)
+        model.panes.diffSessionID = session.id
+        return nil
+    }
+
+    /// addTerminalToPanel: a shell in the owner's tree, claimed by the owner's panel.
+    func addPanelTerminal(_ ownerID: String) {
+        guard let owner = store.session(ownerID) else { return }
+        run {
+            do {
+                let project = store.project(named: owner.projectName)
+                let wt = owner.worktreePath.map { Worktree(path: $0, branch: owner.branch ?? "", isMain: false, name: owner.worktreeName ?? "") }
+                let s = try await store.createShell(cwd: owner.worktreePath ?? owner.projectPath, project: project, worktree: wt)
+                model.panes.openTerminalsPane(ownerID, terminal: s.id)
+                model.focusRequests[s.id, default: 0] += 1
+            } catch {
+                model.toasts.show("Failed to start terminal: \(error.localizedDescription)", .error)
+            }
+        }
+    }
+
+    /// The services the panes are drawn with.
+    var paneServices: PaneServices {
+        PaneServices(client: store.client, session: { store.session($0) }, engine: nil, toasts: model.toasts,
+                     cardActions: cardActions, addPanelTerminal: addPanelTerminal, closeTerminal: { close($0) },
+                     minimize: { id in model.minimizedIDs.insert(id) },
+                     write: { id, data in run { try await store.write(id, data) } },
+                     reloadGit: { path in Task { await store.loadGitInfo(path) } })
     }
 
     func resume(_ id: String) {
@@ -180,21 +255,49 @@ struct ShellActions {
         let busy = store.sessions.contains { $0.worktreePath == worktree.path }
         run {
             if !busy, await store.worktreeDirty(worktree.path) == false {
-                try await store.removeWorktree(projectPath: project.path, worktreePath: worktree.path)
+                removeWorktree(projectPath: project.path, worktreePath: worktree.path, force: false)
             } else {
                 model.overlay = .removeWorktree(projectPath: project.path, worktreePath: worktree.path)
             }
         }
     }
 
+    /// remove-worktree.ts: closes its sessions first, under a progress toast.
     func removeWorktree(projectPath: String, worktreePath: String, force: Bool) {
         let ids = store.sessions.filter { $0.worktreePath == worktreePath }.map(\.id)
-        run {
-            if !ids.isEmpty {
-                for id in ids { try? await store.close(id) }
-                try? await Task.sleep(for: .milliseconds(500))
+        Task { @MainActor in
+            await model.toasts.progress(loading: ids.isEmpty ? "Removing worktree…" : "Closing sessions & removing worktree…",
+                                        success: "Worktree removed") {
+                if !ids.isEmpty {
+                    for id in ids { try? await store.close(id) }
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                try await store.removeWorktree(projectPath: projectPath, worktreePath: worktreePath, force: force)
             }
-            try await store.removeWorktree(projectPath: projectPath, worktreePath: worktreePath, force: force)
+        }
+    }
+
+    /// WorktreeCleanupToastBridge: the last session in a worktree ended; offer to remove it.
+    func offerWorktreeCleanup(projectPath: String, worktreePath: String) {
+        let name = (worktreePath as NSString).lastPathComponent
+        let toasts = model.toasts
+        func actions(force: Bool) -> [ToastCenter.Action] {
+            [ToastCenter.Action("Keep") { toasts.dismiss($0) },
+             ToastCenter.Action("Remove", danger: true) { id in
+                 toasts.dismiss(id)
+                 removeWorktree(projectPath: projectPath, worktreePath: worktreePath, force: force)
+             }]
+        }
+        let id = toasts.show("Worktree \"\(name)\" — last session ended", .info, actions: actions(force: false), sticky: true)
+        Task { @MainActor in
+            switch await store.worktreeDirty(worktreePath) {
+            case true?:
+                toasts.update(id, "Worktree \"\(name)\" has uncommitted changes", .warning, actions: actions(force: true), sticky: true, onlyIfShown: true)
+            case nil:
+                toasts.update(id, "Worktree \"\(name)\" — last session ended (changes check failed)", .warning,
+                              actions: actions(force: true), sticky: true, onlyIfShown: true)
+            default: break
+            }
         }
     }
 

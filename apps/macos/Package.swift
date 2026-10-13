@@ -20,6 +20,8 @@ let package = Package(
         .library(name: "VornTerminals", targets: ["VornTerminals"]),
         .library(name: "VornTasks", targets: ["VornTasks"]),
         .library(name: "VornWorkflows", targets: ["VornWorkflows"]),
+        .library(name: "VornSettings", targets: ["VornSettings"]),
+        .library(name: "VornPanes", targets: ["VornPanes"]),
         .library(name: "VornApp", targets: ["VornApp"]),
     ],
     targets: [
@@ -35,9 +37,11 @@ let package = Package(
         .target(name: "VornTerminals", dependencies: ["VornCore", "VornUI", "CVornGrid"]),
         .target(name: "VornTasks", dependencies: ["VornCore", "VornUI", "VornWorkflows"]),
         .target(name: "VornWorkflows", dependencies: ["VornCore", "VornUI"]),
+        .target(name: "VornSettings", dependencies: ["VornCore", "VornUI"]),
+        .target(name: "VornPanes", dependencies: ["VornCore", "VornUI", "VornTerminals"]),
         .target(
             name: "VornApp",
-            dependencies: ["VornCore", "VornUI", "VornTerminals", "VornTasks", "VornWorkflows"]
+            dependencies: ["VornCore", "VornUI", "VornTerminals", "VornTasks", "VornWorkflows", "VornSettings", "VornPanes"]
         ),
         .executableTarget(name: "VornMac", dependencies: ["VornApp"]),
         // Mount one feature view alone, in a window or offscreen.
@@ -51,7 +55,8 @@ let package = Package(
             dependencies: ["VornWorkflows", "VornCore"],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "VornE2ETests", dependencies: ["VornCore", "VornTerminals", "VornTasks", "VornWorkflows", "VornApp"]),
+        .testTarget(name: "VornPanesTests", dependencies: ["VornPanes", "VornCore", "VornUI"]),
+        .testTarget(name: "VornE2ETests", dependencies: ["VornCore", "VornTerminals", "VornTasks", "VornWorkflows", "VornSettings", "VornPanes", "VornApp"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import VornCore
+import VornPanes
+import VornSettings
 import VornTerminals
 import VornUI
 import VornWorkflows
@@ -60,6 +62,9 @@ struct ShellCommands: Commands {
     private var actions: ShellActions { ShellActions(store: store, model: model) }
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { model.settingsOpen = true }.keyboardShortcut(",")
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Session") { actions.newSession(actions.activeProject, actions.activeWorktree) }
                 .keyboardShortcut("n")
@@ -174,6 +179,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     let features = FeatureStores(client: store.client)
     let model = AppModel()
     model.persistsSidebar = false
+    model.panes = PanesModel(persists: false)
+    model.panes.confirmDiscard = { true }
     model.sidebarViewMode = value("--sidebar-mode").flatMap(SidebarViewMode.init) ?? .worktreesSessions
     model.projectSort = .manual
     model.worktreeSort = .name
@@ -270,6 +277,79 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         }
     }
 
+    if let s = value("--update-status") {
+        let parts = s.split(separator: ":", maxSplits: 1).map(String.init)
+        let v = parts.count > 1 ? parts[1] : "0.8.1"
+        features.settings.updateStatus = switch parts[0] {
+        case "idle": .idle(lastCheckedAt: Date().timeIntervalSince1970 * 1000 - 180_000)
+        case "checking": .checking
+        case "available": .available(version: v)
+        case "downloading": .downloading(version: v, percent: 42)
+        case "ready": .ready(version: v)
+        case "error": .error(v)
+        default: .unsupported
+        }
+    }
+    if let cat = value("--settings") {
+        guard let category = SettingsCategory(rawValue: cat) else {
+            FileHandle.standardError.write(Data("unknown settings category \(cat)\n".utf8))
+            return 2
+        }
+        let settings = features.settings
+        settings.category = category
+        if let hints = value("--settings-hints") { settings.renderHints = Set(hints.split(separator: ",").map(String.init)) }
+        model.settingsOpen = true
+        await settings.load()
+        switch category {
+        case .general: await settings.detectAgents(); await settings.loadShells()
+        case .agents: await settings.detectAgents()
+        case .ssh: await settings.loadSSHKeys()
+        case .keys: await settings.loadConnectorKeys()
+        case .about: await settings.loadCore()
+        case .worktrees: await settings.wtLoad(refresh: false)
+        default: break
+        }
+    }
+
+    // Panes: --files N[:rel,..], --claim N:M, --promote N:rel, --changes N, --commit, --maximize files|terminals, --preview-tab.
+    if let names = value("--expand") { FileTreeModel.renderExpand = Set(names.split(separator: ",").map(String.init)) }
+    let all = model.mainViewMode == .sessions ? model.visibleSessions(store, includeMinimized: true) : []
+    func cwd(_ s: TerminalSession) -> String { s.worktreePath ?? s.projectPath }
+    for path in Set(all.map(cwd)) { await store.refreshDiffStat(path) }
+    if !all.isEmpty { OpenInButton.cache = try? await store.client.detectIDEs() }
+    if args.contains("--files") || args.contains("--promote") { _ = await SyntaxHighlighter.shared.tokens("", language: "typescript") }
+    if let spec = value("--claim") {
+        let parts = spec.split(separator: ":").compactMap { Int($0) }
+        if parts.count == 2, all.indices.contains(parts[0]), all.indices.contains(parts[1]) {
+            model.panes.openTerminalsPane(all[parts[0]].id, terminal: all[parts[1]].id)
+        }
+    }
+    if let spec = value("--files") {
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        if let n = Int(parts[0]), all.indices.contains(n) {
+            let s = all[n]
+            model.panes.toggleFilesPane(s.id)
+            for rel in parts.count > 1 ? parts[1].split(separator: ",").map(String.init) : [] {
+                model.panes.openFileTab(s.id, (cwd(s) as NSString).appendingPathComponent(rel), pin: !args.contains("--preview-tab"))
+            }
+            if parts.count > 1 && !args.contains("--tree") { model.panes.setFileTreeVisible(s.id, false) }
+        }
+    }
+    if let spec = value("--promote") {
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        if parts.count == 2, let n = Int(parts[0]), all.indices.contains(n) {
+            model.panes.promoteFile(all[n].id, (cwd(all[n]) as NSString).appendingPathComponent(parts[1]))
+        }
+    }
+    if let kind = value("--maximize"), let first = all.first(where: { !model.panes.columnEntries($0.id).isEmpty }) {
+        model.panes.maximizedPaneId = kind == "files" ? PaneID.files(first.id) : PaneID.terminals(first.id)
+    }
+    if let n = value("--changes").flatMap(Int.init), all.indices.contains(n) {
+        model.panes.diffSessionID = all[n].id
+        await store.refreshDiffStat(cwd(all[n]))
+        model.commitOpen = args.contains("--commit")
+    }
+
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
     if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) {
         model.selectedSessionID = visible[n].id
@@ -290,6 +370,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             body = CGSize(width: gridW / CGFloat(layout.cols), height: cardH - 41 - 22 - 2)
         }
         for s in visible { engine.attachSnapshot(s.id, size: body) }
+        for id in model.panes.claimedTerminalIDs { engine.attachSnapshot(id, size: CGSize(width: body.width / 2, height: body.height / 2)) }
         await engine.settle()
         if args.contains("--dump-text") {
             for s in visible { print("--- \(s.title)\n\(engine.snapshotText(s.id) ?? "")") }
@@ -302,6 +383,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             "new-menu": .newMenu, "sidebar-options": .sidebarOptions,
             "add-project": .addProject(editing: nil), "edit-project": .addProject(editing: store.projects.first?.name),
             "project-menu": .projectMenu(store.projects.first?.name ?? ""),
+            "remove-worktree": store.sessions.first(where: { $0.worktreePath != nil }).map {
+                .removeWorktree(projectPath: $0.projectPath, worktreePath: $0.worktreePath ?? "")
+            } ?? .viewOptions,
         ]
         guard let overlay = overlays[name] else {
             FileHandle.standardError.write(Data("unknown overlay \(name)\n".utf8))
@@ -326,6 +410,31 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
                                              submenu: value("--submenu"))
     }
 
+    if args.contains("--cleanup-toast"), let s = all.first(where: { $0.worktreePath != nil }), let wt = s.worktreePath {
+        ShellActions(store: store, model: model).offerWorktreeCleanup(projectPath: s.projectPath, worktreePath: wt)
+        try? await Task.sleep(for: .milliseconds(500))
+    }
+    if let name = value("--component"), let s0 = all.first(where: { $0.branch != nil }) ?? all.first {
+        let actions = ShellActions(store: store, model: model)
+        let view: AnyView
+        switch name {
+        case "branch-picker":
+            view = AnyView(BranchPicker(projectPath: s0.projectPath, currentBranch: s0.branch, git: actions.gitActions) { _ in })
+        case "open-in":
+            view = AnyView(OpenInButton.Menu(ides: OpenInButton.cache ?? [], projectPath: s0.projectPath, git: actions.gitActions) {})
+        default:
+            FileHandle.standardError.write(Data("unknown component \(name)\n".utf8))
+            return 2
+        }
+        let framed = view.environment(\.colorScheme, .dark).fixedSize()
+        guard let image = await hostedImage(of: framed.frame(width: size.width, height: size.height, alignment: .topLeading)
+            .background(Theme.surfaceBase), size: size, settle: 1200),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return 1 }
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("wrote \(path)")
+        return 0
+    }
+
     let content = RootView(model: model, store: store, engines: engines, features: features, fauxChrome: true)
         .environment(\.terminalSnapshot, true)
         .environment(\.workflowsStaticLayout, true)
@@ -333,9 +442,11 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
-    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent
+    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
+        || model.panes.diffSessionID != nil || !model.panes.filesPanes.isEmpty || !model.panes.terminalsPanes.isEmpty
+        || !model.panes.editorCards.isEmpty
     let editorState = value("--editor")
-    let settle = args.contains("--review") ? 2500 : 300
+    let settle = args.contains("--review") ? 2500 : model.panes.filesPanes.isEmpty && model.panes.editorCards.isEmpty ? 300 : 1500
     let image = scrolls ? await hostedImage(of: content, size: size, settle: settle) { root in
         if let editorState { RichEditorDriver.drive(root, editorState) }
     } : {

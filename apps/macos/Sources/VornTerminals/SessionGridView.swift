@@ -17,6 +17,8 @@ public struct SessionGridView<Empty: View>: View {
     let onDoubleClickEmpty: () -> Void
     let onContextMenu: (CGPoint) -> Void
     let empty: () -> Empty
+    /// Cards popped out of a session (a file, today), drawn as cells right after it.
+    var cardsAfter: (TerminalSession) -> [(id: String, view: AnyView)] = { _ in [] }
 
     /// `rowHeight` (208) plus the card's header and status bar, for fixed columns.
     static var fixedRowHeight: CGFloat { 250 }
@@ -39,6 +41,27 @@ public struct SessionGridView<Empty: View>: View {
         self.empty = empty
     }
 
+    public func cards(after: @escaping (TerminalSession) -> [(id: String, view: AnyView)]) -> Self {
+        var copy = self
+        copy.cardsAfter = after
+        return copy
+    }
+
+    private enum Cell: Identifiable {
+        case session(Int, TerminalSession)
+        case card(String, AnyView)
+        var id: String {
+            switch self {
+            case .session(_, let s): s.id
+            case .card(let id, _): id
+            }
+        }
+    }
+
+    private var cells: [Cell] {
+        sessions.enumerated().flatMap { i, s in [Cell.session(i, s)] + cardsAfter(s).map { Cell.card($0.id, $0.view) } }
+    }
+
     public var body: some View {
         if sessions.isEmpty {
             Group {
@@ -48,7 +71,7 @@ public struct SessionGridView<Empty: View>: View {
             .background(Color.clear.contentShape(Rectangle()).onRightClick(onContextMenu))
         } else {
             GeometryReader { geo in
-                let layout = Self.layout(sessions.count, columns: columns, size: geo.size)
+                let layout = Self.layout(cells.count, columns: columns, size: geo.size)
                 let cardW = geo.size.width / CGFloat(layout.cols)
                 let cardH = columns > 0 ? Self.fixedRowHeight
                     : layout.mode == .fit ? geo.size.height / CGFloat(layout.rows) : AutoLayout.scrollRowHeight(geo.size.height)
@@ -79,11 +102,16 @@ public struct SessionGridView<Empty: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<layout.rows, id: \.self) { row in
                 HStack(spacing: 0) {
-                    ForEach(Array(sessions.enumerated().dropFirst(row * layout.cols).prefix(layout.cols)), id: \.element.id) { i, s in
-                        AgentCardView(session: s, index: i, engine: engine, isSelected: s.id == selectedID,
-                                      isDimmed: selectedID != nil && s.id != selectedID,
-                                      focusRequest: focusRequest[s.id] ?? 0, actions: actions, context: context(s))
-                            .frame(width: cardW, height: cardH)
+                    ForEach(Array(cells.dropFirst(row * layout.cols).prefix(layout.cols))) { cell in
+                        switch cell {
+                        case .session(let i, let s):
+                            AgentCardView(session: s, index: i, engine: engine, isSelected: s.id == selectedID,
+                                          isDimmed: selectedID != nil && s.id != selectedID,
+                                          focusRequest: focusRequest[s.id] ?? 0, actions: actions, context: context(s))
+                                .frame(width: cardW, height: cardH)
+                        case .card(_, let view):
+                            view.frame(width: cardW, height: cardH)
+                        }
                     }
                 }
             }

@@ -19,6 +19,8 @@ public struct CardActions {
     /// Starts an agent on a prompt from a shell's composer.
     public var prompt: (String, String) -> Void = { _, _ in }
     public var showChanges: (String) -> Void = { _ in }
+    /// Branch switching and opening the tree in an editor, from the status bar.
+    public var git = GitActions()
     /// F2: the session whose name field should open, cleared through `endRename`.
     public var renameRequest: String?
     public var endRename: () -> Void = {}
@@ -47,6 +49,15 @@ public struct CardContext {
     /// Left inset for the traffic lights when the header stands in for the titlebar.
     public var leadingInset: CGFloat = 12
     public var headerLeading: AnyView?
+    /// The session's pane column (PaneColumn), drawn beside the terminal when it has panes.
+    public var paneColumn: AnyView?
+    /// The terminal's share of the card while a column sits beside it.
+    public var splitRatio: Double = 0.5
+    public var onSplitCommit: (Double) -> Void = { _ in }
+    /// One of the column's panes is maximized: it takes the card and the chrome spans it.
+    public var paneMaximized = false
+    /// The focused stage gives the column a fixed 420pt instead of a share.
+    public var fixedColumnWidth: CGFloat?
 
     public init(ended: EndedInfo? = nil, diffStat: DiffStat? = nil) {
         self.ended = ended
@@ -85,18 +96,38 @@ public struct AgentCardView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            CardHeader(session: session, index: index, hovering: hovering, isExpanded: isExpanded,
-                       variant: variant, context: context, actions: actions)
-                .opacity(isDimmed && !hovering ? 0.6 : 1)
-            terminal
-                .padding(variant == .focused ? 4 : 0)
-                .padding(.top, 2)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.surfaceSunken)
-                .onRightClick { p in actions.contextMenu(session.id, p) }
-            SessionComposer(session: session, ended: context.ended, compact: variant == .mini, actions: actions)
-            CardStatusBar(session: session, diffStat: context.diffStat) { actions.showChanges(session.id) }
-                .opacity(isDimmed && !hovering ? 0.6 : 1)
+            if context.paneMaximized { header }
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    if !context.paneMaximized {
+                        VStack(spacing: 0) {
+                            header
+                            terminal
+                                .padding(variant == .focused ? 4 : 0)
+                                .padding(.top, 2)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Theme.surfaceSunken)
+                                .onRightClick { p in actions.contextMenu(session.id, p) }
+                            SessionComposer(session: session, ended: context.ended, compact: variant == .mini, actions: actions)
+                            statusBar
+                        }
+                        .frame(width: terminalWidth(geo.size.width))
+                    }
+                    if let column = context.paneColumn {
+                        if !context.paneMaximized {
+                            if context.fixedColumnWidth == nil {
+                                SplitDivider(axis: .x, label: "Resize terminal and panels", origin: { geo.frame(in: .global).minX },
+                                             extent: { geo.size.width }, onChange: { dragRatio = $0 },
+                                             onCommit: { context.onSplitCommit($0); dragRatio = nil })
+                            } else {
+                                Rectangle().fill(Theme.hairline).frame(width: 1)
+                            }
+                        }
+                        column.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }
+            if context.paneMaximized { statusBar }
         }
         .background(Theme.surfaceRaised)
         .overlay(Rectangle().strokeBorder(borderColor, lineWidth: 1))
@@ -104,6 +135,26 @@ public struct AgentCardView: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.2), value: hovering)
         .simultaneousGesture(TapGesture().onEnded { if !isSelected { actions.select(session.id) } })
+    }
+
+    @State private var dragRatio: Double?
+
+    private var header: some View {
+        CardHeader(session: session, index: index, hovering: hovering, isExpanded: isExpanded,
+                   variant: variant, context: context, actions: actions)
+            .opacity(isDimmed && !hovering ? 0.6 : 1)
+    }
+
+    private var statusBar: some View {
+        CardStatusBar(session: session, diffStat: context.diffStat, git: actions.git) { actions.showChanges(session.id) }
+            .opacity(isDimmed && !hovering ? 0.6 : 1)
+    }
+
+    /// The terminal column's width: the whole card alone, its share (or what the fixed column leaves) beside panes.
+    private func terminalWidth(_ total: CGFloat) -> CGFloat {
+        guard context.paneColumn != nil else { return total }
+        if let fixed = context.fixedColumnWidth { return max(0, total - fixed - 1) }
+        return max(0, (total - 1) * (dragRatio ?? context.splitRatio))
     }
 
     @ViewBuilder private var terminal: some View {
@@ -285,58 +336,29 @@ public struct ConfirmClose: View {
     }
 }
 
-/// The card's bottom bar: branch, worktree, the tree's uncommitted changes (CardStatusBar.tsx).
+/// The card's bottom bar: worktree and branch, the tree's uncommitted changes, open in an editor (CardStatusBar.tsx).
 struct CardStatusBar: View {
     let session: TerminalSession
     var diffStat: DiffStat?
+    var git = GitActions()
     var onChanges: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
-            if let branch = session.branch, !branch.isEmpty {
-                BranchChip(branch: branch)
-            }
-            if session.isWorktree == true, let name = session.worktreeName {
-                HStack(spacing: 4) {
-                    LucideIcon(.folderGit2, size: 10, strokeWidth: 1.5)
-                    Text(name).font(.system(size: 10, design: .monospaced)).lineLimit(1)
-                }
-                .foregroundStyle(Theme.inkSecondary)
-            }
+            BranchChip(session: session, git: git)
             Spacer(minLength: 0)
             if let diffStat, diffStat.insertions > 0 || diffStat.deletions > 0 {
                 GitChangesIndicator(stat: diffStat, action: onChanges)
             }
+            OpenInButton(projectPath: session.projectPath, git: git)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
         .font(.ui(11))
         .padding(.horizontal, 8)
         .frame(height: 22)
         .background(Theme.surfaceRaised)
         .overlay(alignment: .top) { Rectangle().fill(Theme.white(0.04)).frame(height: 1) }
-    }
-}
-
-/// The session's branch (BranchChip.tsx).
-struct BranchChip: View {
-    let branch: String
-
-    var body: some View {
-        Hovering { hover in
-            HStack(spacing: 4) {
-                LucideIcon(.gitBranch, size: 10).foregroundStyle(Theme.gray500)
-                Text(branch)
-                    .font(.system(size: 10, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 110, alignment: .leading)
-                    .fixedSize(horizontal: true, vertical: false)
-                LucideIcon(.chevronDown, size: 9).foregroundStyle(Theme.gray600)
-            }
-            .foregroundStyle(hover ? Theme.gray200 : Theme.gray400)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: Theme.radius).fill(hover ? Theme.white(0.06) : .clear))
-        }
     }
 }
 
@@ -347,14 +369,16 @@ public struct SessionStage: View {
     let focusRequest: Int
     let actions: CardActions
     let context: CardContext
+    var showsStatusBar = true
 
     public init(session: TerminalSession, engine: TerminalEngine?, focusRequest: Int = 0, actions: CardActions,
-                context: CardContext = CardContext()) {
+                context: CardContext = CardContext(), showsStatusBar: Bool = true) {
         self.session = session
         self.engine = engine
         self.focusRequest = focusRequest
         self.actions = actions
         self.context = context
+        self.showsStatusBar = showsStatusBar
     }
 
     public var body: some View {
@@ -368,8 +392,10 @@ public struct SessionStage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onRightClick { p in actions.contextMenu(session.id, p) }
-            SessionComposer(session: session, ended: context.ended, compact: false, actions: actions)
-            CardStatusBar(session: session, diffStat: context.diffStat) { actions.showChanges(session.id) }
+            SessionComposer(session: session, ended: context.ended, compact: !showsStatusBar, actions: actions)
+            if showsStatusBar {
+                CardStatusBar(session: session, diffStat: context.diffStat, git: actions.git) { actions.showChanges(session.id) }
+            }
         }
         .background(Theme.surfaceSunken)
     }

@@ -67,7 +67,9 @@ public struct TasksView: View {
     private var detailOverlays: some View {
         if let detail = store.detail {
             if detail.commitDialogOpen {
-                CommitDialog(model: detail) { detail.commitDialogOpen = false }
+                CommitDialog(branch: detail.task?.branch, stat: detail.stat, onClose: { detail.commitDialogOpen = false }) {
+                    await detail.commit(message: $0, includeUnstaged: $1, push: $2)
+                }
             }
             if let logs = detail.fullOutput {
                 LogReplayModal(logs: logs) { detail.fullOutput = nil }

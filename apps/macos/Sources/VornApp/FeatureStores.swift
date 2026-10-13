@@ -1,5 +1,6 @@
 import Foundation
 import VornCore
+import VornSettings
 import VornTasks
 import VornWorkflows
 
@@ -8,10 +9,12 @@ import VornWorkflows
 public final class FeatureStores {
     public let tasks: TasksStore
     public let workflows: WorkflowsStore
+    public let settings: SettingsModel
 
     public init(client: VornClient) {
         tasks = TasksStore(service: client)
         workflows = WorkflowsStore(backend: LiveWorkflowsBackend(client: client))
+        settings = SettingsModel(client: client)
     }
 
     /// Points the board's hooks at the shell: live sessions, focusing one, and the toast.
@@ -30,6 +33,10 @@ public final class FeatureStores {
             }
         }
         tasks.onToast = { [weak model] message, _ in model?.lastError = message }
+        settings.toasts = model.toasts
+        settings.onToast = { [weak model] message, kind in
+            model?.toasts.show(message, kind == .error ? .error : kind == .success ? .success : .info)
+        }
         tasks.workflows = workflows
         tasks.launchSession = { [weak store] payload in
             guard let store else { throw VornError.notConnected }

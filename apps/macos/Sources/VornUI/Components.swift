@@ -87,6 +87,14 @@ public extension View {
     }
 }
 
+public extension View {
+    /// CSS `line-height` for text at `size`: the extra leading split between lines and above and below.
+    func lineHeight(_ lineHeight: CGFloat, size: CGFloat) -> some View {
+        let extra = max(0, lineHeight - size * 1.2)
+        return lineSpacing(extra).padding(.vertical, extra / 2)
+    }
+}
+
 public extension Font {
     /// The UI font at a pixel size from the renderer (`text-[13px]`, `text-xs`...).
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
