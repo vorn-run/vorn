@@ -6,7 +6,7 @@ use vorn_term_mirror::Mirror;
 use vorn_term_proto::msg::GridPoint;
 use vorn_term_proto::row;
 use vorn_term_proto::screen::{
-    attrs, row_flags, Color, CursorStyle, Row, Screen, StyleDef, Underline,
+    attrs, row_flags, Color, CursorStyle, MouseMode, Row, Screen, StyleDef, Underline,
 };
 
 use crate::look::{term, Rgb};
@@ -66,12 +66,18 @@ pub struct PaneView {
     pub text: Vec<u8>,
     /// Rows where a shell prompt starts (OSC 133): one command block each.
     pub prompts: Vec<u16>,
-    /// The absolute line of row 0; on the alternate screen, 0.
+    /// The absolute line of row 0, and of the live screen's row 0; on the
+    /// alternate screen, 0.
     pub line0: u64,
+    pub live_line: u64,
     /// The oldest line vornd still holds, history included.
     pub oldest: u64,
+    /// Lines of history above the live screen.
+    pub history: u64,
     pub sb_epoch: u32,
     pub primary: bool,
+    /// The program tracks the mouse.
+    pub mouse: bool,
 }
 
 /// The xterm 256-colour palette, its first sixteen the app's.
@@ -159,14 +165,36 @@ impl Palette {
     }
 }
 
-/// The view of a mirror as it is now.
-pub fn build(m: &Mirror) -> PaneView {
+/// The view of a mirror as it is now, starting at absolute line `top`
+/// when scrolled back. A scrolled view has one row more, below its last,
+/// for drawing between rows.
+pub fn build(m: &Mirror, top: Option<u64>) -> PaneView {
     let t = m.term();
-    let mut v = rows(m, m.rows());
+    let primary = t.screen == Screen::Primary;
+    let oldest = t.top_line.saturating_sub(t.history_lines);
+    let first = match top {
+        Some(top) if primary => top.clamp(oldest, t.top_line),
+        _ => t.top_line,
+    };
+    let back = t.top_line - first;
+    let mut v = if back == 0 {
+        rows(m, m.rows())
+    } else {
+        // Rows the cache does not hold yet draw blank.
+        let blank = Row::default();
+        let shown = u64::from(t.rows) + 1;
+        let mut v = rows(
+            m,
+            (first..first + shown).map(|l| m.row_at(l).unwrap_or(&blank)),
+        );
+        v.prompts.retain(|y| *y < t.rows);
+        v
+    };
+    let cursor_y = u64::from(t.cursor.y) + back;
     v.rows = t.rows;
     v.cursor_x = t.cursor.x;
-    v.cursor_y = t.cursor.y;
-    v.cursor_visible = t.cursor.visible;
+    v.cursor_y = u16::try_from(cursor_y).unwrap_or(u16::MAX);
+    v.cursor_visible = t.cursor.visible && cursor_y <= u64::from(t.rows);
     v.cursor = match t.cursor.style {
         CursorStyle::BlockHollow => Cursor::Hollow,
         CursorStyle::Bar => Cursor::Bar,
@@ -175,10 +203,13 @@ pub fn build(m: &Mirror) -> PaneView {
     };
     v.cursor_color = t.colors.cursor.map_or(term::CURSOR, rgb);
     v.sb_epoch = t.sb_epoch;
-    v.primary = t.screen == Screen::Primary;
-    if v.primary {
-        v.line0 = t.top_line;
-        v.oldest = t.top_line.saturating_sub(t.history_lines);
+    v.primary = primary;
+    v.mouse = t.mouse != MouseMode::None;
+    if primary {
+        v.line0 = first;
+        v.live_line = t.top_line;
+        v.oldest = oldest;
+        v.history = t.history_lines;
     }
     v
 }
@@ -278,6 +309,11 @@ impl PaneView {
         }
     }
 
+    /// Rows the view starts above the live screen.
+    pub fn back(&self) -> u64 {
+        self.live_line - self.line0
+    }
+
     /// The text of a run.
     pub fn run_text(&self, r: &Run) -> &str {
         std::str::from_utf8(&self.text[r.text_off as usize..(r.text_off + r.text_len) as usize])
@@ -336,5 +372,61 @@ mod tests {
         };
         v.runs = vec![run(0, 2, 0, 2), run(1, 0, 2, 2), run(1, 4, 4, 1)];
         assert_eq!(v.text(), "  ab\n$   x");
+    }
+
+    /// Three screen rows at lines 2..5 under two lines of history.
+    fn scrolled_mirror() -> Mirror {
+        use vorn_term_proto::row::{Cell, Run as Cells, ROW_FMT};
+        use vorn_term_proto::screen::{LinkDef, Row, Snapshot, TermState};
+        let at = |y: u16, line: u64, text: &str| Row {
+            y,
+            line,
+            flags: 0,
+            cells: row::encode(&[Cells {
+                style: 0,
+                link: 0,
+                cells: text.chars().map(|c| Cell::new(c.to_string())).collect(),
+            }]),
+        };
+        let mut term = TermState {
+            cols: 10,
+            rows: 3,
+            top_line: 2,
+            history_lines: 2,
+            ..TermState::default()
+        };
+        term.cursor.y = 2;
+        term.cursor.visible = true;
+        Mirror::from_snapshot(Snapshot {
+            state_gen: 1,
+            rev: 1,
+            row_fmt: ROW_FMT,
+            term,
+            styles: vec![StyleDef::default()],
+            links: vec![LinkDef::default()],
+            rows: vec![at(0, 2, "two"), at(1, 3, "three"), at(2, 4, "four")],
+            history: vec![at(0, 0, "zero"), at(0, 1, "one")],
+            ..Snapshot::default()
+        })
+        .expect("valid snapshot")
+    }
+
+    #[test]
+    fn a_scrolled_view_starts_in_history_with_a_row_to_spare() {
+        let m = scrolled_mirror();
+        let live = build(&m, None);
+        assert_eq!((live.line0, live.back(), live.history), (2, 0, 2));
+        assert_eq!(live.text(), "two\nthree\nfour");
+        let back = build(&m, Some(1));
+        assert_eq!(back.back(), 1);
+        assert_eq!(back.text(), "one\ntwo\nthree");
+        // The spare row below is there to draw between rows.
+        assert!(back
+            .runs
+            .iter()
+            .any(|r| r.row == 3 && back.run_text(r) == "four"));
+        assert_eq!((back.cursor_y, back.cursor_visible), (3, true));
+        assert_eq!(build(&m, Some(0)).back(), 2);
+        assert_eq!(build(&m, Some(9)).back(), 0);
     }
 }

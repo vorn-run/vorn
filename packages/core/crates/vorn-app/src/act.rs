@@ -71,6 +71,8 @@ pub enum Act {
     CopySelection(String),
     /// Runs the paste the confirm dialog holds, or drops it.
     ConfirmPaste(bool),
+    /// Back to a terminal's live screen from its history.
+    ScrollToBottom(String),
     FitToDevice(String),
     LockSize(String, bool),
     Shortcuts,

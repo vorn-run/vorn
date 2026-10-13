@@ -15,8 +15,9 @@ pub enum Caret {
     Hidden,
 }
 
-/// Draws `v` in `r` (physical pixels) with its cursor shown as `caret`;
-/// `preedit` is IME composition shown at the cursor.
+/// Draws `v` in `r` (physical pixels) with its cursor shown as `caret`,
+/// `dy` whole pixels down from the top while scrolling; `preedit` is IME
+/// composition shown at the cursor.
 /// `sel` is what is selected: `(row, from col, to col exclusive)` per row.
 pub fn pane(
     ui: &mut Ui,
@@ -25,11 +26,29 @@ pub fn pane(
     caret: Caret,
     preedit: &str,
     sel: &[(u16, u16, u16)],
+    dy: f32,
 ) {
     let cell = ui.text.cell();
-    let (x0, y0) = (r.x.round(), r.y.round());
+    let (x0, y0) = (r.x.round(), r.y.round() + dy);
     let at = |col: u16, row: u16| (x0 + f32::from(col) * cell.w, y0 + f32::from(row) * cell.h);
     let thin = ui.scale().round().max(1.0);
+    // What a scroll uncovers above or below the rows is the screen's background.
+    let bottom = r.y.round() + f32::from(v.rows) * cell.h;
+    if dy > 0.0 {
+        ui.scene.quad(
+            Rect::new(x0, r.y.round(), r.w, dy),
+            Rgba::hex(v.bg),
+            0.0,
+            None,
+        );
+    } else if dy < 0.0 {
+        ui.scene.quad(
+            Rect::new(x0, bottom + dy, r.w, -dy),
+            Rgba::hex(v.bg),
+            0.0,
+            None,
+        );
+    }
     for run in &v.runs {
         let (x, y) = at(run.col, run.row);
         let w = f32::from(run.ncols) * cell.w;

@@ -42,7 +42,8 @@ pub use element::{
 pub use gpu::Gpu;
 pub use input::Input;
 pub use interact::{
-    Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, MOVE_SLOP, TOOLTIP_DELAY, TOOLTIP_WARM,
+    Event, WheelPhase, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, MOVE_SLOP, TOOLTIP_DELAY,
+    TOOLTIP_WARM, WHEEL_LINE,
 };
 pub use motion::{Animate, Transform, Transition};
 pub use pace::Pacer;

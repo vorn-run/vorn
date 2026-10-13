@@ -563,7 +563,12 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     if session.is_shell() {
         inner = inner.child(spine(s, session)).child(div().w(8.0).shrink0());
     }
-    let inner = inner.child(custom(CARD_ID_BASE + i as u64).grow());
+    let mut screen = custom(CARD_ID_BASE + i as u64).grow();
+    let back = s.panes.get(sid).is_some_and(|v| v.back() > 0);
+    if back && s.st.focused.as_deref() != Some(sid) {
+        screen = screen.overlay(scroll_to_bottom(s, sid), Place::InsideEnd, 8.0);
+    }
+    let inner = inner.child(screen);
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))
         .on(Action::Click)
@@ -747,6 +752,29 @@ fn running_row(s: &Screen<'_>, r: &Running) -> El {
                 .line_height(14.0)
                 .silent(),
         )
+}
+
+/// The arrow over a terminal scrolled back into its history: straight
+/// back to the live screen.
+fn scroll_to_bottom(s: &Screen<'_>, sid: &str) -> El {
+    const ARROW: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5V9.5M3 7L6 10L9 7"/></svg>"##;
+    let id = s.acts.on("scroll", Act::ScrollToBottom(sid.to_owned()));
+    let hover = s.ui.hover(id);
+    let bg = if s.ui.pressed(id) {
+        0.2
+    } else {
+        0.08 + 0.07 * hover
+    };
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .size(32.0, 32.0)
+        .center()
+        .rounded(4.0)
+        .bg(white(bg))
+        .role(Role::Button, "Scroll to bottom")
+        .child(icon(ARROW, 12.0, c(look::GRAY_400).mix(white(1.0), hover)));
+    tooltip(s.ui, b, id, "Scroll to bottom", None)
 }
 
 /// EndedStrip: why the session ended, and how to pick it back up.

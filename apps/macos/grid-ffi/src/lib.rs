@@ -43,6 +43,10 @@ pub struct VgView {
     pub owner: *mut c_void,
     /// Absolute line of the first row, the coordinate selections use.
     pub first_line: u64,
+    /// Absolute line of the live screen's first row.
+    pub live_line: u64,
+    /// Lines of history the view can scroll back through.
+    pub history_lines: u64,
 }
 
 /// Bits of [`VgView::screen`].
@@ -235,6 +239,8 @@ pub unsafe extern "C" fn vg_view(c: *mut VgClient, pane: u32, out: *mut VgView) 
             text: v.text.as_ptr(),
             text_len: v.text.len() as u32,
             first_line: v.first_line,
+            live_line: v.live_line,
+            history_lines: v.history_lines,
             owner: Box::into_raw(v).cast(),
         };
         // SAFETY: `out` points at a VgView the caller owns.
@@ -420,6 +426,18 @@ pub unsafe extern "C" fn vg_scroll(c: *mut VgClient, pane: u32, lines: i32) {
 /// # Safety
 /// `c` is null or a live handle.
 #[no_mangle]
+pub unsafe extern "C" fn vg_scroll_to(c: *mut VgClient, pane: u32, back: u64) {
+    guard((), || {
+        // SAFETY: the caller's contract above.
+        if let Some(g) = unsafe { grid(c) } {
+            g.scroll_to(pane, back);
+        }
+    });
+}
+
+/// # Safety
+/// `c` is null or a live handle.
+#[no_mangle]
 pub unsafe extern "C" fn vg_mouse(
     c: *mut VgClient,
     pane: u32,
@@ -591,6 +609,7 @@ mod tests {
             vg_reveal(c, 1, 0);
             vg_wheel(c, 1, -3, 0.0, 0.0, 0);
             vg_scroll(c, 1, i32::MAX);
+            vg_scroll_to(c, 1, 3);
             vg_mouse(c, 1, 0, 1, 0, 0.0, 0.0);
             assert!(vg_text_range(c, 1, 0, 0, 1, 0).is_null());
             let (mut a, mut b) = (0u16, 0u16);
@@ -608,7 +627,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(VgView, fg), 20);
         assert_eq!(std::mem::offset_of!(VgView, runs), 40);
         assert_eq!(std::mem::offset_of!(VgView, first_line), 72);
-        assert_eq!(std::mem::size_of::<VgView>(), 80);
+        assert_eq!(std::mem::offset_of!(VgView, live_line), 80);
+        assert_eq!(std::mem::offset_of!(VgView, history_lines), 88);
+        assert_eq!(std::mem::size_of::<VgView>(), 96);
         assert_eq!(std::mem::size_of::<VgTheme>(), 76);
     }
 }

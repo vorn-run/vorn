@@ -16,7 +16,7 @@ use accesskit::{ActionRequest, TreeUpdate};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{
-    ElementState, Modifiers, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
+    ElementState, Modifiers, MouseButton, MouseScrollDelta, StartCause, TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
@@ -26,13 +26,11 @@ use crate::element::{Cursor, El};
 use crate::gpu::{adapter_name, instance_desc, Gpu};
 use crate::input::{from_winit, mods_of, Input};
 use crate::interact::{Event, WindowRequest};
+use crate::interact::{WheelPhase, WHEEL_LINE};
 use crate::pace::Pacer;
 use crate::render::RenderMode;
 use crate::scene::{Rect, Rgba};
 use crate::ui::{Laid, Ui, UiConfig};
-
-/// Lines a wheel notch scrolls, in logical pixels (a browser's 40).
-const LINE: f32 = 40.0;
 
 /// An app drawn by vornui.
 pub trait App: 'static {
@@ -462,12 +460,19 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.pointer_down_secondary();
                 l.dispatch();
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * LINE,
-                    MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / k,
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                let (dy, phase) = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => (-y * WHEEL_LINE, WheelPhase::Line),
+                    MouseScrollDelta::PixelDelta(p) => (
+                        -(p.y as f32) / k,
+                        match phase {
+                            TouchPhase::Started => WheelPhase::Began,
+                            TouchPhase::Moved => WheelPhase::Moved,
+                            TouchPhase::Ended | TouchPhase::Cancelled => WheelPhase::Ended,
+                        },
+                    ),
                 };
-                l.ui.wheel(dy);
+                l.ui.wheel_phase(dy, phase);
                 l.dispatch();
             }
             WindowEvent::Focused(focused) => {

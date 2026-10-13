@@ -14,7 +14,7 @@ pub use vornui::TextStyle;
 pub use vornui::{
     custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
     Cursor, El, Event, Id, Input, Laid, MemoryClipboard, Offscreen, Place, Rect, RenderMode, Rgba,
-    Sense, Ui, UiConfig, WindowRequest,
+    Sense, Ui, UiConfig, WheelPhase, WindowRequest, WHEEL_LINE,
 };
 pub use vornui::{icons, menu, theme, widgets};
 pub use vornui::{TextEdit, MOVE_SLOP};

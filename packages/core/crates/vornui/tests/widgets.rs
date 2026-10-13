@@ -7,7 +7,7 @@ use vornui::accesskit::{Node, NodeId, Role, Toggled};
 use vornui::input::mods;
 use vornui::theme::color;
 use vornui::widgets::{self, Choice, PickerLook, Pill, Tab};
-use vornui::{div, El, Event, Id, Input, Laid, RenderMode, Rgba, Ui, UiConfig};
+use vornui::{div, El, Event, Id, Input, Laid, RenderMode, Rgba, Ui, UiConfig, WheelPhase};
 
 const SIZE: (f32, f32) = (480.0, 360.0);
 
@@ -677,7 +677,12 @@ fn right_presses_double_clicks_wheels_and_title_bars_report() {
 
     rig.ui.wheel(40.0);
     assert!(
-        matches!(rig.ui.take_events().as_slice(), [Event::Wheel { id, dy, .. }] if *id == card && *dy == 40.0)
+        matches!(rig.ui.take_events().as_slice(), [Event::Wheel { id, dy, phase: WheelPhase::Line, .. }] if *id == card && *dy == 40.0)
+    );
+    // A trackpad's phases reach the element, even the deltaless end of a touch.
+    rig.ui.wheel_phase(0.0, WheelPhase::Ended);
+    assert!(
+        matches!(rig.ui.take_events().as_slice(), [Event::Wheel { id, phase: WheelPhase::Ended, .. }] if *id == card)
     );
 
     rig.click(card);

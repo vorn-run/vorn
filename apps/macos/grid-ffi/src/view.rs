@@ -84,6 +84,10 @@ pub struct PaneView {
     pub alternate: bool,
     /// Scrolled back into history.
     pub scrolled: bool,
+    /// Absolute line of the live screen's first row.
+    pub live_line: u64,
+    /// Lines of history above the live screen.
+    pub history_lines: u64,
 }
 
 /// The xterm 256-colour palette, with the theme's first sixteen.
@@ -283,7 +287,7 @@ pub fn build(m: &Mirror, theme: &VgTheme, top: Option<u64>) -> PaneView {
         rows: t.rows,
         cursor_x: t.cursor.x,
         cursor_y: u16::try_from(cursor_y).unwrap_or(u16::MAX),
-        cursor_visible: t.cursor.visible && cursor_y < u64::from(t.rows),
+        cursor_visible: t.cursor.visible && cursor_y < u64::from(t.rows) + u64::from(back > 0),
         cursor_style: match t.cursor.style {
             CursorStyle::BlockHollow => 1,
             CursorStyle::Bar => 2,
@@ -299,8 +303,15 @@ pub fn build(m: &Mirror, theme: &VgTheme, top: Option<u64>) -> PaneView {
         mouse: t.mouse != MouseMode::None,
         alternate: t.screen == Screen::Alternate,
         scrolled: back > 0,
+        live_line: t.top_line,
+        history_lines: if t.screen == Screen::Primary {
+            t.history_lines
+        } else {
+            0
+        },
     };
-    for y in 0..t.rows {
+    // Scrolled back, a row more: a view drawn between rows shows part of it.
+    for y in 0..t.rows.saturating_add(u16::from(back > 0)) {
         let Some(r) = row_at(m, first + u64::from(y)) else {
             continue;
         };
@@ -593,7 +604,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_scrolled_view_shows_history_and_hides_the_cursor_below_it() {
+    fn a_scrolled_view_shows_history_and_a_spare_row_and_hides_the_cursor_below_it() {
         let m = scrolled_mirror();
         let t = VgTheme::default();
         let live = build(&m, &t, None);
@@ -603,10 +614,17 @@ pub(crate) mod tests {
         );
         let back = build(&m, &t, Some(1));
         assert_eq!((back.first_line, back.scrolled), (1, true));
-        assert_eq!(row_texts(&back), vec![(0, "one"), (1, "two"), (2, "three")]);
-        assert!(!back.cursor_visible);
+        assert_eq!(
+            row_texts(&back),
+            vec![(0, "one"), (1, "two"), (2, "three"), (3, "four")]
+        );
+        assert_eq!((back.live_line, back.history_lines), (2, 2));
+        // The spare row can show part of the cursor's row; a row further, none.
+        assert!(back.cursor_visible);
         // Past the oldest line it stops at the oldest; at the live line it is live.
-        assert_eq!(build(&m, &t, Some(0)).first_line, 0);
+        let oldest = build(&m, &t, Some(0));
+        assert_eq!(oldest.first_line, 0);
+        assert!(!oldest.cursor_visible);
         assert!(!build(&m, &t, Some(9)).scrolled);
     }
 

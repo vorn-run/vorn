@@ -144,6 +144,9 @@ pub enum Place {
     /// To the right with the tops aligned (less [`Overlay::lift`]), or to
     /// the left when the right has no room: a submenu beside its entry.
     Beside,
+    /// Inside the owner's bottom-right corner, `gap` in from both edges:
+    /// a control floating over content the app paints itself.
+    InsideEnd,
 }
 
 /// A box drawn over everything, placed against its owner: menus, tooltips.

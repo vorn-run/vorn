@@ -350,6 +350,7 @@ fn assert_same_bytes(id: &str, got: &[u8], want: &[u8]) {
 /// checkpoints, so nothing but the records shapes it.
 fn reference_digest(s: &Spawned, frames: &[Frame]) -> u64 {
     let cfg = Arc::new(Config {
+        scrollback: vornd::engine::DEFAULT_SCROLLBACK,
         colors: Some(vornd::engine::DEFAULT_COLORS),
         cadence: Cadence {
             bytes: u64::MAX,

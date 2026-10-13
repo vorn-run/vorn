@@ -87,8 +87,9 @@ impl App {
     /// vornd says the program would run it line by line.
     pub(super) fn paste_clipboard(&mut self, ui: &mut Ui, session: &str) {
         self.st.sel = None;
-        if let (Some(g), Some(text)) = (&self.grid, ui.clipboard().get()) {
+        if let (Some(g), Some(text)) = (self.grid.clone(), ui.clipboard().get()) {
             if !text.is_empty() {
+                self.return_to_live(session);
                 g.paste_clipboard(session, &text);
             }
         }
@@ -101,7 +102,8 @@ impl App {
             self.st.dialog = None;
             ui.set_focus(None);
         }
-        if let (true, Some(g), Some((session, text))) = (run, &self.grid, pending) {
+        if let (true, Some(g), Some((session, text))) = (run, self.grid.clone(), pending) {
+            self.return_to_live(&session);
             g.paste(&session, &text);
         }
     }

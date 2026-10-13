@@ -51,18 +51,30 @@ struct TerminalSelection: Equatable {
     }
 }
 
+extension VgView {
+    var alternate: Bool { screen & UInt8(VG_ALTERNATE) != 0 }
+    /// Rows back from the live screen the view starts at.
+    var back: UInt64 { screen & UInt8(VG_SCROLLED) != 0 ? live_line &- first_line : 0 }
+    /// Scrolled back, a spare row below the screen shows when drawn between rows.
+    var drawnRows: UInt16 { rows &+ (back > 0 ? 1 : 0) }
+}
+
 final class TerminalPainter {
     private var glyphs = [CGGlyph](repeating: 0, count: 1024)
     private var positions = [CGPoint](repeating: .zero, count: 1024)
 
+    /// Draws `v` moved down by `offset` (up when negative): a view scrolled
+    /// between rows, or stretched past an end of its history.
     func draw(_ ctx: CGContext, _ v: VgView?, fonts: TerminalFonts, bounds: CGRect, focused: Bool, marked: String,
-              selection: TerminalSelection? = nil, matches: ArraySlice<VgHit> = [], current: VgHit? = nil) {
+              selection: TerminalSelection? = nil, matches: ArraySlice<VgHit> = [], current: VgHit? = nil,
+              offset: CGFloat = 0) {
         ctx.setFillColor(cgColor(v?.bg ?? Theme.Terminal.background))
         ctx.fill(bounds)
         guard let v else { return }
         ctx.saveGState()
         defer { ctx.restoreGState() }
-        ctx.translateBy(x: terminalPadX, y: terminalPadY)
+        if offset != 0 { ctx.clip(to: bounds) }
+        ctx.translateBy(x: terminalPadX, y: terminalPadY + offset)
         let cw = fonts.cell.width, ch = fonts.cell.height
         ctx.textMatrix = .identity
         // Stem dilation draws every weight heavier than the font, as no other Vorn terminal does.
@@ -75,7 +87,7 @@ final class TerminalPainter {
         }
         if let selection, !selection.isEmpty {
             ctx.setFillColor(cgColor(Theme.Terminal.selection))
-            for y in 0..<v.rows {
+            for y in 0..<v.drawnRows {
                 guard let c = selection.cols(on: v.first_line + UInt64(y), width: v.cols) else { continue }
                 ctx.fill(CGRect(x: CGFloat(c.lowerBound) * cw, y: CGFloat(y) * ch, width: CGFloat(c.count) * cw, height: ch))
             }
@@ -176,6 +188,8 @@ protocol TerminalHost: AnyObject {
     func fontDidChange()
     /// vornd held a paste that would run commands; it goes in once the person agrees.
     func pasteHeld(_ text: String)
+    /// Moves the scroll on a frame; false once it rests or the view is hidden.
+    func scrollFrame() -> Bool
 }
 
 /// One attached session: its pane in the grid client and the latest view of it.
@@ -371,9 +385,11 @@ public final class TerminalPane {
         if engine.readOnly { vg_scroll(c, id, lines) } else { vg_wheel(c, id, lines, x, y, mods) }
     }
 
-    func scroll(_ lines: Int32) {
+    /// Shows the view `back` rows above the live screen and takes it at once.
+    func scrollTo(_ back: UInt64) {
         guard id != 0, let c = engine.client else { return }
-        vg_scroll(c, id, lines)
+        vg_scroll_to(c, id, back)
+        refresh()
     }
 
     /// For a program tracking the mouse: 0 press, 1 release, 2 motion.
@@ -437,6 +453,8 @@ public final class TerminalEngine: NSObject {
     var panes: [UInt32: TerminalPane] = [:]
     private var link: CADisplayLink?
     private var idle = 0
+    /// Panes whose scroll is moving: ticked every frame until they rest.
+    private var scrolling = Set<UInt32>()
     private var dirty = [UInt32](repeating: 0, count: 256)
 
     /// Today's terminal theme, as the grid client resolves colours.
@@ -511,6 +529,13 @@ public final class TerminalEngine: NSObject {
     /// The visible text of a snapshot pane, for checks.
     public func snapshotText(_ sessionID: String) -> String? { snapshots[sessionID]?.screenText() }
 
+    /// Ticks `pane`'s scroll each frame until it rests.
+    func animate(_ pane: TerminalPane) {
+        guard pane.id != 0 else { return }
+        scrolling.insert(pane.id)
+        wake()
+    }
+
     /// Something changed: run the frame loop until it goes idle.
     func wake() {
         idle = 0
@@ -538,6 +563,10 @@ public final class TerminalEngine: NSObject {
             }
             if n < dirty.count { break }
         }
+        for id in scrolling where panes[id]?.host?.scrollFrame() != true {
+            scrolling.remove(id)
+        }
+        total += scrolling.count
         if total == 0 {
             idle += 1
             if idle > 30 { l.isPaused = true }

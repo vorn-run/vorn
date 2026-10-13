@@ -56,9 +56,9 @@ struct TerminalSelectionLiveTests {
         #expect(rows == ["row\(n)", "row\(n + 1)"], "copied \(copied.debugDescription)")
         #expect(pane.word(at: GridPoint(line: top, col: 1)) == TerminalSelection(GridPoint(line: top, col: 0),
                                                                                    GridPoint(line: top, col: UInt16(rows[0].count))))
-        // Without history kept by vornd, scrolling up stays on the live screen.
-        pane.scroll(-10)
-        #expect(await settled { pane.view?.first_line == v.first_line })
+        // Ten rows up shows history from ten lines above.
+        pane.scrollTo(10)
+        #expect(await settled { pane.view?.first_line == v.first_line - 10 })
 
         // A paste arrives as typed lines, the live screen showing.
         pane.paste("echo pasted-ok\n")
