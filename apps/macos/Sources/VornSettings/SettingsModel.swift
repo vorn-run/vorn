@@ -62,9 +62,12 @@ public final class SettingsModel {
     @ObservationIgnored public var remoteHost: RemoteHostLink?
 
     public let client: VornClient
+    /// Settings › Plugins; the shell sets its `sessionIds` and `openWorkflowEditor`.
+    public let plugins: PluginsModel
 
     public init(client: VornClient, appVersion: String = SettingsModel.bundleVersion) {
         self.client = client
+        plugins = PluginsModel(client: client)
         self.appVersion = appVersion
     }
 

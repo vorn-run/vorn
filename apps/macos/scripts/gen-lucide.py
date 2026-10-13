@@ -10,7 +10,7 @@ VERSION = "1.34.0"  # lucide-react in package.json
 ICONS = {
     # Swift name: lucide file
     "circle": "circle", "clock": "clock", "eye": "eye", "circleCheck": "circle-check",
-    "circleX": "circle-x", "plus": "plus", "ellipsis": "ellipsis", "pencil": "pencil",
+    "circleX": "circle-x", "circleAlert": "circle-alert", "importItems": "import", "puzzle": "puzzle", "plus": "plus", "ellipsis": "ellipsis", "pencil": "pencil",
     "trash2": "trash-2", "archive": "archive", "archiveRestore": "archive-restore",
     "rotateCcw": "rotate-ccw", "fileCode": "file-code", "play": "play", "terminal": "terminal",
     "slidersHorizontal": "sliders-horizontal", "listTodo": "list-todo", "chevronDown": "chevron-down",

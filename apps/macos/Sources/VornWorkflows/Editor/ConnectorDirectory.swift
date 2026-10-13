@@ -27,11 +27,6 @@ public struct ConnectorGlyphData: Hashable, Sendable, Decodable {
         guard let value, let paths = value["paths"]?.arrayValue?.compactMap(\.stringValue), !paths.isEmpty else { return nil }
         return ConnectorGlyphData(viewBox: value.str("viewBox") ?? "0 0 24 24", paths: paths)
     }
-
-    var box: CGFloat {
-        let parts = viewBox.split(whereSeparator: { $0 == " " || $0 == "," }).compactMap { Double($0) }
-        return parts.count == 4 ? CGFloat(max(parts[2], parts[3])) : 24
-    }
 }
 
 /// use-connections.ts ConnectorLook: how a connector is drawn.
@@ -50,26 +45,7 @@ struct ConnectorGlyph: View {
     var color: Color = Theme.ink
 
     var body: some View {
-        if let icon {
-            ZStack {
-                ForEach(Array(icon.paths.enumerated()), id: \.offset) { _, d in
-                    SVGPath(d, viewBox: icon.box).fill(color)
-                }
-            }
-            .frame(width: size, height: size)
-        } else {
-            switch connectorId {
-            case "github", "linear", "mcp", "sdk":
-                ProjectIcon(icon: connectorId == "sdk" ? "mcp" : connectorId, color: "#FAF9F7", size: size)
-            case "http": LucideIcon(.globe, size: size).foregroundStyle(color)
-            default:
-                if packaged {
-                    ProjectIcon(icon: "mcp", color: "#FAF9F7", size: size)
-                } else {
-                    LucideIcon(.externalLink, size: size).foregroundStyle(color)
-                }
-            }
-        }
+        ConnectorIcon(connectorId: connectorId, viewBox: icon?.viewBox, paths: icon?.paths, packaged: packaged, size: size, color: color)
     }
 }
 

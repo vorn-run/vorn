@@ -329,6 +329,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         case .keys: await settings.loadConnectorKeys()
         case .about: await settings.loadCore()
         case .worktrees: await settings.wtLoad(refresh: false)
+        case .connectors: await settings.plugins.render(hints: settings.renderHints)
         default: break
         }
     }
