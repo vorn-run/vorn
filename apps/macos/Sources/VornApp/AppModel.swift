@@ -76,6 +76,8 @@ public enum Overlay: Equatable, Sendable {
     case removeWorktree(projectPath: String, worktreePath: String)
     /// CommandPalette.tsx (⌘K).
     case commandPalette
+    /// OnboardingModal.tsx: the welcome guide, on page `onboardingStep`.
+    case onboarding
 }
 
 /// What the sidebar's projects section lists (ProjectsSectionToolbar.tsx).
@@ -167,6 +169,12 @@ public final class AppModel {
 
     /// The composer tip an offscreen render shows; a live window picks one at random.
     public var launcherTip = 1
+    /// OnboardingModal.tsx: the welcome guide's page.
+    public var onboardingStep = 0
+    /// Remembers the guide was seen; set where the store is known.
+    @ObservationIgnored public var onOnboardingDone: () -> Void = {}
+    /// index.ts `toggleWidget`, for the Window menu; set once the widget is installed.
+    @ObservationIgnored public var toggleWidget: (() -> Void)?
     public var statusFilter: StatusFilter = .all
     public var sortMode: SortMode = .manual
     /// 0 auto, 1-4 fixed, -1 flexible.
@@ -281,6 +289,8 @@ public final class AppModel {
     public func escape() -> Bool {
         if contextMenu != nil {
             contextMenu = nil
+        } else if overlay == .onboarding {
+            closeOnboarding()
         } else if overlay != nil {
             overlay = nil
         } else if settingsOpen {
@@ -295,6 +305,26 @@ public final class AppModel {
             return false
         }
         return true
+    }
+
+    /// OnboardingModal.tsx `close`: shuts the guide and remembers it was seen.
+    public func closeOnboarding() {
+        guard overlay == .onboarding else { return }
+        overlay = nil
+        onOnboardingDone()
+    }
+
+    /// The guide's "Try Command Palette".
+    public func openCommandPalette() {
+        contextMenu = nil
+        overlay = .commandPalette
+    }
+
+    /// The welcome guide, from its first page.
+    public func openOnboarding() {
+        contextMenu = nil
+        onboardingStep = 0
+        overlay = .onboarding
     }
 
     /// ⌘1-9: the session at a position, in whichever surface is showing.

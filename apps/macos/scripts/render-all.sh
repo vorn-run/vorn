@@ -60,6 +60,14 @@ for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
+for step in 0 1 2 3 4 5 6; do
+  "$bin/Vorn" --render "$out/onboarding-$step.png" --overlay onboarding --onboarding-step "$step" --installed claude,copilot
+done
+"$bin/Vorn" --render "$out/onboarding-mcp.png" --overlay onboarding --onboarding-step 0 --installed claude,copilot --mcp-open
+"$bin/Vorn" --render "$out/onboarding-none.png" --overlay onboarding --onboarding-step 0 --installed none
+"$bin/Vorn" --render "$out/widget.png" --widget
+"$bin/Vorn" --render "$out/widget-compact.png" --widget --widget-compact
+"$bin/Vorn" --render "$out/widget-permission.png" --widget --widget-permission
 for page in appearance general updates notifications worktrees agents ssh network mcp keys about; do
   "$bin/Vorn" --render "$out/settings-$page.png" --settings "$page"
 done

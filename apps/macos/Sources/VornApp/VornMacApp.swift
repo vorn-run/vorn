@@ -17,6 +17,7 @@ public struct VornMacApp: App {
     @State private var model = AppModel()
     @State private var engines = EngineHolder()
     @State private var keys = KeyMonitor()
+    @State private var widget: WidgetController?
 
     public init() {
         let store = VornStore()
@@ -33,6 +34,14 @@ public struct VornMacApp: App {
                 .onAppear {
                     store.start()
                     keys.install(model: model)
+                    OnboardingGate.bind(model: model, store: store)
+                    Task { _ = await OnboardingGate.openIfUnseen(model: model, store: store) }
+                    if widget == nil {
+                        let controller = WidgetController(store: store, model: model)
+                        controller.install()
+                        model.toggleWidget = { controller.toggle() }
+                        widget = controller
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -76,6 +85,9 @@ struct ShellCommands: Commands {
             Divider()
             Button("Stop Sessions and Server") { actions.stopSessionsAndServer() }
             Divider()
+        }
+        CommandGroup(after: .windowArrangement) {
+            Button("Toggle Widget") { model.toggleWidget?() }
         }
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") { model.sidebarOpen.toggle() }.keyboardShortcut("b")
@@ -169,7 +181,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME` (`--palette-query TEXT` types into the command palette), `--dock [--dock-collapsed]` loads waiting gates into the session dock, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME` (`--palette-query TEXT` types into the command palette), `onboarding` takes `--onboarding-step N`, `--mcp-open`, `--installed a,b`; `--widget [--widget-compact] [--widget-permission]` the floating widget alone, `--dock [--dock-collapsed]` loads waiting gates into the session dock, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -321,6 +333,42 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         }
     }
 
+    // Welcome guide: --installed a,b stands in for agent detection, which a read-only render cannot ask for.
+    if let list = value("--installed") {
+        let on = Set(list.split(separator: ",").map(String.init))
+        features.settings.stage(installedAgents: Dictionary(uniqueKeysWithValues: AgentDefinition.all.map {
+            ($0.type.rawValue, on.contains($0.type.rawValue))
+        }))
+    }
+    if let step = value("--onboarding-step").flatMap(Int.init) { model.onboardingStep = Onboarding.clamp(step) }
+    OnboardingModal.renderMcpOpen = args.contains("--mcp-open")
+    if args.contains("--widget") {
+        let feed = WidgetFeed(store: store)
+        feed.mode = args.contains("--widget-compact") ? .compact : .full
+        if args.contains("--widget-permission"), let s0 = store.sessions.first {
+            feed.apply("widget:permission-request", [
+                "requestId": "r1", "terminalId": .string(s0.id), "toolName": "Bash",
+                "toolInput": ["command": "yarn test --watch=false"],
+                "permissionSuggestions": [["type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "yarn test:*"]]]],
+            ])
+            feed.apply("widget:permission-request", [
+                "requestId": "r2", "terminalId": .string(s0.id), "toolName": "AskUserQuestion",
+                "toolInput": [:],
+                "questions": [["header": "Scope", "question": "Which tests should run?",
+                               "options": [["label": "Unit only"], ["label": "Everything"]]]],
+            ])
+        }
+        let widgetSize = feed.mode.size
+        let view = WidgetView(feed: feed, agents: feed.agents)
+            .frame(width: widgetSize.width, height: widgetSize.height, alignment: .top)
+        guard let image = await hostedImage(of: view, size: widgetSize, settle: 600),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return 1 }
+        try? png.write(to: URL(fileURLWithPath: path))
+        store.stop()
+        print("wrote \(path) (\(image.width)x\(image.height)), \(feed.agents.count) widget rows")
+        return 0
+    }
+
     // Panes: --files N[:rel,..], --claim N:M, --promote N:rel, --changes N, --commit, --maximize files|terminals, --preview-tab.
     if let names = value("--expand") { FileTreeModel.renderExpand = Set(names.split(separator: ",").map(String.init)) }
     let all = model.mainViewMode == .sessions ? model.visibleSessions(store, includeMinimized: true) : []
@@ -424,6 +472,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         let overlays: [String: Overlay] = [
             "view-options": .viewOptions, "recent": .recent, "shortcuts": .shortcuts,
             "new-menu": .newMenu, "sidebar-options": .sidebarOptions, "dock": .dock, "command-palette": .commandPalette,
+            "onboarding": .onboarding,
             "add-project": .addProject(editing: nil), "edit-project": .addProject(editing: store.projects.first?.name),
             "project-menu": .projectMenu(store.projects.first?.name ?? ""),
             "remove-worktree": store.sessions.first(where: { $0.worktreePath != nil }).map {
@@ -491,7 +540,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
     let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent
-        || model.overlay == .commandPalette || model.settingsOpen
+        || model.overlay == .commandPalette || model.overlay == .onboarding || model.settingsOpen
         || model.panes.diffSessionID != nil || !model.panes.filesPanes.isEmpty || !model.panes.terminalsPanes.isEmpty
         || !model.panes.editorCards.isEmpty || usesBrowser
     let editorState = value("--editor")

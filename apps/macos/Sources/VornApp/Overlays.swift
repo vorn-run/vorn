@@ -48,12 +48,14 @@ struct OverlayHost: View {
 
     private func close() {
         model.contextMenu = nil
+        if model.overlay == .onboarding { model.closeOnboarding() }
         model.overlay = nil
     }
 
     private var backdrop: Color {
         switch model.overlay {
         case .addProject?: Color.black.opacity(0.5)
+        case .onboarding?: Color.black.opacity(0.6)
         case .shortcuts?, .removeWorktree?, .commandPalette?: Color.black.opacity(0.4)
         default: Color.white.opacity(0.001)
         }
@@ -113,6 +115,9 @@ struct OverlayHost: View {
         case .removeWorktree(let projectPath, let worktreePath):
             WorktreeCleanupDialog(projectPath: projectPath, worktreePath: worktreePath, model: model, store: store,
                                   actions: actions)
+                .frame(width: size.width, height: size.height)
+        case .onboarding:
+            OnboardingModal(model: model, store: store, actions: actions, settings: features.settings)
                 .frame(width: size.width, height: size.height)
         case .newMenu:
             if let r = rect("newMenu", geo) {
@@ -377,6 +382,7 @@ struct ShortcutsPanel: View {
                                 .foregroundStyle(Theme.gray500)
                         }
                     }
+                    WelcomeGuideRow { model.openOnboarding() }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)

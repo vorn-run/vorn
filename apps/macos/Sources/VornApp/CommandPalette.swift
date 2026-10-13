@@ -33,7 +33,7 @@ public enum PaletteIcon: Sendable {
 /// What running a command does, so the list can be built and checked without a window.
 public enum PaletteAction: Equatable, Sendable {
     case newSession, openSettings, toggleSidebar, shortcuts, addProject, addWorkflow, openTasks, createTask
-    case stopServer, toggleLayout, newTerminal, copyMCPURL
+    case stopServer, toggleLayout, welcomeGuide, newTerminal, copyMCPURL
     case settings(SettingsCategory)
     case focus(String)
     case focusCard(String)
@@ -118,6 +118,8 @@ public enum PaletteCommands {
             keywords: ["stop", "quit", "shutdown", "server", "end", "kill"], .stopServer)
         add("action:toggle-layout", "Toggle Layout (Grid/Tabs)", .actions, .lucide(.layoutDashboard),
             keywords: ["grid", "tabs", "layout", "switch", "view"], .toggleLayout)
+        add("action:welcome-guide", "Show Welcome Guide", .actions, .lucide(.bookOpen),
+            keywords: ["welcome", "guide", "help", "onboarding", "tour"], .welcomeGuide)
         add("action:new-terminal", "New Terminal Session", .actions, .lucide(.terminal), shortcut: "Ctrl+`",
             keywords: ["shell", "terminal", "zsh", "bash"], .newTerminal)
         add("action:copy-mcp-url", "Copy MCP Server URL", .actions, .lucide(.plug),
@@ -371,6 +373,7 @@ struct PaletteRunner {
             features.tasks.openNewTask()
         case .stopServer: actions.stopSessionsAndServer()
         case .toggleLayout: actions.setLayout(model.layoutMode(store) == .grid ? .tabs : .grid)
+        case .welcomeGuide: model.openOnboarding()
         case .newTerminal: actions.newTerminal(resolvedProject, actions.activeWorktree)
         case .copyMCPURL:
             NSPasteboard.general.clearContents()

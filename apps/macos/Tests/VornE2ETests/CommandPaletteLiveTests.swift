@@ -116,6 +116,8 @@ struct CommandPaletteLiveTests {
         #expect(model.overlay == .shortcuts)
         try run("action:add-project")
         #expect(model.overlay == .addProject(editing: nil))
+        try run("action:welcome-guide")
+        #expect(model.overlay == .onboarding && model.onboardingStep == 0)
     }
 
     private func makeRepo(at url: URL) throws {

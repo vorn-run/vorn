@@ -119,6 +119,12 @@ ICONS = {
     "filter": "filter",
     "arrowUpDown": "arrow-up-down",
     "layoutDashboard": "layout-dashboard",
+    "panelRight": "panel-right",
+    "bell": "bell",
+    "palette": "palette",
+    "columns3": "columns-3",
+    "fileDiff": "file-diff",
+    "squareKanban": "square-kanban",
 }
 # Inline glyphs from TaskToolbar.tsx and OptionRow.tsx rather than lucide.
 INLINE = {

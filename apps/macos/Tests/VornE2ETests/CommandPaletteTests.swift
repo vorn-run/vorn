@@ -116,7 +116,8 @@ struct CommandPaletteTests {
         let all = PaletteCommands.build(src)
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
-        #expect(all.filter { $0.category == .actions }.count == 14)
+        #expect(all.filter { $0.category == .actions }.count == 15)
+        #expect(byId["action:welcome-guide"]?.action == .welcomeGuide)
         #expect(byId["action:stop-sessions-and-server"]?.sublabel == "2 running")
         #expect(byId["action:new-session"]?.shortcut == "⌘N")
         #expect(byId["action:manage-ssh"]?.action == .settings(.ssh))
