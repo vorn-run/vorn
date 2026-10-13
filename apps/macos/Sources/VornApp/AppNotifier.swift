@@ -18,7 +18,7 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// Seams for tests: the tone, the OS notification, and whether this window has focus.
     var playTone: (NotificationReason, Double) -> Void = { NotificationTone.play($0, volume: $1) }
     var show: (_ title: String, _ body: String, _ target: AppNotice.Target) async -> Void = AppNotifier.post
-    var hasFocus: () -> Bool = { NSApp.isActive }
+    var hasFocus: () -> Bool = { NSApp?.isActive ?? false }
     var permitted: () async -> Bool = AppNotifier.authorized
 
     func bind(store: VornStore, model: AppModel, workflows: WorkflowsStore) {
@@ -68,7 +68,7 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Clicking a notice brings the window forward, then the session or run it is about.
     func open(_ target: AppNotice.Target) {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp?.activate(ignoringOtherApps: true)
         guard let model else { return }
         switch target {
         case .session(let id):

@@ -91,6 +91,11 @@ HTML
 node "$here/scripts/seed-test-vornd.mjs" "$data" --no-runs --review >/dev/null
 sleep 3
 "$bin/Vorn" --render "$out/app-workflows-review.png" --view workflows --review
+"$bin/Vorn" --render "$out/dock-waiting.png" --dock
+"$bin/Vorn" --render "$out/dock-tabs.png" --dock --layout tabs
+"$bin/Vorn" --render "$out/dock-collapsed.png" --dock --dock-collapsed
+"$bin/Vorn" --render "$out/overlay-dock.png" --dock --dock-collapsed --overlay dock
+"$bin/Vorn" --render "$out/error-screen.png" --size 900x600 --component error-screen
 
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"

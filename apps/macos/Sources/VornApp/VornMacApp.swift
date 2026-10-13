@@ -164,7 +164,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--dock [--dock-collapsed]` loads waiting gates into the session dock, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -212,7 +212,11 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
 
     features.bind(store: store, model: model)
     switch model.mainViewMode {
-    case .sessions: break
+    case .sessions:
+        if args.contains("--dock") {
+            await features.workflows.reload()
+            model.sessionDockCollapsed = args.contains("--dock-collapsed")
+        }
     case .tasks:
         features.tasks.scope = features.scope(model, store)
         await features.tasks.reload()
@@ -414,7 +418,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     if let name = value("--overlay") {
         let overlays: [String: Overlay] = [
             "view-options": .viewOptions, "recent": .recent, "shortcuts": .shortcuts,
-            "new-menu": .newMenu, "sidebar-options": .sidebarOptions,
+            "new-menu": .newMenu, "sidebar-options": .sidebarOptions, "dock": .dock,
             "add-project": .addProject(editing: nil), "edit-project": .addProject(editing: store.projects.first?.name),
             "project-menu": .projectMenu(store.projects.first?.name ?? ""),
             "remove-worktree": store.sessions.first(where: { $0.worktreePath != nil }).map {
@@ -456,6 +460,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             view = AnyView(BranchPicker(projectPath: s0.projectPath, currentBranch: s0.branch, git: actions.gitActions) { _ in })
         case "open-in":
             view = AnyView(OpenInButton.Menu(ides: OpenInButton.cache ?? [], projectPath: s0.projectPath, git: actions.gitActions) {})
+        case "error-screen":
+            view = AnyView(ErrorScreen(error: "TypeError: Cannot read properties of undefined (reading 'sessions')",
+                                       reload: {}).frame(width: size.width, height: size.height))
         default:
             FileHandle.standardError.write(Data("unknown component \(name)\n".utf8))
             return 2
