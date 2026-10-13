@@ -659,6 +659,7 @@ where
     cfg.scale = scale as f32;
     let adapter = gpu.as_ref().map(Gpu::adapter_name);
     let mut ui = Ui::build(gpu, adapter, mode, format, &cfg);
+    let _ = canvas.set_attribute("data-renderer", &label);
     if let Ok(mut r) = RENDERER.lock() {
         *r = label;
     }

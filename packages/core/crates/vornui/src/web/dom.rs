@@ -110,11 +110,10 @@ impl A11yMirror {
         let _ = style.set_property("width", &format!("{:.1}px", r.2));
         let _ = style.set_property("height", &format!("{:.1}px", r.3));
         set_attr(&el, "role", role);
-        if n.role() == Role::Terminal {
-            let _ = el.set_attribute("aria-readonly", "true");
-            let _ = el.set_attribute("aria-multiline", "true");
-            let _ = el.set_attribute("aria-roledescription", "terminal");
-        }
+        let term = n.role() == Role::Terminal;
+        set_attr(&el, "aria-readonly", term.then_some("true"));
+        set_attr(&el, "aria-multiline", term.then_some("true"));
+        set_attr(&el, "aria-roledescription", term.then_some("terminal"));
         set_attr(&el, "aria-label", (!label.is_empty()).then_some(label));
         // A node with no ARIA role is static text: its label is what it says.
         let text = if role.is_none() { label } else { value };
@@ -139,6 +138,7 @@ impl A11yMirror {
         }
         let el: HtmlElement = self.doc.create_element("div").ok()?.dyn_into().ok()?;
         let _ = el.set_attribute("data-node", &id.0.to_string());
+        let _ = el.style().set_property("position", "absolute");
         let _ = host.append_child(&el);
         self.nodes.insert(
             id,

@@ -94,7 +94,22 @@ fn take_token_from_address() {
         return;
     };
     page::save(TOKEN_KEY, &token);
-    let path = loc.pathname().unwrap_or_else(|_| "/app/".into());
+    // Everything but the token stays, `?renderer=` among it.
+    let without = |q: &str| {
+        q.split('&')
+            .filter(|kv| !kv.is_empty() && !kv.starts_with("token="))
+            .collect::<Vec<_>>()
+            .join("&")
+    };
+    let mut path = loc.pathname().unwrap_or_else(|_| "/app/".into());
+    for (mark, q) in [
+        ("?", without(search.trim_start_matches('?'))),
+        ("#", without(hash.trim_start_matches('#'))),
+    ] {
+        if !q.is_empty() {
+            path = format!("{path}{mark}{q}");
+        }
+    }
     if let Ok(history) = win.history() {
         let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&path));
     }
