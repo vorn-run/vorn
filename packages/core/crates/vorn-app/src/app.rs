@@ -2654,6 +2654,31 @@ impl App {
         }
     }
 
+    /// Text a page pasted: into the focused field, else as a paste into the
+    /// terminal being typed into.
+    pub fn paste(&mut self, ui: &mut Ui, text: String) {
+        let chord = Input::Key {
+            code: "KeyV".into(),
+            mods: MOD(),
+            text: None,
+        };
+        let busy = self.st.dialog.is_some() || self.st.menu.is_some() || self.st.settings.open;
+        if self.intercept(ui, &chord) || ui.key(&chord) || busy {
+            return self.events(ui);
+        }
+        if self.composing() || self.st.view != MainView::Sessions {
+            self.input(Input::Commit(text));
+        } else if let (Some(g), Some(id)) = (&self.grid, self.typing_target()) {
+            g.paste(&id, &text);
+        }
+        self.events(ui);
+    }
+
+    /// Whether vornd refused this client's key.
+    pub fn rejected(&self) -> bool {
+        self.rpc.rejected()
+    }
+
     /// Input as a window delivers it: shortcuts first, then the UI, then
     /// the composer or the terminal, and what the UI reported after.
     pub fn send(&mut self, ui: &mut Ui, input: Input) {

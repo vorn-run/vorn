@@ -6765,6 +6765,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-web"
+version = "0.8.0-beta.8"
+dependencies = [
+ "futures-util",
+ "serde_json",
+ "vorn-app",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
 name = "vorn-work"
 version = "0.0.0"
 dependencies = [

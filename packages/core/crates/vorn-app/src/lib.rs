@@ -32,6 +32,7 @@ pub mod headless;
 pub mod highlight;
 pub mod hotkeys;
 pub mod intent;
+pub mod keep;
 pub mod launch;
 pub mod layout;
 pub mod library;

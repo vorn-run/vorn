@@ -120,8 +120,7 @@ impl SidebarView {
 
     /// The options saved in `file`, else the defaults.
     pub fn load(file: &Path) -> SidebarView {
-        std::fs::read_to_string(file)
-            .ok()
+        crate::keep::read(file)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
@@ -129,11 +128,8 @@ impl SidebarView {
     /// Writes the options down; a failure costs only their survival past
     /// this launch.
     pub fn save(&self, file: &Path) {
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(s) = serde_json::to_string(self) {
-            let _ = std::fs::write(file, s);
+            let _ = crate::keep::write(file, &s);
         }
     }
 }

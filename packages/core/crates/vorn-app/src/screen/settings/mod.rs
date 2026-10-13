@@ -154,7 +154,7 @@ fn sidebar(s: &Screen<'_>) -> El {
             ),
         );
         let mut items = div().col().gap(2.0);
-        for cat in cats.iter() {
+        for cat in cats.iter().filter(|c| c.shown()) {
             items = items.child(nav_item(s, *cat, c(look::GRAY_400)));
         }
         list = list.child(items);

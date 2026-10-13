@@ -195,6 +195,20 @@ pub async fn sleep(d: Duration) {
     let _ = JsFuture::from(promise).await;
 }
 
+/// A GET of `path` from where the page was served, as bytes.
+pub async fn get_bytes(path: &str) -> Option<Vec<u8>> {
+    let res: web_sys::Response = JsFuture::from(window().fetch_with_str(path))
+        .await
+        .ok()?
+        .dyn_into()
+        .ok()?;
+    if !res.ok() {
+        return None;
+    }
+    let buf = JsFuture::from(res.array_buffer().ok()?).await.ok()?;
+    Some(js_sys::Uint8Array::new(&buf).to_vec())
+}
+
 /// A GET of `path` from the page's vornd, as JSON.
 pub async fn get_json(path: &str) -> Option<serde_json::Value> {
     let res: web_sys::Response = JsFuture::from(window().fetch_with_str(path))

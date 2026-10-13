@@ -224,7 +224,9 @@ impl App {
                         Value::Null,
                     );
                 }
-                self.st.settings.cli = Some(crate::cli_link::state());
+                if !crate::settings::IN_BROWSER {
+                    self.st.settings.cli = Some(crate::cli_link::state());
+                }
             }
             Category::Worktrees => {
                 if s.worktrees.projects.is_none() {

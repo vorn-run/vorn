@@ -96,9 +96,8 @@ pub struct Panes {
 impl Panes {
     /// The panes saved in `path`; none when it is missing or unreadable.
     pub fn load(path: &Path) -> Panes {
-        std::fs::read(path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Panes>(&b).ok())
+        crate::keep::read(path)
+            .and_then(|b| serde_json::from_str::<Panes>(&b).ok())
             .map(Panes::intent)
             .unwrap_or_default()
     }
@@ -106,8 +105,8 @@ impl Panes {
     /// Writes the panes to `path`. As the renderer's `savePanes`, only what
     /// was asked for is kept: what a page reported is seen again next run.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let body = serde_json::to_vec(&self.clone().intent()).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        let body = serde_json::to_string(&self.clone().intent()).map_err(std::io::Error::other)?;
+        crate::keep::write(path, &body)
     }
 
     fn intent(mut self) -> Panes {

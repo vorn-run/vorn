@@ -65,6 +65,17 @@ impl Category {
     }
 }
 
+/// Whether this app runs in a browser, where the machine's own settings
+/// (sign-in, updates, the command line tool, the widget) belong to the desktop app.
+pub const IN_BROWSER: bool = cfg!(target_arch = "wasm32");
+
+impl Category {
+    /// Whether the category has anything to set from here.
+    pub fn shown(self) -> bool {
+        !(IN_BROWSER && self == Category::Updates)
+    }
+}
+
 /// The sidebar's sections, as `SIDEBAR_SECTIONS` lists them.
 pub const SECTIONS: [(&str, &[Category]); 2] = [
     (
