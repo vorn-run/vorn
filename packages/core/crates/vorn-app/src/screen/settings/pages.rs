@@ -1465,6 +1465,7 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
                                     },
                                     c(look::GRAY_200),
                                 )
+                                .secure()
                                 .w_full(),
                             ),
                     )

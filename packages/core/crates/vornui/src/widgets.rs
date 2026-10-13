@@ -609,6 +609,7 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         spans: Vec::new(),
         marks: Vec::new(),
         centered: false,
+        secure: false,
     }))
 }
 

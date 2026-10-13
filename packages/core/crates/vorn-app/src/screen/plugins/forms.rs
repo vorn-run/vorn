@@ -110,17 +110,19 @@ fn connect_box(s: &Screen<'_>, a: &Adding) -> El {
 }
 
 /// The form's input: `px-3 py-1.5 text-sm` on `white/[0.05]`.
-fn input(s: &Screen<'_>, f: Field, value: &str, name: &str, placeholder: &str, mono: bool) -> El {
+fn input(s: &Screen<'_>, f: Field, value: &str, name: &str, placeholder: &str, secret: bool) -> El {
     let id = field_id(&f);
     s.acts.text(id, act(PlugAct::Text(f)), value);
     let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
     let style = TextStyle {
         line_height: 20.0,
-        mono,
         ..TextStyle::ui(14.0)
     };
-    field(id, name, placeholder, style, k::GRAY_200)
-        .placeholder_color(k::GRAY_200.alpha(0.5))
+    let mut el = field(id, name, placeholder, style, k::GRAY_200);
+    if secret {
+        el = el.secure();
+    }
+    el.placeholder_color(k::GRAY_200.alpha(0.5))
         .w_full()
         .px(12.0)
         .py(6.0)
@@ -309,7 +311,7 @@ fn dynamic(s: &Screen<'_>, f: &BuiltinForm, spec: &Value) -> Option<El> {
             value,
             name,
             placeholder,
-            false,
+            kind == "password",
         ),
     });
     if let Some(d) = sv(spec, "description").filter(|d| !d.is_empty()) {
@@ -542,7 +544,7 @@ fn sdk(s: &Screen<'_>, a: &Adding, f: &SdkForm) -> El {
                     value,
                     name,
                     "",
-                    false,
+                    secret,
                 ));
             if let Some(d) = sv(e, "description").filter(|d| !d.is_empty()) {
                 fcol = fcol.child(small(d, k::GRAY_600).mt(4.0));
@@ -754,7 +756,7 @@ fn browser(m: &Value) -> Option<El> {
 
 /// `HttpProfileForm`: name, base URL, auth header and secret, then a test.
 fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
-    let fieldset = |l: &str, fld: Field, v: &str, ph: &str, mono: bool| {
+    let fieldset = |l: &str, fld: Field, v: &str, ph: &str, mono: bool, secret: bool| {
         let id = field_id(&fld);
         s.acts.text(id, act(PlugAct::Text(fld)), v);
         let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
@@ -773,14 +775,18 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
                     .role(Role::Label, l),
             )
             .child(
-                field(id, l, ph, style, k::GRAY_200)
-                    .placeholder_color(k::GRAY_200.alpha(0.5))
-                    .w_full()
-                    .px(8.0)
-                    .py(6.0)
-                    .rounded(R)
-                    .bg(white(0.05))
-                    .border(1.0, white(0.1).mix(white(0.2), focus)),
+                if secret {
+                    field(id, l, ph, style, k::GRAY_200).secure()
+                } else {
+                    field(id, l, ph, style, k::GRAY_200)
+                }
+                .placeholder_color(k::GRAY_200.alpha(0.5))
+                .w_full()
+                .px(8.0)
+                .py(6.0)
+                .rounded(R)
+                .bg(white(0.05))
+                .border(1.0, white(0.1).mix(white(0.2), focus)),
             )
     };
     let mut col = div()
@@ -797,12 +803,20 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
                 .mb(8.0)
                 .role(Role::Heading, "HTTP profile"),
         )
-        .child(fieldset("Name", Field::ProfileName, &f.name, "", false))
+        .child(fieldset(
+            "Name",
+            Field::ProfileName,
+            &f.name,
+            "",
+            false,
+            false,
+        ))
         .child(fieldset(
             "Base URL",
             Field::ProfileUrl,
             &f.base_url,
             "https://api.example.com",
+            false,
             false,
         ))
         .child(fieldset(
@@ -811,6 +825,7 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
             &f.header,
             "",
             true,
+            false,
         ))
         .child(fieldset(
             "Secret",
@@ -818,6 +833,7 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
             &f.secret,
             "",
             false,
+            true,
         ));
     if let Some((ok, message)) = &f.result {
         let (g, color) = if *ok {

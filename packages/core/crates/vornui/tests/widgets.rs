@@ -434,6 +434,32 @@ fn text_input_types_composes_and_reports() {
 }
 
 #[test]
+fn a_secure_field_keeps_its_text_but_shows_and_tells_bullets() {
+    let f = Id::new("secret");
+    let build = |ui: &Ui| widgets::text_input(ui, f, "Token", "").w(200.0).secure();
+    let mut r = Rig::new();
+    r.frame(&build);
+    r.click(f);
+    r.typed("pä55");
+    assert_eq!(r.ui.edit_text(f), "pä55");
+    r.frame(&build);
+    let node = r.node(f).unwrap();
+    assert_eq!(node.value(), Some("\u{2022}\u{2022}\u{2022}\u{2022}"));
+    assert_eq!(
+        r.nodes(Role::TextRun)[0].value(),
+        Some("\u{2022}\u{2022}\u{2022}\u{2022}")
+    );
+    // A click past the end puts the caret after the last real character.
+    let b = node.bounds().unwrap();
+    r.wait(600);
+    r.ui.pointer_move(b.x1 as f32 - 4.0, ((b.y0 + b.y1) / 2.0) as f32);
+    r.ui.pointer_down();
+    r.ui.pointer_up();
+    r.typed("!");
+    assert_eq!(r.ui.edit_text(f), "pä55!");
+}
+
+#[test]
 fn composer_submits_on_enter_and_breaks_lines_on_shift_enter() {
     let c = Id::new("composer");
     let build = |ui: &Ui| {

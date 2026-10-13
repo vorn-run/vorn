@@ -203,6 +203,8 @@ pub struct EditLook {
     pub marks: Vec<(std::ops::Range<usize>, Rgba)>,
     /// One line drawn mid-field (`text-center`) rather than from the left.
     pub centered: bool,
+    /// A password field: drawn as bullets, never copied or read aloud.
+    pub secure: bool,
 }
 
 /// Accessibility facts beyond role and label.
@@ -351,6 +353,13 @@ impl El {
         self
     }
 
+    /// Masks an edit field's text (`type="password"`).
+    pub fn secure(mut self) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.secure = true;
+        }
+        self
+    }
     pub fn placeholder_color(mut self, c: Rgba) -> El {
         if let Content::Edit(l) = &mut self.content {
             l.placeholder_color = c;
