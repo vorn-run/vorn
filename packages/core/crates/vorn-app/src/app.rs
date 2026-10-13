@@ -632,9 +632,9 @@ impl App {
                             .insert(id.clone(), std::time::Instant::now());
                     }
                     if let (Some(s), Some(o)) = (self.scrolls.get_mut(&id), old) {
-                        if o.sb_epoch != v.sb_epoch || !v.primary {
+                        if !v.primary {
                             s.reset();
-                        } else {
+                        } else if o.sb_epoch == v.sb_epoch {
                             s.grew(v.live_line.saturating_sub(o.live_line));
                         }
                     }

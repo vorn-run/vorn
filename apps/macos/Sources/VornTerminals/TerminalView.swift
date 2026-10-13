@@ -84,13 +84,17 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
 
     func paneDidChange() {
         if let v = pane.view {
-            // New output: a view scrolled back stays on its lines.
-            if v.alternate || v.live_line < liveLine {
+            // New output: a view scrolled back stays on its lines; renumbered history keeps its distance from live.
+            if v.alternate {
                 scroll.reset()
-            } else {
+            } else if v.live_line > liveLine {
                 scroll.grew(v.live_line - liveLine)
             }
             liveLine = v.live_line
+            if !v.alternate, scroll.split.back != v.back {
+                pane.scrollTo(scroll.split.back)
+                liveLine = pane.view?.live_line ?? liveLine
+            }
         }
         if findBar != nil, !found.done { loadMatches() }
         needsDisplay = true
