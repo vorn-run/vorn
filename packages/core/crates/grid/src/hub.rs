@@ -550,6 +550,10 @@ impl Hub {
 
     /// One render update; false when none could be made.
     fn update(&mut self, ctx: &Ctx<'_>, now: Instant) -> bool {
+        // Spent by every attempt, so failing ones cannot keep the frame due at once.
+        if self.answering() {
+            self.typed_left -= 1;
+        }
         if self.grid.is_none() {
             match Grid::new() {
                 Ok(g) => self.grid = Some(g),
@@ -564,10 +568,8 @@ impl Hub {
             // A read from Ghostty failed part way: trust nothing, and try
             // again at the next frame.
             g.distrust_dirty();
+            self.typed_left = 0;
             return false;
-        }
-        if self.answering() {
-            self.typed_left -= 1;
         }
         self.pending = false;
         true
