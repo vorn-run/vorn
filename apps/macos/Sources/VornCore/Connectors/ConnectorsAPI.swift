@@ -45,6 +45,11 @@ public struct ConnectorsAPI: Sendable {
     public struct PreflightResult: Hashable, Sendable {
         public var ok: Bool?
         public var message: String?
+
+        public init(ok: Bool?, message: String?) {
+            self.ok = ok
+            self.message = message
+        }
     }
 
     public struct Repo: Hashable, Sendable {
@@ -219,7 +224,7 @@ public struct ConnectorsAPI: Sendable {
         }
     }
 
-    static func describe(_ error: Error, fallback: String) -> String {
+    public static func describe(_ error: Error, fallback: String) -> String {
         let text = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         return text.isEmpty ? fallback : text
     }
