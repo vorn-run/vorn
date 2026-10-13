@@ -272,6 +272,8 @@ pub enum Dialog {
     RemoveWorktree,
     /// "Discard unsaved changes?" before a buffer goes.
     Discard,
+    /// "Paste N lines?" before a paste the program could run line by line.
+    Paste,
     /// CommandPalette.
     Palette,
     /// OnboardingModal: the welcome guide.
@@ -475,6 +477,10 @@ pub struct State {
     pub renaming: Option<String>,
     /// The session whose close asks first.
     pub confirm_close: Option<String>,
+    /// A paste waiting on its confirm dialog: the session and the text.
+    pub paste: Option<(String, String)>,
+    /// The terminal selection and the session it is in.
+    pub sel: Option<(String, crate::select::Sel)>,
     /// The project whose delete asks first.
     pub confirm_delete: Option<String>,
     pub toasts: Vec<Toast>,

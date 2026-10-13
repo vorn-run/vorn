@@ -3,11 +3,12 @@
 //! ```text
 //! vorn-app [window] [--data-dir D]
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
-//!               [--keys K1,K2] [--chrome off]
+//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //! ```
 //!
-//! `--keys` sends shortcuts before the shot (`Mod+KeyN`, `Alt+Digit2`,
-//! `F2`, `Escape`).
+//! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
+//! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
+//! among them reads `--clipboard`.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -25,8 +26,8 @@ use vorn_app::client::{data_dir, Endpoint};
 use vorn_app::crash::{self, CrashAct};
 use vorn_app::launch::{self, Server};
 use vorn_app::ui::{
-    div, mods, run_with, text, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui,
-    Waker, WindowApp, WindowOptions,
+    div, mods, run_with, text, El, Event, Input, Laid, MemoryClipboard, NativeWindow, Rect,
+    RenderMode, Rgba, Ui, Waker, WindowApp, WindowOptions,
 };
 use vorn_app::update::Updater;
 use vorn_app::{look, ui_config, App};
@@ -99,6 +100,9 @@ fn shot(args: &Args) -> Result<(), String> {
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
+    if let Some(c) = args.get("clipboard") {
+        ui.set_clipboard(Box::new(MemoryClipboard(Some(c.to_owned()))));
+    }
     // The startup calls answer before the first frame is drawn.
     let until = Instant::now() + Duration::from_secs(5);
     while app.busy() && Instant::now() < until {
@@ -158,10 +162,21 @@ fn key(spec: &str) -> Input {
         };
         code = rest;
     }
+    // A bare letter types itself, as a keyboard's would.
+    let text = code
+        .strip_prefix("Key")
+        .filter(|l| l.len() == 1 && m & !mods::SHIFT == 0)
+        .map(|l| {
+            if m & mods::SHIFT == 0 {
+                l.to_lowercase()
+            } else {
+                l.to_owned()
+            }
+        });
     Input::Key {
         code: code.to_owned(),
         mods: m,
-        text: None,
+        text,
     }
 }
 

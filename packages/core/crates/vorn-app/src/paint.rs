@@ -17,7 +17,15 @@ pub enum Caret {
 
 /// Draws `v` in `r` (physical pixels) with its cursor shown as `caret`;
 /// `preedit` is IME composition shown at the cursor.
-pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, caret: Caret, preedit: &str) {
+/// `sel` is what is selected: `(row, from col, to col exclusive)` per row.
+pub fn pane(
+    ui: &mut Ui,
+    v: &PaneView,
+    r: Rect,
+    caret: Caret,
+    preedit: &str,
+    sel: &[(u16, u16, u16)],
+) {
     let cell = ui.text.cell();
     let (x0, y0) = (r.x.round(), r.y.round());
     let at = |col: u16, row: u16| (x0 + f32::from(col) * cell.w, y0 + f32::from(row) * cell.h);
@@ -39,6 +47,12 @@ pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, caret: Caret, preedit: &str) {
             ui.scene
                 .quad(Rect::new(x, sy, w, thin), Rgba::hex(run.fg), 0.0, None);
         }
+    }
+    let sel_bg = Rgba::hex(crate::look::term::SELECTION);
+    for &(row, a, b) in sel {
+        let (x, y) = at(a, row);
+        let w = f32::from(b - a) * cell.w;
+        ui.scene.quad(Rect::new(x, y, w, cell.h), sel_bg, 0.0, None);
     }
     let cursor = (caret != Caret::Hidden && v.cursor_visible && preedit.is_empty())
         .then_some((v.cursor_x, v.cursor_y));

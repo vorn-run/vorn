@@ -3,8 +3,9 @@
 //! theme and whatever palette the program set.
 
 use vorn_term_mirror::Mirror;
+use vorn_term_proto::msg::GridPoint;
 use vorn_term_proto::row;
-use vorn_term_proto::screen::{attrs, row_flags, Color, CursorStyle, StyleDef, Underline};
+use vorn_term_proto::screen::{attrs, row_flags, Color, CursorStyle, Screen, StyleDef, Underline};
 
 use crate::look::{term, Rgb};
 
@@ -63,6 +64,12 @@ pub struct PaneView {
     pub text: Vec<u8>,
     /// Rows where a shell prompt starts (OSC 133): one command block each.
     pub prompts: Vec<u16>,
+    /// The absolute line of row 0; on the alternate screen, 0.
+    pub line0: u64,
+    /// The oldest line vornd still holds, history included.
+    pub oldest: u64,
+    pub sb_epoch: u32,
+    pub primary: bool,
 }
 
 /// The xterm 256-colour palette, its first sixteen the app's.
@@ -173,7 +180,15 @@ pub fn build(m: &Mirror) -> PaneView {
         runs: Vec::with_capacity(t.rows as usize * 2),
         text: Vec::with_capacity(t.rows as usize * t.cols as usize),
         prompts: Vec::new(),
+        line0: 0,
+        oldest: 0,
+        sb_epoch: t.sb_epoch,
+        primary: t.screen == Screen::Primary,
     };
+    if v.primary {
+        v.line0 = t.top_line;
+        v.oldest = t.top_line.saturating_sub(t.history_lines);
+    }
     for (y, r) in m.rows().iter().enumerate() {
         if r.flags & row_flags::PROMPT != 0 && r.flags & row_flags::PROMPT_CONTINUATION == 0 {
             v.prompts.push(y as u16);
@@ -244,6 +259,15 @@ pub fn build(m: &Mirror) -> PaneView {
 }
 
 impl PaneView {
+    /// The cell at `(col, row)` on screen, as vornd names it.
+    pub fn point(&self, col: u16, row: u16) -> GridPoint {
+        GridPoint {
+            line: self.line0 + u64::from(row),
+            col,
+            sb_epoch: self.sb_epoch,
+        }
+    }
+
     /// The text of a run.
     pub fn run_text(&self, r: &Run) -> &str {
         std::str::from_utf8(&self.text[r.text_off as usize..(r.text_off + r.text_len) as usize])

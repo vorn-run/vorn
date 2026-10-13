@@ -519,7 +519,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))
         .on(Action::Click)
-        .sense(Sense::WHEEL)
+        .sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE)
 }
 
 /// EndedStrip: why the session ended, and how to pick it back up.
