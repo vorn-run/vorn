@@ -6,9 +6,12 @@
 mod support;
 
 use serde_json::json;
+use std::time::Duration;
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::app::MOD;
-use vorn_app::ui::mods;
+use vorn_app::screen::term_id;
+use vorn_app::ui::{mods, Input, WheelPhase};
+use vorn_app::App;
 
 #[test]
 fn a_shell_opens_from_the_keyboard_and_takes_typing() {
@@ -318,4 +321,151 @@ fn an_attach_before_the_session_exists_is_asked_again() {
         grid.attached().is_empty().then_some(())
     });
     assert!(grid.errors().is_empty(), "{:?}", grid.errors());
+}
+
+/// One trackpad event, then a frame 8 ms on, as a display draws them.
+fn pad(shot: &mut Shot, app: &mut App, dy: f32, phase: WheelPhase) {
+    shot.ui.wheel_phase(dy, phase);
+    shot.frame(app);
+    std::thread::sleep(Duration::from_millis(8));
+}
+
+/// Frames until every spring and ease has come to rest.
+fn settle(shot: &mut Shot, app: &mut App) {
+    for _ in 0..80 {
+        shot.frame(app);
+        std::thread::sleep(Duration::from_millis(8));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's first screen", |app, _| {
+        app.pane(&id).map(|_| ())
+    });
+    shot.type_line(&mut app, "seq 1 5000; sleep 8; seq 7001 7040");
+    shot.until(&mut app, "5000 lines, most in history", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().lines().any(|l| l.trim() == "5000"))
+            .map(|p| p.history)
+            .filter(|h| *h > 4900)
+    });
+    shot.hover(&mut app, term_id(&id));
+    let row = shot.ui.text.cell().h;
+
+    // Fingers up the trackpad: the view follows by the pixel.
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Began);
+    for _ in 0..10 {
+        pad(&mut shot, &mut app, -9.0, WheelPhase::Moved);
+    }
+    assert_eq!(app.scroll_position(&id), 90.0);
+    assert!(app.pane(&id).expect("pane").back() > 0);
+    shot.save(&mut app, "scroll-mid-gesture");
+    // Lifted with momentum, it carries on and rests on a whole row.
+    pad(&mut shot, &mut app, -12.0, WheelPhase::Moved);
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Ended);
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Began);
+    for i in 0..20 {
+        pad(&mut shot, &mut app, -(20.0 - i as f32), WheelPhase::Moved);
+    }
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Ended);
+    settle(&mut shot, &mut app);
+    let pos = app.scroll_position(&id);
+    assert!(pos > 250.0, "{pos}");
+    let (back, live) = app
+        .pane(&id)
+        .map(|p| (p.back(), p.live_line))
+        .expect("pane");
+    assert!(
+        (back as f32 * row - pos).abs() < 0.01,
+        "rests on a row: {pos} by {row}"
+    );
+    let top = shot.until(&mut app, "history rows in view", |app, _| {
+        let t = app.pane(&id)?.text();
+        let first = t.lines().next()?.trim().parse::<u32>().ok()?;
+        (first < 5000).then_some(first)
+    });
+    shot.save(&mut app, "scroll-rested");
+
+    // New output does not move a view scrolled back.
+    shot.until(&mut app, "the late output", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.live_line >= live + 40)
+            .map(|_| ())
+    });
+    let t = app.pane(&id).expect("pane").text();
+    assert_eq!(
+        t.lines().next().map(str::trim),
+        Some(top.to_string().as_str())
+    );
+    assert!(app.scrolled_back(&id));
+
+    // Pulled past the oldest line it stretches, then springs back to it.
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Began);
+    for _ in 0..40 {
+        pad(&mut shot, &mut app, -3000.0, WheelPhase::Moved);
+    }
+    let max = app.pane(&id).expect("pane").history as f32 * row;
+    assert!(app.scroll_position(&id) > max, "stretched past the top");
+    shot.until(&mut app, "the oldest rows", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().lines().any(|l| l.trim() == "1"))
+            .map(|_| ())
+    });
+    shot.save(&mut app, "scroll-stretched-at-top");
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Ended);
+    settle(&mut shot, &mut app);
+    assert!((app.scroll_position(&id) - max).abs() < 0.01);
+
+    // Typing returns to the live screen.
+    shot.send(&mut app, Input::char('x'));
+    assert!(!app.scrolled_back(&id));
+    assert_eq!(app.pane(&id).expect("pane").back(), 0);
+    shot.send(&mut app, key("Backspace", 0, None));
+
+    // Pulled down at the live screen it stretches and springs back.
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Began);
+    for _ in 0..3 {
+        pad(&mut shot, &mut app, 60.0, WheelPhase::Moved);
+    }
+    assert!(app.scroll_position(&id) < 0.0);
+    shot.save(&mut app, "scroll-stretched-at-bottom");
+    pad(&mut shot, &mut app, 0.0, WheelPhase::Ended);
+    settle(&mut shot, &mut app);
+    assert_eq!(app.scroll_position(&id), 0.0);
+
+    // A wheel notch eases three rows.
+    shot.ui.wheel(-vorn_app::ui::WHEEL_LINE);
+    settle(&mut shot, &mut app);
+    assert!((app.scroll_position(&id) - 3.0 * row).abs() < 0.01);
+    shot.save(&mut app, "scroll-notch");
+    shot.send(&mut app, Input::char('x'));
+    shot.send(&mut app, key("Backspace", 0, None));
+
+    // On the alternate screen without mouse reporting, a notch is arrow keys.
+    shot.type_line(&mut app, "seq 1 300 | less");
+    shot.until(&mut app, "less", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().lines().next().map(str::trim) == Some("1"))
+            .map(|_| ())
+    });
+    shot.ui.wheel(vorn_app::ui::WHEEL_LINE);
+    shot.until(&mut app, "less three lines on", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().lines().next().map(str::trim) == Some("4"))
+            .map(|_| ())
+    });
+    assert!(!app.scrolled_back(&id));
+    shot.send(&mut app, Input::char('q'));
 }

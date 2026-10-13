@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import VornTerminals
@@ -176,5 +177,24 @@ struct TerminalScrollTests {
         #expect(r.take(-12, .moved, row: row, route: .program) == 0)
         #expect(r.take(1, .line, row: row, route: .program) == 1)
         #expect(r.take(-1, .line, row: row, route: .arrows) == -3)
+    }
+
+    @Test func readsTouchAndMomentumPhasesFromTheEvent() throws {
+        func event(_ units: CGScrollEventUnit, _ dy: Int32, scroll: Int64 = 0, momentum: Int64 = 0) throws -> NSEvent {
+            let e = try #require(CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0))
+            if units == .pixel { e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1) }
+            e.setIntegerValueField(.scrollWheelEventScrollPhase, value: scroll)
+            e.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+            return try #require(NSEvent(cgEvent: e))
+        }
+        #expect(TerminalNSView.phase(of: try event(.line, 1)) == .line)
+        #expect(TerminalNSView.phase(of: try event(.pixel, 0, scroll: 1)) == .began)
+        let moved = try event(.pixel, 7, scroll: 2)
+        #expect(TerminalNSView.phase(of: moved) == .moved)
+        #expect(moved.scrollingDeltaY == 7)
+        #expect(TerminalNSView.phase(of: try event(.pixel, 0, scroll: 4)) == .ended)
+        #expect(TerminalNSView.phase(of: try event(.pixel, 9, momentum: 1)) == .began)
+        #expect(TerminalNSView.phase(of: try event(.pixel, 9, momentum: 2)) == .moved)
+        #expect(TerminalNSView.phase(of: try event(.pixel, 0, momentum: 3)) == .ended)
     }
 }

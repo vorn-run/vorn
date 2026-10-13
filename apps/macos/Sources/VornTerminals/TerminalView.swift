@@ -183,7 +183,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
 
     // MARK: Scroll
 
-    private var scroll = TerminalScroll()
+    private(set) var scroll = TerminalScroll()
     private var rows = WheelRows()
     /// Where the gesture under way goes, and when it was last heard.
     private var gesture: (route: WheelRoute, at: TimeInterval)?

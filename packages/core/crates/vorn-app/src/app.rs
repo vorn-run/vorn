@@ -2777,6 +2777,11 @@ impl App {
         }
     }
 
+    /// Pixels `session`'s terminal is scrolled above the live bottom.
+    pub fn scroll_position(&self, session: &str) -> f32 {
+        self.scrolls.get(session).map_or(0.0, Scroll::pos)
+    }
+
     /// Whether `session`'s terminal shows history rather than the live screen.
     pub fn scrolled_back(&self, session: &str) -> bool {
         self.scrolls.get(session).is_some_and(Scroll::scrolled)

@@ -78,6 +78,7 @@ jobs:
           VORND_BIN: ${{ github.workspace }}/packages/core/target/ci/vornd
           VORN_SESSIOND_BIN: ${{ github.workspace }}/packages/core/target/ci/vorn-sessiond
           VORN_E2E_REQUIRED: '1'
+          VORN_SHOT_DIR: ${{ runner.temp }}/renders
         run: swift test -c release -Xswiftc -enable-testing --skip-build
 
       - name: Offscreen renders
