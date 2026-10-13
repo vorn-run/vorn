@@ -3,8 +3,10 @@
 //! hovered entry. Entries are data carrying the caller's choice `T`; a
 //! chosen entry comes back as a `Select` in the panel's group.
 
-use crate::element::{div, icon, text, Action, El, Id, Place};
-use crate::scene::Rgba;
+use std::time::{Duration, Instant};
+
+use crate::element::{div, icon, text, Action, El, Id};
+use crate::scene::{Rect, Rgba};
 use crate::theme::rgb;
 use crate::widgets::item_id;
 use crate::{accesskit::Role, Ui};
@@ -343,7 +345,9 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
         r = r.child(ico("check", 11.0, 3.0, fg));
     }
     match sub_open {
-        Some(panel) => r.overlay(panel, Place::Right, 4.0),
+        // The submenu's first entry level with this one, a little over the
+        // menu's edge.
+        Some(panel) => r.overlay_beside(panel, OVERLAP, SUB_LIFT),
         None => r,
     }
 }
@@ -537,8 +541,203 @@ fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     r
 }
 
+/// How far a submenu lies over its menu's edge.
+pub const OVERLAP: f32 = 3.0;
+/// A submenu's `py-1` and border: how far above its entry it starts.
+const SUB_LIFT: f32 = 5.0;
+/// How long a change of submenu waits while the pointer heads for the open
+/// one, and after it stops.
+pub const HOLD: Duration = Duration::from_millis(250);
+/// How long a submenu takes to fade in.
+const SUB_IN: Duration = Duration::from_millis(120);
+
+/// The id of the submenu panel whose entries choose in `sub_group`.
+pub fn sub_panel_id(sub_group: Id) -> Id {
+    sub_group.child("scroll")
+}
+
+/// Which entry's submenu is open, and where the pointer is heading: the
+/// open one stays while the pointer crosses other entries on its way
+/// there (the triangle between the pointer and the submenu's near edge).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Cascade {
+    pub open: Option<usize>,
+    /// When `open` last changed; the submenu fades in from it.
+    pub since: Option<Instant>,
+    /// Focus the submenu's first entry once it is laid out.
+    pub focus_sub: bool,
+    /// The entry the pointer was last on.
+    row: Option<usize>,
+    /// The pointer now, and where it was before its last move.
+    at: Option<(f32, f32)>,
+    from: Option<(f32, f32)>,
+    /// A change held back while the pointer heads for the submenu, and
+    /// when it lands anyway.
+    held: Option<(Option<usize>, Instant)>,
+}
+
+impl Cascade {
+    fn set(&mut self, open: Option<usize>, now: Instant) {
+        if self.open != open {
+            self.open = open;
+            self.since = Some(now);
+        }
+        self.focus_sub = false;
+        self.held = None;
+    }
+
+    /// The entry `i`, which has a submenu, clicked: toggles it.
+    pub fn click(&mut self, i: usize, now: Instant) {
+        let open = (self.open != Some(i)).then_some(i);
+        self.set(open, now);
+        self.row = Some(i);
+    }
+
+    /// Opens entry `i`'s submenu from the keyboard, focus going into it.
+    pub fn open_from_keys(&mut self, i: usize, now: Instant) {
+        self.set(Some(i), now);
+        self.focus_sub = true;
+    }
+
+    pub fn close(&mut self, now: Instant) {
+        self.set(None, now);
+    }
+
+    /// One frame of pointer: `row` the entry under it and whether that has
+    /// a submenu, `in_sub` whether it is over the submenu at `sub`. The
+    /// hovered entry's submenu opens and another's closes, unless the
+    /// pointer is heading for the open one. Returns when to look again.
+    pub fn step(
+        &mut self,
+        now: Instant,
+        pointer: Option<(f32, f32)>,
+        row: Option<(usize, bool)>,
+        in_sub: bool,
+        sub: Option<Rect>,
+    ) -> Option<Instant> {
+        let moved = pointer.is_some() && pointer != self.at;
+        if moved {
+            self.from = self.at;
+            self.at = pointer;
+        }
+        if in_sub {
+            self.row = None;
+            self.held = None;
+            return None;
+        }
+        let aiming = moved && heading(self.from, self.at, sub.filter(|_| self.open.is_some()));
+        let on = row.map(|r| r.0);
+        if on != self.row {
+            self.row = on;
+            match row {
+                // Off the entries: what is open stays.
+                None => self.held = None,
+                Some((i, has_sub)) => {
+                    let want = has_sub.then_some(i);
+                    if want == self.open {
+                        self.held = None;
+                    } else if aiming {
+                        self.held = Some((want, now + HOLD));
+                    } else {
+                        self.set(want, now);
+                    }
+                }
+            }
+        } else if let Some((want, until)) = self.held {
+            if aiming {
+                self.held = Some((want, now + HOLD));
+            } else if moved || now >= until {
+                self.set(want, now);
+            }
+        }
+        self.held.map(|h| h.1)
+    }
+}
+
+/// Whether the pointer, moving `from` → `to`, heads for the near edge of
+/// `sub`: `to` inside the triangle of `from` and that edge's corners.
+fn heading(from: Option<(f32, f32)>, to: Option<(f32, f32)>, sub: Option<Rect>) -> bool {
+    let (Some(a), Some(p), Some(r)) = (from, to, sub) else {
+        return false;
+    };
+    let x = if r.x >= a.0 { r.x } else { r.right() };
+    let (b, c) = ((x, r.y - 4.0), (x, r.bottom() + 4.0));
+    let side = |p: (f32, f32), q: (f32, f32), s: (f32, f32)| {
+        (q.0 - p.0) * (s.1 - p.1) - (q.1 - p.1) * (s.0 - p.0)
+    };
+    let (d1, d2, d3) = (side(a, b, p), side(b, c, p), side(c, a, p));
+    let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+    let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+    !(neg && pos)
+}
+
+/// Follows the pointer over a menu's entries in `group` (`subs[i]`:
+/// whether entry `i` has a submenu) and its submenu in `sub_group`, and
+/// focuses the submenu's first entry when keys opened it.
+pub fn track(ui: &mut Ui, c: &mut Cascade, group: Id, sub_group: Id, subs: &[bool]) {
+    let row = subs
+        .iter()
+        .enumerate()
+        .find(|(i, _)| ui.hovered(crate::widgets::item_id(group, *i)))
+        .map(|(i, &s)| (i, s));
+    let panel = sub_panel_id(sub_group);
+    let sub = ui.rect_of(panel);
+    if let Some(at) = c.step(ui.now(), ui.pointer(), row, ui.hovered(panel), sub) {
+        ui.wake_at(at);
+    }
+    if c.focus_sub && c.open.is_some() {
+        if ui.focus_first_in(sub_group) {
+            c.focus_sub = false;
+        } else {
+            ui.wake_at(ui.now());
+        }
+    }
+}
+
+/// A key while a menu with submenus is open: Right, Enter or Space on an
+/// entry with one opens it and focuses its first entry; Left or Escape
+/// closes the open submenu (focus back on its entry); Up and Down in the
+/// menu close it. True when the key was used.
+pub fn key(
+    ui: &mut Ui,
+    c: &mut Cascade,
+    group: Id,
+    sub_group: Id,
+    subs: &[bool],
+    code: &str,
+) -> bool {
+    let now = ui.now();
+    let at = ui.focus().and_then(|f| ui.select_of(f));
+    let in_menu = at.is_some_and(|(g, _)| g == group);
+    let in_sub = at.is_some_and(|(g, _)| g == sub_group);
+    match code {
+        "ArrowRight" | "Enter" | "NumpadEnter" | "Space" if in_menu => {
+            let Some((_, i)) = at.filter(|(_, i)| subs.get(*i) == Some(&true)) else {
+                return code == "ArrowRight";
+            };
+            c.open_from_keys(i, now);
+            true
+        }
+        "ArrowLeft" | "Escape" if c.open.is_some() && (in_sub || code == "Escape") => {
+            let parent = c.open.map(|i| crate::widgets::item_id(group, i));
+            c.close(now);
+            if let Some(p) = parent.filter(|_| in_sub || in_menu) {
+                ui.focus_from_keys(p);
+            }
+            true
+        }
+        "ArrowLeft" | "ArrowRight" => in_menu || in_sub,
+        "ArrowUp" | "ArrowDown" | "Home" | "End" if in_menu && c.open.is_some() => {
+            c.close(now);
+            false
+        }
+        _ => false,
+    }
+}
+
 /// A panel of `items`: `bg-surface-overlay border-white/10 rounded-lg
-/// py-1`, rows of 32 px, separators as rules.
+/// py-1`, rows of 32 px, separators as rules; `cascade`'s open submenu
+/// beside its entry.
 #[allow(clippy::too_many_arguments)]
 pub fn panel<T>(
     ui: &Ui,
@@ -548,8 +747,9 @@ pub fn panel<T>(
     w: f32,
     name: &str,
     items: Vec<Item<T>>,
-    sub: Option<usize>,
+    cascade: Cascade,
 ) -> El {
+    let sub = cascade.open;
     let p = ui.menu_progress(menu);
     let edge = if items
         .iter()
@@ -585,10 +785,11 @@ pub fn panel<T>(
         let sub_w = item.sub_w.unwrap_or(200.0);
         let sub_panel = open.then(|| {
             div()
-                .id(sub_group.child("scroll"))
+                .id(sub_panel_id(sub_group))
                 .col()
                 .scroll_y()
                 .max_h(320.0)
+                .opacity(sub_progress(ui, cascade.since))
                 .child(panel_inner(ui, sub_group, sub_w, sub_items))
         });
         if has_sub {
@@ -598,6 +799,18 @@ pub fn panel<T>(
         col = col.child(row(ui, group, i, item, sub_panel));
     }
     col
+}
+
+/// How far a submenu opened at `since` has faded in, eased out.
+fn sub_progress(ui: &Ui, since: Option<Instant>) -> f32 {
+    let Some(since) = since else { return 1.0 };
+    let t = ui.now().saturating_duration_since(since);
+    if t >= SUB_IN {
+        return 1.0;
+    }
+    ui.wake_at(ui.now());
+    let x = t.as_secs_f32() / SUB_IN.as_secs_f32();
+    1.0 - (1.0 - x) * (1.0 - x)
 }
 
 fn panel_inner<T>(ui: &Ui, group: Id, w: f32, items: Vec<Item<T>>) -> El {

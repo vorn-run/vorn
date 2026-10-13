@@ -140,6 +140,9 @@ pub enum Place {
     AboveStart,
     /// To the right, vertically centred.
     Right,
+    /// To the right with the tops aligned (less [`Overlay::lift`]), or to
+    /// the left when the right has no room: a submenu beside its entry.
+    Beside,
 }
 
 /// A box drawn over everything, placed against its owner: menus, tooltips.
@@ -150,6 +153,8 @@ pub struct Overlay {
     pub gap: f32,
     /// At least as wide as the owner (a dropdown under its trigger).
     pub owner_width: bool,
+    /// How far above the owner's top a [`Place::Beside`] overlay starts.
+    pub lift: f32,
 }
 
 pub enum Content {
@@ -786,6 +791,19 @@ impl El {
             place,
             gap,
             owner_width: false,
+            lift: 0.0,
+        });
+        self
+    }
+    /// A submenu beside this element ([`Place::Beside`]): `overlap` over
+    /// its edge, its top `lift` above this element's.
+    pub fn overlay_beside(mut self, el: El, overlap: f32, lift: f32) -> El {
+        self.overlays.push(Overlay {
+            el,
+            place: Place::Beside,
+            gap: -overlap,
+            owner_width: false,
+            lift,
         });
         self
     }
@@ -796,6 +814,7 @@ impl El {
             place,
             gap,
             owner_width: true,
+            lift: 0.0,
         });
         self
     }
