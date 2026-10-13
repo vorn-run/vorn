@@ -195,6 +195,7 @@ public struct SessionDropTarget: ViewModifier {
     let sessionID: String
     let reorder: ((String, String) -> Void)?
     @Binding var targeted: Bool
+    @Environment(\.terminalSnapshot) private var snapshot
 
     public init(sessionID: String, reorder: ((String, String) -> Void)?, targeted: Binding<Bool>) {
         self.sessionID = sessionID
@@ -203,7 +204,7 @@ public struct SessionDropTarget: ViewModifier {
     }
 
     public func body(content: Content) -> some View {
-        if let reorder {
+        if let reorder, !snapshot {
             content.dropDestination(for: String.self) { ids, _ in
                 guard let id = ids.first, id != sessionID else { return false }
                 reorder(id, sessionID)
@@ -220,6 +221,7 @@ public struct SessionDragSource: ViewModifier {
     let sessionID: String
     let title: String
     let enabled: Bool
+    @Environment(\.terminalSnapshot) private var snapshot
 
     public init(sessionID: String, title: String, enabled: Bool) {
         self.sessionID = sessionID
@@ -228,7 +230,7 @@ public struct SessionDragSource: ViewModifier {
     }
 
     public func body(content: Content) -> some View {
-        if enabled {
+        if enabled, !snapshot {
             content.draggable(sessionID) {
                 Text(title).font(.ui(12)).foregroundStyle(Color.white)
                     .padding(.horizontal, 8).padding(.vertical, 4)

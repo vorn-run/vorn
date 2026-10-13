@@ -451,11 +451,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     }
 
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
-    if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) {
-        model.selectedSessionID = visible[n].id
-        model.expandedSessionID = visible[n].id
-    }
     if model.layoutMode(store) == .tabs { model.activeTabID = visible.first?.id }
+    // As a sidebar click: the card expanded in the grid, the tab in tabs.
+    if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) { model.reveal(visible[n].id, store) }
     if let engine = engines.engine, !visible.isEmpty {
         let gridW = size.width - (model.sidebarOpen ? model.sidebarWidth : 0)
         let body: CGSize
