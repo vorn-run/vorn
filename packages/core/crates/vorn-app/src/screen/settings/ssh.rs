@@ -248,6 +248,7 @@ fn host_form(s: &Screen<'_>, h: &Value, id: &str) -> El {
                         c(look::GRAY_200),
                     )
                     .placeholder_color(c(look::GRAY_600))
+                    .secure()
                     .w_full(),
                 ))
                 .child(hint("Encrypted with your OS keychain"))

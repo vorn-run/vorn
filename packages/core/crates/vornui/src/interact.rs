@@ -80,7 +80,7 @@ pub(crate) struct Moving {
 }
 
 /// What the app asks of the window it runs in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WindowRequest {
     Minimize,
     ToggleMaximize,
@@ -88,6 +88,11 @@ pub enum WindowRequest {
     /// Starts moving the window with the pressed pointer (a title bar).
     Drag,
     ToggleFullscreen,
+    /// Brings the window forward, out of the Dock or taskbar if minimized.
+    Focus,
+    /// Resizes to this logical size, keeping the bottom right corner where
+    /// it is (the floating widget folding to a pill).
+    Resize(f32, f32),
 }
 
 /// How long the pointer rests on an element before its tooltip shows.
@@ -162,12 +167,17 @@ pub(crate) struct Scroll {
     pub max: f32,
 }
 
+/// What a secure field draws in place of each character.
+pub(crate) const MASK: char = '\u{2022}';
+
 /// Where an edit field's text was drawn, to place clicks and the caret.
 #[derive(Clone)]
 pub(crate) struct EditGeom {
     pub shaped: Rc<Shaped>,
     /// Physical pixels of the text's top-left, after scrolling.
     pub origin: (f32, f32),
+    /// Shaped as bullets, one per character of the real text.
+    pub masked: bool,
 }
 
 pub(crate) struct State {
@@ -211,6 +221,7 @@ pub(crate) struct State {
     /// since the last layout; a value nobody asks for is dropped.
     pub motions: RefCell<HashMap<Id, (Motion, bool)>>,
     pub reduced_motion: bool,
+    pub window_focused: bool,
 }
 
 impl State {
@@ -247,6 +258,7 @@ impl State {
             maximized: false,
             motions: RefCell::new(HashMap::new()),
             reduced_motion: motion::system_reduced_motion(),
+            window_focused: true,
         }
     }
 
@@ -845,6 +857,16 @@ impl Ui {
         self.st.maximized
     }
 
+    /// Whether the window has the keyboard, as the window last said: what
+    /// decides if something worth noticing needs a system notification.
+    pub fn window_focused(&self) -> bool {
+        self.st.window_focused
+    }
+
+    pub fn set_window_focused(&mut self, focused: bool) {
+        self.st.window_focused = focused;
+    }
+
     pub fn set_maximized(&mut self, m: bool) {
         self.st.maximized = m;
     }
@@ -1157,20 +1179,29 @@ impl Ui {
         let g = self.st.geoms.get(&id)?;
         let k = self.scale();
         let i = g.shaped.index_at(x * k - g.origin.0, y * k - g.origin.1);
-        Some(i.min(self.edit_text(id).len()))
+        let text = self.edit_text(id);
+        if g.masked {
+            let n = i / MASK.len_utf8();
+            return Some(text.char_indices().nth(n).map_or(text.len(), |(b, _)| b));
+        }
+        Some(i.min(text.len()))
     }
 
     fn select_from_access(&mut self, sel: &accesskit::TextSelection) {
         let byte = |ui: &Ui, pos: &accesskit::TextPosition| -> Option<(Id, usize)> {
-            ui.st.geoms.iter().find_map(|(id, g)| {
-                let line = (0..g.shaped.lines.len())
-                    .find(|l| crate::a11y::run_id(*id, *l).0 == pos.node.0)?;
-                let start = crate::a11y::run_start(&g.shaped, line);
-                let text = ui.edit_text(*id);
-                let end = crate::a11y::run_end(&g.shaped, line, text.len());
-                let i = crate::a11y::char_to_byte(&text[start..end], pos.character_index);
-                Some((*id, start + i))
-            })
+            ui.st
+                .geoms
+                .iter()
+                .filter(|(_, g)| !g.masked)
+                .find_map(|(id, g)| {
+                    let line = (0..g.shaped.lines.len())
+                        .find(|l| crate::a11y::run_id(*id, *l).0 == pos.node.0)?;
+                    let start = crate::a11y::run_start(&g.shaped, line);
+                    let text = ui.edit_text(*id);
+                    let end = crate::a11y::run_end(&g.shaped, line, text.len());
+                    let i = crate::a11y::char_to_byte(&text[start..end], pos.character_index);
+                    Some((*id, start + i))
+                })
         };
         let (Some((a_id, a)), Some((f_id, f))) = (byte(self, &sel.anchor), byte(self, &sel.focus))
         else {

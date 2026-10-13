@@ -24,7 +24,13 @@ pub const TOPICS: &[&str] = &[
     "worktree:confirmCleanup",
     "artifact:published",
     "artifact:commentsChanged",
-    "connector:catalogChanged",
+    "connector:*",
+    "connection:*",
+    "extension:*",
+    "pairing:*",
+    "terminal:bell",
+    "terminal:notify",
+    "widget:permission-request",
 ];
 
 /// The agent a new composer session starts when the config names none, as

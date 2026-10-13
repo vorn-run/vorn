@@ -32,12 +32,19 @@ use vorn_protocol::TerminalSession;
 
 mod browser;
 pub mod canvas;
+mod extensions;
 pub mod forms;
 mod gates;
 mod git;
+mod network;
+mod onboarding;
+mod palette;
+mod plugins;
 mod settings;
 mod side;
+pub mod signin;
 mod tasks;
+mod widget;
 mod workflows;
 
 /// The modifier the renderer's shortcuts use (`modKey`).
@@ -75,6 +82,11 @@ pub enum Shortcut {
     Rename,
     /// F11.
     Fullscreen,
+    /// Mod+K.
+    Palette,
+    /// Mod+Shift+A and Mod+Shift+D: allow or deny the oldest pending
+    /// permission request, wherever its session is.
+    Permission(bool),
 }
 
 /// The renderer's global shortcuts (`useKeyboardShortcuts`). Escape is not
@@ -84,8 +96,13 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     if code == "Backquote" && only(mods::CTRL) {
         return Some(Shortcut::NewShell);
     }
-    if only(MOD | mods::SHIFT) && code == "KeyW" {
-        return Some(Shortcut::View(MainView::Workflows));
+    if only(MOD | mods::SHIFT) {
+        return match code {
+            "KeyW" => Some(Shortcut::View(MainView::Workflows)),
+            "KeyA" => Some(Shortcut::Permission(true)),
+            "KeyD" => Some(Shortcut::Permission(false)),
+            _ => None,
+        };
     }
     if only(0) {
         return match code {
@@ -113,6 +130,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         "KeyO" => Shortcut::Expand,
         "KeyW" => Shortcut::Collapse,
         "Slash" => Shortcut::Shortcuts,
+        "KeyK" => Shortcut::Palette,
         "BracketRight" => Shortcut::Cycle(true),
         "BracketLeft" => Shortcut::Cycle(false),
         _ => {
@@ -182,6 +200,11 @@ enum Call {
     /// Nothing to do with the answer, an error included.
     Ignore,
     Pane(browser::PaneCall),
+    Plug(plugins::PlugCall),
+    Ext(extensions::ExtCall),
+    /// `connection:signedIn` after the sheet saw someone sign in.
+    SignedIn(Option<String>),
+    Net(network::NetCall),
 }
 
 /// The launcher model picker's id field.
@@ -243,6 +266,9 @@ pub struct App {
     agents: crate::components::AgentMarks,
     /// vornd hung up.
     pub closed: bool,
+    notifier: crate::notify::Notifier,
+    /// Notifications heard since the last frame, for the frame to admit.
+    notices: Vec<crate::notify::Notice>,
     /// The app draws its own title bar and window controls.
     pub chrome: bool,
     /// macOS: the traffic lights sit over the app's top bar.
@@ -266,6 +292,22 @@ pub struct App {
     discarding: bool,
     /// The browser and device panes' web views and calls in flight.
     web: browser::Web,
+    /// Wakes the window from another thread.
+    wake: Wake,
+    /// The connections' hidden pages and the calls in flight on them.
+    sessions: signin::Sessions,
+    /// A real window is open, so system-wide keys may be held.
+    windowed: bool,
+    /// The system-wide approve and deny keys, once an agent has asked.
+    hotkeys: Option<Option<crate::hotkeys::Presses>>,
+    /// The floating widget's process, while it runs.
+    widget: Option<widget::Running>,
+    /// `defaults.widgetEnabled` last frame, to hide the widget when it turns off.
+    widget_was_enabled: bool,
+    /// A permission request arrived; the frame decides whether the widget shows.
+    widget_wanted: bool,
+    /// The OS file picker, while it is open.
+    picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
 
 impl App {
@@ -273,6 +315,7 @@ impl App {
     /// `wake` runs whenever either has news for the next frame.
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
+        let app_wake = Arc::clone(&wake);
         let store = Store::load(&rpc)?;
         let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
@@ -285,6 +328,8 @@ impl App {
             layout: LayoutMode::from_config(&store.config),
             tasks: crate::tasks::Tasks::new(&store.config),
             settings: crate::settings::Settings::new(),
+            // A first run, or one before this guide, opens the welcome guide.
+            dialog: (!crate::onboarding::seen(&store.config)).then_some(Dialog::Welcome),
             ..State::default()
         };
         let mut app = App {
@@ -303,6 +348,8 @@ impl App {
             logo: None,
             agents: Default::default(),
             closed: false,
+            notifier: Default::default(),
+            notices: Vec::new(),
             chrome: !cfg!(target_os = "macos"),
             traffic: cfg!(target_os = "macos"),
             size: look::WINDOW,
@@ -314,6 +361,14 @@ impl App {
             removals: Vec::new(),
             discarding: false,
             web,
+            wake: app_wake,
+            sessions: Default::default(),
+            windowed: false,
+            widget: None,
+            widget_was_enabled: false,
+            widget_wanted: false,
+            hotkeys: None,
+            picking: None,
         };
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -347,6 +402,7 @@ impl App {
             crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
         self.st.sidebar_view =
             crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
+        self.web.host.set_profiles(dir.join("connection-profiles"));
         self.data_dir = Some(dir);
     }
 
@@ -418,6 +474,7 @@ impl App {
                     }
                     if method == "connector:catalogChanged" {
                         self.wf_catalog(&params);
+                        self.plug_notified(&method, &params);
                         continue;
                     }
                     if method == "scheduler:missed" {
@@ -428,6 +485,31 @@ impl App {
                         self.git_offer(&params);
                         continue;
                     }
+                    let store = &self.store;
+                    let heard = self.notifier.heard(
+                        &method,
+                        &params,
+                        &store.config,
+                        |id| {
+                            store.session(id).map(|s| crate::notify::Who {
+                                agent: if s.is_shell() {
+                                    "Shell"
+                                } else {
+                                    crate::screen::menus::agent_name(s.info.agent_type.as_str())
+                                },
+                                name: s.title(),
+                            })
+                        },
+                        std::time::Instant::now(),
+                    );
+                    self.notices.extend(heard);
+                    if method == "widget:permission-request" {
+                        self.st.permission_keys = true;
+                        self.widget_wanted = true;
+                    }
+                    self.plug_notified(&method, &params);
+                    self.net_notified(&method, &params);
+                    self.ext_notified(&method, &params);
                     let before = self.store.workspace().to_owned();
                     self.store.apply(&method, params);
                     if self.store.workspace() != before {
@@ -456,7 +538,8 @@ impl App {
                 }
             }
             for id in g.attached() {
-                if self.store.session(&id).is_none() {
+                if self.store.session(&id).is_none() && self.st.ext.owner_of_terminal(&id).is_none()
+                {
                     g.detach(&id);
                     self.views.remove(&id);
                 }
@@ -515,6 +598,12 @@ impl App {
             Call::Side(c) => self.side_answered(c, answer),
             Call::Ignore => {}
             Call::Pane(c) => self.pane_answered(c, answer),
+            Call::Plug(c) => self.plug_answered(c, answer),
+            Call::Ext(c) => self.ext_answered(c, answer),
+            Call::SignedIn(identity) => {
+                self.finish_signin(answer.map(|_| identity).map_err(|e| e.to_string()))
+            }
+            Call::Net(c) => self.net_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -705,6 +794,13 @@ impl App {
     /// owner is the current card, else the current card.
     fn typing_target(&self) -> Option<String> {
         let current = self.current();
+        if let (Some(f), Some(c)) = (&self.st.ext.focus, &current) {
+            if f == c {
+                if let Some(t) = self.st.ext.panes.get(f).and_then(|p| p.terminal_id.clone()) {
+                    return Some(t);
+                }
+            }
+        }
         if let Some(t) = &self.st.side.focus {
             if current.as_deref().is_some() && self.st.side.holder(t) == current.as_deref() {
                 return Some(t.clone());
@@ -797,6 +893,33 @@ impl App {
                 }
             }
             Shortcut::Fullscreen => ui.request(WindowRequest::ToggleFullscreen),
+            Shortcut::Palette => self.toggle_palette(ui),
+            Shortcut::Permission(allow) => {
+                self.call(
+                    Call::Quiet,
+                    "permission:resolve-top",
+                    json!({ "allow": allow }),
+                );
+            }
+        }
+    }
+
+    /// Holds Mod+Shift+A and D system-wide once an agent has asked, as the
+    /// desktop does, and answers their presses.
+    fn hotkeys_tick(&mut self) {
+        if self.hotkeys.is_none() && self.st.permission_keys && self.windowed {
+            self.hotkeys = Some(crate::hotkeys::register(Arc::clone(&self.wake)));
+        }
+        let presses: Vec<bool> = match &self.hotkeys {
+            Some(Some(rx)) => rx.try_iter().collect(),
+            _ => return,
+        };
+        for allow in presses {
+            self.call(
+                Call::Quiet,
+                "permission:resolve-top",
+                json!({ "allow": allow }),
+            );
         }
     }
 
@@ -1278,6 +1401,7 @@ impl App {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
                 self.st.side.focus = None;
+                self.st.ext.focus = None;
                 ui.set_focus(None);
             }
             Act::Git(a) => self.run_git(ui, a, src),
@@ -1360,7 +1484,15 @@ impl App {
                 self.start_run(ui, &id, source, None);
             }
             Act::Workflow(a) => self.run_wf(ui, a, src),
-            Act::Set(a) => self.run_set(ui, a),
+            Act::Set(a) => {
+                let was = self.st.shown(crate::settings::Category::Connectors);
+                self.run_set(ui, a);
+                match (was, self.st.shown(crate::settings::Category::Connectors)) {
+                    (true, false) => self.plug_leave(),
+                    (false, true) => self.run_plug(ui, crate::plugins::PlugAct::Refresh),
+                    _ => {}
+                }
+            }
             Act::Rename(id) => {
                 let Some(title) = self.store.session(&id).map(|s| s.title()) else {
                     return;
@@ -1472,8 +1604,51 @@ impl App {
                 let cat = self.st.settings.category;
                 self.open_settings(cat);
             }
-            // The welcome guide is a later surface of the port.
-            Act::Welcome => self.st.dialog = None,
+            Act::Welcome => self.open_onboard(ui),
+            Act::Ext(a) => self.run_ext(a),
+            Act::ToggleWidget => self.toggle_widget(),
+            Act::AddGroup => {
+                let mut config = self.store.config.clone();
+                let workspace = config
+                    .pointer("/defaults/activeWorkspace")
+                    .and_then(Value::as_str)
+                    .unwrap_or("personal")
+                    .to_owned();
+                let groups = config["sessionGroups"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let order = groups
+                    .iter()
+                    .filter_map(|g| g["order"].as_i64())
+                    .max()
+                    .unwrap_or(-1)
+                    + 1;
+                let mut groups = groups;
+                groups.push(json!({
+                    "id": settings::new_id(),
+                    "name": "New group",
+                    "order": order,
+                    "workspaceId": workspace,
+                }));
+                config["sessionGroups"] = Value::Array(groups);
+                self.save_config(config, Call::Quiet);
+            }
+            Act::SignInClose => self.finish_signin(Err(crate::signin::CLOSED.to_owned())),
+            Act::Palette(a) => self.run_palette(ui, a),
+            Act::Onboard(a) => self.run_onboard(ui, a),
+            Act::Plug(a) => self.run_plug(ui, a),
+            Act::Net(a) => self.run_net(ui, a),
+            Act::Copy { text, toast } => {
+                ui.clipboard().set(&text);
+                if !toast.is_empty() {
+                    self.st.toast(toast, false);
+                }
+            }
+            Act::StopServer => {
+                self.call(Call::Quiet, "server:shutdown", Value::Null);
+                ui.request(WindowRequest::Close);
+            }
             Act::Project(p) => {
                 self.st.project = p;
                 self.st.group = None;
@@ -1765,6 +1940,9 @@ impl App {
             || self.task_event(ui, &event)
             || self.wf_event(ui, &event)
             || self.pane_event(ui, &event)
+            || self.palette_event(ui, &event)
+            || self.plug_event(ui, &event)
+            || self.net_event(ui, &event)
         {
             return;
         }
@@ -2015,6 +2193,9 @@ impl App {
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.palette_key(ui, input) || self.onboard_key(ui, input) {
+            return true;
+        }
         if self.settings_key(ui, input) {
             return true;
         }
@@ -2040,7 +2221,10 @@ impl App {
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
-        if let Some(s) = shortcut(code, *m) {
+        // The approve and deny keys exist once an agent has asked for permission.
+        let s = shortcut(code, *m)
+            .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
+        if let Some(s) = s {
             self.run_shortcut(ui, s);
             return true;
         }
@@ -2278,10 +2462,30 @@ impl App {
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
+        let now = std::time::Instant::now();
+        for notice in std::mem::take(&mut self.notices) {
+            if self.notifier.admit(&notice, ui.window_focused(), now) {
+                crate::notify::show(notice);
+            }
+        }
         self.git_tick();
         self.panes_tick(ui);
         self.tasks_tick(ui);
-        self.settings_tick(std::time::Instant::now());
+        self.net_tick(ui);
+        self.plug_tick();
+        if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
+            self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
+        }
+        self.hotkeys_tick();
+        self.ext_tick();
+        if std::mem::take(&mut self.widget_wanted) {
+            self.widget_asked(ui);
+        }
+        self.widget_tick(ui);
+        if let Some(at) = self.session_tick(now) {
+            ui.wake_at(at);
+        }
+        self.settings_tick(now);
         let focus = ui.focus();
         if focus != self.last_focus {
             if let Some(old) = self.last_focus {
@@ -2344,6 +2548,13 @@ impl App {
         let cell = ui.text.cell();
         let current = self.typing_target();
         for (id, r) in &laid.customs {
+            if let Some(tid) =
+                crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
+            {
+                let tid = tid.clone();
+                self.paint_terminal(ui, &tid, *r, current.as_deref() == Some(tid.as_str()));
+                continue;
+            }
             let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
                 continue;
             };
@@ -2383,6 +2594,29 @@ impl App {
         }
         self.paint_web(ui, laid);
     }
+
+    /// An extension's program terminal, attached and sized to its box.
+    fn paint_terminal(&self, ui: &mut Ui, id: &str, r: crate::ui::Rect, focused: bool) {
+        let cell = ui.text.cell();
+        if let Some(g) = &self.grid {
+            let cols = (r.w / cell.w).floor() as u16;
+            let rows = (r.h / cell.h).floor() as u16;
+            g.attach(id, cols, rows);
+            g.resize(id, cols.max(2), rows.max(1));
+        }
+        if let Some(v) = self.views.get(id) {
+            let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
+            let pre = if focused { self.preedit.as_str() } else { "" };
+            ui.scene.push_clip(r);
+            let caret = if focused {
+                paint::Caret::Live
+            } else {
+                paint::Caret::Hollow
+            };
+            paint::pane(ui, v, r, caret, pre);
+            ui.scene.pop_clip();
+        }
+    }
 }
 
 /// An answer that should be a list, else none.
@@ -2413,6 +2647,15 @@ mod tests {
         assert_eq!(shortcut("BracketRight", MOD), Some(Shortcut::Cycle(true)));
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
         assert_eq!(shortcut("Slash", MOD), Some(Shortcut::Shortcuts));
+        assert_eq!(shortcut("KeyK", MOD), Some(Shortcut::Palette));
+        assert_eq!(
+            shortcut("KeyA", MOD | mods::SHIFT),
+            Some(Shortcut::Permission(true))
+        );
+        assert_eq!(
+            shortcut("KeyD", MOD | mods::SHIFT),
+            Some(Shortcut::Permission(false))
+        );
         assert_eq!(shortcut("KeyJ", MOD), Some(Shortcut::ViewOptions));
         assert_eq!(shortcut("KeyB", MOD), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));

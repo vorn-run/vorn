@@ -1465,6 +1465,7 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
                                     },
                                     c(look::GRAY_200),
                                 )
+                                .secure()
                                 .w_full(),
                             ),
                     )
@@ -1678,19 +1679,6 @@ pub(super) fn about(s: &Screen<'_>) -> El {
     }
     col = col.child(status);
     col
-}
-
-/// A panel another part of the port brings, under its own header.
-pub(super) fn later(title: &str, description: &str) -> El {
-    div().col().child(header(title, description, None)).child(
-        text(
-            "This page is not in this build yet.",
-            13.0,
-            c(look::GRAY_500),
-        )
-        .line_height(19.5)
-        .silent(),
-    )
 }
 
 /// `ConnectorIcon`: a built-in connector's mark, else the external link.

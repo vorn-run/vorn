@@ -954,7 +954,7 @@ impl App {
 }
 
 /// A fresh id for a host, as `crypto.randomUUID` gives one.
-fn new_id() -> String {
+pub(super) fn new_id() -> String {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());

@@ -5,7 +5,7 @@
 use serde_json::{json, Map, Value};
 use vorn_mcp::workflow::portability as port;
 
-use super::{list, tasks::open_url, App, Call, Src, MOD};
+use super::{list, App, Call, Src, MOD};
 use crate::client::RpcError;
 use crate::runs::{self, s};
 use crate::screen::MainView;
@@ -30,7 +30,7 @@ pub(super) enum WfCall {
     /// the work back.
     Gate(Option<String>, bool),
     /// `connection:browserAuth`.
-    SignIn,
+    SignIn(String),
     /// `connection:list`, for the sign-in button's name and the library.
     Connections,
     /// `connector:catalog`.
@@ -143,11 +143,12 @@ impl App {
                 }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
-            WfCall::SignIn => match answer {
-                Ok(v) => match v.pointer("/browser/signInUrl").and_then(Value::as_str) {
-                    Some(url) => open_url(url),
-                    None => self.st.toast("Nothing to sign in to here", true),
-                },
+            WfCall::SignIn(conn) => match answer {
+                Ok(v) => {
+                    if let Some(e) = self.open_signin(&conn, &v, crate::signin::From::Run) {
+                        self.st.toast(e, true);
+                    }
+                }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
         }
@@ -693,7 +694,7 @@ impl App {
 
     /// What the library and start-from draw: the catalog, packs,
     /// connectors, connections and each connection's actions.
-    fn load_library(&mut self) {
+    pub(super) fn load_library(&mut self) {
         self.call(
             Call::Workflow(WfCall::Catalog),
             "connector:catalog",
@@ -733,7 +734,7 @@ impl App {
             }
             WfAct::SignIn(conn) => {
                 self.call(
-                    Call::Workflow(WfCall::SignIn),
+                    Call::Workflow(WfCall::SignIn(conn.clone())),
                     "connection:browserAuth",
                     json!(conn),
                 );
@@ -1018,9 +1019,8 @@ impl App {
                     );
                 }
             }
-            WfAct::Fix(_) => self
-                .st
-                .toast("Connector setup is not in this build yet", true),
+            // The fix opens in the panel that asked, as today's editor does.
+            WfAct::Fix(fix) => self.plug_fix(fix),
             WfAct::DismissNeeds => self.st.wf.imported = None,
             WfAct::ClosePanel => {
                 self.st.wf.panel = match self.st.wf.panel {

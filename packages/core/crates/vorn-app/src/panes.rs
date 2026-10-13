@@ -29,6 +29,8 @@ pub fn web_index(id: u64) -> Option<usize> {
 pub enum PaneKind {
     Browser,
     Device,
+    /// The pane an extension opened (`ExtensionPaneCard`).
+    Extension,
 }
 
 /// The view keys: a session's page, its compare page, its artboards and
@@ -183,6 +185,8 @@ pub struct WebSlot {
     pub key: String,
     pub url: String,
     pub zoom: f64,
+    /// The connection whose profile the view keeps cookies in.
+    pub profile: Option<String>,
 }
 
 /// Every pane's state.

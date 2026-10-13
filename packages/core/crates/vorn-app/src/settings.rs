@@ -28,6 +28,25 @@ pub enum Category {
 }
 
 impl Category {
+    /// The renderer's id for a category (`setSettingsCategory`).
+    pub fn from_id(id: &str) -> Option<Category> {
+        Some(match id {
+            "appearance" => Category::Appearance,
+            "general" => Category::General,
+            "updates" => Category::Updates,
+            "notifications" => Category::Notifications,
+            "worktrees" => Category::Worktrees,
+            "agents" => Category::Agents,
+            "ssh" => Category::Ssh,
+            "mcp" => Category::Mcp,
+            "connectors" => Category::Connectors,
+            "keys" => Category::Keys,
+            "network" => Category::Network,
+            "about" => Category::About,
+            _ => return None,
+        })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Category::Appearance => "Appearance",

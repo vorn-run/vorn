@@ -873,7 +873,15 @@ impl Ui {
         }
         if let (Content::Edit(look), Some(eid)) = (&el.content, el.id) {
             let text = self.edit_text(eid).to_owned();
-            n.set_value(text);
+            if look.secure {
+                n.set_value(
+                    text.chars()
+                        .map(|_| crate::interact::MASK)
+                        .collect::<String>(),
+                );
+            } else {
+                n.set_value(text);
+            }
             if a.placeholder.is_none() && !look.placeholder.is_empty() {
                 n.set_placeholder(look.placeholder.as_str());
             }
@@ -916,13 +924,35 @@ impl Ui {
             .or_insert_with(|| TextEdit::new("", look.multiline));
         e.set_multiline(look.multiline);
         e.set_textarea(look.textarea);
-        let (shown, pre) = e.display();
+        e.set_secure(look.secure);
+        let (real, pre) = e.display();
         let caret_at = if e.preedit().is_empty() {
             e.caret()
         } else {
             pre.end
         };
         let sel = e.selection();
+        let anchor_caret = (e.anchor(), e.caret());
+        // A secure field shapes a bullet per character; every offset moves with it.
+        let mask = crate::interact::MASK;
+        let map = |i: usize| {
+            if look.secure {
+                real[..i.min(real.len())].chars().count() * mask.len_utf8()
+            } else {
+                i
+            }
+        };
+        let (caret_at, sel, pre, anchor_caret) = (
+            map(caret_at),
+            map(sel.start)..map(sel.end),
+            map(pre.start)..map(pre.end),
+            (map(anchor_caret.0), map(anchor_caret.1)),
+        );
+        let shown = if look.secure {
+            real.chars().map(|_| mask).collect()
+        } else {
+            real
+        };
         let wrap = look.multiline && !look.nowrap;
         let sh = self.text.shape(&shown, look.style, wrap.then_some(inner.w));
         // Keep the caret in view.
@@ -966,7 +996,6 @@ impl Ui {
             (true, false) => ((inner.x - e.scroll_x) * k, (inner.y - e.scroll_y) * k),
             (false, _) => ((inner.x - e.scroll_y) * k + centre(sh.w), inner.y * k),
         };
-        let anchor_caret = (e.anchor(), e.caret());
         self.scene.push_clip(inner.scaled(k));
         if !sel.is_empty() {
             for (i, l) in sh.lines.iter().enumerate() {
@@ -1069,6 +1098,7 @@ impl Ui {
             EditGeom {
                 shaped: sh,
                 origin: (ox, oy),
+                masked: look.secure,
             },
         );
         runs

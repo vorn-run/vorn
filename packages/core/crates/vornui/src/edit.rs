@@ -56,6 +56,8 @@ pub struct TextEdit {
     multiline: bool,
     /// Enter starts a line; the primary modifier with Enter submits.
     textarea: bool,
+    /// A password field: its text never reaches the clipboard.
+    secure: bool,
     /// Its field has been painted, so `multiline` is the field's.
     shaped: bool,
     /// Where an up/down run started, physical pixels, so the caret keeps
@@ -88,6 +90,10 @@ impl TextEdit {
 
     pub(crate) fn set_textarea(&mut self, on: bool) {
         self.textarea = on;
+    }
+
+    pub(crate) fn set_secure(&mut self, on: bool) {
+        self.secure = on;
     }
 
     /// Follows the field's look, for edits made before their field was
@@ -226,7 +232,7 @@ impl TextEdit {
                     return Outcome::Moved;
                 }
                 "KeyC" | "KeyX" => {
-                    if self.caret == self.anchor {
+                    if self.caret == self.anchor || self.secure {
                         return Outcome::Moved;
                     }
                     clip.set(self.selected_text());
@@ -447,6 +453,17 @@ mod tests {
         assert_eq!(e.text(), "git m fix", "Option+Backspace skips the dash");
         e.key(&key("ArrowRight", mods::SUPER | mods::SHIFT), true, &mut c);
         assert_eq!(e.selected_text(), "m fix");
+    }
+
+    #[test]
+    fn a_secure_field_never_copies_or_cuts() {
+        let mut c = MemoryClipboard::default();
+        let mut e = TextEdit::new("secret", false);
+        e.set_secure(true);
+        e.key(&key("KeyA", mods::CTRL), false, &mut c);
+        e.key(&key("KeyC", mods::CTRL), false, &mut c);
+        e.key(&key("KeyX", mods::CTRL), false, &mut c);
+        assert_eq!((e.text(), c.0.as_deref()), ("secret", None));
     }
 
     #[test]

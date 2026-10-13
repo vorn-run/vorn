@@ -393,6 +393,71 @@ mod win {
     }
 }
 
+/// Asks the OS for one file on a thread, waking the app with the answer;
+/// `None` when the picker was cancelled or this system has none.
+pub fn pick_file(
+    prompt: &str,
+    wake: crate::client::rpc::Wake,
+) -> std::sync::mpsc::Receiver<Option<PathBuf>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let prompt = prompt.to_owned();
+    std::thread::spawn(move || {
+        let _ = tx.send(run_picker(&prompt));
+        wake();
+    });
+    rx
+}
+
+fn run_picker(prompt: &str) -> Option<PathBuf> {
+    let attempts: Vec<std::process::Command> = if cfg!(target_os = "macos") {
+        let mut c = vorn_spawn::command("osascript");
+        c.args([
+            "-e",
+            "on run argv",
+            "-e",
+            "POSIX path of (choose file with prompt (item 1 of argv))",
+            "-e",
+            "end run",
+            prompt,
+        ]);
+        vec![c]
+    } else if cfg!(windows) {
+        let mut c = vorn_spawn::command("powershell");
+        c.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-STA",
+            "-Command",
+            WINDOWS_PICKER,
+        ])
+        .env("VORN_PICK_TITLE", prompt);
+        vec![c]
+    } else {
+        let mut z = vorn_spawn::command("zenity");
+        z.args(["--file-selection", "--title", prompt]);
+        let mut k = vorn_spawn::command("kdialog");
+        k.args(["--getopenfilename", ".", "--title", prompt]);
+        vec![z, k]
+    };
+    for mut c in attempts {
+        let Ok(out) = c.stdin(std::process::Stdio::null()).output() else {
+            continue;
+        };
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        return (out.status.success() && !path.is_empty()).then(|| PathBuf::from(path));
+    }
+    None
+}
+
+/// The system's open dialog, its title from the environment so it is never read as script.
+const WINDOWS_PICKER: &str = r"
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = $env:VORN_PICK_TITLE
+$d.Filter = 'Vorn packs (*.vorn.tgz)|*.vorn.tgz|All files (*.*)|*.*'
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -242,6 +242,7 @@ impl App {
     /// the agents' browser and device tools.
     pub fn opened(&mut self, window: &Arc<NativeWindow>) {
         self.web.host.attach(window);
+        self.windowed = true;
         self.st.bench.unavailable = self.web.host.unavailable().map(str::to_owned);
         self.answer_agents();
     }
@@ -323,6 +324,9 @@ impl App {
 
     /// Answers a `browser:*` or `device:*` call an agent's tool made.
     pub(super) fn bridge(&mut self, id: Value, method: &str, params: Value) {
+        if method.starts_with("session:") {
+            return self.session_bridge(id, method, params);
+        }
         let session = params["sessionId"].as_str().unwrap_or_default().to_owned();
         if self.store.session(&session).is_none() && method != "device:chrome" {
             self.rpc
@@ -959,11 +963,22 @@ impl App {
         self.watch_files(now);
         self.refresh_artifact_tabs();
         self.sync_pollers();
-        let (host, bench, store) = (&mut self.web.host, &self.st.bench, &self.store);
+        let (host, bench, store, ext) = (
+            &mut self.web.host,
+            &self.st.bench,
+            &self.store,
+            &self.st.ext,
+        );
         host.close(|key| {
+            // A connection's views go when the connection's work does.
+            if crate::signin::connection_of(key).is_some() {
+                return false;
+            }
             let session = session_of(key);
             store.session(session).is_none()
-                || if key.ends_with("#device") {
+                || if key.ends_with(crate::extensions::PAGE_SUFFIX) {
+                    !ext.panes.contains_key(session)
+                } else if key.ends_with("#device") {
                     !bench.devices.contains_key(session)
                 } else {
                     bench.browsers.get(session).is_none()
@@ -985,6 +1000,16 @@ impl App {
     }
 
     fn web_event(&mut self, event: WebEvent) {
+        let key = match &event {
+            WebEvent::Page { key, .. }
+            | WebEvent::Title { key, .. }
+            | WebEvent::Message { key, .. }
+            | WebEvent::NewWindow { key, .. } => Some(key.as_str()),
+            WebEvent::Answer { .. } => None,
+        };
+        if key.and_then(crate::signin::connection_of).is_some() {
+            return self.session_web(event);
+        }
         match event {
             WebEvent::Page { key, url, finished } => {
                 self.web.painted.remove(&key);
@@ -1626,6 +1651,7 @@ impl App {
                     PaneKind::Device => {
                         self.st.bench.devices.remove(&s);
                     }
+                    PaneKind::Extension => self.ext_close(&s),
                 }
             }
             PaneAct::Maximize(s, kind) => {
@@ -2026,6 +2052,7 @@ impl App {
                                     key: board_key(session, &b.id),
                                     url: artifact::artboard_url(&tab.url, &b.id),
                                     zoom,
+                                    profile: None,
                                 });
                             }
                         }
@@ -2033,6 +2060,7 @@ impl App {
                             key: page_key(session),
                             url: tab.url.clone(),
                             zoom: 1.0,
+                            profile: None,
                         }),
                     }
                     // The canvas reads its manifest from the page, kept loaded.
@@ -2041,6 +2069,7 @@ impl App {
                             key: page_key(session),
                             url: tab.url.clone(),
                             zoom: 1.0,
+                            profile: None,
                         });
                     }
                     if let Some(url) = live
@@ -2051,6 +2080,7 @@ impl App {
                             key: compare_key(session),
                             url,
                             zoom: 1.0,
+                            profile: None,
                         });
                     }
                 }
@@ -2067,9 +2097,33 @@ impl App {
                         key: device_key(session),
                         url,
                         zoom: 1.0,
+                        profile: None,
                     });
                 }
             }
+        }
+        if !covered {
+            for (session, p) in &self.st.ext.panes {
+                if let Some(url) = &p.url {
+                    slots.push(WebSlot {
+                        key: crate::extensions::page_key(session),
+                        url: url.clone(),
+                        zoom: 1.0,
+                        profile: None,
+                    });
+                }
+            }
+        }
+        if let (Some(w), true) = (
+            &self.st.signin,
+            self.st.dialog == Some(crate::state::Dialog::SignIn) && self.st.menu.is_none(),
+        ) {
+            slots.push(WebSlot {
+                key: crate::signin::window_key(&w.connection),
+                url: w.url.clone(),
+                zoom: 1.0,
+                profile: Some(w.connection.clone()),
+            });
         }
         self.st.bench.slots = slots;
     }
@@ -2100,6 +2154,7 @@ impl App {
                 url: slot.url.clone(),
                 rect: rect.scaled(k),
                 zoom: slot.zoom,
+                profile: slot.profile.clone(),
             });
         }
         self.web.host.show(&shown);

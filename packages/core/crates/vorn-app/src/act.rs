@@ -160,6 +160,30 @@ pub enum Act {
     Side(crate::side::SideAct),
     Edit(crate::editor::EditAct),
     Pane(crate::panes::PaneAct),
+    /// The command palette's controls.
+    Palette(crate::palette::PalAct),
+    /// The welcome guide's controls.
+    Onboard(crate::onboarding::OnbAct),
+    /// The Plugins page's controls.
+    Plug(crate::plugins::PlugAct),
+    /// Extension panes.
+    Ext(crate::extensions::ExtAct),
+    /// Shows or hides the floating widget.
+    ToggleWidget,
+    /// `addSessionGroup`: a group named "New group" at the end of the list.
+    AddGroup,
+    /// Closes the sign-in sheet before anyone signed in.
+    SignInClose,
+    /// The Remote Access page's controls.
+    Net(crate::network::NetAct),
+    /// Copies text to the clipboard, saying so in a toast.
+    Copy {
+        text: String,
+        toast: String,
+    },
+    /// Ends every session and the server, then the app (the File menu's
+    /// Stop Sessions and Server).
+    StopServer,
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.
@@ -250,6 +274,12 @@ impl Acts {
         self.contexts.borrow_mut().clear();
         self.doubles.borrow_mut().clear();
         self.texts.borrow_mut().clear();
+    }
+}
+
+impl From<crate::settings::SetAct> for Act {
+    fn from(a: crate::settings::SetAct) -> Self {
+        Act::Set(a)
     }
 }
 

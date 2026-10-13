@@ -192,14 +192,8 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         Category::Mcp => pages::mcp(s),
         Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
-        Category::Connectors => pages::later(
-            "Plugins",
-            "Connect the services your workflows read from and act on",
-        ),
-        Category::Network => pages::later(
-            "Remote Access",
-            "Reach this machine from your other devices, or use another one from here",
-        ),
+        Category::Connectors => super::plugins::page(s),
+        Category::Network => super::network::page(s),
     };
     let mut root = div()
         .row()
@@ -234,7 +228,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
 }
 
 /// `SettingsPageHeader`: the title, its description, and actions.
-pub(super) fn header(title: &str, description: &str, actions: Option<El>) -> El {
+pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<El>) -> El {
     div()
         .row()
         .items_start()
@@ -263,7 +257,7 @@ pub(super) fn header(title: &str, description: &str, actions: Option<El>) -> El 
 
 /// `SettingRow`: the label and description beside `control`, a note
 /// under the description, dimmed when `disabled`.
-pub(super) fn row(
+pub(in crate::screen) fn row(
     label: &str,
     description: &str,
     note: Option<&str>,
@@ -310,15 +304,15 @@ pub(super) fn row(
 }
 
 /// `ToggleSwitch`: 40 by 24, blue when on, its 16 px knob sliding.
-pub(super) fn toggle(
+pub(in crate::screen) fn toggle(
     s: &Screen<'_>,
     place: &str,
     on: bool,
-    act: SetAct,
+    act: impl Into<Act>,
     disabled: bool,
     label: &str,
 ) -> El {
-    let id = s.acts.on(place, set(act));
+    let id = s.acts.on(place, act.into());
     let mut el = div()
         .id(id)
         .w(40.0)

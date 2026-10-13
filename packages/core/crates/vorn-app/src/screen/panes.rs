@@ -146,11 +146,106 @@ fn controls(s: &Screen<'_>, sid: &str, kind: PaneKind, title: &str) -> El {
         ))
 }
 
+/// The panes a session shows: its browser, its device, its extension's.
+fn kinds(s: &Screen<'_>, sid: &str) -> Vec<PaneKind> {
+    let mut out = s.st.bench.kinds(sid);
+    if s.st.ext.panes.contains_key(sid) {
+        out.push(PaneKind::Extension);
+    }
+    out
+}
+
+/// `ExtensionPaneIcon`: the pane's glyph, the extension's, else a puzzle piece.
+pub(super) fn extension_icon(icon: Option<&serde_json::Value>, size: f32, color: Rgba) -> El {
+    let svg = icon.and_then(crate::library::parse_icon).and_then(|i| {
+        crate::library::mark_svg(&crate::library::Look {
+            connector: "sdk".to_owned(),
+            packaged: true,
+            icon: Some(i),
+        })
+    });
+    match svg {
+        Some(svg) => crate::ui::icon(svg, size, color),
+        None => ico("puzzle", size, 2.0, color),
+    }
+}
+
+/// `ExtensionPaneCard`: its own bar naming the pane and its extension, over
+/// the page the pack ships or the program the host runs.
+fn extension_pane(s: &Screen<'_>, sid: &str) -> El {
+    let Some(p) = s.st.ext.panes.get(sid) else {
+        return div();
+    };
+    let bar = div()
+        .row()
+        .items_center()
+        .gap(6.0)
+        .px(8.0)
+        .py(4.0)
+        .shrink0()
+        .child(extension_icon(p.icon.as_ref(), 12.0, c(look::GRAY_500)))
+        .child(
+            text(p.title.as_str(), 12.0, c(look::GRAY_300))
+                .weight(500)
+                .line_height(18.0)
+                .shrink0(),
+        )
+        .child(text("\u{b7}", 12.0, crate::ui::theme::color::INK_GHOST).line_height(18.0))
+        .child(
+            div().grow().min_w0().child(
+                text(
+                    p.extension_name.as_str(),
+                    11.0,
+                    crate::ui::theme::color::INK_SECONDARY,
+                )
+                .line_height(16.0)
+                .truncate(),
+            ),
+        )
+        .child(controls(s, sid, PaneKind::Extension, &p.title));
+    let body = if p.url.is_some() {
+        web_box(s, &crate::extensions::page_key(sid)).bg(c(look::SURFACE_PANEL))
+    } else {
+        let slot = p
+            .terminal_id
+            .as_ref()
+            .and_then(|t| s.st.ext.slots.iter().position(|x| x == t));
+        let focus = s.acts.on(
+            "ext-focus",
+            crate::act::Act::Ext(crate::extensions::ExtAct::Focus(sid.to_owned())),
+        );
+        let mut el = div()
+            .id(focus)
+            .on(Action::Click)
+            .grow()
+            .min_h(0.0)
+            .w_full()
+            .pt(2.0)
+            .bg(c(look::SURFACE_SUNKEN));
+        if let Some(i) = slot {
+            el = el.child(
+                custom(crate::extensions::TERM_ID_BASE + i as u64)
+                    .w_full()
+                    .h_full(),
+            );
+        }
+        el
+    };
+    div()
+        .col()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .role(Role::Group, format!("{}: {}", p.extension_name, p.title))
+        .child(bar)
+        .child(body)
+}
+
 /// `PaneColumn`: the browser over the device, or the maximized one alone.
 pub(super) fn column(s: &Screen<'_>, session: &Session) -> Option<El> {
     let sid = session.info.id.as_str();
     let bench = &s.st.bench;
-    let mut kinds = bench.kinds(sid);
+    let mut kinds = kinds(s, sid);
     if let Some(m) = bench.maximized.get(sid) {
         kinds.retain(|k| k == m);
     }
@@ -165,6 +260,7 @@ pub(super) fn column(s: &Screen<'_>, session: &Session) -> Option<El> {
         col = col.child(match kind {
             PaneKind::Browser => browser_pane(s, session),
             PaneKind::Device => device_pane(s, session),
+            PaneKind::Extension => extension_pane(s, sid),
         });
     }
     Some(col)
@@ -175,7 +271,7 @@ pub(super) fn maximized(s: &Screen<'_>, sid: &str) -> bool {
     s.st.bench
         .maximized
         .get(sid)
-        .is_some_and(|k| s.st.bench.kinds(sid).contains(k))
+        .is_some_and(|k| kinds(s, sid).contains(k))
 }
 
 /// A web view's box, or the pane's own words where none can show.

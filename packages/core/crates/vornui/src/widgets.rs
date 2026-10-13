@@ -113,6 +113,8 @@ pub struct Pill<'a> {
     /// Draws the icon alone and moves the label into a tooltip below, with
     /// this shortcut: `MainViewPills`.
     pub tip: Option<&'a str>,
+    /// A count over the pill's corner; the tooltip then reads `hint`.
+    pub badge: Option<(&'a str, &'a str)>,
 }
 
 impl<'a> Pill<'a> {
@@ -122,6 +124,7 @@ impl<'a> Pill<'a> {
             label,
             icon,
             tip: None,
+            badge: None,
         }
     }
 
@@ -131,7 +134,15 @@ impl<'a> Pill<'a> {
             label,
             icon: Some(icon),
             tip: Some(shortcut),
+            badge: None,
         }
+    }
+
+    /// Adds `count` over the corner (`bg-bronzo`, 9 px mono), and `hint`
+    /// as the tooltip's text in place of the label.
+    pub fn badge(mut self, count: &'a str, hint: &'a str) -> Self {
+        self.badge = Some((count, hint));
+        self
     }
 }
 
@@ -164,9 +175,28 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
             .ring(radius::SM)
             .role(Role::RadioButton, p.label)
             .toggled(on)
-            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)));
+            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)))
+            .child_if(p.badge.map(|(count, _)| {
+                div()
+                    .absolute_right(-2.0, -2.0)
+                    .row()
+                    .items_center()
+                    .justify_center()
+                    .min_w(12.0)
+                    .h(12.0)
+                    .px(3.0)
+                    .rounded(6.0)
+                    .bg(color::BRONZO)
+                    .child(
+                        text(count, 9.0, color::SURFACE_BASE)
+                            .mono()
+                            .line_height(9.0)
+                            .silent(),
+                    )
+            }));
+        let tip = p.badge.map_or(p.label, |(_, hint)| hint);
         match p.tip {
-            Some(keys) => tooltip_at(ui, pill, id, p.label, Some(keys), Place::Below),
+            Some(keys) => tooltip_at(ui, pill, id, tip, Some(keys), Place::Below),
             None => pill.child(label(p.label, crate::theme::text::XS, fg)),
         }
     };
@@ -233,6 +263,12 @@ pub enum PickerLook {
     Compact,
     /// `ModelPicker` bordered: a chip with a `white/[0.12]` outline.
     Chip,
+    /// A native `<select>` in a filter row: `py-1.5 px-2 text-xs` on
+    /// `white/[0.05]`, as wide as its longest choice.
+    Select,
+    /// A form's `<select>`: full width, `px-3 py-1.5 text-sm` on
+    /// `white/[0.05]` with a `white/[0.1]` border, the chevron at the end.
+    Field,
 }
 
 /// The menu a picker opens; its entries report `Event::Select` with it as
@@ -261,6 +297,8 @@ pub fn picker(
     let (fg, size) = match look {
         PickerLook::Compact => (color::GRAY_400, crate::theme::text::XS),
         PickerLook::Plain | PickerLook::Chip => (color::GRAY_300, (12.0, 18.0)),
+        PickerLook::Field => (color::GRAY_200, crate::theme::text::SM),
+        PickerLook::Select => (color::GRAY_300, crate::theme::text::XS),
     };
     let chevron = icons::rotated(icons::CHEVRON_DOWN, 180.0 * ui.menu_progress(menu));
     let trigger = div()
@@ -274,7 +312,23 @@ pub fn picker(
         .value(current)
         .has_popup()
         .expanded(open)
-        .child(label(current, size, fg))
+        .child(match look {
+            PickerLook::Field => div().grow().min_w0().child(label(current, size, fg)),
+            // Every choice laid out at no height, so the box is as wide as the longest.
+            PickerLook::Select => {
+                div()
+                    .col()
+                    .child(label(current, size, fg))
+                    .children(choices.iter().map(|c| {
+                        div()
+                            .h(0.0)
+                            .clip()
+                            .opacity(0.0)
+                            .child(label(c.label, size, fg))
+                    }))
+            }
+            _ => label(current, size, fg),
+        })
         .child(icon(chevron, 12.0, color::GRAY_500));
     let trigger = match look {
         PickerLook::Plain => trigger
@@ -294,6 +348,26 @@ pub fn picker(
             .rounded(radius::SM)
             .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
             .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot)),
+        PickerLook::Select => trigger
+            .gap(8.0)
+            .px(8.0)
+            .py(6.0)
+            .rounded(radius::SM)
+            .bg(Rgba::white(0.05))
+            .border(
+                1.0,
+                Rgba::white(0.1).mix(Rgba::white(0.2), if open { 1.0 } else { 0.0 }),
+            ),
+        PickerLook::Field => trigger
+            .w_full()
+            .px(12.0)
+            .py(6.0)
+            .rounded(radius::SM)
+            .bg(Rgba::white(0.05))
+            .border(
+                1.0,
+                Rgba::white(0.1).mix(Rgba::white(0.2), if open { 1.0 } else { 0.0 }),
+            ),
     };
     if !open {
         return trigger;
@@ -535,6 +609,7 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         spans: Vec::new(),
         marks: Vec::new(),
         centered: false,
+        secure: false,
     }))
 }
 
