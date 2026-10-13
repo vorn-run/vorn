@@ -1,4 +1,4 @@
-//! The app's design tokens: the colours in `src/renderer/theme.css`, the
+//! The app's design tokens: the colours in `packages/web/src/renderer/theme.css`, the
 //! Tailwind v4 defaults the components use (grays, type scale, radii,
 //! transitions) and the global rules in `global.css` (focus ring,
 //! scrollbar). Widgets read these instead of literals so a port stays a

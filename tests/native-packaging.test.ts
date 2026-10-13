@@ -33,7 +33,7 @@ describe('native packages', () => {
     })
     expect(assetNames(version, 'darwin', 'x64')).toEqual({
       zip: 'Vorn-0.8.0-beta.9-mac.zip',
-      dmg: 'Vorn-0.8.0-beta.9.dmg'
+      dmg: 'Vorn-0.8.0-beta.9-x64.dmg'
     })
     expect(assetNames(version, 'win32', 'x64')).toEqual({ setup: 'Vorn-Setup-0.8.0-beta.9.exe' })
     expect(assetNames(version, 'linux', 'x64')).toEqual({

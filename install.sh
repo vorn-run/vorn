@@ -139,10 +139,8 @@ if [ "$#" -eq 0 ]; then
   exec "$APPIMAGE"
 fi
 
-# The command lives inside the AppImage, so it is started from APPDIR in there.
-BOOTSTRAP='var r = require("child_process").spawnSync(process.env.APPDIR + "/resources/vornd/vorn", process.argv.slice(1), { stdio: "inherit" }); process.exit(r.status === null ? 1 : r.status)'
-
-ELECTRON_RUN_AS_NODE=1 exec "$APPIMAGE" -e "$BOOTSTRAP" "$@"
+# The command lives inside the AppImage; VORN_CLI asks it for that instead of the app.
+VORN_CLI=1 exec "$APPIMAGE" "$@"
 SHIM
     chmod +x "${BIN_DIR}/vorn"
 

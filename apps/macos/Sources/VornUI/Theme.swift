@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Today's design tokens: src/renderer/theme.css and the Tailwind v4 defaults
+/// Today's design tokens: packages/web/src/renderer/theme.css and the Tailwind v4 defaults
 /// the renderer uses (grays are its oklch values in sRGB). 1 Tailwind unit = 4pt.
 public enum Theme {
     public static let surfaceBase = Color(hex: 0x0D0D0F)

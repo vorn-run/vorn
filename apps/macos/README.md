@@ -5,7 +5,7 @@ The native app, as a Swift package (`swift build -c release`, or `Vorn.xcodeproj
 | Module             | Holds                                                                                               |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
 | `VornCore`         | The vornd client: endpoint and credential, JSON-RPC over `/ws`, subscriptions, models and services  |
-| `VornUI`           | Theme tokens from `src/renderer/theme.css`, Lucide glyphs, agent and project icons, shared controls |
+| `VornUI`           | Theme tokens from `packages/web/src/renderer/theme.css`, Lucide glyphs, agent and project icons, shared controls |
 | `VornTerminals`    | Terminal panes over vornd's grid socket                                                             |
 | `VornTasks`        | The tasks board: list and kanban, cards, detail panel, new task dialog, view options                |
 | `VornWorkflows`    | Workflows: runs list and detail, gates, the workflow page                                           |

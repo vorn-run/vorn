@@ -56,7 +56,7 @@ export const WINDOWS_GUID = '51b24bfb-ca41-5f10-85db-83383073071d'
 export function assetNames(version, platform, arch) {
   if (platform === 'darwin') {
     const a = arch === 'arm64' ? '-arm64' : ''
-    return { zip: `Vorn-${version}${a}-mac.zip`, dmg: `Vorn-${version}${a}.dmg` }
+    return { zip: `Vorn-${version}${a}-mac.zip`, dmg: `Vorn-${version}-${arch}.dmg` }
   }
   if (platform === 'win32') return { setup: `Vorn-Setup-${version}.exe` }
   if (platform === 'linux') {
@@ -168,6 +168,8 @@ fi
 
 const APP_RUN = `#!/bin/sh
 here="$(dirname "$(readlink -f "$0")")"
+# VORN_CLI=1 runs the bundled command line instead of the app.
+if [ -n "$VORN_CLI" ]; then exec "$here/resources/vornd/vorn" "$@"; fi
 exec "$here/vorn" "$@"
 `
 

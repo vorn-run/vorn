@@ -6357,6 +6357,7 @@ dependencies = [
  "futures-util",
  "gtk",
  "libc",
+ "objc2 0.5.3",
  "semver",
  "serde",
  "serde_json",

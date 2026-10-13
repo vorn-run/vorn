@@ -55,3 +55,7 @@ x11rb = { version = "0.13", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Clears the login item 0.8.0-beta.8 and earlier registered with SMAppService.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
