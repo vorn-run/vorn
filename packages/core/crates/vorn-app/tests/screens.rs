@@ -247,7 +247,10 @@ fn the_sessions_screens() {
     shot.send(&mut app, key("KeyA", MOD, None));
     shot.type_line(&mut app, "my-model");
     assert_eq!(menu(&app), None);
-    assert_eq!(app.st.models.picked.get("claude").map(String::as_str), Some("my-model"));
+    assert_eq!(
+        app.st.models.picked.get("claude").map(String::as_str),
+        Some("my-model")
+    );
     app.st.models.lists.insert(
         models,
         vorn_app::models::Listing {
