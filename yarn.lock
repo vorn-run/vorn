@@ -3777,6 +3777,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/ws@npm:^8.18.1":
+  version: 8.18.1
+  resolution: "@types/ws@npm:8.18.1"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/61aff1129143fcc4312f083bc9e9e168aa3026b7dd6e70796276dcfb2c8211c4292603f9c4864fae702f2ed86e4abd4d38aa421831c2fd7f856c931a481afbab
+  languageName: node
+  linkType: hard
+
 "@typescript-eslint/eslint-plugin@npm:8.59.2":
   version: 8.59.2
   resolution: "@typescript-eslint/eslint-plugin@npm:8.59.2"
@@ -10476,6 +10485,7 @@ __metadata:
     "@types/qrcode": "npm:^1.5.6"
     "@types/react": "npm:^19.2.18"
     "@types/react-dom": "npm:^19"
+    "@types/ws": "npm:^8.18.1"
     "@vitejs/plugin-react": "npm:^5.2.0"
     "@vitest/coverage-v8": "npm:4.1.10"
     "@vitest/eslint-plugin": "npm:^1.6.27"
