@@ -56,7 +56,11 @@ public actor VornClient {
     private var stateListeners: [UUID: AsyncStream<State>.Continuation] = [:]
     private var reconnecting: Task<Void, Never>?
     private var closedByUser = false
+    private var requestHandler: RequestHandler?
     public private(set) var state: State = .idle
+
+    /// Answers a request vornd makes of this app: its result, or an error message.
+    public typealias RequestHandler = @Sendable (_ method: String, _ params: JSONValue) async -> Result<JSONValue, VornRequestError>
 
     /// A client for one fixed endpoint.
     public init(endpoint: VornEndpoint, readOnly: Bool = false, session: URLSession = URLSession(configuration: .ephemeral)) {
@@ -126,6 +130,7 @@ public actor VornClient {
         do {
             try await sendSubscription()
             setState(.connected)
+            if requestHandler != nil { Task { _ = try? await self.identify() } }
         } catch {
             teardown(reason: error.localizedDescription)
             throw error
@@ -207,10 +212,47 @@ public actor VornClient {
             return
         }
         guard let method = frame["method"]?.stringValue else { return }
+        if let id = frame["id"], !id.isNull {
+            answer(id: id, method: method, params: frame["params"] ?? .null)
+            return
+        }
         let event = VornEvent.notification(method: method, params: frame["params"] ?? .null)
         for (_, l) in listeners where l.topics.contains(where: { Self.topic($0, matches: method) }) {
             l.continuation.yield(event)
         }
+    }
+
+    private func answer(id: JSONValue, method: String, params: JSONValue) {
+        guard let handler = requestHandler else {
+            reply(id: id, .failure(VornRequestError("\(method) is not answered by this app.")))
+            return
+        }
+        Task {
+            let result = await handler(method, params)
+            self.reply(id: id, result)
+        }
+    }
+
+    private func reply(id: JSONValue, _ result: Result<JSONValue, VornRequestError>) {
+        guard let socket else { return }
+        var frame: [String: JSONValue] = ["jsonrpc": "2.0", "id": id]
+        switch result {
+        case .success(let value): frame["result"] = value
+        case .failure(let e): frame["error"] = ["code": -32000, "message": .string(e.message)]
+        }
+        guard let data = try? JSONEncoder().encode(JSONValue.object(frame)) else { return }
+        socket.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+    }
+
+    /// Claims this connection as the one vornd asks its `browser:*` and `device:*` calls of.
+    public func serveRequests(_ handler: @escaping RequestHandler) async {
+        requestHandler = handler
+        if state == .connected { _ = try? await identify() }
+    }
+
+    @discardableResult
+    private func identify() async throws -> Bool {
+        try await send("bridge:identify", nil)["ok"]?.boolValue == true
     }
 
     /// A topic names one method, or every method it prefixes when it ends in `*`.
@@ -346,4 +388,10 @@ public actor VornClient {
             "topics": .array(topics.map(JSONValue.string)), "terminalBytes": false,
         ]))
     }
+}
+
+/// Why this app could not answer a request vornd made of it.
+public struct VornRequestError: Error, Equatable, Sendable {
+    public var message: String
+    public init(_ message: String) { self.message = message }
 }
