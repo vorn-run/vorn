@@ -221,8 +221,9 @@ private struct WidgetRow: View {
         let tint = Color(.sRGB, red: glow.red / 255, green: glow.green / 255, blue: glow.blue / 255, opacity: glow.alpha)
         return ZStack {
             if running {
-                Circle().fill(tint).frame(width: 30, height: 30).opacity(pulse ? 0.7 : 0)
-                Circle().fill(tint).frame(width: 26, height: 26).opacity(pulse ? 1 : 0)
+                // `0 0 8px 3px`: a 3pt ring hugging the 24pt circle, fading out over the next few points.
+                Circle().strokeBorder(tint.opacity(0.4), lineWidth: 4).frame(width: 38, height: 38).opacity(pulse ? 1 : 0)
+                Circle().strokeBorder(tint, lineWidth: 3).frame(width: 30, height: 30).opacity(pulse ? 1 : 0)
             }
             AgentIcon(agent.agentType, size: 18)
                 .scaleEffect(running && pulse ? 1.18 : 1)
