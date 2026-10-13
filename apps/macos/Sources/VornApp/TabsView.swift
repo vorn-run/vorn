@@ -81,7 +81,8 @@ struct TabsView<Empty: View>: View {
             .overlay(cardShape.strokeBorder(Theme.white(0.08), lineWidth: 1))
         }
         .padding(.top, Theme.toolbarHeight - rowHeight)
-        .padding([.leading, .trailing, .bottom], 8)
+        .padding([.trailing, .bottom], 8)
+        .padding(.leading, model.sidebarOpen ? 0 : 8)
     }
 
     /// TabView.tsx `handleCloseTab`: the tab beside it becomes active, then the session closes.

@@ -164,25 +164,45 @@ enum KeyRouting {
     }
 }
 
-/// Gives the hidden titlebar the height of the 40pt top bar, so the window
-/// buttons sit centred on it.
+/// A unified toolbar gives the hidden titlebar the 52pt title row, so the window
+/// buttons sit centred on the top bar.
 struct WindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-            window.toolbar = NSToolbar(identifier: "main")
-            window.toolbarStyle = .unified
-            window.backgroundColor = NSColor(red: 0x0D / 255, green: 0x0D / 255, blue: 0x0F / 255, alpha: 1)
-            window.appearance = NSAppearance(named: .darkAqua)
+            window.styleAsMain()
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+extension NSWindow {
+    /// The hidden titlebar with a unified toolbar's 52pt title row, which the app's own chrome fills.
+    func styleAsMain() {
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        styleMask.insert(.fullSizeContentView)
+        toolbar = NSToolbar(identifier: "main")
+        toolbarStyle = .unified
+        backgroundColor = NSColor(red: 0x0D / 255, green: 0x0D / 255, blue: 0x0F / 255, alpha: 1)
+        appearance = NSAppearance(named: .darkAqua)
+        clearTitlebarSafeArea()
+        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: self, queue: .main) { note in
+                MainActor.assumeIsolated { (note.object as? NSWindow)?.clearTitlebarSafeArea() }
+            }
+        }
+    }
+
+    /// The chrome draws in the title row itself, so content must not see it as safe area: colour backgrounds would bleed over it.
+    func clearTitlebarSafeArea() {
+        guard let view = contentView else { return }
+        let base = view.safeAreaInsets.top - view.additionalSafeAreaInsets.top
+        view.additionalSafeAreaInsets = NSEdgeInsets(top: -base, left: 0, bottom: 0, right: 0)
+    }
 }
 
 /// Renders the main screen offscreen with live data from vornd (read-only),
@@ -455,12 +475,12 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     // As a sidebar click: the card expanded in the grid, the tab in tabs.
     if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) { model.reveal(visible[n].id, store) }
     if let engine = engines.engine, !visible.isEmpty {
-        let gridW = size.width - (model.sidebarOpen ? model.sidebarWidth : 0)
+        let gridW = size.width - (model.sidebarOpen ? Sidebar.trailingEdge(model.sidebarWidth) : 0)
         let body: CGSize
         if model.expandedSessionID != nil {
-            body = CGSize(width: gridW, height: size.height - 41 - 22 - 2)
+            body = CGSize(width: gridW, height: size.height - Theme.toolbarHeight - 22 - 2)
         } else if model.layoutMode(store) == .tabs {
-            body = CGSize(width: gridW, height: size.height - Theme.toolbarHeight - 36 - 22 - 2)
+            body = CGSize(width: gridW - (model.sidebarOpen ? 8 : 16) - 2, height: size.height - Theme.toolbarHeight - 8 - 22 - 2)
         } else {
             let gridH = size.height - Theme.toolbarHeight
             let layout = AutoLayout.pick(visible.count, width: gridW, height: gridH)
@@ -538,7 +558,28 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         return 0
     }
 
+    // `--window` draws in a real titled window, so the system's glass and window buttons are in the picture.
+    let inWindow = args.contains("--window")
+    if inWindow {
+        let image = await windowImage(of: RootView(model: model, store: store, engines: engines, features: features)
+            .environment(\.terminalSnapshot, true)
+            .environment(\.workflowsStaticLayout, true)
+            .inlinePopoverHost(), size: size, settle: args.contains("--review") ? 2500 : 1200)
+        guard let image, let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+              (try? png.write(to: URL(fileURLWithPath: path))) != nil else {
+            FileHandle.standardError.write(Data("window capture failed\n".utf8))
+            return 1
+        }
+        engines.engine?.shutdown()
+        features.tasks.stop()
+        features.workflows.stop()
+        store.stop()
+        print("wrote \(path) (\(image.width)x\(image.height)), \(visible.count) sessions")
+        return 0
+    }
+
     let content = RootView(model: model, store: store, engines: engines, features: features, fauxChrome: true)
+        .environment(\.navigationGlass, false)
         .environment(\.terminalSnapshot, true)
         .environment(\.workflowsStaticLayout, true)
         .inlinePopoverHost()
@@ -580,6 +621,36 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     store.stop()
     print("wrote \(path) (\(image.width)x\(image.height)), \(visible.count) sessions")
     return 0
+}
+
+/// A window that stays where it is put, offscreen, and draws as the key window without being made key.
+private final class OffscreenWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
+}
+
+/// Draws `content` in a real titled window offscreen and asks the window server for it, glass and window buttons included.
+@MainActor
+private func windowImage(of content: some View, size: CGSize, settle: Int) async -> CGImage? {
+    typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+    // Deprecated in the SDK headers but still served; looked up at run time so the build stays warning-free.
+    guard let sym = dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage") else { return nil }
+    NSApplication.shared.setActivationPolicy(.accessory)
+    let window = OffscreenWindow(contentRect: CGRect(origin: CGPoint(x: -6000, y: -6000), size: size),
+                                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                 backing: .buffered, defer: false)
+    window.contentViewController = NSHostingController(rootView: content.ignoresSafeArea())
+    window.setContentSize(size)
+    window.setFrameOrigin(CGPoint(x: -6000, y: -6000))
+    window.orderFrontRegardless()
+    window.styleAsMain()
+    try? await Task.sleep(for: .milliseconds(400 + settle))
+    // Including the one window, its bounds without the shadow, at the best resolution.
+    let image = unsafeBitCast(sym, to: CreateImage.self)(.null, 1 << 3, UInt32(window.windowNumber), (1 << 0) | (1 << 3))?
+        .takeRetainedValue()
+    window.orderOut(nil)
+    return image
 }
 
 /// Draws `content` in an offscreen window at 2x, for views ImageRenderer cannot draw.

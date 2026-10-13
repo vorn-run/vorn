@@ -197,7 +197,7 @@ struct ViewOptionsButton: View {
     var body: some View {
         let open = model.overlay == .viewOptions
         let active = model.hasActiveViewOptions(store)
-        ToolbarSymbolButton("slider.horizontal.3", help: "View options", shortcut: "⌘J", isOn: open || active) {
+        ToolbarSymbolButton("slider.horizontal.3", help: "View options", shortcut: "⌘J", isOn: open) {
             model.toggle(.viewOptions)
         }
         .overlay(alignment: .topTrailing) { if active && !open { StatusDot(Theme.inkSecondary) } }

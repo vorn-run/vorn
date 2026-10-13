@@ -127,8 +127,8 @@ public struct FauxTrafficLights: View {
             light(0xFEBC2E, 0xDFA023)
             light(0x28C840, 0x1AAB29)
         }
-        .padding(.leading, 16)
-        .padding(.top, 14)
+        .padding(.leading, 20)
+        .padding(.top, 20)
     }
 
     private func light(_ fill: UInt32, _ edge: UInt32) -> some View {

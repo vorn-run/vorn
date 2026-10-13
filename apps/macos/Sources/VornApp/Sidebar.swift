@@ -101,14 +101,6 @@ struct SidebarHeader: View {
 }
 
 extension MainViewMode {
-    var icon: LucideGlyph {
-        switch self {
-        case .sessions: .monitor
-        case .tasks: .listTodo
-        case .workflows: .workflow
-        }
-    }
-
     /// The monochrome SF Symbol in the title bar's view switch.
     var symbol: String {
         switch self {
