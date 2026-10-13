@@ -41,6 +41,7 @@ mod palette;
 mod plugins;
 mod settings;
 mod side;
+mod signin;
 mod tasks;
 mod workflows;
 
@@ -198,6 +199,8 @@ enum Call {
     Ignore,
     Pane(browser::PaneCall),
     Plug(plugins::PlugCall),
+    /// `connection:signedIn` after the sheet saw someone sign in.
+    SignedIn(Option<String>),
     Net(network::NetCall),
 }
 
@@ -288,6 +291,8 @@ pub struct App {
     web: browser::Web,
     /// Wakes the window from another thread.
     wake: Wake,
+    /// The connections' hidden pages and the calls in flight on them.
+    sessions: signin::Sessions,
     /// The OS file picker, while it is open.
     picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
@@ -344,6 +349,7 @@ impl App {
             discarding: false,
             web,
             wake: app_wake,
+            sessions: Default::default(),
             picking: None,
         };
         app.see_projects();
@@ -378,6 +384,7 @@ impl App {
             crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
         self.st.sidebar_view =
             crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
+        self.web.host.set_profiles(dir.join("connection-profiles"));
         self.data_dir = Some(dir);
     }
 
@@ -571,6 +578,9 @@ impl App {
             Call::Ignore => {}
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Plug(c) => self.plug_answered(c, answer),
+            Call::SignedIn(identity) => {
+                self.finish_signin(answer.map(|_| identity).map_err(|e| e.to_string()))
+            }
             Call::Net(c) => self.net_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
@@ -1546,6 +1556,7 @@ impl App {
                 self.open_settings(cat);
             }
             Act::Welcome => self.open_onboard(ui),
+            Act::SignInClose => self.finish_signin(Err(crate::signin::CLOSED.to_owned())),
             Act::Palette(a) => self.run_palette(ui, a),
             Act::Onboard(a) => self.run_onboard(ui, a),
             Act::Plug(a) => self.run_plug(ui, a),
@@ -2384,6 +2395,12 @@ impl App {
         self.tasks_tick(ui);
         self.net_tick(ui);
         self.plug_tick();
+        if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
+            self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
+        }
+        if let Some(at) = self.session_tick(now) {
+            ui.wake_at(at);
+        }
         self.settings_tick(now);
         let focus = ui.focus();
         if focus != self.last_focus {

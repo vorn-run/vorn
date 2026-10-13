@@ -15,11 +15,12 @@ mod network;
 mod onboarding;
 mod palette;
 mod panes;
-mod plugins;
+pub(crate) mod plugins;
 pub mod runs;
 pub mod settings;
 pub mod side;
 mod sidebar;
+mod signin;
 pub mod tasks;
 pub mod workflows;
 

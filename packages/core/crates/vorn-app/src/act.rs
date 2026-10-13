@@ -166,6 +166,8 @@ pub enum Act {
     Onboard(crate::onboarding::OnbAct),
     /// The Plugins page's controls.
     Plug(crate::plugins::PlugAct),
+    /// Closes the sign-in sheet before anyone signed in.
+    SignInClose,
     /// The Remote Access page's controls.
     Net(crate::network::NetAct),
     /// Copies text to the clipboard, saying so in a toast.
@@ -269,6 +271,12 @@ impl Acts {
     }
 }
 
+impl From<crate::settings::SetAct> for Act {
+    fn from(a: crate::settings::SetAct) -> Self {
+        Act::Set(a)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,11 +292,5 @@ mod tests {
         assert_ne!(id, Acts::id("row", &Act::Select("a".into())));
         acts.clear();
         assert_eq!(acts.clicked(id), None);
-    }
-}
-
-impl From<crate::settings::SetAct> for Act {
-    fn from(a: crate::settings::SetAct) -> Self {
-        Act::Set(a)
     }
 }

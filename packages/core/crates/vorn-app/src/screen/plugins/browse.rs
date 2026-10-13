@@ -200,7 +200,7 @@ fn footer(s: &Screen<'_>) -> El {
         .gap(6.0)
         .pt(12.0)
         .border_top(1.0, white(0.06))
-        .child(line(&catalog_age(p.fetched_at, now_ms() as f64)))
+        .child(line(&catalog_age(p.fetched_at, now_ms())))
         .child(line("·"))
         .child(check)
 }
@@ -282,7 +282,7 @@ fn row(s: &Screen<'_>, l: &Listing) -> El {
         .gap(12.0)
         .grow()
         .min_w0()
-        .role(Role::Button, &format!("About {}", l.name))
+        .role(Role::Button, format!("About {}", l.name))
         .child(
             well(
                 32.0,

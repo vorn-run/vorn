@@ -393,60 +393,6 @@ mod win {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn a_dev_build_leaves_the_login_record_alone() {
-        let c = json!({ "defaults": { "startAtLogin": true } });
-        assert_eq!(login_item_for(&c, false), None);
-        assert_eq!(login_item_for(&c, true), Some(true));
-        assert_eq!(
-            login_item_for(&json!({ "defaults": {} }), true),
-            Some(false)
-        );
-        assert_eq!(login_item_for(&Value::Null, true), None);
-    }
-
-    #[test]
-    fn the_autostart_file_is_written_once_and_removed() {
-        let dir = std::env::temp_dir().join(format!("vorn-autostart-{}", std::process::id()));
-        let file = desktop_entry(&dir);
-        let exe = Path::new("/opt/vorn/vorn-app");
-        assert!(set_autostart_file(&file, exe, true, false).expect("write"));
-        assert!(!set_autostart_file(&file, exe, true, false).expect("same"));
-        let body = std::fs::read_to_string(&file).expect("read");
-        assert!(body.contains("Exec=\"/opt/vorn/vorn-app\""));
-        assert!(set_autostart_file(&file, exe, false, false).expect("remove"));
-        assert!(!set_autostart_file(&file, exe, false, false).expect("gone"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn shims_open_the_app_or_run_the_command() {
-        let sh = shim_script(Path::new("/a/vorn-app"), Path::new("/a/vorn"), false);
-        assert!(sh.starts_with("#!/bin/sh"));
-        assert!(sh.contains("exec \"/a/vorn\" \"$@\""));
-        let cmd = shim_script(
-            Path::new("C:\\V\\vorn-app.exe"),
-            Path::new("C:\\V\\vorn.exe"),
-            true,
-        );
-        assert!(cmd.contains("start \"\" \"C:\\V\\vorn-app.exe\""));
-        assert!(cmd.contains("\r\n\"C:\\V\\vorn.exe\" %*"));
-    }
-
-    #[test]
-    fn path_entries_match_with_or_without_a_trailing_separator() {
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let var = format!("/usr/bin{sep}/home/u/.local/bin/");
-        assert!(on_path(Path::new("/home/u/.local/bin"), &var));
-        assert!(!on_path(Path::new("/opt/bin"), &var));
-    }
-}
-
 /// Asks the OS for one file on a thread, waking the app with the answer;
 /// `None` when the picker was cancelled or this system has none.
 pub fn pick_file(
@@ -511,3 +457,57 @@ $d.Title = $env:VORN_PICK_TITLE
 $d.Filter = 'Vorn packs (*.vorn.tgz)|*.vorn.tgz|All files (*.*)|*.*'
 if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_dev_build_leaves_the_login_record_alone() {
+        let c = json!({ "defaults": { "startAtLogin": true } });
+        assert_eq!(login_item_for(&c, false), None);
+        assert_eq!(login_item_for(&c, true), Some(true));
+        assert_eq!(
+            login_item_for(&json!({ "defaults": {} }), true),
+            Some(false)
+        );
+        assert_eq!(login_item_for(&Value::Null, true), None);
+    }
+
+    #[test]
+    fn the_autostart_file_is_written_once_and_removed() {
+        let dir = std::env::temp_dir().join(format!("vorn-autostart-{}", std::process::id()));
+        let file = desktop_entry(&dir);
+        let exe = Path::new("/opt/vorn/vorn-app");
+        assert!(set_autostart_file(&file, exe, true, false).expect("write"));
+        assert!(!set_autostart_file(&file, exe, true, false).expect("same"));
+        let body = std::fs::read_to_string(&file).expect("read");
+        assert!(body.contains("Exec=\"/opt/vorn/vorn-app\""));
+        assert!(set_autostart_file(&file, exe, false, false).expect("remove"));
+        assert!(!set_autostart_file(&file, exe, false, false).expect("gone"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shims_open_the_app_or_run_the_command() {
+        let sh = shim_script(Path::new("/a/vorn-app"), Path::new("/a/vorn"), false);
+        assert!(sh.starts_with("#!/bin/sh"));
+        assert!(sh.contains("exec \"/a/vorn\" \"$@\""));
+        let cmd = shim_script(
+            Path::new("C:\\V\\vorn-app.exe"),
+            Path::new("C:\\V\\vorn.exe"),
+            true,
+        );
+        assert!(cmd.contains("start \"\" \"C:\\V\\vorn-app.exe\""));
+        assert!(cmd.contains("\r\n\"C:\\V\\vorn.exe\" %*"));
+    }
+
+    #[test]
+    fn path_entries_match_with_or_without_a_trailing_separator() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let var = format!("/usr/bin{sep}/home/u/.local/bin/");
+        assert!(on_path(Path::new("/home/u/.local/bin"), &var));
+        assert!(!on_path(Path::new("/opt/bin"), &var));
+    }
+}

@@ -322,6 +322,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::GateReview => super::gates::review(s)?,
         Dialog::Palette => super::palette::palette(s),
         Dialog::Welcome => super::onboarding::modal(s)?,
+        Dialog::SignIn => super::signin::sheet(s)?,
     })
 }
 

@@ -183,6 +183,8 @@ pub struct WebSlot {
     pub key: String,
     pub url: String,
     pub zoom: f64,
+    /// The connection whose profile the view keeps cookies in.
+    pub profile: Option<String>,
 }
 
 /// Every pane's state.

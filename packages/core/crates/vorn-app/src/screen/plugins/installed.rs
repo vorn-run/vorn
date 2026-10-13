@@ -144,7 +144,7 @@ fn row(s: &Screen<'_>, l: &Listing) -> El {
         .gap(12.0)
         .grow()
         .min_w0()
-        .role(Role::Button, &format!("About {}", l.name))
+        .role(Role::Button, format!("About {}", l.name))
         .child(
             well(
                 32.0,

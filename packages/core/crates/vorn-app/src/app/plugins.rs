@@ -223,6 +223,7 @@ impl App {
             }
             PlugAct::SignOut(id) => {
                 if self.plug_start(Verb::SignOut, &id) {
+                    self.forget_profile(&id);
                     self.call(
                         Call::Plug(PlugCall::SignOut(id.clone())),
                         "connection:signedOut",
@@ -508,10 +509,10 @@ impl App {
 
     /// Leaves the page; a workflow editor under it re-reads what its requirements check.
     pub(super) fn plug_leave(&mut self) {
-        self.st.dialog = None;
         let p = &mut self.st.plugins;
         p.from_editor = false;
         p.adding = None;
+        p.pending = None;
         if self.st.wf.editor.is_some() {
             self.load_library();
         }
@@ -633,6 +634,10 @@ impl App {
                     return;
                 };
                 let fail = |p: &mut plug::Plugins, error: String| {
+                    // The editor's panel has no row to carry it, so it says it at the top.
+                    if p.from_editor {
+                        p.report = Some(error.clone());
+                    }
                     p.progress.insert(
                         l.id.clone(),
                         Progress {
@@ -679,7 +684,11 @@ impl App {
                     None => {
                         p.progress.insert(id.clone(), Progress::phase("installing"));
                         p.forget.push(id);
+                        let editor = p.from_editor;
                         self.plug_load(false);
+                        if editor && self.st.wf.editor.is_some() {
+                            self.load_library();
+                        }
                     }
                 }
             }
@@ -895,21 +904,15 @@ impl App {
                 }
                 self.plug_load(false);
             }
+            // The row stays busy until the sheet closes, as the desktop's window did.
             PlugCall::SignIn(id) => {
-                let url = answer
-                    .as_ref()
-                    .ok()
-                    .and_then(|v| v.pointer("/browser/signInUrl"))
-                    .and_then(Value::as_str);
-                let error = match (&answer, url) {
-                    (_, Some(url)) => {
-                        open_url(url);
-                        None
-                    }
-                    (Err(e), None) => Some(e.to_string()),
-                    (Ok(_), None) => Some("Not signed in.".to_owned()),
+                let error = match &answer {
+                    Ok(v) => self.open_signin(&id, v, crate::signin::From::Plugins),
+                    Err(e) => Some(e.to_string()),
                 };
-                self.plug_finish(&id, error);
+                if error.is_some() {
+                    self.plug_finish(&id, error);
+                }
             }
             PlugCall::SignOut(id) => {
                 let error = answer.err().map(|e| e.to_string());
@@ -938,7 +941,7 @@ impl App {
                 }
             }
             "connector:catalogChanged" => self.plug_catalog(params),
-            _ if !self.st.shown(Category::Connectors) => {}
+            _ if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor => {}
             "config:changed" => {
                 self.call(
                     Call::Plug(PlugCall::Connections),
@@ -951,8 +954,41 @@ impl App {
         }
     }
 
-    /// Once a frame: a picked file goes to vornd to be checked.
+    /// How a sign-in the page started ended.
+    pub(super) fn plug_signed_in(&mut self, conn: &str, outcome: super::signin::Outcome) {
+        self.plug_finish(conn, outcome.err());
+        self.plug_load(false);
+    }
+
+    /// A workflow requirement's fix, shown in the editor panel that asked.
+    pub(super) fn plug_fix(&mut self, fix: Fix) {
+        let p = &mut self.st.plugins;
+        p.from_editor = true;
+        p.adding = None;
+        p.pending = None;
+        p.report = None;
+        p.intent = Some(fix);
+        if p.loaded && p.loads == 0 {
+            self.plug_apply_intent();
+        } else if p.loads == 0 {
+            self.plug_load(true);
+        }
+    }
+
+    /// Once a frame: a picked file goes to vornd to be checked, and an
+    /// editor fix is put away once its panel is.
     pub(super) fn plug_tick(&mut self) {
+        let panel_open = self.st.wf.editor.is_some()
+            && (self.st.wf.panel == crate::workflows::Panel::StartFrom
+                || !self.st.wf.still_needed().is_empty());
+        if self.st.plugins.from_editor && !panel_open && !self.st.shown(Category::Connectors) {
+            let p = &mut self.st.plugins;
+            p.from_editor = false;
+            p.adding = None;
+            p.pending = None;
+            p.intent = None;
+            p.report = None;
+        }
         let Some(rx) = &self.picking else { return };
         let Ok(picked) = rx.try_recv() else { return };
         self.picking = None;
@@ -966,7 +1002,7 @@ impl App {
     }
 
     pub(super) fn plug_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
-        if !self.st.shown(Category::Connectors) {
+        if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor {
             return false;
         }
         match event {

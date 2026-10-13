@@ -7,10 +7,14 @@
 mod support;
 
 use serde_json::json;
-use support::{add_project, connect, Shot, TestVornd};
+use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
+use vorn_app::app::MOD;
 use vorn_app::plugins::{field_id, Field, Form, PlugAct, Tab};
 use vorn_app::settings::{Category, SetAct};
+use vorn_app::templates::{self, Fix};
+use vorn_app::ui::mods;
+use vorn_app::workflows::{Panel, WfAct};
 use vorn_app::App;
 
 fn plug(place: &str, act: PlugAct) -> vorn_app::ui::Id {
@@ -56,7 +60,7 @@ fn plugins_page_lists_adds_and_connects() {
     assert!(app.st.plugins.filtered().is_empty());
     shot.save(&mut app, "pl-browse-empty");
     for _ in 0.."zzzz-none".len() {
-        shot.send(&mut app, support::key("Backspace", 0, None));
+        shot.send(&mut app, key("Backspace", 0, None));
     }
     shot.frame(&mut app);
     assert!(!app.st.plugins.filtered().is_empty());
@@ -124,4 +128,94 @@ fn plugins_page_lists_adds_and_connects() {
     );
     assert!(!app.st.shown(Category::Connectors));
     assert!(app.st.plugins.adding.is_none());
+}
+
+/// The first unmet requirement among the templates whose fix is `wanted`.
+fn template_fix(app: &App, wanted: fn(&Fix) -> bool) -> Option<(String, Fix)> {
+    let wf = &app.st.wf;
+    let l = templates::Listings {
+        connectors: &wf.lib.connectors,
+        catalog: &wf.lib.catalog,
+        packs: &wf.lib.packs,
+    };
+    wf.lib.templates.iter().find_map(|t| {
+        templates::of_template(t, &wf.connections)
+            .into_iter()
+            .filter(|n| n.bound.is_none())
+            .find_map(|n| {
+                let fix = templates::fix(&n, l);
+                let node = n.req["nodeId"].as_str().unwrap_or("").to_owned();
+                wanted(&fix).then_some((node, fix))
+            })
+    })
+}
+
+#[test]
+fn a_template_requirement_is_fixed_in_the_start_from_panel() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    add_project(&mut app, &v, "web", json!({}));
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.click(
+        &mut app,
+        App::control("sidebar", &Act::Workflow(WfAct::New)),
+    );
+    assert_eq!(app.st.wf.panel, Panel::StartFrom);
+    let found = shot.until(&mut app, "a template asking for a profile", |app, _| {
+        template_fix(app, |f| matches!(f, Fix::CreateProfile(_)))
+    });
+    let (node, fix) = found;
+    shot.click(
+        &mut app,
+        App::control(&format!("wf-fix.{node}"), &Act::Workflow(WfAct::Fix(fix))),
+    );
+    // The form opens in the panel; Settings stays shut.
+    shot.until(&mut app, "the profile form", |app, _| {
+        matches!(
+            app.st.plugins.adding.as_ref().map(|a| &a.form),
+            Some(Form::Profile(_))
+        )
+        .then_some(())
+    });
+    assert!(!app.st.settings.open);
+    assert_eq!(app.st.wf.panel, Panel::StartFrom);
+    shot.save(&mut app, "wf-fix-profile");
+
+    shot.click(&mut app, field_id(&Field::ProfileUrl));
+    shot.type_text(&mut app, "https://127.0.0.1:9");
+    shot.click(&mut app, plug("plug-save", PlugAct::Save));
+    // Nothing answers there, so the form stays open saying why.
+    shot.until(&mut app, "the profile's test", |app, _| {
+        match app.st.plugins.adding.as_ref().map(|a| &a.form) {
+            Some(Form::Profile(f)) => f.result.clone().map(|_| ()),
+            None => Some(()),
+            _ => None,
+        }
+    });
+    shot.save(&mut app, "wf-fix-tested");
+    // The profile exists even though it did not answer, so a retry updates it.
+    let made = match app.st.plugins.adding.as_ref().map(|a| &a.form) {
+        Some(Form::Profile(f)) => f.made.clone(),
+        _ => None,
+    };
+    let list = app
+        .rpc()
+        .call("connection:list", json!({}))
+        .expect("connections");
+    let made = made.expect("the first save made the profile");
+    assert!(list
+        .as_array()
+        .is_some_and(|l| l.iter().any(|c| c["id"] == made.as_str())));
+
+    // Closing the panel puts the form away.
+    shot.click(
+        &mut app,
+        App::control("wf-start-blank", &Act::Workflow(WfAct::StartBlank)),
+    );
+    shot.frame(&mut app);
+    assert!(app.st.plugins.adding.is_none());
+    assert!(!app.st.plugins.from_editor);
 }

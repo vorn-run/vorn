@@ -43,6 +43,7 @@ pub mod screen;
 pub mod settings;
 pub mod side;
 pub mod sidebar_view;
+pub mod signin;
 pub mod state;
 pub mod system;
 pub mod tasks;

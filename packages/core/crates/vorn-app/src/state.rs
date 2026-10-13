@@ -276,6 +276,8 @@ pub enum Dialog {
     Palette,
     /// OnboardingModal: the welcome guide.
     Welcome,
+    /// A connection's sign-in page, in its own profile.
+    SignIn,
 }
 
 /// A toast in the bottom right.
@@ -520,6 +522,8 @@ pub struct State {
     pub onboard: crate::onboarding::Onboard,
     pub plugins: crate::plugins::Plugins,
     pub network: crate::network::Network,
+    /// The sign-in sheet, while one is open.
+    pub signin: Option<crate::signin::Window>,
     /// An agent has asked for permission, so Mod+Shift+A and D answer it.
     pub permission_keys: bool,
 }

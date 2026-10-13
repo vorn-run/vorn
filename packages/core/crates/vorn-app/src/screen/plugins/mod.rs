@@ -514,3 +514,34 @@ pub(super) fn sheet_for(s: &Screen<'_>, key: &str) -> Option<El> {
     let p = s.st.plugins.pending.as_ref().filter(|p| p.key == key)?;
     Some(div().mt(8.0).mb(12.0).child(pending_sheet(s, p)))
 }
+
+/// What a workflow requirement's fix opened, at the top of the editor panel
+/// that asked: why an install failed, the pack's confirm sheet, the form.
+pub(in crate::screen) fn editor_fix(s: &Screen<'_>) -> Vec<El> {
+    let p = &s.st.plugins;
+    if !p.from_editor {
+        return Vec::new();
+    }
+    let slot = |inner: El| div().p(8.0).border_bottom(1.0, white(0.08)).child(inner);
+    let mut out = Vec::new();
+    if let Some(e) = &p.report {
+        out.push(
+            div()
+                .px(16.0)
+                .py(8.0)
+                .border_bottom(1.0, white(0.08))
+                .child(
+                    text(e.as_str(), 11.0, k::DANGER)
+                        .line_height(16.0)
+                        .wrapping(),
+                ),
+        );
+    }
+    if let Some(pending) = &p.pending {
+        out.push(slot(pending_sheet(s, pending)));
+    }
+    if let Some(a) = &p.adding {
+        out.push(slot(forms::view(s, a)));
+    }
+    out
+}

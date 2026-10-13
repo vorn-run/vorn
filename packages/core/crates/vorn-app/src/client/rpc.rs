@@ -92,7 +92,7 @@ enum Out {
 pub fn answers_for_vornd(method: &str) -> bool {
     matches!(
         method.split_once(':').map(|(g, _)| g),
-        Some("browser" | "device")
+        Some("browser" | "device" | "session")
     )
 }
 
@@ -437,7 +437,8 @@ mod tests {
         );
         assert!(answers_for_vornd("browser:readPage"));
         assert!(answers_for_vornd("device:list"));
-        assert!(!answers_for_vornd("session:fetch"));
+        assert!(answers_for_vornd("session:fetch"));
+        assert!(!answers_for_vornd("terminal:create"));
         assert_eq!(classify("not json"), Incoming::Ignored);
         assert_eq!(classify(r#"{"id":"str"}"#), Incoming::Ignored);
     }

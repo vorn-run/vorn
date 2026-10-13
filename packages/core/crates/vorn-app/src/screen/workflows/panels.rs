@@ -501,6 +501,7 @@ fn start_from(s: &Screen<'_>) -> El {
     }
     shell(280.0, "Start from")
         .child(header(s, "Start from", "Close", 16.0, 12.0))
+        .children(crate::screen::plugins::editor_fix(s))
         .child(
             div()
                 .col()
@@ -556,15 +557,18 @@ pub fn needs(s: &Screen<'_>) -> Option<El> {
         list = list.child(requirement_row(s, need));
     }
     Some(
-        shell(280.0, "Still needs").child(head).child(
-            div()
-                .col()
-                .grow()
-                .min_h(0.0)
-                .scroll_y()
-                .id(Id::new("wf-needs"))
-                .child(list),
-        ),
+        shell(280.0, "Still needs")
+            .child(head)
+            .children(crate::screen::plugins::editor_fix(s))
+            .child(
+                div()
+                    .col()
+                    .grow()
+                    .min_h(0.0)
+                    .scroll_y()
+                    .id(Id::new("wf-needs"))
+                    .child(list),
+            ),
     )
 }
 

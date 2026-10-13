@@ -104,10 +104,14 @@ pub struct Slot {
     /// Physical pixels in the window.
     pub rect: Rect,
     pub zoom: f64,
+    /// A connection whose signed-in profile the view keeps its cookies in.
+    pub profile: Option<String>,
 }
 
 struct View {
     wv: WebView,
+    /// The profile's context, which must outlive the view (Windows, Linux).
+    _context: Option<Box<wry::WebContext>>,
     /// The address last asked for; a slot asking for another loads it, and
     /// where the page wandered since does not count.
     asked: String,
@@ -134,6 +138,8 @@ pub struct Host {
     next_token: u64,
     /// Device frames the `vorn` scheme serves.
     pub frames: Frames,
+    /// Where connection profiles keep their data, off macOS.
+    profiles: Option<std::path::PathBuf>,
 }
 
 impl Host {
@@ -148,6 +154,59 @@ impl Host {
             wake,
             next_token: 0,
             frames: Frames::default(),
+            profiles: None,
+        }
+    }
+
+    /// Keeps connection profiles under `dir`.
+    pub fn set_profiles(&mut self, dir: std::path::PathBuf) {
+        self.profiles = Some(dir);
+    }
+
+    /// Makes `key`'s view if it is not there, hidden: a page the app works
+    /// in rather than one anybody looks at.
+    pub fn ensure(&mut self, key: &str, url: &str, profile: Option<&str>) -> Result<(), String> {
+        if self.views.contains_key(key) {
+            return Ok(());
+        }
+        if self.window.is_none() {
+            return Err("No window to open the page in.".to_owned());
+        }
+        if let Some(why) = &self.unavailable {
+            return Err(why.clone());
+        }
+        let slot = Slot {
+            key: key.to_owned(),
+            url: url.to_owned(),
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+            zoom: 1.0,
+            profile: profile.map(str::to_owned),
+        };
+        let mut view = self.build(&slot)?;
+        let _ = view.wv.set_visible(false);
+        view.shown = false;
+        self.views.insert(key.to_owned(), view);
+        Ok(())
+    }
+
+    /// Drops every view in `connection`'s profile and what the profile
+    /// keeps on disk.
+    pub fn forget(&mut self, connection: &str) {
+        self.views
+            .retain(|k, _| crate::signin::connection_of(k) != Some(connection));
+        #[cfg(target_os = "macos")]
+        {
+            use wry::WebViewExtDarwin;
+            WebView::remove_data_store(&crate::signin::profile_uuid(connection), |_| {});
+        }
+        #[cfg(not(target_os = "macos"))]
+        if let Some(root) = &self.profiles {
+            let _ = std::fs::remove_dir_all(root.join(crate::signin::profile_folder(connection)));
         }
     }
 
@@ -238,18 +297,38 @@ impl Host {
         let message = send(|key, body| WebEvent::Message { key, body });
         let popup = send(|key, url| WebEvent::NewWindow { key, url });
         let frames = Arc::clone(&self.frames);
-        let wv = WebViewBuilder::new()
+        let mut context = self.context_for(slot.profile.as_deref());
+        let builder = match context.as_deref_mut() {
+            Some(ctx) => WebViewBuilder::new_with_web_context(ctx),
+            None => WebViewBuilder::new(),
+        };
+        let mut builder = builder
             .with_url(&slot.url)
             .with_bounds(bounds(slot.rect))
-            .with_initialization_script(PAGE_SCRIPT)
-            .with_custom_protocol("vorn".to_owned(), move |_, req| serve(&frames, &req))
             .with_on_page_load_handler(page)
             .with_document_title_changed_handler(title)
             .with_ipc_handler(move |req| message(req.into_body()))
             .with_new_window_req_handler(move |url, _| {
                 popup(url);
                 NewWindowResponse::Deny
-            })
+            });
+        match &slot.profile {
+            // A connection's pages are the service's own: no pane script, no `vorn` scheme.
+            Some(_conn) => {
+                #[cfg(target_os = "macos")]
+                {
+                    use wry::WebViewBuilderExtDarwin;
+                    builder =
+                        builder.with_data_store_identifier(crate::signin::profile_uuid(_conn));
+                }
+            }
+            None => {
+                builder = builder
+                    .with_initialization_script(PAGE_SCRIPT)
+                    .with_custom_protocol("vorn".to_owned(), move |_, req| serve(&frames, &req));
+            }
+        }
+        let wv = builder
             .build_as_child(window.as_ref())
             .map_err(|e| format!("The page view did not open: {e}"))?;
         if slot.zoom != 1.0 {
@@ -257,6 +336,7 @@ impl Host {
         }
         Ok(View {
             wv,
+            _context: context,
             asked: slot.url.clone(),
             shown: true,
             rect: slot.rect,
@@ -266,6 +346,18 @@ impl Host {
             at: 0,
             stepping: None,
         })
+    }
+
+    /// A profile's own context off macOS, where profiles are folders.
+    fn context_for(&self, profile: Option<&str>) -> Option<Box<wry::WebContext>> {
+        let conn = profile?;
+        if cfg!(target_os = "macos") {
+            return None;
+        }
+        let root = self.profiles.clone()?;
+        Some(Box::new(wry::WebContext::new(Some(
+            root.join(crate::signin::profile_folder(conn)),
+        ))))
     }
 
     /// Drops the views whose key `gone` says goes.
