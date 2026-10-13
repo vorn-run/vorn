@@ -15,6 +15,7 @@ use super::runs::{icon_button, status_dot};
 use super::sidebar::{control, toggle_section};
 use super::{c, ico, white, MainView, Screen, MOD_LABEL};
 use crate::act::Act;
+use crate::library::Look;
 use crate::look;
 use crate::runs::{self, s as sv, RunAct};
 use crate::state::{now_ms, MenuKind};
@@ -77,14 +78,49 @@ pub(super) fn hex(v: Option<&str>) -> Option<Rgba> {
         .map(Rgba::hex)
 }
 
-/// `RunIcon`: the workflow's `ICON_MAP` glyph in its colour, else
-/// `fallback`.
-fn wf_icon(w: Option<&Value>, size: f32, fallback: &str, color: Rgba) -> El {
-    let name = w.and_then(|w| sv(w, "icon")).and_then(look::icon_map);
-    let tint = w.and_then(|w| hex(sv(w, "iconColor")));
-    match name {
-        Some(n) => ico(n, size, 1.5, tint.unwrap_or(c(0x6b7280))),
-        None => ico(fallback, size, 1.5, color),
+/// `useConnectorLook`: how a connection's connector is drawn.
+fn connection_look(s: &Screen<'_>, connection: &str) -> Option<Look> {
+    let src = crate::library::Sources {
+        connections: &s.st.wf.connections,
+        packs: &s.st.wf.lib.packs,
+        ..crate::library::Sources::default()
+    };
+    crate::library::look_for(&src, connection)
+}
+
+/// `parseConnectorWorkflowId`: the connection a connector-seeded workflow
+/// (`connector:<connectionId>:<event>`) listens on.
+fn seeded_connection(id: &str) -> Option<&str> {
+    id.strip_prefix("connector:")?
+        .split_once(':')
+        .map(|(c, _)| c)
+}
+
+/// The look a connector run resolves to, from its item's connection.
+fn run_look(s: &Screen<'_>, run: &Value) -> Option<Look> {
+    run.pointer("/connectorItem/connectionId")
+        .and_then(Value::as_str)
+        .and_then(|c| connection_look(s, c))
+}
+
+/// `RunIcon`: the workflow's `ICON_MAP` glyph in its colour, else the
+/// connector's mark for a connector run, else the source's glyph; the last
+/// two in `color`.
+fn run_icon(w: Option<&Value>, d: &wf::Described, lk: Option<&Look>, size: f32, color: Rgba) -> El {
+    if let Some(n) = w.and_then(|w| sv(w, "icon")).and_then(look::icon_map) {
+        let tint = w.and_then(|w| hex(sv(w, "iconColor")));
+        return ico(n, size, 1.5, tint.unwrap_or(c(look::ICON_DEFAULT)));
+    }
+    match &d.connector {
+        Some(connector) => {
+            let lk = Look {
+                connector: connector.clone(),
+                icon: lk.and_then(|l| l.icon.clone()),
+                packaged: lk.is_some_and(|l| l.packaged),
+            };
+            panels::mark(Some(&lk), size, color)
+        }
+        None => ico(d.fallback, size, 1.5, color),
     }
 }
 
@@ -96,7 +132,7 @@ fn wf_glyph(w: &Value, size: f32) -> El {
         name,
         size,
         1.5,
-        hex(sv(w, "iconColor")).unwrap_or(c(0x6b7280)),
+        hex(sv(w, "iconColor")).unwrap_or(c(look::ICON_DEFAULT)),
     )
 }
 
@@ -121,7 +157,7 @@ pub(super) fn node_glyph(s: &Screen<'_>, n: &Value, size: f32) -> El {
         };
         crate::library::look_for(&src, c)
     }) {
-        return panels::mark(Some(&look), size);
+        return panels::mark(Some(&look), size, c(look::INK));
     }
     let glyph = match sv(n, "type").unwrap_or("") {
         "trigger" => wf::trigger_icon(cfg("triggerType")),
@@ -225,16 +261,6 @@ pub fn icon_colors(
     div().col().gap(8.0).child(grid).child(swatches)
 }
 
-/// `SOURCE_ICONS`.
-fn source_icon(source: &str) -> &'static str {
-    match source {
-        "scheduled" => "clock",
-        "task" => "square-check",
-        "restore" => "rotate-ccw",
-        _ => "zap",
-    }
-}
-
 fn nodes_of(w: Option<&Value>) -> &Value {
     static EMPTY: Value = Value::Null;
     w.and_then(|w| w.get("nodes")).unwrap_or(&EMPTY)
@@ -324,7 +350,8 @@ fn run_row(s: &Screen<'_>, run: &Value, selected: bool) -> El {
     let named = w
         .cloned()
         .unwrap_or_else(|| serde_json::json!({ "name": sv(run, "workflowName").unwrap_or("") }));
-    let d = wf::describe(run, Some(&named));
+    let lk = run_look(s, run);
+    let d = wf::describe(run, Some(&named), lk.as_ref().map(|l| l.connector.as_str()));
     let nodes = nodes_of(w);
     let start = sv(run, "startedAt").unwrap_or("");
     let progress = (sv(run, "status") != Some("success") && w.is_some())
@@ -334,7 +361,7 @@ fn run_row(s: &Screen<'_>, run: &Value, selected: bool) -> El {
     let partial = run.get("partial").and_then(Value::as_bool) == Some(true);
     let details: Vec<String> = [
         Some(wf::status_line(run, nodes)),
-        Some(d.subtitle.clone().unwrap_or_else(|| d.source.to_owned())),
+        Some(d.subtitle.clone().unwrap_or_else(|| d.source.clone())),
         progress,
         partial.then(|| "partial".to_owned()),
         w.is_none().then(|| "deleted".to_owned()),
@@ -361,7 +388,7 @@ fn run_row(s: &Screen<'_>, run: &Value, selected: bool) -> El {
                 .min_w0()
                 .items_center()
                 .gap(8.0)
-                .child(wf_icon(w, 13.0, source_icon(d.source), c(look::GRAY_400)))
+                .child(run_icon(w, &d, lk.as_ref(), 13.0, c(look::GRAY_400)))
                 .child(
                     text(d.title.as_str(), 13.0, ink(1.0))
                         .line_height(18.0)
@@ -433,7 +460,8 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
     let named = w
         .cloned()
         .unwrap_or_else(|| serde_json::json!({ "name": sv(run, "workflowName").unwrap_or("") }));
-    let d = wf::describe(run, Some(&named));
+    let lk = run_look(s, run);
+    let d = wf::describe(run, Some(&named), lk.as_ref().map(|l| l.connector.as_str()));
     let nodes = nodes_of(w);
     let start = sv(run, "startedAt").unwrap_or("");
     let name = sv(&named, "name").map(str::trim).filter(|n| !n.is_empty());
@@ -441,7 +469,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
     let meta: Vec<String> = [
         name.filter(|n| *n != d.title).map(str::to_owned),
         Some(format!("Run {short}")),
-        Some(d.source.to_owned()),
+        Some(d.source.clone()),
         Some(runs::relative(start, now_ms())),
         Some(runs::duration(start, sv(run, "completedAt"))),
     ]
@@ -456,7 +484,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
         .child(
             div()
                 .pr(4.0)
-                .child(wf_icon(w, 15.0, source_icon(d.source), secondary())),
+                .child(run_icon(w, &d, lk.as_ref(), 15.0, secondary())),
         )
         .child(
             div().grow().min_w0().child(
@@ -971,6 +999,18 @@ fn selected_bar() -> El {
         .bg(c(look::WHITE))
 }
 
+/// `WorkflowItem`'s glyph: a connector-seeded workflow's connector in
+/// gray-400, else the workflow's own.
+fn side_glyph(s: &Screen<'_>, w: &Value) -> El {
+    match sv(w, "id")
+        .and_then(seeded_connection)
+        .and_then(|c| connection_look(s, c))
+    {
+        Some(lk) => panels::mark(Some(&lk), 14.0, c(look::GRAY_400)),
+        None => wf_glyph(w, 14.0),
+    }
+}
+
 /// `WorkflowItem`: the glyph with its status dot, the name, and Run and
 /// More on hover, held in place so the name truncates the same way.
 fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> El {
@@ -1049,7 +1089,7 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> E
         .role(Role::Button, name)
         .selected(editing)
         .child_if(editing.then(selected_bar))
-        .child(div().shrink0().child(wf_glyph(w, 14.0)).child_if(dot))
+        .child(div().shrink0().child(side_glyph(s, w)).child_if(dot))
         .child(
             div()
                 .row()
@@ -1284,6 +1324,13 @@ pub fn menu_width(kind: &MenuKind) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_seeded_workflow_names_its_connection() {
+        assert_eq!(seeded_connection("connector:c1:issue.opened"), Some("c1"));
+        assert_eq!(seeded_connection("connector:c1"), None);
+        assert_eq!(seeded_connection("wf-1"), None);
+    }
 
     #[test]
     fn icon_names_map_to_glyphs() {

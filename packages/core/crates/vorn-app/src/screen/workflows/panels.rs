@@ -73,12 +73,12 @@ fn header(s: &Screen<'_>, label: &str, close_label: &str, px: f32, py: f32) -> E
         .child(close(s, "wf-panel-close", close_label))
 }
 
-/// A connector's mark at `size`: its own glyph in full ink, or a built-in
-/// mark.
-pub fn mark(look: Option<&crate::library::Look>, size: f32) -> El {
+/// `ConnectorIcon`: a connector's own glyph or a built-in mark, in the
+/// caller's `color`.
+pub fn mark(look: Option<&crate::library::Look>, size: f32, color: Rgba) -> El {
     match look.and_then(crate::library::mark_svg) {
         Some(svg) if look.is_some_and(|l| !l.connector.is_empty()) => {
-            crate::ui::icon(svg, size, Rgba::hex(look::INK))
+            crate::ui::icon(svg, size, color)
         }
         _ => ico("zap", size, 2.0, Rgba::hexa(look::INK, look::INK_SECONDARY)),
     }
@@ -224,7 +224,7 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
                                 2.0,
                                 c(look::GRAY_500),
                             ))
-                            .child(mark(lk.as_ref(), 14.0))
+                            .child(mark(lk.as_ref(), 14.0, c(look::INK)))
                             .child(div().grow().min_w0().child(
                                 text(label, 12.5, fg).line_height(18.75).truncate().silent(),
                             ))
@@ -265,7 +265,7 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
                 if let Some(i) = icon {
                     r = r.child(ico(i, 14.0, 2.0, secondary));
                 } else if !nested {
-                    r = r.child(mark(lk.as_ref(), 14.0));
+                    r = r.child(mark(lk.as_ref(), 14.0, c(look::INK)));
                 }
                 r = r.child(
                     div()

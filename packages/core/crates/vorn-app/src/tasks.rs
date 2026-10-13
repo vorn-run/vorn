@@ -410,7 +410,7 @@ pub const SLASH: [(&str, &str, &str, &str); 9] = [
     (
         "Task List",
         "Checklist with checkboxes",
-        "square-check",
+        "square-check-big",
         "- [ ] ",
     ),
     ("Code Block", "Fenced code snippet", "code", "```\n"),

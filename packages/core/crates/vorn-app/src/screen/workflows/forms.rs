@@ -310,7 +310,7 @@ fn dropdown(s: &Screen<'_>, groups: &[crate::vars::StepGroup]) -> El {
                         crate::library::look_for(&src, cid)
                     });
                     let glyph = match look {
-                        Some(l) => mark(Some(&l), 12.0),
+                        Some(l) => mark(Some(&l), 12.0, secondary()),
                         None => ico(
                             super::super::runs::node_icon(&g.kind),
                             12.0,
@@ -926,8 +926,11 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
                         ..crate::library::Sources::default()
                     };
                     let look = crate::library::look_for(&src, id);
-                    pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id)
-                        .mark(mark(look.as_ref(), 14.0))
+                    pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id).mark(mark(
+                        look.as_ref(),
+                        14.0,
+                        c(look::GRAY_400),
+                    ))
                 })
                 .collect()
         }
@@ -1348,7 +1351,7 @@ fn header_glyph(s: &Screen<'_>, n: &Value) -> El {
             };
             crate::library::look_for(&src, cid)
         }) {
-            return mark(Some(&look), 14.0);
+            return mark(Some(&look), 14.0, secondary());
         }
     }
     let glyph = match sv(n, "type").unwrap_or("") {
@@ -1794,7 +1797,13 @@ fn trigger_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
                     s,
                     token(380.0, Some(id), "poll.connection"),
                     current.and_then(|c| sv(c, "name")),
-                    current.map(|_| mark(crate::library::look_for(&src, conn).as_ref(), 14.0)),
+                    current.map(|_| {
+                        mark(
+                            crate::library::look_for(&src, conn).as_ref(),
+                            14.0,
+                            c(look::GRAY_400),
+                        )
+                    }),
                     "Select a connection...",
                     Wash::Strong,
                 ),
@@ -3347,7 +3356,13 @@ fn action_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             s,
             token(380.0, Some(id), "action.connection"),
             current.and_then(|c| sv(c, "name")),
-            current.map(|_| mark(crate::library::look_for(&src, conn).as_ref(), 14.0)),
+            current.map(|_| {
+                mark(
+                    crate::library::look_for(&src, conn).as_ref(),
+                    14.0,
+                    c(look::GRAY_400),
+                )
+            }),
             "Select a connection...",
             Wash::Strong,
         ),
