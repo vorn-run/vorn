@@ -2,7 +2,7 @@
 //! progress bars and the step's title, the step's body, and a footer
 //! that moves between steps.
 
-use super::{agent_icon, c, ico, white, Screen, ALT_LABEL, MOD_LABEL};
+use super::{agent_icon, alt_label, c, ico, mod_label, white, Screen};
 use crate::act::Act;
 use crate::look;
 use crate::onboarding::{self, OnbAct, Then, AGENTS, EXPLORE, MCP_CAPS, STEPS};
@@ -532,7 +532,7 @@ fn step_projects(s: &Screen<'_>) -> El {
 }
 
 fn step_sessions(s: &Screen<'_>) -> El {
-    let key = format!("{MOD_LABEL}N");
+    let key = format!("{m}N", m = mod_label());
     let mut pickers = div().row().items_center().gap(8.0);
     for (glyph, label) in [
         ("bot", "Agent"),
@@ -610,7 +610,7 @@ fn step_sessions(s: &Screen<'_>) -> El {
 }
 
 fn step_workspace() -> El {
-    let key = format!("{MOD_LABEL}J");
+    let key = format!("{m}J", m = mod_label());
     let slot = |h: f32| {
         div()
             .h(h)
@@ -766,7 +766,7 @@ fn step_workflows() -> El {
 }
 
 fn step_shortcuts(s: &Screen<'_>) -> El {
-    let keys = onboarding::essential_shortcuts(MOD_LABEL, ALT_LABEL);
+    let keys = onboarding::essential_shortcuts(mod_label(), alt_label());
     let row = |(desc, k): &(&str, String)| {
         div()
             .flex(1.0)
@@ -785,8 +785,8 @@ fn step_shortcuts(s: &Screen<'_>) -> El {
         }
         grid = grid.child(r);
     }
-    let palette = format!("{MOD_LABEL}K");
-    let panel = format!("{MOD_LABEL}/");
+    let palette = format!("{m}K", m = mod_label());
+    let panel = format!("{m}/", m = mod_label());
     div()
         .col()
         .gap(16.0)

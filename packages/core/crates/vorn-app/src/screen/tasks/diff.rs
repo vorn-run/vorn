@@ -7,7 +7,7 @@ use crate::act::Act;
 use crate::git::{DiffOp, GitAct};
 use crate::look;
 use crate::screen::side::file_icon;
-use crate::screen::{c, ico, white, Screen, MOD_LABEL};
+use crate::screen::{c, ico, mod_label, white, Screen};
 use crate::tasks::{Diff, DiffFile, TaskAct};
 use crate::ui::{area, div, text, Action, El, Id, Rgba, Role, TextStyle};
 
@@ -306,7 +306,7 @@ fn comment_input(s: &Screen<'_>, scope: Scope) -> El {
                     .pt(6.0)
                     .child(
                         text(
-                            format!("{MOD_LABEL}Enter to submit"),
+                            format!("{m}Enter to submit", m = mod_label()),
                             10.0,
                             c(look::GRAY_600),
                         )

@@ -18,7 +18,7 @@ const W: f32 = 560.0;
 pub(super) fn palette(s: &Screen<'_>) -> El {
     let query = s.st.palette.query.trim();
     let rows = palette::shown(
-        palette::commands(s.store, s.st, super::MOD_LABEL, super::ALT_LABEL),
+        palette::commands(s.store, s.st, super::mod_label(), super::alt_label()),
         &s.st.palette.query,
     );
     let search = div()

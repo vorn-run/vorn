@@ -305,7 +305,7 @@ fn grid(s: &Screen<'_>) -> Vec<Item> {
         items.push(shell);
     }
     let mut new = Item::new("plus", "New session...", Act::NewSession);
-    new.shortcut = Some(format!("{}N", super::MOD_LABEL));
+    new.shortcut = Some(format!("{}N", super::mod_label()));
     new.separator = !items.is_empty();
     items.push(new);
     let flows = workflows(s, None);

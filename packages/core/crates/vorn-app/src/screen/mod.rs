@@ -268,18 +268,22 @@ pub(crate) fn agent_icon(s: &Screen<'_>, agent: &str, size: f32) -> El {
 }
 
 /// The Alt key's label in shortcut hints.
-pub(crate) const ALT_LABEL: &str = if cfg!(target_os = "macos") {
-    "\u{2325}"
-} else {
-    "Alt+"
-};
+pub(crate) fn alt_label() -> &'static str {
+    if crate::ui::mods::mac() {
+        "\u{2325}"
+    } else {
+        "Alt+"
+    }
+}
 
-/// The modifier the renderer's shortcuts use: ⌘ on macOS, Ctrl elsewhere.
-pub(crate) const MOD_LABEL: &str = if cfg!(target_os = "macos") {
-    "\u{2318}"
-} else {
-    "Ctrl+"
-};
+/// The modifier the renderer's shortcuts use: ⌘ on a Mac, Ctrl elsewhere.
+pub(crate) fn mod_label() -> &'static str {
+    if crate::ui::mods::mac() {
+        "\u{2318}"
+    } else {
+        "Ctrl+"
+    }
+}
 
 /// `s` cut to `max` characters with an ellipsis: text is not clipped, so
 /// what would overflow its box is cut instead.

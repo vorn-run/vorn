@@ -13,7 +13,7 @@ use super::chrome::{divider, tool, window_controls};
 use super::menus::Item;
 use super::runs::{icon_button, status_dot};
 use super::sidebar::{control, toggle_section};
-use super::{c, ico, white, MainView, Screen, MOD_LABEL};
+use super::{c, ico, mod_label, white, MainView, Screen};
 use crate::act::Act;
 use crate::library::Look;
 use crate::look;
@@ -788,7 +788,7 @@ fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
             Act::Gate(GateOp::Approve(gk.clone())),
             "check",
             "Approve & continue",
-            Some(&format!("{MOD_LABEL}\u{21b5}")),
+            Some(&format!("{m}\u{21b5}", m = mod_label())),
             true,
             blocked.is_some(),
         ));
