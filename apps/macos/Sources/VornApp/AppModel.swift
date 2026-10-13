@@ -74,6 +74,8 @@ public enum Overlay: Equatable, Sendable {
     case addProject(editing: String?)
     /// WorktreeCleanupDialog.tsx.
     case removeWorktree(projectPath: String, worktreePath: String)
+    /// CommandPalette.tsx (⌘K).
+    case commandPalette
 }
 
 /// What the sidebar's projects section lists (ProjectsSectionToolbar.tsx).
