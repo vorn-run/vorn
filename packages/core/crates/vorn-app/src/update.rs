@@ -192,6 +192,7 @@ fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[cfg(not(target_arch = "wasm32"))]
     return vorn_spawn::command(program);
     #[cfg(target_arch = "wasm32")]
+    // spawn-visible: a browser has no processes; this only type-checks there.
     Command::new(program)
 }
 
