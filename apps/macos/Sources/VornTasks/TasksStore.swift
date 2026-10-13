@@ -417,16 +417,20 @@ public final class TasksStore {
 
     // MARK: - Plumbing
 
+    @ObservationIgnored private var lastWrite: Task<Void, Never>?
+
     private func mutate(_ id: String, _ change: (inout VornTask) -> Void) {
         guard let i = tasks.firstIndex(where: { $0.id == id }) else { return }
         change(&tasks[i])
         tasks[i].updatedAt = Self.now()
     }
 
-    /// Sends a write; a refusal puts the board back as vornd has it.
+    /// Sends a write after the ones before it; a refusal puts the board back as vornd has it.
     private func run(_ op: @escaping @Sendable (any TaskService) async throws -> Void) {
         let service = service
-        Task {
+        let previous = lastWrite
+        lastWrite = Task {
+            await previous?.value
             do {
                 try await op(service)
             } catch {

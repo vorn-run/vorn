@@ -1,16 +1,14 @@
-import AppKit
 import UserNotifications
 
-/// The OS side of the notifications page: asking once, and the test tone.
-enum NotificationPermission {
-    static func request() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+/// The OS side of the notifications page: asking once.
+public enum NotificationPermission {
+    /// The notification center only exists for a bundled app; a bare build has none.
+    public static var available: Bool {
+        Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    @MainActor static func bell(volume: Double) {
-        guard let sound = NSSound(named: "Glass") else { return NSSound.beep() }
-        sound.volume = Float(volume)
-        sound.play()
+    public static func request() {
+        guard available else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 }

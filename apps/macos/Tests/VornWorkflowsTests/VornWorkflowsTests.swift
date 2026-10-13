@@ -221,8 +221,12 @@ let nodes: [WorkflowNode] = try! decode(
         let wf = try #require(s.workflow("wf-nightly"))
         s.setEnabled(wf, false)
         #expect(s.workflow("wf-nightly")?.enabled == false)
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(await backend.writes.contains { $0.hasPrefix("setEnabled") })
+        var sent = false
+        for _ in 0..<200 where !sent {
+            sent = await backend.writes.contains { $0.hasPrefix("setEnabled") }
+            if !sent { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        #expect(sent)
     }
 
     @Test func answeringAGateGoesToTheBackend() async throws {

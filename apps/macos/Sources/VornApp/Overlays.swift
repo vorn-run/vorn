@@ -48,13 +48,15 @@ struct OverlayHost: View {
 
     private func close() {
         model.contextMenu = nil
+        if model.overlay == .onboarding { model.closeOnboarding() }
         model.overlay = nil
     }
 
     private var backdrop: Color {
         switch model.overlay {
         case .addProject?: Color.black.opacity(0.5)
-        case .shortcuts?, .removeWorktree?: Color.black.opacity(0.4)
+        case .onboarding?: Color.black.opacity(0.6)
+        case .shortcuts?, .removeWorktree?, .commandPalette?: Color.black.opacity(0.4)
         default: Color.white.opacity(0.001)
         }
     }
@@ -79,10 +81,23 @@ struct OverlayHost: View {
                     .fixedSize()
                     .offset(x: model.layoutMode(store) == .tabs ? r.maxX - 280 : r.minX, y: r.maxY + 6)
             }
+        case .dock:
+            if let r = rect("dock", geo) {
+                let panel = DockPanel(model: model, store: store, features: features,
+                                      includeMinimized: model.layoutMode(store) == .grid)
+                if model.sessionDockCollapsed {
+                    panel.offset(x: r.minX, y: r.maxY + 6)
+                } else {
+                    panel.frame(width: r.maxX, alignment: .trailing).offset(y: r.maxY + 6)
+                }
+            }
         case .shortcuts:
             ShortcutsPanel(model: model)
                 .frame(width: 520)
                 .offset(x: (size.width - 520) / 2, y: size.height * 0.15)
+        case .commandPalette:
+            CommandPaletteView(model: model, store: store, actions: actions, features: features)
+                .offset(x: (size.width - CommandPaletteView.width) / 2, y: size.height * 0.2)
         case .sidebarOptions:
             if let r = rect("sidebarOptions", geo) {
                 SidebarOptionsPanel(model: model).offset(x: r.minX, y: r.maxY + 4)
@@ -100,6 +115,9 @@ struct OverlayHost: View {
         case .removeWorktree(let projectPath, let worktreePath):
             WorktreeCleanupDialog(projectPath: projectPath, worktreePath: worktreePath, model: model, store: store,
                                   actions: actions)
+                .frame(width: size.width, height: size.height)
+        case .onboarding:
+            OnboardingModal(model: model, store: store, actions: actions, settings: features.settings)
                 .frame(width: size.width, height: size.height)
         case .newMenu:
             if let r = rect("newMenu", geo) {
@@ -364,6 +382,7 @@ struct ShortcutsPanel: View {
                                 .foregroundStyle(Theme.gray500)
                         }
                     }
+                    WelcomeGuideRow { model.openOnboarding() }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
@@ -385,13 +404,7 @@ struct ShortcutsPanel: View {
     }
 
     private func row<K: View>(_ label: String, @ViewBuilder key: () -> K) -> some View {
-        HStack {
-            Text(label).font(.ui(13)).foregroundStyle(Theme.gray300)
-            Spacer()
-            key()
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        ShortcutRow(label: label, key: key())
     }
 
     private func kbd(_ key: String) -> some View {
@@ -402,6 +415,26 @@ struct ShortcutsPanel: View {
             .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.white(0.04)))
             .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// A shortcut row, lit on hover like the renderer's `hover:bg-white/[0.03]`.
+private struct ShortcutRow<K: View>: View {
+    let label: String
+    let key: K
+    @State private var hovered = false
+
+    var body: some View {
+        HStack {
+            Text(label).font(.ui(13)).foregroundStyle(Theme.gray300)
+            Spacer()
+            key
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(Theme.white(hovered ? 0.03 : 0)))
+        .onHover { hovered = $0 }
+        .animation(.easeInOut(duration: 0.15), value: hovered)
     }
 }
 

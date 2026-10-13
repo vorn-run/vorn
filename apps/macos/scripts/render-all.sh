@@ -15,6 +15,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/vr.XXXXXX")
 data=$tmp/d
 mkdir -p "$tmp/home" "$data"
 printf "PS1='%%1~ %%# '\n" >"$tmp/home/.zshrc"
+node "$here/scripts/seed-plugins.mjs" files "$tmp/home" "$data"
 port=$((52000 + RANDOM % 8000))
 HOME=$tmp/home SHELL=/bin/zsh "$vornd" --data-dir "$data" --port "$port" --host 127.0.0.1 \
   --sessiond "$sessiond" --log-file "$tmp/vornd.log" </dev/null &
@@ -51,15 +52,34 @@ export VORN_DATA_DIR=$data
 "$bin/Vorn" --render "$out/shell-grid-menu.png" --context grid
 "$bin/Vorn" --render "$out/shell-card-menu.png" --context card:0
 "$bin/Vorn" --render "$out/shell-card-menu-sub.png" --context card:0 --submenu new-with
-for overlay in view-options recent shortcuts new-menu sidebar-options add-project edit-project project-menu; do
+for overlay in view-options recent shortcuts new-menu sidebar-options add-project edit-project project-menu command-palette; do
   "$bin/Vorn" --render "$out/overlay-$overlay.png" --overlay "$overlay"
 done
+"$bin/Vorn" --render "$out/palette-query.png" --overlay command-palette --palette-query term
+"$bin/Vorn" --render "$out/palette-empty.png" --overlay command-palette --palette-query zzzz
 for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
-for page in appearance general updates notifications worktrees agents ssh mcp keys about; do
+for step in 0 1 2 3 4 5 6; do
+  "$bin/Vorn" --render "$out/onboarding-$step.png" --overlay onboarding --onboarding-step "$step" --installed claude,copilot
+done
+"$bin/Vorn" --render "$out/onboarding-mcp.png" --overlay onboarding --onboarding-step 0 --installed claude,copilot --mcp-open
+"$bin/Vorn" --render "$out/onboarding-none.png" --overlay onboarding --onboarding-step 0 --installed none
+"$bin/Vorn" --render "$out/widget.png" --widget
+"$bin/Vorn" --render "$out/widget-compact.png" --widget --widget-compact
+"$bin/Vorn" --render "$out/widget-permission.png" --widget --widget-permission
+for page in appearance general updates notifications worktrees agents ssh network mcp keys about; do
   "$bin/Vorn" --render "$out/settings-$page.png" --settings "$page"
+done
+# Remote Access states, staged from hints (the render client cannot write).
+for hints in confirm sharing lan lan,all devices devices,revoke code expired asking token minted devices,error host host-error host-connected; do
+  "$bin/Vorn" --render "$out/settings-network-${hints//,/-}.png" --settings network --settings-hints "$hints"
+done
+node "$here/scripts/seed-plugins.mjs" connections "$data"
+"$bin/Vorn" --render "$out/settings-connectors.png" --settings connectors
+for hint in installed connections browse detail:acme-tickets detail:focus-timer detail:kusto add:acme-tickets add:http add:filesystem confirm:focus-timer; do
+  "$bin/Vorn" --render "$out/settings-plugins-${hint/:/-}.png" --settings connectors --settings-hints "plugins-$hint"
 done
 "$bin/Vorn" --render "$out/shell-update-ready.png" --update-status ready:0.8.1
 "$bin/Vorn" --render "$out/panes-files.png" --files 0 --claim 0:1
@@ -91,6 +111,11 @@ HTML
 node "$here/scripts/seed-test-vornd.mjs" "$data" --no-runs --review >/dev/null
 sleep 3
 "$bin/Vorn" --render "$out/app-workflows-review.png" --view workflows --review
+"$bin/Vorn" --render "$out/dock-waiting.png" --dock
+"$bin/Vorn" --render "$out/dock-tabs.png" --dock --layout tabs
+"$bin/Vorn" --render "$out/dock-collapsed.png" --dock --dock-collapsed
+"$bin/Vorn" --render "$out/overlay-dock.png" --dock --dock-collapsed --overlay dock
+"$bin/Vorn" --render "$out/error-screen.png" --size 900x600 --component error-screen
 
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"

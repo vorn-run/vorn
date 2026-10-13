@@ -80,6 +80,8 @@ public final class WorkflowsStore {
     @ObservationIgnored public var resumeSession: ((RunResumeRequest) -> Void)?
     /// The run prompt, full output, review page and missed schedules drawn over the window.
     public let surfaces = RunSurfaces()
+    /// Every run update vornd pushes, for the app's notifications.
+    @ObservationIgnored public var onRunUpdate: ((WorkflowExecution) -> Void)?
 
     @ObservationIgnored let backend: WorkflowsBackend
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -203,6 +205,15 @@ public final class WorkflowsStore {
         }
     }
 
+    /// Gates waiting on the user, one per step, for the session dock (useWaitingApprovals).
+    public var waitingApprovals: [WaitingApproval] {
+        workspaceRuns.flatMap { run in
+            run.nodeStates.filter { $0.status == .waiting && !$0.isSignInWait }.map {
+                WaitingApproval(run: run, state: $0, workflow: workflow(run.workflowId))
+            }
+        }
+    }
+
     public func waitingCount(for workflowId: String) -> Int {
         workspaceRuns.filter { $0.workflowId == workflowId && $0.waitingStep != nil }.count
     }
@@ -231,6 +242,14 @@ public final class WorkflowsStore {
         workflowRuns = []
         editorModel().load(nil)
         editorOpen = true
+    }
+
+    /// Opens a run on the runs landing, whatever filter was set (showRun).
+    public func showRun(_ runId: String) {
+        closeEditor()
+        tab = .runs
+        runFilter = .all
+        selectedRunId = runId
     }
 
     public func showAllRuns() {
@@ -361,8 +380,10 @@ public final class WorkflowsStore {
         switch event {
         case .runUpdated(let run):
             upsert(run)
+            onRunUpdate?(run)
         case .runCompleted(let run):
             upsert(run)
+            onRunUpdate?(run)
             scheduleReload()
         case .gateResolved:
             scheduleReload()
@@ -431,4 +452,18 @@ public final class WorkflowsStore {
     public var importedRequirements: ImportedRequirements?
     /// The save and open dialogs, replaced in tests and renders.
     @ObservationIgnored public var workflowFiles: WorkflowFileIO = .panels
+}
+
+/// A gate waiting on the user, with the run and workflow it belongs to.
+public struct WaitingApproval: Identifiable, Hashable, Sendable {
+    public let run: WorkflowExecution
+    public let state: NodeExecutionState
+    public let workflow: WorkflowDefinition?
+
+    public var id: String { "\(run.runId):\(state.nodeId)" }
+
+    /// What the gate asks: the run's word for it, else the step's configured message.
+    public var message: String? {
+        state.message ?? workflow?.nodes.first { $0.id == state.nodeId }?.config["message"]?.stringValue
+    }
 }

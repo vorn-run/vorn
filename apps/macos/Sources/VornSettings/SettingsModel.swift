@@ -58,11 +58,16 @@ public final class SettingsModel {
     /// Called after a write so the shell can pick up changes (font size, layout).
     public var onDefaultsChanged: ([String: JSONValue]) -> Void = { _ in }
     @ObservationIgnored public weak var updater: AppUpdater?
+    /// Remote Access's "Another machine"; nil hides that half, as the web build does.
+    @ObservationIgnored public var remoteHost: RemoteHostLink?
 
     public let client: VornClient
+    /// Settings › Plugins; the shell sets its `sessionIds` and `openWorkflowEditor`.
+    public let plugins: PluginsModel
 
     public init(client: VornClient, appVersion: String = SettingsModel.bundleVersion) {
         self.client = client
+        plugins = PluginsModel(client: client)
         self.appVersion = appVersion
     }
 

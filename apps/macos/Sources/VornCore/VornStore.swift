@@ -54,11 +54,15 @@ public final class VornStore {
     public static let topics = [
         "session:created", "session:updated", "session:reordered", "session-exit",
         "terminal:exit", "config:changed", "widget:status-update", "headless:exit", "headless:data",
-        "worktree:confirmCleanup",
+        "worktree:confirmCleanup", "terminal:bell", "terminal:notify",
     ]
 
     /// The last session in a worktree ended (`worktree:confirmCleanup`): project path, worktree path.
     @ObservationIgnored public var onWorktreeCleanup: (String, String) -> Void = { _, _ in }
+    /// A terminal rang its bell or a program in it asked to notify.
+    @ObservationIgnored public var onNotice: (AppNotice) -> Void = { _ in }
+    /// Why the last load after connecting failed; the app shows its error screen over it.
+    public private(set) var loadError: String?
 
     public init(
         dataDir: URL = VornEndpoint.defaultDataDir(),
@@ -118,13 +122,25 @@ public final class VornStore {
         case .disconnected(let reason): phase = .failed(reason)
         case .connected:
             endpoint = await client.endpoint
-            do {
-                try await reload()
-                phase = .connected
-            } catch {
-                phase = .failed(error.localizedDescription)
-            }
+            await load()
         }
+    }
+
+    private func load() async {
+        do {
+            try await reload()
+            loadError = nil
+            phase = .connected
+        } catch {
+            loadError = String(describing: error)
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// The error screen's Reload: reads everything again over the open connection.
+    public func retryLoad() async {
+        loadError = nil
+        await load()
     }
 
     private func reload() async throws {
@@ -228,6 +244,12 @@ public final class VornStore {
         case "config:changed":
             guard let config = try? params.decode(AppConfigSummary.self) else { return }
             applyConfig(config)
+        case "terminal:bell":
+            guard let id = params["id"]?.stringValue, let s = session(id) else { return }
+            onNotice(.agent(s, .bell))
+        case "terminal:notify":
+            guard let id = params["id"]?.stringValue, let s = session(id) else { return }
+            onNotice(.program(s, title: params["title"]?.stringValue ?? "", body: params["body"]?.stringValue ?? ""))
         case "worktree:confirmCleanup":
             guard let p = params["projectPath"]?.stringValue, let w = params["worktreePath"]?.stringValue else { return }
             onWorktreeCleanup(p, w)

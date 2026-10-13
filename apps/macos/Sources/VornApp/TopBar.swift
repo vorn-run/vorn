@@ -16,9 +16,10 @@ struct TopBar: View {
         ZStack {
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
-                    if !model.sidebarOpen { AppNavCluster(model: model) }
+                    if !model.sidebarOpen { AppNavCluster(model: model, workflows: features.workflows) }
                     if model.mainViewMode == .sessions {
-                        SessionDock(model: model, store: store)
+                        SessionDock(model: model, store: store, features: features,
+                                    includeMinimized: model.layoutMode(store) == .grid)
                         HeadlessBadge(model: model, store: store)
                     }
                 }
@@ -53,19 +54,21 @@ struct TopBar: View {
 
 struct AppNavCluster: View {
     @Bindable var model: AppModel
+    let workflows: WorkflowsStore
 
     var body: some View {
         HStack(spacing: 4) {
             IconButton(.panelLeft, size: 16, padding: 4) { model.sidebarOpen.toggle() }
                 .tooltip("Toggle sidebar", shortcut: "⌘B")
             VDivider().padding(.horizontal, 2)
-            MainViewPills(model: model)
+            MainViewPills(model: model, waiting: workflows.waitingApprovals.count)
         }
     }
 }
 
 private struct MainViewPills: View {
     @Bindable var model: AppModel
+    let waiting: Int
 
     var body: some View {
         HStack(spacing: 2) {
@@ -79,11 +82,15 @@ private struct MainViewPills: View {
                             .padding(.vertical, 4)
                             .background(RoundedRectangle(cornerRadius: Theme.radiusMd)
                                 .fill(active ? Theme.white(0.1) : .clear))
+                            .overlay(alignment: .topTrailing) {
+                                if mode == .workflows && waiting > 0 { WaitingBadge(count: waiting) }
+                            }
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                .tooltip(mode.label, shortcut: mode.shortcut)
+                .tooltip(mode == .workflows && waiting > 0 ? "Workflows · \(waiting) awaiting review" : mode.label,
+                         shortcut: mode.shortcut)
             }
         }
         .padding(2)
@@ -91,34 +98,24 @@ private struct MainViewPills: View {
     }
 }
 
-/// Minimized cards and sessions waiting on approval (SessionDock.tsx, expanded).
-private struct SessionDock: View {
-    @Bindable var model: AppModel
-    let store: VornStore
+/// The count of gates awaiting review on the Workflows pill.
+private struct WaitingBadge: View {
+    let count: Int
 
     var body: some View {
-        let items = store.sessions.filter { model.minimizedIDs.contains($0.id) }
-        HStack(spacing: 6) {
-            ForEach(items.prefix(4)) { s in
-                MinimizedPill(session: s) {
-                    model.minimizedIDs.remove(s.id)
-                    model.focus(s.id)
-                }
-            }
-            if items.count > 4 {
-                Text("+\(items.count - 4)")
-                    .font(.ui(11, weight: .medium))
-                    .foregroundStyle(Theme.gray400)
-                    .padding(.horizontal, 6)
-                    .frame(minWidth: 28, minHeight: 26)
-                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.hairline, lineWidth: 1))
-            }
-        }
+        Text(count > 9 ? "9+" : "\(count)")
+            .font(.system(size: 9, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(Theme.surfaceBase)
+            .padding(.horizontal, 3)
+            .frame(minWidth: 12, minHeight: 12, maxHeight: 12)
+            .background(Theme.bronzo, in: Capsule())
+            .offset(x: 2, y: -2)
+            .accessibilityHidden(true)
     }
 }
 
-private struct MinimizedPill: View {
+struct MinimizedPill: View {
     let session: TerminalSession
     let restore: () -> Void
 

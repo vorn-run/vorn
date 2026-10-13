@@ -215,6 +215,11 @@ public struct AppConfigSummary: Decodable, Sendable, Equatable {
         public var layoutMode: String?
         public var reopenSessions: Bool?
         public var showHeadlessAgents: Bool?
+        public var notifications: NotificationPrefs?
+        /// Which onboarding version was dismissed; App.tsx reads it with `Number()`.
+        public var hasSeenOnboarding: JSONValue?
+        /// Whether the floating widget may show; index.ts only honours a literal `true`.
+        public var widgetEnabled: JSONValue?
 
         public init(defaultAgent: AgentType? = nil, layoutMode: String? = nil, reopenSessions: Bool? = nil,
                     showHeadlessAgents: Bool? = nil) {
