@@ -88,8 +88,11 @@ with the setup file and uninstall the old one from Settings → Apps.
 
 ## Command line
 
-The installer also puts a `vorn` command on your PATH. It talks to the same server the app
-does, and starts one if none is running.
+Installing Vorn also puts a `vorn` command on your PATH. It talks to the same server the app
+does, and starts one if none is running. The Windows installer adds its folder to your user
+PATH, and the .deb installs `/usr/bin/vorn`. On macOS and from the AppImage, the app links it
+on first launch, into `/usr/local/bin` when you can write there and `~/.local/bin` otherwise,
+and says where. If that folder is not on your PATH, the notice offers the fix.
 
 ```bash
 vorn session start --agent claude --prompt "fix the failing test"
@@ -103,8 +106,8 @@ vorn server serve          # a server on its own, without the app
 ```
 
 `vorn` on its own opens the app. `--json` gives machine-readable output on stdout, with
-notices and errors on stderr, so a command can be piped. If you installed by dragging the
-app across or with Homebrew, Settings → General → Command Line Tool writes the same command.
+notices and errors on stderr, so a command can be piped. Settings → General → Command-Line
+Tool shows where the command is, and installs or removes it.
 
 Workflows run in the server, so a run started here keeps going with nothing open — and a
 scheduled one happens whether or not the app is running.

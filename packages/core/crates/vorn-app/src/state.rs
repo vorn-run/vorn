@@ -484,6 +484,8 @@ pub struct State {
     /// The project whose delete asks first.
     pub confirm_delete: Option<String>,
     pub toasts: Vec<Toast>,
+    /// What the launch step did with the `vorn` command, until dismissed.
+    pub cli_notice: Option<crate::cli_link::Notice>,
     /// Sessions the restored banner offers.
     pub banner: Vec<TerminalSession>,
     pub restoring: bool,

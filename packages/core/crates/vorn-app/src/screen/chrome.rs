@@ -836,9 +836,39 @@ pub(super) fn banner(s: &Screen<'_>) -> Option<El> {
     )
 }
 
+/// What the launch step did with the `vorn` command, with its fix, until dismissed.
+fn cli_notice(s: &Screen<'_>) -> Option<El> {
+    use crate::cli_link::Fix;
+    use crate::settings::SetAct;
+    let n = s.st.cli_notice.as_ref()?;
+    let kind = if n.error {
+        ("triangle-alert", look::AMBER_400)
+    } else {
+        ("terminal", look::BLUE_400)
+    };
+    let actions = n
+        .fix
+        .iter()
+        .map(|f| {
+            let act = match f {
+                Fix::Install(_) => Act::Set(SetAct::InstallCli),
+                Fix::AddToPath(dir) => Act::Set(SetAct::CliAddToPath(dir.clone())),
+                Fix::CopyPathLine(dir) => Act::Copy {
+                    text: crate::cli_link::path_line(dir),
+                    toast: "Copied. Add it to your shell's startup file.".to_owned(),
+                },
+            };
+            (f.label(), act, false)
+        })
+        .collect();
+    let dismiss = Act::Set(SetAct::DismissCliNotice);
+    Some(super::git::toast(s, kind, &n.text, actions, Some(dismiss)))
+}
+
 /// The toasts, newest at the bottom right.
 pub(super) fn toasts(s: &Screen<'_>) -> Option<El> {
-    let worktrees = super::git::toasts(s);
+    let mut worktrees = super::git::toasts(s);
+    worktrees.extend(cli_notice(s));
     if s.st.toasts.is_empty() && worktrees.is_empty() {
         return None;
     }

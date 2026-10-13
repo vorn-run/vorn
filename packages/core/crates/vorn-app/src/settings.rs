@@ -105,7 +105,12 @@ pub enum SetAct {
     ShellMenu,
     PickShell(String),
     EditShell,
+    /// Install, Reinstall, or a notice's Replace and Try again.
     InstallCli,
+    RemoveCli,
+    /// The notice's administrator prompt that lists this folder in `/etc/paths.d`.
+    CliAddToPath(std::path::PathBuf),
+    DismissCliNotice,
     CheckUpdates,
     /// Restart into a ready update, download an offered one, or retry.
     UpdateNow,
@@ -962,8 +967,13 @@ pub fn older_note(h: &Holder) -> String {
 pub struct CliState {
     pub available: bool,
     pub installed: bool,
+    /// Where it is, or would go.
     pub path: String,
     pub on_path: bool,
+    /// What is in the way, or why it cannot be installed.
+    pub note: Option<String>,
+    /// In a folder this user cannot change, such as a package's `/usr/bin`.
+    pub managed: bool,
 }
 
 /// Everything the settings page holds between frames.

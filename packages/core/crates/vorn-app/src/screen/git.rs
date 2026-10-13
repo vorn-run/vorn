@@ -884,7 +884,7 @@ pub(super) fn removal(s: &Screen<'_>) -> El {
 }
 
 /// One toast in today's style, with its action buttons.
-fn toast(
+pub(super) fn toast(
     s: &Screen<'_>,
     (glyph, tint): (&str, u32),
     message: &str,

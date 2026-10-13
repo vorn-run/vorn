@@ -612,53 +612,48 @@ fn select_row(s: &Screen<'_>, key: &str, title: &str, description: &str) -> El {
     row(title, description, None, select(s, key, &label), false)
 }
 
+/// Where the `vorn` command is, with Install, or Reinstall and Remove.
 fn cli_row(s: &Screen<'_>) -> Option<El> {
     let st = s.st.settings.cli.as_ref()?;
-    let note = s.st.settings.cli_error.clone().unwrap_or_else(|| {
-        if st.on_path {
-            st.path.clone()
-        } else {
-            format!("{} \u{2014} add its directory to your PATH", st.path)
-        }
-    });
+    let note =
+        s.st.settings
+            .cli_error
+            .clone()
+            .or_else(|| st.note.clone())
+            .unwrap_or_else(|| {
+                if st.installed && !st.on_path {
+                    format!("{} \u{2014} its folder is not on your PATH", st.path)
+                } else {
+                    st.path.clone()
+                }
+            });
     let description = if st.installed {
         "Installed. Run `vorn --help` in a terminal."
     } else {
-        "Put the vorn command on your PATH, for starting sessions and reading them from a terminal."
+        "The vorn command starts sessions and reads them from a terminal."
     };
-    let enabled = st.available && !s.st.settings.cli_busy;
-    let id = s.acts.on("cli", set(SetAct::InstallCli));
-    let hot = s.ui.hover(id);
-    let mut b = div()
-        .id(id)
-        .px(8.0)
-        .py(4.0)
-        .rounded(4.0)
-        .shrink0()
-        .bg(white(0.04).mix(white(0.08), hot))
-        .role(
-            Role::Button,
-            if st.installed { "Reinstall" } else { "Install" },
-        )
-        .child(
-            text(
-                if st.installed { "Reinstall" } else { "Install" },
-                12.0,
-                c(look::GRAY_400).mix(c(look::GRAY_200), hot),
-            )
-            .line_height(16.0)
-            .silent(),
-        );
-    b = if enabled {
-        b.on(Action::Click)
+    let enabled = st.available && !st.managed && !s.st.settings.cli_busy;
+    let control = if st.installed {
+        div()
+            .row()
+            .gap(6.0)
+            .shrink0()
+            .child(button(s, "cli", "Reinstall", SetAct::InstallCli, enabled))
+            .child(button(
+                s,
+                "cli-remove",
+                "Remove",
+                SetAct::RemoveCli,
+                enabled,
+            ))
     } else {
-        b.opacity(0.4)
+        button(s, "cli", "Install", SetAct::InstallCli, enabled)
     };
     Some(row(
-        "Command Line Tool",
+        "Command-Line Tool",
         description,
         Some(&note),
-        b,
+        control,
         !st.available,
     ))
 }

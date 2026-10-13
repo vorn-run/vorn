@@ -269,6 +269,8 @@ struct Win {
     reconnect: Box<dyn Fn() -> Result<App, String>>,
     window: Option<Arc<NativeWindow>>,
     updater: Arc<Updater>,
+    /// The launch step's notice about the `vorn` command, for the first app.
+    cli: Option<std::sync::mpsc::Receiver<Option<vorn_app::cli_link::Notice>>>,
 }
 
 impl Win {
@@ -365,6 +367,9 @@ impl WindowApp for Win {
         };
         self.waiting = None;
         app.set_updater(Arc::clone(&self.updater));
+        if let Some(rx) = self.cli.take() {
+            app.set_cli_launch(rx);
+        }
         if let Some(window) = &self.window {
             app.opened(window);
             // The app draws its own frame outside macOS.
@@ -395,12 +400,16 @@ fn window(args: &Args) -> Result<(), String> {
         launch::retire_older(&dir, &server);
     }
     let updater = Updater::start(Arc::clone(&wake));
+    let mut cli = Some(vorn_app::cli_link::start(dir.clone(), Arc::clone(&wake)));
     let mut waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
     // Connected before the window opens when vornd runs, so it never shows
     // the waiting screen; otherwise this starts the bundled one.
     let mut app = waiting.poll();
     if let Some(app) = &mut app {
         app.set_updater(Arc::clone(&updater));
+        if let Some(rx) = cli.take() {
+            app.set_cli_launch(rx);
+        }
     }
     let ready = app.is_some();
     let reconnect = Box::new(move || {
@@ -430,8 +439,25 @@ fn window(args: &Args) -> Result<(), String> {
             reconnect,
             window: None,
             updater,
+            cli,
         }
     })
+}
+
+/// The launch step alone, for checking a package: links the `vorn` command
+/// (or not) and prints what the notice would say.
+fn install_cli(args: &Args) -> Result<(), String> {
+    match vorn_app::cli_link::on_launch(&args.data_dir()?) {
+        Some(n) if n.error => Err(n.text),
+        Some(n) => {
+            println!("{}", n.text);
+            Ok(())
+        }
+        None => {
+            println!("{}", vorn_app::cli_link::state().path);
+            Ok(())
+        }
+    }
 }
 
 /// The floating widget, a window of its own over other apps.
@@ -466,6 +492,7 @@ fn main() {
         "shot" => shot(&args),
         "window" => window(&args),
         "widget" => widget(&args),
+        "install-cli" => install_cli(&args),
         other => Err(format!("unknown mode {other:?}")),
     });
     if let Err(e) = result {

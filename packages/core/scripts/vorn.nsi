@@ -3,7 +3,8 @@
 ; It installs for the current user where the Electron app's installer did and
 ; takes over its registry entries, so an existing install updates in place.
 ; The updater runs it with /S --updated --force-run: silent, no folder
-; choice, and Vorn started when done.
+; choice, and Vorn started when done. A first install puts the folder with
+; vorn.exe on the user's PATH; the uninstaller takes it off.
 
 Unicode true
 ManifestDPIAware true
@@ -13,6 +14,7 @@ RequestExecutionLevel user
 !include MUI2.nsh
 !include FileFunc.nsh
 !include LogicLib.nsh
+!include WordFunc.nsh
 
 !define APP "Vorn"
 !define EXE "Vorn.exe"
@@ -20,6 +22,7 @@ RequestExecutionLevel user
 !define INSTALL_KEY "Software\${GUID}"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${GUID}"
 !define URL_KEY "Software\Classes\vorn"
+!define CLI_DIR "$INSTDIR\resources\vornd"
 
 Name "${APP}"
 OutFile "${OUTFILE}"
@@ -128,6 +131,34 @@ Function RemoveElectron
   ${EndIf}
 FunctionEnd
 
+; Adds (+) or removes (-) the vorn command's folder in the user's PATH, for
+; terminals opened after. A PATH too long to read whole is left alone: the
+; app adds the folder itself on launch.
+!macro UserPath OP
+  ClearErrors
+  ReadRegStr $0 HKCU "Environment" "Path"
+  StrLen $1 $0
+  IntOp $1 $1 + 260
+  ${If} $1 < ${NSIS_MAX_STRLEN}
+    ${If} $0 == ""
+      StrCpy $1 ""
+      ${If} "${OP}" == "+"
+        StrCpy $1 "${CLI_DIR}"
+      ${EndIf}
+    ${Else}
+      ${WordAdd} $0 ";" "${OP}${CLI_DIR}" $1
+    ${EndIf}
+    ${If} $1 != $0
+      ${If} $1 == ""
+        DeleteRegValue HKCU "Environment" "Path"
+      ${Else}
+        WriteRegExpandStr HKCU "Environment" "Path" $1
+      ${EndIf}
+      SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 Section "Vorn"
   SetShellVarContext current
   Call WaitForApp
@@ -172,10 +203,16 @@ Section "Vorn"
   WriteRegStr HKCU "${URL_KEY}" "URL Protocol" ""
   WriteRegStr HKCU "${URL_KEY}\DefaultIcon" "" "$INSTDIR\${EXE},0"
   WriteRegStr HKCU "${URL_KEY}\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
+
+  ; An update keeps whatever the person chose in Settings.
+  ${If} $updated != 1
+    !insertmacro UserPath "+"
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
+  !insertmacro UserPath "-"
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
   RMDir /r /REBOOTOK "$INSTDIR\resources"

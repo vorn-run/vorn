@@ -168,7 +168,9 @@ fi
 
 const APP_RUN = `#!/bin/sh
 here="$(dirname "$(readlink -f "$0")")"
-# VORN_CLI=1 runs the bundled command line instead of the app.
+# VORN_CLI=1 runs the bundled command line instead of the app, and so does a
+# vorn link to this image (ARGV0 is the name it was started by).
+if [ -z "$VORN_CLI" ] && [ "\${ARGV0##*/}" = vorn ] && [ -L "$(command -v "$ARGV0")" ]; then VORN_CLI=1; fi
 if [ -n "$VORN_CLI" ]; then exec "$here/resources/vornd/vorn" "$@"; fi
 exec "$here/vorn" "$@"
 `
