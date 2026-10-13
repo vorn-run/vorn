@@ -1,0 +1,23 @@
+agent = "copilot"
+
+# A permission prompt: a command, an edit or a tool, as a numbered menu.
+[[rule]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  'Do you want to (run|edit|create|allow|use)',
+  '^[\s│]*❯\s*\d+\.\s',
+  'No, and tell .* what to do differently',
+]
+
+# A turn in progress: the spinner's line offers to cancel it.
+[[rule]]
+status = "working"
+rows = [-12, -1]
+any = ['(?i)\besc to (cancel|interrupt)\b']
+
+# The input box, empty or being typed in.
+[[rule]]
+status = "idle"
+rows = [-8, -1]
+any = ['@ to mention files', '^[\s│]*>(\s|$)', '\? for shortcuts']

@@ -1,0 +1,29 @@
+agent = "claude"
+
+# A choice to make: a permission prompt, the trust or theme picker, a plan to
+# approve. Each draws a numbered menu with a pointer on the chosen line.
+[[rule]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  '^[\s│]*❯\s*\d+\.\s',
+  'Do you want to (proceed|make this edit|create|allow)',
+  'Would you like to proceed\?',
+]
+
+# A picker with no numbers, such as the theme chooser on first start.
+[[rule]]
+status = "waiting"
+all = ['^[\s│]*❯\s+\S', '(?i)^[\s│]*(choose|select)\b|enter to (confirm|select)']
+
+# A turn in progress: the spinner's line offers to interrupt it.
+[[rule]]
+status = "working"
+rows = [-12, -1]
+any = ['(?i)\besc to interrupt\b']
+
+# The prompt, empty or being typed in, with nothing running.
+[[rule]]
+status = "idle"
+rows = [-8, -1]
+any = ['^[\s│]*>(\s|$)', '\? for shortcuts']

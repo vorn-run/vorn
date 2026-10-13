@@ -42,6 +42,8 @@ use vorn_sessiond_wire::{AttachFrom, AttachRefusal, Checkpoint, Kind, SessionInf
 use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
+use vorn_analysis::rules::Rules;
+
 use crate::snapshot::VtSnapshot;
 use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT};
 
@@ -103,6 +105,23 @@ pub struct Config {
     /// Whether a session has viewers the engine does not see itself (a
     /// host's bytes clients); one with any is never put away.
     pub viewed: Option<Viewed>,
+    /// The screen rules a session's agent status is read with, asked of it
+    /// by id. Where none of them holds, or a session has none, the
+    /// analyzer's patterns decide.
+    pub agents: Option<Agents>,
+}
+
+/// Asked of a session by id: see [`Config::agents`]. `None` while the host
+/// does not know what the session runs yet, `Some(None)` when it runs
+/// something without rules.
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
+pub struct Agents(pub Arc<dyn Fn(&str) -> Option<Option<&'static Rules>> + Send + Sync>);
+
+impl std::fmt::Debug for Agents {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Agents")
+    }
 }
 
 /// Asked of a session by id: see [`Config::viewed`].
@@ -129,6 +148,7 @@ impl Default for Config {
             colors: None,
             idle: None,
             viewed: None,
+            agents: None,
         }
     }
 }
@@ -261,7 +281,9 @@ pub enum Effect {
     /// A state: the cwd from here on.
     Cwd(String),
     /// A state: the agent status from here on, one of
-    /// `vorn_analysis::STATUS_*`.
+    /// `vorn_analysis::STATUS_*`: what the agent's screen rules from
+    /// [`Config::agents`] read (idle among them), or the analyzer's
+    /// patterns where none holds.
     Status(u32),
     /// A state: the program's OSC 9;4 progress from here on.
     Progress {
@@ -503,6 +525,46 @@ pub struct Session {
     waiting: Vec<GridIn>,
     /// Snapshots asked for and not cut yet, and when each was asked.
     snapshots: Vec<(u64, Instant)>,
+    /// The agent's screen rules once [`Config::agents`] knows them, else
+    /// when it was last asked.
+    rules: Resolve,
+}
+
+/// Where a session's screen rules stand.
+#[derive(Debug, Clone, Copy)]
+enum Resolve {
+    Known(Option<&'static Rules>),
+    Asked(Instant),
+    Never,
+}
+
+/// How often an agent not known yet is asked about again.
+const RESOLVE_EVERY: Duration = Duration::from_secs(1);
+
+/// The session's screen rules, asking [`Config::agents`] while they are not
+/// known and a while has passed since it was last asked.
+fn resolve(state: &mut Resolve, cfg: &Config, id: &str, now: Instant) -> Option<&'static Rules> {
+    match *state {
+        Resolve::Known(rules) => return rules,
+        Resolve::Asked(at) if now.duration_since(at) < RESOLVE_EVERY => return None,
+        Resolve::Asked(_) | Resolve::Never => {}
+    }
+    match cfg.agents.as_ref() {
+        None => {
+            *state = Resolve::Known(None);
+            None
+        }
+        Some(Agents(ask)) => match ask(id) {
+            Some(rules) => {
+                *state = Resolve::Known(rules);
+                rules
+            }
+            None => {
+                *state = Resolve::Asked(now);
+                None
+            }
+        },
+    }
 }
 
 impl Session {
@@ -580,6 +642,7 @@ impl Session {
             fx: Vec::new(),
             waiting: Vec::new(),
             snapshots: Vec::new(),
+            rules: Resolve::Never,
         }
     }
 
@@ -838,6 +901,7 @@ impl Session {
             // An answer to an attach that was turned down.
             return;
         };
+        let rules = resolve(&mut self.rules, &self.cfg, &self.id, now);
         let first = out.len();
         let mut applied = false;
         for e in entries {
@@ -863,6 +927,7 @@ impl Session {
                 id: &self.id,
                 cfg: &self.cfg,
                 sent: self.open.sent,
+                rules,
             };
             run.apply(&ctx, e, now, &mut self.fx, &mut self.reason, out);
             if let Record::Exit { code, signal } = e.rec {
@@ -923,6 +988,7 @@ impl Session {
                 id: &self.id,
                 cfg: &self.cfg,
                 sent: self.open.sent,
+                rules: None,
             };
             run.cut_due(&ctx, true, &mut self.checkpoints, &mut self.uncut, out);
         }
@@ -937,6 +1003,7 @@ impl Session {
                 id: &self.id,
                 cfg: &self.cfg,
                 sent: self.open.sent,
+                rules: None,
             };
             run.cut_due(&ctx, true, &mut self.checkpoints, &mut self.uncut, out);
         }
@@ -1042,6 +1109,7 @@ impl Session {
                                     id: &self.id,
                                     cfg: &self.cfg,
                                     sent: self.open.sent,
+                                    rules: None,
                                 };
                                 run.cut_due(
                                     &ctx,
@@ -1169,6 +1237,7 @@ struct Ctx<'a> {
     id: &'a str,
     cfg: &'a Config,
     sent: Cursor,
+    rules: Option<&'static Rules>,
 }
 
 impl Run {
@@ -1220,6 +1289,7 @@ impl Run {
         let mut status = None;
         match &e.rec {
             Record::Data { bytes, .. } => {
+                self.term.rules = ctx.rules;
                 status = self.term.feed(bytes, ctx.cfg.analyze, fx);
                 self.since_cut += bytes.len() as u64;
                 self.last_output = now;

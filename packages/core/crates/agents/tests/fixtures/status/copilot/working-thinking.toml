@@ -1,0 +1,28 @@
+# Hand-written from the agent's screen; no recording of this state ships.
+status = "working"
+screen = '''
+> fix the failing test in parser.rs
+
+● I'll run the tests first.
+
+● Run the parser tests
+  $ cargo test -p parser
+  └ 14 lines...
+
+● The empty-input case returns an error where callers expect an empty list.
+
+
+
+
+
+
+
+
+∙ Thinking (Esc to cancel)
+
+ ~/dev/parser [⎇ main*]                                                 model
+╭──────────────────────────────────────────────────────────────────────────╮
+│ >  Enter @ to mention files or / for commands                            │
+╰──────────────────────────────────────────────────────────────────────────╯
+ Ctrl+c Exit · Ctrl+r Expand recent
+'''

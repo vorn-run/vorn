@@ -3,11 +3,13 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use libghostty_vt::fmt::Format;
+use libghostty_vt::selection::{FormatOptions, Selection};
 use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{
     ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
-    PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, Terminal,
-    TertiaryDeviceAttributes,
+    Point, PointCoordinate, PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize,
+    Terminal, TertiaryDeviceAttributes,
 };
 
 use crate::scan::Scan;
@@ -290,6 +292,49 @@ impl Emulator {
             .then(|| self.holds.get())
     }
 
+    /// The cursor's row and column on the screen, and whether it shows.
+    pub fn cursor(&self) -> (u16, u16, bool) {
+        (
+            self.term.cursor_y().unwrap_or(0),
+            self.term.cursor_x().unwrap_or(0),
+            self.term.is_cursor_visible().unwrap_or(false),
+        )
+    }
+
+    /// Screen rows `from..=to` as plain text, one string per row with its
+    /// trailing blanks dropped, into `out`, which is cleared first.
+    pub fn rows_text(&self, from: u16, to: u16, out: &mut Vec<String>) {
+        out.clear();
+        let to = to.min(self.rows.saturating_sub(1));
+        if from > to {
+            return;
+        }
+        let at = |x: u16, y: u16| {
+            self.term
+                .grid_ref(Point::Active(PointCoordinate { x, y: u32::from(y) }))
+                .ok()
+        };
+        let text = at(0, from)
+            .zip(at(self.cols.saturating_sub(1), to))
+            .and_then(|(a, b)| {
+                let sel = Selection::new(a, b, false);
+                let opts = FormatOptions::new()
+                    .with_emit_format(Format::Plain)
+                    .with_unwrap(false)
+                    .with_trim(true)
+                    .with_selection(&sel);
+                self.term.format_selection_alloc(None, opts).ok().flatten()
+            });
+        if let Some(text) = text {
+            out.extend(
+                String::from_utf8_lossy(&text)
+                    .split('\n')
+                    .map(|r| r.trim_end().to_owned()),
+            );
+        }
+        out.resize(usize::from(to - from) + 1, String::new());
+    }
+
     /// Scrollback clears (ED 3) and resets (RIS): history line numbers start again when this moves.
     pub fn history_clears(&self) -> u64 {
         self.scan.clears
@@ -438,6 +483,25 @@ fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_text_keeps_one_string_per_screen_row() {
+        let mut em = Emulator::with_scrollback(12, 6, 1 << 16).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"old\r\n\r\n\r\n\r\n\r\n\r\n", &mut fx);
+        em.feed(
+            b"\x1b[2J\x1b[Htop  \x1b[3;3Hmid\x1b[6;1H> abcdefghi\x1b[?25l",
+            &mut fx,
+        );
+        let mut rows = Vec::new();
+        em.rows_text(0, 5, &mut rows);
+        assert_eq!(rows, ["top", "", "  mid", "", "", "> abcdefghi"]);
+        em.rows_text(2, 99, &mut rows);
+        assert_eq!(rows, ["  mid", "", "", "> abcdefghi"]);
+        em.rows_text(4, 3, &mut rows);
+        assert!(rows.is_empty());
+        assert_eq!(em.cursor(), (5, 11, false));
+    }
 
     /// ED 3, DECSED 3 and RIS each count as a scrollback clear; ED 2 does not.
     #[test]

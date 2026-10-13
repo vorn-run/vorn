@@ -5,11 +5,14 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Output analysis for agent sessions: stripped line ring, bracketed paste and status patterns in one pass"
+description = "Output analysis for agent sessions: stripped line ring, bracketed paste and status patterns in one pass, and the matcher for agents' screen rules"
 
 [dependencies]
 memchr = "2"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
+# Agents' screen rules are TOML files.
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
