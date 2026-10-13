@@ -30,6 +30,7 @@ pub const TOPICS: &[&str] = &[
     "pairing:*",
     "terminal:bell",
     "terminal:notify",
+    "terminal:command",
     "widget:permission-request",
 ];
 

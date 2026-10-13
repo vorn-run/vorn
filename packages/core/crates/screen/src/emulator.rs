@@ -12,7 +12,7 @@ use libghostty_vt::terminal::{
     Terminal, TertiaryDeviceAttributes,
 };
 
-use crate::scan::Scan;
+use crate::scan::{Osc, Scan};
 use crate::{clip_units, dimension, is_plausible_path, percent_decode, Result};
 
 /// The longest unfinished sequence a checkpoint carries; inside a longer one none is cut.
@@ -41,6 +41,29 @@ pub enum Effect {
         state: ProgressState,
         percent: Option<u8>,
     },
+    /// A shell's OSC 133 prompt or command mark.
+    Command(Mark),
+}
+
+/// Where a shell is in running a command, as its OSC 133 marks say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mark {
+    /// A new prompt (A).
+    Prompt,
+    /// A command began running (C), with its text when the shell told it.
+    Start { command: Option<String> },
+    /// The command finished (D), with its exit code and the duration the shell measured.
+    End {
+        exit_code: Option<i32>,
+        duration_ms: Option<u64>,
+    },
+}
+
+/// What OSC 5522 said about the next command mark.
+#[derive(Debug, Default)]
+pub(crate) struct Pending {
+    command: Option<String>,
+    duration_ms: Option<u64>,
 }
 
 /// What an OSC 9;4 progress report shows.
@@ -111,6 +134,8 @@ pub struct Emulator {
     pub(crate) title: String,
     pub(crate) cwd: String,
     pub(crate) scan: Scan,
+    /// The command text and duration OSC 5522 gave for the next mark.
+    pending: Pending,
     /// Which of Ghostty's title and pwd the last write changed.
     changed: Rc<Cell<u8>>,
     /// Output bytes handed to Ghostty by [`Emulator::feed`].
@@ -238,6 +263,7 @@ impl Emulator {
             title: String::new(),
             cwd: String::new(),
             scan: Scan::default(),
+            pending: Pending::default(),
             changed,
             parsed: 0,
             holds,
@@ -372,10 +398,19 @@ impl Emulator {
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<Effect>) {
         self.parsed += bytes.len() as u64;
         self.term.vt_write(bytes);
-        let (cwd, effects) = (&mut self.cwd, &self.effects);
-        self.scan.feed(bytes, |payload| {
-            if let Some(moved) = private_cwd(cwd, payload) {
-                effects.borrow_mut().push(Effect::Cwd(moved));
+        let (cwd, effects, pending) = (&mut self.cwd, &self.effects, &mut self.pending);
+        self.scan.feed(bytes, |kind, payload| match kind {
+            Osc::Private => {
+                if let Some(moved) = private_cwd(cwd, payload) {
+                    effects.borrow_mut().push(Effect::Cwd(moved));
+                } else {
+                    pending.read(payload);
+                }
+            }
+            Osc::Mark => {
+                if let Some(mark) = pending.mark(payload) {
+                    effects.borrow_mut().push(Effect::Command(mark));
+                }
             }
         });
         // After the OSC 5522 reports, so one in the same feed is not hidden.
@@ -456,6 +491,66 @@ fn private_cwd(cwd: &mut String, payload: &[u8]) -> Option<String> {
     }
     cwd.clone_from(&next);
     Some(next)
+}
+
+impl Pending {
+    /// Takes an OSC 5522 `cmd;<base64>` or `dur;<ms>` report.
+    fn read(&mut self, payload: &[u8]) {
+        if let Some(b64) = payload.strip_prefix(b"cmd;") {
+            self.command = base64_decode(b64)
+                .map(|raw| clip_units(String::from_utf8_lossy(&raw).trim()))
+                .filter(|c| !c.is_empty());
+        } else if let Some(ms) = payload.strip_prefix(b"dur;") {
+            self.duration_ms = std::str::from_utf8(ms).ok().and_then(|m| m.parse().ok());
+        }
+    }
+
+    /// An OSC 133 payload as a mark; the command text and duration go to the mark that uses them.
+    fn mark(&mut self, payload: &[u8]) -> Option<Mark> {
+        let text = String::from_utf8_lossy(payload);
+        let mut parts = text.split(';');
+        match parts.next()? {
+            "A" => Some(Mark::Prompt),
+            "C" => {
+                let given = parts
+                    .find_map(|p| p.strip_prefix("cmdline_url="))
+                    .map(|c| percent_decode(c).unwrap_or_else(|| c.to_owned()));
+                let command = given.or(self.command.take());
+                self.command = None;
+                Some(Mark::Start {
+                    command: command.map(|c| clip_units(c.trim())).filter(|c| !c.is_empty()),
+                })
+            }
+            "D" => Some(Mark::End {
+                exit_code: parts.next().and_then(|c| c.trim().parse().ok()),
+                duration_ms: self.duration_ms.take(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Standard or URL-safe base64, padded or not; `None` when it is not base64.
+fn base64_decode(s: &[u8]) -> Option<Vec<u8>> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' | b'-' => Some(62),
+        b'/' | b'_' => Some(63),
+        _ => None,
+    };
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for &c in s.iter().take_while(|&&c| c != b'=') {
+        acc = ((acc << 6) | u32::from(value(c)?)) & 0xffff;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 /// The path of an OSC 7 URL (or a bare path), percent-decoded.
@@ -583,6 +678,51 @@ mod tests {
             ]
         );
         assert_eq!((em.title(), em.cwd()), ("t", "/srv"));
+    }
+
+    #[test]
+    fn shell_marks_become_command_effects() {
+        let mut em = Emulator::new(20, 3).unwrap();
+        let mut fx = Vec::new();
+        // "git status" in base64, as the shell integration reports it before C.
+        em.feed(
+            b"\x1b]133;A\x07$ \x1b]5522;cmd;Z2l0IHN0YXR1cw==\x07\x1b]133;C\x07out\r\n\x1b]5522;dur;1500\x07\x1b]133;D;2\x07",
+            &mut fx,
+        );
+        em.feed(
+            b"\x1b]133;C;cmdline_url=echo%20hi\x07\x1b]133;D\x07\x1b]133;C\x07",
+            &mut fx,
+        );
+        let marks: Vec<Mark> = fx
+            .into_iter()
+            .filter_map(|e| match e {
+                Effect::Command(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                Mark::Prompt,
+                Mark::Start {
+                    command: Some("git status".into())
+                },
+                Mark::End {
+                    exit_code: Some(2),
+                    duration_ms: Some(1500)
+                },
+                Mark::Start {
+                    command: Some("echo hi".into())
+                },
+                Mark::End {
+                    exit_code: None,
+                    duration_ms: None
+                },
+                Mark::Start { command: None },
+            ]
+        );
+        assert_eq!(base64_decode(b"aGk"), Some(b"hi".to_vec()));
+        assert_eq!(base64_decode(b"a*"), None);
     }
 
     #[test]

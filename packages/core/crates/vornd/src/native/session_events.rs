@@ -88,6 +88,9 @@ fn effected(
             }
         }
         Effect::Cwd(cwd) if terminal => registry.terminal_cwd(id, &cwd),
+        Effect::Command(mark) if terminal => {
+            native.broadcast_to("terminal:command", command_note(id, &mark), Some(id));
+        }
         Effect::Notify { title, body } => {
             let key = crate::journal::effect_key(fx);
             if first_notice(native, &key) {
@@ -96,6 +99,29 @@ fn effected(
             }
         }
         _ => {}
+    }
+}
+
+/// What clients hear of a shell's prompt or command mark, stamped when vornd read it.
+fn command_note(id: &str, mark: &vorn_engine::Mark) -> Value {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    match mark {
+        vorn_engine::Mark::Prompt => json!({ "id": id, "phase": "prompt", "at": at }),
+        vorn_engine::Mark::Start { command } => {
+            json!({ "id": id, "phase": "start", "command": command, "at": at })
+        }
+        vorn_engine::Mark::End {
+            exit_code,
+            duration_ms,
+        } => json!({
+            "id": id,
+            "phase": "end",
+            "exitCode": exit_code,
+            "durationMs": duration_ms,
+            "at": at,
+        }),
     }
 }
 
@@ -357,6 +383,40 @@ mod tests {
                 "method": "terminal:notify",
                 "params": { "id": "a", "title": "done", "body": "built", "effectId": key },
             })]
+        );
+    }
+
+    #[test]
+    fn a_shells_command_marks_are_told_to_its_viewers() {
+        let fed = fed();
+        let mut rx = fed.notes();
+        let start = Effect::Command(vorn_engine::Mark::Start {
+            command: Some("ls".into()),
+        });
+        effected(&fed.native, &fed.registry, &fx("sh", 8), start.clone());
+        effected(&fed.native, &fed.registry, &fx("x", 8), start);
+        let end = Effect::Command(vorn_engine::Mark::End {
+            exit_code: Some(1),
+            duration_ms: None,
+        });
+        effected(&fed.native, &fed.registry, &fx("sh", 9), end);
+        let mut notes = told(&mut rx);
+        for n in &mut notes {
+            assert!(n["params"]["at"].as_u64().is_some_and(|at| at > 0), "{n}");
+            n["params"].as_object_mut().unwrap().remove("at");
+        }
+        assert_eq!(
+            notes,
+            [
+                json!({
+                    "method": "terminal:command",
+                    "params": { "id": "sh", "phase": "start", "command": "ls" },
+                }),
+                json!({
+                    "method": "terminal:command",
+                    "params": { "id": "sh", "phase": "end", "exitCode": 1, "durationMs": null },
+                }),
+            ]
         );
     }
 

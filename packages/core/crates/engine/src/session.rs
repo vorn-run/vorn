@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use vorn_grid::{Ctx as GridCtx, GridIn, Hub, HubConfig, HubOut};
 use vorn_pipeline::history::History;
-use vorn_screen::{ClipboardTarget, Emulator, ProgressState};
+use vorn_screen::{ClipboardTarget, Emulator, Mark, ProgressState};
 use vorn_sessiond_wire::{AttachFrom, AttachRefusal, Checkpoint, Kind, SessionInfo};
 use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
@@ -290,6 +290,8 @@ pub enum Effect {
         state: ProgressState,
         percent: Option<u8>,
     },
+    /// At most once, like the bell: a shell's prompt or command mark.
+    Command(Mark),
     /// A state: the program ended.
     Exit {
         code: Option<i32>,
@@ -1348,6 +1350,7 @@ impl Run {
                 vorn_screen::Effect::Progress { state, percent } => {
                     Effect::Progress { state, percent }
                 }
+                vorn_screen::Effect::Command(mark) => Effect::Command(mark),
             };
             self.emit(ctx, &e.hdr, &mut index, effect, out);
         }
@@ -1378,7 +1381,10 @@ impl Run {
             index: *index,
         };
         *index += 1;
-        let at_most_once = matches!(effect, Effect::Bell | Effect::Clipboard { .. });
+        let at_most_once = matches!(
+            effect,
+            Effect::Bell | Effect::Clipboard { .. } | Effect::Command(_)
+        );
         if at_most_once && ctx.sent.includes(hdr) {
             return;
         }
@@ -1500,8 +1506,8 @@ fn event_kind(effect: &Effect) -> Option<EventKind> {
             code: *code,
             signal: *signal,
         },
-        // The grid protocol has no progress event yet.
-        Effect::Cwd(_) | Effect::Progress { .. } => return None,
+        // The grid protocol has no progress or command event yet.
+        Effect::Cwd(_) | Effect::Progress { .. } | Effect::Command(_) => return None,
     })
 }
 
