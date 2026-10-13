@@ -69,10 +69,19 @@ struct TerminalScrollLiveTests {
         }
         let (began, changed, ended): (Int64, Int64, Int64) = (1, 2, 4)
         let (mBegan, mGoing, mEnded): (Int64, Int64, Int64) = (1, 2, 3)
-        func firstLine() -> String { pane.screenText().split(separator: "\n").first.map(String.init) ?? "" }
+        /// The top row the view shows, history or live.
+        func liveTop() -> String {
+            pane.screenText().split(separator: "\n").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        }
+        func firstLine() -> String {
+            guard let v = pane.view else { return "" }
+            let row = TerminalSelection(GridPoint(line: v.first_line, col: 0), GridPoint(line: v.first_line, col: v.cols))
+            return pane.text(of: row).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
-        pane.text("seq 1 5000; sleep 8; seq 7001 7040\r")
+        pane.text("seq 1 5000; sleep 15; seq 7001 7040\r")
         #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 200 })
+        let live = pane.view?.live_line ?? 0
         let row = view.scroll.row
 
         // Fingers up the trackpad: the view follows by the point, between rows.
@@ -90,12 +99,11 @@ struct TerminalScrollLiveTests {
         let pos = view.scroll.pos
         #expect(pos > 200)
         #expect(abs(pos - CGFloat(view.scroll.split.back) * row) < 0.01, "rests on a row: \(pos) by \(row)")
-        #expect(await settled { Int(firstLine().trimmingCharacters(in: .whitespaces)).map { $0 < 5000 } ?? false })
+        #expect(await settled { Int(firstLine()).map { $0 < 5000 } ?? false })
         let top = firstLine()
         shoot("rested")
 
         // New output does not move a view scrolled back.
-        let live = pane.view?.live_line ?? 0
         #expect(await settled { (pane.view?.live_line ?? 0) >= live + 40 })
         #expect(firstLine() == top)
         #expect(view.scroll.scrolled)
@@ -136,10 +144,10 @@ struct TerminalScrollLiveTests {
 
         // On the alternate screen without mouse reporting, a notch is arrow keys.
         pane.text("seq 1 300 | less\r")
-        #expect(await settled { pane.view?.alternate == true && firstLine().trimmingCharacters(in: .whitespaces) == "1" })
+        #expect(await settled { pane.view?.alternate == true && liveTop() == "1" })
         let down = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0)!
         view.scrollWheel(with: NSEvent(cgEvent: down)!)
-        #expect(await settled { firstLine().trimmingCharacters(in: .whitespaces) == "4" })
+        #expect(await settled { liveTop() == "4" })
         #expect(!view.scroll.scrolled)
         pane.text("q")
     }

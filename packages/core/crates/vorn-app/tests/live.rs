@@ -326,6 +326,7 @@ fn an_attach_before_the_session_exists_is_asked_again() {
 /// One trackpad event, then a frame 8 ms on, as a display draws them.
 fn pad(shot: &mut Shot, app: &mut App, dy: f32, phase: WheelPhase) {
     shot.ui.wheel_phase(dy, phase);
+    app.events(&mut shot.ui);
     shot.frame(app);
     std::thread::sleep(Duration::from_millis(8));
 }
@@ -354,12 +355,11 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     shot.until(&mut app, "the shell's first screen", |app, _| {
         app.pane(&id).map(|_| ())
     });
-    shot.type_line(&mut app, "seq 1 5000; sleep 8; seq 7001 7040");
-    shot.until(&mut app, "5000 lines, some in history", |app, _| {
+    shot.type_line(&mut app, "seq 1 5000; sleep 15; seq 7001 7040");
+    let live = shot.until(&mut app, "5000 lines, some in history", |app, _| {
         app.pane(&id)
-            .filter(|p| p.text().lines().any(|l| l.trim() == "5000"))
-            .map(|p| p.history)
-            .filter(|h| *h > 200)
+            .filter(|p| p.text().lines().any(|l| l.trim() == "5000") && p.history > 200)
+            .map(|p| p.live_line)
     });
     shot.hover(&mut app, term_id(&id));
     let row = shot.ui.text.cell().h;
@@ -383,10 +383,7 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     settle(&mut shot, &mut app);
     let pos = app.scroll_position(&id);
     assert!(pos > 250.0, "{pos}");
-    let (back, live) = app
-        .pane(&id)
-        .map(|p| (p.back(), p.live_line))
-        .expect("pane");
+    let back = app.pane(&id).map(|p| p.back()).expect("pane");
     assert!(
         (back as f32 * row - pos).abs() < 0.01,
         "rests on a row: {pos} by {row}"
@@ -445,6 +442,7 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
 
     // A wheel notch eases three rows.
     shot.ui.wheel(-vorn_app::ui::WHEEL_LINE);
+    app.events(&mut shot.ui);
     settle(&mut shot, &mut app);
     assert!((app.scroll_position(&id) - 3.0 * row).abs() < 0.01);
     shot.save(&mut app, "scroll-notch");
@@ -459,6 +457,7 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
             .map(|_| ())
     });
     shot.ui.wheel(vorn_app::ui::WHEEL_LINE);
+    app.events(&mut shot.ui);
     shot.until(&mut app, "less three lines on", |app, _| {
         app.pane(&id)
             .filter(|p| p.text().lines().next().map(str::trim) == Some("4"))
