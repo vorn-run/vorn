@@ -331,7 +331,7 @@ pub struct Staged {
 }
 
 fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<String, String> {
-    let out = Command::new(cmd)
+    let out = vorn_spawn::command(cmd)
         .args(args)
         .output()
         .map_err(|e| format!("{cmd}: {e}"))?;
@@ -533,10 +533,8 @@ fn spawn_detached(command: &mut Command) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        use vorn_spawn::Hidden;
+        command.hidden_with(vorn_spawn::DETACHED_PROCESS | vorn_spawn::CREATE_NEW_PROCESS_GROUP);
     }
     command.spawn().map(drop).map_err(|e| e.to_string())
 }
@@ -544,7 +542,7 @@ fn spawn_detached(command: &mut Command) -> Result<(), String> {
 /// A shell that waits for this process to end, then runs `then`.
 #[cfg(unix)]
 fn after_exit(then: &str, args: &[&Path]) -> Command {
-    let mut command = Command::new("/bin/sh");
+    let mut command = vorn_spawn::command("/bin/sh");
     command
         .arg("-c")
         .arg(format!(
@@ -570,7 +568,7 @@ pub fn install(staged: &Staged) -> Result<(), String> {
             ))
         }
         Install::Windows => {
-            let mut command = Command::new(&staged.path);
+            let mut command = vorn_spawn::command(&staged.path);
             command.args(["/S", "--updated", "--force-run"]);
             spawn_detached(&mut command)
         }
