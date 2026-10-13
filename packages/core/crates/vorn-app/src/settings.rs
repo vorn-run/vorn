@@ -994,7 +994,7 @@ pub struct Settings {
     pub detecting: bool,
     pub agents_open: HashSet<String>,
     /// The agent whose install command was copied, and until when.
-    pub copied: Option<(String, std::time::Instant)>,
+    pub copied: Option<(String, web_time::Instant)>,
     /// Typed arguments not yet committed, by (agent, field).
     pub args: HashMap<(String, AgentField), String>,
     pub ssh: SshPage,

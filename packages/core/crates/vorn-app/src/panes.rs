@@ -4,7 +4,7 @@
 //! long as the app, as the renderer's component state does.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::Instant;
+use web_time::Instant;
 
 use serde_json::{Map, Value};
 
@@ -140,7 +140,7 @@ pub type PageRect = (f32, f32, f32, f32);
 
 /// How long a selection holds still before the comment popover opens, as
 /// the renderer's two matching 400 ms polls.
-pub const SELECTION_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+pub const SELECTION_SETTLE: web_time::Duration = web_time::Duration::from_millis(400);
 
 /// How many console messages and requests a page keeps for the agent.
 pub const LOG_LIMIT: usize = 500;

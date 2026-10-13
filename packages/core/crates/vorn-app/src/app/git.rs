@@ -2,7 +2,7 @@
 //! `useBranchSwitcher`, `OpenInButton` and the worktree cleanup do, with
 //! vornd answering the git.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Value};
 

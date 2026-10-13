@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use accesskit::{ActionData, ActionRequest};
 
@@ -412,7 +412,7 @@ fn default_cursor(h: &Hit) -> Option<Cursor> {
 
 /// The platform's shortcut set: macOS or everything else.
 fn mac() -> bool {
-    cfg!(target_os = "macos")
+    crate::input::mods::mac()
 }
 
 impl Ui {

@@ -755,7 +755,7 @@ async fn open(endpoint: &str) -> std::io::Result<Conn> {
 
 #[cfg(windows)]
 async fn open(endpoint: &str) -> std::io::Result<Conn> {
-    use std::time::{Duration, Instant};
+    use web_time::{Duration, Instant};
     use tokio::net::windows::named_pipe::ClientOptions;
     const ERROR_PIPE_BUSY: i32 = 231;
     let started = Instant::now();

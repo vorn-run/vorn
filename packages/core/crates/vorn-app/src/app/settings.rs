@@ -287,7 +287,7 @@ impl App {
     }
 
     /// Takes in the health check once it answers.
-    pub(super) fn settings_tick(&mut self, now: std::time::Instant) {
+    pub(super) fn settings_tick(&mut self, now: web_time::Instant) {
         self.cli_tick();
         if let Some(rx) = &self.health {
             if let Ok(v) = rx.try_recv() {
@@ -557,12 +557,12 @@ impl App {
             SetAct::CopyInstall(k) => {
                 if let Some(a) = settings::agent(&k) {
                     ui.clipboard().set(a.install);
-                    self.st.settings.copied = Some((k, std::time::Instant::now()));
+                    self.st.settings.copied = Some((k, web_time::Instant::now()));
                 }
             }
             SetAct::Copy(text) => {
                 ui.clipboard().set(&text);
-                self.st.settings.copied = Some((text, std::time::Instant::now()));
+                self.st.settings.copied = Some((text, web_time::Instant::now()));
             }
             SetAct::AgentText(..) | SetAct::HostText(..) | SetAct::KeyText(_) => {}
             SetAct::AddHost => {
@@ -985,7 +985,7 @@ impl App {
             return false;
         };
         let held = *m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
-        if code == "Comma" && held == MOD {
+        if code == "Comma" && held == MOD() {
             let cat = self.st.settings.category;
             self.open_settings(cat);
             return true;
@@ -1006,8 +1006,8 @@ impl App {
 
 /// A fresh id for a host, as `crypto.randomUUID` gives one.
 pub(super) fn new_id() -> String {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let n = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     let a = n as u64;
     let b = (n >> 64) as u64 ^ u64::from(std::process::id()).rotate_left(17);

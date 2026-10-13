@@ -524,7 +524,7 @@ impl Host {
             while gtk::events_pending() {
                 gtk::main_iteration_do(false);
             }
-            return Some(Instant::now() + std::time::Duration::from_millis(8));
+            return Some(Instant::now() + web_time::Duration::from_millis(8));
         }
         None
     }

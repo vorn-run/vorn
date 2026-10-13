@@ -5,7 +5,7 @@
 //! (`WorktreeCleanupDialog`, `WorktreeCleanupToastBridge`).
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::Value;
 

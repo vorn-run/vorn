@@ -147,7 +147,7 @@ pub fn bell() {
 pub fn http_get_json(port: u16, path: &str) -> Option<Value> {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
-    s.set_read_timeout(Some(std::time::Duration::from_secs(3)))
+    s.set_read_timeout(Some(web_time::Duration::from_secs(3)))
         .ok()?;
     let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     s.write_all(req.as_bytes()).ok()?;

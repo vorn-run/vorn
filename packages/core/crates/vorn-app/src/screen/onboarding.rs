@@ -20,7 +20,7 @@ const W: f32 = 520.0;
 const HEADER_H: f32 = 97.0;
 const FOOTER_H: f32 = 61.0;
 /// How long a copied command shows its check.
-const COPIED_FOR: std::time::Duration = std::time::Duration::from_millis(1500);
+const COPIED_FOR: web_time::Duration = web_time::Duration::from_millis(1500);
 
 fn onb(a: OnbAct) -> Act {
     Act::Onboard(a)

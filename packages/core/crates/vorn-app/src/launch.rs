@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::Value;
 

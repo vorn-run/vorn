@@ -2,7 +2,7 @@
 //! calls they make, as `TaskBoardView`, `TaskDetailPanel`, `AddTaskDialog`
 //! and `CommitDialog` do them.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use vorn_protocol::TerminalSession;
@@ -985,7 +985,7 @@ impl App {
             return false;
         };
         let held = *m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
-        let (plain, with_mod) = (held == 0, held == MOD);
+        let (plain, with_mod) = (held == 0, held == MOD());
         if let Some((form, start, matches)) = slash_open(ui, self.st.tasks.slash_closed) {
             let n = matches.len();
             let sel = self.st.tasks.slash.min(n - 1);

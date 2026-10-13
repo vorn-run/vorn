@@ -19,6 +19,7 @@ mod cpu;
 pub mod edit;
 pub mod element;
 pub mod gpu;
+mod host;
 pub mod icons;
 pub mod input;
 mod interact;
@@ -32,10 +33,19 @@ pub mod scene;
 pub mod text;
 pub mod theme;
 mod ui;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 pub mod widgets;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod window;
+/// The browser's host behind the desktop's names, so an app opens the same way in both.
+#[cfg(target_arch = "wasm32")]
+pub mod window {
+    pub use crate::host::{App, UserEvent, Waker, WindowOptions};
+    pub use crate::web::{run, run_with};
+}
 
-pub use {accesskit, wgpu, winit};
+pub use {accesskit, web_time, wgpu, winit};
 
 pub use edit::{Clipboard, MemoryClipboard, TextEdit};
 pub use element::{
@@ -51,7 +61,7 @@ pub use motion::{Animate, Transform, Transition};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
 pub use scene::{Blur, Rect, Rgba, Scene, Shadow, TextGamma};
-pub use text::{TextStyle, TextSystem};
+pub use text::{use_bundled_fonts, TextStyle, TextSystem};
 pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
     ROOT_NODE,

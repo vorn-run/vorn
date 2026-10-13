@@ -1333,7 +1333,7 @@ impl App {
         if ui.focus().is_some() {
             return false;
         }
-        let approve = code == "Enter" && held == MOD;
+        let approve = code == "Enter" && held == MOD();
         let reject = code == "KeyR" && held == 0;
         if !approve && !reject {
             return false;

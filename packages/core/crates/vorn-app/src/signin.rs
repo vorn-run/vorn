@@ -19,13 +19,13 @@ pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub const BYTES_REFUSAL: &str = "The answer is over the 16 MiB a signed-in call carries";
 
 /// How often the sign-in window asks whether anyone signed in.
-pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+pub const CHECK_EVERY: web_time::Duration = web_time::Duration::from_secs(2);
 
 /// Long enough to type a password and pass a second factor.
-pub const SIGN_IN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+pub const SIGN_IN_TIMEOUT: web_time::Duration = web_time::Duration::from_secs(10 * 60);
 
 /// A runner nobody has used for this long is closed.
-pub const RUNNER_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
+pub const RUNNER_IDLE: web_time::Duration = web_time::Duration::from_secs(60);
 
 pub const TIMED_OUT: &str = "Sign-in timed out. Try again.";
 pub const CLOSED: &str = "The sign-in window closed before anyone signed in.";
@@ -97,8 +97,8 @@ pub struct Window {
     pub browser: Value,
     pub url: String,
     pub from: From,
-    pub opened: std::time::Instant,
-    pub next_check: std::time::Instant,
+    pub opened: web_time::Instant,
+    pub next_check: web_time::Instant,
     pub checking: bool,
 }
 
@@ -109,7 +109,7 @@ impl Window {
         target: &Value,
         link: Option<&str>,
         from: From,
-        now: std::time::Instant,
+        now: web_time::Instant,
     ) -> Result<Window, String> {
         let browser = target
             .get("browser")

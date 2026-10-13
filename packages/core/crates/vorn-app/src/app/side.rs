@@ -4,7 +4,7 @@
 //! and save, with vornd reading and writing the files.
 
 use std::collections::HashSet;
-use std::time::Instant;
+use web_time::Instant;
 
 use serde_json::{json, Value};
 use vorn_protocol::TerminalSession;

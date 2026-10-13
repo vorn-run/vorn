@@ -8,7 +8,7 @@
 //! drawn at once. Once a frame shows the echo, or after [`ECHO_WAIT`] in
 //! case none comes (a key the program swallowed), it is back on the beat.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 /// How long input waits for its echo before the pacer stops hurrying.
 pub const ECHO_WAIT: Duration = Duration::from_millis(250);

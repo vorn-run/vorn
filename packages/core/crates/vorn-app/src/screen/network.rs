@@ -2,7 +2,7 @@
 //! addresses and devices (`ShareThisMachine`, `DeviceTokenList`), or use
 //! another one (`UseAnotherMachine`).
 
-use std::time::Instant;
+use web_time::Instant;
 
 use super::settings::{header, row, toggle};
 use super::{c, ico, white, Screen};

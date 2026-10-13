@@ -4,7 +4,7 @@
 //! scrollbar). Widgets read these instead of literals so a port stays a
 //! port: a test checks the colours against `theme.css` itself.
 
-use std::time::Duration;
+use web_time::Duration;
 
 use crate::scene::Rgba;
 
@@ -161,7 +161,13 @@ pub mod font {
     pub const SF: &str = "System Font";
     pub const SF_FILE: &str = "/System/Library/Fonts/SFNS.ttf";
 
-    pub const UI: &str = if cfg!(target_os = "macos") {
+    /// The faces a browser build bundles (`use_bundled_fonts`).
+    pub const WEB_UI: &str = "Inter";
+    pub const WEB_MONO: &str = "JetBrains Mono";
+
+    pub const UI: &str = if cfg!(target_arch = "wasm32") {
+        WEB_UI
+    } else if cfg!(target_os = "macos") {
         SF
     } else if cfg!(windows) {
         "Segoe UI"
@@ -200,7 +206,9 @@ pub mod font {
         (px / size).max(0.0)
     }
 
-    pub const MONO: &str = if cfg!(target_os = "macos") {
+    pub const MONO: &str = if cfg!(target_arch = "wasm32") {
+        WEB_MONO
+    } else if cfg!(target_os = "macos") {
         "Menlo"
     } else if cfg!(windows) {
         "Consolas"
@@ -246,7 +254,7 @@ pub const TRANSITION: Duration = Duration::from_millis(150);
 
 /// Motion beyond hover fades.
 pub mod motion {
-    use std::time::Duration;
+    use web_time::Duration;
     /// `animate-pulse`: opacity 1 → 0.5 → 1, `cubic-bezier(0.4, 0, 0.6, 1)`.
     pub const PULSE: Duration = Duration::from_secs(2);
     /// `animate-spin`: one turn, linear.

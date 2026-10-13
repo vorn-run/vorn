@@ -34,7 +34,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use vorn_app::client::rpc::Wake;
 use vorn_app::client::{data_dir, Endpoint};

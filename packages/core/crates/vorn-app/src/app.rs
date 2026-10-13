@@ -50,12 +50,11 @@ mod term;
 mod widget;
 mod workflows;
 
-/// The modifier the renderer's shortcuts use (`modKey`).
-pub const MOD: u16 = if cfg!(target_os = "macos") {
-    mods::SUPER
-} else {
-    mods::CTRL
-};
+/// The modifier the app's shortcuts use: Cmd on a Mac, Ctrl elsewhere.
+#[allow(non_snake_case)]
+pub fn MOD() -> u16 {
+    mods::primary()
+}
 
 /// What a key does before it reaches a field, a terminal or the composer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,7 +98,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     if code == "Backquote" && only(mods::CTRL) {
         return Some(Shortcut::NewShell);
     }
-    if only(MOD | mods::SHIFT) {
+    if only(MOD() | mods::SHIFT) {
         return match code {
             "KeyW" => Some(Shortcut::View(MainView::Workflows)),
             "KeyA" => Some(Shortcut::Permission(true)),
@@ -121,7 +120,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             .copied()
             .map(Shortcut::Filter);
     }
-    if !only(MOD) {
+    if !only(MOD()) {
         return None;
     }
     Some(match code {
@@ -730,7 +729,7 @@ impl App {
                                 name: s.title(),
                             })
                         },
-                        std::time::Instant::now(),
+                        web_time::Instant::now(),
                     );
                     self.notices.extend(heard);
                     if method == "widget:permission-request" {
@@ -767,7 +766,7 @@ impl App {
                     if old.is_none_or(|o| o.rev != v.rev) {
                         self.st
                             .last_output
-                            .insert(id.clone(), std::time::Instant::now());
+                            .insert(id.clone(), web_time::Instant::now());
                     }
                     if let (Some(s), Some(o)) = (self.scrolls.get_mut(&id), old) {
                         if !v.primary {
@@ -808,7 +807,7 @@ impl App {
             .retain(|id, _| self.store.session(id).is_some());
         self.pump_web();
         self.detect_mobile();
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         self.st.toasts.retain(|t| t.until > now);
         let gone = |id: &Option<String>, store: &Store| {
             id.as_deref().is_some_and(|id| store.session(id).is_none())
@@ -2503,7 +2502,7 @@ impl App {
             return true;
         }
         if let Input::Key { code, mods: m, .. } = input {
-            let with_mod = *m & MOD != 0;
+            let with_mod = *m & MOD() != 0;
             if !self.st.settings.open
                 && (self.git_key(ui, code, with_mod)
                     || self.pane_key(ui, code, with_mod, *m & mods::SHIFT != 0))
@@ -2562,7 +2561,7 @@ impl App {
             self.run(ui, Act::CancelWorkspace, Src::default());
             return true;
         }
-        if self.st.menu.is_some() || code != "Escape" || *m & (MOD | mods::ALT) != 0 {
+        if self.st.menu.is_some() || code != "Escape" || *m & (MOD() | mods::ALT) != 0 {
             return false;
         }
         if self.st.dialog == Some(Dialog::AddTask) {
@@ -2809,7 +2808,7 @@ impl App {
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         for notice in std::mem::take(&mut self.notices) {
             if self.notifier.admit(&notice, ui.window_focused(), now) {
                 self.notice_sink.show(notice);
@@ -3131,30 +3130,30 @@ mod tests {
     #[test]
     fn shortcuts_match_the_renderer() {
         assert_eq!(
-            shortcut("KeyS", MOD),
+            shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        assert_eq!(shortcut("KeyT", MOD), Some(Shortcut::View(MainView::Tasks)));
+        assert_eq!(shortcut("KeyT", MOD()), Some(Shortcut::View(MainView::Tasks)));
         assert_eq!(
-            shortcut("KeyW", MOD | mods::SHIFT),
+            shortcut("KeyW", MOD() | mods::SHIFT),
             Some(Shortcut::View(MainView::Workflows))
         );
-        assert_eq!(shortcut("Digit3", MOD), Some(Shortcut::Jump(2)));
-        assert_eq!(shortcut("Digit0", MOD), None);
-        assert_eq!(shortcut("BracketRight", MOD), Some(Shortcut::Cycle(true)));
+        assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));
+        assert_eq!(shortcut("Digit0", MOD()), None);
+        assert_eq!(shortcut("BracketRight", MOD()), Some(Shortcut::Cycle(true)));
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
-        assert_eq!(shortcut("Slash", MOD), Some(Shortcut::Shortcuts));
-        assert_eq!(shortcut("KeyK", MOD), Some(Shortcut::Palette));
+        assert_eq!(shortcut("Slash", MOD()), Some(Shortcut::Shortcuts));
+        assert_eq!(shortcut("KeyK", MOD()), Some(Shortcut::Palette));
         assert_eq!(
-            shortcut("KeyA", MOD | mods::SHIFT),
+            shortcut("KeyA", MOD() | mods::SHIFT),
             Some(Shortcut::Permission(true))
         );
         assert_eq!(
-            shortcut("KeyD", MOD | mods::SHIFT),
+            shortcut("KeyD", MOD() | mods::SHIFT),
             Some(Shortcut::Permission(false))
         );
-        assert_eq!(shortcut("KeyJ", MOD), Some(Shortcut::ViewOptions));
-        assert_eq!(shortcut("KeyB", MOD), Some(Shortcut::Sidebar));
+        assert_eq!(shortcut("KeyJ", MOD()), Some(Shortcut::ViewOptions));
+        assert_eq!(shortcut("KeyB", MOD()), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));
         assert_eq!(
             shortcut("Digit3", mods::ALT),
@@ -3163,7 +3162,7 @@ mod tests {
         assert_eq!(shortcut("Digit6", mods::ALT), None);
         // Unmodified and extra-modified keys belong to the terminal.
         assert_eq!(shortcut("KeyS", 0), None);
-        assert_eq!(shortcut("KeyS", MOD | mods::ALT), None);
+        assert_eq!(shortcut("KeyS", MOD() | mods::ALT), None);
         assert_eq!(shortcut("Escape", 0), None);
     }
 
