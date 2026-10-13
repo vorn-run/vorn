@@ -219,3 +219,36 @@ fn a_template_requirement_is_fixed_in_the_start_from_panel() {
     assert!(app.st.plugins.adding.is_none());
     assert!(!app.st.plugins.from_editor);
 }
+
+#[test]
+fn the_sign_in_sheet_opens_checks_and_closes() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let target = json!({ "name": "Example", "browser": {
+        "signInUrl": "https://example.com/login",
+        "origins": ["https://example.com"],
+        "check": { "url": "https://example.com/me", "identity": ["login"] } } });
+    assert!(app
+        .open_signin("c1", &target, vorn_app::signin::From::Plugins)
+        .is_none());
+    assert_eq!(app.st.dialog, Some(vorn_app::state::Dialog::SignIn));
+    // Offscreen there is no page to sign in on; the check fails quietly and waits.
+    shot.frame(&mut app);
+    shot.save(&mut app, "signin-sheet");
+    shot.click(&mut app, App::control("signin-close", &Act::SignInClose));
+    assert!(app.st.signin.is_none());
+    assert_eq!(app.st.dialog, None);
+    assert!(matches!(
+        app.st.plugins.activity.get("c1"),
+        Some(vorn_app::plugins::Activity::Failed(e)) if e == vorn_app::signin::CLOSED
+    ));
+    let bad = json!({ "name": "None" });
+    assert_eq!(
+        app.open_signin("c2", &bad, vorn_app::signin::From::Run)
+            .as_deref(),
+        Some("This connection does not sign in through a Vorn window.")
+    );
+}

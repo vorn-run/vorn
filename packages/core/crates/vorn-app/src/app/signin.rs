@@ -296,7 +296,7 @@ impl App {
     }
 
     /// Opens the sheet on `browserAuth`'s answer, or says why it cannot.
-    pub(super) fn open_signin(&mut self, conn: &str, target: &Value, from: From) -> Option<String> {
+    pub fn open_signin(&mut self, conn: &str, target: &Value, from: From) -> Option<String> {
         if self
             .st
             .signin

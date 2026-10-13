@@ -41,7 +41,7 @@ mod palette;
 mod plugins;
 mod settings;
 mod side;
-mod signin;
+pub mod signin;
 mod tasks;
 mod workflows;
 
