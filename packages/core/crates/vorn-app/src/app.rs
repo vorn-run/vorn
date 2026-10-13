@@ -3233,11 +3233,11 @@ mod tests {
         assert!(!terminal_key("KeyA", 0));
         // App shortcuts on the command key stay the app's.
         for code in ["KeyK", "KeyN", "KeyW", "KeyB", "BracketRight", "Slash"] {
-            assert!(!terminal_key(code, MOD), "{code}");
+            assert!(!terminal_key(code, MOD()), "{code}");
         }
-        assert!(!terminal_key("KeyW", MOD | mods::SHIFT));
+        assert!(!terminal_key("KeyW", MOD() | mods::SHIFT));
         assert!(!terminal_key("Backquote", mods::CTRL));
-        assert!(!terminal_key("KeyJ", MOD));
+        assert!(!terminal_key("KeyJ", MOD()));
     }
 
     #[test]

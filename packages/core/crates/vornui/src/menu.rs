@@ -3,7 +3,8 @@
 //! hovered entry. Entries are data carrying the caller's choice `T`; a
 //! chosen entry comes back as a `Select` in the panel's group.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::element::{div, icon, text, Action, El, Id};
 use crate::scene::{Rect, Rgba};

@@ -4,7 +4,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -60,7 +61,7 @@ impl History {
     pub fn load(file: Option<PathBuf>) -> History {
         let entries = file
             .as_deref()
-            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(crate::keep::read)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         History { file, entries }
@@ -89,12 +90,9 @@ impl History {
         );
         self.entries.truncate(MAX_ENTRIES);
         let Some(f) = &self.file else { return };
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         // A full disk costs the history, not the command.
         if let Ok(s) = serde_json::to_string(&self.entries) {
-            let _ = std::fs::write(f, s);
+            let _ = crate::keep::write(f, &s);
         }
     }
 
