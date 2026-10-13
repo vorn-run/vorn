@@ -72,7 +72,7 @@ struct TerminalScrollLiveTests {
         func firstLine() -> String { pane.screenText().split(separator: "\n").first.map(String.init) ?? "" }
 
         pane.text("seq 1 5000; sleep 8; seq 7001 7040\r")
-        #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 500 })
+        #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 200 })
         let row = view.scroll.row
 
         // Fingers up the trackpad: the view follows by the point, between rows.

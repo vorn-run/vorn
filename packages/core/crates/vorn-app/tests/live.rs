@@ -355,11 +355,11 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
         app.pane(&id).map(|_| ())
     });
     shot.type_line(&mut app, "seq 1 5000; sleep 8; seq 7001 7040");
-    shot.until(&mut app, "5000 lines, hundreds in history", |app, _| {
+    shot.until(&mut app, "5000 lines, some in history", |app, _| {
         app.pane(&id)
             .filter(|p| p.text().lines().any(|l| l.trim() == "5000"))
             .map(|p| p.history)
-            .filter(|h| *h > 500)
+            .filter(|h| *h > 200)
     });
     shot.hover(&mut app, term_id(&id));
     let row = shot.ui.text.cell().h;

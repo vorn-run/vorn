@@ -199,6 +199,7 @@ async fn shutdown_signal() {
 fn new_holder(cfg: &HolderConfig) -> Holder {
     info!(libghostty = %vorn_engine::ghostty_build(), "terminal engine");
     Holder::with_engine(vornd::engine::Engine::new(vorn_engine::Config {
+        scrollback: vornd::engine::DEFAULT_SCROLLBACK,
         history: Some(cfg.home.join("vornd").join("history")),
         build: env!("CARGO_PKG_VERSION").into(),
         ..vorn_engine::Config::default()

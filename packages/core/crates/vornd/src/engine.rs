@@ -78,6 +78,9 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 /// [`WRITE_TIMEOUT`].
 pub const WRITE_QUEUE_CAP: usize = 64 << 20;
 
+/// The history each session's terminal keeps for the native apps to scroll, in bytes of page memory.
+pub const DEFAULT_SCROLLBACK: usize = 1 << 20;
+
 /// The colours a session's terminal answers colour queries (OSC 4, 10 to 12)
 /// with: the app's terminal theme, which is what xterm.js answered with
 /// before vornd answered every query.
