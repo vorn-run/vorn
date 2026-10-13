@@ -166,7 +166,8 @@ jobs:
             macOS) ditto -x -k dist-native/Vorn-*-mac.zip "$dir"; res="$dir/Vorn.app/Contents/Resources"; x= ;;
             Windows)
               # The installer itself, silently, as the updater runs it.
-              ./dist-native/Vorn-Setup-*.exe /S
+              # MSYS2_ARG_CONV_EXCL: Git Bash would turn /S into a path.
+              MSYS2_ARG_CONV_EXCL="*" ./dist-native/Vorn-Setup-*.exe /S
               inst="$(cygpath -u "$LOCALAPPDATA")/Programs/vorn"
               test -f "$inst/Vorn.exe"
               res="$inst/resources"; x=.exe ;;
@@ -185,7 +186,7 @@ jobs:
           "$res/vornd/vorn$x" --version
           if [ "$RUNNER_OS" = Windows ]; then
             taskkill //F //IM vorn-sessiond.exe || true
-            "$inst/Uninstall Vorn.exe" /S "_?=$(cygpath -w "$inst")"
+            MSYS2_ARG_CONV_EXCL="*" "$inst/Uninstall Vorn.exe" /S "_?=$(cygpath -w "$inst")"
             test ! -e "$inst/Vorn.exe"
             test ! -e "$inst/resources"
           fi
