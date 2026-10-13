@@ -42,6 +42,8 @@ impl Args {
         let mut it = std::env::args()
             .skip(1)
             .filter(|a| !a.starts_with("-psn_"))
+            // A vorn:// link opens the window.
+            .filter(|a| !a.starts_with("vorn:"))
             .peekable();
         let mode = match it.peek() {
             Some(m) if !m.starts_with("--") => it.next().unwrap_or_default(),

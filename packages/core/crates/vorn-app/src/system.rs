@@ -203,7 +203,11 @@ pub fn apply_login_item(config: &Value) -> Result<(), String> {
     let Some(on) = login_item_for(config, packaged()) else {
         return Ok(());
     };
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // An AppImage runs from a mount that is gone by the next login.
+    let exe = match std::env::var_os("APPIMAGE").filter(|_| cfg!(target_os = "linux")) {
+        Some(image) => PathBuf::from(image),
+        None => std::env::current_exe().map_err(|e| e.to_string())?,
+    };
     set_login(&exe, on)
 }
 
