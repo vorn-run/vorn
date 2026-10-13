@@ -23,6 +23,21 @@ use crate::text::Shaped;
 use crate::theme;
 use crate::Ui;
 
+/// Logical pixels one wheel notch scrolls (a browser's 40).
+pub const WHEEL_LINE: f32 = 40.0;
+
+/// Where a wheel event sits in its gesture. A notched wheel reports
+/// `Line`; a trackpad reports `Began`, `Moved` and `Ended` for the touch,
+/// then again for the momentum that follows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WheelPhase {
+    #[default]
+    Line,
+    Began,
+    Moved,
+    Ended,
+}
+
 /// Something the app should act on, reported by [`Ui::take_events`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -47,7 +62,13 @@ pub enum Event {
     DoubleClick(Id),
     /// The wheel over an element with [`Sense::WHEEL`] that no scroll view
     /// took, at `(x, y)` logical pixels.
-    Wheel { id: Id, dy: f32, x: f32, y: f32 },
+    Wheel {
+        id: Id,
+        dy: f32,
+        x: f32,
+        y: f32,
+        phase: WheelPhase,
+    },
     /// An element with [`Sense::MOVE`] is being dragged: `(dx, dy)` from
     /// where the press began, the pointer at `(x, y)`.
     Move {
@@ -979,6 +1000,11 @@ impl Ui {
     /// The wheel or trackpad scrolled by `dy` logical pixels (positive
     /// moves the content up, showing what is below).
     pub fn wheel(&mut self, dy: f32) {
+        self.wheel_phase(dy, WheelPhase::Line);
+    }
+
+    /// [`wheel`](Self::wheel) with where the event sits in its gesture.
+    pub fn wheel_phase(&mut self, dy: f32, phase: WheelPhase) {
         let Some(p) = self.st.pointer else {
             return;
         };
@@ -1014,6 +1040,7 @@ impl Ui {
                 dy,
                 x: p.0,
                 y: p.1,
+                phase,
             });
         }
     }

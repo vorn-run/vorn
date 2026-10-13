@@ -145,6 +145,17 @@ impl Mirror {
             .map(|i| &self.history[i])
     }
 
+    /// The row showing absolute `line`: the viewport's, else the cached
+    /// history's above it.
+    pub fn row_at(&self, line: u64) -> Option<&Row> {
+        let top = self.term.top_line;
+        if line < top {
+            self.history_line(line)
+        } else {
+            self.rows.get(usize::try_from(line - top).ok()?)
+        }
+    }
+
     /// The lines in `from..to` the history cache lacks, as `(first, count)`
     /// ranges in order: what to fetch before showing them.
     pub fn gaps(&self, from: u64, to: u64) -> Vec<(u64, u64)> {
@@ -696,6 +707,10 @@ mod tests {
         let mut m = Mirror::from_snapshot(snapshot()).unwrap();
         let mut d = delta(1, 2);
         d.scrolled = 2;
+        d.term = Some(TermDelta {
+            top_line: Some(10),
+            ..TermDelta::default()
+        });
         m.apply(d).unwrap();
         // Lines 0 and 1 scrolled in; 2..10 are a gap until fetched.
         assert_eq!(m.gaps(0, 10), vec![(2, 8)]);
@@ -708,6 +723,11 @@ mod tests {
         .unwrap();
         assert_eq!(m.gaps(0, 10), vec![(2, 1), (4, 1), (6, 4)]);
         assert_eq!(row_text(m.history_line(3).unwrap()), "three");
+        assert_eq!(row_text(m.row_at(3).unwrap()), "three");
+        assert!(m.row_at(4).is_none());
+        let top = m.term().top_line;
+        assert_eq!(m.row_at(top), m.rows().first());
+        assert!(m.row_at(top + u64::from(m.term().rows)).is_none());
         // A refetch replaces the row it names.
         m.apply_history(0, vec![hist(3, "THREE")], Vec::new(), Vec::new())
             .unwrap();

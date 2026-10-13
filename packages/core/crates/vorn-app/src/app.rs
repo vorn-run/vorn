@@ -20,12 +20,13 @@ use crate::screen::{
     card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_NAME,
     PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
+use crate::scroll::{self, Route, Rows, Scroll};
 use crate::state::{
     basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
     decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
-    WindowRequest,
+    WheelPhase, WindowRequest,
 };
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
@@ -279,6 +280,10 @@ pub struct App {
     term_boxes: HashMap<String, crate::ui::Rect>,
     /// A double-click asked vornd for a word; the click that ends it keeps the selection.
     word_pending: bool,
+    /// Each terminal's scroll through its history; only painted ones move.
+    scrolls: HashMap<String, Scroll>,
+    /// The wheel gesture under way: its pane, where it goes, and its last event.
+    wheel: Option<(String, Route, Rows, std::time::Instant)>,
     pub st: State,
     pub acts: Acts,
     preedit: String,
@@ -369,6 +374,8 @@ impl App {
             views: HashMap::new(),
             term_boxes: HashMap::new(),
             word_pending: false,
+            scrolls: HashMap::new(),
+            wheel: None,
             st,
             acts: Acts::default(),
             preedit: String::new(),
@@ -617,9 +624,20 @@ impl App {
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
                 if let Some(v) = g.view(&id) {
-                    self.st
-                        .last_output
-                        .insert(id.clone(), std::time::Instant::now());
+                    let old = self.views.get(&id);
+                    // History arriving for a scrolled view is not output.
+                    if old.is_none_or(|o| o.rev != v.rev) {
+                        self.st
+                            .last_output
+                            .insert(id.clone(), std::time::Instant::now());
+                    }
+                    if let (Some(s), Some(o)) = (self.scrolls.get_mut(&id), old) {
+                        if o.sb_epoch != v.sb_epoch || !v.primary {
+                            s.reset();
+                        } else {
+                            s.grew(v.live_line.saturating_sub(o.live_line));
+                        }
+                    }
                     // A resize or a cleared history renumbers the lines under a selection.
                     if self
                         .st
@@ -640,6 +658,7 @@ impl App {
                 {
                     g.detach(&id);
                     self.views.remove(&id);
+                    self.scrolls.remove(&id);
                 }
             }
         }
@@ -1673,6 +1692,7 @@ impl App {
             Act::Paste(id) => self.paste_clipboard(ui, &id),
             Act::CopySelection(id) => self.copy_selection(&id),
             Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
+            Act::ScrollToBottom(id) => self.return_to_live(&id),
             Act::FitToDevice(id) => {
                 if let Some(g) = &self.grid {
                     g.take_size(&id);
@@ -2150,26 +2170,13 @@ impl App {
                     );
                 }
             }
-            UiEvent::Wheel { id, dy, x, y } => {
-                let Some(g) = &self.grid else { return };
-                let Some(s) = self
-                    .store
-                    .sessions
-                    .iter()
-                    .find(|s| term_id(&s.info.id) == id)
-                else {
-                    return;
-                };
-                let (Some(r), cell) = (ui.rect_of(id), ui.text.cell()) else {
-                    return;
-                };
-                g.wheel(
-                    &s.info.id,
-                    dy,
-                    ((x - r.x) / cell.w).floor(),
-                    ((y - r.y) / cell.h).floor(),
-                );
-            }
+            UiEvent::Wheel {
+                id,
+                dy,
+                x,
+                y,
+                phase,
+            } => self.wheel(ui, id, dy, (x, y), phase),
             UiEvent::Select { group, index } if group == VIEWS => {
                 if let Some(&v) = VIEW_ORDER.get(index) {
                     self.run(ui, Act::View(v), Src::default());
@@ -2437,9 +2444,14 @@ impl App {
         if self.st.view != MainView::Sessions {
             return;
         }
-        let (Some(g), Some(id)) = (&self.grid, self.typing_target()) else {
+        let (Some(g), Some(id)) = (self.grid.clone(), self.typing_target()) else {
             return;
         };
+        let modifier = matches!(&input, Input::Key { code, .. }
+            if ["Shift", "Control", "Alt", "Meta"].iter().any(|m| code.starts_with(m)));
+        if !matches!(input, Input::Preedit(_)) && !modifier {
+            self.return_to_live(&id);
+        }
         match input {
             Input::Key { code, mods, text } => {
                 if !MODIFIER_KEYS.contains(&code.as_str()) {
@@ -2700,6 +2712,105 @@ impl App {
         root
     }
 
+    /// A wheel or trackpad event over a terminal: the program's when it
+    /// tracks the mouse, arrow keys on the alternate screen, else a scroll
+    /// through history.
+    fn wheel(&mut self, ui: &mut Ui, id: Id, dy: f32, (x, y): (f32, f32), phase: WheelPhase) {
+        let Some(g) = self.grid.clone() else { return };
+        let now = ui.now();
+        // A gesture stays with the pane it began on, momentum and all.
+        let latched = self
+            .wheel
+            .take()
+            .filter(|w| phase != WheelPhase::Line && now.duration_since(w.3).as_millis() < 200);
+        let (session, route, mut rows) = match latched {
+            Some((s, route, rows, _)) => (s, route, rows),
+            None => {
+                let Some(s) = self
+                    .store
+                    .sessions
+                    .iter()
+                    .find(|s| term_id(&s.info.id) == id)
+                else {
+                    return;
+                };
+                let Some(v) = self.views.get(&s.info.id) else {
+                    return;
+                };
+                (
+                    s.info.id.clone(),
+                    scroll::route(v.mouse, !v.primary),
+                    Rows::default(),
+                )
+            }
+        };
+        let k = ui.scale();
+        let cell = ui.text.cell();
+        if route == Route::History {
+            self.scrolls
+                .entry(session.clone())
+                .or_default()
+                .wheel(dy * k, phase, now);
+            ui.wake_at(now);
+        } else if let Some(r) = ui.rect_of(id) {
+            let n = rows.take(dy * k, phase, cell.h, route);
+            let col = ((x - r.x) * k / cell.w).floor().max(0.0);
+            let row = ((y - r.y) * k / cell.h).floor().max(0.0);
+            g.wheel_rows(&session, n, route, col, row);
+        }
+        self.wheel = Some((session, route, rows, now));
+    }
+
+    /// Back to the live screen at once, as typing into a terminal does.
+    fn return_to_live(&mut self, session: &str) {
+        if let Some(s) = self.scrolls.get_mut(session) {
+            s.reset();
+        }
+        if let Some(g) = &self.grid {
+            if g.scroll_to(session, 0) {
+                if let Some(v) = g.view(session) {
+                    self.views.insert(session.to_owned(), v);
+                }
+            }
+        }
+    }
+
+    /// Whether `session`'s terminal shows history rather than the live screen.
+    pub fn scrolled_back(&self, session: &str) -> bool {
+        self.scrolls.get(session).is_some_and(Scroll::scrolled)
+    }
+
+    /// Moves a painted pane's scroll on a frame and lines its view up with
+    /// it; returns the pixels to draw the view down by.
+    fn scroll_frame(&mut self, ui: &Ui, session: &str, h: f32) -> f32 {
+        let (Some(s), Some(v), Some(g)) = (
+            self.scrolls.get_mut(session),
+            self.views.get(session),
+            &self.grid,
+        ) else {
+            return 0.0;
+        };
+        let row = ui.text.cell().h;
+        let history = v.history;
+        s.set_metrics(row, h, history);
+        let now = ui.now();
+        if let Some(at) = s.tick(now) {
+            ui.wake_at(at);
+        }
+        let (back, _) = s.split();
+        if back != v.back() && g.scroll_to(session, back) {
+            if let Some(nv) = g.view(session) {
+                self.views.insert(session.to_owned(), nv);
+            }
+        }
+        let back = self.views.get(session).map_or(0, PaneView::back);
+        let dy = (s.pos() - back as f32 * row).round();
+        if s.resting() && !s.scrolled() {
+            self.scrolls.remove(session);
+        }
+        dy
+    }
+
     /// Paints each card's terminal into the box it got, attaching and
     /// sizing the terminal to it.
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
@@ -2746,6 +2857,13 @@ impl App {
                     }
                 }
             }
+            let sid = sid.to_owned();
+            let dy = if split {
+                0.0
+            } else {
+                self.scroll_frame(ui, &sid, r.h)
+            };
+            let sid = sid.as_str();
             let caret = if current.as_deref() != Some(sid) {
                 paint::Caret::Hidden
             } else if self.st.renaming.is_none() && self.st.dialog.is_none() && ui.focus().is_none()
@@ -2772,7 +2890,7 @@ impl App {
                 };
                 // A screen not yet resized to a narrower box stays inside it.
                 ui.scene.push_clip(*r);
-                paint::pane(ui, v, *r, caret, pre, &sel);
+                paint::pane(ui, v, *r, caret, pre, &sel, dy);
                 ui.scene.pop_clip();
             }
             self.term_boxes.insert(sid.to_owned(), *r);
@@ -2798,7 +2916,7 @@ impl App {
             } else {
                 paint::Caret::Hollow
             };
-            paint::pane(ui, v, r, caret, pre, &[]);
+            paint::pane(ui, v, r, caret, pre, &[], 0.0);
             ui.scene.pop_clip();
         }
     }

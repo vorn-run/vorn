@@ -13,10 +13,12 @@ use vorn_term_proto::msg::{
     caps, Attach, AttachMode, ClientKind, ClientMsg, CopyFormat, GridPoint, Hello, InputEvent,
     KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
+use vorn_term_proto::screen::Screen;
 
 use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
 
 use crate::client::rpc::Wake;
+use crate::scroll::Route;
 use crate::view::{self, PaneView};
 
 /// History lines a shell attaches with, for its earlier command blocks.
@@ -47,6 +49,10 @@ struct Pane {
     history: u16,
     /// The scrollback epoch history was last asked for in.
     epoch: Option<u32>,
+    /// The absolute line the view starts at while scrolled back.
+    top: Option<u64>,
+    /// The history fetch in flight, as `(sb_epoch, from_line)`.
+    fetching: Option<(u32, u64)>,
 }
 
 struct State {
@@ -63,6 +69,11 @@ struct State {
     next_req: u32,
     replies: Vec<Reply>,
 }
+
+/// History fetched ahead of a scrolled view, above it.
+const AHEAD: u64 = 200;
+/// The most rows vornd sends for one fetch.
+const MAX_FETCH: u64 = 1000;
 
 /// What vornd answered or asked about a pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +105,42 @@ impl State {
     fn answered(&mut self, req: u32) -> Option<String> {
         let i = self.asks.iter().position(|(r, _)| *r == req)?;
         Some(self.asks.remove(i).1)
+    }
+
+    /// Asks for the first history a scrolled view lacks, from a few pages
+    /// above it to its last row; one fetch at a time.
+    fn fetch_history(&mut self, i: usize) {
+        let p = &self.panes[i];
+        let (Some(sid), Some(top), None) = (p.sid, p.top, p.fetching) else {
+            return;
+        };
+        let Some(m) = self.client.pane(sid).and_then(|x| x.mirror()) else {
+            return;
+        };
+        let t = m.term();
+        let rows = u64::from(t.rows);
+        let oldest = t.top_line.saturating_sub(t.history_lines);
+        let from = top.saturating_sub(AHEAD.max(rows * 4)).max(oldest);
+        let to = (top + rows + 1).min(t.top_line);
+        // Nearest the view first: the rows it shows before the ones above.
+        let Some((from_line, count)) = m
+            .gaps(from, to)
+            .last()
+            .map(|&(a, n)| (a + n.saturating_sub(MAX_FETCH), n.min(MAX_FETCH)))
+        else {
+            return;
+        };
+        let sb_epoch = t.sb_epoch;
+        self.req = self.req.wrapping_add(1);
+        let req = self.req;
+        self.panes[i].fetching = Some((sb_epoch, from_line));
+        self.client.send(&ClientMsg::FetchHistory {
+            sid,
+            req,
+            sb_epoch,
+            from_line,
+            count: count as u16,
+        });
     }
 }
 
@@ -179,6 +226,8 @@ impl Grid {
                 size: (cols, rows),
                 history,
                 epoch: None,
+                top: None,
+                fetching: None,
             });
         }
         self.flush();
@@ -228,11 +277,57 @@ impl Grid {
         self.lock().errors.clone()
     }
 
-    /// `session`'s screen as it is now, once it has one.
+    /// `session`'s screen as it is now, once it has one, scrolled back as
+    /// [`scroll_to`](Self::scroll_to) left it.
     pub fn view(&self, session: &str) -> Option<PaneView> {
         let st = self.lock();
-        let m = st.client.pane(st.sid(session)?)?.mirror()?;
-        Some(view::build(m))
+        let p = st.pane(session)?;
+        let m = st.client.pane(p.sid?)?.mirror()?;
+        Some(view::build(m, p.top))
+    }
+
+    /// Starts the view `back` rows above the live screen, fetching the
+    /// history around it; 0 is the live screen. Returns whether it moved.
+    pub fn scroll_to(&self, session: &str, back: u64) -> bool {
+        {
+            let mut st = self.lock();
+            let Some(i) = st.panes.iter().position(|p| p.session == session) else {
+                return false;
+            };
+            let Some(m) = st.panes[i]
+                .sid
+                .and_then(|sid| st.client.pane(sid))
+                .and_then(|x| x.mirror())
+            else {
+                return false;
+            };
+            let t = m.term();
+            let top = (back > 0 && t.screen == Screen::Primary)
+                .then(|| t.top_line - back.min(t.history_lines));
+            if st.panes[i].top == top {
+                return false;
+            }
+            st.panes[i].top = top;
+            st.fetch_history(i);
+        }
+        self.flush();
+        true
+    }
+
+    /// `rows` wheel rows (negative up) for a program: wheel reports when
+    /// it tracks the mouse, else arrow keys, at cell `(x, y)`.
+    pub fn wheel_rows(&self, session: &str, rows: i32, route: Route, x: f32, y: f32) {
+        let dy = if rows < 0 { -1.0 } else { 1.0 };
+        for _ in 0..rows.unsigned_abs().min(100) {
+            match route {
+                Route::Program => self.wheel(session, dy, x, y),
+                Route::Arrows => {
+                    let code = if rows < 0 { "ArrowUp" } else { "ArrowDown" };
+                    self.key(session, code, 0, None);
+                }
+                Route::History => return,
+            }
+        }
     }
 
     /// Where `session`'s lines are: its prompts and cursor in absolute
@@ -576,11 +671,27 @@ impl Grid {
                         }
                     }
                 }
-                Got::Message(ServerMsg::History { sid, .. }) => {
-                    if let Some(p) = st.panes.iter_mut().find(|p| p.sid == Some(sid)) {
-                        p.dirty = true;
-                        changed = true;
+                Got::Message(ServerMsg::History {
+                    sid,
+                    sb_epoch,
+                    from_line,
+                    ..
+                }) => {
+                    let Some(i) = st.panes.iter().position(|p| p.sid == Some(sid)) else {
+                        continue;
+                    };
+                    let asked = st.panes[i].fetching.take() == Some((sb_epoch, from_line));
+                    let filled = st
+                        .client
+                        .pane(sid)
+                        .and_then(|x| x.mirror())
+                        .is_some_and(|m| m.gaps(from_line, from_line + 1).is_empty());
+                    // A reply that filled nothing is not asked for again.
+                    if !asked || filled {
+                        st.fetch_history(i);
                     }
+                    st.panes[i].dirty = true;
+                    changed = true;
                 }
                 Got::Refused { sid, why } => {
                     st.errors

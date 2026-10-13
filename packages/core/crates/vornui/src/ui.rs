@@ -105,7 +105,8 @@ enum Measure<'a> {
 /// the clip hits are cut to.
 struct Cx<'a> {
     taffy: TaffyTree<Measure<'a>>,
-    overlays: Vec<(&'a Overlay, Rect)>,
+    /// Each overlay with its owner's box and the clip the owner had.
+    overlays: Vec<(&'a Overlay, Rect, Rect)>,
     customs: Vec<(u64, Rect)>,
     nodes: Vec<(NodeId, Node)>,
     clip: Rect,
@@ -337,9 +338,9 @@ impl Ui {
             &mut root_children,
         );
         let mut i = 0;
-        while let Some(&(ov, host)) = cx.overlays.get(i) {
+        while let Some(&(ov, host, clip)) = cx.overlays.get(i) {
             i += 1;
-            self.place_overlay(&mut cx, ov, host, size, &mut root_children);
+            self.place_overlay(&mut cx, ov, (host, clip), size, &mut root_children);
         }
         self.scene.set_layer(main_layer);
         self.after_layout(&cx);
@@ -467,7 +468,7 @@ impl Ui {
         &mut self,
         cx: &mut Cx<'a>,
         ov: &'a Overlay,
-        host: Rect,
+        (host, host_clip): (Rect, Rect),
         win: (f32, f32),
         a11y_parent: &mut Vec<NodeId>,
     ) {
@@ -486,21 +487,31 @@ impl Ui {
             Place::AboveStart => (host.x, host.y - g - h),
             Place::Right => (host.right() + g, host.y + (host.h - h) / 2.0),
             Place::Beside => (beside_x(host, w, g, win.0), host.y - ov.lift),
+            Place::InsideEnd => (host.right() - g - w, host.bottom() - g - h),
         };
-        // Flip to the other side when there is no room, then keep it on
-        // screen.
-        if ov.place == Place::Beside {
-            // Slides up to fit rather than flipping above its entry.
-        } else if y + h > win.1 - MARGIN && host.y - g - h >= MARGIN {
-            y = host.y - g - h;
-        } else if y < MARGIN && host.bottom() + g + h <= win.1 - MARGIN {
-            y = host.bottom() + g;
+        let inside = ov.place == Place::InsideEnd;
+        if !inside {
+            // Flip to the other side when there is no room, then keep it on
+            // screen.
+            if ov.place == Place::Beside {
+                // Slides up to fit rather than flipping above its entry.
+            } else if y + h > win.1 - MARGIN && host.y - g - h >= MARGIN {
+                y = host.y - g - h;
+            } else if y < MARGIN && host.bottom() + g + h <= win.1 - MARGIN {
+                y = host.bottom() + g;
+            }
+            x = x.min(win.0 - MARGIN - w).max(MARGIN);
+            y = y.min(win.1 - MARGIN - h).max(MARGIN);
         }
-        x = x.min(win.0 - MARGIN - w).max(MARGIN);
-        y = y.min(win.1 - MARGIN - h).max(MARGIN);
         self.scene.layer();
         cx.layer += 1;
-        let saved = std::mem::replace(&mut cx.clip, Rect::EVERYTHING);
+        // Inside its owner, it is cut where the owner is.
+        let clip = if inside { host_clip } else { Rect::EVERYTHING };
+        let clipped = clip != Rect::EVERYTHING;
+        if clipped {
+            self.scene.push_clip(clip.scaled(self.scale()));
+        }
+        let saved = std::mem::replace(&mut cx.clip, clip);
         let origin = (x - l.location.x, y - l.location.y);
         self.paint(
             cx,
@@ -511,6 +522,9 @@ impl Ui {
             a11y_parent,
         );
         cx.clip = saved;
+        if clipped {
+            self.scene.pop_clip();
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -812,7 +826,7 @@ impl Ui {
             );
         }
         for ov in &el.overlays {
-            cx.overlays.push((ov, cx.xf.apply(rl)));
+            cx.overlays.push((ov, cx.xf.apply(rl), cx.clip));
         }
         if el.transform.is_some() {
             self.scene.pop_transform();

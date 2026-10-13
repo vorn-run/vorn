@@ -322,7 +322,8 @@ impl App {
             .intent
             .history
             .record(line, project.as_deref(), crate::state::now_ms() as u64);
-        if let Some(g) = &self.grid {
+        if let Some(g) = self.grid.clone() {
+            self.return_to_live(sid);
             g.paste(sid, line);
             g.text(sid, "\r");
         }
@@ -369,7 +370,7 @@ impl App {
         let k = ui.scale();
         let clip = Rect::new(log.x * k, log.y * k, log.w * k, log.h * k);
         ui.scene.push_clip(clip);
-        paint::pane(ui, &b.view, r, paint::Caret::Hidden, "", &[]);
+        paint::pane(ui, &b.view, r, paint::Caret::Hidden, "", &[], 0.0);
         ui.scene.pop_clip();
         true
     }
@@ -404,7 +405,7 @@ impl App {
             _ => Vec::new(),
         };
         ui.scene.push_clip(r);
-        paint::pane(ui, v, at, caret, preedit, &sel);
+        paint::pane(ui, v, at, caret, preedit, &sel, 0.0);
         ui.scene.pop_clip();
         Some(at)
     }
