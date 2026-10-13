@@ -10,7 +10,7 @@ use crate::client::Session;
 use crate::look;
 use crate::state::{MenuKind, SidebarMode};
 use crate::ui::{div, field, text, tooltip, tooltip_at, Action, El, Place, Rgba, Role, TextStyle};
-use vorn_protocol::{ProjectConfig, SessionGroupConfig};
+use vorn_protocol::{ProjectConfig, SessionGroupConfig, WorkspaceConfig};
 
 /// A configured colour, `#rrggbb`.
 fn stored_color(hex: Option<&str>) -> Option<Rgba> {
@@ -80,29 +80,38 @@ fn folder_icon(size: f32, color: Rgba) -> El {
 }
 
 fn header(s: &Screen<'_>) -> El {
-    let workspace = s
-        .store
-        .config
-        .pointer("/workspaces/0/name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Personal");
+    let ws = s.store.current_workspace();
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Workspace);
+    let id = s.acts.on("workspace", Act::Open(MenuKind::Workspace));
+    let hot = s.ui.hover(id);
     let title = div()
+        .id(id)
+        .on(Action::Click)
         .row()
         .items_center()
         .gap(8.0)
         .px(10.0)
         .py(6.0)
+        .rounded(6.0)
+        .bg(white(0.0).mix(white(0.06), hot))
         .grow()
         .min_w0()
-        .role(Role::Label, workspace)
-        .child(ico("user", 14.0, 1.5, c(look::GRAY_500)))
+        .role(Role::Button, ws.name.as_str())
+        .child(workspace_icon(&ws, 14.0))
         .child(
-            text(workspace, 13.0, c(look::GRAY_200))
+            text(ws.name.as_str(), 13.0, c(look::GRAY_200))
                 .weight(500)
                 .line_height(18.0)
                 .truncate()
                 .silent(),
-        );
+        )
+        .child(div().grow())
+        .child(ico(
+            if open { "chevron-up" } else { "chevron-down" },
+            12.0,
+            2.0,
+            c(look::GRAY_500),
+        ));
     let bar = div()
         .row()
         .items_center()
@@ -1091,6 +1100,237 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
         );
     }
     row
+}
+
+/// `WorkspaceIcon`: its stored glyph in its colour, else a gray user.
+fn workspace_icon(ws: &WorkspaceConfig, size: f32) -> El {
+    workspace_glyph(ws.icon.as_deref(), ws.icon_color.as_deref(), size)
+}
+
+fn workspace_glyph(icon: Option<&str>, color: Option<&str>, size: f32) -> El {
+    let glyph = icon
+        .and_then(|n| look::WORKSPACE_ICONS.iter().find(|(name, ..)| *name == n))
+        .map_or("user", |(_, glyph, _)| *glyph);
+    let tint = color
+        .and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
+        .map_or(c(look::GRAY_500), Rgba::hex);
+    ico(glyph, size, 1.5, tint)
+}
+
+/// `WorkspaceSwitcher`'s dropdown: the workspaces with their project
+/// counts, each editable and (but `personal`) deletable, then Create.
+pub(super) fn workspace_panel(s: &Screen<'_>) -> El {
+    let active = s.store.workspace();
+    let form = s.st.ws_form.as_ref();
+    let mut list = div().id(s.acts.on("workspace-list", Act::Nothing)).col().scroll_y().max_h(300.0);
+    for ws in s.store.workspaces() {
+        if form.is_some_and(|f| f.id.as_deref() == Some(ws.id.as_str())) {
+            list = list.child(workspace_form(s));
+            continue;
+        }
+        let count = s
+            .store
+            .projects
+            .iter()
+            .filter(|p| p.workspace_id.as_deref().unwrap_or(crate::client::store::WORKSPACE) == ws.id)
+            .count();
+        list = list.child(workspace_row(s, &ws, ws.id == active, count));
+    }
+    let mut panel = div()
+        .col()
+        .w(260.0)
+        .py(4.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Menu, "Workspaces")
+        .child(list)
+        .child(div().h(1.0).mt(4.0).mb(4.0).bg(white(0.06)));
+    if form.is_some_and(|f| f.id.is_none()) {
+        panel = panel.child(workspace_form(s));
+    } else {
+        let id = s.acts.on("workspace", Act::EditWorkspace(None));
+        let hot = s.ui.hover(id);
+        let fg = c(look::GRAY_400).mix(c(look::GRAY_200), hot);
+        panel = panel.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(12.0)
+                .py(8.0)
+                .bg(white(0.0).mix(white(0.04), hot))
+                .role(Role::MenuItem, "Create Workspace")
+                .child(ico("plus", 14.0, 1.5, fg))
+                .child(text("Create Workspace", 13.0, fg).line_height(19.5).silent()),
+        );
+    }
+    panel
+}
+
+/// A workspace in the switcher: its icon, name and project count, and on
+/// hover Edit and Delete (armed by the first click).
+fn workspace_row(s: &Screen<'_>, ws: &WorkspaceConfig, on: bool, count: usize) -> El {
+    let pick = s.acts.on("workspace", Act::SwitchWorkspace(ws.id.clone()));
+    let row_id = pick.child("row");
+    let hot = s.ui.hovered(row_id);
+    let armed = s.st.confirm_delete.as_deref() == Some(ws.id.as_str());
+    let bg = if on {
+        white(0.08)
+    } else {
+        white(0.0).mix(white(0.04), s.ui.hover(row_id))
+    };
+    let fg = if on { c(look::WHITE) } else { c(look::GRAY_300) };
+    let button = div()
+        .id(pick)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .grow()
+        .min_w0()
+        .role(Role::MenuItem, ws.name.as_str())
+        .selected(on)
+        .child(workspace_icon(ws, 14.0))
+        .child(text(ws.name.as_str(), 13.0, fg).line_height(19.5).truncate().silent())
+        .child(div().grow())
+        .child(text(count.to_string(), 11.0, c(look::GRAY_600)).line_height(16.5).silent());
+    let mut actions = div().row().items_center().gap(2.0).shrink0();
+    if hot || armed {
+        let edit = s.acts.on("workspace", Act::EditWorkspace(Some(ws.id.clone())));
+        let edit_hot = s.ui.hover(edit);
+        actions = actions.child(tooltip(
+            s.ui,
+            div()
+                .id(edit)
+                .on(Action::Click)
+                .p(2.0)
+                .rounded(4.0)
+                .role(Role::Button, "Edit")
+                .child(ico("pencil", 11.0, 1.5, c(look::GRAY_500).mix(c(look::GRAY_300), edit_hot))),
+            edit,
+            "Edit",
+            None,
+        ));
+        if ws.id != crate::client::store::WORKSPACE {
+            let (act, label, tint, stroke) = if armed {
+                (Act::DeleteWorkspace(ws.id.clone()), "Confirm delete", c(look::RED_400), 2.0)
+            } else {
+                (Act::AskDeleteWorkspace(ws.id.clone()), "Delete", c(look::GRAY_500), 1.5)
+            };
+            let del = s.acts.on("workspace", act);
+            let del_hot = s.ui.hover(del);
+            let tint = if armed { tint } else { tint.mix(c(look::RED_400), del_hot) };
+            actions = actions.child(tooltip(
+                s.ui,
+                div()
+                    .id(del)
+                    .on(Action::Click)
+                    .p(2.0)
+                    .rounded(4.0)
+                    .role(Role::Button, label)
+                    .child(ico("trash-2", 11.0, stroke, tint)),
+                del,
+                label,
+                None,
+            ));
+        }
+    }
+    div()
+        .id(row_id)
+        .sense(crate::ui::Sense::HOVER)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(10.0)
+        .py(8.0)
+        .bg(bg)
+        .child(button)
+        .child(actions)
+}
+
+/// The switcher's create or edit row: icon button, name field, save and
+/// cancel, and the icon picker under them when open.
+fn workspace_form(s: &Screen<'_>) -> El {
+    let Some(f) = s.st.ws_form.as_ref() else {
+        return div();
+    };
+    let picker = s.acts.on("workspace", Act::WorkspacePicker);
+    let save = s.acts.on("workspace", Act::SaveWorkspace);
+    let cancel = s.acts.on("workspace", Act::CancelWorkspace);
+    let empty = s.ui.edit_text(crate::app::WS_NAME).trim().is_empty();
+    let focused = s.ui.focused(crate::app::WS_NAME);
+    let input = div()
+        .grow()
+        .min_w0()
+        .px(8.0)
+        .py(4.0)
+        .rounded(4.0)
+        .bg(white(0.06))
+        .border(1.0, if focused { white(0.2) } else { white(0.1) })
+        .child(field(
+            crate::app::WS_NAME,
+            "Workspace name",
+            if f.id.is_none() { "Workspace name..." } else { "" },
+            TextStyle {
+                line_height: 19.5,
+                ..TextStyle::ui(13.0)
+            },
+            c(look::GRAY_200),
+        ));
+    let save_fg = c(look::GREEN_400).alpha(if f.id.is_none() && empty { 0.3 } else { 1.0 });
+    let row = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .child(
+            div()
+                .id(picker)
+                .on(Action::Click)
+                .p(4.0)
+                .rounded(4.0)
+                .bg(white(0.0).mix(white(0.08), s.ui.hover(picker)))
+                .role(Role::Button, "Change icon")
+                .child(workspace_glyph(Some(&f.icon), Some(&f.color), 14.0)),
+        )
+        .child(input)
+        .child(
+            div()
+                .id(save)
+                .on(Action::Click)
+                .p(4.0)
+                .role(Role::Button, "Save")
+                .child(ico("check", 14.0, 2.0, save_fg)),
+        )
+        .child(
+            div()
+                .id(cancel)
+                .on(Action::Click)
+                .p(4.0)
+                .role(Role::Button, "Cancel")
+                .child(ico(
+                    "x",
+                    14.0,
+                    2.0,
+                    c(look::GRAY_500).mix(c(look::GRAY_300), s.ui.hover(cancel)),
+                )),
+        );
+    let mut col = div().col().px(8.0).py(6.0).child(row);
+    if f.picker {
+        col = col.child(div().mt(8.0).child(super::workflows::icon_colors_from(
+            s,
+            "workspace",
+            &look::WORKSPACE_ICONS,
+            26.0,
+            &f.icon,
+            &f.color,
+            Act::WorkspaceIcon,
+            Act::WorkspaceColor,
+        )));
+    }
+    col
 }
 
 /// SessionGroupItem's icon popover: `IconColorPicker` over a Done button.

@@ -207,16 +207,31 @@ pub fn icon_colors(
     on_icon: impl Fn(String) -> Act,
     on_color: impl Fn(String) -> Act,
 ) -> El {
+    icon_colors_from(s, place, &look::ICON_OPTIONS, 22.0, icon, color, on_icon, on_color)
+}
+
+/// `icon_colors` over `options`, each cell `cell_w` wide.
+#[allow(clippy::too_many_arguments)]
+pub fn icon_colors_from(
+    s: &Screen<'_>,
+    place: &'static str,
+    options: &[(&str, &str, &str)],
+    cell_w: f32,
+    icon: &str,
+    color: &str,
+    on_icon: impl Fn(String) -> Act,
+    on_color: impl Fn(String) -> Act,
+) -> El {
     let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
     let mut grid = div().row().wrap_children().gap(4.0);
-    for (name, glyph, label) in look::ICON_OPTIONS {
+    for &(name, glyph, label) in options {
         let id = s.acts.on(place, on_icon(name.to_owned()));
         let on = icon == name;
         let hot = s.ui.hover(id);
         let b = div()
             .id(id)
             .on(Action::Click)
-            .size(22.0, 24.0)
+            .size(cell_w, 24.0)
             .center()
             .rounded(4.0)
             .bg(if on {

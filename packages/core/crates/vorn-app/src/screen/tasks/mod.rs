@@ -731,7 +731,7 @@ fn empty(s: &Screen<'_>) -> El {
 
 /// The tasks the board shows.
 pub(super) fn shown<'a>(s: &Screen<'a>) -> Vec<&'a TaskConfig> {
-    let names: Vec<&str> = s.store.projects.iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<&str> = s.store.workspace_projects().map(|p| p.name.as_str()).collect();
     s.st.tasks
         .visible(&s.store.tasks, s.st.project.as_deref(), &names)
 }

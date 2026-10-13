@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use vorn_protocol::{
     ProjectConfig, SessionGroupConfig, TaskConfig, TerminalSession, WorkflowDefinition,
+    WorkspaceConfig,
 };
 
 use super::rpc::{Pending, Rpc, RpcError, CALL_TIMEOUT};
@@ -162,6 +163,26 @@ impl Store {
     /// every app on this vornd saves on a switch, else `personal`.
     pub fn workspace(&self) -> &str {
         active_workspace(&self.config)
+    }
+
+    /// `config.workspaces ?? [DEFAULT_WORKSPACE]`, skipping any it cannot read.
+    pub fn workspaces(&self) -> Vec<WorkspaceConfig> {
+        match self.config.get("workspaces").and_then(Value::as_array) {
+            Some(list) => list
+                .iter()
+                .filter_map(|w| serde_json::from_value(w.clone()).ok())
+                .collect(),
+            None => vec![default_workspace()],
+        }
+    }
+
+    /// The active workspace, else the default one, as the switcher shows it.
+    pub fn current_workspace(&self) -> WorkspaceConfig {
+        let id = self.workspace();
+        self.workspaces()
+            .into_iter()
+            .find(|w| w.id == id)
+            .unwrap_or_else(default_workspace)
     }
 
     /// Whether `p` belongs to the active workspace; a project with none
@@ -324,6 +345,17 @@ impl Store {
             }
             _ => Change::Nothing,
         }
+    }
+}
+
+/// `DEFAULT_WORKSPACE`.
+pub fn default_workspace() -> WorkspaceConfig {
+    WorkspaceConfig {
+        id: WORKSPACE.to_owned(),
+        name: "Personal".to_owned(),
+        icon: Some("User".to_owned()),
+        icon_color: Some("#6b7280".to_owned()),
+        order: 0.0,
     }
 }
 

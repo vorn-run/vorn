@@ -133,6 +133,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),
+                crate::state::MenuKind::Workspace => sidebar::workspace_panel(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
                 crate::state::MenuKind::LaunchModel => composer::model_panel(self),
                 crate::state::MenuKind::Branch(_) => git::branch_panel(self),

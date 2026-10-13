@@ -155,12 +155,7 @@ impl App {
 
     /// The workspace new workflows and the landing's runs belong to.
     pub(super) fn workspace(&self) -> String {
-        self.store
-            .config
-            .pointer("/defaults/activeWorkspace")
-            .and_then(Value::as_str)
-            .unwrap_or("personal")
-            .to_owned()
+        self.store.workspace().to_owned()
     }
 
     /// The saved workflow `id`, as the config holds it.

@@ -190,6 +190,17 @@ pub const MODEL_ID: Id = Id(0x6d6f_6465_6c00_0001);
 /// The field a group's name is edited in.
 pub const GROUP_NAME: Id = Id(0x6772_6f75_7000_0001);
 
+/// The workspace switcher's name field.
+pub const WS_NAME: Id = Id(0x7773_6e61_6d00_0001);
+
+/// Sets `defaults.activeWorkspace`, making `defaults` when there is none.
+fn set_active_workspace(config: &mut Value, id: String) {
+    if !config.get("defaults").is_some_and(Value::is_object) {
+        config["defaults"] = json!({});
+    }
+    config["defaults"]["activeWorkspace"] = Value::String(id);
+}
+
 /// Appends `group` to the config's `sessionGroups`, making the list when
 /// there is none.
 fn push_group(config: &mut Value, group: Value) {
@@ -836,12 +847,11 @@ impl App {
         at.0 = at.0.min(self.size.0 - w - 8.0).max(8.0);
         match &kind {
             MenuKind::Grid => {
-                for p in self.store.projects.clone() {
-                    self.call(
-                        Call::Worktrees(p.path.clone()),
-                        "git:listWorktrees",
-                        json!(p.path),
-                    );
+                let paths: Vec<String> =
+                    self.store.workspace_projects().map(|p| p.path.clone()).collect();
+                for path in paths {
+                    let arg = json!(path);
+                    self.call(Call::Worktrees(path), "git:listWorktrees", arg);
                 }
             }
             MenuKind::Recent => {
@@ -922,6 +932,9 @@ impl App {
     fn close_menu(&mut self, ui: &mut Ui) {
         self.st.menu = None;
         self.st.confirm_delete = None;
+        if self.st.ws_form.take().is_some() && ui.focused(WS_NAME) {
+            ui.set_focus(None);
+        }
         ui.close_menu();
     }
 
@@ -1021,6 +1034,123 @@ impl App {
         }
     }
 
+    /// `setActiveWorkspace`: saved in the config, which every app on this
+    /// vornd follows.
+    fn switch_workspace(&mut self, id: String) {
+        let mut config = self.store.config.clone();
+        set_active_workspace(&mut config, id);
+        self.save_config(config, Call::Quiet);
+    }
+
+    /// The switcher's form, filled from workspace `id` or for a new one.
+    fn edit_workspace(&mut self, ui: &mut Ui, id: Option<String>) {
+        let ws = id
+            .as_deref()
+            .and_then(|id| self.store.workspaces().into_iter().find(|w| w.id == id));
+        let (name, icon, color) = match &ws {
+            Some(w) => (
+                w.name.clone(),
+                w.icon.clone().unwrap_or_else(|| "User".to_owned()),
+                w.icon_color.clone().unwrap_or_else(|| "#6b7280".to_owned()),
+            ),
+            None => (String::new(), "Briefcase".to_owned(), "#3b82f6".to_owned()),
+        };
+        self.st.confirm_delete = None;
+        self.st.ws_form = Some(crate::state::WorkspaceForm {
+            id: ws.map(|w| w.id),
+            icon,
+            color,
+            picker: false,
+        });
+        ui.set_edit_text(WS_NAME, &name);
+        ui.set_focus(Some(WS_NAME));
+    }
+
+    /// `handleCreate` (then a switch to it) or `handleUpdate`.
+    fn save_workspace(&mut self, ui: &mut Ui) {
+        let name = ui.edit_text(WS_NAME).trim().to_owned();
+        let Some(form) = self.st.ws_form.as_ref().filter(|_| !name.is_empty()) else {
+            return;
+        };
+        let mut config = self.store.config.clone();
+        if !config.get("workspaces").is_some_and(Value::is_array) {
+            config["workspaces"] = json!([]);
+        }
+        let Some(list) = config["workspaces"].as_array_mut() else {
+            return;
+        };
+        let call = match &form.id {
+            Some(id) => {
+                if let Some(w) = list
+                    .iter_mut()
+                    .find(|w| w.get("id").and_then(Value::as_str) == Some(id))
+                {
+                    w["name"] = json!(name);
+                    w["icon"] = json!(form.icon);
+                    w["iconColor"] = json!(form.color);
+                }
+                Call::Toast("Workspace updated".to_owned())
+            }
+            None => {
+                let id = crate::graph::new_id();
+                let order = list
+                    .iter()
+                    .filter_map(|w| w.get("order").and_then(Value::as_f64))
+                    .fold(0.0, f64::max)
+                    + 1.0;
+                list.push(json!({
+                    "id": id,
+                    "name": name,
+                    "icon": form.icon,
+                    "iconColor": form.color,
+                    "order": order,
+                }));
+                set_active_workspace(&mut config, id);
+                Call::Toast(format!("Workspace \"{name}\" created"))
+            }
+        };
+        self.st.ws_form = None;
+        ui.set_focus(None);
+        self.save_config(config, call);
+    }
+
+    /// `removeWorkspace`: its groups go with it, its projects and
+    /// workflows move to `personal`, which it hands the screen to if it
+    /// had it.
+    fn delete_workspace(&mut self, id: &str) {
+        use crate::client::store::WORKSPACE;
+        self.st.confirm_delete = None;
+        if id == WORKSPACE {
+            return;
+        }
+        let name = self
+            .store
+            .workspaces()
+            .into_iter()
+            .find(|w| w.id == id)
+            .map(|w| w.name);
+        let mut config = self.store.config.clone();
+        let mine = |v: &Value| v.get("workspaceId").and_then(Value::as_str).unwrap_or(WORKSPACE) == id;
+        if let Some(l) = config.get_mut("workspaces").and_then(Value::as_array_mut) {
+            l.retain(|w| w.get("id").and_then(Value::as_str) != Some(id));
+        }
+        if let Some(l) = config.get_mut("sessionGroups").and_then(Value::as_array_mut) {
+            l.retain(|g| g.get("workspaceId").and_then(Value::as_str) != Some(id));
+        }
+        for key in ["projects", "workflows"] {
+            if let Some(l) = config.get_mut(key).and_then(Value::as_array_mut) {
+                for item in l.iter_mut().filter(|v| mine(v)) {
+                    item["workspaceId"] = json!(WORKSPACE);
+                }
+            }
+        }
+        if self.store.workspace() == id {
+            set_active_workspace(&mut config, WORKSPACE.to_owned());
+        }
+        let label = name.unwrap_or_default();
+        self.save_config(config, Call::Toast(format!("Workspace \"{label}\" deleted")));
+    }
+
     /// `updateSessionGroup`: one field of a group, saved quietly.
     fn patch_group(&mut self, id: &str, key: &str, value: String) {
         let mut config = self.store.config.clone();
@@ -1086,7 +1216,11 @@ impl App {
     }
 
     fn save_config(&mut self, config: Value, call: Call) {
+        let before = self.store.workspace().to_owned();
         self.store.apply("config:changed", config.clone());
+        if self.store.workspace() != before {
+            self.workspace_switched();
+        }
         self.saves.push_back((config, call));
         self.next_save();
     }
@@ -1418,6 +1552,31 @@ impl App {
                 self.st.renaming_group = Some(id);
             }
             Act::GroupIcon(id) => self.open_menu(ui, MenuKind::GroupIcon(id), src),
+            Act::SwitchWorkspace(id) => self.switch_workspace(id),
+            Act::EditWorkspace(id) => self.edit_workspace(ui, id),
+            Act::WorkspaceIcon(icon) => {
+                if let Some(f) = &mut self.st.ws_form {
+                    f.icon = icon;
+                }
+            }
+            Act::WorkspaceColor(color) => {
+                if let Some(f) = &mut self.st.ws_form {
+                    f.color = color;
+                }
+            }
+            Act::WorkspacePicker => {
+                if let Some(f) = &mut self.st.ws_form {
+                    f.picker = !f.picker;
+                }
+            }
+            Act::SaveWorkspace => self.save_workspace(ui),
+            Act::CancelWorkspace => {
+                self.st.ws_form = None;
+                self.st.confirm_delete = None;
+                ui.set_focus(None);
+            }
+            Act::AskDeleteWorkspace(id) => self.st.confirm_delete = Some(id),
+            Act::DeleteWorkspace(id) => self.delete_workspace(&id),
             Act::GroupIconName(id, icon) => self.patch_group(&id, "icon", icon),
             Act::GroupIconColor(id, color) => self.patch_group(&id, "iconColor", color),
             Act::UngroupAll(id) => {
@@ -1619,6 +1778,18 @@ impl App {
                                 )
                             || matches!(m.kind, MenuKind::GroupIcon(_))
                                 && matches!(act, Act::GroupIconName(..) | Act::GroupIconColor(..))
+                            || m.kind == MenuKind::Workspace
+                                && matches!(
+                                    act,
+                                    Act::EditWorkspace(_)
+                                        | Act::WorkspaceIcon(_)
+                                        | Act::WorkspaceColor(_)
+                                        | Act::WorkspacePicker
+                                        | Act::SaveWorkspace
+                                        | Act::CancelWorkspace
+                                        | Act::AskDeleteWorkspace(_)
+                                        | Act::DeleteWorkspace(_)
+                                )
                             || matches!(m.kind, MenuKind::SidebarOptions)
                                 && matches!(
                                     act,
@@ -1745,6 +1916,10 @@ impl App {
             self.rename_group(ui);
             return;
         }
+        if id == WS_NAME {
+            self.save_workspace(ui);
+            return;
+        }
         if id == MODEL_ID {
             self.choose_typed_model(ui);
             return;
@@ -1859,6 +2034,11 @@ impl App {
         let bare = self.st.dialog.is_none() && self.st.menu.is_none() && ui.focus().is_none();
         if code == "Tab" && bare && self.composing() {
             self.compose(input.clone());
+            return true;
+        }
+        // Escape in the switcher's form cancels the form, not the switcher.
+        if code == "Escape" && self.st.ws_form.is_some() {
+            self.run(ui, Act::CancelWorkspace, Src::default());
             return true;
         }
         if self.st.menu.is_some() || code != "Escape" || *m & (MOD | mods::ALT) != 0 {

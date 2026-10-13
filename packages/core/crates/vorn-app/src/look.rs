@@ -100,6 +100,26 @@ pub const ICON_COLORS: [Rgb; 8] = [
     0x22c55e,
 ];
 
+/// `WORKSPACE_ICON_OPTIONS`: what a workspace stores, its glyph and label.
+pub const WORKSPACE_ICONS: [(&str, &str, &str); 16] = [
+    ("User", "user", "Personal"),
+    ("Briefcase", "briefcase", "Work"),
+    ("Building2", "building-2", "Company"),
+    ("Users", "users", "Team"),
+    ("Code", "code", "Code"),
+    ("Star", "star", "Star"),
+    ("Heart", "heart", "Favorite"),
+    ("Coffee", "coffee", "Side Project"),
+    ("Layers", "layers", "Layers"),
+    ("Rocket", "rocket", "Launch"),
+    ("FlaskConical", "flask-conical", "Lab"),
+    ("Globe", "globe", "Web"),
+    ("Shield", "shield", "Security"),
+    ("Zap", "zap", "Fast"),
+    ("Gamepad2", "gamepad-2", "Game"),
+    ("BookOpen", "book-open", "Docs"),
+];
+
 /// `ICON_MAP[name]`: the glyph a stored icon name draws, `Play` included.
 pub fn icon_map(name: &str) -> Option<&'static str> {
     if name == "Play" {

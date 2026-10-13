@@ -138,6 +138,16 @@ impl SidebarMode {
     }
 }
 
+/// The workspace being created (`id` none) or edited, and its icon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceForm {
+    pub id: Option<String>,
+    pub icon: String,
+    pub color: String,
+    /// The icon and colour picker is showing.
+    pub picker: bool,
+}
+
 /// Which menu is open.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MenuKind {
@@ -161,6 +171,8 @@ pub enum MenuKind {
     SessionGroups(String),
     /// A group's icon and colour picker.
     GroupIcon(String),
+    /// The sidebar header's workspace switcher.
+    Workspace,
     /// The launcher's pickers.
     LaunchProject,
     LaunchAgent,
@@ -424,6 +436,8 @@ pub struct State {
     pub groups_folded: HashSet<String>,
     /// The group whose name is being edited.
     pub renaming_group: Option<String>,
+    /// The workspace switcher's create or edit form, its name in `WS_NAME`.
+    pub ws_form: Option<WorkspaceForm>,
     pub filter: Filter,
     pub sort: Sort,
     /// 0 for the automatic layout, -1 flexible, else that many columns.

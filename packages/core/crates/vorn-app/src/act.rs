@@ -109,6 +109,17 @@ pub enum Act {
     /// Lets every session of a group go.
     UngroupAll(String),
     AskDeleteGroup(String),
+    /// `setActiveWorkspace`.
+    SwitchWorkspace(String),
+    /// Opens the switcher's form: a new workspace, or this one's.
+    EditWorkspace(Option<String>),
+    WorkspaceIcon(String),
+    WorkspaceColor(String),
+    WorkspacePicker,
+    SaveWorkspace,
+    CancelWorkspace,
+    AskDeleteWorkspace(String),
+    DeleteWorkspace(String),
     DeleteGroup(String),
     /// Moves a session into a group, or out of its own.
     MoveToGroup {
