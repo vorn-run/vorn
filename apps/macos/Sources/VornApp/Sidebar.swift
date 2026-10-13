@@ -428,7 +428,6 @@ struct ProjectItem: View {
         .onHover { hover = $0 }
         .onTapGesture {
             model.select(project: project.name)
-            if model.expandedProjects[project.name] == nil, sessions.isEmpty { model.expandedProjects[project.name] = true }
         }
         .controlAnchor("project:\(project.name)")
     }

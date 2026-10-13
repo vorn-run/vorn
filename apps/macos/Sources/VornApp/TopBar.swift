@@ -1,6 +1,7 @@
 import SwiftUI
 import VornCore
 import VornTasks
+import VornTerminals
 import VornUI
 import VornWorkflows
 
@@ -41,7 +42,7 @@ struct TopBar: View {
                     }
                 }
             }
-            Breadcrumb(model: model, store: store)
+            Breadcrumb(model: model, store: store, actions: actions)
                 .frame(maxWidth: 400)
         }
         .padding(.leading, model.sidebarOpen ? 12 : Theme.trafficLightPad)
@@ -168,6 +169,9 @@ struct MinimizedPill: View {
 private struct Breadcrumb: View {
     @Bindable var model: AppModel
     let store: VornStore
+    let actions: ShellActions
+    @State private var picking = false
+    @State private var switching = false
 
     var body: some View {
         if let name = model.activeProject {
@@ -184,20 +188,49 @@ private struct Breadcrumb: View {
                         chevron
                         Text(wt.name).foregroundStyle(Theme.gray400).lineLimit(1)
                     }
-                    if let wt {
+                    if let wt, let project {
                         chevron
-                        HStack(spacing: 4) {
-                            LucideIcon(.gitBranch, size: 11).foregroundStyle(Theme.gray500)
-                            Text(wt.branch).lineLimit(1).frame(maxWidth: 120).fixedSize(horizontal: true, vertical: false)
-                            LucideIcon(.chevronDown, size: 10).foregroundStyle(Theme.gray500)
-                        }
-                        .foregroundStyle(Color.white)
+                        branchButton(wt, project)
                     }
                 } else {
                     Text(name).foregroundStyle(Color.white).lineLimit(1)
                 }
             }
             .font(.ui(13))
+        }
+    }
+
+    /// useBranchSwitcher: checks out a branch in the filtered tree.
+    private func branchButton(_ wt: Worktree, _ project: Project) -> some View {
+        let cwd = wt.isMain ? project.path : wt.path
+        return Hovering { hover in
+            Button { picking.toggle() } label: {
+                HStack(spacing: 4) {
+                    LucideIcon(.gitBranch, size: 11).foregroundStyle(Theme.gray500)
+                    Text(wt.branch).lineLimit(1).frame(maxWidth: 120).fixedSize(horizontal: true, vertical: false)
+                    LucideIcon(.chevronDown, size: 10).foregroundStyle(Theme.gray500)
+                }
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 4)
+                .background(RoundedRectangle(cornerRadius: Theme.radius)
+                    .fill(picking ? Theme.white(0.08) : hover ? Theme.white(0.06) : .clear))
+                .opacity(switching ? 0.5 : 1)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(switching)
+            .accessibilityLabel("Switch branch (current: \(wt.branch))")
+        }
+        .popover(isPresented: $picking, arrowEdge: .bottom) {
+            BranchPicker(projectPath: project.path, currentBranch: wt.branch, git: actions.gitActions) { pick in
+                picking = false
+                guard pick != wt.branch, !switching else { return }
+                switching = true
+                Task {
+                    await actions.checkout(cwd: cwd, projectPath: project.path, branch: pick)
+                    switching = false
+                }
+            }
         }
     }
 

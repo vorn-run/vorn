@@ -17,7 +17,7 @@ struct ShellActions {
         run {
             let cwd = worktree?.path ?? project?.path
             let s = try await store.createShell(cwd: cwd, project: project, worktree: worktree)
-            model.focus(s.id)
+            model.showTab(s.id)
         }
     }
 
@@ -31,7 +31,7 @@ struct ShellActions {
         }
         run {
             let s = try await store.createSession(payload)
-            model.focus(s.id)
+            model.showTab(s.id)
         }
     }
 
@@ -132,6 +132,21 @@ struct ShellActions {
         return g
     }
 
+    /// useBranchSwitcher.selectBranch: checks `branch` out in `cwd`, toasting the outcome.
+    func checkout(cwd: String, projectPath: String, branch: String) async {
+        do {
+            if let err = try await store.client.checkout(cwd: cwd, branch: branch) {
+                model.toasts.show(err, .error)
+                return
+            }
+            store.setBranch(branch, forCwd: cwd)
+            await store.loadGitInfo(projectPath)
+            model.toasts.show("Switched to '\(branch)'", .success)
+        } catch {
+            model.toasts.show(error.localizedDescription, .error)
+        }
+    }
+
     /// CommitDialog.handleContinue for a session's tree: commit, then push if asked; answers the error to show.
     func commit(_ session: TerminalSession, message: String, includeUnstaged: Bool, push: Bool) async -> String? {
         let cwd = session.worktreePath ?? session.projectPath
@@ -185,7 +200,7 @@ struct ShellActions {
     func resume(_ id: String) {
         run {
             try await store.resume(id)
-            model.focus(id)
+            model.showTab(id)
         }
     }
 
@@ -201,7 +216,7 @@ struct ShellActions {
         }
         run {
             let created = try await store.createSession(payload)
-            model.focus(created.id)
+            model.showTab(created.id)
         }
     }
 
@@ -214,7 +229,7 @@ struct ShellActions {
         model.overlay = nil
         run {
             let s = try await store.createSession(payload)
-            model.focus(s.id)
+            model.showTab(s.id)
         }
     }
 
@@ -225,7 +240,7 @@ struct ShellActions {
                                             projectPath: project.path, branch: branch, useWorktree: true)
         run {
             let s = try await store.createSession(payload)
-            model.focus(s.id)
+            model.showTab(s.id)
         }
     }
 

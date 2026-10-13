@@ -73,7 +73,7 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
         switch target {
         case .session(let id):
             model.mainViewMode = .sessions
-            model.focus(id)
+            model.setFocused(id)
         case .run(let id):
             model.mainViewMode = .workflows
             workflows?.showRun(id)

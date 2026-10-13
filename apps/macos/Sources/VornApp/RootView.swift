@@ -212,7 +212,7 @@ public struct RootView: View {
                        isGitRepo: { p in store.gitRepos[p.path] == true },
                        tip: model.launcherTip) { payload in
             let s = try await store.createSession(payload)
-            model.focus(s.id)
+            model.showTab(s.id)
         }
     }
 
