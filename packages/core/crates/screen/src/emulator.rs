@@ -518,7 +518,9 @@ impl Pending {
                 let command = given.or(self.command.take());
                 self.command = None;
                 Some(Mark::Start {
-                    command: command.map(|c| clip_units(c.trim())).filter(|c| !c.is_empty()),
+                    command: command
+                        .map(|c| clip_units(c.trim()))
+                        .filter(|c| !c.is_empty()),
                 })
             }
             "D" => Some(Mark::End {

@@ -38,10 +38,9 @@ impl App {
             .store
             .session(&id)
             .and_then(|s| s.info.shell_cwd.clone());
-        let lines = self.grid.as_ref().and_then(|g| g.lines(&id));
         let started = matches!(mark, Mark::Start(_));
         let sh = self.st.shells.entry(id.clone()).or_default();
-        sh.mark(mark, at, cwd.as_deref(), lines.as_ref(), Instant::now());
+        sh.mark(mark, at, cwd.as_deref(), Instant::now());
         if started {
             if let Some(m) = self.st.intent.menus.get_mut(&id) {
                 m.close();

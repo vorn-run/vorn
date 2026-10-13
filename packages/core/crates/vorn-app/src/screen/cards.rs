@@ -675,7 +675,7 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
                     .child(
                         text(cmd.as_str(), 13.0, c(look::GRAY_100))
                             .mono()
-                            .weight(600)
+                            .weight(MONO_SEMIBOLD)
                             .line_height(19.0)
                             .wrapping()
                             .grow()
@@ -694,6 +694,9 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
         ),
     }
 }
+
+/// `font-semibold` in the terminal face: it has no 600, and asking for one falls back to the UI face.
+const MONO_SEMIBOLD: u16 = 700;
 
 /// How long Copy shows its check.
 const COPIED: Duration = Duration::from_millis(1200);
@@ -723,7 +726,7 @@ fn running_row(s: &Screen<'_>, r: &Running) -> El {
         .child(
             text(label, 13.0, c(look::GRAY_100))
                 .mono()
-                .weight(600)
+                .weight(MONO_SEMIBOLD)
                 .line_height(19.0)
                 .truncate()
                 .grow(),

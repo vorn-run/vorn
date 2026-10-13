@@ -60,8 +60,6 @@ struct Entry {
     ended: bool,
     exit_code: Option<i32>,
     duration_ms: Option<u64>,
-    /// The prompt's line, in its scrollback epoch, as the screen had it when the command started.
-    line: Option<(u32, u64)>,
 }
 
 /// A finished command, ready to draw.
@@ -132,17 +130,9 @@ pub fn split<'a>(
 
 impl Shell {
     /// Takes a mark the shell reported at `at` (epoch ms), seen at `now`
-    /// with the screen as `lines` and the directory as `cwd`.
-    pub fn mark(
-        &mut self,
-        mark: Mark,
-        at: u64,
-        cwd: Option<&str>,
-        lines: Option<&Lines>,
-        now: Instant,
-    ) {
+    /// with the directory as `cwd`.
+    pub fn mark(&mut self, mark: Mark, at: u64, cwd: Option<&str>, now: Instant) {
         self.seen = true;
-        let line = lines.and_then(|l| l.prompts.last().map(|p| (l.epoch, *p)));
         match mark {
             Mark::Prompt => {
                 self.entries.push_back(Entry {
@@ -168,7 +158,6 @@ impl Shell {
                 e.command = command.filter(|c| !c.trim().is_empty());
                 e.start_at = at;
                 e.since = Some(now);
-                e.line = line;
                 // The prompt's directory, by now surely reported.
                 if let Some(c) = cwd.filter(|c| !c.is_empty()) {
                     e.cwd = Some(c.to_owned());
@@ -185,7 +174,6 @@ impl Shell {
                 if !e.started {
                     e.started = true;
                     e.start_at = at;
-                    e.line = line;
                 }
                 e.ended = true;
                 e.exit_code = Some(exit_code.unwrap_or(0));
@@ -211,16 +199,8 @@ impl Shell {
     /// The entry each prompt in `lines` belongs to, by index.
     fn pair(&self, lines: &Lines) -> Vec<Option<usize>> {
         let (n, m) = (lines.prompts.len() as i64, self.entries.len() as i64);
-        // The latest command placed on a line still on screen ties the two lists together.
-        let anchor = self.entries.iter().enumerate().rev().find_map(|(j, e)| {
-            let (epoch, line) = e.line?;
-            if epoch != lines.epoch {
-                return None;
-            }
-            let k = lines.prompts.binary_search(&line).ok()?;
-            Some(j as i64 - k as i64)
-        });
-        let shift = anchor.unwrap_or(m - n);
+        // Both come from the shell's prompt marks, so the newest of each belong together.
+        let shift = m - n;
         (0..n)
             .map(|i| {
                 let j = i + shift;
@@ -366,9 +346,8 @@ mod tests {
     fn finished_commands_become_blocks_and_empty_prompts_do_not() {
         let now = Instant::now();
         let mut sh = Shell::default();
-        let mut l = lines(&[0], 0, 0);
-        sh.mark(Mark::Prompt, 0, Some("/a/b/c"), Some(&l), now);
-        sh.mark(Mark::Start(Some("ls".into())), 100, None, Some(&l), now);
+        sh.mark(Mark::Prompt, 0, Some("/a/b/c"), now);
+        sh.mark(Mark::Start(Some("ls".into())), 100, None, now);
         assert_eq!(sh.running().map(|r| r.command), Some(Some("ls".into())));
         sh.mark(
             Mark::End {
@@ -377,15 +356,13 @@ mod tests {
             },
             350,
             None,
-            Some(&l),
             now,
         );
         assert_eq!(sh.running(), None);
-        l = lines(&[0, 3], 0, 3);
-        sh.mark(Mark::Prompt, 400, Some("/a/b/c"), Some(&l), now);
+        sh.mark(Mark::Prompt, 400, Some("/a/b/c"), now);
         // Enter on an empty line.
-        l = lines(&[0, 3, 4], 0, 4);
-        sh.mark(Mark::Prompt, 500, Some("/a/b/c"), Some(&l), now);
+        let l = lines(&[0, 3, 4], 0, 4);
+        sh.mark(Mark::Prompt, 500, Some("/a/b/c"), now);
         let mut asked = Vec::new();
         sh.sync(l, |from, to| {
             asked.push((from, to));
@@ -405,9 +382,8 @@ mod tests {
     fn a_resize_keeps_titles_by_counting_prompts_from_the_end() {
         let now = Instant::now();
         let mut sh = Shell::default();
-        let l = lines(&[10], 10, 0);
-        sh.mark(Mark::Prompt, 0, None, Some(&l), now);
-        sh.mark(Mark::Start(Some("make".into())), 0, None, Some(&l), now);
+        sh.mark(Mark::Prompt, 0, None, now);
+        sh.mark(Mark::Start(Some("make".into())), 0, None, now);
         sh.mark(
             Mark::End {
                 exit_code: Some(0),
@@ -415,10 +391,9 @@ mod tests {
             },
             0,
             None,
-            Some(&l),
             now,
         );
-        sh.mark(Mark::Prompt, 0, None, Some(&l), now);
+        sh.mark(Mark::Prompt, 0, None, now);
         // Reflowed: a new epoch, new numbers, an older prompt from before the app.
         let mut l2 = lines(&[0, 4, 9], 0, 9);
         l2.epoch = 2;

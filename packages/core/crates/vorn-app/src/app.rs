@@ -2607,26 +2607,24 @@ impl App {
                     }
                 }
             }
+            let caret = if current.as_deref() != Some(sid) {
+                paint::Caret::Hidden
+            } else if self.st.renaming.is_none() && self.st.dialog.is_none() && ui.focus().is_none()
+            {
+                paint::Caret::Live
+            } else {
+                paint::Caret::Hollow
+            };
+            let pre = if caret == paint::Caret::Live {
+                self.preedit.as_str()
+            } else {
+                ""
+            };
+            if split {
+                self.paint_live(ui, i, *r, caret, pre);
+                continue;
+            }
             if let Some(v) = self.views.get(sid) {
-                let caret = if current.as_deref() != Some(sid) {
-                    paint::Caret::Hidden
-                } else if self.st.renaming.is_none()
-                    && self.st.dialog.is_none()
-                    && ui.focus().is_none()
-                {
-                    paint::Caret::Live
-                } else {
-                    paint::Caret::Hollow
-                };
-                let pre = if caret == paint::Caret::Live {
-                    self.preedit.as_str()
-                } else {
-                    ""
-                };
-                if split {
-                    self.paint_live(ui, i, *r, caret, pre);
-                    continue;
-                }
                 // A screen not yet resized to a narrower box stays inside it.
                 ui.scene.push_clip(*r);
                 paint::pane(ui, v, *r, caret, pre);

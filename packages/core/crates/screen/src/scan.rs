@@ -117,7 +117,13 @@ impl Scan {
                 at = start + 2;
                 continue;
             };
-            match self.payload(bytes, start + kind.pattern().len(), kind, Vec::new(), &mut report) {
+            match self.payload(
+                bytes,
+                start + kind.pattern().len(),
+                kind,
+                Vec::new(),
+                &mut report,
+            ) {
                 Some(end) => at = end,
                 None => return,
             }
