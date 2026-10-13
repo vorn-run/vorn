@@ -58,8 +58,12 @@ for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
-for page in appearance general updates notifications worktrees agents ssh mcp keys about; do
+for page in appearance general updates notifications worktrees agents ssh network mcp keys about; do
   "$bin/Vorn" --render "$out/settings-$page.png" --settings "$page"
+done
+# Remote Access states, staged from hints (the render client cannot write).
+for hints in confirm sharing lan lan,all devices devices,revoke code expired asking token minted devices,error host host-error host-connected; do
+  "$bin/Vorn" --render "$out/settings-network-${hints//,/-}.png" --settings network --settings-hints "$hints"
 done
 "$bin/Vorn" --render "$out/shell-update-ready.png" --update-status ready:0.8.1
 "$bin/Vorn" --render "$out/panes-files.png" --files 0 --claim 0:1
