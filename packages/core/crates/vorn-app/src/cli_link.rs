@@ -268,13 +268,18 @@ fn symlink(_to: &Path, _at: &Path) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-/// Removes every link to `to`, or to another copy, that `env` knows of;
-/// someone else's `vorn` stays. The links removed.
-pub fn unlink(env: &Env, to: &Path) -> Result<Vec<PathBuf>, String> {
+/// Removes every link to `to`, or to another copy, that `env` knows of and
+/// this user may change; someone else's `vorn`, and a package's, stay. The
+/// links removed.
+pub fn unlink(
+    env: &Env,
+    to: &Path,
+    writable: &dyn Fn(&Path) -> bool,
+) -> Result<Vec<PathBuf>, String> {
     let mut removed = Vec::new();
     for dir in env.dirs() {
         let link = dir.join(NAME);
-        if matches!(inspect(&link, to), Found::Ours | Found::Stale) {
+        if writable(&dir) && matches!(inspect(&link, to), Found::Ours | Found::Stale) {
             std::fs::remove_file(&link)
                 .map_err(|e| format!("Vorn cannot remove {}: {e}.", tidy(&link)))?;
             removed.push(link);
@@ -413,7 +418,7 @@ mod os {
 
     #[cfg(not(windows))]
     pub fn remove(to: &Path) -> Result<(), String> {
-        unlink(&Env::current(), to).map(|_| ())
+        unlink(&Env::current(), to, &writable).map(|_| ())
     }
 
     #[cfg(windows)]
@@ -573,10 +578,16 @@ pub fn state() -> CliState {
             path: String::new(),
             on_path: false,
             note: Some("Only an installed Vorn can put its command on your PATH.".into()),
+            managed: false,
         };
     };
     let (s, on_path) = os::status(&to);
+    let managed = s.found == Found::Ours && !s.link.parent().is_some_and(writable);
     let note = match s.found {
+        _ if managed => Some(format!(
+            "{} comes with the package, which installs and removes it.",
+            tidy(&s.link)
+        )),
         Found::Foreign => Some(format!("Another vorn is at {}.", tidy(&s.link))),
         Found::Stale => Some(format!("{} points at another copy of Vorn.", tidy(&s.link))),
         _ => None,
@@ -587,6 +598,7 @@ pub fn state() -> CliState {
         path: tidy(&s.link),
         on_path,
         note,
+        managed,
     }
 }
 
@@ -896,12 +908,22 @@ mod tests {
         let s = status(&e, &moved, &all);
         assert_eq!(s.found, Found::Foreign);
         assert!(link(&s, &moved, false).is_err());
-        assert_eq!(unlink(&e, &moved).unwrap(), Vec::<PathBuf>::new());
+        assert_eq!(
+            unlink(&e, &moved, &|_| true).unwrap(),
+            Vec::<PathBuf>::new()
+        );
         assert!(bin.join("vorn").is_file());
         link(&s, &moved, true).unwrap();
         assert_eq!(inspect(&bin.join("vorn"), &moved), Found::Ours);
 
-        assert_eq!(unlink(&e, &moved).unwrap(), vec![bin.join("vorn")]);
+        assert_eq!(
+            unlink(&e, &moved, &|_| false).unwrap(),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            unlink(&e, &moved, &|_| true).unwrap(),
+            vec![bin.join("vorn")]
+        );
         assert_eq!(inspect(&bin.join("vorn"), &moved), Found::Missing);
         let _ = std::fs::remove_dir_all(&root);
     }

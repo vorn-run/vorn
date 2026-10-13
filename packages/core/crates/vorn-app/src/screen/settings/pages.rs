@@ -632,7 +632,7 @@ fn cli_row(s: &Screen<'_>) -> Option<El> {
     } else {
         "The vorn command starts sessions and reads them from a terminal."
     };
-    let enabled = st.available && !s.st.settings.cli_busy;
+    let enabled = st.available && !st.managed && !s.st.settings.cli_busy;
     let control = if st.installed {
         div()
             .row()

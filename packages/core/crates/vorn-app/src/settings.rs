@@ -972,6 +972,8 @@ pub struct CliState {
     pub on_path: bool,
     /// What is in the way, or why it cannot be installed.
     pub note: Option<String>,
+    /// In a folder this user cannot change, such as a package's `/usr/bin`.
+    pub managed: bool,
 }
 
 /// Everything the settings page holds between frames.
