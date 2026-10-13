@@ -101,7 +101,11 @@ impl App {
             if m.text != typed {
                 m.text = typed.to_owned();
                 m.history = self.st.intent.history.search(typed, project);
-                m.changed = Some(now);
+                m.changed = Some(if std::mem::take(&mut m.filled) {
+                    now - intent::DEBOUNCE
+                } else {
+                    now
+                });
                 m.completed = false;
                 m.highlight = None;
                 m.open = !typed.is_empty();
@@ -266,8 +270,7 @@ impl App {
     fn fill(&mut self, ui: &mut Ui, sid: &str, text: &str) {
         ui.set_edit_text(intent_id(sid), text);
         if let Some(m) = self.st.intent.menus.get_mut(sid) {
-            // Seen as typed on the next frame, without the pause.
-            m.changed = Some(ui.now() - intent::DEBOUNCE);
+            m.filled = m.text != text;
         }
     }
 

@@ -773,6 +773,8 @@ pub struct Menu {
     pub changed: Option<Instant>,
     /// The completions are for `text`.
     pub completed: bool,
+    /// The next text change was put in, so it skips the debounce.
+    pub filled: bool,
 }
 
 /// A menu row.

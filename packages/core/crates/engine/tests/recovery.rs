@@ -66,7 +66,10 @@ fn ids(fx: &[(EffectId, Effect)], f: impl Fn(&Effect) -> bool) -> Vec<EffectId> 
 }
 
 fn at_most_once(e: &Effect) -> bool {
-    matches!(e, Effect::Bell | Effect::Clipboard { .. })
+    matches!(
+        e,
+        Effect::Bell | Effect::Clipboard { .. } | Effect::Command(_)
+    )
 }
 
 /// The session run with no kill: every effect it makes, and its terminal.
