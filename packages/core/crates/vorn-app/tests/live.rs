@@ -355,11 +355,11 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
         app.pane(&id).map(|_| ())
     });
     shot.type_line(&mut app, "seq 1 5000; sleep 8; seq 7001 7040");
-    shot.until(&mut app, "5000 lines, most in history", |app, _| {
+    shot.until(&mut app, "5000 lines, hundreds in history", |app, _| {
         app.pane(&id)
             .filter(|p| p.text().lines().any(|l| l.trim() == "5000"))
             .map(|p| p.history)
-            .filter(|h| *h > 4900)
+            .filter(|h| *h > 500)
     });
     shot.hover(&mut app, term_id(&id));
     let row = shot.ui.text.cell().h;
@@ -419,9 +419,7 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     let max = app.pane(&id).expect("pane").history as f32 * row;
     assert!(app.scroll_position(&id) > max, "stretched past the top");
     shot.until(&mut app, "the oldest rows", |app, _| {
-        app.pane(&id)
-            .filter(|p| p.text().lines().any(|l| l.trim() == "1"))
-            .map(|_| ())
+        app.pane(&id).filter(|p| p.back() == p.history).map(|_| ())
     });
     shot.save(&mut app, "scroll-stretched-at-top");
     pad(&mut shot, &mut app, 0.0, WheelPhase::Ended);

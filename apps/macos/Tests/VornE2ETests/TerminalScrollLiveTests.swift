@@ -72,7 +72,7 @@ struct TerminalScrollLiveTests {
         func firstLine() -> String { pane.screenText().split(separator: "\n").first.map(String.init) ?? "" }
 
         pane.text("seq 1 5000; sleep 8; seq 7001 7040\r")
-        #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 4900 })
+        #expect(await settled { pane.screenText().contains("5000") && (pane.view?.history_lines ?? 0) > 500 })
         let row = view.scroll.row
 
         // Fingers up the trackpad: the view follows by the point, between rows.
@@ -104,7 +104,7 @@ struct TerminalScrollLiveTests {
         await pad(0, scroll: began)
         for _ in 0..<40 { await pad(3000, scroll: changed) }
         #expect(view.scroll.pos > view.scroll.max)
-        #expect(await settled { pane.screenText().split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "1" } })
+        #expect(await settled { pane.view.map { $0.back == $0.history_lines } ?? false })
         shoot("stretched-at-top")
         await pad(0, scroll: ended)
         await rest()

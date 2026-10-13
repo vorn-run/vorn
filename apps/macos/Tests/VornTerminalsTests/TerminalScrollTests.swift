@@ -179,7 +179,7 @@ struct TerminalScrollTests {
         #expect(r.take(-1, .line, row: row, route: .arrows) == -3)
     }
 
-    @Test func readsTouchAndMomentumPhasesFromTheEvent() throws {
+    @MainActor @Test func readsTouchAndMomentumPhasesFromTheEvent() throws {
         func event(_ units: CGScrollEventUnit, _ dy: Int32, scroll: Int64 = 0, momentum: Int64 = 0) throws -> NSEvent {
             let e = try #require(CGEvent(scrollWheelEvent2Source: nil, units: units, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0))
             if units == .pixel { e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1) }
