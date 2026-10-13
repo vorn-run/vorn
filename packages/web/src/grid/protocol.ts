@@ -57,7 +57,7 @@ export class ProtocolError extends Error {}
 
 /** Splits the bytes of a socket into frames. */
 export class FrameReader {
-  private buf = new Uint8Array(0)
+  private buf: Uint8Array = new Uint8Array(0)
 
   push(bytes: Uint8Array): void {
     this.buf = this.buf.length ? concat([this.buf, bytes]) : bytes.slice()
