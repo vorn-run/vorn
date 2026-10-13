@@ -140,6 +140,20 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     })
 }
 
+/// Keys a terminal holding the keyboard takes before the app's shortcuts
+/// and focus traversal, as xterm.js does: Tab and Shift+Tab with Ctrl or
+/// Alt or neither, and off macOS the Ctrl letters a shell uses (XOFF,
+/// transpose, newline) and Alt+digits (Meta), which are shortcuts there.
+pub fn terminal_key(code: &str, m: u16) -> bool {
+    let held = m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
+    let off_mac = !cfg!(target_os = "macos");
+    match code {
+        "Tab" => held & mods::SUPER == 0,
+        "KeyS" | "KeyT" | "KeyJ" => off_mac && held == mods::CTRL,
+        _ => off_mac && held == mods::ALT && code.starts_with("Digit"),
+    }
+}
+
 /// The card after or before `current` among `n`, wrapping; with none
 /// selected, the first or the last.
 fn cycle(current: Option<usize>, n: usize, forward: bool) -> Option<usize> {
@@ -2221,6 +2235,10 @@ impl App {
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
+        if terminal_key(code, *m) && self.terminal_has_keys(ui) {
+            self.input(input.clone());
+            return true;
+        }
         // The approve and deny keys exist once an agent has asked for permission.
         let s = shortcut(code, *m)
             .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
@@ -2265,6 +2283,19 @@ impl App {
             return false;
         }
         true
+    }
+
+    /// Whether a terminal holds the keyboard: typing reaches a card and no
+    /// control, dialog, menu or composer has it.
+    pub fn terminal_has_keys(&self, ui: &Ui) -> bool {
+        ui.focus().is_none()
+            && self.st.dialog.is_none()
+            && self.st.menu.is_none()
+            && !self.st.settings.open
+            && self.st.view == MainView::Sessions
+            && !self.composing()
+            && self.grid.is_some()
+            && self.typing_target().is_some()
     }
 
     /// One key or IME event the UI did not use: the composer's or the
@@ -2668,6 +2699,33 @@ mod tests {
         assert_eq!(shortcut("KeyS", 0), None);
         assert_eq!(shortcut("KeyS", MOD | mods::ALT), None);
         assert_eq!(shortcut("Escape", 0), None);
+    }
+
+    #[test]
+    fn a_terminal_takes_tab_and_the_keys_xterm_would() {
+        for m in [
+            0,
+            mods::SHIFT,
+            mods::CTRL,
+            mods::CTRL | mods::SHIFT,
+            mods::ALT,
+        ] {
+            assert!(terminal_key("Tab", m), "Tab with {m:#b}");
+        }
+        assert!(!terminal_key("Tab", mods::SUPER));
+        assert!(!terminal_key("Escape", 0));
+        assert!(!terminal_key("KeyA", 0));
+        // App shortcuts on the command key stay the app's.
+        for code in ["KeyK", "KeyN", "KeyW", "KeyB", "BracketRight", "Slash"] {
+            assert!(!terminal_key(code, MOD), "{code}");
+        }
+        assert!(!terminal_key("KeyW", MOD | mods::SHIFT));
+        assert!(!terminal_key("Backquote", mods::CTRL));
+        let off_mac = !cfg!(target_os = "macos");
+        assert_eq!(terminal_key("KeyJ", mods::CTRL), off_mac);
+        assert_eq!(terminal_key("KeyS", mods::CTRL), off_mac);
+        assert_eq!(terminal_key("Digit1", mods::ALT), off_mac);
+        assert!(!terminal_key("KeyJ", mods::CTRL | mods::SHIFT));
     }
 
     #[test]

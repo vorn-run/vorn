@@ -7,6 +7,7 @@ mod support;
 
 use serde_json::json;
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
+use vorn_app::app::MOD;
 use vorn_app::ui::mods;
 
 #[test]
@@ -41,6 +42,46 @@ fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     });
     assert!(screen.contains("echo vorn-42"), "{screen}");
     shot.save(&mut app, "shell");
+}
+
+#[cfg(unix)]
+#[test]
+fn tab_and_its_variants_reach_a_focused_terminal() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's first screen", |app, _| {
+        app.pane(&id).map(|_| ())
+    });
+    shot.type_line(&mut app, "stty -echo; cat -vt; stty echo");
+    // cat has the terminal once the shell no longer echoes.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    for m in [0, mods::SHIFT, mods::CTRL, mods::CTRL | mods::SHIFT] {
+        shot.send(&mut app, key("Tab", m, Some("\t")));
+        assert_eq!(shot.ui.focus(), None, "Tab with {m:#b} moved focus");
+    }
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.type_line(&mut app, "|end");
+    let screen = shot.until(&mut app, "cat's line", |app, _| {
+        app.pane(&id)
+            .map(|p| p.text())
+            .filter(|t| t.contains("|end"))
+    });
+    assert!(screen.contains("^I^[[Z^I^[[Z^[|end"), "{screen}");
+    assert!(app.terminal_has_keys(&shot.ui));
+
+    // Settings hold the keyboard: Tab moves between their controls.
+    shot.send(&mut app, key("Comma", MOD, Some(",")));
+    assert!(app.st.settings.open);
+    shot.send(&mut app, key("Tab", 0, Some("\t")));
+    assert!(shot.ui.focus().is_some(), "Tab focuses a settings control");
 }
 
 #[cfg(unix)]

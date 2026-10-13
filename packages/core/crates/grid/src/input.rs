@@ -76,6 +76,7 @@ impl InputEncoder {
                 unshifted,
                 composing,
             } => {
+                let mods = tab_mods(t, *key, *mods)?;
                 let ev = &mut self.key_event;
                 ev.set_action(match action {
                     KeyAction::Press => key::Action::Press,
@@ -83,7 +84,7 @@ impl InputEncoder {
                     KeyAction::Release => key::Action::Release,
                 })
                 .set_key(ghostty_key(*key))
-                .set_mods(ghostty_mods(*mods))
+                .set_mods(ghostty_mods(mods))
                 .set_consumed_mods(ghostty_mods(*consumed_mods))
                 .set_composing(*composing)
                 .set_utf8(text.clone());
@@ -232,6 +233,15 @@ impl InputEncoder {
 }
 
 /// The cell a position in cells falls in, held inside the pane as Ghostty holds it.
+/// Tab's modifiers as xterm.js sends them, Ctrl and Alt dropped (Shift
+/// still makes it CSI Z), unless the program asked for Kitty key reports.
+fn tab_mods(t: &Term, key: KeyCode, m: u16) -> Result<u16, Error> {
+    if key.name() != "Tab" || !t.kitty_keyboard_flags()?.is_empty() {
+        return Ok(m);
+    }
+    Ok(m & !(mods::CTRL | mods::ALT | mods::CTRL_RIGHT | mods::ALT_RIGHT))
+}
+
 fn clamp_cell(at: f32, n: u32) -> u32 {
     (at.max(0.0) as u32).min(n.saturating_sub(1))
 }
@@ -314,6 +324,22 @@ mod tests {
             Encoded::Bytes(b) => b,
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn tab_and_its_variants_encode_as_xterm_sends_them() {
+        let t = Term::new(20, 5).unwrap();
+        let mut enc = InputEncoder::new().unwrap();
+        let mut send = |t: &Term, m, text| bytes(enc.encode(t, &key("Tab", m, text)).unwrap());
+        assert_eq!(send(&t, 0, Some("\t")), b"\t");
+        assert_eq!(send(&t, mods::SHIFT, None), b"\x1b[Z");
+        assert_eq!(send(&t, mods::CTRL, None), b"\t");
+        assert_eq!(send(&t, mods::CTRL | mods::SHIFT, None), b"\x1b[Z");
+        assert_eq!(send(&t, mods::ALT, None), b"\t");
+        // A program that asked for Kitty key reports still tells Ctrl+Tab apart.
+        let mut t = t;
+        t.vt_write(b"\x1b[>1u");
+        assert_eq!(send(&t, mods::CTRL, None), b"\x1b[9;5u");
     }
 
     #[test]
