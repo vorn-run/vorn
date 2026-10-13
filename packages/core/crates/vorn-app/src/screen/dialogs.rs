@@ -317,6 +317,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::GitCommit => super::tasks::commit(s, super::tasks::diff::Scope::Session),
         Dialog::RemoveWorktree => super::git::removal(s),
         Dialog::Discard => super::side::discard(s),
+        Dialog::Paste => paste(s)?,
         Dialog::Output => super::tasks::output(s),
         Dialog::RunPrompt | Dialog::Missed | Dialog::WfFile => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,
@@ -324,6 +325,25 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Welcome => super::onboarding::modal(s)?,
         Dialog::SignIn => super::signin::sheet(s)?,
     })
+}
+
+/// "Paste N lines?" before a paste the program would run line by line.
+fn paste(s: &Screen<'_>) -> Option<El> {
+    let (_, text) = s.st.paste.as_ref()?;
+    let n = text.lines().count();
+    let title = if n > 1 {
+        format!("Paste {n} lines?")
+    } else {
+        "Paste this text?".to_owned()
+    };
+    Some(super::side::alert(
+        s,
+        "paste",
+        &title,
+        Some("The program runs each line as it arrives."),
+        ("Paste", Act::ConfirmPaste(true)),
+        Act::ConfirmPaste(false),
+    ))
 }
 
 #[cfg(test)]

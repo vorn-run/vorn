@@ -3,14 +3,15 @@
 //! an I/O thread keeps each pane's mirror, returns every frame's credit as
 //! soon as it is applied, and marks the pane dirty for the next frame.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use vorn_grid_client::{Client, Got};
 use vorn_term_proto::msg::{
-    caps, Attach, AttachMode, ClientKind, ClientMsg, Hello, InputEvent, KeyAction, KeyCode,
-    ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
+    caps, Attach, AttachMode, ClientKind, ClientMsg, CopyFormat, GridPoint, Hello, InputEvent,
+    KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 
 use crate::client::rpc::Wake;
@@ -29,7 +30,30 @@ struct State {
     panes: Vec<Pane>,
     errors: Vec<String>,
     closed: bool,
+    /// Recent pastes by input sequence, kept until vornd may ask to confirm one.
+    pastes: VecDeque<(u64, String, String)>,
+    /// Requests in flight, by request id: the session each is for.
+    asks: Vec<(u32, String)>,
+    next_req: u32,
+    replies: Vec<Reply>,
 }
+
+/// What vornd answered or asked about a pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reply {
+    /// The word around a point, if there is one.
+    Selection {
+        session: String,
+        range: Option<(GridPoint, GridPoint)>,
+    },
+    /// A selection's text.
+    Copied(String),
+    /// A paste the program cannot tell from typing: run it only once the person says so.
+    ConfirmPaste { session: String, text: String },
+}
+
+/// How many recent pastes are kept for a confirmation that may come.
+const PASTES_KEPT: usize = 4;
 
 impl State {
     fn pane(&self, session: &str) -> Option<&Pane> {
@@ -38,6 +62,12 @@ impl State {
 
     fn sid(&self, session: &str) -> Option<u32> {
         self.pane(session)?.sid
+    }
+
+    /// The session request `req` was for, now that it is answered.
+    fn answered(&mut self, req: u32) -> Option<String> {
+        let i = self.asks.iter().position(|(r, _)| *r == req)?;
+        Some(self.asks.remove(i).1)
     }
 }
 
@@ -67,6 +97,10 @@ impl Grid {
                 panes: Vec::new(),
                 errors: Vec::new(),
                 closed: false,
+                pastes: VecDeque::new(),
+                asks: Vec::new(),
+                next_req: 0,
+                replies: Vec::new(),
             }),
             out: tx,
             wake,
@@ -207,7 +241,27 @@ impl Grid {
         );
     }
 
-    /// Bracketed paste of `utf8`, already confirmed by the person.
+    /// Bracketed paste of the person's clipboard. vornd asks first, as a
+    /// [`Reply::ConfirmPaste`], when the program could take it for typed commands.
+    pub fn paste_clipboard(&self, session: &str, utf8: &str) {
+        let seq = self.input(
+            session,
+            InputEvent::Paste {
+                utf8: utf8.to_owned(),
+                confirmed: false,
+            },
+        );
+        if let Some(seq) = seq {
+            let mut st = self.lock();
+            if st.pastes.len() == PASTES_KEPT {
+                st.pastes.pop_front();
+            }
+            st.pastes
+                .push_back((seq, session.to_owned(), utf8.to_owned()));
+        }
+    }
+
+    /// Bracketed paste of `utf8`, already confirmed by the person or written by the app.
     pub fn paste(&self, session: &str, utf8: &str) {
         self.input(
             session,
@@ -216,6 +270,47 @@ impl Grid {
                 confirmed: true,
             },
         );
+    }
+
+    /// Asks for the word at `at`; the answer is a [`Reply::Selection`].
+    pub fn select_word(&self, session: &str, at: GridPoint) {
+        self.ask(session, |sid, req| ClientMsg::SelectAt {
+            sid,
+            req,
+            at,
+            kind: SelectKind::Word,
+        });
+    }
+
+    /// Asks for the text from `from` to `to`; the answer is a [`Reply::Copied`].
+    pub fn copy(&self, session: &str, from: GridPoint, to: GridPoint) {
+        self.ask(session, |sid, req| ClientMsg::Copy {
+            sid,
+            req,
+            from,
+            to,
+            rect: false,
+            format: CopyFormat::Plain,
+        });
+    }
+
+    /// What vornd answered or asked since the last call.
+    pub fn take_replies(&self) -> Vec<Reply> {
+        std::mem::take(&mut self.lock().replies)
+    }
+
+    fn ask(&self, session: &str, msg: impl FnOnce(u32, u32) -> ClientMsg) {
+        {
+            let mut st = self.lock();
+            let Some(sid) = st.sid(session) else {
+                return;
+            };
+            st.next_req = st.next_req.wrapping_add(1);
+            let req = st.next_req;
+            st.asks.push((req, session.to_owned()));
+            st.client.send(&msg(sid, req));
+        }
+        self.flush();
     }
 
     /// The wheel over the terminal: `dy` in lines, at cell `(x, y)`.
@@ -253,20 +348,21 @@ impl Grid {
         self.flush();
     }
 
-    fn input(&self, session: &str, event: InputEvent) {
-        {
+    /// Sends `event`; its input sequence, once the pane is attached.
+    fn input(&self, session: &str, event: InputEvent) -> Option<u64> {
+        let input_seq = {
             let mut st = self.lock();
-            let Some(sid) = st.sid(session) else {
-                return;
-            };
+            let sid = st.sid(session)?;
             let input_seq = st.client.input_seq();
             st.client.send(&ClientMsg::Input {
                 sid,
                 input_seq,
                 event,
             });
-        }
+            input_seq
+        };
         self.flush();
+        Some(input_seq)
     }
 
     /// The card's terminal is now `cols`x`rows`: says so and takes the
@@ -390,6 +486,29 @@ impl Grid {
                     } else {
                         st.errors.push(format!("error {code}: {message}"));
                     }
+                }
+                Got::Message(ServerMsg::PasteConfirm { sid, input_seq }) => {
+                    let mine = |p: &(u64, String, String)| {
+                        p.0 == input_seq && st.pane(&p.1).is_some_and(|p| p.sid == Some(sid))
+                    };
+                    if let Some(i) = st.pastes.iter().position(mine) {
+                        let (_, session, text) = st.pastes.remove(i).unwrap_or_default();
+                        st.replies.push(Reply::ConfirmPaste { session, text });
+                        changed = true;
+                    }
+                }
+                Got::Message(ServerMsg::Selection { req, range, .. }) => {
+                    if let Some(session) = st.answered(req) {
+                        st.replies.push(Reply::Selection { session, range });
+                        changed = true;
+                    }
+                }
+                Got::Message(ServerMsg::Copied { req, text, .. }) => {
+                    if st.answered(req).is_none() {
+                        continue;
+                    }
+                    st.replies.push(Reply::Copied(text));
+                    changed = true;
                 }
                 _ => {}
             }

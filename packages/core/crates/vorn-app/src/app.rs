@@ -44,6 +44,7 @@ mod settings;
 mod side;
 pub mod signin;
 mod tasks;
+mod term;
 mod widget;
 mod workflows;
 
@@ -145,6 +146,19 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
 pub fn terminal_key(code: &str, m: u16) -> bool {
     code == "Tab" && m & mods::SUPER == 0
 }
+
+/// Keys that only hold a modifier: pressing one keeps a terminal's selection.
+const MODIFIER_KEYS: [&str; 9] = [
+    "ShiftLeft",
+    "ShiftRight",
+    "ControlLeft",
+    "ControlRight",
+    "AltLeft",
+    "AltRight",
+    "MetaLeft",
+    "MetaRight",
+    "CapsLock",
+];
 
 /// The card after or before `current` among `n`, wrapping; with none
 /// selected, the first or the last.
@@ -259,6 +273,10 @@ pub struct App {
     /// Why the grid is not there, when it is not.
     pub grid_error: Option<String>,
     views: HashMap<String, PaneView>,
+    /// Where each session's terminal was painted (physical pixels), for the pointer.
+    term_boxes: HashMap<String, crate::ui::Rect>,
+    /// A double-click asked vornd for a word; the click that ends it keeps the selection.
+    word_pending: bool,
     pub st: State,
     pub acts: Acts,
     preedit: String,
@@ -345,6 +363,8 @@ impl App {
             grid,
             grid_error,
             views: HashMap::new(),
+            term_boxes: HashMap::new(),
+            word_pending: false,
             st,
             acts: Acts::default(),
             preedit: String::new(),
@@ -1570,11 +1590,9 @@ impl App {
                 };
                 self.call(call, "sessions:resume", json!({ "id": id }));
             }
-            Act::Paste(id) => {
-                if let (Some(g), Some(text)) = (&self.grid, ui.clipboard().get()) {
-                    g.paste(&id, &text);
-                }
-            }
+            Act::Paste(id) => self.paste_clipboard(ui, &id),
+            Act::CopySelection(id) => self.copy_selection(&id),
+            Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
             Act::FitToDevice(id) => {
                 if let Some(g) = &self.grid {
                     g.take_size(&id);
@@ -1949,6 +1967,7 @@ impl App {
             || self.palette_event(ui, &event)
             || self.plug_event(ui, &event)
             || self.net_event(ui, &event)
+            || self.term_event(ui, &event)
         {
             return;
         }
@@ -2217,6 +2236,11 @@ impl App {
                 self.run_edit(ui, crate::editor::EditAct::CancelDiscard);
                 return true;
             }
+            if self.st.dialog == Some(Dialog::Paste) && matches!(code.as_str(), "Escape" | "Enter")
+            {
+                self.confirm_paste(ui, code == "Enter");
+                return true;
+            }
         }
         if self.st.settings.open {
             return false;
@@ -2227,9 +2251,14 @@ impl App {
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
-        if terminal_key(code, *m) && self.terminal_has_keys(ui) {
-            self.input(input.clone());
-            return true;
+        if self.terminal_has_keys(ui) {
+            if self.clip_key(ui, code, *m) {
+                return true;
+            }
+            if terminal_key(code, *m) {
+                self.input(input.clone());
+                return true;
+            }
         }
         // The approve and deny keys exist once an agent has asked for permission.
         let s = shortcut(code, *m)
@@ -2307,10 +2336,16 @@ impl App {
             return;
         };
         match input {
-            Input::Key { code, mods, text } => g.key(&id, &code, mods, text.as_deref()),
+            Input::Key { code, mods, text } => {
+                if !MODIFIER_KEYS.contains(&code.as_str()) {
+                    self.st.sel = None;
+                }
+                g.key(&id, &code, mods, text.as_deref());
+            }
             Input::Preedit(s) => self.preedit = s,
             Input::Commit(s) => {
                 self.preedit.clear();
+                self.st.sel = None;
                 g.text(&id, &s);
             }
         }
@@ -2482,6 +2517,7 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.grid_replies(ui);
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
@@ -2570,6 +2606,7 @@ impl App {
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
         let current = self.typing_target();
+        self.term_boxes.clear();
         for (id, r) in &laid.customs {
             if let Some(tid) =
                 crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
@@ -2609,11 +2646,16 @@ impl App {
                 } else {
                     ""
                 };
+                let sel = match &self.st.sel {
+                    Some((s, sel)) if s == sid => sel.rows(v),
+                    _ => Vec::new(),
+                };
                 // A screen not yet resized to a narrower box stays inside it.
                 ui.scene.push_clip(*r);
-                paint::pane(ui, v, *r, caret, pre);
+                paint::pane(ui, v, *r, caret, pre, &sel);
                 ui.scene.pop_clip();
             }
+            self.term_boxes.insert(sid.to_owned(), *r);
         }
         self.paint_web(ui, laid);
     }
@@ -2636,7 +2678,7 @@ impl App {
             } else {
                 paint::Caret::Hollow
             };
-            paint::pane(ui, v, r, caret, pre);
+            paint::pane(ui, v, r, caret, pre, &[]);
             ui.scene.pop_clip();
         }
     }

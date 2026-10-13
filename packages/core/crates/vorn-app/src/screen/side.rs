@@ -1270,7 +1270,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
                 Act::Open(crate::state::MenuKind::Terminal(sid.to_owned())),
             )
             .on(Action::Click)
-            .sense(Sense::WHEEL);
+            .sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE);
         col = col
             .child(surface)
             .child_if(cards::composer(s, session, true));
@@ -1503,8 +1503,28 @@ pub(super) fn tab_items(s: &Screen<'_>, owner: &str) -> Vec<super::menus::Item> 
 
 /// "Discard unsaved changes?", as `window.confirm` asks it.
 pub(super) fn discard(s: &Screen<'_>) -> El {
-    let cancel = s.acts.on("discard-cancel", edit(EditAct::CancelDiscard));
-    let ok = s.acts.on("discard-ok", edit(EditAct::ConfirmDiscard));
+    alert(
+        s,
+        "discard",
+        "Discard unsaved changes?",
+        None,
+        ("OK", edit(EditAct::ConfirmDiscard)),
+        edit(EditAct::CancelDiscard),
+    )
+}
+
+/// A small alert: a title, an optional line under it, Cancel and the
+/// default button. `place` keeps its controls' ids apart from other alerts'.
+pub(super) fn alert(
+    s: &Screen<'_>,
+    place: &str,
+    title: &str,
+    info: Option<&str>,
+    (label, ok): (&str, Act),
+    cancel: Act,
+) -> El {
+    let cancel_id = s.acts.on(&format!("{place}-cancel"), cancel.clone());
+    let ok = s.acts.on(&format!("{place}-ok"), ok);
     let button = |id: Id, label: &str, strong: bool| {
         div()
             .id(id)
@@ -1540,23 +1560,28 @@ pub(super) fn discard(s: &Screen<'_>) -> El {
         .rounded(10.0)
         .border(1.0, white(0.1))
         .bg(c(look::SURFACE_OVERLAY))
-        .role(Role::AlertDialog, "Discard unsaved changes?")
+        .role(Role::AlertDialog, title)
         .child(
-            text("Discard unsaved changes?", 13.0, c(look::GRAY_200))
+            text(title, 13.0, c(look::GRAY_200))
                 .weight(500)
                 .line_height(18.0)
                 .silent(),
         )
+        .child_if(info.map(|info| {
+            text(info, 12.0, c(look::GRAY_400))
+                .line_height(16.0)
+                .silent()
+        }))
         .child(
             div()
                 .row()
                 .justify_end()
                 .gap(8.0)
-                .child(button(cancel, "Cancel", false))
-                .child(button(ok, "OK", true)),
+                .child(button(cancel_id, "Cancel", false))
+                .child(button(ok, label, true)),
         );
-    let panel = s.acts.click(panel, "discard", Act::Nothing);
-    let bg = s.acts.on("discard-backdrop", edit(EditAct::CancelDiscard));
+    let panel = s.acts.click(panel, place, Act::Nothing);
+    let bg = s.acts.on(&format!("{place}-backdrop"), cancel);
     div()
         .id(bg)
         .on(Action::Click)

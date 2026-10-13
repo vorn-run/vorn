@@ -65,6 +65,10 @@ pub enum Act {
     ShowRun(String),
     Resume(String),
     Paste(String),
+    /// Copies the selection in this session's terminal.
+    CopySelection(String),
+    /// Runs the paste the confirm dialog holds, or drops it.
+    ConfirmPaste(bool),
     FitToDevice(String),
     LockSize(String, bool),
     Shortcuts,

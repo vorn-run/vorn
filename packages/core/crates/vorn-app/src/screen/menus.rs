@@ -393,9 +393,9 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
 }
 
 fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {
-    let selection = false;
+    let selection = s.st.sel.as_ref().is_some_and(|(sid, _)| sid == id);
     let mut items = vec![
-        Item::new("copy", "Copy", Act::Nothing).disabled(!selection),
+        Item::new("copy", "Copy", Act::CopySelection(id.to_owned())).disabled(!selection),
         Item::new("clipboard-paste", "Paste", Act::Paste(id.to_owned())),
     ];
     let locked = s.st.locked.contains(id);
