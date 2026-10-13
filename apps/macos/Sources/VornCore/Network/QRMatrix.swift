@@ -15,14 +15,14 @@ public struct QRMatrix: Hashable, Sendable {
         filter.message = Data(text.utf8)
         filter.correctionLevel = level
         guard let raw = filter.outputImage else { return nil }
-        // Rendered large and unfiltered, then read at module centres, so edge blending never decides a module.
+        // Rendered large, unfiltered and on the CPU, then read at module centres, so no GPU or blending decides a module.
         let scale = 8
         let output = raw.samplingNearest().transformed(by: CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
         let extent = output.extent.integral
         let w = Int(extent.width), h = Int(extent.height)
         guard w > 0, w == h else { return nil }
         var pixels = [UInt8](repeating: 0, count: w * h)
-        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .useSoftwareRenderer: true])
         context.render(output, toBitmap: &pixels, rowBytes: w, bounds: extent, format: .L8, colorSpace: nil)
         let dark = pixels.map { $0 < 128 }
         // The generator pads with a quiet zone; the dark pixels' bounds are the code.
