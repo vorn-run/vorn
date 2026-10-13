@@ -472,7 +472,8 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
 
     public override func keyDown(with e: NSEvent) {
         pane.selection = nil
-        switch route(e) {
+        // While the input method composes, its keys are its own.
+        switch pane.marked.isEmpty ? route(e) : .encode {
         case .page(let up):
             // Shift-Page Up and Down page through history, as the shell never sees them.
             let page = Int32(max(Int(pane.view?.rows ?? 2) - 1, 1))
