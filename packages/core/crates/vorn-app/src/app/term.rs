@@ -114,7 +114,6 @@ impl App {
         for reply in g.take_replies() {
             match reply {
                 Reply::Selection { session, range } => {
-                    self.word_pending = false;
                     let primary = self.views.get(&session).is_some_and(|v| v.primary);
                     self.st.sel = range.map(|(a, b)| (session, Sel::new(a, b, primary)));
                 }
@@ -168,6 +167,7 @@ impl App {
                 }
                 // A drag that selected still focuses the terminal, as a click would.
                 if matches!(e, UiEvent::Drop { .. }) {
+                    self.word_pending = false;
                     if let Some(act) = self.acts.clicked(id) {
                         self.run(ui, act, Src::default());
                     }

@@ -137,8 +137,9 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
         app.pump();
         app.st.selected.clone()
     });
-    shot.until(&mut app, "the shell's first screen", |app, _| {
-        app.pane(&id).map(|_| ())
+    // The card's fitted size renumbers the lines; select after it lands.
+    shot.until(&mut app, "the shell's fitted screen", |app, _| {
+        app.pane(&id).filter(|p| p.sb_epoch > 0).map(|_| ())
     });
     let shows = |line: &'static str| {
         let id = id.clone();
@@ -193,24 +194,34 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     app.events(&mut shot.ui);
     assert!(app.st.sel.is_some(), "the drag selected");
     shot.save(&mut app, "selection");
+    shot.ui.clipboard().set("");
     shot.send(&mut app, copy.clone());
     assert!(app.st.sel.is_none(), "copying clears the selection");
     assert_eq!(copied(&mut shot, &mut app, "the copied row"), "pasted-1");
 
     // A double-click selects the word under it; the menu's Copy copies it.
+    // The drag's press is a click too: wait until it no longer pairs.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    shot.frame(&mut app);
     let row = row_of(&app, &id, "two-b");
     let (x, y) = cell_xy(&app, &shot, &id, 1, row);
     shot.ui.pointer_move(x, y);
-    for _ in 0..2 {
-        shot.ui.pointer_down();
-        shot.ui.pointer_up();
-    }
+    shot.ui.pointer_down();
     app.events(&mut shot.ui);
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    shot.ui.pointer_down();
+    app.events(&mut shot.ui);
+    // vornd answers before the button comes up, as it does under a hand.
     shot.until(&mut app, "the word's selection", |app, _| {
         app.st.sel.as_ref().map(|_| ())
     });
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    assert!(app.st.sel.is_some(), "the release keeps the word");
     shot.right_click(&mut app, term_id(&id));
     assert_eq!(app.menu_labels(&shot.ui)[0], "Copy");
+    shot.ui.clipboard().set("");
     choose(&mut shot, &mut app, "Copy");
     assert_eq!(copied(&mut shot, &mut app, "the copied word"), "two-b");
 
@@ -229,9 +240,9 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     );
 }
 
-/// What the copy put on the clipboard, once it has.
+/// What the copy put on the clipboard, once it has; the caller empties it
+/// before the copy.
 fn copied(shot: &mut Shot, app: &mut vorn_app::App, what: &str) -> String {
-    shot.ui.clipboard().set("");
     wait_for(what, || {
         shot.frame(app);
         shot.ui.clipboard().get().filter(|t| !t.is_empty())

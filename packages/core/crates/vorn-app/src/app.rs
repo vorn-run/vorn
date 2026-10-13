@@ -565,6 +565,15 @@ impl App {
                     self.st
                         .last_output
                         .insert(id.clone(), std::time::Instant::now());
+                    // A resize or a cleared history renumbers the lines under a selection.
+                    if self
+                        .st
+                        .sel
+                        .as_ref()
+                        .is_some_and(|(s, sel)| *s == id && sel.from.sb_epoch != v.sb_epoch)
+                    {
+                        self.st.sel = None;
+                    }
                     self.views.insert(id, v);
                 }
             }
