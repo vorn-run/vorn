@@ -6,8 +6,8 @@
 //!               [--keys K1,K2] [--chrome off]
 //! ```
 //!
-//! `--keys` sends shortcuts before the shot (`Mod+KeyN`, `Alt+Digit2`,
-//! `F2`, `Escape`).
+//! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
+//! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -155,10 +155,21 @@ fn key(spec: &str) -> Input {
         };
         code = rest;
     }
+    // A bare letter types itself, as a keyboard's would.
+    let text = code
+        .strip_prefix("Key")
+        .filter(|l| l.len() == 1 && m & !mods::SHIFT == 0)
+        .map(|l| {
+            if m & mods::SHIFT == 0 {
+                l.to_lowercase()
+            } else {
+                l.to_owned()
+            }
+        });
     Input::Key {
         code: code.to_owned(),
         mods: m,
-        text: None,
+        text,
     }
 }
 
