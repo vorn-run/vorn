@@ -10,17 +10,23 @@
 //! `F2`, `Escape`).
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
-//! `shot` draws one frame offscreen once every card has its screen.
+//! `window` starts the vornd shipped beside it when none answers, and waits
+//! for it; `shot` draws one frame offscreen once every card has its screen.
 
-use std::path::PathBuf;
+// A shipped build opens no console window on Windows.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use vorn_app::client::rpc::Wake;
 use vorn_app::client::{data_dir, Endpoint};
 use vorn_app::crash::{self, CrashAct};
+use vorn_app::launch::{self, Server};
 use vorn_app::ui::{
-    mods, run_with, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui, Waker,
-    WindowApp, WindowOptions,
+    div, mods, run_with, text, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui,
+    Waker, WindowApp, WindowOptions,
 };
 use vorn_app::{look, ui_config, App};
 
@@ -31,7 +37,11 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Args, String> {
-        let mut it = std::env::args().skip(1).peekable();
+        // Finder may still pass a process serial number to a bundled app.
+        let mut it = std::env::args()
+            .skip(1)
+            .filter(|a| !a.starts_with("-psn_"))
+            .peekable();
         let mode = match it.peek() {
             Some(m) if !m.starts_with("--") => it.next().unwrap_or_default(),
             _ => "window".to_owned(),
@@ -60,11 +70,11 @@ impl Args {
     }
 }
 
-fn connect(args: &Args, wake: vorn_app::client::rpc::Wake) -> Result<App, String> {
-    let dir = args.data_dir()?;
-    let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
+fn connect(dir: &Path, wake: Wake) -> Result<App, String> {
+    let ep = Endpoint::find(dir).map_err(|e| e.to_string())?;
     let mut app = App::connect(&ep, wake).map_err(|e| e.to_string())?;
-    app.load_panes(&dir);
+    app.load_panes(dir);
+    app.set_data_dir(dir.to_owned());
     Ok(app)
 }
 
@@ -81,8 +91,7 @@ fn shot(args: &Args) -> Result<(), String> {
         ),
         None => look::WINDOW,
     };
-    let mut app = connect(args, Arc::new(|| {}))?;
-    app.set_data_dir(args.data_dir()?);
+    let mut app = connect(&args.data_dir()?, Arc::new(|| {}))?;
     app.chrome = args.get("chrome") != Some("off");
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
@@ -153,8 +162,90 @@ fn key(spec: &str) -> Input {
     }
 }
 
+/// Before vornd answers: a quiet screen that starts the bundled vornd once
+/// and keeps trying until one answers.
+struct Waiting {
+    dir: PathBuf,
+    wake: Wake,
+    status: String,
+    detail: Option<String>,
+    started: Option<Instant>,
+    next: Instant,
+}
+
+/// How long a started vornd has before the screen says it has not answered.
+const START_WAIT: Duration = Duration::from_secs(30);
+const RETRY: Duration = Duration::from_millis(500);
+
+impl Waiting {
+    fn new(dir: PathBuf, wake: Wake) -> Waiting {
+        Waiting {
+            dir,
+            wake,
+            status: String::new(),
+            detail: None,
+            started: None,
+            next: Instant::now(),
+        }
+    }
+
+    /// One attempt, when one is due: the app once vornd answers. Starts the
+    /// bundled vornd after the first miss.
+    fn poll(&mut self) -> Option<App> {
+        let now = Instant::now();
+        if now < self.next {
+            return None;
+        }
+        self.next = now + RETRY;
+        let missed = match connect(&self.dir, Arc::clone(&self.wake)) {
+            Ok(app) => return Some(app),
+            Err(e) => e,
+        };
+        match self.started {
+            None => {
+                self.started = Some(now);
+                (self.status, self.detail) = match Server::locate() {
+                    Some(server) => match server.start(&self.dir) {
+                        Ok(()) => ("Starting vornd.".into(), None),
+                        Err(e) => ("Could not start vornd. Retrying.".into(), Some(e)),
+                    },
+                    None => ("Could not reach vornd. Retrying.".into(), Some(missed)),
+                };
+            }
+            Some(at) if now - at > START_WAIT && self.detail.is_none() => {
+                self.status = "vornd has not answered. Retrying.".into();
+                self.detail = Some(format!(
+                    "Its log is {}.",
+                    self.dir.join(launch::LOG_FILE).display()
+                ));
+            }
+            Some(_) => {}
+        }
+        None
+    }
+
+    fn view(&self, ui: &Ui) -> El {
+        let (w, h) = ui.viewport();
+        let ink = |a| Rgba::hexa(look::INK, a);
+        div()
+            .size(w, h)
+            .col()
+            .center()
+            .gap(8.0)
+            .bg(Rgba::hex(look::SURFACE_BASE))
+            .child(text(&self.status, 13.0, ink(look::INK_SECONDARY)))
+            .child_if(
+                self.detail
+                    .as_deref()
+                    .map(|d| text(d, 12.0, ink(look::INK_FAINT))),
+            )
+    }
+}
+
 /// The window's app, or the error that stopped it and how to start again.
 struct Win {
+    /// Set until vornd first answers.
+    waiting: Option<Waiting>,
     app: Option<App>,
     error: Option<String>,
     reconnect: Box<dyn Fn() -> Result<App, String>>,
@@ -181,6 +272,9 @@ impl Win {
 impl WindowApp for Win {
     fn view(&mut self, ui: &mut Ui) -> El {
         let size = ui.viewport();
+        if let Some(w) = &self.waiting {
+            return w.view(ui);
+        }
         match self.guard(|app| Some(app.view(ui, size))) {
             Some(el) => el,
             None => crash::view(ui, self.error.as_deref().unwrap_or_default()),
@@ -237,23 +331,48 @@ impl WindowApp for Win {
     }
 
     fn tick(&mut self) -> Option<Instant> {
+        let Some(w) = &mut self.waiting else {
+            return self.guard(App::tick);
+        };
+        let shown = (w.status.clone(), w.detail.clone());
+        let Some(mut app) = w.poll() else {
+            if shown != (w.status.clone(), w.detail.clone()) {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            return Some(w.next);
+        };
+        self.waiting = None;
+        if let Some(window) = &self.window {
+            app.opened(window);
+            // The app draws its own frame outside macOS.
+            if !cfg!(target_os = "macos") {
+                window.set_decorations(false);
+            }
+            window.request_redraw();
+        }
+        self.app = Some(app);
         self.guard(App::tick)
     }
 }
 
 fn window(args: &Args) -> Result<(), String> {
-    // The window's waker exists only once it is open; connecting first
-    // reports a missing vornd before any window appears.
+    // The window's waker exists only once it is open; the app's wake reaches
+    // it through this slot.
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
-    let wake: vorn_app::client::rpc::Wake = Arc::new(move || {
+    let wake: Wake = Arc::new(move || {
         if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
             w.wake();
         }
     });
     let dir = args.data_dir()?;
-    let mut app = connect(args, Arc::clone(&wake))?;
-    app.set_data_dir(dir.clone());
+    let mut waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
+    // Connected before the window opens when vornd runs, so it never shows
+    // the waiting screen; otherwise this starts the bundled one.
+    let app = waiting.poll();
+    let ready = app.is_some();
     let reconnect = Box::new(move || {
         let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
         let mut app = App::connect(&ep, Arc::clone(&wake)).map_err(|e| e.to_string())?;
@@ -264,8 +383,9 @@ fn window(args: &Args) -> Result<(), String> {
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
         // macOS keeps its traffic lights over the app's top bar, with no
-        // title drawn; elsewhere the app draws its own controls.
-        decorations: cfg!(target_os = "macos"),
+        // title drawn; elsewhere the app draws its own controls, and the
+        // waiting screen has the system's until it connects.
+        decorations: cfg!(target_os = "macos") || !ready,
         inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
         ..WindowOptions::sized(look::WINDOW)
     };
@@ -274,7 +394,8 @@ fn window(args: &Args) -> Result<(), String> {
             *slot = Some(wake);
         }
         Win {
-            app: Some(app),
+            waiting: (!ready).then_some(waiting),
+            app,
             error: None,
             reconnect,
             window: None,
@@ -287,7 +408,7 @@ fn widget(args: &Args) -> Result<(), String> {
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
-    let wake: vorn_app::client::rpc::Wake = Arc::new(move || {
+    let wake: Wake = Arc::new(move || {
         if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
             w.wake();
         }
