@@ -203,7 +203,11 @@ pub fn contextual(nodes: &serde_json::Value) -> bool {
 fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {
     let mut out = Vec::new();
     for p in s.store.workspace_projects() {
-        let wts = s.st.worktrees.get(&p.path).map(Vec::as_slice).unwrap_or_default();
+        let wts =
+            s.st.worktrees
+                .get(&p.path)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
         let new = |worktree: Option<String>| {
             if shell {
                 Act::NewShellIn(worktree.unwrap_or_else(|| p.path.clone()))
@@ -233,7 +237,11 @@ fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {
             let (icon, label, tint) = if wt.main {
                 ("git-branch", wt.branch.as_str(), c(look::GRAY_400))
             } else {
-                ("folder-git-2", wt.name.as_str(), c(look::AMBER_400).alpha(0.7))
+                (
+                    "folder-git-2",
+                    wt.name.as_str(),
+                    c(look::AMBER_400).alpha(0.7),
+                )
             };
             let mut it = Item::option(label, false, new((!wt.main).then(|| wt.path.clone())))
                 .mark(ico(icon, 12.0, 2.0, tint));
@@ -495,22 +503,38 @@ fn sidebar_options(s: &Screen<'_>) -> Vec<Item> {
     let v = s.st.sidebar_view;
     let mut items = vec![Item::header("Show")];
     for m in SidebarMode::ALL {
-        items.push(Item::option(m.label(), v.view_mode == m, Act::SidebarMode(m)));
+        items.push(Item::option(
+            m.label(),
+            v.view_mode == m,
+            Act::SidebarMode(m),
+        ));
     }
     if v.by_project() {
         items.push(Item::header("Filter").sep());
         for f in WorktreeFilter::ALL {
-            items.push(Item::option(f.label(), v.worktree_filter == f, Act::WorktreeFilter(f)));
+            items.push(Item::option(
+                f.label(),
+                v.worktree_filter == f,
+                Act::WorktreeFilter(f),
+            ));
         }
         items.push(Item::header("Sort projects").sep());
         for o in ProjectSort::ALL {
-            items.push(Item::option(o.label(), v.project_sort == o, Act::ProjectSort(o)));
+            items.push(Item::option(
+                o.label(),
+                v.project_sort == o,
+                Act::ProjectSort(o),
+            ));
         }
     }
     if v.by_worktree() {
         items.push(Item::header("Sort worktrees").sep());
         for o in WorktreeSort::ALL {
-            items.push(Item::option(o.label(), v.worktree_sort == o, Act::WorktreeSort(o)));
+            items.push(Item::option(
+                o.label(),
+                v.worktree_sort == o,
+                Act::WorktreeSort(o),
+            ));
         }
     }
     items

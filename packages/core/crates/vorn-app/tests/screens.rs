@@ -148,7 +148,10 @@ fn the_sessions_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
-    assert_eq!(app.st.sidebar_view.view_mode, SidebarMode::WorktreesSessions);
+    assert_eq!(
+        app.st.sidebar_view.view_mode,
+        SidebarMode::WorktreesSessions
+    );
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar");
 

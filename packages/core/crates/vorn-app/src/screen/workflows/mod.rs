@@ -207,7 +207,16 @@ pub fn icon_colors(
     on_icon: impl Fn(String) -> Act,
     on_color: impl Fn(String) -> Act,
 ) -> El {
-    icon_colors_from(s, place, &look::ICON_OPTIONS, 22.0, icon, color, on_icon, on_color)
+    icon_colors_from(
+        s,
+        place,
+        &look::ICON_OPTIONS,
+        22.0,
+        icon,
+        color,
+        on_icon,
+        on_color,
+    )
 }
 
 /// `icon_colors` over `options`, each cell `cell_w` wide.

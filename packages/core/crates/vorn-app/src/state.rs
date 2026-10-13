@@ -103,7 +103,9 @@ impl LayoutMode {
 
 /// How the sessions view's sidebar arranges its sessions
 /// (`SidebarViewMode`), worktrees and their sessions by default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SidebarMode {
     #[serde(rename = "worktrees")]
     Worktrees,
@@ -511,9 +513,10 @@ impl State {
             .enumerate()
             .filter(|(_, s)| {
                 store.in_scope(s)
-                    && self.project
-                    .as_deref()
-                    .is_none_or(|p| s.info.project_name == p)
+                    && self
+                        .project
+                        .as_deref()
+                        .is_none_or(|p| s.info.project_name == p)
                     && self
                         .group
                         .as_deref()

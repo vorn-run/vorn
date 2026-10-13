@@ -81,7 +81,10 @@ fn folder_icon(size: f32, color: Rgba) -> El {
 
 fn header(s: &Screen<'_>) -> El {
     let ws = s.store.current_workspace();
-    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Workspace);
+    let open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Workspace);
     let id = s.acts.on("workspace", Act::Open(MenuKind::Workspace));
     let hot = s.ui.hover(id);
     let title = div()
@@ -853,10 +856,9 @@ fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
         s: &'b Screen<'_>,
         p: &'b ProjectConfig,
     ) -> impl Iterator<Item = &'b crate::client::Session> {
-        s.store
-            .sessions
-            .iter()
-            .filter(move |x| x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none())
+        s.store.sessions.iter().filter(move |x| {
+            x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none()
+        })
     }
     let mut out: Vec<&ProjectConfig> = s
         .store
@@ -1122,7 +1124,11 @@ fn workspace_glyph(icon: Option<&str>, color: Option<&str>, size: f32) -> El {
 pub(super) fn workspace_panel(s: &Screen<'_>) -> El {
     let active = s.store.workspace();
     let form = s.st.ws_form.as_ref();
-    let mut list = div().id(s.acts.on("workspace-list", Act::Nothing)).col().scroll_y().max_h(300.0);
+    let mut list = div()
+        .id(s.acts.on("workspace-list", Act::Nothing))
+        .col()
+        .scroll_y()
+        .max_h(300.0);
     for ws in s.store.workspaces() {
         if form.is_some_and(|f| f.id.as_deref() == Some(ws.id.as_str())) {
             list = list.child(workspace_form(s));
@@ -1132,7 +1138,12 @@ pub(super) fn workspace_panel(s: &Screen<'_>) -> El {
             .store
             .projects
             .iter()
-            .filter(|p| p.workspace_id.as_deref().unwrap_or(crate::client::store::WORKSPACE) == ws.id)
+            .filter(|p| {
+                p.workspace_id
+                    .as_deref()
+                    .unwrap_or(crate::client::store::WORKSPACE)
+                    == ws.id
+            })
             .count();
         list = list.child(workspace_row(s, &ws, ws.id == active, count));
     }
@@ -1164,7 +1175,11 @@ pub(super) fn workspace_panel(s: &Screen<'_>) -> El {
                 .bg(white(0.0).mix(white(0.04), hot))
                 .role(Role::MenuItem, "Create Workspace")
                 .child(ico("plus", 14.0, 1.5, fg))
-                .child(text("Create Workspace", 13.0, fg).line_height(19.5).silent()),
+                .child(
+                    text("Create Workspace", 13.0, fg)
+                        .line_height(19.5)
+                        .silent(),
+                ),
         );
     }
     panel
@@ -1182,7 +1197,11 @@ fn workspace_row(s: &Screen<'_>, ws: &WorkspaceConfig, on: bool, count: usize) -
     } else {
         white(0.0).mix(white(0.04), s.ui.hover(row_id))
     };
-    let fg = if on { c(look::WHITE) } else { c(look::GRAY_300) };
+    let fg = if on {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300)
+    };
     let button = div()
         .id(pick)
         .on(Action::Click)
@@ -1194,12 +1213,23 @@ fn workspace_row(s: &Screen<'_>, ws: &WorkspaceConfig, on: bool, count: usize) -
         .role(Role::MenuItem, ws.name.as_str())
         .selected(on)
         .child(workspace_icon(ws, 14.0))
-        .child(text(ws.name.as_str(), 13.0, fg).line_height(19.5).truncate().silent())
+        .child(
+            text(ws.name.as_str(), 13.0, fg)
+                .line_height(19.5)
+                .truncate()
+                .silent(),
+        )
         .child(div().grow())
-        .child(text(count.to_string(), 11.0, c(look::GRAY_600)).line_height(16.5).silent());
+        .child(
+            text(count.to_string(), 11.0, c(look::GRAY_600))
+                .line_height(16.5)
+                .silent(),
+        );
     let mut actions = div().row().items_center().gap(2.0).shrink0();
     if hot || armed {
-        let edit = s.acts.on("workspace", Act::EditWorkspace(Some(ws.id.clone())));
+        let edit = s
+            .acts
+            .on("workspace", Act::EditWorkspace(Some(ws.id.clone())));
         let edit_hot = s.ui.hover(edit);
         actions = actions.child(tooltip(
             s.ui,
@@ -1209,20 +1239,39 @@ fn workspace_row(s: &Screen<'_>, ws: &WorkspaceConfig, on: bool, count: usize) -
                 .p(2.0)
                 .rounded(4.0)
                 .role(Role::Button, "Edit")
-                .child(ico("pencil", 11.0, 1.5, c(look::GRAY_500).mix(c(look::GRAY_300), edit_hot))),
+                .child(ico(
+                    "pencil",
+                    11.0,
+                    1.5,
+                    c(look::GRAY_500).mix(c(look::GRAY_300), edit_hot),
+                )),
             edit,
             "Edit",
             None,
         ));
         if ws.id != crate::client::store::WORKSPACE {
             let (act, label, tint, stroke) = if armed {
-                (Act::DeleteWorkspace(ws.id.clone()), "Confirm delete", c(look::RED_400), 2.0)
+                (
+                    Act::DeleteWorkspace(ws.id.clone()),
+                    "Confirm delete",
+                    c(look::RED_400),
+                    2.0,
+                )
             } else {
-                (Act::AskDeleteWorkspace(ws.id.clone()), "Delete", c(look::GRAY_500), 1.5)
+                (
+                    Act::AskDeleteWorkspace(ws.id.clone()),
+                    "Delete",
+                    c(look::GRAY_500),
+                    1.5,
+                )
             };
             let del = s.acts.on("workspace", act);
             let del_hot = s.ui.hover(del);
-            let tint = if armed { tint } else { tint.mix(c(look::RED_400), del_hot) };
+            let tint = if armed {
+                tint
+            } else {
+                tint.mix(c(look::RED_400), del_hot)
+            };
             actions = actions.child(tooltip(
                 s.ui,
                 div()
@@ -1273,7 +1322,11 @@ fn workspace_form(s: &Screen<'_>) -> El {
         .child(field(
             crate::app::WS_NAME,
             "Workspace name",
-            if f.id.is_none() { "Workspace name..." } else { "" },
+            if f.id.is_none() {
+                "Workspace name..."
+            } else {
+                ""
+            },
             TextStyle {
                 line_height: 19.5,
                 ..TextStyle::ui(13.0)

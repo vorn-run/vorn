@@ -512,9 +512,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     let id = term_id(sid);
     let mut inner = div().row().grow().min_h(0.0);
     if session.is_shell() {
-        inner = inner
-            .child(spine(s, session))
-            .child(div().w(8.0).shrink0());
+        inner = inner.child(spine(s, session)).child(div().w(8.0).shrink0());
     }
     let inner = inner.child(custom(CARD_ID_BASE + i as u64).grow());
     s.acts.bind(id, Act::Select(sid.to_owned()));

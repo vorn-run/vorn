@@ -314,9 +314,13 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
     r = r.child(div().row().grow().min_w(0.0).child(label));
     if let Some(d) = &item.detail {
         r = r.child(
-            text(d, 10.0, item.detail_color.unwrap_or(Rgba::hex(rgb::GRAY_600)))
-                .line_height(14.0)
-                .silent(),
+            text(
+                d,
+                10.0,
+                item.detail_color.unwrap_or(Rgba::hex(rgb::GRAY_600)),
+            )
+            .line_height(14.0)
+            .silent(),
         );
     }
     if let Some(s) = &item.shortcut {

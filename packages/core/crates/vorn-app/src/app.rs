@@ -847,8 +847,11 @@ impl App {
         at.0 = at.0.min(self.size.0 - w - 8.0).max(8.0);
         match &kind {
             MenuKind::Grid => {
-                let paths: Vec<String> =
-                    self.store.workspace_projects().map(|p| p.path.clone()).collect();
+                let paths: Vec<String> = self
+                    .store
+                    .workspace_projects()
+                    .map(|p| p.path.clone())
+                    .collect();
                 for path in paths {
                     let arg = json!(path);
                     self.call(Call::Worktrees(path), "git:listWorktrees", arg);
@@ -1130,11 +1133,19 @@ impl App {
             .find(|w| w.id == id)
             .map(|w| w.name);
         let mut config = self.store.config.clone();
-        let mine = |v: &Value| v.get("workspaceId").and_then(Value::as_str).unwrap_or(WORKSPACE) == id;
+        let mine = |v: &Value| {
+            v.get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or(WORKSPACE)
+                == id
+        };
         if let Some(l) = config.get_mut("workspaces").and_then(Value::as_array_mut) {
             l.retain(|w| w.get("id").and_then(Value::as_str) != Some(id));
         }
-        if let Some(l) = config.get_mut("sessionGroups").and_then(Value::as_array_mut) {
+        if let Some(l) = config
+            .get_mut("sessionGroups")
+            .and_then(Value::as_array_mut)
+        {
             l.retain(|g| g.get("workspaceId").and_then(Value::as_str) != Some(id));
         }
         for key in ["projects", "workflows"] {
@@ -1148,7 +1159,10 @@ impl App {
             set_active_workspace(&mut config, WORKSPACE.to_owned());
         }
         let label = name.unwrap_or_default();
-        self.save_config(config, Call::Toast(format!("Workspace \"{label}\" deleted")));
+        self.save_config(
+            config,
+            Call::Toast(format!("Workspace \"{label}\" deleted")),
+        );
     }
 
     /// `updateSessionGroup`: one field of a group, saved quietly.

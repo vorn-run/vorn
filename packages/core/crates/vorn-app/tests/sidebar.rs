@@ -78,7 +78,11 @@ fn the_sidebar_options_persist_and_rearrange_it() {
     let repo = seed_acme(&mut app, &v);
     let path = repo.to_string_lossy().into_owned();
     shot.until(&mut app, "the worktrees", |app, _| {
-        app.st.worktrees.get(&path).filter(|w| w.len() > 1).map(|_| ())
+        app.st
+            .worktrees
+            .get(&path)
+            .filter(|w| w.len() > 1)
+            .map(|_| ())
     });
     let claude = session(&mut shot, &mut app, "claude", "acme", &path);
     session(&mut shot, &mut app, "shell", "acme", &path);
@@ -126,7 +130,10 @@ fn the_sidebar_options_persist_and_rearrange_it() {
     assert_eq!(saved["projectSort"], "name");
 
     let again = connect(&v);
-    assert_eq!(again.st.sidebar_view, app.st.sidebar_view, "reopened, it keeps them");
+    assert_eq!(
+        again.st.sidebar_view, app.st.sidebar_view,
+        "reopened, it keeps them"
+    );
 }
 
 #[test]
@@ -158,7 +165,10 @@ fn workspaces_switch_create_rename_and_delete() {
     shot.until(&mut app, "vornd to hold the switch", |app, _| {
         (active_workspace(app) == work).then_some(())
     });
-    assert!(app.store.workspace_projects().next().is_none(), "a new one starts empty");
+    assert!(
+        app.store.workspace_projects().next().is_none(),
+        "a new one starts empty"
+    );
     park(&mut shot, &mut app);
     shot.save(&mut app, "workspace-work");
 
@@ -168,7 +178,10 @@ fn workspaces_switch_create_rename_and_delete() {
     let row = control("workspace", Act::SwitchWorkspace(work.clone()));
     shot.hover(&mut app, row);
     shot.save(&mut app, "workspace-row-hover");
-    shot.click(&mut app, control("workspace", Act::EditWorkspace(Some(work.clone()))));
+    shot.click(
+        &mut app,
+        control("workspace", Act::EditWorkspace(Some(work.clone()))),
+    );
     shot.type_text(&mut app, " team");
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     shot.until(&mut app, "the rename", |app, _| {
@@ -187,7 +200,10 @@ fn workspaces_switch_create_rename_and_delete() {
     if menu(&app) != Some(MenuKind::Workspace) {
         shot.click(&mut app, open);
     }
-    shot.click(&mut app, control("workspace", Act::SwitchWorkspace(work.clone())));
+    shot.click(
+        &mut app,
+        control("workspace", Act::SwitchWorkspace(work.clone())),
+    );
     shot.until(&mut app, "the switch", |app, _| {
         (app.store.workspace() == work).then_some(())
     });
@@ -199,9 +215,15 @@ fn workspaces_switch_create_rename_and_delete() {
         shot.click(&mut app, open);
     }
     shot.hover(&mut app, row);
-    shot.click(&mut app, control("workspace", Act::AskDeleteWorkspace(work.clone())));
+    shot.click(
+        &mut app,
+        control("workspace", Act::AskDeleteWorkspace(work.clone())),
+    );
     shot.save(&mut app, "workspace-delete");
-    shot.click(&mut app, control("workspace", Act::DeleteWorkspace(work.clone())));
+    shot.click(
+        &mut app,
+        control("workspace", Act::DeleteWorkspace(work.clone())),
+    );
     shot.until(&mut app, "the delete", |app, _| {
         app.store
             .workspaces()
@@ -223,7 +245,11 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
     let path = repo.to_string_lossy().into_owned();
     session(&mut shot, &mut app, "claude", "acme", &path);
     shot.until(&mut app, "the worktrees", |app, _| {
-        app.st.worktrees.get(&path).filter(|w| w.len() > 1).map(|_| ())
+        app.st
+            .worktrees
+            .get(&path)
+            .filter(|w| w.len() > 1)
+            .map(|_| ())
     });
 
     shot.click(&mut app, control("toolbar", Act::Open(MenuKind::Grid)));

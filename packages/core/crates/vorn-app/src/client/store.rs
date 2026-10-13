@@ -197,10 +197,14 @@ impl Store {
     }
 
     /// Whether a session's project is in the active workspace, which is
-    /// what `useSessionScope` lets any surface show.
+    /// what `useSessionScope` lets any surface show. A session outside every
+    /// project (a shell in the home directory) belongs to no workspace, so
+    /// it shows in all of them rather than nowhere.
     pub fn in_scope(&self, s: &Session) -> bool {
-        self.workspace_projects()
-            .any(|p| p.name == s.info.project_name)
+        match self.projects.iter().find(|p| p.name == s.info.project_name) {
+            Some(p) => self.in_workspace(p),
+            None => true,
+        }
     }
 
     /// The active workspace's sessions.
@@ -500,6 +504,26 @@ mod tests {
         let ids: Vec<&str> = s.groups.iter().map(|g| g.id.as_str()).collect();
         assert_eq!(ids, ["a", "b"]);
         assert_eq!(s.group("b").map(|g| g.order), Some(1.0));
+    }
+
+    #[test]
+    fn sessions_show_in_their_projects_workspace_and_loose_ones_in_all() {
+        let mut s = Store::default();
+        for (id, project) in [("w", "web"), ("a", "api"), ("h", "me")] {
+            let mut v = session(id, "running");
+            v["projectName"] = json!(project);
+            s.apply("session:created", v);
+        }
+        let config = json!({
+            "defaults": { "activeWorkspace": "work" },
+            "projects": [
+                { "name": "web", "path": "/w", "preferredAgents": [], "workspaceId": "work" },
+                { "name": "api", "path": "/a", "preferredAgents": [] },
+            ],
+        });
+        s.apply("config:changed", config);
+        let scoped: Vec<&str> = s.scoped_sessions().map(|s| s.info.id.as_str()).collect();
+        assert_eq!(scoped, ["w", "h"]);
     }
 
     #[test]
