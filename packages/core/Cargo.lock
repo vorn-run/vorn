@@ -6312,6 +6312,7 @@ dependencies = [
  "futures-util",
  "gtk",
  "libc",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "tokio",

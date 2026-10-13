@@ -94,6 +94,11 @@ pub enum WebEvent {
         key: String,
         url: String,
     },
+    /// A load ended before the page committed (no such host, offline).
+    Failed {
+        key: String,
+        url: String,
+    },
 }
 
 /// Where one web view should be this frame.
@@ -124,6 +129,17 @@ struct View {
     at: usize,
     /// A history step in flight, to the index it lands on.
     stepping: Option<usize>,
+    /// A load asked for that has not committed yet, and when.
+    pending: Option<Instant>,
+}
+
+impl View {
+    fn load(&mut self, url: &str) {
+        self.asked = url.to_owned();
+        self.stepping = None;
+        self.pending = Some(Instant::now());
+        let _ = self.wv.load_url(url);
+    }
 }
 
 /// The web views of every open pane.
@@ -243,9 +259,7 @@ impl Host {
                 continue;
             };
             if v.asked != slot.url {
-                v.asked.clone_from(&slot.url);
-                v.stepping = None;
-                let _ = v.wv.load_url(&slot.url);
+                v.load(&slot.url);
             }
             if v.rect != slot.rect {
                 v.rect = slot.rect;
@@ -348,6 +362,7 @@ impl Host {
             history: Vec::new(),
             at: 0,
             stepping: None,
+            pending: Some(Instant::now()),
         })
     }
 
@@ -383,6 +398,7 @@ impl Host {
             let Some(v) = self.views.get_mut(key) else {
                 continue;
             };
+            v.pending = None;
             if !finished {
                 v.generation += 1;
                 continue;
@@ -440,14 +456,13 @@ impl Host {
     /// Loads `url` even when it is the address last asked for.
     pub fn load(&mut self, key: &str, url: &str) {
         if let Some(v) = self.views.get_mut(key) {
-            v.asked = url.to_owned();
-            v.stepping = None;
-            let _ = v.wv.load_url(url);
+            v.load(url);
         }
     }
 
-    pub fn reload(&self, key: &str) {
-        if let Some(v) = self.views.get(key) {
+    pub fn reload(&mut self, key: &str) {
+        if let Some(v) = self.views.get_mut(key) {
+            v.pending = Some(Instant::now());
             let _ = v.wv.reload();
         }
     }
@@ -477,6 +492,10 @@ impl Host {
 
     /// Pumps GTK's loop, which WebKitGTK runs on; when to come back.
     pub fn tick(&mut self) -> Option<Instant> {
+        #[cfg(target_os = "macos")]
+        if let Some(next) = self.settle_failed() {
+            return Some(next);
+        }
         #[cfg(target_os = "linux")]
         if !self.views.is_empty() {
             while gtk::events_pending() {
@@ -485,6 +504,35 @@ impl Host {
             return Some(Instant::now() + std::time::Duration::from_millis(8));
         }
         None
+    }
+
+    /// WKWebView tells nothing of a load that fails before it commits, so a
+    /// pending load the view stopped working on is reported failed.
+    #[cfg(target_os = "macos")]
+    fn settle_failed(&mut self) -> Option<Instant> {
+        use wry::WebViewExtMacOS;
+        const GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+        let now = Instant::now();
+        let mut next = None;
+        for (key, v) in &mut self.views {
+            let Some(since) = v.pending else { continue };
+            if now < since + GRACE {
+                next = Some(since + GRACE);
+                continue;
+            }
+            // SAFETY: the view is a live WKWebView owned by `v.wv`, read on the UI thread.
+            if unsafe { v.wv.webview().isLoading() } {
+                next = Some(now + GRACE);
+                continue;
+            }
+            v.pending = None;
+            let _ = self.tx.send(WebEvent::Failed {
+                key: key.clone(),
+                url: v.asked.clone(),
+            });
+            (self.wake)();
+        }
+        next
     }
 }
 

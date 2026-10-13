@@ -326,6 +326,36 @@ impl Panes {
     }
 }
 
+/// Where the address bar sends text that is not a web address.
+const SEARCH_URL: &str = "https://www.google.com/search";
+
+/// What the address bar opens for what was typed: the web address it names,
+/// or a search for words that name none. `None` for an address it will not load.
+pub fn address_target(input: &str) -> Option<String> {
+    let raw = input.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if looks_like_address(raw) {
+        return normalize_url(raw, false);
+    }
+    let mut url = Url::parse(SEARCH_URL).ok()?;
+    url.query_pairs_mut().append_pair("q", raw);
+    Some(url.to_string())
+}
+
+/// A scheme, a port, a dotted host or `localhost`; a lone word or a phrase is a search.
+fn looks_like_address(raw: &str) -> bool {
+    if raw.chars().any(char::is_whitespace) {
+        return false;
+    }
+    if host_and_port(raw) || has_scheme(raw) || raw.starts_with("//") {
+        return true;
+    }
+    let host = raw.split(['/', '?', '#']).next().unwrap_or_default();
+    host.contains('.') || host.eq_ignore_ascii_case("localhost") || host.starts_with('[')
+}
+
 /// `normalizeUrl`: what the address bar loads for what was typed, or `None`
 /// for something it will not load. `file:` only with `allow_file`, with no
 /// host, and without its query and hash.
@@ -566,6 +596,34 @@ mod tests {
         );
         assert_eq!(n("//app.local/x").as_deref(), Some("http://app.local/x"));
         assert_eq!(n("   ").as_deref(), None);
+    }
+
+    #[test]
+    fn words_become_a_search_and_addresses_load() {
+        let a = |s: &str| address_target(s);
+        assert_eq!(
+            a("google").as_deref(),
+            Some("https://www.google.com/search?q=google")
+        );
+        assert_eq!(
+            a(" rust borrow checker ").as_deref(),
+            Some("https://www.google.com/search?q=rust+borrow+checker")
+        );
+        assert_eq!(a("a&b").as_deref(), Some("https://www.google.com/search?q=a%26b"));
+        assert_eq!(a("google.com").as_deref(), Some("https://google.com/"));
+        assert_eq!(
+            a("https://example.com/a?b=1").as_deref(),
+            Some("https://example.com/a?b=1")
+        );
+        assert_eq!(a("localhost").as_deref(), Some("http://localhost/"));
+        assert_eq!(
+            a("localhost:3000/x").as_deref(),
+            Some("http://localhost:3000/x")
+        );
+        assert_eq!(a("127.0.0.1:8080").as_deref(), Some("http://127.0.0.1:8080/"));
+        assert_eq!(a("about:blank").as_deref(), Some("about:blank"));
+        assert_eq!(a("javascript:alert(1)"), None);
+        assert_eq!(a(""), None);
     }
 
     #[test]
