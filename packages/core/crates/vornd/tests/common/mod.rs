@@ -9,11 +9,11 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use vorn_sessiond::launch;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use vorn_sessiond::launch;
 
 pub type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -205,4 +205,3 @@ impl Drop for Vornd {
         let _ = self.child.wait();
     }
 }
-

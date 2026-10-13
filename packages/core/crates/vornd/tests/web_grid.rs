@@ -269,7 +269,8 @@ async fn a_browser_follows_types_into_and_resizes_a_session_over_grid() {
             utf8: "echo grid-$((6*7))\r".into(),
         },
     });
-    b.until("the echo", |b| b.text(sid).contains("grid-42")).await;
+    b.until("the echo", |b| b.text(sid).contains("grid-42"))
+        .await;
 
     b.client.send(&ClientMsg::Viewport {
         sid,
@@ -278,7 +279,14 @@ async fn a_browser_follows_types_into_and_resizes_a_session_over_grid() {
     b.client.send(&ClientMsg::TakeSize { sid });
     b.until("the resize", |b| {
         b.got.iter().any(|g| {
-            matches!(g, Got::Message(ServerMsg::Resized { cols: 100, rows: 30, .. }))
+            matches!(
+                g,
+                Got::Message(ServerMsg::Resized {
+                    cols: 100,
+                    rows: 30,
+                    ..
+                })
+            )
         })
     })
     .await;
