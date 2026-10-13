@@ -120,7 +120,7 @@ mod transcript {
                 let s = tick / 10;
                 // toFixed(1): rounds the f64's exact value, and exact ties (x.25, x.75) up.
                 let tokens = (tick * 13) % 9000;
-                let tokens = if tokens % 250 == 0 && tokens % 100 == 50 {
+                let tokens = if tokens.is_multiple_of(250) && tokens % 100 == 50 {
                     format!("{}.{}", (tokens + 50) / 1000, (tokens + 50) / 100 % 10)
                 } else {
                     format!("{:.1}", tokens as f64 / 1000.0)
