@@ -17,6 +17,7 @@ use vorn_app::gates::{self, GateOp, Mode, Place};
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
+use vorn_app::tasks::{Form, TaskAct};
 use vorn_app::ui::{item_id, mods, Id};
 use vorn_app::workflows::{self as wf, Anchor, Missed, Panel, Pick, WfAct};
 use vorn_app::App;
@@ -826,6 +827,25 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     );
 
     shot.save(&mut app, "icons-projects");
+
+    // The task dialog's project picker draws `ProjectPicker`'s own icons.
+    shot.send(&mut app, key("KeyT", MOD, None));
+    shot.click(
+        &mut app,
+        App::control("toolbar", &Act::Task(TaskAct::New("todo".into()))),
+    );
+    assert_eq!(app.st.dialog, Some(Dialog::AddTask));
+    shot.click(
+        &mut app,
+        App::control(
+            "task-project-picker",
+            &Act::Open(MenuKind::TaskProject(Form::Dialog)),
+        ),
+    );
+    assert_eq!(app.menu_labels(&shot.ui), ["web", "api", "docs"]);
+    shot.save(&mut app, "icons-task-picker");
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.send(&mut app, key("Escape", 0, None));
     for run in [
         icon_run("run-bug", "wf-bug", json!({})),
         icon_run("run-sched", "wf-plain", json!({})),

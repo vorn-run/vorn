@@ -551,13 +551,9 @@ pub fn choice_width(t: &str) -> f32 {
     parse_token(t).0.max(180.0)
 }
 
-/// `ProjectIcon` on the form trigger, whose text is white.
+/// `ProjectPicker`'s `ProjectIcon` on the form trigger.
 fn project_glyph(s: &Screen<'_>, name: &str) -> El {
-    let white = c(look::WHITE);
-    match s.store.projects.iter().find(|p| p.name == name) {
-        Some(p) => super::super::sidebar_project_icon(p, 14.0, white),
-        None => super::super::folder_icon(14.0, white),
-    }
+    super::super::picker_project_icon(s.store.projects.iter().find(|p| p.name == name), 13.0)
 }
 
 /// `ProjectPicker` (`variant="form"`): the project, or From Context.
@@ -665,9 +661,10 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
                 )));
             }
             for p in &s.store.projects {
-                out.push(pick(&p.name, &p.name, !from_ctx && p.name == cur).mark(
-                    super::super::sidebar_project_icon(p, 14.0, c(look::GRAY_300)),
-                ));
+                out.push(
+                    pick(&p.name, &p.name, !from_ctx && p.name == cur)
+                        .mark(super::super::picker_project_icon(Some(p), 13.0)),
+                );
             }
             out
         }

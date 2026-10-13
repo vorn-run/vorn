@@ -38,8 +38,44 @@ pub(crate) fn stored_icon(icon: Option<&str>, color: Option<&str>, size: f32, cu
     }
 }
 
+/// `ProjectPicker`'s `ICON_MAP`: a smaller set than the sidebar's.
+const PICKER_ICONS: [&str; 20] = [
+    "Folder",
+    "FolderGit2",
+    "Code",
+    "Globe",
+    "Database",
+    "Server",
+    "Smartphone",
+    "Package",
+    "FileCode",
+    "Terminal",
+    "Cpu",
+    "Cloud",
+    "Shield",
+    "Zap",
+    "Gamepad2",
+    "Music",
+    "Image",
+    "BookOpen",
+    "FlaskConical",
+    "Rocket",
+];
+
+/// `ProjectPicker`'s own `ProjectIcon`: lucide's folder for no or an unknown
+/// icon, and `#6b7280` rather than the row colour when none is set.
+pub(crate) fn picker_project_icon(p: Option<&ProjectConfig>, size: f32) -> El {
+    let name = p
+        .and_then(|p| p.icon.as_deref())
+        .filter(|i| PICKER_ICONS.contains(i))
+        .and_then(look::icon_map)
+        .unwrap_or("folder");
+    let color = p.and_then(project_color);
+    ico(name, size, 1.5, color.unwrap_or(c(look::ICON_DEFAULT)))
+}
+
 /// `ProjectIcon` with no icon: its own folder path, not lucide's.
-pub(crate) fn folder_icon(size: f32, color: Rgba) -> El {
+fn folder_icon(size: f32, color: Rgba) -> El {
     crate::ui::icon(look::PROJECT_FOLDER, size, color)
 }
 
@@ -1297,6 +1333,13 @@ mod tests {
             "iconColor": color,
         }))
         .expect("project")
+    }
+
+    #[test]
+    fn every_picker_icon_has_a_glyph() {
+        for name in PICKER_ICONS {
+            assert!(look::icon_map(name).is_some(), "{name}");
+        }
     }
 
     #[test]
