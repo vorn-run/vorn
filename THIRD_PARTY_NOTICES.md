@@ -52,3 +52,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Inter and JetBrains Mono (the web client's fonts)
+
+The web client (`resources/web/dist/fonts`) draws its interface in Inter and its
+terminals in JetBrains Mono. Both are licensed under the SIL Open Font License,
+Version 1.1; the full text ships beside the fonts.
+
+- Inter: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter), `fonts/Inter-LICENSE.txt`
+- JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), `fonts/JetBrainsMono-OFL.txt`

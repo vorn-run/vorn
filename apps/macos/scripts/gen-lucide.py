@@ -6,7 +6,7 @@ import pathlib
 import re
 import urllib.request
 
-VERSION = "1.34.0"  # lucide-react in package.json
+VERSION = "1.34.0"
 ICONS = {
     # Swift name: lucide file
     "circle": "circle", "clock": "clock", "eye": "eye", "circleCheck": "circle-check",

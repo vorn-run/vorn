@@ -36,7 +36,7 @@ pairs are in `examples/`.
   scrollbar thumb.
 - **Colour 80/15/5**: 80% surface (base, panel, sunken, overlay) and ink;
   15% secondary ink and grays; at most 5% Bronzo. Every colour comes from
-  `theme::color` (tested against `packages/web/src/renderer/theme.css`). No new hex.
+  `theme::color`. No new hex.
 - **Colour means status, never chrome.** Buttons are neutral: gray icon,
   white on hover, `white/0.06` fill on hover, a tooltip naming the action and
   its shortcut. One filled primary button per surface at most, neutral fill.
