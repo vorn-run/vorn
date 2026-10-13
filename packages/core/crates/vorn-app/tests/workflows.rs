@@ -766,3 +766,93 @@ fn a_template_starts_the_canvas_and_names_what_it_still_needs() {
     assert_eq!(needs[0].req["connectorId"], "github");
     shot.save(&mut app, "w-still-needs");
 }
+
+fn icon_run(id: &str, wf: &str, extra: Value) -> Value {
+    let mut run = json!({
+        "runId": id,
+        "workflowId": wf,
+        "workflowName": wf,
+        "startedAt": "2030-01-01T00:00:00.000Z",
+        "completedAt": "2030-01-01T00:00:05.000Z",
+        "status": "success",
+        "nodeStates": [{ "nodeId": "t", "status": "success" }]
+    });
+    if let (Some(r), Value::Object(more)) = (run.as_object_mut(), extra) {
+        r.extend(more);
+    }
+    run
+}
+
+#[test]
+fn projects_workflows_and_runs_draw_their_configured_icons() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let dir = |n: &str| {
+        let p = v.home.join(n);
+        std::fs::create_dir_all(&p).expect("project dir");
+        p
+    };
+    let trigger = |kind: &str| {
+        json!([{ "id": "t", "type": "trigger", "label": "Start", "position": { "x": 0, "y": 0 },
+                 "config": { "triggerType": kind } }])
+    };
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    config["projects"] = json!([
+        { "name": "web", "path": dir("web"), "preferredAgents": [],
+          "icon": "Rocket", "iconColor": "#22c55e" },
+        { "name": "api", "path": dir("api"), "preferredAgents": [], "iconColor": "#ef4444" },
+        { "name": "docs", "path": dir("docs"), "preferredAgents": [] }
+    ]);
+    config["workflows"] = json!([
+        { "id": "wf-bug", "name": "Triage", "icon": "Rocket", "iconColor": "#f97316",
+          "enabled": true, "workspaceId": "personal", "nodes": trigger("manual"), "edges": [] },
+        { "id": "wf-plain", "name": "Nightly", "icon": "", "iconColor": "", "enabled": true, "workspaceId": "personal",
+          "nodes": trigger("recurring"), "edges": [] },
+        { "id": "connector:c1:issue.opened", "name": "On issue", "icon": "", "iconColor": "", "enabled": true,
+          "workspaceId": "personal", "nodes": trigger("connectorPoll"), "edges": [] }
+    ]);
+    app.rpc().call("config:save", config).expect("saved");
+    let mut shot = Shot::new();
+    shot.until(&mut app, "the projects and workflows", |app, _| {
+        let wfs = app.store.config["workflows"].as_array()?.len();
+        (app.store.projects.len() == 3 && wfs == 3).then_some(())
+    });
+    let web = &app.store.projects[0];
+    assert_eq!(
+        (web.icon.as_deref(), web.icon_color.as_deref()),
+        (Some("Rocket"), Some("#22c55e"))
+    );
+
+    shot.save(&mut app, "icons-projects");
+    for run in [
+        icon_run("run-bug", "wf-bug", json!({})),
+        icon_run("run-sched", "wf-plain", json!({})),
+        icon_run(
+            "run-pr",
+            "connector:c1:issue.opened",
+            json!({ "connectorItem": {
+                "connectionId": "c1", "connectorId": "github", "externalId": "42",
+                "externalUrl": "https://example.test/o/r/pull/42", "title": "Fix the build"
+            } }),
+        ),
+    ] {
+        app.rpc().call("workflowRun:save", run).expect("run saved");
+    }
+    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    assert_eq!(app.st.view, MainView::Workflows);
+    shot.click(
+        &mut app,
+        App::control("sidebar", &Act::Workflow(WfAct::AllRuns)),
+    );
+    shot.until(&mut app, "the runs listed", |app, _| {
+        (app.st.wf.runs.len() >= 3).then_some(())
+    });
+    shot.save(&mut app, "icons-landing");
+    shot.click(
+        &mut app,
+        control("wf-run", WfAct::SelectRun("run-pr".into())),
+    );
+    shot.save(&mut app, "icons-run-detail");
+}
