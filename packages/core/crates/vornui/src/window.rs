@@ -427,6 +427,8 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.set_scale(*scale_factor as f32);
                 l.window.request_redraw();
             }
+            // A new window is hidden until first composited; its skipped frame is drawn now.
+            WindowEvent::Occluded(false) => l.window.request_redraw(),
             WindowEvent::RedrawRequested => {
                 if let Err(e) = l.redraw() {
                     self.error = Some(e);

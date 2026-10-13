@@ -15,7 +15,7 @@
 // On macOS the bundle is signed with the Developer ID identity in the keychain
 // (or VORN_SIGN_IDENTITY), and notarized when APPLE_ID,
 // APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID are set; without an identity
-// it is signed ad hoc.
+// it is signed ad hoc, as it is with VORN_SIGN_IDENTITY=-.
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
@@ -105,9 +105,10 @@ function copyExe(from, to) {
   chmodSync(to, 0o755)
 }
 
-/** The Developer ID identity to sign with, or null for ad hoc. */
+/** The Developer ID identity to sign with, or null for ad hoc (also `VORN_SIGN_IDENTITY=-`). */
 function signingIdentity() {
-  if (process.env.VORN_SIGN_IDENTITY) return process.env.VORN_SIGN_IDENTITY
+  const named = process.env.VORN_SIGN_IDENTITY
+  if (named) return named === '-' ? null : named
   try {
     const found = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
       encoding: 'utf8'
@@ -120,7 +121,7 @@ function signingIdentity() {
 
 function notarize(app, zip) {
   const { APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID } = process.env
-  run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip])
+  run('ditto', ['-c', '-k', '--norsrc', '--noextattr', '--keepParent', app, zip])
   const auth = [
     '--apple-id',
     APPLE_ID,
@@ -189,7 +190,7 @@ function packageMac({ binDir, daemonDir, out, version }) {
 
   const asset = path.join(out, assetName(version, 'darwin', process.arch))
   rmSync(asset, { force: true })
-  run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, asset])
+  run('ditto', ['-c', '-k', '--norsrc', '--noextattr', '--keepParent', app, asset])
   return {
     asset,
     signing: identity ? `Developer ID (${identity})` : 'ad hoc',

@@ -67,6 +67,11 @@ brew tap vorn-run/tap && brew install --cask vorn
 
 Or download directly from [GitHub Releases](https://github.com/vorn-run/vorn/releases).
 
+Each release also ships the native desktop app, built on Vorn's GPU UI, beside the Electron one:
+`Vorn-Native-<version>-mac-arm64.zip` (or `mac-x64`), `-win-x64.zip` and `-linux-x64.tar.gz`. It
+connects to the server the app runs, and starts the one it ships with when none is running. On
+Linux it needs WebKitGTK 4.1 and GTK 3.
+
 ## Command line
 
 The installer also puts a `vorn` command on your PATH. It talks to the same server the app
