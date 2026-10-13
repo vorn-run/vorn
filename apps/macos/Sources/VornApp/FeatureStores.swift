@@ -39,6 +39,13 @@ public final class FeatureStores {
         settings.onToast = { [weak model] message, kind in
             model?.toasts.show(message, kind == .error ? .error : kind == .success ? .success : .info)
         }
+        settings.plugins.sessionIds = { [weak store] in store?.sessions.map(\.id) ?? [] }
+        // Settings covers the page, so it closes first; nil opens a new workflow.
+        settings.plugins.openWorkflowEditor = { [weak model, weak workflows] id in
+            model?.settingsOpen = false
+            model?.mainViewMode = .workflows
+            if let id { workflows?.openWorkflow(id) } else { workflows?.newWorkflow() }
+        }
         tasks.workflows = workflows
         tasks.launchSession = { [weak store] payload in
             guard let store else { throw VornError.notConnected }

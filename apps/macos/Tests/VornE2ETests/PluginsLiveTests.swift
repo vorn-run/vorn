@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import VornApp
 import VornCore
 @testable import VornSettings
 
@@ -35,5 +36,31 @@ struct PluginsLiveTests {
         await plugins.deleteConnection(created.id)
         #expect(plugins.connections.isEmpty)
         #expect(!plugins.isBusy(.delete, created.id))
+    }
+
+    @Test func shellCountsOpenCardsAndOpensWorkflowsFromPlugins() async throws {
+        guard let server = try TestVornd.launch() else { return }
+        defer { server.stop() }
+        let store = VornStore(dataDir: server.dataDir, readOnly: false)
+        store.start()
+        defer { store.stop() }
+        #expect(await liveUntil(timeout: 15) { store.phase == .connected })
+        try #require(store.phase == .connected)
+
+        let model = AppModel()
+        model.persistsSidebar = false
+        let features = FeatureStores(client: store.client)
+        features.bind(store: store, model: model)
+        let plugins = features.settings.plugins
+        let dir = server.root.appendingPathComponent("alpha")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let shell = try await store.createShell(cwd: dir.path, project: nil, worktree: nil)
+        #expect(await liveUntil { plugins.sessionIds().contains(shell.id) })
+
+        model.settingsOpen = true
+        plugins.openWorkflowEditor?(nil)
+        #expect(!model.settingsOpen)
+        #expect(model.mainViewMode == .workflows)
+        #expect(features.workflows.isEditing)
     }
 }
