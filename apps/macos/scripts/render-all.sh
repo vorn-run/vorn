@@ -20,11 +20,22 @@ HOME=$tmp/home SHELL=/bin/zsh "$vornd" --data-dir "$data" --port "$port" --host 
   --sessiond "$sessiond" --log-file "$tmp/vornd.log" </dev/null &
 pid=$!
 # sessiond outlives vornd while a shell is open, so it is stopped by its --home.
-trap 'kill $pid 2>/dev/null; wait $pid 2>/dev/null; pkill -f -- "--home $data" 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'kill $pid 2>/dev/null; wait $pid 2>/dev/null; for p in $(pgrep -f -- "--home $data"); do kill "$p"; done 2>/dev/null; rm -rf "$tmp"' EXIT
 for _ in $(seq 100); do [ -s "$data/local-token" ] && [ -s "$data/ws-port" ] && break; sleep 0.1; done
 [ -s "$data/local-token" ] || { cat "$tmp/vornd.log" >&2; exit 1; }
 
 "$bin/VornTasksPreview" --data-dir "$data" --seed
+# A repo with uncommitted work, so the Changes panel and the files tree have something to show.
+repo=$data/projects/vorn
+git -C "$repo" init -q -b main
+mkdir -p "$repo/src"
+printf 'export function greet(name: string) {\n  return `Hello, ${name}`\n}\n' >"$repo/src/greet.ts"
+printf '# vorn\n' >"$repo/README.md"
+git -C "$repo" add -A
+git -C "$repo" -c user.name=t -c user.email=t@t commit -qm init
+printf 'export function greet(name: string, excited = false) {\n  const line = `Hello, ${name}`\n  return excited ? `${line}!` : line\n}\n' >"$repo/src/greet.ts"
+printf '# vorn\n\nRun many agents side by side.\n' >"$repo/README.md"
+printf 'export const version = "0.8.0"\n' >"$repo/src/version.ts"
 node "$here/scripts/seed-test-vornd.mjs" "$data" --shell "$data/projects/vorn" --shells 3 >/dev/null
 sleep 2
 
@@ -52,6 +63,9 @@ for page in appearance general updates notifications worktrees agents ssh mcp ke
 done
 "$bin/Vorn" --render "$out/shell-update-ready.png" --update-status ready:0.8.1
 "$bin/Vorn" --render "$out/panes-files.png" --files 0 --claim 0:1
+"$bin/Vorn" --render "$out/panes-editor.png" --files 0:src/greet.ts,README.md
+"$bin/Vorn" --render "$out/panes-promoted.png" --promote 0:src/greet.ts
+"$bin/Vorn" --render "$out/panes-maximized.png" --files 0:src/greet.ts --maximize files
 "$bin/Vorn" --render "$out/panes-changes.png" --changes 0
 "$bin/Vorn" --render "$out/panes-commit.png" --changes 0 --commit
 "$bin/Vorn" --render "$out/component-branch-picker.png" --size 300x320 --component branch-picker
