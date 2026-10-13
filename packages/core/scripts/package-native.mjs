@@ -144,7 +144,20 @@ function notarize(app, zip) {
     throw new Error(`notarization ${result.status ?? 'failed'}: ${result.message ?? ''}`)
   }
   rmSync(zip)
-  run('xcrun', ['stapler', 'staple', app])
+  retry(3, 15, () => run('xcrun', ['stapler', 'staple', app]))
+}
+
+/** Runs `fn` up to `times` times, `wait` seconds apart: the ticket service drops connections. */
+function retry(times, wait, fn) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn()
+    } catch (e) {
+      if (attempt >= times) throw e
+      console.log(`attempt ${attempt} of ${times} failed; retrying in ${wait}s`)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait * 1000)
+    }
+  }
 }
 
 function packageMac({ binDir, daemonDir, out, version }) {
