@@ -19,6 +19,8 @@ pub enum Act {
     ToggleSidebar,
     /// Selects a card (the active tab in the tabs layout).
     Select(String),
+    /// A shell's command blocks and its composer's menu.
+    Intent(crate::intent::IntentAct),
     /// Expands a card onto the focused stage.
     Expand(String),
     /// Puts the focused stage back into the grid.

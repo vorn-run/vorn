@@ -6358,6 +6358,7 @@ dependencies = [
  "gtk",
  "libc",
  "objc2 0.5.3",
+ "objc2-web-kit",
  "semver",
  "serde",
  "serde_json",

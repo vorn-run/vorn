@@ -1,26 +1,47 @@
-//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 cwds and scrollback clears.
+//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks and
+//! scrollback clears.
 
 use std::sync::LazyLock;
 
 use memchr::memmem::Finder;
 
-/// Starts vorn's cwd report: `OSC 5522 ; cwd ; <path> ST`.
+/// Starts vorn's own reports: `OSC 5522 ; cwd ; <path> ST` and the like.
 const PRIVATE: &[u8] = b"\x1b]5522;";
+/// Starts a shell's prompt and command mark: `OSC 133 ; A ST` and the like.
+const MARK: &[u8] = b"\x1b]133;";
 /// ED 3, DECSED 3 and RIS, as programs write them.
 const CLEARS: [&[u8]; 3] = [b"\x1b[3J", b"\x1b[?3J", b"\x1bc"];
 /// The longest pattern, which bounds the bytes held between feeds.
 const LONGEST: usize = PRIVATE.len();
 /// Built once: on a feed of a few hundred bytes building a searcher costs more than searching.
 static FINDERS: LazyLock<([Finder<'static>; 3], Finder<'static>)> =
-    LazyLock::new(|| (CLEARS.map(Finder::new), Finder::new(PRIVATE)));
-/// How much of one OSC 5522 payload is kept; the rest is dropped.
+    LazyLock::new(|| (CLEARS.map(Finder::new), Finder::new(b"\x1b]")));
+/// How much of one OSC payload is kept; the rest is dropped.
 const MAX_OSC_CAPTURE: usize = 16 * 1024;
+
+/// Which OSC a payload came in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Osc {
+    /// OSC 5522, vorn's own.
+    Private,
+    /// OSC 133, the shell's prompt and command marks.
+    Mark,
+}
+
+impl Osc {
+    fn pattern(self) -> &'static [u8] {
+        match self {
+            Osc::Private => PRIVATE,
+            Osc::Mark => MARK,
+        }
+    }
+}
 
 /// What the bytes from an `ESC` are.
 enum Seen {
     Clear,
-    /// The start of an OSC 5522, whose payload follows.
-    Private,
+    /// The start of an OSC whose payload follows.
+    Osc(Osc),
     /// They end before they can be told apart from a pattern.
     Prefix,
     Other,
@@ -29,11 +50,12 @@ enum Seen {
 fn seen(s: &[u8]) -> Seen {
     match s {
         [_, b'c', ..] | [_, b'[', b'3', b'J', ..] | [_, b'[', b'?', b'3', b'J', ..] => Seen::Clear,
-        [_, b']', b'5', b'5', b'2', b'2', b';', ..] => Seen::Private,
+        [_, b']', b'5', b'5', b'2', b'2', b';', ..] => Seen::Osc(Osc::Private),
+        [_, b']', b'1', b'3', b'3', b';', ..] => Seen::Osc(Osc::Mark),
         _ if s.len() < LONGEST
             && CLEARS
                 .iter()
-                .chain([&PRIVATE])
+                .chain([&PRIVATE, &MARK])
                 .any(|pat| pat.starts_with(s)) =>
         {
             Seen::Prefix
@@ -47,18 +69,18 @@ fn seen(s: &[u8]) -> Seen {
 pub(crate) struct Scan {
     /// The last feed's end from its last `ESC`, when the next feed may finish a pattern there.
     tail: Vec<u8>,
-    /// An OSC 5522 payload the stream is inside.
-    osc: Option<Vec<u8>>,
+    /// An OSC payload the stream is inside.
+    osc: Option<(Osc, Vec<u8>)>,
     /// ED 3, DECSED 3 and RIS seen.
     pub(crate) clears: u64,
 }
 
 impl Scan {
-    /// Scans a feed, calling `private` with each OSC 5522 payload.
-    pub(crate) fn feed(&mut self, bytes: &[u8], mut private: impl FnMut(&[u8])) {
+    /// Scans a feed, calling `report` with each OSC 5522 and OSC 133 payload.
+    pub(crate) fn feed(&mut self, bytes: &[u8], mut report: impl FnMut(Osc, &[u8])) {
         let mut from = 0;
-        if let Some(payload) = self.osc.take() {
-            match self.payload(bytes, 0, payload, &mut private) {
+        if let Some((kind, payload)) = self.osc.take() {
+            match self.payload(bytes, 0, kind, payload, &mut report) {
                 Some(end) => from = end,
                 None => return,
             }
@@ -69,9 +91,9 @@ impl Scan {
             window.extend_from_slice(&bytes[from..bytes.len().min(from + LONGEST)]);
             match seen(&window) {
                 Seen::Clear => self.clears += 1,
-                Seen::Private => {
-                    let begin = from + PRIVATE.len() - held;
-                    match self.payload(bytes, begin, Vec::new(), &mut private) {
+                Seen::Osc(kind) => {
+                    let begin = from + kind.pattern().len() - held;
+                    match self.payload(bytes, begin, kind, Vec::new(), &mut report) {
                         Some(end) => from = end,
                         None => return,
                     }
@@ -84,13 +106,24 @@ impl Scan {
             }
         }
         let rest = &bytes[from..];
-        let (clears, private_osc) = &*FINDERS;
+        let (clears, osc_start) = &*FINDERS;
         for finder in clears {
             self.clears += finder.find_iter(rest).count() as u64;
         }
         let mut at = from;
-        while let Some(n) = private_osc.find(&bytes[at..]) {
-            match self.payload(bytes, at + n + PRIVATE.len(), Vec::new(), &mut private) {
+        while let Some(n) = osc_start.find(&bytes[at..]) {
+            let start = at + n;
+            let Seen::Osc(kind) = seen(&bytes[start..]) else {
+                at = start + 2;
+                continue;
+            };
+            match self.payload(
+                bytes,
+                start + kind.pattern().len(),
+                kind,
+                Vec::new(),
+                &mut report,
+            ) {
                 Some(end) => at = end,
                 None => return,
             }
@@ -103,13 +136,14 @@ impl Scan {
         }
     }
 
-    /// Reports the OSC 5522 payload from `begin` and returns its end, or holds it if the feed ends first.
+    /// Reports the OSC payload from `begin` and returns its end, or holds it if the feed ends first.
     fn payload(
         &mut self,
         bytes: &[u8],
         begin: usize,
+        kind: Osc,
         mut payload: Vec<u8>,
-        private: &mut impl FnMut(&[u8]),
+        report: &mut impl FnMut(Osc, &[u8]),
     ) -> Option<usize> {
         let rest = &bytes[begin..];
         // Ghostty dispatches an OSC at BEL or any ESC and aborts it at CAN or SUB.
@@ -118,12 +152,12 @@ impl Scan {
             .position(|&b| matches!(b, 0x07 | 0x1b | 0x18 | 0x1a))
         else {
             extend(&mut payload, rest);
-            self.osc = Some(payload);
+            self.osc = Some((kind, payload));
             return None;
         };
         extend(&mut payload, &rest[..len]);
         if matches!(rest[len], 0x07 | 0x1b) {
-            private(&payload);
+            report(kind, &payload);
         }
         Some(begin + len)
     }
@@ -132,7 +166,7 @@ impl Scan {
     pub(crate) fn reseed(&mut self, continuation: &[u8]) {
         let clears = self.clears;
         *self = Scan::default();
-        self.feed(continuation, |_| {});
+        self.feed(continuation, |_, _| {});
         self.clears = clears;
     }
 }
@@ -147,12 +181,18 @@ fn extend(payload: &mut Vec<u8>, bytes: &[u8]) {
 mod tests {
     use super::*;
 
-    /// Every OSC 5522 payload and the clear count, fed in `chunks`.
+    /// Every OSC payload (OSC 133 ones marked `133:`) and the clear count, fed in `chunks`.
     fn scan(chunks: &[&[u8]]) -> (Vec<String>, u64) {
         let mut s = Scan::default();
         let mut seen = Vec::new();
         for c in chunks {
-            s.feed(c, |p| seen.push(String::from_utf8_lossy(p).into_owned()));
+            s.feed(c, |kind, p| {
+                let p = String::from_utf8_lossy(p);
+                seen.push(match kind {
+                    Osc::Private => p.into_owned(),
+                    Osc::Mark => format!("133:{p}"),
+                });
+            });
         }
         (seen, s.clears)
     }
@@ -179,6 +219,14 @@ mod tests {
     }
 
     #[test]
+    fn reads_prompt_and_command_marks_beside_private_reports() {
+        let (seen, _) = split_everywhere(
+            b"\x1b]133;D;1\x07\x1b]5522;cwd;/a\x07\x1b]133;A\x07$ \x1b]2;t\x07\x1b]133;C;cmdline_url=ls\x1b\\\x1b]13;x\x07",
+        );
+        assert_eq!(seen, ["133:D;1", "cwd;/a", "133:A", "133:C;cmdline_url=ls"]);
+    }
+
+    #[test]
     fn counts_scrollback_clears() {
         let (_, n) =
             split_everywhere(b"\x1b[3J\x1b[?3J\x1b[2J\x1b[13J\x1b[>3J\x1bc\x1b(c\x1b]5522;\x1b[3J");
@@ -189,16 +237,16 @@ mod tests {
     fn reseeding_from_a_continuation_resumes_mid_sequence() {
         let mut seen = Vec::new();
         let mut live = Scan::default();
-        live.feed(b"text \x1b]5522;cwd;/ha", |p| seen.push(p.to_vec()));
+        live.feed(b"text \x1b]5522;cwd;/ha", |_, p| seen.push(p.to_vec()));
         let mut back = Scan::default();
         back.reseed(b"\x1b]5522;cwd;/ha");
         for s in [&mut live, &mut back] {
-            s.feed(b"lf\x07", |p| seen.push(p.to_vec()));
+            s.feed(b"lf\x07", |_, p| seen.push(p.to_vec()));
         }
         assert_eq!(seen, [b"cwd;/half".to_vec(), b"cwd;/half".to_vec()]);
         let mut cleared = Scan::default();
         cleared.reseed(b"\x1b[?3");
-        cleared.feed(b"J", |_| {});
+        cleared.feed(b"J", |_, _| {});
         assert_eq!(cleared.clears, 1);
     }
 }

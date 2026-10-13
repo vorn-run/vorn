@@ -56,6 +56,8 @@ x11rb = { version = "0.13", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Clears the login item 0.8.0-beta.8 and earlier registered with SMAppService.
 [target.'cfg(target_os = "macos")'.dependencies]
+# Clears the login item 0.8.0-beta.8 and earlier registered with SMAppService.
 objc2 = "0.5"
+# Whether a WKWebView is still loading, which wry does not say.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }

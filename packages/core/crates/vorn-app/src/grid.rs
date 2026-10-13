@@ -14,8 +14,28 @@ use vorn_term_proto::msg::{
     KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 
+use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
+
 use crate::client::rpc::Wake;
 use crate::view::{self, PaneView};
+
+/// History lines a shell attaches with, for its earlier command blocks.
+pub const SHELL_HISTORY: u16 = 1000;
+
+/// Where a terminal's lines are, for cutting it into command blocks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Lines {
+    /// Line numbers are only comparable within one scrollback epoch.
+    pub epoch: u32,
+    /// Absolute lines where a prompt starts, oldest first, up to the cursor.
+    pub prompts: Vec<u64>,
+    /// The absolute line of screen row 0.
+    pub top: u64,
+    pub cursor_y: u16,
+    pub rows: u16,
+    /// A full-screen program has the alternate screen.
+    pub alt: bool,
+}
 
 struct Pane {
     session: String,
@@ -23,11 +43,17 @@ struct Pane {
     sid: Option<u32>,
     dirty: bool,
     size: (u16, u16),
+    /// History lines asked for on attach and after each scrollback epoch.
+    history: u16,
+    /// The scrollback epoch history was last asked for in.
+    epoch: Option<u32>,
 }
 
 struct State {
     client: Client,
     panes: Vec<Pane>,
+    /// The id of the next history fetch.
+    req: u32,
     errors: Vec<String>,
     closed: bool,
     /// Recent pastes by input sequence, kept until vornd may ask to confirm one.
@@ -95,6 +121,7 @@ impl Grid {
             state: Mutex::new(State {
                 client,
                 panes: Vec::new(),
+                req: 0,
                 errors: Vec::new(),
                 closed: false,
                 pastes: VecDeque::new(),
@@ -123,8 +150,9 @@ impl Grid {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Attaches `session` at `cols`x`rows`, unless it is already.
-    pub fn attach(&self, session: &str, cols: u16, rows: u16) {
+    /// Attaches `session` at `cols`x`rows` with up to `history` lines of
+    /// scrollback, unless it is already.
+    pub fn attach(&self, session: &str, cols: u16, rows: u16, history: u16) {
         {
             let mut st = self.lock();
             if st.pane(session).is_some() {
@@ -142,13 +170,15 @@ impl Grid {
                 },
                 visible: true,
                 resume: None,
-                history_tail: 0,
+                history_tail: history,
             });
             st.panes.push(Pane {
                 session: session.to_owned(),
                 sid: None,
                 dirty: false,
                 size: (cols, rows),
+                history,
+                epoch: None,
             });
         }
         self.flush();
@@ -203,6 +233,58 @@ impl Grid {
         let st = self.lock();
         let m = st.client.pane(st.sid(session)?)?.mirror()?;
         Some(view::build(m))
+    }
+
+    /// Where `session`'s lines are: its prompts and cursor in absolute
+    /// lines, across the history held and the screen.
+    pub fn lines(&self, session: &str) -> Option<Lines> {
+        let st = self.lock();
+        let m = st.client.pane(st.sid(session)?)?.mirror()?;
+        let t = m.term();
+        let prompt = |r: &&Row| {
+            r.flags & row_flags::PROMPT != 0 && r.flags & row_flags::PROMPT_CONTINUATION == 0
+        };
+        let alt = t.screen == TermScreen::Alternate;
+        let mut prompts: Vec<u64> = m.history().iter().filter(prompt).map(|r| r.line).collect();
+        if !alt {
+            let screen = m.rows().iter().take(usize::from(t.cursor.y) + 1);
+            prompts.extend(screen.filter(prompt).map(|r| r.line));
+        }
+        Some(Lines {
+            epoch: t.sb_epoch,
+            prompts,
+            top: t.top_line,
+            cursor_y: t.cursor.y,
+            rows: t.rows,
+            alt,
+        })
+    }
+
+    /// `session`'s lines `from..to` as a view of their own, blank lines at
+    /// either end left out.
+    pub fn lines_view(&self, session: &str, from: u64, to: u64) -> Option<PaneView> {
+        let st = self.lock();
+        let m = st.client.pane(st.sid(session)?)?.mirror()?;
+        let top = m.term().top_line;
+        let mut rows: Vec<&Row> = (from..to.min(top))
+            .filter_map(|l| m.history_line(l))
+            .collect();
+        // History still on its way: not cut yet, rather than cut short.
+        if rows.len() as u64 != to.min(top).saturating_sub(from) {
+            return None;
+        }
+        rows.extend(
+            m.rows()
+                .iter()
+                .filter(|r| r.line >= from.max(top) && r.line < to),
+        );
+        let blank = |r: &&Row| vorn_term_mirror::row_text(r).trim().is_empty();
+        let first = rows.iter().position(|r| !blank(r)).unwrap_or(rows.len());
+        let last = rows
+            .iter()
+            .rposition(|r| !blank(r))
+            .map_or(first, |i| i + 1);
+        Some(view::rows(m, rows[first..last].iter().copied()))
     }
 
     /// A key press: `code` is the W3C `code` name ("KeyA", "Enter"), `text`
@@ -469,6 +551,32 @@ impl Grid {
                 }
                 Got::Frame { sid, rev, .. } => {
                     st.client.ack(sid, rev);
+                    let st = &mut *st;
+                    if let Some(p) = st.panes.iter_mut().find(|p| p.sid == Some(sid)) {
+                        p.dirty = true;
+                        changed = true;
+                        let term = st.client.pane(sid).and_then(|c| c.mirror()).map(|m| {
+                            let t = m.term();
+                            (t.sb_epoch, t.top_line, t.history_lines)
+                        });
+                        // A new epoch dropped the history; ask again for what the attach had.
+                        if let Some((epoch, top, held)) = term {
+                            let was = p.epoch.replace(epoch);
+                            let count = u64::from(p.history).min(held).min(top);
+                            if was.is_some_and(|e| e != epoch) && count > 0 {
+                                st.req = st.req.wrapping_add(1);
+                                st.client.send(&ClientMsg::FetchHistory {
+                                    sid,
+                                    req: st.req,
+                                    sb_epoch: epoch,
+                                    from_line: top - count,
+                                    count: count as u16,
+                                });
+                            }
+                        }
+                    }
+                }
+                Got::Message(ServerMsg::History { sid, .. }) => {
                     if let Some(p) = st.panes.iter_mut().find(|p| p.sid == Some(sid)) {
                         p.dirty = true;
                         changed = true;

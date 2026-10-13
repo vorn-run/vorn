@@ -1394,6 +1394,18 @@ export interface ServerNotifications {
    */
   'terminal:notify': { id: string; title: string; body: string; effectId?: string }
   /**
+   * A shell's OSC 133 prompt or command mark, as vornd read it; `at` is when,
+   * in epoch milliseconds. Told once, not on a replay.
+   */
+  'terminal:command': {
+    id: string
+    phase: 'prompt' | 'start' | 'end'
+    command?: string | null
+    exitCode?: number | null
+    durationMs?: number | null
+    at: number
+  }
+  /**
    * Output for this terminal was withheld while the client was too far behind.
    * Its screen is now stale: re-attach to get the present one.
    */

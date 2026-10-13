@@ -124,7 +124,10 @@ impl Journal {
                 }
             }
             // No client shows progress yet, so none is held for one.
-            Effect::Bell | Effect::Clipboard { .. } | Effect::Progress { .. } => {}
+            Effect::Bell
+            | Effect::Clipboard { .. }
+            | Effect::Progress { .. }
+            | Effect::Command(_) => {}
         }
     }
 

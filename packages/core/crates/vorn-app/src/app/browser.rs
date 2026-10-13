@@ -1004,7 +1004,8 @@ impl App {
             WebEvent::Page { key, .. }
             | WebEvent::Title { key, .. }
             | WebEvent::Message { key, .. }
-            | WebEvent::NewWindow { key, .. } => Some(key.as_str()),
+            | WebEvent::NewWindow { key, .. }
+            | WebEvent::Failed { key, .. } => Some(key.as_str()),
             WebEvent::Answer { .. } => None,
         };
         if key.and_then(crate::signin::connection_of).is_some() {
@@ -1067,6 +1068,18 @@ impl App {
                 }
             }
             WebEvent::Answer { token, json } => self.page_answered(token, &json),
+            WebEvent::Failed { key, url } => {
+                let session = session_of(&key).to_owned();
+                if key == page_key(&session) {
+                    let host = url::Url::parse(&url)
+                        .ok()
+                        .and_then(|u| u.host_str().map(str::to_owned))
+                        .unwrap_or(url);
+                    let live = self.st.bench.live_mut(&session);
+                    live.loading = false;
+                    live.failed = Some(format!("Could not open {host}."));
+                }
+            }
             WebEvent::NewWindow { key, url } => {
                 let session = session_of(&key).to_owned();
                 if let Some(url) = browser::loadable_url(&url, self.root(&session).as_deref()) {
@@ -1979,7 +1992,7 @@ impl App {
         let submit = matches!(event, UiEvent::Submit(_));
         let text = ui.edit_text(id).to_owned();
         match act {
-            PaneAct::Address(s) if submit => match browser::normalize_url(&text, false) {
+            PaneAct::Address(s) if submit => match browser::address_target(&text) {
                 None => {
                     self.st.bench.live_mut(&s).failed =
                         Some("That does not look like a web address".to_owned());
@@ -1988,7 +2001,10 @@ impl App {
                     let live = self.st.bench.live_mut(&s);
                     live.failed = None;
                     live.draft = None;
-                    self.st.bench.browsers.open(&s, Some(url));
+                    live.loading = true;
+                    self.st.bench.browsers.open(&s, Some(url.clone()));
+                    // Enter on the page already shown loads it again.
+                    self.web.host.load(&page_key(&s), &url);
                     self.save_panes();
                     ui.set_focus(None);
                 }

@@ -41,6 +41,7 @@ mod onboarding;
 mod palette;
 mod plugins;
 mod settings;
+mod shell;
 mod side;
 pub mod signin;
 mod tasks;
@@ -225,6 +226,7 @@ enum Call {
     /// `connection:signedIn` after the sheet saw someone sign in.
     SignedIn(Option<String>),
     Net(network::NetCall),
+    Intent(crate::intent::Need),
 }
 
 /// The launcher model picker's id field.
@@ -432,6 +434,8 @@ impl App {
         self.st.sidebar_view =
             crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
         self.web.host.set_profiles(dir.join("connection-profiles"));
+        self.st.intent.history =
+            crate::intent::History::load(Some(crate::intent::history_file(&dir)));
         self.data_dir = Some(dir);
     }
 
@@ -542,6 +546,10 @@ impl App {
                         self.wf_run_updated(&params);
                     }
                     self.pane_notified(&method, &params);
+                    if method == "terminal:command" {
+                        self.shell_notified(&method, &params);
+                        continue;
+                    }
                     if method == "server:identity" {
                         self.st.server_version = params
                             .get("appVersion")
@@ -605,6 +613,7 @@ impl App {
                 Some(answer) => self.answered(kind, answer),
             }
         }
+        let mut shells = Vec::new();
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
                 if let Some(v) = g.view(&id) {
@@ -620,6 +629,9 @@ impl App {
                     {
                         self.st.sel = None;
                     }
+                    if self.store.session(&id).is_some_and(|s| s.is_shell()) {
+                        shells.push(id.clone());
+                    }
                     self.views.insert(id, v);
                 }
             }
@@ -631,6 +643,12 @@ impl App {
                 }
             }
         }
+        for id in shells {
+            self.sync_shell(&id);
+        }
+        self.st
+            .shells
+            .retain(|id, _| self.store.session(id).is_some());
         self.pump_web();
         self.detect_mobile();
         let now = std::time::Instant::now();
@@ -683,6 +701,7 @@ impl App {
             Call::Git(c) => self.git_answered(c, answer),
             Call::Side(c) => self.side_answered(c, answer),
             Call::Ignore => {}
+            Call::Intent(need) => self.intent_answered(need, answer),
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Plug(c) => self.plug_answered(c, answer),
             Call::Ext(c) => self.ext_answered(c, answer),
@@ -1483,6 +1502,7 @@ impl App {
                     self.see_projects();
                 }
             }
+            Act::Intent(a) => self.run_intent(ui, a),
             Act::Select(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
@@ -2229,11 +2249,7 @@ impl App {
             return;
         };
         let line = ui.edit_text(id).to_owned();
-        ui.set_edit_text(id, "");
-        if let Some(g) = &self.grid {
-            g.paste(&sid, &line);
-            g.text(&sid, "\r");
-        }
+        self.run_line(ui, &sid, &line);
     }
 
     /// A menu entry chosen: its submenu opened, or its act run.
@@ -2332,6 +2348,9 @@ impl App {
             return false;
         }
         if self.st.menu.is_none() && (self.task_key(ui, input) || self.wf_key(ui, input)) {
+            return true;
+        }
+        if self.st.menu.is_none() && self.st.dialog.is_none() && self.intent_key(ui, input) {
             return true;
         }
         let Input::Key { code, mods: m, .. } = input else {
@@ -2669,6 +2688,7 @@ impl App {
         }
         self.web_slots(ui);
         self.acts.clear();
+        self.shell_frame(ui);
         let root = self.screen(ui).build();
         self.seed_texts(ui);
         ui.custom_a11y.clear();
@@ -2694,37 +2714,58 @@ impl App {
                 self.paint_terminal(ui, &tid, *r, current.as_deref() == Some(tid.as_str()));
                 continue;
             }
-            let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
+            if self.paint_block(ui, *id, *r) {
+                continue;
+            }
+            let Some(i) = card_index(*id) else { continue };
+            let Some(session) = self.store.sessions.get(i) else {
                 continue;
             };
             let sid = session.info.id.as_str();
-            if let Some(g) = &self.grid {
-                if !session.ended() {
-                    // Whole cells only; f32 to u16 saturates.
-                    let cols = (r.w / cell.w).floor() as u16;
-                    let rows = (r.h / cell.h).floor() as u16;
-                    g.attach(sid, cols, rows);
-                    if !self.st.locked.contains(sid) {
-                        g.resize(sid, cols.max(2), rows.max(1));
+            let split = crate::blocks::split(&self.store.config, session, self.st.shells.get(sid))
+                .is_some();
+            if !split {
+                if let Some(g) = &self.grid {
+                    if !session.ended() {
+                        // Whole cells only; f32 to u16 saturates.
+                        let cols = (r.w / cell.w).floor() as u16;
+                        let rows = (r.h / cell.h).floor() as u16;
+                        g.attach(
+                            sid,
+                            cols,
+                            rows,
+                            if session.is_shell() {
+                                crate::grid::SHELL_HISTORY
+                            } else {
+                                0
+                            },
+                        );
+                        if !self.st.locked.contains(sid) {
+                            g.resize(sid, cols.max(2), rows.max(1));
+                        }
                     }
                 }
             }
+            let caret = if current.as_deref() != Some(sid) {
+                paint::Caret::Hidden
+            } else if self.st.renaming.is_none() && self.st.dialog.is_none() && ui.focus().is_none()
+            {
+                paint::Caret::Live
+            } else {
+                paint::Caret::Hollow
+            };
+            let pre = if caret == paint::Caret::Live {
+                self.preedit.as_str()
+            } else {
+                ""
+            };
+            if split {
+                if let Some(at) = self.paint_live(ui, i, *r, caret, pre) {
+                    self.term_boxes.insert(sid.to_owned(), at);
+                }
+                continue;
+            }
             if let Some(v) = self.views.get(sid) {
-                let caret = if current.as_deref() != Some(sid) {
-                    paint::Caret::Hidden
-                } else if self.st.renaming.is_none()
-                    && self.st.dialog.is_none()
-                    && ui.focus().is_none()
-                {
-                    paint::Caret::Live
-                } else {
-                    paint::Caret::Hollow
-                };
-                let pre = if caret == paint::Caret::Live {
-                    self.preedit.as_str()
-                } else {
-                    ""
-                };
                 let sel = match &self.st.sel {
                     Some((s, sel)) if s == sid => sel.rows(v),
                     _ => Vec::new(),
@@ -2745,7 +2786,7 @@ impl App {
         if let Some(g) = &self.grid {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
-            g.attach(id, cols, rows);
+            g.attach(id, cols, rows, 0);
             g.resize(id, cols.max(2), rows.max(1));
         }
         if let Some(v) = self.views.get(id) {
