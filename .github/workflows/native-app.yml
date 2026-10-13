@@ -1,0 +1,139 @@
+# Builds the native desktop app, vorn-app, in release with the vornd and
+# vorn-sessiond it starts when none is running, and packages it for each
+# platform with packages/core/scripts/package-native.mjs. The release workflow
+# calls it with the tag to upload the assets to; a pull request that changes
+# the packaging runs it to check every platform still packages.
+name: Native app
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release to upload the assets to; empty keeps them as artifacts only
+        type: string
+        default: ''
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-app.yml'
+      - 'packages/core/scripts/package-native.mjs'
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-15, not latest: Zig, which builds vornd's terminal library, cannot read newer SDKs.
+          - name: mac-arm64
+            os: macos-15
+          - name: mac-x64
+            os: macos-15-intel
+          - name: win-x64
+            os: windows-2022
+          # The oldest supported Ubuntu, so the binaries run on older glibc too.
+          - name: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # vornd's session engine parses with libghostty-vt, which needs Zig 0.16.0.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: native-${{ matrix.name }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: native-${{ matrix.name }}-
+
+      # The browser pane embeds WebKitGTK on Linux.
+      - name: Web view libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      - name: Sync version from tag
+        if: inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag }}
+        run: npm pkg set version="${TAG#v}"
+
+      # The crates' versions follow package.json, so the app reports the tag.
+      - name: Sync crate versions
+        run: bash scripts/sync-versions.sh
+
+      - name: Build
+        working-directory: packages/core
+        run: cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-app
+
+      # vorn-sessiond hosts Windows sessions in the ConPTY shipped beside it.
+      - name: ConPTY
+        if: runner.os == 'Windows'
+        working-directory: packages/core
+        run: node scripts/fetch-conpty.mjs --out target/release
+
+      - name: Import code signing certificate
+        if: runner.os == 'macOS'
+        env:
+          MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERTIFICATE" ]; then
+            echo "No signing certificate: the app is signed ad hoc."
+            exit 0
+          fi
+          echo "$MAC_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p actions build.keychain
+          # A new keychain locks itself after 5 minutes, and codesign then waits
+          # forever for a password. Keep it unlocked for the whole job.
+          security set-keychain-settings -lut 21600 build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import certificate.p12 -k build.keychain -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          rm certificate.p12
+
+      - name: Package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node packages/core/scripts/package-native.mjs
+
+      - name: Clean up keychain
+        if: always() && runner.os == 'macOS'
+        run: security delete-keychain build.keychain || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vorn-native-${{ matrix.name }}
+          path: dist-native/Vorn-Native-*
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" dist-native/Vorn-Native-* --clobber

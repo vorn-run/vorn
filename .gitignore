@@ -1,6 +1,7 @@
 node_modules
 out/
 dist/
+dist-native/
 coverage/
 .vitest-reports/
 .DS_Store

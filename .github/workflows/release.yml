@@ -12,6 +12,8 @@ permissions:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -383,6 +385,14 @@ jobs:
             gh release upload "$tag" dist/beta-linux.yml --clobber
           fi
           [ -f dist/latest-linux.yml ] && gh release upload "$tag" dist/latest-linux.yml --clobber
+
+  # The native desktop app, beside the Electron one, for every platform.
+  build-native:
+    needs: create-release
+    uses: ./.github/workflows/native-app.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit
 
   publish-npm:
     if: startsWith(github.ref, 'refs/tags/v')
