@@ -579,7 +579,7 @@ final class WidgetController {
         guard let panel else { return }
         let screen = panel.screen ?? NSScreen.main
         let area = screen?.visibleFrame ?? panel.frame
-        // AppKit counts y up from the bottom; WidgetPlacement counts down from the top, as Electron does.
+        // AppKit counts y up from the bottom; WidgetPlacement counts down from the top, as the desktop app does.
         let flip = { (r: CGRect) in CGRect(x: r.minX, y: area.maxY - r.maxY + area.minY, width: r.width, height: r.height) }
         let next = flip(WidgetPlacement.resized(flip(panel.frame), to: mode.size, in: area))
         panel.setFrame(next, display: true)
