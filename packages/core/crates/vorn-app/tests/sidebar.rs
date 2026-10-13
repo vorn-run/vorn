@@ -294,7 +294,11 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
             shot.frame(&mut app);
         }
         assert_eq!(open_sub(&app), Some(i), "held while heading for it");
-        let near = if toward > 0.0 { sub.x + 20.0 } else { sub.right() - 20.0 };
+        let near = if toward > 0.0 {
+            sub.x + 20.0
+        } else {
+            sub.right() - 20.0
+        };
         let (x2, y2) = (near, (y1 + 10.0).min(sub.bottom() - 10.0));
         for k in 1..=3 {
             let t = k as f32 / 3.0;

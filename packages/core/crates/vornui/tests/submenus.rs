@@ -82,12 +82,11 @@ impl Rig {
                 items(),
                 self.c,
             );
-            root = root.child(
-                div()
-                    .absolute(self.at.0, self.at.1)
-                    .size(0.0, 0.0)
-                    .overlay(panel, Place::BelowStart, 0.0),
-            );
+            root = root.child(div().absolute(self.at.0, self.at.1).size(0.0, 0.0).overlay(
+                panel,
+                Place::BelowStart,
+                0.0,
+            ));
         }
         self.ui.layout(root, self.size);
     }
@@ -183,7 +182,10 @@ fn a_submenu_opens_beside_its_entry_level_with_it() {
         "to the right, a little over the edge: {sub:?} beside {row:?}"
     );
     let first = r.rect(item_id(sub_id(), 0));
-    assert!((first.y - row.y).abs() <= 1.0, "its first entry level with Alpha");
+    assert!(
+        (first.y - row.y).abs() <= 1.0,
+        "its first entry level with Alpha"
+    );
     // The next entry stays reachable: the submenu covers none of it.
     let beta = r.row(1);
     assert!(sub.x >= beta.right() - OVERLAP - 1.5);
@@ -210,8 +212,14 @@ fn a_submenu_slides_up_to_fit_above_the_window_bottom() {
     assert_eq!(r.c.open, Some(2));
     let sub = r.sub();
     assert!(sub.bottom() <= 600.0 - 3.5, "on screen: {sub:?}");
-    assert!(sub.y < row.y && sub.bottom() >= row.bottom(), "still beside Gamma");
-    assert!(sub.x >= row.right() - OVERLAP - 1.5, "beside, not over, the menu");
+    assert!(
+        sub.y < row.y && sub.bottom() >= row.bottom(),
+        "still beside Gamma"
+    );
+    assert!(
+        sub.x >= row.right() - OVERLAP - 1.5,
+        "beside, not over, the menu"
+    );
 }
 
 #[test]
@@ -225,7 +233,10 @@ fn heading_for_the_submenu_across_other_entries_keeps_it_open() {
     let beta = r.row(1);
     let on_beta = (beta.right() - 24.0, beta.y + beta.h / 2.0);
     r.glide(start, on_beta, 4);
-    assert!(r.ui.hovered(item_id(menu_id(), 1)), "the pointer is on Beta");
+    assert!(
+        r.ui.hovered(item_id(menu_id(), 1)),
+        "the pointer is on Beta"
+    );
     assert_eq!(r.c.open, Some(0), "Alpha's submenu holds");
     // On into the submenu: it stays.
     let a2 = mid(r.rect(item_id(sub_id(), 1)));
@@ -250,7 +261,11 @@ fn moving_away_from_the_submenu_switches_at_once() {
     assert_eq!(r.c.open, Some(0));
     // Straight down onto Gamma: not towards the submenu.
     let g = r.row(2);
-    r.glide((a.x + 20.0, a.y + a.h / 2.0), (g.x + 20.0, g.y + g.h / 2.0), 3);
+    r.glide(
+        (a.x + 20.0, a.y + a.h / 2.0),
+        (g.x + 20.0, g.y + g.h / 2.0),
+        3,
+    );
     assert_eq!(r.c.open, Some(2), "Gamma's submenu replaces Alpha's");
     let d = r.row(3);
     r.move_to((d.x + 20.0, d.y + d.h / 2.0));
@@ -288,7 +303,10 @@ fn keys_open_walk_and_close_submenus() {
     assert!(r.focused(item_id(menu_id(), 0)));
     assert!(r.key("ArrowRight"));
     assert_eq!(r.c.open, Some(0));
-    assert!(r.focused(item_id(sub_id(), 0)), "focus goes into the submenu");
+    assert!(
+        r.focused(item_id(sub_id(), 0)),
+        "focus goes into the submenu"
+    );
     assert!(r.key("ArrowDown"));
     assert!(r.focused(item_id(sub_id(), 1)), "Down walks the submenu");
     assert!(r.key("ArrowLeft"));
@@ -318,7 +336,11 @@ fn entries_of_a_menu_and_its_submenu_never_share_an_id() {
     let (menu, sub) = (Id(0x6d65_6e75_0000_0001), Id(0x6d65_6e75_0000_0003));
     for i in 0..64 {
         for j in 0..64 {
-            assert_ne!(item_id(menu, i), item_id(sub, j), "entry {i} and submenu entry {j}");
+            assert_ne!(
+                item_id(menu, i),
+                item_id(sub, j),
+                "entry {i} and submenu entry {j}"
+            );
         }
     }
 }
