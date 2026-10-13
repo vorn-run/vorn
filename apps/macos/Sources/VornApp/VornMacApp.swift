@@ -311,8 +311,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         }
     }
 
-    // Panes: `--files N[:rel,rel]`, `--claim N:M` (session M in N's terminals panel), `--promote N:rel`,
-    // `--changes N`, `--commit`, `--maximize files|terminals`, `--preview-tab` keeps the last tab italic.
+    // Panes: --files N[:rel,..], --claim N:M, --promote N:rel, --changes N, --commit, --maximize files|terminals, --preview-tab.
     if let names = value("--expand") { FileTreeModel.renderExpand = Set(names.split(separator: ",").map(String.init)) }
     let all = model.mainViewMode == .sessions ? model.visibleSessions(store, includeMinimized: true) : []
     func cwd(_ s: TerminalSession) -> String { s.worktreePath ?? s.projectPath }

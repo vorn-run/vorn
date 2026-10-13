@@ -34,8 +34,7 @@ public struct PaneServices {
     }
 }
 
-/// One open file (FilePanel in FileTreeExplorer.tsx): path strip, find, save and discard, the drafts kept across quits,
-/// and the banner when the file moved under an edit.
+/// One open file (FilePanel in FileTreeExplorer.tsx): path strip, find, save, discard, kept drafts and the moved-file banner.
 @MainActor
 @Observable
 final class FileBuffer {

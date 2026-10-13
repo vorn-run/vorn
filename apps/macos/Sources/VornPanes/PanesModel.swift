@@ -49,8 +49,7 @@ public enum PaneID {
     public static func isCard(_ id: String) -> Bool { id.hasPrefix("card:") }
 }
 
-/// The panes sessions own (files, panel terminals), the files popped out as cards, the card splits,
-/// the maximized pane and the changes panel — today's `ui-slice` pane state.
+/// Today's `ui-slice` pane state: owned panes, promoted file cards, card splits, the maximized pane and the changes panel.
 @MainActor
 @Observable
 public final class PanesModel {
