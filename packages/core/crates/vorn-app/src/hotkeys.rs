@@ -6,31 +6,43 @@
 //! while the window has focus.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::client::rpc::Wake;
 
 /// Presses of the two keys: `true` approves, `false` denies.
 pub type Presses = Receiver<bool>;
 
-/// Holds the keys for the life of the app; `None` when this system cannot.
+/// Who hears the presses: the latest app to register, so an app built
+/// again after a crash takes them over.
+static TARGET: Mutex<Option<(Sender<bool>, Wake)>> = Mutex::new(None);
+
+/// Whether the system holds the keys; asked once per process.
+static HELD: OnceLock<bool> = OnceLock::new();
+
+/// Holds the keys for the life of the process and sends their presses to
+/// this caller; `None` when this system cannot.
 pub fn register(wake: Wake) -> Option<Presses> {
     let (tx, rx) = channel();
-    platform::register(tx, wake).then_some(rx)
+    *TARGET.lock().unwrap_or_else(PoisonError::into_inner) = Some((tx, wake));
+    HELD.get_or_init(platform::register).then_some(rx)
 }
 
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
-fn press(tx: &Sender<bool>, wake: &Wake, allow: bool) {
-    if tx.send(allow).is_ok() {
-        wake();
+fn press(allow: bool) {
+    let target = TARGET.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((tx, wake)) = target.as_ref() {
+        if tx.send(allow).is_ok() {
+            wake();
+        }
     }
 }
 
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ffi::c_void;
-    use std::sync::{Mutex, OnceLock, PoisonError};
 
-    use super::{press, Sender, Wake};
+    use super::press;
 
     #[repr(C)]
     struct EventTypeSpec {
@@ -86,8 +98,6 @@ mod platform {
     /// `kVK_ANSI_A` and `kVK_ANSI_D`.
     const KEYS: [(u32, u32); 2] = [(0x00, 1), (0x02, 2)];
 
-    static TARGET: OnceLock<Mutex<(Sender<bool>, Wake)>> = OnceLock::new();
-
     extern "C" fn handle(_: *mut c_void, event: *mut c_void, _: *mut c_void) -> i32 {
         let mut id = HotKeyId {
             signature: 0,
@@ -106,19 +116,13 @@ mod platform {
             )
         };
         if status == 0 && id.signature == SIGNATURE {
-            if let Some(t) = TARGET.get() {
-                let t = t.lock().unwrap_or_else(PoisonError::into_inner);
-                press(&t.0, &t.1, id.id == 1);
-            }
+            press(id.id == 1);
         }
         0
     }
 
     /// Runs on the main thread, where the app's event loop is.
-    pub fn register(tx: Sender<bool>, wake: Wake) -> bool {
-        if TARGET.set(Mutex::new((tx, wake))).is_err() {
-            return false;
-        }
+    pub fn register() -> bool {
         let spec = EventTypeSpec {
             class: KEYBOARD,
             kind: HOT_KEY_PRESSED,
@@ -153,10 +157,10 @@ mod platform {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
 
-    use super::{press, Sender, Wake};
+    use super::press;
 
     /// A thread of its own holds the keys and waits on its message queue.
-    pub fn register(tx: Sender<bool>, wake: Wake) -> bool {
+    pub fn register() -> bool {
         let (ready, answer) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mods = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
@@ -174,7 +178,7 @@ mod platform {
             // SAFETY: `msg` is a valid MSG this thread owns.
             while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
                 if msg.message == WM_HOTKEY {
-                    press(&tx, &wake, msg.wParam == 1);
+                    press(msg.wParam == 1);
                 }
             }
         });
@@ -188,10 +192,10 @@ mod platform {
     use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask};
     use x11rb::protocol::Event;
 
-    use super::{press, Sender, Wake};
+    use super::press;
 
     /// Grabs the keys on the root window, with and without Caps and Num Lock.
-    pub fn register(tx: Sender<bool>, wake: Wake) -> bool {
+    pub fn register() -> bool {
         if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_none() {
             return false;
         }
@@ -231,7 +235,7 @@ mod platform {
         std::thread::spawn(move || {
             while let Ok(event) = conn.wait_for_event() {
                 if let Event::KeyPress(k) = event {
-                    press(&tx, &wake, Some(k.detail) == codes.first().copied());
+                    press(Some(k.detail) == codes.first().copied());
                 }
             }
         });
@@ -261,9 +265,7 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod platform {
-    use super::{Sender, Wake};
-
-    pub fn register(_: Sender<bool>, _: Wake) -> bool {
+    pub fn register() -> bool {
         false
     }
 }

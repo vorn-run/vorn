@@ -410,7 +410,9 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
             Cat::Actions,
             "Manage Worktrees",
             Glyph::Icon("hard-drive"),
-            Act::Settings,
+            Act::Set(crate::settings::SetAct::Open(
+                crate::settings::Category::Worktrees,
+            )),
         )
         .keys(&[
             "worktree",
@@ -426,7 +428,9 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
             Cat::Actions,
             "SSH & Hosts",
             Glyph::Icon("server"),
-            Act::Settings,
+            Act::Set(crate::settings::SetAct::Open(
+                crate::settings::Category::Ssh,
+            )),
         )
         .keys(&[
             "ssh",

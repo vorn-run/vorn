@@ -685,6 +685,8 @@ impl App {
                         p.progress.insert(id.clone(), Progress::phase("installing"));
                         p.forget.push(id);
                         let editor = p.from_editor;
+                        // What a card offers is read from the extension list, which just changed.
+                        self.st.ext.loaded = false;
                         self.plug_load(false);
                         if editor && self.st.wf.editor.is_some() {
                             self.load_library();
@@ -712,6 +714,7 @@ impl App {
                     }
                 }
                 self.plug_finish(&id, error);
+                self.st.ext.loaded = false;
                 self.plug_load(false);
             }
             PlugCall::Rollback(id) => {

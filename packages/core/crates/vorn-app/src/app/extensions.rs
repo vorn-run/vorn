@@ -70,19 +70,19 @@ impl App {
 
     pub(super) fn ext_answered(&mut self, call: ExtCall, answer: Result<Value, RpcError>) {
         match call {
+            // Asked once; an install or removal asks again.
             ExtCall::List => {
+                self.st.ext.loaded = true;
                 if let Ok(Value::Array(packs)) = answer {
                     self.st.ext.packs = packs;
-                    self.st.ext.loaded = true;
                 }
             }
-            ExtCall::Activation(session) => match answer {
-                Ok(Value::Array(states)) => self.ext_activation(&session, states),
-                // A host that did not know the session yet is asked again.
-                _ => {
-                    self.st.ext.hydrated.remove(&session);
+            // A session the host does not know yet is told about by its activation push.
+            ExtCall::Activation(session) => {
+                if let Ok(Value::Array(states)) = answer {
+                    self.ext_activation(&session, states);
                 }
-            },
+            }
             ExtCall::Open(session) => match answer {
                 Ok(grant) => {
                     let Some(open) = OpenPane::from_grant(&grant, &self.st.ext.packs) else {
@@ -134,6 +134,7 @@ impl App {
             .store
             .sessions
             .iter()
+            .filter(|s| !s.ended())
             .map(|s| s.info.id.clone())
             .filter(|id| !self.st.ext.hydrated.contains(id))
             .collect();

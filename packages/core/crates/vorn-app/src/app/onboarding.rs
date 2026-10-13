@@ -43,7 +43,14 @@ impl App {
                     Then::OpenTasks => self.run(ui, Act::View(MainView::Tasks), Src::default()),
                     Then::NewSession => self.run(ui, Act::NewSession, Src::default()),
                     Then::Palette => self.toggle_palette(ui),
-                    Then::Settings(_) => self.run(ui, Act::Settings, Src::default()),
+                    Then::Settings(id) => match crate::settings::Category::from_id(id) {
+                        Some(cat) => self.run(
+                            ui,
+                            Act::Set(crate::settings::SetAct::Open(cat)),
+                            Src::default(),
+                        ),
+                        None => self.run(ui, Act::Settings, Src::default()),
+                    },
                 }
             }
         }
