@@ -56,9 +56,6 @@ impl Scope {
     }
 }
 
-const ADD: u32 = 0x7ea96a;
-const REMOVE: u32 = 0xc96f62;
-
 /// One drawn line of a diff; `index` is its line in the raw diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -147,7 +144,7 @@ pub(crate) fn file_list(s: &Screen<'_>, scope: Scope, files: &[DiffFile]) -> El 
         let mut counts = div().row().gap(6.0).shrink0();
         if f.insertions > 0 {
             counts = counts.child(
-                text(format!("+{}", f.insertions), 11.0, c(ADD))
+                text(format!("+{}", f.insertions), 11.0, c(look::DIFF_ADD))
                     .mono()
                     .line_height(16.0)
                     .silent(),
@@ -155,7 +152,7 @@ pub(crate) fn file_list(s: &Screen<'_>, scope: Scope, files: &[DiffFile]) -> El 
         }
         if f.deletions > 0 {
             counts = counts.child(
-                text(format!("-{}", f.deletions), 11.0, c(REMOVE))
+                text(format!("-{}", f.deletions), 11.0, c(look::DIFF_REMOVE))
                     .mono()
                     .line_height(16.0)
                     .silent(),
@@ -450,13 +447,13 @@ fn file(s: &Screen<'_>, scope: Scope, f: &DiffFile) -> El {
                         .id(id)
                         .on(Action::Click)
                         .row()
-                        .bg(Rgba::hexa(0x22c55e, 0.10 + 0.05 * hot))
+                        .bg(Rgba::hexa(look::GREEN_500, 0.10 + 0.05 * hot))
                         .role(Role::Button, &t)
                         .child(num(None, gray))
-                        .child(num(Some(n), c(0x16a34a)))
+                        .child(num(Some(n), c(look::GREEN_600)))
                         .child(
                             div().px(4.0).grow().min_w0().child(
-                                text(body(&t), 12.0, c(0x86efac))
+                                text(body(&t), 12.0, c(look::GREEN_300))
                                     .mono()
                                     .line_height(19.2)
                                     .silent(),
@@ -482,13 +479,13 @@ fn file(s: &Screen<'_>, scope: Scope, f: &DiffFile) -> El {
                         .id(id)
                         .on(Action::Click)
                         .row()
-                        .bg(Rgba::hexa(0xef4444, 0.10 + 0.05 * hot))
+                        .bg(Rgba::hexa(look::RED_500, 0.10 + 0.05 * hot))
                         .role(Role::Button, &t)
-                        .child(num(Some(o), c(0xdc2626)))
+                        .child(num(Some(o), c(look::RED_600)))
                         .child(num(None, gray))
                         .child(
                             div().px(4.0).grow().min_w0().child(
-                                text(body(&t), 12.0, c(0xfca5a5))
+                                text(body(&t), 12.0, c(look::RED_300))
                                     .mono()
                                     .line_height(19.2)
                                     .silent(),

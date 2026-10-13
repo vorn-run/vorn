@@ -153,6 +153,7 @@ icons! {
     "square",
     "square-arrow-out-up-right",
     "square-check",
+    "square-check-big",
     "square-terminal",
     "step-forward",
     "strikethrough",

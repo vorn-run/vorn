@@ -7,17 +7,8 @@ use super::{c, ico, sidebar_project_icon, truncate, white, Screen};
 use crate::act::Act;
 use crate::client::Session;
 use crate::git::{files_label, CommitOp, DiffOp, Dirty, GitAct};
-use crate::look;
+use crate::look::{self, AMBER_300, AMBER_500, BLUE_300, BLUE_500, DIFF_ADD, DIFF_REMOVE, RED_300};
 use crate::ui::{div, field, icon, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle};
-
-/// Tailwind's colours the panel uses that `look` does not name.
-const DIFF_ADD: u32 = 0x7ea96a;
-const DIFF_REMOVE: u32 = 0xc96f62;
-const BLUE_300: u32 = 0x8ec5ff;
-const BLUE_500: u32 = 0x2b7fff;
-const AMBER_300: u32 = 0xffd230;
-const AMBER_500: u32 = 0xfe9a00;
-const RED_300: u32 = 0xffa2a2;
 
 pub fn commit_id() -> Id {
     Id::new("git-commit-message")
@@ -393,7 +384,7 @@ pub(super) fn right_panel(s: &Screen<'_>) -> Option<El> {
                 .row()
                 .items_center()
                 .gap(4.0)
-                .child(sidebar_project_icon(p, 11.0))
+                .child(sidebar_project_icon(p, 11.0, gray))
                 .child(
                     text(truncate(&p.name, 16), 11.0, gray)
                         .line_height(16.0)
@@ -540,13 +531,17 @@ pub(super) fn right_panel(s: &Screen<'_>) -> Option<El> {
                 "git-commit-horizontal",
                 13.0,
                 1.5,
-                c(look::GRAY_300).mix(c(0xf3f4f6), hot),
+                c(look::GRAY_300).mix(c(look::GRAY_100), hot),
             ))
             .child(
-                text("Commit", 11.0, c(look::GRAY_300).mix(c(0xf3f4f6), hot))
-                    .weight(500)
-                    .line_height(16.0)
-                    .silent(),
+                text(
+                    "Commit",
+                    11.0,
+                    c(look::GRAY_300).mix(c(look::GRAY_100), hot),
+                )
+                .weight(500)
+                .line_height(16.0)
+                .silent(),
             );
         head = head.child(tooltip(s.ui, b, id, "Commit changes", None));
     }

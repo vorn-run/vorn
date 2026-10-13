@@ -20,9 +20,9 @@ pub struct Status {
     pub empty: &'static str,
 }
 
-pub const SLATE: Rgb = 0x7d8590;
-pub const BLUE: Rgb = 0x6f8faf;
-pub const SAGE: Rgb = 0x7d9471;
+pub const SLATE: Rgb = look::STATUS_SLATE;
+pub const BLUE: Rgb = look::STATUS_BLUE;
+pub const SAGE: Rgb = look::STATUS_SAGE;
 
 /// `TASK_STATUS_ORDER` with what each shows.
 pub const STATUSES: [Status; 5] = [
@@ -410,7 +410,7 @@ pub const SLASH: [(&str, &str, &str, &str); 9] = [
     (
         "Task List",
         "Checklist with checkboxes",
-        "square-check",
+        "square-check-big",
         "- [ ] ",
     ),
     ("Code Block", "Fenced code snippet", "code", "```\n"),

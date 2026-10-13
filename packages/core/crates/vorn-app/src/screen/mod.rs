@@ -30,7 +30,7 @@ use crate::view::PaneView;
 
 pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
 pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
-pub(crate) use sidebar::project_icon as sidebar_project_icon;
+pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
 /// The three views the top bar's pills switch between.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

@@ -17,7 +17,6 @@ use crate::ui::{
     code, custom, div, field, icon, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle,
 };
 
-const AMBER_300: u32 = 0xffd230;
 /// The pane grey (`PANE_SURFACE`).
 fn pane_bg() -> Rgba {
     c(look::SURFACE_PANEL)
@@ -114,7 +113,7 @@ fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
         .id(id)
         .shrink0()
         .sense(Sense::DRAG)
-        .bg(white(0.06).mix(Rgba::hexa(0x2b7fff, 0.4), hot))
+        .bg(white(0.06).mix(Rgba::hexa(look::BLUE_500, 0.4), hot))
         .role(Role::Splitter, label)
         .vertical(side_by_side);
     if side_by_side {
@@ -1003,7 +1002,7 @@ fn conflict(s: &Screen<'_>, key: &str) -> El {
                 text(
                     label,
                     11.0,
-                    c(look::GRAY_300).mix(c(0xf3f4f6), s.ui.hover(id)),
+                    c(look::GRAY_300).mix(c(look::GRAY_100), s.ui.hover(id)),
                 )
                 .line_height(16.0)
                 .silent(),
@@ -1113,12 +1112,12 @@ fn editor_view(key: &str, b: &Buffer) -> El {
             let on = Some(i) == active;
             marks.push((
                 hit.range.0..hit.range.1,
-                c(AMBER_300).alpha(if on { 0.7 } else { 0.25 }),
+                c(look::AMBER_300).alpha(if on { 0.7 } else { 0.25 }),
             ));
             spans = overlay(
                 &spans,
                 hit.range.0..hit.range.1,
-                if on { c(0x000000) } else { c(0xf3f4f6) },
+                if on { c(0x000000) } else { c(look::GRAY_100) },
             );
         }
     }

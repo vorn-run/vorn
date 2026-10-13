@@ -8,10 +8,11 @@ pub type Rgb = u32;
 
 // The palette lives once, in vornui's tokens.
 pub use crate::ui::theme::rgb::{
-    AMBER_400, BLUE_400, BRONZO, DANGER, GRAY_200, GRAY_300, GRAY_400, GRAY_500, GRAY_600,
-    GRAY_700, GREEN_400, GREEN_500, INK, RED_400, RED_500, SKY_400, STATUS_BLUE, STATUS_SLATE,
-    SURFACE_BASE, SURFACE_OVERLAY, SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, WHITE,
-    YELLOW_500,
+    AMBER_300, AMBER_400, AMBER_500, BLUE_300, BLUE_400, BLUE_500, BLUE_600, BRONZO, DANGER,
+    DIFF_ADD, DIFF_REMOVE, EMERALD_400, GRAY_100, GRAY_200, GRAY_300, GRAY_400, GRAY_500, GRAY_600,
+    GRAY_700, GRAY_900, GREEN_300, GREEN_400, GREEN_500, GREEN_600, INK, RED_200, RED_300, RED_400,
+    RED_500, RED_600, SKY_400, STATUS_BLUE, STATUS_SAGE, STATUS_SLATE, SURFACE_BASE,
+    SURFACE_OVERLAY, SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, WHITE, YELLOW_500,
 };
 /// `--color-ink-secondary` and `--color-ink-faint`: white at these alphas.
 pub const INK_SECONDARY: f32 = 0.55;
@@ -81,9 +82,22 @@ pub const ICON_OPTIONS: [(&str, &str, &str); 24] = [
     ("mcp", "mcp", "MCP"),
 ];
 
+/// `ProjectIcon`'s and `RunIcon`'s tint for a mapped icon with no colour.
+pub const ICON_DEFAULT: Rgb = 0x6b7280;
+
+/// `ProjectIcon`'s fallback: a folder drawn with its own path.
+pub const PROJECT_FOLDER: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.5\"><path d=\"M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z\"/></svg>";
+
 /// `ICON_COLOR_PALETTE`.
 pub const ICON_COLORS: [Rgb; 8] = [
-    0x6b7280, 0x3b82f6, 0x8b5cf6, 0xec4899, 0xef4444, 0xf97316, 0xeab308, 0x22c55e,
+    ICON_DEFAULT,
+    0x3b82f6,
+    0x8b5cf6,
+    0xec4899,
+    0xef4444,
+    0xf97316,
+    0xeab308,
+    0x22c55e,
 ];
 
 /// `ICON_MAP[name]`: the glyph a stored icon name draws, `Play` included.

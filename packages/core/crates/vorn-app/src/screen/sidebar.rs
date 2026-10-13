@@ -12,39 +12,71 @@ use crate::state::{MenuKind, SidebarMode};
 use crate::ui::{div, field, text, tooltip, tooltip_at, Action, El, Place, Rgba, Role, TextStyle};
 use vorn_protocol::{ProjectConfig, SessionGroupConfig};
 
-/// A configured colour, `#rrggbb`, else gray-400.
-fn stored_color(hex: Option<&str>) -> Rgba {
+/// A configured colour, `#rrggbb`.
+fn stored_color(hex: Option<&str>) -> Option<Rgba> {
     hex.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
-        .map_or(c(look::GRAY_400), Rgba::hex)
+        .map(Rgba::hex)
 }
 
-/// A project's configured icon when the app carries it, else a folder.
-pub(crate) fn project_icon(p: &ProjectConfig, size: f32) -> El {
-    stored_icon(p.icon.as_deref(), p.icon_color.as_deref(), size)
+/// A project's configured colour, `#rrggbb`.
+fn project_color(p: &ProjectConfig) -> Option<Rgba> {
+    stored_color(p.icon_color.as_deref())
 }
 
-/// `ProjectIcon`: a stored icon name and colour, else a gray folder.
-pub(crate) fn stored_icon(icon: Option<&str>, color: Option<&str>, size: f32) -> El {
-    let name = icon
-        .map(lucide_name)
-        .filter(|n| look::icon(n, 1.5).is_some())
-        .unwrap_or_else(|| "folder".to_owned());
-    ico(&name, size, 1.5, stored_color(color))
+/// `ProjectIcon` for a project.
+pub(crate) fn project_icon(p: &ProjectConfig, size: f32, current: Rgba) -> El {
+    stored_icon(p.icon.as_deref(), p.icon_color.as_deref(), size, current)
 }
 
-/// `FolderGit2` to `folder-git-2`.
-fn lucide_name(pascal: &str) -> String {
-    let mut out = String::new();
-    for (i, ch) in pascal.chars().enumerate() {
-        if (ch.is_ascii_uppercase()
-            || (ch.is_ascii_digit() && !out.ends_with(|c: char| c.is_ascii_digit())))
-            && i > 0
-        {
-            out.push('-');
-        }
-        out.push(ch.to_ascii_lowercase());
+/// `ProjectIcon`: the `ICON_MAP` glyph in its colour (else `#6b7280`), or
+/// the drawn folder in its colour (else `current`, the row's text colour).
+pub(crate) fn stored_icon(icon: Option<&str>, color: Option<&str>, size: f32, current: Rgba) -> El {
+    let color = stored_color(color);
+    match icon.and_then(look::icon_map) {
+        Some(name) => ico(name, size, 1.5, color.unwrap_or(c(look::ICON_DEFAULT))),
+        None => folder_icon(size, color.unwrap_or(current)),
     }
-    out
+}
+
+/// `ProjectPicker`'s `ICON_MAP`: a smaller set than the sidebar's.
+const PICKER_ICONS: [&str; 20] = [
+    "Folder",
+    "FolderGit2",
+    "Code",
+    "Globe",
+    "Database",
+    "Server",
+    "Smartphone",
+    "Package",
+    "FileCode",
+    "Terminal",
+    "Cpu",
+    "Cloud",
+    "Shield",
+    "Zap",
+    "Gamepad2",
+    "Music",
+    "Image",
+    "BookOpen",
+    "FlaskConical",
+    "Rocket",
+];
+
+/// `ProjectPicker`'s own `ProjectIcon`: lucide's folder for no or an unknown
+/// icon, and `#6b7280` rather than the row colour when none is set.
+pub(crate) fn picker_project_icon(p: Option<&ProjectConfig>, size: f32) -> El {
+    let name = p
+        .and_then(|p| p.icon.as_deref())
+        .filter(|i| PICKER_ICONS.contains(i))
+        .and_then(look::icon_map)
+        .unwrap_or("folder");
+    let color = p.and_then(project_color);
+    ico(name, size, 1.5, color.unwrap_or(c(look::ICON_DEFAULT)))
+}
+
+/// `ProjectIcon` with no icon: its own folder path, not lucide's.
+fn folder_icon(size: f32, color: Rgba) -> El {
+    crate::ui::icon(look::PROJECT_FOLDER, size, color)
 }
 
 fn header(s: &Screen<'_>) -> El {
@@ -187,11 +219,12 @@ pub(super) fn control(
     tooltip_at(s.ui, b, id, label, None, Place::Below)
 }
 
-/// SidebarNavItem: an icon, a label and a count.
+/// SidebarNavItem: an icon (given the row's text colour), a label and a
+/// count.
 pub(super) fn nav_item(
     s: &Screen<'_>,
     act: Act,
-    icon: El,
+    icon: impl FnOnce(Rgba) -> El,
     label: &str,
     badge: Option<usize>,
     active: bool,
@@ -219,7 +252,7 @@ pub(super) fn nav_item(
         })
         .role(Role::Button, label)
         .selected(active)
-        .child(icon)
+        .child(icon(fg))
         .child(
             div()
                 .row()
@@ -435,7 +468,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
             toggle,
             hot,
             expanded,
-            project_icon(p, 14.0),
+            project_icon(p, 14.0, fg),
         ))
         .child(
             div().row().grow().min_w0().child(
@@ -711,7 +744,7 @@ fn all_projects(s: &Screen<'_>, badge: Option<usize>) -> El {
     nav_item(
         s,
         Act::Project(None),
-        ico("layers", 14.0, 1.5, c(look::GRAY_400)),
+        |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Projects",
         badge,
         s.st.project.is_none() && s.st.group.is_none(),
@@ -798,7 +831,7 @@ fn groups(s: &Screen<'_>) -> El {
     col = col.child(nav_item(
         s,
         Act::Group(None),
-        ico("layers", 14.0, 1.5, c(look::GRAY_400)),
+        |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Sessions",
         Some(s.store.sessions.len()),
         s.st.project.is_none() && s.st.group.is_none(),
@@ -846,7 +879,7 @@ fn groups(s: &Screen<'_>) -> El {
 /// SessionGroupItem: its icon (a disclosure on hover), name and count, a
 /// More button on hover; the name field while renaming.
 fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expanded: bool) -> El {
-    let icon = stored_icon(g.icon.as_deref(), g.icon_color.as_deref(), 14.0);
+    let icon = |fg| stored_icon(g.icon.as_deref(), g.icon_color.as_deref(), 14.0, fg);
     if s.st.renaming_group.as_deref() == Some(g.id.as_str()) {
         let focused = s.ui.focused(GROUP_NAME);
         let input = div()
@@ -874,7 +907,7 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
             .px(8.0)
             .py(6.0)
             .min_w0()
-            .child(icon)
+            .child(icon(c(look::GRAY_300)))
             .child(input);
     }
     let id = s.acts.on("sidebar-group", Act::Group(Some(g.id.clone())));
@@ -910,7 +943,7 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
             };
             ico(glyph, 12.0, 2.5, c(look::GRAY_500))
         } else {
-            icon
+            icon(fg)
         });
     let waiting = !expanded && members.iter().any(|x| x.status() == "waiting");
     let mut row = div()
@@ -1082,7 +1115,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
     col = col.child(nav_item(
         s,
         Act::Project(None),
-        ico("layers", 14.0, 1.5, c(look::GRAY_400)),
+        |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Projects",
         None,
         s.st.project.is_none(),
@@ -1100,7 +1133,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
         col = col.child(nav_item(
             s,
             Act::Project(Some(p.name.clone())),
-            project_icon(p, 14.0),
+            |fg| project_icon(p, 14.0, fg),
             &p.name,
             None,
             s.st.project.as_deref() == Some(p.name.as_str()),
@@ -1292,10 +1325,29 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
 mod tests {
     use super::*;
 
+    fn project(color: &str) -> ProjectConfig {
+        serde_json::from_value(serde_json::json!({
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": [],
+            "iconColor": color,
+        }))
+        .expect("project")
+    }
+
     #[test]
-    fn configured_icon_names_map_to_their_files() {
-        assert_eq!(lucide_name("FolderGit2"), "folder-git-2");
-        assert_eq!(lucide_name("Layers"), "layers");
-        assert_eq!(lucide_name("SquareTerminal"), "square-terminal");
+    fn every_picker_icon_has_a_glyph() {
+        for name in PICKER_ICONS {
+            assert!(look::icon_map(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn project_colour_reads_the_configured_hex() {
+        assert_eq!(
+            project_color(&project("#ec4899")),
+            Some(Rgba::hex(0xec4899))
+        );
+        assert_eq!(project_color(&project("nope")), None);
     }
 }

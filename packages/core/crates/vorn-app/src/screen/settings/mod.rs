@@ -324,7 +324,7 @@ pub(super) fn toggle(
         .w(40.0)
         .h(24.0)
         .rounded(12.0)
-        .bg(if on { c(0x2b7fff) } else { white(0.1) })
+        .bg(if on { c(look::BLUE_500) } else { white(0.1) })
         .role(Role::Switch, label)
         .toggled(on)
         .disabled(disabled)

@@ -37,15 +37,25 @@ pub mod rgb {
     pub const GRAY_500: u32 = 0x6a7282;
     pub const GRAY_600: u32 = 0x4a5565;
     pub const GRAY_700: u32 = 0x364153;
+    pub const GRAY_900: u32 = 0x101828;
+    pub const GREEN_300: u32 = 0x7bf1a8;
     pub const GREEN_400: u32 = 0x05df72;
     pub const GREEN_500: u32 = 0x00c758;
+    pub const GREEN_600: u32 = 0x00a63e;
+    pub const EMERALD_400: u32 = 0x00d492;
     pub const YELLOW_500: u32 = 0xedb200;
+    pub const RED_200: u32 = 0xffc9c9;
+    pub const RED_300: u32 = 0xffa2a2;
     pub const RED_400: u32 = 0xff6467;
     pub const RED_500: u32 = 0xfb2c36;
+    pub const RED_600: u32 = 0xe7000b;
+    pub const AMBER_300: u32 = 0xffd230;
     pub const AMBER_400: u32 = 0xffba00;
     pub const AMBER_500: u32 = 0xfe9a00;
+    pub const BLUE_300: u32 = 0x8ec5ff;
     pub const BLUE_400: u32 = 0x54a2ff;
     pub const BLUE_500: u32 = 0x2b7fff;
+    pub const BLUE_600: u32 = 0x155dfc;
     pub const SKY_400: u32 = 0x00bcff;
 }
 
@@ -79,15 +89,26 @@ pub mod color {
     pub const GRAY_500: Rgba = Rgba::hex(rgb::GRAY_500);
     pub const GRAY_600: Rgba = Rgba::hex(rgb::GRAY_600);
     pub const GRAY_700: Rgba = Rgba::hex(rgb::GRAY_700);
+    pub const GRAY_900: Rgba = Rgba::hex(rgb::GRAY_900);
+    pub const GREEN_300: Rgba = Rgba::hex(rgb::GREEN_300);
     pub const GREEN_400: Rgba = Rgba::hex(rgb::GREEN_400);
     pub const GREEN_500: Rgba = Rgba::hex(rgb::GREEN_500);
+    pub const GREEN_600: Rgba = Rgba::hex(rgb::GREEN_600);
+    pub const EMERALD_400: Rgba = Rgba::hex(rgb::EMERALD_400);
     pub const YELLOW_500: Rgba = Rgba::hex(rgb::YELLOW_500);
+    pub const RED_200: Rgba = Rgba::hex(rgb::RED_200);
+    pub const RED_300: Rgba = Rgba::hex(rgb::RED_300);
     pub const RED_400: Rgba = Rgba::hex(rgb::RED_400);
     pub const RED_500: Rgba = Rgba::hex(rgb::RED_500);
+    pub const RED_600: Rgba = Rgba::hex(rgb::RED_600);
+    pub const AMBER_300: Rgba = Rgba::hex(rgb::AMBER_300);
     pub const AMBER_400: Rgba = Rgba::hex(rgb::AMBER_400);
     pub const AMBER_500: Rgba = Rgba::hex(rgb::AMBER_500);
+    pub const BLUE_300: Rgba = Rgba::hex(rgb::BLUE_300);
     pub const BLUE_400: Rgba = Rgba::hex(rgb::BLUE_400);
     pub const BLUE_500: Rgba = Rgba::hex(rgb::BLUE_500);
+    pub const BLUE_600: Rgba = Rgba::hex(rgb::BLUE_600);
+    pub const SKY_400: Rgba = Rgba::hex(rgb::SKY_400);
     pub const WHITE: Rgba = Rgba::white(1.0);
 
     /// Text selection: the colour Chromium paints `::selection` with when

@@ -281,7 +281,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
         )))
         .child(
             div().grow().child(
-                text("Commit your changes", 18.0, c(0xf3f4f6))
+                text("Commit your changes", 18.0, c(look::GRAY_100))
                     .weight(600)
                     .line_height(28.0)
                     .role(Role::Heading, "Commit your changes"),
@@ -340,13 +340,13 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
                 .silent(),
             )
             .child(
-                text(format!("+{ins}"), 14.0, c(0x4ade80))
+                text(format!("+{ins}"), 14.0, c(look::GREEN_400))
                     .mono()
                     .line_height(20.0)
                     .silent(),
             )
             .child(
-                text(format!("-{del}"), 14.0, c(0xf87171))
+                text(format!("-{del}"), 14.0, c(look::RED_400))
                     .mono()
                     .line_height(20.0)
                     .silent(),
@@ -371,7 +371,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
                 .h(22.0)
                 .rounded(11.0)
                 .bg(if cm.unstaged {
-                    c(0x3b82f6)
+                    c(look::BLUE_500)
                 } else {
                     white(0.12)
                 })
@@ -433,7 +433,11 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
         let on = cm.push == push;
         let id = s.acts.on(&place("commit-next"), act(CommitOp::Push(push)));
         let hot = s.ui.hover(id);
-        let color = if on { c(0xf3f4f6) } else { c(look::GRAY_400) };
+        let color = if on {
+            c(look::GRAY_100)
+        } else {
+            c(look::GRAY_400)
+        };
         let mut b = div()
             .id(id)
             .on(Action::Click)
@@ -492,7 +496,11 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
             text(
                 "Continue",
                 14.0,
-                if ok { c(0x111827) } else { c(look::GRAY_500) },
+                if ok {
+                    c(look::GRAY_900)
+                } else {
+                    c(look::GRAY_500)
+                },
             )
             .weight(500)
             .line_height(20.0)
@@ -518,8 +526,8 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
                 .px(12.0)
                 .py(8.0)
                 .rounded(8.0)
-                .bg(Rgba::hexa(0xef4444, 0.10))
-                .child(text(e, 13.0, c(0xf87171)).line_height(18.0).wrapping()),
+                .bg(Rgba::hexa(look::RED_500, 0.10))
+                .child(text(e, 13.0, c(look::RED_400)).line_height(18.0).wrapping()),
         );
     }
     body = body.child(cont);

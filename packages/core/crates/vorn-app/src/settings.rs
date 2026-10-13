@@ -7,6 +7,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::Value;
 
+use crate::look;
+
 /// A panel of the settings page (`SettingsCategory`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Category {
@@ -467,11 +469,11 @@ impl WtEntry {
 /// `VERDICT_STYLES`: a verdict's label and its text and fill colours.
 pub fn verdict_style(level: &str) -> (&'static str, u32, u32, f32) {
     match level {
-        "review" => ("Review", 0xffd230, 0xf99c00, 0.12),
-        "reclaim" => ("Build output only", 0x8ec5ff, 0x3080ff, 0.12),
-        "remove" => ("Removable", 0x8ec5ff, 0x3080ff, 0.12),
-        "orphan" => ("Orphan directory", 0xffa2a2, 0xfb2c36, 0.12),
-        _ => ("Keep", 0x99a1af, 0xffffff, 0.05),
+        "review" => ("Review", look::AMBER_300, look::AMBER_500, 0.12),
+        "reclaim" => ("Build output only", look::BLUE_300, look::BLUE_500, 0.12),
+        "remove" => ("Removable", look::BLUE_300, look::BLUE_500, 0.12),
+        "orphan" => ("Orphan directory", look::RED_300, look::RED_500, 0.12),
+        _ => ("Keep", look::GRAY_400, look::WHITE, 0.05),
     }
 }
 

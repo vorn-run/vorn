@@ -93,14 +93,14 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(0.0, 4.0)
                 .size(x + knob / 2.0, 8.0)
                 .rounded(4.0)
-                .bg(c(0x2b7fff)),
+                .bg(c(look::BLUE_500)),
         )
         .child(
             div()
                 .absolute(x, 0.0)
                 .size(knob, knob)
                 .rounded(knob / 2.0)
-                .bg(c(0x2b7fff)),
+                .bg(c(look::BLUE_500)),
         )
 }
 
@@ -391,7 +391,7 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
                     text("Full command blocks", 11.0, c(look::GRAY_500))
                 } else {
                     let tone = if sh.level == "limited" {
-                        Rgba::hexa(0xfe9a00, 0.8)
+                        Rgba::hexa(look::AMBER_500, 0.8)
                     } else {
                         c(look::GRAY_500)
                     };
@@ -1363,7 +1363,7 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
         if let Some((ok, _)) = &st.result {
             let dot = match ok {
                 None => c(look::GRAY_600),
-                Some(true) => c(0x7ea96a),
+                Some(true) => c(look::DIFF_ADD),
                 Some(false) => c(look::DANGER),
             };
             top = top.child(div().size(6.0, 6.0).rounded(3.0).shrink0().bg(dot));

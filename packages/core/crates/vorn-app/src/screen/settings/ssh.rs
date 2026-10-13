@@ -429,9 +429,9 @@ fn host_form(s: &Screen<'_>, h: &Value, id: &str) -> El {
         .child(actions);
     if let Some(TestResult::Done { ok, message }) = st.tests.get(id) {
         let (fg, base) = if *ok {
-            (c(0x05df72), 0x00c950)
+            (c(look::GREEN_400), look::GREEN_500)
         } else {
-            (c(look::RED_400), 0xfb2c36)
+            (c(look::RED_400), look::RED_500)
         };
         form = form.child(
             div()
@@ -595,7 +595,7 @@ fn key_form(s: &Screen<'_>) -> El {
         .px(16.0)
         .py(6.0)
         .rounded(6.0)
-        .bg(c(0x155dfc).mix(c(0x2b7fff), s.ui.hover(save)))
+        .bg(c(look::BLUE_600).mix(c(look::BLUE_500), s.ui.hover(save)))
         .role(Role::Button, "Save Key")
         .child(
             text("Save Key", 12.0, c(look::WHITE))
@@ -703,7 +703,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
                 .px(16.0)
                 .py(12.0)
                 .rounded(8.0)
-                .border(1.0, Rgba::hexa(0xfe9a00, 0.3))
+                .border(1.0, Rgba::hexa(look::AMBER_500, 0.3))
                 .bg(Rgba::hexa(0xf59e0b, 0.08))
                 .child(
                     text(
@@ -721,7 +721,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
     for h in &hosts {
         let id = s_of(h, "id").to_owned();
         let open = st.hosts_open.contains(&id);
-        let title = text(s_of(h, "label"), 14.0, c(0xf3f4f6))
+        let title = text(s_of(h, "label"), 14.0, c(look::GRAY_100))
             .weight(500)
             .line_height(20.0)
             .silent();
@@ -734,7 +734,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
             s,
             "ssh-host-row",
             SetAct::ToggleHost(id.clone()),
-            tile("server", look::BLUE_400, 0x2b7fff),
+            tile("server", look::BLUE_400, look::BLUE_500),
             title,
             Some(sub),
             open,
@@ -764,7 +764,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
     for k in &st.keys {
         let open = st.keys_open.contains(&k.id);
         let mut title = div().row().items_center().gap(8.0).child(
-            text(&k.label, 14.0, c(0xf3f4f6))
+            text(&k.label, 14.0, c(look::GRAY_100))
                 .weight(500)
                 .line_height(20.0)
                 .silent(),
@@ -792,7 +792,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
             s,
             "ssh-key-row",
             SetAct::ToggleKey(k.id.clone()),
-            tile("file-key", look::AMBER_400, 0xfe9a00),
+            tile("file-key", look::AMBER_400, look::AMBER_500),
             title,
             sub,
             open,

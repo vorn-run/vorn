@@ -550,14 +550,46 @@ pub fn progress(run: &Value, nodes: &Value) -> (usize, usize) {
     (done, steps.len())
 }
 
-/// `describeRun`'s title, subtitle and source label.
+/// `describeRun`'s title, subtitle, source label and glyphs.
 pub struct Described {
     pub title: String,
     pub subtitle: Option<String>,
-    pub source: &'static str,
+    /// `sourceLabel`.
+    pub source: String,
+    /// The connector a connector run draws when its workflow has no icon.
+    pub connector: Option<String>,
+    /// `SOURCE_ICONS[source]`, for a run whose workflow has no icon.
+    pub fallback: &'static str,
 }
 
-pub fn describe(run: &Value, wf: Option<&Value>) -> Described {
+/// `SOURCE_ICONS`.
+fn source_icon(source: &str) -> &'static str {
+    match source {
+        "schedule" => "clock",
+        "task" => "square-check-big",
+        "connector" => "play",
+        "restore" => "rotate-ccw",
+        _ => "zap",
+    }
+}
+
+/// `connectorTitle`: GitHub's issues and pull requests share one number
+/// sequence, so the item's URL tells them apart.
+fn connector_title(item: &Value, connector: &str) -> Option<String> {
+    let id = s(item, "externalId").unwrap_or("");
+    let url = s(item, "externalUrl").unwrap_or("");
+    if url.contains("/pull/") {
+        Some(format!("PR #{id}"))
+    } else if url.contains("/issues/") {
+        Some(format!("Issue #{id}"))
+    } else {
+        (!id.is_empty()).then(|| format!("{connector} {id}"))
+    }
+}
+
+/// `describeRun`. `look_connector` is the connector the run's connection
+/// resolves to, which a packaged connector's item only knows as `sdk`.
+pub fn describe(run: &Value, wf: Option<&Value>, look_connector: Option<&str>) -> Described {
     let name = wf
         .and_then(|w| s(w, "name"))
         .map(str::trim)
@@ -567,6 +599,25 @@ pub fn describe(run: &Value, wf: Option<&Value>) -> Described {
         .and_then(|w| trigger(w.get("nodes").and_then(Value::as_array)?))
         .and_then(|t| t.pointer("/config/triggerType"))
         .and_then(Value::as_str);
+    if let Some(item) = run.get("connectorItem").filter(|v| v.is_object()) {
+        let connector = look_connector
+            .or_else(|| s(item, "connectorId"))
+            .unwrap_or("")
+            .to_owned();
+        let item_title = s(item, "title").unwrap_or("");
+        let title = connector_title(item, &connector).unwrap_or_else(|| item_title.to_owned());
+        return Described {
+            subtitle: if item_title != title {
+                Some(item_title.to_owned())
+            } else {
+                name
+            },
+            title,
+            source: connector.clone(),
+            connector: Some(connector),
+            fallback: source_icon("connector"),
+        };
+    }
     if let Some(ts) = run.get("triggerSession").filter(|v| v.is_object()) {
         let label = s(ts, "label").unwrap_or("");
         return Described {
@@ -575,7 +626,9 @@ pub fn describe(run: &Value, wf: Option<&Value>) -> Described {
                 "restore \u{b7} {} \u{b7} {label}",
                 s(ts, "restore").unwrap_or("")
             )),
-            source: "restore",
+            source: "restore".to_owned(),
+            connector: None,
+            fallback: source_icon("restore"),
         };
     }
     if let Some(task) = s(run, "triggerTaskId") {
@@ -583,19 +636,25 @@ pub fn describe(run: &Value, wf: Option<&Value>) -> Described {
         return Described {
             title: name.unwrap_or_else(|| format!("Task {short}")),
             subtitle: Some(format!("Task {short}")),
-            source: "task",
+            source: "task".to_owned(),
+            connector: None,
+            fallback: source_icon("task"),
         };
     }
-    let source = match trigger {
-        Some("once" | "recurring") => "scheduled",
-        Some("taskCreated" | "taskStatusChanged") => "task",
-        Some("sessionRestored") => "restore",
-        _ => "manual",
+    // `sourceOf`: a connector poll draws the play glyph but reads "manual".
+    let (source, label) = match trigger {
+        Some("once" | "recurring") => ("schedule", "scheduled"),
+        Some("connectorPoll") => ("connector", "manual"),
+        Some("taskCreated" | "taskStatusChanged") => ("task", "manual"),
+        Some("sessionRestored") => ("restore", "restore"),
+        _ => ("manual", "manual"),
     };
     Described {
         title: name.unwrap_or_else(|| s(run, "workflowId").unwrap_or("").chars().take(8).collect()),
         subtitle: None,
-        source,
+        source: label.to_owned(),
+        connector: None,
+        fallback: source_icon(source),
     }
 }
 
@@ -1968,11 +2027,61 @@ mod tests {
     #[test]
     fn a_run_is_described_by_its_source() {
         let run = json!({ "workflowId": "abcdefghij", "triggerTaskId": "t1234567" });
-        let d = describe(&run, None);
-        assert_eq!((d.title.as_str(), d.source), ("Task t12345", "task"));
+        let d = describe(&run, None, None);
+        assert_eq!(
+            (d.title.as_str(), d.source.as_str()),
+            ("Task t12345", "task")
+        );
+        assert_eq!(d.fallback, "square-check-big");
         let w = json!({ "name": "Nightly", "nodes": [{ "type": "trigger", "config": { "triggerType": "recurring" } }] });
-        let d = describe(&json!({ "workflowId": "x" }), Some(&w));
-        assert_eq!((d.title.as_str(), d.source), ("Nightly", "scheduled"));
+        let d = describe(&json!({ "workflowId": "x" }), Some(&w), None);
+        assert_eq!(
+            (d.title.as_str(), d.source.as_str()),
+            ("Nightly", "scheduled")
+        );
+        assert_eq!(d.fallback, "clock");
+    }
+
+    #[test]
+    fn a_connector_poll_draws_play_but_reads_manual() {
+        let w = json!({ "name": "Poll", "nodes": [{ "type": "trigger", "config": { "triggerType": "connectorPoll" } }] });
+        let d = describe(&json!({ "workflowId": "x" }), Some(&w), None);
+        assert_eq!((d.source.as_str(), d.fallback), ("manual", "play"));
+        assert_eq!(d.connector, None);
+    }
+
+    #[test]
+    fn a_connector_run_is_titled_by_its_item() {
+        let w = json!({ "name": "Triage" });
+        let item = |url: &str| {
+            json!({ "connectorItem": {
+                "connectorId": "sdk", "connectionId": "c1", "externalId": "42",
+                "externalUrl": url, "title": "Fix the build",
+            } })
+        };
+        let pr = describe(
+            &item("https://github.com/o/r/pull/42"),
+            Some(&w),
+            Some("github"),
+        );
+        assert_eq!(pr.title, "PR #42");
+        assert_eq!(pr.subtitle.as_deref(), Some("Fix the build"));
+        assert_eq!(pr.source, "github");
+        assert_eq!(pr.connector.as_deref(), Some("github"));
+        assert_eq!(pr.fallback, "play");
+        let issue = describe(&item("https://github.com/o/r/issues/42"), Some(&w), None);
+        assert_eq!(
+            (issue.title.as_str(), issue.source.as_str()),
+            ("Issue #42", "sdk")
+        );
+        let other = describe(&item("https://x.test/t/42"), Some(&w), Some("linear"));
+        assert_eq!(other.title, "linear 42");
+        let bare = json!({ "connectorItem": { "connectorId": "linear", "title": "Fix" } });
+        let d = describe(&bare, Some(&w), None);
+        assert_eq!(
+            (d.title.as_str(), d.subtitle.as_deref()),
+            ("Fix", Some("Triage"))
+        );
     }
 
     #[test]
