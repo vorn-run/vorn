@@ -10,8 +10,9 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
 }
 
 import { registerSW } from 'virtual:pwa-register'
-import { createApiShim, AuthRequiredError, storeToken } from './api-shim'
-import { getWebSocketUrl } from './env'
+import { createApiShim, AuthRequiredError, readStoredToken, storeToken } from './api-shim'
+import { getGridUrl, getWebSocketUrl, isGridEnabled } from './env'
+import type { GridConnectionOptions } from './grid/client'
 import { renderTokenPrompt } from './token-prompt'
 
 // Register service worker for PWA installability and asset caching.
@@ -33,6 +34,21 @@ const askForToken = (): void =>
   })
 
 api.__onAuthRequired(askForToken)
+
+// Grid mode is opt-in and, for now, only a connection a renderer can open;
+// the terminals still draw from bytes.
+if (isGridEnabled()) {
+  ;(window as unknown as { __vornGrid: unknown }).__vornGrid = {
+    connect: async (opts: Omit<GridConnectionOptions, 'token'>) => {
+      const { GridConnection } = await import('./grid/client')
+      return new GridConnection(getGridUrl(), {
+        ...opts,
+        token: readStoredToken(),
+        onAuthRequired: opts.onAuthRequired ?? askForToken
+      })
+    }
+  }
+}
 
 /**
  * A bundle and a server that disagree about the protocol.
