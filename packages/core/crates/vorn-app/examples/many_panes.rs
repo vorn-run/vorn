@@ -114,13 +114,16 @@ mod transcript {
                 "\x1b[?2004l\x1b[?25h\r\n> \x1b[?2004h\x1b[?25l".to_owned()
             } else {
                 let s = tick / 10;
-                // toFixed(1) of tokens / 1000, which rounds halves up.
-                let tenths = ((tick * 13) % 9000 + 50) / 100;
+                // toFixed(1): rounds the f64's exact value, and exact ties (x.25, x.75) up.
+                let tokens = (tick * 13) % 9000;
+                let tokens = if tokens % 250 == 0 && tokens % 100 == 50 {
+                    format!("{}.{}", (tokens + 50) / 1000, (tokens + 50) / 100 % 10)
+                } else {
+                    format!("{:.1}", tokens as f64 / 1000.0)
+                };
                 format!(
-                    "\r\x1b[2K\x1b[38;5;174m{}\x1b[39m \x1b[38;5;174mThinking…\x1b[39m \x1b[2m({s}s · ↑ {}.{}k tokens · esc to interrupt)\x1b[22m",
+                    "\r\x1b[2K\x1b[38;5;174m{}\x1b[39m \x1b[38;5;174mThinking…\x1b[39m \x1b[2m({s}s · ↑ {tokens}k tokens · esc to interrupt)\x1b[22m",
                     SPINNER[tick % SPINNER.len()],
-                    tenths / 10,
-                    tenths % 10
                 )
             };
             bytes += frame.len();
@@ -327,6 +330,7 @@ mod bench {
     use std::time::{Duration, Instant};
 
     use serde_json::{json, Value};
+    use vorn_app::screen::term_id;
     use vorn_app::ui::{Offscreen, RenderMode, Ui};
     use vorn_app::{ui_config, App};
 
@@ -487,13 +491,23 @@ mod bench {
             (opts.size.1 * opts.scale).round() as u32,
         );
         let target = ui.offscreen(px);
-        // Each card attaches its terminal the first time it is laid out.
+        // Cards attach their terminals when first laid out; the grid pages past
+        // 16, so the rest attach here as if the person had paged through them.
+        draw(&mut app, &mut ui, &target, opts.size);
+        let grid = app.grid().ok_or("no grid connection")?.clone();
+        for id in &ids {
+            grid.attach(id, 80, 24);
+        }
         wait_for("every pane's first screen", || {
-            app.frame(&mut ui, opts.size);
+            draw(&mut app, &mut ui, &target, opts.size);
             ids.iter().all(|id| app.pane(id).is_some()).then_some(())
         });
+        let on_screen = |ui: &Ui, id: &String| ui.rect_of(term_id(id)).is_some();
+        // The probe is a pane on screen; it goes first so it gets the echo feed.
+        let mut ids = ids;
+        let first = ids.iter().position(|id| on_screen(&ui, id)).unwrap_or(0);
+        ids.swap(0, first);
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let grid = app.grid().ok_or("no grid connection")?.clone();
         for (i, id) in ids.iter().enumerate() {
             let feed = case.feed(i);
             let rate = if feed == "log" {
@@ -597,7 +611,10 @@ mod bench {
             .zip(&revs_before)
             .filter(|(a, b)| a != b)
             .count();
-        let shown = if case == Case::Hidden { 1 } else { n };
+        let shown = ids
+            .iter()
+            .filter(|id| on_screen(&ui, id) || app.st.focused.as_ref() == Some(*id))
+            .count();
         let over = frames.iter().filter(|&&f| f > ms(FRAME)).count();
         Ok(json!({
             "case": case.name(),
