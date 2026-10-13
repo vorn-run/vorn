@@ -33,7 +33,7 @@ public struct VornMacApp: App {
                 .background(WindowConfigurator())
                 .onAppear {
                     store.start()
-                    keys.install(model: model)
+                    keys.install(model: model, store: store)
                     OnboardingGate.bind(model: model, store: store)
                     Task { _ = await OnboardingGate.openIfUnseen(model: model, store: store) }
                     if widget == nil {
@@ -97,6 +97,10 @@ struct ShellCommands: Commands {
             Button("Tasks") { model.mainViewMode = .tasks }.keyboardShortcut("t")
             Button("Workflows") { model.mainViewMode = .workflows }.keyboardShortcut("w", modifiers: [.command, .shift])
             Divider()
+            Button("Make Text Bigger") { store.stepTerminalFont(by: 1) }.keyboardShortcut("=")
+            Button("Make Text Smaller") { store.stepTerminalFont(by: -1) }.keyboardShortcut("-")
+            Button("Make Text Normal Size") { store.stepTerminalFont(by: 0) }.keyboardShortcut("0")
+            Divider()
             Button("View Options") { model.toggle(.viewOptions) }.keyboardShortcut("j")
             Button("Recent Sessions") { model.toggle(.recent) }
             Button("Keyboard Shortcuts") { model.toggle(.shortcuts) }.keyboardShortcut("/")
@@ -131,15 +135,30 @@ struct ShellCommands: Commands {
     }
 }
 
-/// Esc, ⌘W and ⌘K, which the terminal keeps when it has focus (useKeyboardShortcuts.ts).
+extension VornStore {
+    /// ⌘+ and ⌘- step the font size every terminal shares, as Settings › Appearance does; 0 resets it.
+    func stepTerminalFont(by step: Int) {
+        let size = step == 0 ? TerminalPreferences.defaultFontSize : TerminalPreferences.fontSize(defaults?.fontSize, by: step)
+        Task { try? await setDefault("fontSize", .number(size)) }
+    }
+}
+
+/// Esc, ⌘W and ⌘K, which the terminal keeps when it has focus (useKeyboardShortcuts.ts), and the terminal's own find and clear.
 @MainActor
 final class KeyMonitor {
     private var token: Any?
 
-    func install(model: AppModel) {
+    func install(model: AppModel, store: VornStore) {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // ⌘+ is ⇧⌘= on most layouts; the menu item matches ⌘= only.
+            if event.keyCode == 24, event.modifierFlags.intersection([.command, .shift, .option, .control]) == [.command, .shift] {
+                store.stepTerminalFont(by: 1)
+                return nil
+            }
             let responder = event.window?.firstResponder
+            if let terminal = TerminalNSView.owning(responder),
+               terminal.performShortcut(keyCode: event.keyCode, modifiers: event.modifierFlags) { return nil }
             let typing = responder is TerminalNSView || responder is NSTextView
             return KeyRouting.handle(keyCode: event.keyCode, modifiers: event.modifierFlags,
                                      typing: typing, model: model) ? nil : event

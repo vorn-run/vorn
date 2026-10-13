@@ -1,6 +1,7 @@
 import AppKit
 import CVornGrid
 import SwiftUI
+import VornCore
 import VornUI
 
 // MARK: - Keys
@@ -55,6 +56,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         pane.host = self
+        registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -76,11 +78,36 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         TerminalFonts.of(size: pane.engine.fontSize, scale: window?.backingScaleFactor ?? 2)
     }
 
-    func paneDidChange() { needsDisplay = true }
+    func paneDidChange() {
+        if findBar != nil, !found.done { loadMatches() }
+        needsDisplay = true
+    }
+
+    func fontDidChange() {
+        layoutGrid()
+        needsDisplay = true
+    }
+
+    /// Asks before a paste vornd held; answers true to send it. Replaceable for tests.
+    var confirmPaste: ((String, @escaping (Bool) -> Void) -> Void)?
+
+    func pasteHeld(_ text: String) {
+        let send: (Bool) -> Void = { [weak self] ok in if ok { self?.pane.paste(text, confirmed: true) } }
+        if let confirmPaste { return confirmPaste(text, send) }
+        guard let window else { return }
+        let lines = text.split(whereSeparator: \.isNewline).count
+        let alert = NSAlert()
+        alert.messageText = "Paste \(lines) \(lines == 1 ? "line" : "lines") into the terminal?"
+        alert.informativeText = "Each line will run as a command."
+        alert.addButton(withTitle: "Paste")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { send($0 == .alertFirstButtonReturn) }
+    }
 
     public override func setFrameSize(_ s: NSSize) {
         super.setFrameSize(s)
         layoutGrid()
+        layoutFindBar()
     }
 
     public override func viewDidMoveToWindow() {
@@ -117,7 +144,8 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     public override func draw(_ dirty: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         painter.draw(ctx, pane.view, fonts: fonts, bounds: bounds, focused: pane.focused, marked: pane.marked,
-                     selection: pane.selection)
+                     selection: pane.selection, matches: visibleMatches,
+                     current: found.at.map { found.hits[$0] })
         didDraw?(ctx)
     }
 
@@ -251,6 +279,160 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         pane.paste(text)
     }
 
+    /// Ctrl-L for the program: a shell clears its screen and draws the prompt again.
+    @objc public func clearScreen(_ sender: Any?) {
+        pane.selection = nil
+        pane.text("\u{0c}")
+    }
+
+    // MARK: Drag and drop: files type their quoted paths.
+
+    private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
+        guard !pane.engine.readOnly else { return [] }
+        return info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                   options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    public override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation {
+        droppedFiles(info).isEmpty ? [] : .copy
+    }
+
+    public override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
+        let files = droppedFiles(info)
+        guard !files.isEmpty else { return false }
+        window?.makeFirstResponder(self)
+        pane.paste(TerminalKeys.quotedPaths(files), confirmed: true)
+        return true
+    }
+
+    // MARK: Find
+
+    private var findBar: TerminalFindBar?
+    /// The matches so far, oldest first, and the one shown.
+    private var found: (hits: [VgHit], done: Bool, at: Int?) = ([], true, nil)
+    private var query = ""
+
+    var isFinding: Bool { findBar != nil }
+    var findStatus: String { findBar?.countText ?? "" }
+
+    /// The matches on the rows in view.
+    private var visibleMatches: ArraySlice<VgHit> {
+        guard findBar != nil, let v = pane.view, !found.hits.isEmpty else { return [] }
+        let end = v.first_line + UInt64(v.rows)
+        return found.hits[firstMatch(atOrAfter: v.first_line)..<firstMatch(atOrAfter: end)]
+    }
+
+    /// The index of the first match on `line` or below; the matches are in line order.
+    private func firstMatch(atOrAfter line: UInt64) -> Int {
+        var (lo, hi) = (0, found.hits.count)
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if found.hits[mid].line < line { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
+    }
+
+    /// Shows the find bar, or puts the cursor back in it.
+    @objc public func findInTerminal(_ sender: Any?) {
+        let bar = findBar ?? makeFindBar()
+        window?.makeFirstResponder(bar.field)
+        bar.field.currentEditor()?.selectAll(nil)
+    }
+
+    @objc public func findNext(_ sender: Any?) { findBar == nil ? findInTerminal(sender) : step(1) }
+    @objc public func findPrevious(_ sender: Any?) { findBar == nil ? findInTerminal(sender) : step(-1) }
+
+    /// The Edit menu's Find items.
+    @objc public override func performTextFinderAction(_ sender: Any?) {
+        switch NSTextFinder.Action(rawValue: (sender as? NSValidatedUserInterfaceItem)?.tag ?? 0) {
+        case .nextMatch: findNext(sender)
+        case .previousMatch: findPrevious(sender)
+        case .hideFindInterface: closeFind()
+        default: findInTerminal(sender)
+        }
+    }
+
+    private func makeFindBar() -> TerminalFindBar {
+        let bar = TerminalFindBar()
+        bar.onQuery = { [weak self] in self?.search($0) }
+        bar.onStep = { [weak self] in self?.step($0) }
+        bar.onClose = { [weak self] in self?.closeFind() }
+        addSubview(bar)
+        findBar = bar
+        layoutFindBar()
+        if !query.isEmpty { bar.field.stringValue = query; search(query) }
+        return bar
+    }
+
+    private func layoutFindBar() {
+        guard let findBar else { return }
+        let s = TerminalFindBar.size
+        findBar.frame = NSRect(x: max(bounds.width - s.width - 8, 0), y: 8, width: min(s.width, bounds.width), height: s.height)
+    }
+
+    func search(_ q: String) {
+        query = q
+        found = ([], q.isEmpty, nil)
+        pane.search(q)
+        findBar?.show(current: nil, total: 0, query: q)
+        needsDisplay = true
+    }
+
+    /// Takes the matches come so far; once all have, shows the newest.
+    private func loadMatches() {
+        let (hits, done) = pane.hits()
+        found.hits = hits
+        found.done = done
+        if done, found.at == nil, !hits.isEmpty { show(hits.count - 1) }
+        findBar?.show(current: found.at, total: hits.count, query: query)
+    }
+
+    /// Moves to the next match (1) or the previous one (-1), round the ends.
+    func step(_ by: Int) {
+        let n = found.hits.count
+        guard n > 0 else { return }
+        show(((found.at ?? (by > 0 ? -1 : n)) + by + n) % n)
+    }
+
+    private func show(_ i: Int) {
+        found.at = i
+        pane.reveal(line: found.hits[i].line)
+        findBar?.show(current: i, total: found.hits.count, query: query)
+        needsDisplay = true
+    }
+
+    func closeFind() {
+        guard let bar = findBar else { return }
+        bar.removeFromSuperview()
+        findBar = nil
+        found = ([], true, nil)
+        pane.search("")
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
+    /// The terminal's own shortcuts, taken before the menus see them: find and clear.
+    public func performShortcut(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        switch TerminalKeys.shortcut(keyCode: keyCode, modifiers: modifiers) {
+        case .find?: findInTerminal(nil)
+        case .findNext?: findNext(nil)
+        case .findPrevious?: findPrevious(nil)
+        case .clear?: if pane.engine.readOnly { return false } else { clearScreen(nil) }
+        case nil: return false
+        }
+        return true
+    }
+
+    /// The terminal whose screen or find bar has keyboard focus.
+    public static func owning(_ responder: NSResponder?) -> TerminalNSView? {
+        var view = ((responder as? NSTextView)?.delegate as? NSView) ?? responder as? NSView
+        while let v = view {
+            if let t = v as? TerminalNSView { return t }
+            view = v.superview
+        }
+        return nil
+    }
+
     public override func selectAll(_ sender: Any?) {
         pane.selection = TerminalSelection(GridPoint(line: 0, col: 0), GridPoint(line: .max, col: .max))
     }
@@ -262,6 +444,10 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         let m = NSMenu()
         m.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
         m.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        m.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "")
+        m.addItem(.separator())
+        m.addItem(withTitle: "Find…", action: #selector(findInTerminal(_:)), keyEquivalent: "")
+        m.addItem(withTitle: "Clear Screen", action: #selector(clearScreen(_:)), keyEquivalent: "")
         m.addItem(.separator())
         m.addItem(withTitle: "Fit to This Window", action: #selector(fitToWindow(_:)), keyEquivalent: "")
         for item in m.items { item.target = self }
@@ -269,22 +455,34 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     }
 
     public override func performKeyEquivalent(with e: NSEvent) -> Bool {
-        // Control chords belong to the shell, except the app's own Ctrl+`.
-        guard window?.firstResponder === self, e.type == .keyDown,
-              e.modifierFlags.contains(.control), !e.modifierFlags.contains(.command), e.keyCode != 50
-        else { return super.performKeyEquivalent(with: e) }
+        guard window?.firstResponder === self, e.type == .keyDown else { return super.performKeyEquivalent(with: e) }
+        let f = e.modifierFlags
+        // Control chords belong to the shell, except the app's own Ctrl+`; so do ⌘← ⌘→ ⌘⌫.
+        let shells = f.contains(.control) && !f.contains(.command) && e.keyCode != 50
+        guard shells || f.contains(.command) && route(e) != .encode else { return super.performKeyEquivalent(with: e) }
         keyDown(with: e)
         return true
     }
 
+    private func route(_ e: NSEvent) -> TerminalKey {
+        TerminalKeys.route(keyCode: e.keyCode, modifiers: e.modifierFlags, unmodified: e.charactersIgnoringModifiers,
+                           alternateScreen: pane.view.map { $0.screen & UInt8(VG_ALTERNATE) != 0 } ?? false,
+                           optionAsMeta: TerminalPreferences.optionAsMeta)
+    }
+
     public override func keyDown(with e: NSEvent) {
         pane.selection = nil
-        // Shift-Page Up and Down page through history, as the shell never sees them.
-        if e.modifierFlags.contains(.shift), e.keyCode == 116 || e.keyCode == 121,
-           let v = pane.view, v.screen & UInt8(VG_ALTERNATE) == 0 {
-            let page = Int32(max(Int(v.rows) - 1, 1))
-            pane.scroll(e.keyCode == 116 ? -page : page)
+        // While the input method composes, its keys are its own.
+        switch pane.marked.isEmpty ? route(e) : .encode {
+        case .page(let up):
+            // Shift-Page Up and Down page through history, as the shell never sees them.
+            let page = Int32(max(Int(pane.view?.rows ?? 2) - 1, 1))
+            pane.scroll(up ? -page : page)
             return
+        case .send(let bytes):
+            pane.text(bytes)
+            return
+        case .encode: break
         }
         // A synthesized event in a window that is not key has no input
         // context to compose with: send it as the key it is.
@@ -340,7 +538,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         switch item.action {
         case #selector(copy(_:)): return pane.selection.map { !$0.isEmpty } ?? false
         case #selector(paste(_:)): return !pane.engine.readOnly && NSPasteboard.general.string(forType: .string) != nil
-        case #selector(fitToWindow(_:)): return !pane.engine.readOnly
+        case #selector(fitToWindow(_:)), #selector(clearScreen(_:)): return !pane.engine.readOnly
         default: return true
         }
     }

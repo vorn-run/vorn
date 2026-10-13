@@ -63,8 +63,22 @@ void vg_view_free(VgView *v);
 void vg_key(VgClient *c, uint32_t pane, const char *code, uint16_t mods, const char *text);
 /* Committed text or a paste. */
 void vg_text(VgClient *c, uint32_t pane, const char *utf8);
-/* A paste: \n becomes \r, bracketed when the program asks for it. */
-void vg_paste(VgClient *c, uint32_t pane, const char *utf8);
+/* A paste, bracketed when the program asks for it. Unconfirmed, vornd may hold one that would run
+   commands: vg_take_held_paste then returns it, to send again confirmed once the person agrees. */
+void vg_paste(VgClient *c, uint32_t pane, const char *utf8, bool confirmed);
+/* The paste vornd held for confirmation, once; free with vg_free_string. NULL if none. */
+char *vg_take_held_paste(VgClient *c, uint32_t pane);
+typedef struct {
+    uint64_t line; /* absolute */
+    uint16_t from, to; /* columns, to excluded */
+} VgHit;
+/* Searches screen and history for plain text; matches stream in. An empty query ends the search. */
+void vg_search(VgClient *c, uint32_t pane, const char *query, bool case_sensitive);
+/* The search's matches so far, oldest first: writes up to cap and returns how many there are;
+   sets *done once all have come. */
+uint32_t vg_hits(VgClient *c, uint32_t pane, VgHit *out, uint32_t cap, bool *done);
+/* Scrolls the view so the line shows, centred when it was off screen. */
+void vg_reveal(VgClient *c, uint32_t pane, uint64_t line);
 /* A wheel turn of lines (negative up) at cell (x, y): sent to a program tracking the mouse, as arrow
    keys on the alternate screen, else scrolls the view through history. */
 void vg_wheel(VgClient *c, uint32_t pane, int32_t lines, float x, float y, uint16_t mods);

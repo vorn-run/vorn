@@ -344,6 +344,11 @@ struct ShortcutsPanel: View {
                   ("Toggle sidebar", "⌘B"), ("New terminal session", "Ctrl+`"), ("Sessions view", "⌘S"),
                   ("Tasks view", "⌘T"), ("Workflows view", "⌘⇧W"), ("View options", "⌘J"),
                   ("Fit the whole workflow on the canvas", "1")]),
+        ("Terminal", [("Copy / paste", "⌘C / ⌘V"), ("Select all", "⌘A"), ("Find", "⌘F"),
+                      ("Next / previous match", "⌘G / ⌘⇧G"), ("Clear screen", "⌥⌘K"),
+                      ("Bigger / smaller / normal text", "⌘+ / ⌘- / ⌘0"), ("Word left / right", "⌥← / ⌥→"),
+                      ("Line start / end", "⌘← / ⌘→"), ("Delete word / line", "⌥⌫ / ⌘⌫"),
+                      ("Scroll a page", "⇧PgUp / ⇧PgDn")]),
         ("Filters", [("Show all", "⌥1"), ("Show running", "⌥2"), ("Show waiting", "⌥3"), ("Show idle", "⌥4"),
                      ("Show errors", "⌥5")]),
     ]
