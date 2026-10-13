@@ -135,8 +135,7 @@ public struct SettingsPage: View {
         case .about: AboutSettings(model: model)
         case .connectors:
             SettingsPageHeader(title: "Plugins", description: "Connectors watch a service and start workflows. Extensions add footers and panes to a card. Both install as packs from the same directory.")
-        case .network:
-            SettingsPageHeader(title: "Remote Access", description: "Reach this Vorn from your phone or another computer")
+        case .network: NetworkSettings(model: model)
         }
     }
 }
