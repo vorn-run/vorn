@@ -122,17 +122,26 @@ struct ConnectorDetailView: View {
         }
     }
 
+    private typealias Surface = (key: String, title: String, detail: String, when: ExtensionActivation?)
+
+    private static func surfaces(_ contributes: ExtensionContributions?) -> [Surface] {
+        var out: [Surface] = []
+        for pane in contributes?.panes ?? [] {
+            out.append(("pane:\(pane.id)", "\(pane.title) · pane", pane.description ?? ExtensionCopy.describePaneKind(pane), pane.when))
+        }
+        for footer in contributes?.footers ?? [] {
+            let detail = footer.description ?? ExtensionCopy.describeFooterInterval(Int(footer.every))
+            out.append(("footer:\(footer.id)", "\(footer.title) · footer", detail, footer.when))
+        }
+        for link in contributes?.linkHandlers ?? [] {
+            out.append(("link:\(link.id)", "\(link.title) · link", link.description ?? "matches \(link.pattern ?? "")", link.when))
+        }
+        return out
+    }
+
     @ViewBuilder
     private var extensionSections: some View {
-        let contributes = listing.contributes
-        let surfaces: [(key: String, title: String, detail: String, when: ExtensionActivation?)] =
-            (contributes?.panes ?? []).map { ("pane:\($0.id)", "\($0.title) · pane", $0.description ?? ExtensionCopy.describePaneKind($0), $0.when) }
-            + (contributes?.footers ?? []).map {
-                ("footer:\($0.id)", "\($0.title) · footer", $0.description ?? ExtensionCopy.describeFooterInterval(Int($0.every)), $0.when)
-            }
-            + (contributes?.linkHandlers ?? []).map {
-                ("link:\($0.id)", "\($0.title) · link", $0.description ?? "matches \($0.pattern ?? "")", $0.when)
-            }
+        let surfaces = Self.surfaces(listing.contributes)
         let stated = listing.permissions != nil || listing.pack != nil
         let rows = ExtensionCopy.permissionRows(listing.permissions)
         let notAsked = ExtensionCopy.notAsked(listing.permissions)

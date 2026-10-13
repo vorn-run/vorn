@@ -15,7 +15,10 @@ for (const dir of rest) {
   }
 }
 
-const ticketIcon = { viewBox: '0 0 24 24', paths: ['M3 5h18v14H3zM5 7v10h14V7z', 'M7 10h10v2H7z', 'M7 13h6v2H7z'] }
+const ticketIcon = {
+  viewBox: '0 0 24 24',
+  paths: ['M3 5h18v14H3zM5 7v10h14V7z', 'M7 10h10v2H7z', 'M7 13h6v2H7z']
+}
 const tickets = {
   id: 'acme-tickets',
   name: 'Acme Tickets',
@@ -24,7 +27,13 @@ const tickets = {
   description: 'Start a workflow when a ticket lands in an Acme queue.',
   icon: ticketIcon,
   auth: { rung: 'key' },
-  triggers: [{ type: 'ticket.created', label: 'New ticket', description: 'A ticket was opened in the queue.' }],
+  triggers: [
+    {
+      type: 'ticket.created',
+      label: 'New ticket',
+      description: 'A ticket was opened in the queue.'
+    }
+  ],
   actions: [
     { type: 'ticket.comment', label: 'Comment on a ticket' },
     { type: 'ticket.close', label: 'Close a ticket' }
@@ -78,7 +87,12 @@ if (mode === 'files') {
           capabilities: ['triggers', 'actions'],
           category: 'Data',
           authRung: 'cli',
-          verified: { schema: 1, version: '0.4.0', checkedAt: '2025-01-10T00:00:00Z', checks: ['installs', 'starts'] },
+          verified: {
+            schema: 1,
+            version: '0.4.0',
+            checkedAt: '2025-01-10T00:00:00Z',
+            checks: ['installs', 'starts']
+          },
           keywords: ['kql', 'adx']
         },
         {
@@ -119,7 +133,10 @@ if (mode === 'files') {
     mkdirSync(join(dir, pack.version), { recursive: true })
     writeFileSync(join(dir, pack.version, 'manifest.json'), JSON.stringify(pack))
     writeFileSync(join(dir, pack.version, 'index.js'), 'process.stdin.resume()\n')
-    writeFileSync(join(dir, 'current.json'), JSON.stringify({ version: pack.version, installedAt: Date.now() }))
+    writeFileSync(
+      join(dir, 'current.json'),
+      JSON.stringify({ version: pack.version, installedAt: Date.now() })
+    )
   }
 } else if (mode === 'connections') {
   const [data] = rest
@@ -174,7 +191,13 @@ if (mode === 'files') {
       icon: 'Workflow',
       iconColor: '#8b8b8b',
       nodes: [
-        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: { triggerType: 'cron', cron: '*/5 * * * *' } }
+        {
+          id: 'trigger',
+          type: 'trigger',
+          label: 'Trigger',
+          position: { x: 0, y: 0 },
+          config: { triggerType: 'cron', cron: '*/5 * * * *' }
+        }
       ],
       edges: [],
       enabled: true,

@@ -238,10 +238,12 @@ public enum ConnectorBrowse {
         let terms = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { return listings }
         return listings.filter { listing in
-            let haystack = ([listing.name, listing.description ?? "", listing.category] + listing.capabilities + listing.keywords
-                + (listing.contributes?.all.map(\.title) ?? [])
-                + (listing.permissions ?? []).map { ExtensionCopy.permission($0).phrase })
-                .joined(separator: " ").lowercased()
+            var words: [String] = [listing.name, listing.description ?? "", listing.category]
+            words += listing.capabilities
+            words += listing.keywords
+            words += listing.contributes?.all.map(\.title) ?? []
+            words += (listing.permissions ?? []).map { ExtensionCopy.permission($0).phrase }
+            let haystack = words.joined(separator: " ").lowercased()
             return terms.allSatisfy { haystack.contains($0) }
         }
     }
