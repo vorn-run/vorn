@@ -561,6 +561,10 @@ impl Ui {
                     .groups
                     .get(&m.id)
                     .is_some_and(|g| g.iter().any(|i| i.0 == f))
+                    // Or an entry of its submenu.
+                    || self.st.hit(f).is_some_and(|h| {
+                        h.layer > 0 && matches!(h.action, Some(Action::Select { .. }))
+                    })
             });
             if inside {
                 self.st.focus = Some(m.trigger);

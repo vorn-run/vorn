@@ -107,6 +107,7 @@ impl Rig {
                     self.chosen.push(index as u32);
                 } else if group == sub_id() {
                     self.chosen.push(100 + index as u32);
+                    self.ui.close_menu();
                 }
             }
         }
@@ -328,6 +329,18 @@ fn keys_open_walk_and_close_submenus() {
     assert!(r.key("Escape"));
     assert!(!r.ui.menu_open(menu_id()), "and then the menu");
     assert!(r.chosen.is_empty());
+}
+
+#[test]
+fn choosing_in_a_submenu_by_keys_returns_focus_to_the_trigger() {
+    let mut r = Rig::new((40.0, 40.0), (800.0, 600.0));
+    assert!(r.key("ArrowDown"));
+    assert!(r.key("ArrowRight"));
+    assert!(r.key("ArrowDown"));
+    assert!(r.key("Enter"));
+    assert_eq!(r.chosen, vec![101]);
+    assert!(!r.ui.menu_open(menu_id()));
+    assert!(r.focused(trigger()), "focus back on what opened the menu");
 }
 
 #[test]
