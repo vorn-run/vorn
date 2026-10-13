@@ -36,7 +36,7 @@ git -C "$repo" -c user.name=t -c user.email=t@t commit -qm init
 printf 'export function greet(name: string, excited = false) {\n  const line = `Hello, ${name}`\n  return excited ? `${line}!` : line\n}\n' >"$repo/src/greet.ts"
 printf '# vorn\n\nRun many agents side by side.\n' >"$repo/README.md"
 printf 'export const version = "0.8.0"\n' >"$repo/src/version.ts"
-node "$here/scripts/seed-test-vornd.mjs" "$data" --shell "$data/projects/vorn" --shells 3 >/dev/null
+node "$here/scripts/seed-test-vornd.mjs" "$data" --shell "$data/projects/vorn" --shells 3 --artifacts >/dev/null
 sleep 2
 
 export VORN_DATA_DIR=$data
@@ -68,6 +68,25 @@ done
 "$bin/Vorn" --render "$out/panes-maximized.png" --files 0:src/greet.ts --maximize files
 "$bin/Vorn" --render "$out/panes-changes.png" --changes 0
 "$bin/Vorn" --render "$out/panes-commit.png" --changes 0 --commit
+# The browser and device panes: a local page, a doc artifact with its rail, versions and editor, a design, a phone.
+mkdir -p "$repo/preview"
+cat >"$repo/preview/index.html" <<'HTML'
+<!doctype html><title>Local preview</title><body style="margin:0;font:16px -apple-system,sans-serif;background:#fafafa;color:#222">
+<header style="padding:18px 28px;background:#111;color:#fff;font-weight:600">Acme</header><main style="padding:40px 28px">
+<h1 style="margin:0 0 8px">Ship faster</h1><p>A local dev server, opened in the session's browser pane.</p></main></body>
+HTML
+"$bin/Vorn" --render "$out/browser-page.png" --browser "0:file://$repo/preview/index.html" --focused 0
+"$bin/Vorn" --render "$out/browser-blank.png" --browser 0 --focused 0
+"$bin/Vorn" --render "$out/artifact-doc.png" --artifact "0:Launch plan" --focused 0
+"$bin/Vorn" --render "$out/artifact-rail.png" --artifact "0:Launch plan" --browser-step comments --focused 0
+"$bin/Vorn" --render "$out/artifact-versions.png" --artifact "0:Launch plan" --browser-step versions --focused 0
+"$bin/Vorn" --render "$out/doc-editor.png" --artifact "0:Launch plan" --browser-step edit --focused 0
+"$bin/Vorn" --render "$out/artifact-maximized.png" --artifact "0:Launch plan" --maximize browser --browser-step comments --focused 0
+"$bin/Vorn" --render "$out/design-canvas.png" --artifact "0:Pricing hero" --maximize browser --focused 0
+"$bin/Vorn" --render "$out/design-phone.png" --artifact "0:Pricing hero" --maximize browser --browser-step board:phone --focused 0
+"$bin/Vorn" --render "$out/device-pane.png" --device 0 --focused 0
+"$bin/Vorn" --render "$out/device-maximized.png" --device 0 --maximize device --focused 0
+"$bin/Vorn" --render "$out/device-picker.png" --device 0 --browser-step picker --focused 0
 "$bin/Vorn" --render "$out/component-branch-picker.png" --size 300x320 --component branch-picker
 node "$here/scripts/seed-test-vornd.mjs" "$data" --no-runs --review >/dev/null
 sleep 3

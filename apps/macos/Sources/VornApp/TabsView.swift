@@ -136,7 +136,7 @@ private struct SessionTab: View {
                     tabButton(.folderOpen, "Browse files") { actions.browseFiles(session.id) }
                     if session.agentType != .shell {
                         tabButton(.squareTerminal, "Add a terminal") { actions.addTerminal(session.id) }
-                        tabButton(.globe, "Open browser") {}
+                        tabButton(.globe, "Open browser") { actions.openBrowser(session.id) }
                     }
                     tabButton(.pencil, "Rename session") {
                         draft = session.title

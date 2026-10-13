@@ -81,9 +81,21 @@ struct ShellActions {
         a.endRename = { model.renamingSessionID = nil }
         a.browseFiles = { id in model.panes.toggleFilesPane(id) }
         a.addTerminal = addPanelTerminal
+        a.openBrowser = { id in model.panes.browser.toggle(id) }
+        a.deviceButton = { [browser = model.panes.browser] s in AnyView(DeviceCardButton(model: browser, session: s)) }
         a.showChanges = { id in model.panes.diffSessionID = id }
         a.git = gitActions
         return a
+    }
+
+    /// Gives the browser panes the daemon and the sessions, and starts answering the agents' browser tools.
+    func bindBrowser() {
+        let b = model.panes.browser
+        b.session = { [weak store] id in store?.session(id) }
+        b.liveSessions = { [weak store] in store?.sessions ?? [] }
+        b.write = { [weak store] id, data in Task { try? await store?.write(id, data) } }
+        b.toast = { [weak model] message, isError in model?.toasts.show(message, isError ? .error : .success) }
+        b.start(client: store.client, answerAgents: !store.readOnly)
     }
 
     var gitActions: GitActions {

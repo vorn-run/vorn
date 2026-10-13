@@ -90,6 +90,7 @@ public struct RootView: View {
             if let s = model.selectedSessionID, !live.contains(s) { model.selectedSessionID = nil }
             if let s = model.expandedSessionID, !live.contains(s) { model.expandedSessionID = nil }
         }
+        .onChange(of: Set(store.sessions.map(\.projectPath)), initial: true) { _, paths in model.panes.browser.detectMobile(Array(paths)) }
         .onChange(of: features.scope(model, store), initial: true) { _, scope in features.tasks.scope = scope }
         .onChange(of: model.activeWorkspace, initial: true) { _, id in features.workflows.workspaceId = id }
         .onChange(of: store.projects, initial: true) { _, list in features.workflows.projects = list }
@@ -98,6 +99,7 @@ public struct RootView: View {
             features.bind(store: store, model: model)
             store.onWorktreeCleanup = { p, w in actions.offerWorktreeCleanup(projectPath: p, worktreePath: w) }
             model.panes.onSurfaceCard = { id in model.minimizedIDs.remove(id) }
+            actions.bindBrowser()
         }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.

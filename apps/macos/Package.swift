@@ -38,7 +38,7 @@ let package = Package(
         .target(name: "VornTasks", dependencies: ["VornCore", "VornUI", "VornWorkflows"]),
         .target(name: "VornWorkflows", dependencies: ["VornCore", "VornUI"]),
         .target(name: "VornSettings", dependencies: ["VornCore", "VornUI"]),
-        .target(name: "VornPanes", dependencies: ["VornCore", "VornUI", "VornTerminals"]),
+        .target(name: "VornPanes", dependencies: ["VornCore", "VornUI", "VornTerminals"], resources: [.copy("Resources/page.js")]),
         .target(
             name: "VornApp",
             dependencies: ["VornCore", "VornUI", "VornTerminals", "VornTasks", "VornWorkflows", "VornSettings", "VornPanes"]

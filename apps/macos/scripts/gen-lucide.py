@@ -107,6 +107,15 @@ ICONS = {
     "split": "split",
     "square": "square",
     "stepForward": "step-forward",
+    "arrowRight": "arrow-right",
+    "rotateCw": "rotate-cw",
+    "imageDown": "image-down",
+    "scan": "scan",
+    "messageSquarePlus": "message-square-plus",
+    "mousePointerClick": "mouse-pointer-click",
+    "alignLeft": "align-left",
+    "fileText": "file-text",
+    "shapes": "shapes",
 }
 # Inline glyphs from TaskToolbar.tsx and OptionRow.tsx rather than lucide.
 INLINE = {

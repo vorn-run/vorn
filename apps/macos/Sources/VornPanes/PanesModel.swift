@@ -35,7 +35,7 @@ public struct EditorCardState: Codable, Equatable, Sendable {
 
 /// One pane in a session's column, keyed by the id maximize matches on.
 public struct ColumnEntry: Equatable, Sendable, Identifiable {
-    public enum Kind: String, Sendable { case files, terminals }
+    public enum Kind: String, Sendable { case files, browser, device, terminals }
     public let id: String
     public let kind: Kind
 }
@@ -44,6 +44,8 @@ public struct ColumnEntry: Equatable, Sendable, Identifiable {
 public enum PaneID {
     public static func files(_ s: String) -> String { "files:\(s)" }
     public static func terminals(_ s: String) -> String { "terminals:\(s)" }
+    public static func browser(_ s: String) -> String { "browser:\(s)" }
+    public static func device(_ s: String) -> String { "device:\(s)" }
     public static func fileTab(_ s: String, _ path: String) -> String { "tab:\(s)\u{0}\(path)" }
     public static func card(_ s: String, _ seq: Int) -> String { "card:\(s):\(seq)" }
     public static func isCard(_ id: String) -> Bool { id.hasPrefix("card:") }
@@ -68,6 +70,8 @@ public final class PanesModel {
     public var diffSessionID: String?
     public var diffWidth: CGFloat = 480
     public var diffMaximized = false
+    /// The browser and device panes, and the agents' bridge to them.
+    public let browser: BrowserModel
 
     /// Asks before unsaved edits are thrown away; renders and tests answer for the person.
     @ObservationIgnored public var confirmDiscard: () -> Bool = PanesModel.askDiscard
@@ -78,6 +82,7 @@ public final class PanesModel {
     public init(defaults: UserDefaults = .standard, persists: Bool = true) {
         self.defaults = defaults
         self.persists = persists
+        browser = BrowserModel(defaults: defaults, persists: persists)
         guard persists else { return }
         let dec = JSONDecoder()
         if let d = defaults.data(forKey: "vorn.filesPanes"), let v = try? dec.decode([String: FilesPaneState].self, from: d) { filesPanes = v }
@@ -133,6 +138,8 @@ public final class PanesModel {
     public func columnEntries(_ sessionID: String) -> [ColumnEntry] {
         var out: [ColumnEntry] = []
         if filesPanes[sessionID] != nil { out.append(ColumnEntry(id: PaneID.files(sessionID), kind: .files)) }
+        if browser.isOpen(sessionID) { out.append(ColumnEntry(id: PaneID.browser(sessionID), kind: .browser)) }
+        if browser.hasDevicePane(sessionID) { out.append(ColumnEntry(id: PaneID.device(sessionID), kind: .device)) }
         if let t = terminalsPanes[sessionID], !t.terminals.isEmpty {
             out.append(ColumnEntry(id: PaneID.terminals(sessionID), kind: .terminals))
         }
@@ -334,6 +341,7 @@ public final class PanesModel {
             cardOrder.removeAll { $0 == id }
         }
         if let d = diffSessionID, !liveSessions.contains(d) { diffSessionID = nil }
+        browser.prune(liveSessions: liveSessions)
         save()
     }
 }

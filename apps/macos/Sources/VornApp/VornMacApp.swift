@@ -6,6 +6,7 @@ import VornSettings
 import VornTerminals
 import VornUI
 import VornWorkflows
+import WebKit
 
 public let defaultWindowSize = CGSize(width: 1280, height: 800)
 
@@ -341,9 +342,42 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             model.panes.promoteFile(all[n].id, (cwd(all[n]) as NSString).appendingPathComponent(parts[1]))
         }
     }
-    if let kind = value("--maximize"), let first = all.first(where: { !model.panes.columnEntries($0.id).isEmpty }) {
-        model.panes.maximizedPaneId = kind == "files" ? PaneID.files(first.id) : PaneID.terminals(first.id)
+    let browser = model.panes.browser
+    let usesBrowser = ["--browser", "--artifact", "--device"].contains(where: args.contains)
+    if usesBrowser {
+        BrowserModel.inlinePopovers = true
+        ShellActions(store: store, model: model).bindBrowser()
+        browser.deviceBackend = .rendering
     }
+    if let spec = value("--browser") {
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        if let n = Int(parts[0]), all.indices.contains(n) { browser.open(all[n].id, url: parts.count > 1 ? parts[1] : nil) }
+    }
+    if let spec = value("--artifact") {
+        let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        if parts.count == 2, let n = Int(parts[0]), all.indices.contains(n),
+           let list = try? await store.client.call("artifact:list", ["limit": 50]),
+           let a = (list.arrayValue ?? list["artifacts"]?.arrayValue ?? []).first(where: { $0["title"]?.stringValue == parts[1] }),
+           let id = a["id"]?.stringValue, let version = a["latestVersion"]?.numberValue,
+           let url = try? await store.client.call("artifact:versionUrl", ["artifactId": .string(id), "version": .number(version)])["url"] {
+            _ = await browser.bridge("browser:openPane", [
+                "sessionId": .string(all[n].id), "url": url,
+                "artifact": ["id": .string(id), "version": .number(version), "kind": a["kind"] ?? "doc", "title": .string(parts[1])],
+            ])
+        }
+    }
+    if let n = value("--device").flatMap(Int.init), all.indices.contains(n) {
+        await browser.renderStep(all[n].id, "claim:\(DeviceBackend.renderingDevice.udid)")
+    }
+    if let kind = value("--maximize"), let first = all.first(where: { !model.panes.columnEntries($0.id).isEmpty }) {
+        model.panes.maximizedPaneId = switch kind {
+        case "files": PaneID.files(first.id)
+        case "browser": PaneID.browser(first.id)
+        case "device": PaneID.device(first.id)
+        default: PaneID.terminals(first.id)
+        }
+    }
+    let browserSteps = value("--browser-step").map { $0.split(separator: ",").map(String.init) } ?? []
     if let n = value("--changes").flatMap(Int.init), all.indices.contains(n) {
         model.panes.diffSessionID = all[n].id
         await store.refreshDiffStat(cwd(all[n]))
@@ -438,17 +472,21 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     let content = RootView(model: model, store: store, engines: engines, features: features, fauxChrome: true)
         .environment(\.terminalSnapshot, true)
         .environment(\.workflowsStaticLayout, true)
+        .inlinePopoverHost()
         .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
     let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
         || model.panes.diffSessionID != nil || !model.panes.filesPanes.isEmpty || !model.panes.terminalsPanes.isEmpty
-        || !model.panes.editorCards.isEmpty
+        || !model.panes.editorCards.isEmpty || usesBrowser
     let editorState = value("--editor")
-    let settle = args.contains("--review") ? 2500 : model.panes.filesPanes.isEmpty && model.panes.editorCards.isEmpty ? 300 : 1500
+    let settle = args.contains("--review") ? 2500 : usesBrowser ? 3000
+        : model.panes.filesPanes.isEmpty && model.panes.editorCards.isEmpty ? 300 : 1500
+    let stepped = all.first { browser.isOpen($0.id) || browser.hasDevicePane($0.id) }?.id
     let image = scrolls ? await hostedImage(of: content, size: size, settle: settle) { root in
         if let editorState { RichEditorDriver.drive(root, editorState) }
+        if let stepped { Task { for step in browserSteps { await browser.renderStep(stepped, step) } } }
     } : {
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
@@ -497,6 +535,23 @@ private func hostedImage(
         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
     ) else { return nil }
     rep.size = size
+    await freezeWebViews(in: host)
     host.cacheDisplay(in: host.bounds, to: rep)
     return rep.cgImage
+}
+
+/// Page views don't draw through `cacheDisplay`, so each is swapped for an image of its snapshot first.
+@MainActor
+private func freezeWebViews(in host: NSView) async {
+    func webViews(_ v: NSView) -> [WKWebView] {
+        (v as? WKWebView).map { [$0] } ?? v.subviews.flatMap(webViews)
+    }
+    for web in webViews(host) where web.window != nil && !web.isHiddenOrHasHiddenAncestor && web.bounds.width > 1 && web.bounds.height > 1 {
+        guard let image = try? await web.takeSnapshot(configuration: nil), let parent = web.superview else { continue }
+        let still = NSImageView(frame: web.frame)
+        still.image = image
+        still.imageScaling = .scaleAxesIndependently
+        parent.addSubview(still, positioned: .above, relativeTo: web)
+        web.isHidden = true
+    }
 }
