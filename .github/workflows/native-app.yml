@@ -159,6 +159,7 @@ jobs:
 
       # The packaged app's server, helpers and CLI run.
       - name: Packaged app runs
+        timeout-minutes: 10
         run: |
           dir=$(mktemp -d)
           case "$RUNNER_OS" in
@@ -172,7 +173,9 @@ jobs:
             Linux) dpkg-deb -x dist-native/vorn_*.deb "$dir"; res="$dir/opt/Vorn/resources"; x= ;;
           esac
           test -f "$res/web/dist/index.html"
-          out=$("$res/vornd/vornd$x" --data-dir "$dir/data" --port 0 --exit-with-stdin < /dev/null)
+          # A file, not a pipe: on Windows the sessiond vornd starts inherits a pipe and holds it open.
+          "$res/vornd/vornd$x" --data-dir "$dir/data" --port 0 --exit-with-stdin < /dev/null > "$dir/vornd.out"
+          out=$(head -n 1 "$dir/vornd.out")
           echo "$out"
           case "$out" in
             '{"port":'*) ;;
@@ -181,6 +184,7 @@ jobs:
           "$res/vornd/vorn-sessiond$x" --version
           "$res/vornd/vorn$x" --version
           if [ "$RUNNER_OS" = Windows ]; then
+            taskkill //F //IM vorn-sessiond.exe || true
             "$inst/Uninstall Vorn.exe" /S "_?=$(cygpath -w "$inst")"
             test ! -e "$inst/Vorn.exe"
             test ! -e "$inst/resources"
