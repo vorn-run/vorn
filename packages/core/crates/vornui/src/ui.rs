@@ -1203,6 +1203,7 @@ impl Ui {
                 Shape::Dot => cells::Op::Glyph {
                     glyph: "●".into(),
                     color: bg,
+                    icon: 0,
                 },
             };
             self.record(cx, op, rl);
@@ -1252,7 +1253,11 @@ impl Ui {
                 _ => theme::color::INK,
             });
             let glyph = g.to_owned();
-            self.record(cx, cells::Op::Glyph { glyph, color }, inner);
+            let icon = match &el.content {
+                Content::Icon { svg, .. } => cells::icon_key(svg),
+                _ => 0,
+            };
+            self.record(cx, cells::Op::Glyph { glyph, color, icon }, inner);
             return;
         }
         match &el.content {

@@ -221,6 +221,41 @@ pub mod attr {
     pub const INVERSE: u8 = 32;
 }
 
+/// The icons cells frames refer to: each SVG's key, and the SVG of each key.
+#[derive(Default)]
+struct Icons {
+    keys: std::collections::HashMap<String, u32>,
+    svgs: Vec<String>,
+}
+
+static ICONS: std::sync::LazyLock<std::sync::Mutex<Icons>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// A key for icon `svg`, the same for the same SVG for the life of the process.
+pub fn icon_key(svg: &str) -> u32 {
+    let mut icons = ICONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(k) = icons.keys.get(svg) {
+        return *k;
+    }
+    icons.svgs.push(svg.to_owned());
+    let key = u32::try_from(icons.svgs.len()).unwrap_or(0);
+    icons.keys.insert(svg.to_owned(), key);
+    key
+}
+
+/// The SVG icon `key` stands for.
+pub fn icon_svg(key: u32) -> Option<String> {
+    let icons = ICONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    icons
+        .svgs
+        .get(usize::try_from(key).ok()?.checked_sub(1)?)
+        .cloned()
+}
+
 /// One terminal cell: its grapheme, colours (sRGB) and attributes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cell {
@@ -228,6 +263,9 @@ pub struct Cell {
     pub fg: [u8; 3],
     pub bg: [u8; 3],
     pub attr: u8,
+    /// The icon this cell stands for ([`icon_key`]), 0 for none: a terminal
+    /// that shows images draws the icon itself, the rest the glyph in `sym`.
+    pub icon: u32,
 }
 
 impl Cell {
@@ -237,6 +275,7 @@ impl Cell {
             fg: [255; 3],
             bg,
             attr: 0,
+            icon: 0,
         }
     }
 }
@@ -283,7 +322,12 @@ pub enum Op {
         wrap: bool,
     },
     /// An icon's glyph, centred in its box.
-    Glyph { glyph: String, color: Rgba },
+    /// `icon` is the drawn icon's [`icon_key`], 0 for a plain glyph.
+    Glyph {
+        glyph: String,
+        color: Rgba,
+        icon: u32,
+    },
     /// Cells copied as they are (a terminal pane), `cols` wide, row by row.
     Cells { cols: u16, cells: Vec<Cell> },
 }
@@ -904,11 +948,17 @@ impl Raster<'_> {
                     self.text(rx0, y, &line, *color, *attr, item.alpha, (x0, y0, x1, y1));
                 }
             }
-            Op::Glyph { glyph, color } => {
+            Op::Glyph { glyph, color, icon } => {
                 let gw = width(glyph).max(1) as i32;
                 let x = rx0 + ((rx1 - rx0 - gw) / 2).max(0);
                 let y = ry0 + ((ry1 - ry0 - 1) / 2).max(0);
                 self.text(x, y, glyph, *color, 0, item.alpha, (x0, y0, x1, y1));
+                // One cell of image stands for a one-cell glyph.
+                if *icon != 0 && gw == 1 && inside(x, y) {
+                    if let Some(j) = self.index(x, y) {
+                        self.buf.cells[j].icon = *icon;
+                    }
+                }
             }
             Op::Cells { cols: w, cells } => {
                 let w = i32::from(*w);
@@ -969,6 +1019,7 @@ impl Raster<'_> {
                                 fg,
                                 bg,
                                 attr,
+                                icon: 0,
                             };
                             self.line[j] = None;
                         }

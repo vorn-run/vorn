@@ -177,6 +177,7 @@ pub fn pane_cells(ui: &mut Ui, v: &PaneView, r: Rect, caret: Caret) {
             fg: rgb(run.fg),
             bg: rgb(run.bg),
             attr: a,
+            icon: 0,
         };
         let row = usize::from(run.row) * usize::from(cols);
         let text = v.run_text(run);
