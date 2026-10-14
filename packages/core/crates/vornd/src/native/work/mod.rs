@@ -530,8 +530,7 @@ impl Work {
                     ));
                 }
                 let inputs = param(params, "inputs").and_then(Value::as_object).cloned();
-                let work = Arc::clone(self);
-                tokio::spawn(async move { work.fire(&id, inputs).await });
+                self.fire_row(&row, inputs);
                 Answer::Void
             }
             "workflow:stopRun" => {

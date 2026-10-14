@@ -22,6 +22,10 @@ pub struct World {
     pub replies: Map<String, Value>,
     pub used: HashMap<String, Vec<bool>>,
     pub sessions: u32,
+    /// Session starts asked for and not yet answered.
+    pub in_flight: u32,
+    /// The ids of the sessions started.
+    pub handed: Vec<String>,
     pub pages: HashMap<(String, String, u32), String>,
 }
 
@@ -114,137 +118,152 @@ impl Host for Fake {
     fn publish(&self, _run: &WorkflowExecution) {}
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
-        self.record(method, params.clone());
-        // An answer comes back on a later turn, as a promise's does.
-        tokio::task::yield_now().await;
-        match method {
-            "headless:create" => {
-                let reply = self
-                    .take(method, &params)
-                    .unwrap_or(json!({ "exitCode": 0 }));
-                if let Some(e) = failed(&reply) {
-                    return Err(e);
+        let creates = matches!(method, "headless:create" | "terminal:create");
+        if creates {
+            self.world().in_flight += 1;
+        }
+        let answer = async {
+            self.record(method, params.clone());
+            // An answer comes back on a later turn, as a promise's does.
+            tokio::task::yield_now().await;
+            match method {
+                "headless:create" => {
+                    let reply = self
+                        .take(method, &params)
+                        .unwrap_or(json!({ "exitCode": 0 }));
+                    if let Some(e) = failed(&reply) {
+                        return Err(e);
+                    }
+                    let id = {
+                        let mut w = self.world();
+                        w.sessions += 1;
+                        format!("sess-{}", w.sessions)
+                    };
+                    let mut session = json!({ "id": id, "pid": 4242, "launchCommand": "agent -p" });
+                    for (k, v) in reply
+                        .get("session")
+                        .and_then(Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
+                        session[k] = v.clone();
+                    }
+                    let code = reply.get("exitCode").and_then(Value::as_i64);
+                    if reply.get("exitBeforeId") == Some(&Value::Bool(true)) {
+                        let _ = self.notes.send(Note::HeadlessExit {
+                            id,
+                            code: code.unwrap_or(0),
+                        });
+                    } else {
+                        let mut said: Vec<(u64, Note)> = reply
+                            .get("output")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .map(|data| {
+                                (
+                                    1,
+                                    Note::HeadlessData {
+                                        id: id.clone(),
+                                        data: data.as_str().unwrap_or("").into(),
+                                    },
+                                )
+                            })
+                            .collect();
+                        if let Some(code) = code {
+                            said.push((9, Note::HeadlessExit { id, code }));
+                        }
+                        self.later(said);
+                    }
+                    Ok(session)
                 }
-                let id = {
-                    let mut w = self.world();
-                    w.sessions += 1;
-                    format!("sess-{}", w.sessions)
-                };
-                let mut session = json!({ "id": id, "pid": 4242, "launchCommand": "agent -p" });
-                for (k, v) in reply
-                    .get("session")
-                    .and_then(Value::as_object)
-                    .into_iter()
-                    .flatten()
-                {
-                    session[k] = v.clone();
+                "terminal:create" => {
+                    let reply = self.take(method, &params).unwrap_or(json!({}));
+                    if let Some(e) = failed(&reply) {
+                        return Err(e);
+                    }
+                    let id = {
+                        let mut w = self.world();
+                        w.sessions += 1;
+                        format!("term-{}", w.sessions)
+                    };
+                    let mut session = json!({ "id": id });
+                    for (k, v) in reply
+                        .get("session")
+                        .and_then(Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
+                        session[k] = v.clone();
+                    }
+                    Ok(session)
                 }
-                let code = reply.get("exitCode").and_then(Value::as_i64);
-                if reply.get("exitBeforeId") == Some(&Value::Bool(true)) {
-                    let _ = self.notes.send(Note::HeadlessExit {
-                        id,
-                        code: code.unwrap_or(0),
-                    });
-                } else {
-                    let mut said: Vec<(u64, Note)> = reply
-                        .get("output")
+                "script:execute" => {
+                    let reply = self
+                        .take(method, &params)
+                        .unwrap_or(json!({ "result": { "success": true, "output": "" } }));
+                    let run_id = params
+                        .get("runId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    for data in reply
+                        .get("data")
                         .and_then(Value::as_array)
                         .into_iter()
                         .flatten()
-                        .map(|data| {
-                            (
-                                1,
-                                Note::HeadlessData {
-                                    id: id.clone(),
-                                    data: data.as_str().unwrap_or("").into(),
-                                },
-                            )
-                        })
-                        .collect();
-                    if let Some(code) = code {
-                        said.push((9, Note::HeadlessExit { id, code }));
+                    {
+                        let _ = self.notes.send(Note::ScriptData {
+                            run_id: run_id.clone(),
+                            data: data.as_str().unwrap_or("").into(),
+                        });
                     }
-                    self.later(said);
-                }
-                Ok(session)
-            }
-            "terminal:create" => {
-                let reply = self.take(method, &params).unwrap_or(json!({}));
-                if let Some(e) = failed(&reply) {
-                    return Err(e);
-                }
-                let id = {
-                    let mut w = self.world();
-                    w.sessions += 1;
-                    format!("term-{}", w.sessions)
-                };
-                let mut session = json!({ "id": id });
-                for (k, v) in reply
-                    .get("session")
-                    .and_then(Value::as_object)
-                    .into_iter()
-                    .flatten()
-                {
-                    session[k] = v.clone();
-                }
-                Ok(session)
-            }
-            "script:execute" => {
-                let reply = self
-                    .take(method, &params)
-                    .unwrap_or(json!({ "result": { "success": true, "output": "" } }));
-                let run_id = params
-                    .get("runId")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned();
-                for data in reply
-                    .get("data")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    let _ = self.notes.send(Note::ScriptData {
-                        run_id: run_id.clone(),
-                        data: data.as_str().unwrap_or("").into(),
-                    });
-                }
-                if let Some(e) = failed(&reply) {
-                    return Err(e);
-                }
-                Ok(reply["result"].clone())
-            }
-            "connection:executeAction" | "http:request" | "connection:upsertFromItem" => {
-                let default = match method {
-                    "connection:executeAction" => json!({ "result": { "success": true } }),
-                    "http:request" => {
-                        json!({ "result": { "success": true, "output": { "status": 200 } } })
+                    if let Some(e) = failed(&reply) {
+                        return Err(e);
                     }
-                    _ => json!({ "result": { "taskId": "t", "created": true } }),
-                };
-                let reply = self.take(method, &params).unwrap_or(default);
-                if let Some(e) = failed(&reply) {
-                    return Err(e);
+                    Ok(reply["result"].clone())
                 }
-                Ok(reply["result"].clone())
+                "connection:executeAction" | "http:request" | "connection:upsertFromItem" => {
+                    let default = match method {
+                        "connection:executeAction" => json!({ "result": { "success": true } }),
+                        "http:request" => {
+                            json!({ "result": { "success": true, "output": { "status": 200 } } })
+                        }
+                        _ => json!({ "result": { "taskId": "t", "created": true } }),
+                    };
+                    let reply = self.take(method, &params).unwrap_or(default);
+                    if let Some(e) = failed(&reply) {
+                        return Err(e);
+                    }
+                    Ok(reply["result"].clone())
+                }
+                "sessionEvent:listBySession" => {
+                    let key = json!({ "sessionId": params["sessionId"] });
+                    Ok(self
+                        .take(method, &key)
+                        .map_or(json!([]), |r| r["result"].clone()))
+                }
+                "worktree:activeSessions" => Ok(self
+                    .take(method, &json!({}))
+                    .map_or(json!({ "count": 0, "sessionIds": [] }), |r| {
+                        r["result"].clone()
+                    })),
+                "git:worktreeDirty" => Ok(self
+                    .take(method, &json!({}))
+                    .map_or(json!(false), |r| r["result"].clone())),
+                "git:removeWorktree" => Ok(json!(true)),
+                _ => Ok(Value::Null),
             }
-            "sessionEvent:listBySession" => {
-                let key = json!({ "sessionId": params["sessionId"] });
-                Ok(self
-                    .take(method, &key)
-                    .map_or(json!([]), |r| r["result"].clone()))
-            }
-            "worktree:activeSessions" => Ok(self
-                .take(method, &json!({}))
-                .map_or(json!({ "count": 0, "sessionIds": [] }), |r| {
-                    r["result"].clone()
-                })),
-            "git:worktreeDirty" => Ok(self
-                .take(method, &json!({}))
-                .map_or(json!(false), |r| r["result"].clone())),
-            "git:removeWorktree" => Ok(json!(true)),
-            _ => Ok(Value::Null),
         }
+        .await;
+        if creates {
+            let mut w = self.world();
+            w.in_flight -= 1;
+            if let Some(id) = answer.as_ref().ok().and_then(|s| s["id"].as_str()) {
+                w.handed.push(id.to_owned());
+            }
+        }
+        answer
     }
 
     fn notes(&self) -> broadcast::Receiver<Note> {

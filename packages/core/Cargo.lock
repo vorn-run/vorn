@@ -6839,6 +6839,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-workflow-bench"
+version = "0.8.0-beta.10"
+dependencies = [
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "vorn-worktrees"
 version = "0.0.0"
 dependencies = [

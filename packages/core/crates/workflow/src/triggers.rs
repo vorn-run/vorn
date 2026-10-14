@@ -160,6 +160,11 @@ impl<H: Host> Engine<H> {
         else {
             return;
         };
+        self.run_scheduled_workflow(workflow, inputs);
+    }
+
+    /// `runScheduled` of a workflow the caller has already read.
+    pub fn run_scheduled_workflow(&self, workflow: Workflow, inputs: Option<Map<String, Value>>) {
         let context = scheduler_context(None, inputs);
         self.start(workflow, context, Some(Source::Scheduler));
     }

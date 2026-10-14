@@ -195,15 +195,23 @@ impl Host for VorndHost {
     }
 
     async fn save_run(&self, run: WorkflowExecution) {
+        self.save_runs(vec![run]).await;
+    }
+
+    async fn save_runs(&self, runs: Vec<WorkflowExecution>) {
         let data_dir = self.data_dir.clone();
         self.db
-            .run(move |store| match store.save_workflow_run(&run) {
-                Ok(trimmed) => {
-                    for id in trimmed {
-                        vorn_work::gates::remove(&data_dir, &id);
+            .run(move |store| {
+                for run in &runs {
+                    match store.save_workflow_run(run) {
+                        Ok(trimmed) => {
+                            for id in trimmed {
+                                vorn_work::gates::remove(&data_dir, &id);
+                            }
+                        }
+                        Err(err) => warn!(%err, run = %run.run_id, "a run could not be saved"),
                     }
                 }
-                Err(err) => warn!(%err, run = %run.run_id, "a run could not be saved"),
             })
             .await;
     }

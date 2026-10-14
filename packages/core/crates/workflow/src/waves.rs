@@ -168,6 +168,8 @@ impl<H: Host> Engine<H> {
                     }
                 });
                 futures_util::future::join_all(steps).await;
+                // Steps that never wait would otherwise hold this worker for the whole walk.
+                tokio::task::yield_now().await;
                 let stateless = stateless.into_inner().unwrap_or_else(|e| e.into_inner());
                 if let Some(first) = stateless.into_iter().next() {
                     return Err(first);

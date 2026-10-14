@@ -1,0 +1,22 @@
+[package]
+name = "vorn-workflow-bench"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Measures the workflow engine in a test vornd: trigger to first step under concurrent runs, cost per step, gates, schedules and memory per run"
+
+[[bin]]
+name = "vorn-workflow-bench"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "macros", "time"] }
+tokio-tungstenite = "0.28"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

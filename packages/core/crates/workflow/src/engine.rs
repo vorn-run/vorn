@@ -167,6 +167,29 @@ enum Save {
     Flush(oneshot::Sender<()>),
 }
 
+/// Queued saves, each run's latest state at its first place, and the flushes behind them.
+#[derive(Default)]
+struct Batch {
+    runs: Vec<WorkflowExecution>,
+    at: HashMap<String, usize>,
+    flushes: Vec<oneshot::Sender<()>>,
+}
+
+impl Batch {
+    fn add(&mut self, save: Save) {
+        match save {
+            Save::Run(run) => match self.at.get(&run.run_id) {
+                Some(&i) => self.runs[i] = *run,
+                None => {
+                    self.at.insert(run.run_id.clone(), self.runs.len());
+                    self.runs.push(*run);
+                }
+            },
+            Save::Flush(done) => self.flushes.push(done),
+        }
+    }
+}
+
 pub(crate) struct Inner<H> {
     pub(crate) host: H,
     saves: mpsc::UnboundedSender<Save>,
@@ -234,15 +257,18 @@ impl<H: Host> Engine<H> {
         });
         let weak = Arc::downgrade(&inner);
         tokio::spawn(async move {
-            while let Some(save) = queue.recv().await {
-                match save {
-                    Save::Run(run) => {
-                        let Some(inner) = weak.upgrade() else { return };
-                        inner.host.save_run(*run).await;
-                    }
-                    Save::Flush(done) => {
-                        let _ = done.send(());
-                    }
+            while let Some(first) = queue.recv().await {
+                let mut batch = Batch::default();
+                batch.add(first);
+                while let Ok(save) = queue.try_recv() {
+                    batch.add(save);
+                }
+                if !batch.runs.is_empty() {
+                    let Some(inner) = weak.upgrade() else { return };
+                    inner.host.save_runs(batch.runs).await;
+                }
+                for done in batch.flushes {
+                    let _ = done.send(());
                 }
             }
         });
@@ -304,7 +330,7 @@ impl<H: Host> Engine<H> {
     /// every few seconds.
     pub(crate) fn publish(&self, run: &Run) {
         let snapshot = {
-            let r = lock(run);
+            let mut r = lock(run);
             let shape = shape(&r);
             let now = Instant::now();
             let mut published = locked(&self.inner.published);
@@ -318,7 +344,12 @@ impl<H: Host> Engine<H> {
             } else {
                 published.remove(&r.run_id);
             }
-            r.clone()
+            drop(published);
+            // Clients never get the definition, so the snapshot does not copy it.
+            let definition = r.definition.take();
+            let snapshot = r.clone();
+            r.definition = definition;
+            snapshot
         };
         self.inner.host.publish(&snapshot);
     }

@@ -29,6 +29,7 @@ Rust binaries:
 ```sh
 cargo test --workspace         # the logic, on any platform
 cargo bench -p vorn-analysis   # Criterion
+bench/workflows/run.sh OUT     # the workflow engine under concurrent runs, on a test vornd
 ```
 
 ## vornd
