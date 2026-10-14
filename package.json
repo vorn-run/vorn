@@ -40,12 +40,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "shiki": "^4.2.0",
-    "ws": "^8.21.1",
+    "ws": "^8.22.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "4.1.10",
     "@vitest/eslint-plugin": "^1.6.27",
     "eslint": "^10.7.0",
