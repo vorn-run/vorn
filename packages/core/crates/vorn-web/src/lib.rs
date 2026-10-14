@@ -1,6 +1,13 @@
 //! Vorn in a browser: the desktop app's screens drawn by vornui in a canvas,
 //! talking to the vornd that served the page over its `/ws` and `/grid`
 //! WebSockets. The build's loader fetches the wasm and calls [`start`].
+//!
+//! Images in terminals: a pasted (clipboard holds only an image) or dropped
+//! image is uploaded to vornd and its saved path is pasted, since the program
+//! runs on vornd's machine and cannot read this browser's clipboard. Limits the
+//! browser sets: only images (png, jpeg, gif, webp, bmp, up to 10 MB); other
+//! dropped files are ignored, as a page never sees local paths; Ctrl+V reaches
+//! the program, but it reads the clipboard of vornd's machine.
 
 #![cfg(target_arch = "wasm32")]
 
