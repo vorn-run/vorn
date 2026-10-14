@@ -730,7 +730,7 @@ impl Connectors {
         }
         let local = vorn_connectors::catalog::local_launch_spec(sdk_id, self.repo_root.as_deref());
         let Some((command, args)) = local else {
-            let pack = self.installer.store().describe(sdk_id)?;
+            let pack = self.installer.store().inspect_unmeasured(sdk_id).ok()?;
             return Some(auth::Source {
                 auth: pack
                     .manifest
@@ -808,7 +808,7 @@ impl Connectors {
             {
                 source = LaunchSource::Checkout;
                 program_args = Some(local);
-            } else if let Some(pack) = self.installer.store().describe(&sdk_id) {
+            } else if let Ok(pack) = self.installer.store().inspect_unmeasured(&sdk_id) {
                 source = LaunchSource::Pack;
                 protocol = pack.manifest.protocol;
                 name = pack.name().to_owned();
@@ -954,7 +954,7 @@ impl Connectors {
         args: &Map<String, Value>,
     ) -> Option<Result<Value, sdk::SdkError>> {
         let sdk_id = conns::sdk_id_of(conn);
-        let pack = self.installer.store().describe(&sdk_id)?;
+        let pack = self.installer.store().inspect_unmeasured(&sdk_id).ok()?;
         let run = pack.manifest.run(action)?;
         let (program, run_args) = pack.resolve(&run.command)?;
         let mut spawn = match self.spawn_spec(conn).await {
@@ -1982,8 +1982,21 @@ impl Connectors {
         (!sdk_id.is_empty()).then_some(sdk_id)
     }
 
-    /// A package installed, linked or removed through the extension bridge.
+    /// A package installed or linked through the extension bridge.
     pub(crate) async fn package_changed(&self, id: &str) {
+        self.pack_changed(id).await;
+        self.changed();
+    }
+
+    /// A package removed through the extension bridge takes every connection
+    /// made with it, and their secrets: nothing of it is left.
+    pub(crate) async fn package_removed(&self, id: &str) {
+        for conn in self.connections_of(id).await {
+            let conn_id = text(&conn, "id");
+            if let Err(err) = self.remove_connection(conn_id).await {
+                warn!("[packs] could not remove {conn_id} with {id}: {err}");
+            }
+        }
         self.pack_changed(id).await;
         self.changed();
     }

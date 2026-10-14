@@ -169,8 +169,12 @@ pub trait Around: Send + Sync + 'static {
     fn write(&self, id: &str, text: &str) -> BoxFuture<'static, Result<(), String>>;
     /// The git to read a worktree with.
     fn git(&self) -> Git;
-    /// A package was installed, linked or removed: the connector it brings comes or goes.
+    /// A package was installed or linked: the connector it brings comes with it.
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
+    /// A package was removed: the connections made with it go with it.
+    fn pack_removed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
 }
@@ -439,7 +443,7 @@ impl Extensions {
         self.router.forget(id).await;
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
-        self.around.pack_changed(id).await;
+        self.around.pack_removed(id).await;
         Ok(json!({ "removed": id }))
     }
 
@@ -1081,6 +1085,16 @@ impl Around for Wired {
         Box::pin(async move {
             if let Some(connectors) = connectors {
                 connectors.package_changed(&id).await;
+            }
+        })
+    }
+
+    fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
+        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let id = id.to_owned();
+        Box::pin(async move {
+            if let Some(connectors) = connectors {
+                connectors.package_removed(&id).await;
             }
         })
     }
