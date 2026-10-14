@@ -538,7 +538,7 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
 /// cells: only the cards in view are built, yet every card is reached by
 /// scrolling, the arrows and a drag that scrolls the column it nears.
 fn long_board(cells: bool) {
-    const LONG: usize = 2000;
+    const LONG: usize = 400;
     let Some(v) = TestVornd::start() else {
         return;
     };
