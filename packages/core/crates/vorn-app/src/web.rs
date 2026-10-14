@@ -7,24 +7,42 @@
 //! Without a window (an offscreen shot) there are no views: the screen
 //! still draws the pane's chrome and leaves the page box empty.
 
+#[cfg(feature = "webview")]
 use std::borrow::Cow;
 use std::collections::HashMap;
+#[cfg(feature = "webview")]
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex, PoisonError};
+#[cfg(feature = "webview")]
+use std::sync::PoisonError;
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "webview")]
 use std::time::Instant;
 
+#[cfg(feature = "webview")]
 use wry::dpi::{PhysicalPosition, PhysicalSize};
+#[cfg(feature = "webview")]
 use wry::http::{header, Request, Response};
+#[cfg(feature = "webview")]
 use wry::{NewWindowResponse, PageLoadEvent, WebView, WebViewBuilder};
 
+#[cfg(feature = "webview")]
 use crate::client::rpc::Wake;
-use crate::ui::{NativeWindow, Rect};
+#[cfg(feature = "webview")]
+use crate::ui::NativeWindow;
+use crate::ui::Rect;
+
+#[cfg(not(feature = "webview"))]
+#[path = "web/off.rs"]
+mod off;
+#[cfg(not(feature = "webview"))]
+pub use off::Host;
 
 /// The script every page gets before its own (`window.__vorn`).
 pub const PAGE_SCRIPT: &str = include_str!("web/page.js");
 
 /// The page a device pane shows: the latest frame, refreshed. Taps need the
 /// simulator companion, so the frame is view-only.
+#[cfg(feature = "webview")]
 const DEVICE_PAGE: &str = include_str!("web/device.html");
 
 /// The latest screen of each session's device, as PNG bytes.
@@ -41,6 +59,7 @@ pub fn device_url(session: &str) -> String {
 }
 
 /// Answers `vorn://localhost/device/<session>[/frame.png]`.
+#[cfg(feature = "webview")]
 fn serve(frames: &Frames, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = req.uri().path();
     let reply = |status: u16, kind: &str, body: Cow<'static, [u8]>| {
@@ -113,6 +132,7 @@ pub struct Slot {
     pub profile: Option<String>,
 }
 
+#[cfg(feature = "webview")]
 struct View {
     wv: WebView,
     /// The profile's context, which must outlive the view (Windows, Linux).
@@ -133,6 +153,7 @@ struct View {
     pending: Option<Instant>,
 }
 
+#[cfg(feature = "webview")]
 impl View {
     fn load(&mut self, url: &str) {
         self.asked = url.to_owned();
@@ -143,6 +164,7 @@ impl View {
 }
 
 /// The web views of every open pane.
+#[cfg(feature = "webview")]
 pub struct Host {
     window: Option<Arc<NativeWindow>>,
     /// Why there are no views here, said in the pane.
@@ -158,6 +180,7 @@ pub struct Host {
     profiles: Option<std::path::PathBuf>,
 }
 
+#[cfg(feature = "webview")]
 impl Host {
     pub fn new(wake: Wake) -> Host {
         let (tx, rx) = channel();
@@ -540,6 +563,7 @@ impl Host {
 pub const NO_PANE: &str =
     "This session has no browser pane open. Open one from the session card, then retry.";
 
+#[cfg(feature = "webview")]
 fn bounds(r: Rect) -> wry::Rect {
     wry::Rect {
         position: PhysicalPosition::new(r.x.round() as i32, r.y.round() as i32).into(),
@@ -548,6 +572,7 @@ fn bounds(r: Rect) -> wry::Rect {
 }
 
 /// WebKitGTK seats a child view only in an X11 window, on GTK's loop.
+#[cfg(feature = "webview")]
 #[cfg(target_os = "linux")]
 fn platform_ready(window: &NativeWindow) -> Result<(), String> {
     use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -562,6 +587,7 @@ fn platform_ready(window: &NativeWindow) -> Result<(), String> {
     gtk::init().map_err(|e| format!("GTK did not start: {e}"))
 }
 
+#[cfg(feature = "webview")]
 #[cfg(not(target_os = "linux"))]
 fn platform_ready(_window: &NativeWindow) -> Result<(), String> {
     Ok(())

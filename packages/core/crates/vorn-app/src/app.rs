@@ -956,6 +956,12 @@ impl App {
         current
     }
 
+    /// Puts the card `id` on the focused stage, full window, keys going to it.
+    pub fn focus_session(&mut self, id: &str) {
+        self.st.focused = Some(id.to_owned());
+        self.go_to(id.to_owned());
+    }
+
     /// Moves to the card `id`: onto the stage when one is focused.
     fn go_to(&mut self, id: String) {
         self.st.view = MainView::Sessions;
@@ -2924,10 +2930,14 @@ impl App {
                     Some((s, sel)) if s == sid => sel.rows(v),
                     _ => Vec::new(),
                 };
-                // A screen not yet resized to a narrower box stays inside it.
-                ui.scene.push_clip(*r);
-                paint::pane(ui, v, *r, caret, pre, &sel, dy);
-                ui.scene.pop_clip();
+                if ui.is_cells() {
+                    paint::pane_cells(ui, v, *r, caret);
+                } else {
+                    // A screen not yet resized to a narrower box stays inside it.
+                    ui.scene.push_clip(*r);
+                    paint::pane(ui, v, *r, caret, pre, &sel, dy);
+                    ui.scene.pop_clip();
+                }
             }
             self.term_boxes.insert(sid.to_owned(), *r);
         }
@@ -2946,12 +2956,16 @@ impl App {
         if let Some(v) = self.views.get(id) {
             let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
             let pre = if focused { self.preedit.as_str() } else { "" };
-            ui.scene.push_clip(r);
             let caret = if focused {
                 paint::Caret::Live
             } else {
                 paint::Caret::Hollow
             };
+            if ui.is_cells() {
+                paint::pane_cells(ui, v, r, caret);
+                return;
+            }
+            ui.scene.push_clip(r);
             paint::pane(ui, v, r, caret, pre, &[], 0.0);
             ui.scene.pop_clip();
         }

@@ -142,6 +142,76 @@ pub fn pane(
     }
 }
 
+/// Draws `v` into `r` (cells) on a cells surface: the session's own cells
+/// copied straight in, and the terminal's real cursor at the session cursor.
+pub fn pane_cells(ui: &mut Ui, v: &PaneView, r: Rect, caret: Caret) {
+    use crate::ui::cells::{attr, Cell, CursorAt, CursorShape, Op, Sym};
+    let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
+    let (cols, rows) = (v.cols.min(r.w as u16), v.rows.min(r.h as u16));
+    if cols == 0 || rows == 0 {
+        return;
+    }
+    let blank = Cell {
+        fg: rgb(v.fg),
+        ..Cell::blank(rgb(v.bg))
+    };
+    let mut cells = vec![blank; usize::from(cols) * usize::from(rows)];
+    for run in &v.runs {
+        if run.row >= rows {
+            continue;
+        }
+        let mut a = 0;
+        for (f, c) in [
+            (flags::BOLD, attr::BOLD),
+            (flags::ITALIC, attr::ITALIC),
+            (flags::UNDERLINE, attr::UNDERLINE),
+            (flags::STRIKE, attr::STRIKE),
+            (flags::FAINT, attr::DIM),
+        ] {
+            if run.flags & f != 0 {
+                a |= c;
+            }
+        }
+        let cell = |sym| Cell {
+            sym,
+            fg: rgb(run.fg),
+            bg: rgb(run.bg),
+            attr: a,
+        };
+        let row = usize::from(run.row) * usize::from(cols);
+        let text = v.run_text(run);
+        if run.flags & flags::CLUSTER != 0 {
+            for i in 0..run.ncols.min(cols.saturating_sub(run.col)) {
+                let sym = if i == 0 { Sym::new(text) } else { Sym::TAIL };
+                cells[row + usize::from(run.col + i)] = cell(sym);
+            }
+            continue;
+        }
+        for (n, (i, ch)) in text.char_indices().take(usize::from(run.ncols)).enumerate() {
+            let col = run.col as usize + n;
+            if col < usize::from(cols) {
+                cells[row + col] = cell(Sym::new(&text[i..i + ch.len_utf8()]));
+            }
+        }
+    }
+    let rect = Rect::new(r.x, r.y, f32::from(cols), f32::from(rows));
+    let Some(list) = ui.paint_list_mut() else {
+        return;
+    };
+    list.push_app(Op::Cells { cols, cells }, rect, r);
+    if caret == Caret::Live && v.cursor_visible && v.cursor_x < cols && v.cursor_y < rows {
+        list.cursor = Some(CursorAt {
+            col: (r.x + f32::from(v.cursor_x)) as u16,
+            row: (r.y + f32::from(v.cursor_y)) as u16,
+            shape: match v.cursor {
+                Cursor::Bar => CursorShape::Bar,
+                Cursor::Underline => CursorShape::Underline,
+                Cursor::Block | Cursor::Hollow => CursorShape::Block,
+            },
+        });
+    }
+}
+
 /// IME composition: drawn over the cursor's cells, underlined, the way a
 /// terminal shows text that is not yet sent.
 fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
@@ -172,4 +242,36 @@ fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
         0.0,
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::cells::Op;
+    use crate::view::Run;
+
+    #[test]
+    fn wide_bytes_land_one_per_cell() {
+        let mut ui = Ui::cells(&crate::ui_config(1.0));
+        ui.paint_list_mut().expect("cells").begin(Rgba::default());
+        let text = "─┼─".as_bytes().to_vec();
+        let v = PaneView {
+            rows: 1,
+            cols: 4,
+            runs: vec![Run {
+                ncols: 3,
+                text_len: text.len() as u32,
+                ..Run::default()
+            }],
+            text,
+            ..PaneView::default()
+        };
+        pane_cells(&mut ui, &v, Rect::new(0.0, 0.0, 4.0, 1.0), Caret::Hollow);
+        let list = ui.paint_list().expect("cells");
+        let Some(Op::Cells { cells, .. }) = list.items.last().map(|i| &i.op) else {
+            panic!("no cells op");
+        };
+        let row: String = cells.iter().map(|c| c.sym.as_str()).collect();
+        assert_eq!(row.trim_end(), "─┼─");
+    }
 }

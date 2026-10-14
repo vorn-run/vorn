@@ -267,6 +267,10 @@ pub struct El {
     /// Blur what is drawn under the box by this standard deviation, in
     /// logical pixels (`backdrop-filter: blur()`).
     pub(crate) backdrop_blur: Option<f32>,
+    /// What the box shows on a cells surface instead of its content and children.
+    pub(crate) glyph: Option<Box<str>>,
+    /// The glyph's ink, when it is not the content's.
+    pub(crate) glyph_tint: Option<Rgba>,
 }
 
 pub fn div() -> El {
@@ -295,6 +299,8 @@ pub fn div() -> El {
         dashed: false,
         shadows: Vec::new(),
         backdrop_blur: None,
+        glyph: None,
+        glyph_tint: None,
     }
 }
 
@@ -345,6 +351,17 @@ pub fn custom(id: u64) -> El {
 impl El {
     pub fn content(mut self, c: Content) -> El {
         self.content = c;
+        self
+    }
+    /// The character (or short string) this box is on a cells surface, in
+    /// place of its icon, image or children; pixel surfaces ignore it.
+    pub fn glyph(mut self, g: impl Into<String>) -> El {
+        self.glyph = Some(g.into().into_boxed_str());
+        self
+    }
+    /// The glyph's ink on a cells surface (an image's mark has none).
+    pub fn glyph_tint(mut self, c: Rgba) -> El {
+        self.glyph_tint = Some(c);
         self
     }
     /// An edit field's placeholder ink, for one without `placeholder-*`.

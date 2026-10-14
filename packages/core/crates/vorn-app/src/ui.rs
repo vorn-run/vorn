@@ -11,12 +11,12 @@ pub use vornui::widgets::{
 pub use vornui::window::{run as run_window, run_with, App as WindowApp, Waker, WindowOptions};
 pub use vornui::winit::window::Window as NativeWindow;
 pub use vornui::TextStyle;
+pub use vornui::{backend, cells, icons, menu, theme, widgets};
 pub use vornui::{
     custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
     Cursor, El, Event, Id, Input, Laid, MemoryClipboard, Offscreen, Place, Rect, RenderMode, Rgba,
     Sense, Ui, UiConfig, WheelPhase, WindowRequest, WHEEL_LINE,
 };
-pub use vornui::{icons, menu, theme, widgets};
 pub use vornui::{TextEdit, MOVE_SLOP};
 
 /// The terminal cell at `scale`, in logical pixels, without a GPU.

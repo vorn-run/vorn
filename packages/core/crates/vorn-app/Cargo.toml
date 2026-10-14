@@ -11,6 +11,11 @@ description = "Vorn's desktop app: the main screen on vornui, live from vornd"
 name = "vorn-app"
 path = "src/main.rs"
 
+[features]
+default = ["webview"]
+# The browser pane's OS web views; without them the terminal UI builds with no GTK.
+webview = ["dep:wry", "dep:gtk"]
+
 [build-dependencies]
 # The app icon in vorn-app.exe, for Explorer, the taskbar and the installer.
 embed-resource = "3"
@@ -35,7 +40,7 @@ serde_json = "1"
 # The address bar parses as the renderer's WHATWG `URL` does.
 url = "2"
 # The browser pane: the OS web view (WKWebView, WebView2, WebKitGTK).
-wry = "0.57"
+wry = { version = "0.57", optional = true }
 # The updater: the release feed, the download and its checksum.
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 sha2 = "0.10"
@@ -49,7 +54,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 # WebKitGTK runs on GTK's loop, which the window pumps between frames.
-gtk = "0.18"
+gtk = { version = "0.18", optional = true }
 # The approve and deny keys, grabbed on the X11 root window.
 x11rb = { version = "0.13", default-features = false }
 

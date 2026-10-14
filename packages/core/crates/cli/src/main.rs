@@ -18,7 +18,17 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let code = runtime.block_on(vorn_cli::run(&argv, &mut StdIo));
+    let tty = {
+        use std::io::IsTerminal;
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    };
+    let code = match runtime.block_on(vorn_cli::plan(&argv, &mut StdIo, tty)) {
+        vorn_cli::attach::Outcome::Exit(code) => code,
+        vorn_cli::attach::Outcome::Tui(tui) => {
+            drop(runtime);
+            vorn_cli::attach::open(&tui)
+        }
+    };
     // Exits rather than dropping the runtime: a read of stdin `vorn mcp` left
     // pending runs on a thread the runtime would otherwise wait for.
     std::process::exit(code.code());

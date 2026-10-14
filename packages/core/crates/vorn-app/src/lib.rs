@@ -56,6 +56,7 @@ pub mod state;
 pub mod system;
 pub mod tasks;
 pub mod templates;
+pub mod tui;
 pub mod ui;
 pub mod update;
 pub mod vars;

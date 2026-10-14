@@ -3,8 +3,18 @@
 //! ```text
 //! vorn-app [window] [--data-dir D]
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
-//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
+//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off] [--layout tabs]
+//! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
+//!               [--keys K1,K2] [--click COL:ROW] [--png a.png] [--scale S]
+//!               [--layout tabs]
+//! vorn-app term --session ID --out a.png [--data-dir D] [--size COLSxROWS]
+//!               [--scale S]
 //! ```
+//!
+//! `cells` draws the same frame through the Cells backend and writes it as
+//! HTML, with the plain text beside it (`a.txt`) and, with `--png`, as the
+//! pane painter draws a terminal screen. `term` attaches to one
+//! session at `COLSxROWS`, takes that size, and draws its screen alone.
 //!
 //! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
 //! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
@@ -72,6 +82,13 @@ impl Args {
             None => data_dir().map_err(|e| e.to_string()),
         }
     }
+
+    /// `--layout tabs` shows the sessions as tabs.
+    fn layout(&self, app: &mut App) {
+        if self.get("layout") == Some("tabs") {
+            app.st.layout = vorn_app::state::LayoutMode::Tabs;
+        }
+    }
 }
 
 fn connect(dir: &Path, wake: Wake) -> Result<App, String> {
@@ -98,6 +115,7 @@ fn shot(args: &Args) -> Result<(), String> {
     let mut app = connect(&args.data_dir()?, Arc::new(|| {}))?;
     app.set_notice_sink(Arc::new(vorn_app::notify::Recorded::default()));
     app.chrome = args.get("chrome") != Some("off");
+    args.layout(&mut app);
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
@@ -145,6 +163,208 @@ fn shot(args: &Args) -> Result<(), String> {
         ui.render_offscreen(&target);
     }
     ui.save_png(&target, out)?;
+    println!("{out}");
+    Ok(())
+}
+
+fn cells(args: &Args) -> Result<(), String> {
+    use vorn_app::ui::backend::{Backend, Cells};
+    let out = args.get("out").ok_or("cells needs --out")?;
+    let (cols, rows): (u16, u16) = match args.get("size").and_then(|s| s.split_once('x')) {
+        Some((w, h)) => (
+            w.parse().map_err(|_| "bad --size")?,
+            h.parse().map_err(|_| "bad --size")?,
+        ),
+        None => (120, 36),
+    };
+    let size = vorn_app::ui::cells::units::px(cols, rows);
+    let mut app = connect(&args.data_dir()?, Arc::new(|| {}))?;
+    (app.chrome, app.traffic) = (false, false);
+    args.layout(&mut app);
+    let mut ui = Ui::cells(&ui_config(1.0));
+    let until = Instant::now() + Duration::from_secs(5);
+    while app.busy() && Instant::now() < until {
+        app.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    app.frame(&mut ui, size);
+    if let Some(n) = args.get("select").and_then(|n| n.parse::<usize>().ok()) {
+        app.send(&mut ui, key(&format!("Mod+Digit{n}")));
+    }
+    for k in args.get("keys").into_iter().flat_map(|k| k.split(',')) {
+        app.frame(&mut ui, size);
+        app.send(&mut ui, key(k));
+    }
+    if let Some((x, y)) = args.get("click").and_then(|c| c.split_once(':')) {
+        let (x, y): (f32, f32) = (
+            x.parse().map_err(|_| "bad --click")?,
+            y.parse().map_err(|_| "bad --click")?,
+        );
+        app.frame(&mut ui, size);
+        ui.pointer_move(x + 0.5, y + 0.5);
+        ui.pointer_down();
+        app.events(&mut ui);
+        ui.pointer_up();
+        app.events(&mut ui);
+    }
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        app.frame(&mut ui, size);
+        let ready = app
+            .store
+            .sessions
+            .iter()
+            .all(|s| s.ended() || app.pane(&s.info.id).is_some());
+        if ready || Instant::now() > until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let mut target = Cells::offscreen(cols, rows);
+    app.frame(&mut ui, size);
+    target.present(&mut ui)?;
+    let title = format!("vorn {cols}x{rows}");
+    std::fs::write(out, target.buffer.to_html(&title)).map_err(|e| e.to_string())?;
+    let text: Vec<String> = (0..rows).map(|r| target.buffer.row_text(r)).collect();
+    let txt = Path::new(out).with_extension("txt");
+    std::fs::write(&txt, text.join("\n") + "\n").map_err(|e| e.to_string())?;
+    if let Some(png) = args.get("png") {
+        let scale = args
+            .get("scale")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2.0);
+        paint_view(
+            &buffer_view(&target.buffer),
+            png,
+            scale,
+            vorn_app::paint::Caret::Hidden,
+        )?;
+    }
+    println!("{out}");
+    Ok(())
+}
+
+/// A cells frame as a terminal screen, so it can be painted as a session's is.
+fn buffer_view(b: &vorn_app::ui::cells::Buffer) -> vorn_app::view::PaneView {
+    use vorn_app::ui::cells::{attr, Sym};
+    use vorn_app::view::{flags, PaneView, Run};
+    let rgb = |c: [u8; 3]| (u32::from(c[0]) << 16) | (u32::from(c[1]) << 8) | u32::from(c[2]);
+    let mut v = PaneView {
+        cols: b.cols,
+        rows: b.rows,
+        bg: rgb([0; 3]),
+        fg: rgb([255; 3]),
+        primary: true,
+        ..PaneView::default()
+    };
+    for row in 0..b.rows {
+        for col in 0..b.cols {
+            let Some(c) = b.get(col, row) else { continue };
+            if c.sym == Sym::TAIL {
+                continue;
+            }
+            let s = c.sym.as_str();
+            let wide = b.get(col + 1, row).is_some_and(|n| n.sym == Sym::TAIL);
+            let (mut fg, mut bg) = (c.fg, c.bg);
+            if c.attr & attr::INVERSE != 0 {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+            let mut f = 0;
+            for (a, fl) in [
+                (attr::BOLD, flags::BOLD),
+                (attr::DIM, flags::FAINT),
+                (attr::ITALIC, flags::ITALIC),
+                (attr::UNDERLINE, flags::UNDERLINE),
+            ] {
+                if c.attr & a != 0 {
+                    f |= fl;
+                }
+            }
+            if !s.is_ascii() {
+                f |= flags::CLUSTER;
+            }
+            if wide {
+                f |= flags::WIDE;
+            }
+            v.runs.push(Run {
+                row,
+                col,
+                ncols: if wide { 2 } else { 1 },
+                flags: f,
+                fg: rgb(fg),
+                bg: rgb(bg),
+                text_off: v.text.len() as u32,
+                text_len: s.len() as u32,
+            });
+            v.text.extend_from_slice(s.as_bytes());
+        }
+    }
+    if let Some(c) = b.cursor {
+        (v.cursor_x, v.cursor_y, v.cursor_visible) = (c.col, c.row, true);
+    }
+    v
+}
+
+/// Paints a terminal screen to a PNG with the app's pane painter.
+fn paint_view(
+    view: &vorn_app::view::PaneView,
+    out: &str,
+    scale: f32,
+    caret: vorn_app::paint::Caret,
+) -> Result<(), String> {
+    use vorn_app::paint;
+    let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
+    let (cw, ch) = ui.text.cell_logical();
+    let size = (f32::from(view.cols) * cw, f32::from(view.rows) * ch);
+    let px = (
+        (size.0 * scale).round() as u32,
+        (size.1 * scale).round() as u32,
+    );
+    let target = ui.offscreen(px);
+    for _ in 0..2 {
+        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        let _ = ui.layout(div(), size);
+        let r = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: size.0,
+            h: size.1,
+        };
+        paint::pane(&mut ui, view, r, caret, "", &[], 0.0);
+        if ui.render_offscreen(&target) {
+            break;
+        }
+    }
+    ui.save_png(&target, out)
+}
+
+fn term(args: &Args) -> Result<(), String> {
+    let session = args.get("session").ok_or("term needs --session")?;
+    let out = args.get("out").ok_or("term needs --out")?;
+    let scale: f32 = args
+        .get("scale")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2.0);
+    let (cols, rows): (u16, u16) = match args.get("size").and_then(|s| s.split_once('x')) {
+        Some((w, h)) => (
+            w.parse().map_err(|_| "bad --size")?,
+            h.parse().map_err(|_| "bad --size")?,
+        ),
+        None => (120, 36),
+    };
+    let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
+    let grid =
+        vorn_app::grid::Grid::connect(&ep.grid, Arc::new(|| {})).map_err(|e| e.to_string())?;
+    grid.attach(session, cols, rows, 0);
+    grid.resize(session, cols, rows);
+    let until = Instant::now() + Duration::from_secs(10);
+    while grid.view(session).is_none() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let view = grid.view(session).ok_or("no screen for the session")?;
+    paint_view(&view, out, scale, vorn_app::paint::Caret::Live)?;
     println!("{out}");
     Ok(())
 }
@@ -491,6 +711,8 @@ fn widget(args: &Args) -> Result<(), String> {
 fn main() {
     let result = Args::parse().and_then(|args| match args.mode.as_str() {
         "shot" => shot(&args),
+        "cells" => cells(&args),
+        "term" => term(&args),
         "window" => window(&args),
         "widget" => widget(&args),
         "install-cli" => install_cli(&args),

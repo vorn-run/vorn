@@ -76,7 +76,7 @@ pub(crate) fn picker_project_icon(p: Option<&ProjectConfig>, size: f32) -> El {
 
 /// `ProjectIcon` with no icon: its own folder path, not lucide's.
 fn folder_icon(size: f32, color: Rgba) -> El {
-    crate::ui::icon(look::PROJECT_FOLDER, size, color)
+    crate::ui::icon(look::PROJECT_FOLDER, size, color).glyph("▪")
 }
 
 fn header(s: &Screen<'_>) -> El {
@@ -1678,7 +1678,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
         .child(body);
     div()
         .col()
-        .w(look::SIDEBAR_W)
+        .w(s.sidebar_w())
         .h_full()
         .shrink0()
         .bg(c(look::SURFACE_PANEL))

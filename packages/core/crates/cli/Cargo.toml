@@ -28,6 +28,9 @@ uuid = { version = "1", features = ["v4"] }
 vorn-protocol = { path = "../protocol" }
 vorn-store = { path = "../store" }
 
+# `vorn` and `vorn attach`: the app's screens in this terminal.
+vorn-app = { path = "../vorn-app", default-features = false }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

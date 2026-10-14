@@ -358,9 +358,15 @@ fn list(s: &Screen<'_>, visible: &[Value], current: Option<&Value>) -> El {
         let on = picked.as_deref() == Some(runs::key(run).as_str());
         rows = rows.child(run_row(s, run, on));
     }
+    // A terminal too narrow for both keeps the run's detail beside the list.
+    let w = if s.ui.is_cells() {
+        420.0_f32.min((s.grid_size().0 * 0.55).round())
+    } else {
+        420.0
+    };
     div()
         .col()
-        .w(420.0)
+        .w(w)
         .shrink0()
         .min_h(0.0)
         .child(head)

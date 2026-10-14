@@ -13,6 +13,8 @@
 mod a11y;
 pub mod atlas;
 mod backdrop;
+pub mod backend;
+pub mod cells;
 mod cpu;
 pub mod edit;
 pub mod element;

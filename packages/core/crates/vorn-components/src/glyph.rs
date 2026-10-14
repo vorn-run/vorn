@@ -85,13 +85,23 @@ fn cell_opacity(i: usize, elapsed: f64) -> f64 {
 /// RunningGlyph: a 15-unit grid of twelve 3x3 cells in `color`, each
 /// pulsing on its own beat, drawn `size` square.
 pub fn running(ui: &Ui, size: f32, color: Rgba) -> El {
-    ui.wake_at(ui.now() + FRAME);
     let t = ui.anim_time();
-    let unit = size / 15.0;
-    let mut g = div()
+    const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let spin = SPIN[(t * 10.0) as usize % SPIN.len()];
+    let g = div()
         .size(size, size)
         .shrink0()
+        .glyph(spin)
+        .glyph_tint(color)
         .role(Role::Image, "Running");
+    // A terminal shows the spinner alone and redraws at its 10 fps steps.
+    if ui.is_cells() {
+        ui.wake_at(ui.now() + std::time::Duration::from_secs_f64(0.1 - t % 0.1));
+        return g;
+    }
+    ui.wake_at(ui.now() + FRAME);
+    let unit = size / 15.0;
+    let mut g = g;
     for (i, tier) in GRID.iter().enumerate() {
         if *tier == Tier::Hidden {
             continue;
@@ -110,6 +120,10 @@ pub fn running(ui: &Ui, size: f32, color: Rgba) -> El {
 
 /// A status dot's opacity under `animate-pulse`: 1 → 0.5 → 1 every 2 s.
 pub fn pulse(ui: &Ui) -> f32 {
+    // A terminal cannot fade a dot, so it holds still there.
+    if ui.is_cells() {
+        return 1.0;
+    }
     ui.wake_at(ui.now() + FRAME);
     envelope(ui.anim_time(), 0.0, 2.0, (1.0, 0.5), PULSE) as f32
 }
