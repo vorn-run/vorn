@@ -636,6 +636,63 @@
     "NodeExecutionStatus": {
       "type": "string"
     },
+    "ProgramRecord": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ProgramState"
+        },
+        "kind": {
+          "$ref": "#/definitions/ProgramWaitKind"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "app": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "msg": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ]
+    },
+    "ProgramState": {
+      "type": "string"
+    },
+    "ProgramStatus": {
+      "type": "object",
+      "properties": {
+        "native": {
+          "type": "boolean"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProgramRecord"
+          }
+        },
+        "unseen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "native",
+        "records"
+      ]
+    },
+    "ProgramWaitKind": {
+      "type": "string"
+    },
     "ProjectConfig": {
       "type": "object",
       "properties": {
@@ -1100,6 +1157,9 @@
         },
         "savedAt": {
           "type": "number"
+        },
+        "programStatus": {
+          "$ref": "#/definitions/ProgramStatus"
         },
         "rev": {
           "type": "number"

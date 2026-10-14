@@ -390,6 +390,8 @@ fn composed(b: &mut Builder) {
                         agent: "claude",
                         status: Status::Waiting,
                         active,
+                        detail: None,
+                        steps: &[],
                     },
                 ))
             },

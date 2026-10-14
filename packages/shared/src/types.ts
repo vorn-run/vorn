@@ -131,6 +131,8 @@ export interface TerminalSession {
    * restored from a previous process has to tell somebody.
    */
   savedAt?: number
+  /** What the session's program reports of itself (OSC 7501), when it does. */
+  programStatus?: ProgramStatus
   /**
    * The revision of the session registry this record was last changed at.
    *
@@ -140,6 +142,36 @@ export interface TerminalSession {
    * older; a record without one is taken as it comes.
    */
   rev?: number
+}
+
+/** A program's state in an OSC 7501 report. */
+export type ProgramState = 'idle' | 'working' | 'done' | 'blocked' | 'error'
+
+/** What a blocked program waits for. */
+export type ProgramWaitKind = 'permission' | 'question' | 'auth'
+
+/** One OSC 7501 record: id "" is the program itself, "a/b" a child of "a". */
+export interface ProgramRecord {
+  id: string
+  state: ProgramState
+  kind?: ProgramWaitKind
+  /** 0-100. */
+  progress?: number
+  app?: string
+  title?: string
+  msg?: string
+}
+
+/**
+ * A session's OSC 7501 records. While `native`, they decide its status rather
+ * than its agent's hooks or what its screen shows.
+ */
+export interface ProgramStatus {
+  native: boolean
+  /** The root record first, each child after its parent. */
+  records: ProgramRecord[]
+  /** It finished and nobody has looked at it since (`terminal:seen`). */
+  unseen?: boolean
 }
 
 /**

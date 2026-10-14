@@ -4,6 +4,7 @@
 
 pub mod endpoint;
 pub mod link;
+pub mod report;
 pub mod rpc;
 pub mod store;
 

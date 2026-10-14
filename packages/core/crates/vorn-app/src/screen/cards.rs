@@ -475,6 +475,52 @@ fn task_chip(s: &Screen<'_>, id: &str, dim: f32) -> Option<El> {
     Some(chip)
 }
 
+/// What the session's program reports of itself: its line, its progress,
+/// and how many steps run under it (the sidebar lists them).
+fn report(session: &Session, dim: f32) -> Option<El> {
+    let r = session.report()?;
+    let ink = if r.unseen {
+        fade(look::INK, 1.0, dim)
+    } else {
+        fade(look::INK, look::INK_SECONDARY, dim)
+    };
+    let mut line = r.line.clone();
+    if !r.steps.is_empty() {
+        let n = r.steps.len();
+        let steps = format!("{n} step{}", if n == 1 { "" } else { "s" });
+        line = if line.is_empty() { steps } else { format!("{line} \u{b7} {steps}") };
+    }
+    let mut el = div()
+        .row()
+        .items_center()
+        .gap(6.0)
+        .grow()
+        .min_w0()
+        .role(Role::Status, line.as_str())
+        .child(text(line.as_str(), 10.0, ink).line_height(12.0).truncate().silent());
+    if let Some(p) = r.progress {
+        const TRACK: f32 = 40.0;
+        el = el
+            .child(
+                div()
+                    .w(TRACK)
+                    .h(2.0)
+                    .shrink0()
+                    .rounded(1.0)
+                    .bg(fade(look::WHITE, 0.08, dim))
+                    .child(div().w(TRACK * f32::from(p) / 100.0).h(2.0).rounded(1.0).bg(ink)),
+            )
+            .child(
+                text(format!("{p}%"), 10.0, fade(look::GRAY_500, 1.0, dim))
+                    .mono()
+                    .line_height(12.0)
+                    .shrink0()
+                    .silent(),
+            );
+    }
+    Some(el)
+}
+
 fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
     let mut bar = div()
         .row()
@@ -489,7 +535,7 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
     if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
     }
-    bar = bar.child(div().grow());
+    bar = bar.child(report(session, dim).unwrap_or_else(|| div().grow()));
     for item in super::side::status_items(s, session, dim) {
         bar = bar.child(item);
     }
