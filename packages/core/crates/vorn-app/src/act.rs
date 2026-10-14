@@ -75,6 +75,8 @@ pub enum Act {
     ScrollToBottom(String),
     /// A page up (true) or down through a terminal's history, from its scrollbar's track.
     ScrollPage(String, bool),
+    /// Opens this vornd's web client in the default browser.
+    OpenWebClient,
     FitToDevice(String),
     LockSize(String, bool),
     Shortcuts,

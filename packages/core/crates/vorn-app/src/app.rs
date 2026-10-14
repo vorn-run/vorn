@@ -306,6 +306,8 @@ pub struct App {
     spoken: HashMap<String, String>,
     pub st: State,
     pub acts: Acts,
+    /// The web client of the vornd this app talks to.
+    pub web_url: String,
     preedit: String,
     /// The composer showed last frame: it takes the keyboard when it appears.
     was_composing: bool,
@@ -436,6 +438,7 @@ impl App {
             spoken: HashMap::new(),
             st,
             acts: Acts::default(),
+            web_url: ep.web_url(),
             preedit: String::new(),
             was_composing: false,
             calls: Vec::new(),
@@ -1929,6 +1932,7 @@ impl App {
             Act::Run(a) => self.run_run(a),
             Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
+            Act::OpenWebClient => tasks::open_url(&self.web_url),
             Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
                 self.close_task_dialog(ui);
             }
@@ -2884,6 +2888,7 @@ impl App {
             size: self.size,
             chrome: self.chrome,
             traffic: self.traffic,
+            web_url: &self.web_url,
         }
     }
 

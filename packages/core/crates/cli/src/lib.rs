@@ -28,6 +28,7 @@ pub mod server;
 pub mod session;
 pub mod status;
 pub mod time;
+pub mod web;
 pub mod workflow;
 
 use args::{takes_value_anywhere, ClientArgs};
@@ -51,6 +52,7 @@ Usage
   vorn workflow runs [--workflow <name>] [--json]        Their runs
   vorn ext install|link|remove|list|pack                 Extensions
   vorn server serve|token                                Run a server, or its tokens
+  vorn web [--print]                                     Open the web client in a browser
   vorn mcp                                               Vorn's MCP server, over stdio
   vorn --help | --version
 
@@ -82,8 +84,8 @@ pub fn find_command(argv: &[String]) -> Option<&str> {
     None
 }
 
-const COMMANDS: [&str; 9] = [
-    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach", "ext",
+const COMMANDS: [&str; 10] = [
+    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach", "ext", "web",
 ];
 
 /// An option that swallowed the command because its own value was missing:
@@ -196,6 +198,7 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
         "serve" | "token" => server::run(argv, io),
         "session" | "workflow" | "ext" => client_command(argv, io, false).await,
         "mcp" => client_command(&without_command(argv, command), io, true).await,
+        "web" => web::run(&without_command(argv, command), io),
         _ => {
             if let Some(code) = eaten(io, argv) {
                 return code;
