@@ -4,9 +4,9 @@
 //! the runs, calls and answers compared after times, generated ids and the
 //! timeline's seconds are normalized as the recording normalized them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use regex::Regex;
 use serde_json::{json, Map, Value};
@@ -52,6 +52,33 @@ fn normalize(
             Value::Object(out)
         }
         other => vorn_work::js_numbers(other.clone()),
+    }
+}
+
+/// Waits until every session start asked for has answered and shows on its
+/// run, so a stop finds the sessions the recording found however slow the machine.
+async fn session_starts_settled(engine: &Engine<Fake>, fake: &Fake) {
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let (busy, handed, order) = {
+            let w = fake.world();
+            (w.in_flight > 0, w.handed.clone(), w.order.clone())
+        };
+        if !busy {
+            let mut shown = HashSet::new();
+            for id in &order {
+                if let Some(run) = engine.snapshot(id).await {
+                    shown.extend(run.node_states.into_iter().filter_map(|n| n.session_id));
+                }
+            }
+            if handed.iter().all(|h| shown.contains(h)) {
+                return;
+            }
+        }
+        if Instant::now() > until {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }
 
@@ -152,6 +179,7 @@ async fn play(case: &Value) -> Value {
             };
             answers.push(answer);
         } else if let Some(s) = step.get("stop") {
+            session_starts_settled(&engine, &fake).await;
             engine.flush().await;
             engine
                 .stop(&run_at(s["run"].as_u64().unwrap() as usize))

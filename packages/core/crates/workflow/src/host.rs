@@ -71,6 +71,15 @@ pub trait Host: Send + Sync + 'static {
     /// Writes a run. Called in order; the engine never waits on two.
     fn save_run(&self, run: WorkflowExecution) -> impl Future<Output = ()> + Send;
 
+    /// Writes runs in the order given; a host with one queue takes them as one job.
+    fn save_runs(&self, runs: Vec<WorkflowExecution>) -> impl Future<Output = ()> + Send {
+        async move {
+            for run in runs {
+                self.save_run(run).await;
+            }
+        }
+    }
+
     /// A stored run.
     fn load_run(&self, run_id: &str) -> impl Future<Output = Option<WorkflowExecution>> + Send;
 

@@ -121,21 +121,25 @@ impl Work {
         workflow_id: &str,
         inputs: Option<serde_json::Map<String, Value>>,
     ) {
-        let id = workflow_id.to_owned();
-        let workflow = self
-            .db
-            .run(move |s| s.call("dbGetWorkflow", json!([id])).ok())
-            .await
-            .flatten();
-        let Some(workflow) = workflow.filter(Value::is_object) else {
+        if let Some(row) = self.workflow_row(workflow_id).await {
+            self.fire_row(&row, inputs);
+        }
+    }
+
+    /// [`Self::fire`] with the workflow's row already read.
+    pub(crate) fn fire_row(
+        self: &Arc<Self>,
+        row: &Value,
+        inputs: Option<serde_json::Map<String, Value>>,
+    ) {
+        let Some(workflow) = vorn_work::model::Workflow::from_json(row) else {
             return;
         };
-        let polls = vorn_work::model::Workflow::from_json(&workflow)
-            .is_some_and(|w| w.trigger_type() == Some("connectorPoll"));
-        if !polls {
-            self.engine.run_scheduled(workflow_id, inputs).await;
+        if workflow.trigger_type() != Some("connectorPoll") {
+            self.engine.run_scheduled_workflow(workflow, inputs);
             return;
         }
+        let workflow_id = workflow.id.as_str();
         if !self
             .polls
             .lock()
