@@ -646,12 +646,24 @@ fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
             .get(&sid)
             .and_then(|p| p.terminals.first().cloned())
     });
-    shot.until(&mut app, "its prompt", |a, _| {
-        lines(a, &held)
-            .iter()
-            .any(|l| !l.trim().is_empty())
-            .then_some(())
+    let prompt = (0..300).any(|_| {
+        shot.frame(&mut app);
+        app.pump();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        lines(&app, &held).iter().any(|l| !l.trim().is_empty())
     });
+    assert!(
+        prompt,
+        "no prompt: split={} pane={} vornd log:\n{}",
+        app.is_split(&held),
+        app.pane(&held).is_some(),
+        v.log()
+            .lines()
+            .rev()
+            .take(40)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     shot.click(&mut app, vorn_app::screen::term_id(&held));
     shot.until(&mut app, "the marked prompt", |a, _| {
         a.is_split(&held).then_some(())
