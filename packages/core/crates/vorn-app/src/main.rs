@@ -618,6 +618,10 @@ impl WindowApp for Win {
         None
     }
 
+    fn pressed(&mut self) {
+        self.guard(App::pressed);
+    }
+
     fn opened(&mut self, window: &Arc<NativeWindow>) {
         self.window = Some(Arc::clone(window));
         self.guard(|app| app.opened(window));

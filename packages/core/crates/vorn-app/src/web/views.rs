@@ -247,6 +247,8 @@ impl Host {
         let mut builder = builder
             .with_url(&slot.url)
             .with_bounds(bounds(slot.rect))
+            // A new view takes no keys until it is clicked: WebView2 would take them from the whole window.
+            .with_focused(false)
             .with_on_page_load_handler(page)
             .with_document_title_changed_handler(title)
             .with_ipc_handler(move |req| message(req.into_body()))
@@ -304,6 +306,14 @@ impl Host {
         Some(Box::new(wry::WebContext::new(Some(
             root.join(crate::signin::profile_folder(conn)),
         ))))
+    }
+
+    /// Gives the keyboard back to the app's window: a native view that took
+    /// focus keeps every key otherwise, the address bar's included.
+    pub fn release_keys(&self) {
+        if let Some(v) = self.views.values().find(|v| v.shown) {
+            let _ = v.wv.focus_parent();
+        }
     }
 
     /// Drops the views whose key `gone` says goes.

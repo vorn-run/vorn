@@ -328,6 +328,11 @@ fn shot_window() -> ((f32, f32), f32) {
 impl Shot {
     pub fn new() -> Shot {
         let (size, scale) = shot_window();
+        Shot::at(size, scale)
+    }
+
+    /// A `size` window at `scale`, as a Retina display draws it at 2.
+    pub fn at(size: (f32, f32), scale: f32) -> Shot {
         let ui = Ui::headless(RenderMode::Auto, &ui_config(scale));
         let px = ((size.0 * scale) as u32, (size.1 * scale) as u32);
         let target = ui.offscreen(px);
