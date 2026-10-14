@@ -24,7 +24,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 use crate::edit::Clipboard;
 use crate::gpu::{adapter_name, instance_desc, Gpu};
 use crate::host::{cursor_icon, draw};
-pub use crate::host::{App, UserEvent, Waker, WindowOptions};
+pub use crate::host::{App, Dropped, UserEvent, Waker, WindowOptions};
 use crate::input::{from_winit, mods_of};
 use crate::interact::WindowRequest;
 use crate::interact::{WheelPhase, WHEEL_LINE};
@@ -43,6 +43,54 @@ impl Clipboard for System {
     fn set(&mut self, text: &str) {
         let _ = self.0.set_text(text);
     }
+    fn has_image(&mut self) -> bool {
+        clipboard_has_image()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn clipboard_has_image() -> bool {
+    crate::macos::clipboard_has_image()
+}
+
+#[cfg(windows)]
+fn clipboard_has_image() -> bool {
+    use windows_sys::Win32::System::DataExchange::{
+        IsClipboardFormatAvailable, RegisterClipboardFormatW,
+    };
+    const BITMAP: u32 = 2;
+    const DIB: u32 = 8;
+    const DIBV5: u32 = 17;
+    let png: Vec<u16> = "PNG\0".encode_utf16().collect();
+    // SAFETY: reads which formats the clipboard holds; `png` is NUL-terminated.
+    unsafe {
+        [BITMAP, DIB, DIBV5, RegisterClipboardFormatW(png.as_ptr())]
+            .into_iter()
+            .any(|f| f != 0 && IsClipboardFormatAvailable(f) != 0)
+    }
+}
+
+/// Asks the window system's clipboard tool which types it holds; without
+/// one, no image.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn clipboard_has_image() -> bool {
+    let mut cmd = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        let mut c = vorn_spawn::command("wl-paste");
+        c.arg("--list-types");
+        c
+    } else {
+        let mut c = vorn_spawn::command("xclip");
+        c.args(["-selection", "clipboard", "-t", "TARGETS", "-o"]);
+        c
+    };
+    cmd.stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|t| t.trim().starts_with("image/"))
+        })
 }
 
 /// How frames reach the window.
@@ -80,6 +128,9 @@ struct Runner<A, F> {
     live: Option<Live<A>>,
     mods: Modifiers,
     error: Option<String>,
+    /// Files dropped since the loop last went idle: winit sends one event
+    /// per file, and the app takes them as one drop.
+    dropped: Vec<std::path::PathBuf>,
 }
 
 /// Opens a window and runs `make`'s app in it until the window closes.
@@ -115,6 +166,7 @@ where
         live: None,
         mods: Modifiers::default(),
         error: None,
+        dropped: Vec::new(),
     };
     event_loop.run_app(&mut r).map_err(|e| e.to_string())?;
     r.error.map_or(Ok(()), Err)
@@ -215,6 +267,8 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         if let Some(at) = o.inset_title {
             crate::macos::place_traffic_lights(&window, at);
         }
+        #[cfg(target_os = "macos")]
+        crate::macos::take_drops(&window, Waker::new(self.proxy.clone()));
         let mut app = make(&mut ui, Waker::new(self.proxy.clone()));
         app.opened(&window);
         window.set_visible(true);
@@ -330,6 +384,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.pointer_move(position.x as f32 / k, position.y as f32 / k);
                 l.dispatch();
             }
+            WindowEvent::DroppedFile(path) => self.dropped.push(path.clone()),
             WindowEvent::CursorLeft { .. } => {
                 l.ui.pointer_leave();
                 l.dispatch();
@@ -394,6 +449,23 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
         let Some(l) = &mut self.live else {
             return;
         };
+        let mut drops = Vec::new();
+        if !self.dropped.is_empty() {
+            let at = cursor_in(&l.window);
+            drops.push((Dropped::Files(std::mem::take(&mut self.dropped)), at));
+        }
+        #[cfg(target_os = "macos")]
+        drops.extend(crate::macos::drops());
+        if !drops.is_empty() {
+            l.ui.set_now(Instant::now());
+            for (what, at) in drops {
+                l.app.dropped(&mut l.ui, what, at);
+            }
+            l.dispatch();
+            if l.apply_requests() {
+                el.exit();
+            }
+        }
         let now = Instant::now();
         let ui_wake = l.ui.next_wake().map(|t| t.max(l.pacer.next_frame(now)));
         let wake = match (l.pending, ui_wake) {
@@ -411,6 +483,31 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             None => el.set_control_flow(tick.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)),
         }
     }
+}
+
+/// Where the pointer is in the window, in logical pixels, when a drop does
+/// not say: Windows asks the system; elsewhere it is unknown (the pointer's
+/// last move may predate the drag), and the app picks its own target.
+#[cfg(windows)]
+fn cursor_in(window: &Window) -> Option<(f32, f32)> {
+    use windows_sys::Win32::Foundation::{HWND, POINT};
+    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let RawWindowHandle::Win32(h) = window.window_handle().ok()?.as_raw() else {
+        return None;
+    };
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: the handle is winit's live window; `p` is ours to write.
+    let ok =
+        unsafe { GetCursorPos(&mut p) != 0 && ScreenToClient(h.hwnd.get() as HWND, &mut p) != 0 };
+    let k = window.scale_factor() as f32;
+    ok.then(|| (p.x as f32 / k, p.y as f32 / k))
+}
+
+#[cfg(not(windows))]
+fn cursor_in(_: &Window) -> Option<(f32, f32)> {
+    None
 }
 
 impl<A: App> Live<A> {

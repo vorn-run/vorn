@@ -84,6 +84,34 @@ struct TerminalKeysTests {
         #expect(TerminalKeys.quotedPaths(urls) == "/tmp/a '/tmp/b c' ")
     }
 
+    @Test func anImageAloneIsCtrlVAndTextWinsOverIt() {
+        #expect(TerminalKeys.paste(text: "hi", hasImage: true) == .text("hi"))
+        #expect(TerminalKeys.paste(text: "hi", hasImage: false) == .text("hi"))
+        #expect(TerminalKeys.paste(text: nil, hasImage: true) == .ctrlV)
+        #expect(TerminalKeys.paste(text: "", hasImage: true) == .ctrlV)
+        #expect(TerminalKeys.paste(text: nil, hasImage: false) == .nothing)
+    }
+
+    @Test func aDroppedImageIsSavedAsPNGUnderANewName() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vorn-drop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let pb = NSPasteboard(name: NSPasteboard.Name("vorn-test-\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        pb.setData(rep.tiffRepresentation, forType: .tiff)
+        let png = try #require(TerminalKeys.png(from: pb))
+        #expect(png.starts(with: [0x89, 0x50, 0x4e, 0x47]))
+        let now = Date(timeIntervalSince1970: 1)
+        let a = try TerminalKeys.saveImage(png, in: dir, now: now)
+        let b = try TerminalKeys.saveImage(png, in: dir, now: now)
+        #expect(a.lastPathComponent == "image-1000.png")
+        #expect(b.lastPathComponent == "image-1000-1.png")
+        #expect(try Data(contentsOf: a) == png)
+    }
+
     @Test func fontSizeStepsStayInRange() {
         #expect(TerminalPreferences.fontSize(13, by: 1) == 14)
         #expect(TerminalPreferences.fontSize(13, by: -1) == 12)

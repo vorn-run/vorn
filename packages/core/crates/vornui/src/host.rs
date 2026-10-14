@@ -15,6 +15,16 @@ use crate::interact::Event;
 use crate::scene::{Rect, Rgba};
 use crate::ui::{Laid, Ui};
 
+/// What was dropped on the window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Dropped {
+    /// Files and folders on this machine.
+    Files(Vec<std::path::PathBuf>),
+    /// An image with no file of its own (dragged from a web page, or pasted
+    /// in a browser): its bytes, and a file name that says its type.
+    Image { name: String, bytes: Vec<u8> },
+}
+
 /// An app drawn by vornui.
 pub trait App: 'static {
     /// The frame's element tree, built from the app's state and `ui`'s.
@@ -46,6 +56,10 @@ pub trait App: 'static {
             self.input(ui, input);
         }
     }
+    /// Something dropped on the window at `at` (logical pixels), where the
+    /// platform says where; a browser's pasted image comes here too, with
+    /// no place.
+    fn dropped(&mut self, _ui: &mut Ui, _what: Dropped, _at: Option<(f32, f32)>) {}
     /// Whether the last frame showed what the last keystroke was waiting
     /// for. Apps whose input echoes asynchronously answer it; others are
     /// done once the key itself is drawn.

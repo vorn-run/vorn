@@ -20,8 +20,8 @@ use web_time::{Duration, Instant};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{
-    CanvasRenderingContext2d, ClipboardEvent, CompositionEvent, HtmlCanvasElement, HtmlElement,
-    HtmlTextAreaElement, ImageData, KeyboardEvent, MouseEvent,
+    CanvasRenderingContext2d, ClipboardEvent, CompositionEvent, DragEvent, HtmlCanvasElement,
+    HtmlElement, HtmlTextAreaElement, ImageData, KeyboardEvent, MouseEvent,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
@@ -31,7 +31,7 @@ use winit::window::{Window, WindowId};
 
 use crate::edit::Clipboard;
 use crate::gpu::Gpu;
-use crate::host::{cursor_icon, draw, App, UserEvent, Waker, WindowOptions};
+use crate::host::{cursor_icon, draw, App, Dropped, UserEvent, Waker, WindowOptions};
 use crate::input::{mods, Input};
 use crate::interact::{WheelPhase, WindowRequest, WHEEL_LINE};
 use crate::pace::Pacer;
@@ -238,6 +238,12 @@ impl<A: App> Live<A> {
         self.ui.set_now(Instant::now());
         self.pacer.input(Instant::now());
         self.app.paste(&mut self.ui, text);
+        self.dispatch();
+    }
+
+    fn dropped(&mut self, what: Dropped, at: Option<(f32, f32)>) {
+        self.ui.set_now(Instant::now());
+        self.app.dropped(&mut self.ui, what, at);
         self.dispatch();
     }
 
@@ -717,6 +723,36 @@ fn on<A: App, E: JsCast + 'static>(
     Ok(())
 }
 
+/// Reads the images among `files` and hands each to the app as a drop,
+/// once its bytes arrive.
+fn read_images<A: App>(
+    shared: &Rc<RefCell<Live<A>>>,
+    files: web_sys::FileList,
+    at: Option<(f32, f32)>,
+) {
+    let files: Vec<web_sys::File> = (0..files.length())
+        .filter_map(|i| files.get(i))
+        .filter(|f| f.type_().starts_with("image/"))
+        .collect();
+    for file in files {
+        let s = shared.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let Ok(buf) = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await else {
+                return;
+            };
+            let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+            let what = Dropped::Image {
+                name: file.name(),
+                bytes,
+            };
+            match s.try_borrow_mut() {
+                Ok(mut s) => s.dropped(what, at),
+                Err(_) => log_error("dropped image while busy"),
+            }
+        });
+    }
+}
+
 fn listen<A: App>(
     shared: &Rc<RefCell<Live<A>>>,
     canvas: &HtmlCanvasElement,
@@ -745,14 +781,36 @@ fn listen<A: App>(
         }
         s.input.set_value("");
     })?;
-    on(doc, "paste", shared, |s, e: ClipboardEvent| {
+    let images = shared.clone();
+    on(doc, "paste", shared, move |s, e: ClipboardEvent| {
         e.prevent_default();
-        let text = e
-            .clipboard_data()
+        let data = e.clipboard_data();
+        let text = data
+            .as_ref()
             .and_then(|d| d.get_data("text/plain").ok())
             .unwrap_or_default();
         if !text.is_empty() {
             s.paste(text);
+        } else if let Some(files) = data.and_then(|d| d.files()) {
+            read_images(&images, files, None);
+        }
+    })?;
+    // A page may not see where a dropped file lives, only its bytes: images
+    // reach the app as bytes, and other files are refused.
+    on(canvas, "dragover", shared, |_, e: DragEvent| {
+        let files = e
+            .data_transfer()
+            .is_some_and(|d| d.types().includes(&"Files".into(), 0));
+        if files {
+            e.prevent_default();
+        }
+    })?;
+    let images = shared.clone();
+    on(canvas, "drop", shared, move |_, e: DragEvent| {
+        e.prevent_default();
+        let at = (e.offset_x() as f32, e.offset_y() as f32);
+        if let Some(files) = e.data_transfer().and_then(|d| d.files()) {
+            read_images(&images, files, Some(at));
         }
     })?;
     // The app took the copy on the key; the page's event carries it out

@@ -10,6 +10,14 @@ enum TerminalKey: Equatable {
     case page(up: Bool)
 }
 
+/// What a paste sends: the clipboard's text, or Ctrl-V when it holds only an
+/// image, which agent CLIs answer by reading the image themselves.
+enum TerminalPaste: Equatable {
+    case text(String)
+    case ctrlV
+    case nothing
+}
+
 /// The terminal's own commands, taken before the app's menus.
 enum TerminalShortcut: Equatable {
     case find, findNext, findPrevious, clear
@@ -66,5 +74,42 @@ enum TerminalKeys {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-")
         if !s.isEmpty, s.unicodeScalars.allSatisfy(plain.contains) { return s }
         return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func paste(text: String?, hasImage: Bool) -> TerminalPaste {
+        if let text, !text.isEmpty { return .text(text) }
+        return hasImage ? .ctrlV : .nothing
+    }
+
+    /// The image types a paste or a drop takes as an image.
+    static let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
+
+    /// A dropped image as PNG: as it is when it is one, else drawn from whatever image type it holds.
+    static func png(from pb: NSPasteboard) -> Data? {
+        if let png = pb.data(forType: .png) { return png }
+        guard let tiff = pb.data(forType: .tiff) ?? NSImage(pasteboard: pb)?.tiffRepresentation else { return nil }
+        return NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+    }
+
+    /// Writes `png` to a new file in `dir`, named for the time.
+    static func saveImage(_ png: Data, in dir: URL, now: Date = Date()) throws -> URL {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let stamp = Int(now.timeIntervalSince1970 * 1000)
+        for n in 0... {
+            let url = dir.appendingPathComponent(n == 0 ? "image-\(stamp).png" : "image-\(stamp)-\(n).png")
+            do {
+                try png.write(to: url, options: .withoutOverwriting)
+                return url
+            } catch CocoaError.fileWriteFileExists {
+                continue
+            }
+        }
+        fatalError("a free name exists")
+    }
+
+    /// Where dropped images are kept for the program to read.
+    static var imageDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("vorn-images", isDirectory: true)
     }
 }

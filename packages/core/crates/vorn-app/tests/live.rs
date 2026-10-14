@@ -472,3 +472,106 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
     assert!(!app.scrolled_back(&id));
     shot.send(&mut app, Input::char('q'));
 }
+
+/// A program that turns bracketed paste on and prints what each read
+/// brings, control bytes as `^X`, as an agent CLI sees its input.
+#[cfg(unix)]
+const SHOW_BYTES: &str = r#"python3 -c "import os,sys,tty;tty.setraw(0);sys.stdout.write('\x1b[?2004h'+'got-'+'ready\r\n');sys.stdout.flush();[(sys.stdout.write('got '+''.join(c if ' '<=c<='~' else '^'+chr(ord(c)^64) for c in os.read(0,4096).decode())+'.\r\n'),sys.stdout.flush()) for _ in iter(int,1)]""#;
+
+#[test]
+#[cfg(unix)]
+fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_quoted_paths() {
+    use vorn_app::ui::{Dropped, MemoryClipboard};
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let paste = if cfg!(target_os = "macos") {
+        key("KeyV", mods::SUPER, Some("v"))
+    } else {
+        key("KeyV", mods::CTRL | mods::SHIFT, Some("V"))
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's fitted screen", |app, _| {
+        app.pane(&id).filter(|p| p.sb_epoch > 0).map(|_| ())
+    });
+    shot.type_line(&mut app, SHOW_BYTES);
+    // What the program printed, its wrapped rows joined.
+    let got = |app: &App| -> String { screen(app, &id).iter().map(|l| l.trim_end()).collect() };
+    let shows = |what: String, n: usize| {
+        move |app: &mut App, _: &vorn_app::ui::Ui| {
+            (got(app).matches(&what).count() >= n).then_some(())
+        }
+    };
+    shot.until(&mut app, "the byte printer", shows("got-ready".into(), 1));
+
+    // Ctrl-V is the program's own key.
+    shot.send(&mut app, key("KeyV", mods::CTRL, Some("v")));
+    shot.until(&mut app, "Ctrl-V's byte", shows("got ^V.".into(), 1));
+
+    // An image and no text: the paste key sends Ctrl-V, for the CLI to read it.
+    shot.ui.set_clipboard(Box::new(MemoryClipboard {
+        text: None,
+        image: true,
+    }));
+    shot.send(&mut app, paste.clone());
+    shot.until(
+        &mut app,
+        "the image paste's Ctrl-V",
+        shows("got ^V.".into(), 2),
+    );
+
+    // Text and an image: the text, bracketed.
+    shot.ui.set_clipboard(Box::new(MemoryClipboard {
+        text: Some("hi there".into()),
+        image: true,
+    }));
+    shot.send(&mut app, paste.clone());
+    shot.until(
+        &mut app,
+        "the text paste",
+        shows("got ^[[200~hi there^[[201~.".into(), 1),
+    );
+
+    // Dropped files: their quoted paths, space separated, bracketed.
+    let r = app.term_box(&id).expect("the terminal is painted");
+    let k = shot.ui.scale();
+    let mid = ((r.x + r.w / 2.0) / k, (r.y + r.h / 2.0) / k);
+    let files = vec!["/tmp/a.png".into(), "/tmp/my shot.png".into()];
+    app.dropped(&mut shot.ui, Dropped::Files(files), Some(mid));
+    shot.until(
+        &mut app,
+        "the dropped paths",
+        shows(
+            "got ^[[200~/tmp/a.png '/tmp/my shot.png' ^[[201~.".into(),
+            1,
+        ),
+    );
+
+    // A dropped image with no file: saved, and its path pasted.
+    let png = b"\x89PNG\r\n\x1a\nnot really".to_vec();
+    app.dropped(
+        &mut shot.ui,
+        Dropped::Image {
+            name: "image.png".into(),
+            bytes: png.clone(),
+        },
+        None,
+    );
+    let dir = std::env::temp_dir().join("vorn-images");
+    let start = format!("got ^[[200~{}", dir.join("image-").display());
+    let path = shot.until(&mut app, "the saved image's path", |app, _| {
+        let text = got(app);
+        let at = text.find(&start)?;
+        let rest = &text[at + "got ^[[200~".len()..];
+        rest.find(" ^[[201~.").map(|end| rest[..end].to_owned())
+    });
+    assert!(path.ends_with(".png"), "{path}");
+    assert_eq!(std::fs::read(&path).expect("the image was saved"), png);
+    let _ = std::fs::remove_file(&path);
+}

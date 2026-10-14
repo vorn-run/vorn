@@ -56,7 +56,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         pane.host = self
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL] + TerminalKeys.imageTypes + NSImage.imageTypes.map { NSPasteboard.PasteboardType($0) })
         bottomButton.target = self
         bottomButton.action = #selector(scrollToBottom(_:))
         bottomButton.isHidden = true
@@ -389,11 +389,19 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// Text pastes as text; an image alone is Ctrl-V, for an agent CLI to read the clipboard itself.
     @objc func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        let pb = NSPasteboard.general
+        let what = TerminalKeys.paste(text: pb.string(forType: .string),
+                                      hasImage: pb.availableType(from: TerminalKeys.imageTypes) != nil)
+        guard what != .nothing else { return }
         pane.selection = nil
         returnToLive()
-        pane.paste(text)
+        switch what {
+        case .text(let text): pane.paste(text)
+        case .ctrlV: pane.key("KeyV", wireMods(.control), nil)
+        case .nothing: break
+        }
     }
 
     /// Ctrl-L for the program: a shell clears its screen and draws the prompt again.
@@ -403,7 +411,7 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
         pane.text("\u{0c}")
     }
 
-    // MARK: Drag and drop: files type their quoted paths.
+    // MARK: Drag and drop: files type their quoted paths; an image with no file is saved first.
 
     private func droppedFiles(_ info: NSDraggingInfo) -> [URL] {
         guard !pane.engine.readOnly else { return [] }
@@ -411,12 +419,21 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
                                                    options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
+    private func dropsImage(_ info: NSDraggingInfo) -> Bool {
+        let pb = info.draggingPasteboard
+        return !pane.engine.readOnly && (pb.availableType(from: TerminalKeys.imageTypes) != nil || NSImage.canInit(with: pb))
+    }
+
     public override func draggingEntered(_ info: NSDraggingInfo) -> NSDragOperation {
-        droppedFiles(info).isEmpty ? [] : .copy
+        droppedFiles(info).isEmpty && !dropsImage(info) ? [] : .copy
     }
 
     public override func performDragOperation(_ info: NSDraggingInfo) -> Bool {
-        let files = droppedFiles(info)
+        var files = droppedFiles(info)
+        if files.isEmpty, dropsImage(info), let png = TerminalKeys.png(from: info.draggingPasteboard),
+           let saved = try? TerminalKeys.saveImage(png, in: TerminalKeys.imageDirectory) {
+            files = [saved]
+        }
         guard !files.isEmpty else { return false }
         window?.makeFirstResponder(self)
         returnToLive()
@@ -659,7 +676,9 @@ public final class TerminalNSView: NSView, NSTextInputClient, NSMenuItemValidati
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(copy(_:)): return pane.selection.map { !$0.isEmpty } ?? false
-        case #selector(paste(_:)): return !pane.engine.readOnly && NSPasteboard.general.string(forType: .string) != nil
+        case #selector(paste(_:)):
+            let pb = NSPasteboard.general
+            return !pane.engine.readOnly && (pb.string(forType: .string) != nil || pb.availableType(from: TerminalKeys.imageTypes) != nil)
         case #selector(fitToWindow(_:)), #selector(clearScreen(_:)): return !pane.engine.readOnly
         default: return true
         }
