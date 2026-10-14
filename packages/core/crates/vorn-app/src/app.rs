@@ -298,6 +298,8 @@ pub struct App {
     /// vornd hung up.
     pub closed: bool,
     notifier: crate::notify::Notifier,
+    /// Where admitted notices are shown: the OS, unless a test swaps it.
+    notice_sink: Arc<dyn crate::notify::Sink>,
     /// Notifications heard since the last frame, for the frame to admit.
     notices: Vec<crate::notify::Notice>,
     /// The app draws its own title bar and window controls.
@@ -390,6 +392,7 @@ impl App {
             agents: Default::default(),
             closed: false,
             notifier: Default::default(),
+            notice_sink: Arc::new(crate::notify::Os),
             notices: Vec::new(),
             chrome: !cfg!(target_os = "macos"),
             traffic: cfg!(target_os = "macos"),
@@ -446,6 +449,12 @@ impl App {
         rx: std::sync::mpsc::Receiver<Option<crate::cli_link::Notice>>,
     ) {
         self.cli_launch = Some(rx);
+    }
+
+    /// Shows notices through `sink` instead of the OS: tests and offscreen
+    /// frames must never post a real notification.
+    pub fn set_notice_sink(&mut self, sink: Arc<dyn crate::notify::Sink>) {
+        self.notice_sink = sink;
     }
 
     pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
@@ -2655,7 +2664,7 @@ impl App {
         let now = std::time::Instant::now();
         for notice in std::mem::take(&mut self.notices) {
             if self.notifier.admit(&notice, ui.window_focused(), now) {
-                crate::notify::show(notice);
+                self.notice_sink.show(notice);
             }
         }
         self.git_tick();
