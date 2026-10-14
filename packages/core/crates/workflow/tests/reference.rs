@@ -55,8 +55,7 @@ fn normalize(
     }
 }
 
-/// Waits until every session start asked for has answered and shows on its
-/// run, so a stop finds the sessions the recording found however slow the machine.
+/// Waits until every session started so far shows on its run, so a stop finds it.
 async fn session_starts_settled(engine: &Engine<Fake>, fake: &Fake) {
     let until = Instant::now() + Duration::from_secs(5);
     loop {

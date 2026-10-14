@@ -167,8 +167,7 @@ enum Save {
     Flush(oneshot::Sender<()>),
 }
 
-/// What the writer found queued: each run's latest state where the run first
-/// appeared, and the flushes that wait for them.
+/// Queued saves, each run's latest state at its first place, and the flushes behind them.
 #[derive(Default)]
 struct Batch {
     runs: Vec<WorkflowExecution>,
