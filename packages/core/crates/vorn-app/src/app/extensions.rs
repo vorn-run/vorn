@@ -15,6 +15,8 @@ pub(super) enum ExtCall {
     List,
     Activation(String),
     Open(String),
+    /// `ext:list`: the sections of extensions in two tiers.
+    Sections,
 }
 
 impl App {
@@ -83,6 +85,14 @@ impl App {
                     self.ext_activation(&session, states);
                 }
             }
+            ExtCall::Sections => {
+                if let Ok(v) = answer {
+                    self.st.tiers.take_all(&v);
+                } else {
+                    // A vornd without the tiers host: nothing to show, nothing to ask again.
+                    self.st.tiers.loaded = true;
+                }
+            }
             ExtCall::Open(session) => match answer {
                 Ok(grant) => {
                     let Some(open) = OpenPane::from_grant(&grant, &self.st.ext.packs) else {
@@ -117,6 +127,9 @@ impl App {
     }
 
     pub(super) fn ext_notified(&mut self, method: &str, params: &Value) {
+        if method == "ext:section" {
+            self.st.tiers.take(params);
+        }
         if method == "extension:activation" {
             let session = params["sessionId"].as_str().unwrap_or_default().to_owned();
             let states = params["states"].as_array().cloned().unwrap_or_default();
@@ -129,6 +142,13 @@ impl App {
     pub(super) fn ext_tick(&mut self) {
         if !self.st.ext.loaded && !self.ext_loading() {
             self.call(Call::Ext(ExtCall::List), "extension:list", Value::Null);
+        }
+        let asking = self
+            .calls
+            .iter()
+            .any(|(c, _)| matches!(c, Call::Ext(ExtCall::Sections)));
+        if !self.st.tiers.loaded && !asking {
+            self.call(Call::Ext(ExtCall::Sections), "ext:list", Value::Null);
         }
         let fresh: Vec<String> = self
             .store

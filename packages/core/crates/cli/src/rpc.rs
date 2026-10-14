@@ -461,6 +461,29 @@ impl Client {
         }
     }
 
+    /// Keeps a socket open and hands every notification to `on` until it returns false.
+    pub async fn watch(&self, mut on: impl FnMut(&str, &Value) -> bool) -> Result<(), CallError> {
+        let (request, port) = self.connection()?;
+        let (mut ws, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(|err| connect_error(err, port))?;
+        while let Some(message) = ws.next().await {
+            let Ok(Message::Text(text)) = message else {
+                continue;
+            };
+            let Ok(note) = serde_json::from_str::<Value>(text.as_str()) else {
+                continue;
+            };
+            if let Some(method) = note.get("method").and_then(Value::as_str) {
+                if !on(method, &note["params"]) {
+                    break;
+                }
+            }
+        }
+        let _ = ws.close(None).await;
+        Ok(())
+    }
+
     /// Sends a notification and does not wait for anything back.
     pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), CallError> {
         let (request, port) = self.connection()?;

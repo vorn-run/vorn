@@ -1,0 +1,35 @@
+[package]
+name = "vorn-ext"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Extensions in two tiers on one manifest: typed templates, the bridge both tiers call, the quick tier over stdio and the safe tier on runtime-only Wasmtime"
+
+[features]
+# What a client needs is the default: the typed template and its rows, from JSON on the wire.
+default = []
+# Running extensions: the files a person writes (TOML, KDL), the quick tier's processes, recorded checks and promotion.
+host = ["dep:vorn-spawn", "dep:toml", "dep:kdl"]
+# The safe tier: precompiled components on Wasmtime without its compiler.
+wasm = ["host", "dep:wasmtime"]
+# The real network, git and credential behind the gate.
+live = ["host", "dep:ureq"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Manifests and templates are TOML a person writes; 1.x reports the span of every key, so errors name their line.
+toml = { version = "1.1", optional = true, default-features = false, features = ["parse", "serde", "std"] }
+# Templates are KDL a person or an agent writes: +0.25 MB stripped and two crates (kdl, miette) new to the tree, and spans for every node and entry.
+kdl = { version = "6.7", optional = true, default-features = false, features = ["span"] }
+vorn-spawn = { path = "../spawn", optional = true }
+# Blocking HTTP over rustls, as vorn-connectors sends it.
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls", "gzip"] }
+# Pinned exactly: a .cwasm loads only into the Wasmtime that vorn-extc compiled it with.
+wasmtime = { version = "=49.0.2", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
+
+[dev-dependencies]
+tempfile = "3"

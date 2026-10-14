@@ -33,6 +33,7 @@ pub mod sessions;
 pub mod shell;
 pub mod ssh;
 pub mod tasks;
+pub mod tiers;
 pub mod widget;
 pub mod work;
 pub mod worktree;
@@ -138,6 +139,7 @@ pub const IDENTIFY: &str = "bridge:identify";
 pub fn answers(method: &str) -> bool {
     work::METHODS.contains(&method)
         || extensions::METHODS.contains(&method)
+        || tiers::METHODS.contains(&method)
         || connectors::METHODS.contains(&method)
         || desktop::answers(method)
         || method == IDENTIFY
@@ -252,6 +254,8 @@ pub struct Native {
     connectors: OnceLock<Arc<connectors::Connectors>>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
+    /// Extensions in two tiers ([`tiers`]), once vornd has a data directory.
+    tiers: OnceLock<Arc<tiers::Tiers>>,
     /// The desktop's main process, which answers the browser and device calls.
     main: Arc<desktop::Desktop>,
 }
@@ -304,6 +308,7 @@ impl Native {
             work: OnceLock::new(),
             connectors: OnceLock::new(),
             extensions: OnceLock::new(),
+            tiers: OnceLock::new(),
             main: Arc::default(),
         })
     }
@@ -418,6 +423,17 @@ impl Native {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// The tiers host, started once vornd knows its data directory.
+    pub fn tiers(self: &Arc<Self>) -> Option<Arc<tiers::Tiers>> {
+        if let Some(t) = self.tiers.get() {
+            return Some(Arc::clone(t));
+        }
+        let dir = self.database()?.parent()?.to_path_buf();
+        Some(Arc::clone(
+            self.tiers.get_or_init(|| tiers::Tiers::start(self, &dir)),
+        ))
     }
 
     /// The extension host. Only the first one given is kept.
@@ -550,6 +566,17 @@ impl Native {
         }
         if hooks::METHODS.contains(&method.as_str()) {
             return hooks::answer(self, &method, &params);
+        }
+        if tiers::METHODS.contains(&method.as_str()) {
+            let Some(tiers) = self.tiers() else {
+                return Answer::Error("vornd has no data directory for extensions".to_owned());
+            };
+            let m = method.clone();
+            let running = tokio::task::spawn_blocking(move || tiers.answer(&m, &params));
+            return running.await.unwrap_or_else(|err| {
+                warn!(%method, %err, "an extension call failed");
+                Answer::Error(format!("{method} failed in vornd"))
+            });
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

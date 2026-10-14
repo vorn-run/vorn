@@ -1,0 +1,21 @@
+// The current branch's pull request checks, failing first.
+schema "vorn:view@0.1"
+
+// Every row also has an id.
+rows {
+    name string
+    workflow string
+    state enum pass fail pending skipping cancel
+    link url
+}
+
+column {
+    text "{rows.state.fail} failing · {rows.state.pending} pending · {rows.state.pass} passed" role=secondary
+    list empty="No pull request for this branch" {
+        row {
+            status "{row.state}" pass=good fail=bad pending=busy skipping=muted cancel=warn
+            text "{row.name}" grow=#true
+            button Open open="{row.link}"
+        }
+    }
+}

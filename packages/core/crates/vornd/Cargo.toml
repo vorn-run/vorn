@@ -42,6 +42,8 @@ vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
 vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
+# Extensions in two tiers; the safe tier links Wasmtime without its compiler.
+vorn-ext = { path = "../ext", features = ["wasm", "live"] }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }
 vorn-connectors = { path = "../connectors" }

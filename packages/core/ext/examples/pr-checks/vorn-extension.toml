@@ -1,0 +1,14 @@
+id = "local.pr-checks"
+name = "PR checks"
+version = "0.1.0"
+api = "vorn:extension@0.9"
+
+[runtime]
+command = ["bash", "run.sh"]
+
+[[contributes.sidebar]]
+id = "checks"
+title = "PR checks"
+view = "views/checks.kdl"
+rows = "rows"
+every = "30s"

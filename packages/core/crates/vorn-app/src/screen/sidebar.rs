@@ -1697,6 +1697,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
                         .min_w0()
                         .child(header(s))
                         .child(scroll)
+                        .child(super::ext_section::sections(s))
                         .child(footer(s)),
                 )
                 .child(div().w(1.0).h_full().bg(white(0.06))),

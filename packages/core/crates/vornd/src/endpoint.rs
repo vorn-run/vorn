@@ -247,6 +247,8 @@ impl Daemon {
         }
         native.set_extensions(Arc::clone(&extensions));
         extensions.start();
+        // Brings back the extensions linked in an earlier run.
+        let _ = native.tiers();
     }
 
     /// Answers `vornd:spawn` from clients from now on, for tests.

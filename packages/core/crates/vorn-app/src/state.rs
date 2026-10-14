@@ -500,6 +500,8 @@ pub struct State {
     pub plugins: crate::plugins::Plugins,
     pub network: crate::network::Network,
     pub ext: crate::extensions::Extensions,
+    /// Sections from extensions in two tiers (`ext:section`).
+    pub tiers: crate::ext_tiers::Sections,
     /// The sign-in sheet, while one is open.
     pub signin: Option<crate::signin::Window>,
     /// An agent has asked for permission, so Mod+Shift+A and D answer it.

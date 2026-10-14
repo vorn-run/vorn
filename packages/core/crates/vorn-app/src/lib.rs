@@ -22,6 +22,7 @@ pub mod client;
 pub mod crash;
 pub mod device;
 pub mod editor;
+pub mod ext_tiers;
 pub mod extensions;
 pub mod file_icons;
 pub mod gates;

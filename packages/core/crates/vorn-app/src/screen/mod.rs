@@ -8,6 +8,7 @@ mod chrome;
 pub use chrome::{DOCK, VIEWS, VIEW_ORDER};
 mod composer;
 mod dialogs;
+mod ext_section;
 pub mod gates;
 pub mod git;
 pub mod menus;
