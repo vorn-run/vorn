@@ -583,6 +583,47 @@ mod tests {
         assert_eq!(s.approvals(), 0);
     }
 
+    fn task(id: &str, title: &str) -> Value {
+        json!({ "id": id, "projectName": "web", "title": title, "description": "",
+                "status": "todo", "order": 0, "createdAt": "2026-10-14T00:00:00.000Z",
+                "updatedAt": "2026-10-14T00:00:00.000Z" })
+    }
+
+    fn titles(s: &Store) -> Vec<&str> {
+        s.tasks.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    #[test]
+    fn a_config_change_rereads_only_the_tasks_that_changed() {
+        let mut s = Store::default();
+        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B")] }));
+        assert_eq!(titles(&s), ["A", "B"]);
+        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B2")] }));
+        assert_eq!(titles(&s), ["A", "B2"]);
+        let three = json!({ "tasks": [task("c", "C"), { "bad": 1 }, task("a", "A")] });
+        s.apply("config:changed", three);
+        assert_eq!(titles(&s), ["C", "A"]);
+        s.apply("config:changed", json!({ "tasks": [task("c", "C"), task("a", "A1")] }));
+        assert_eq!(titles(&s), ["C", "A1"]);
+    }
+
+    #[test]
+    fn a_task_rereads_alone_when_changed_added_or_gone() {
+        let mut s = Store::default();
+        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B")] }));
+        s.config["tasks"][0]["title"] = json!("A2");
+        s.reread_task("a");
+        assert_eq!(titles(&s), ["A2", "B"]);
+        s.config["tasks"].as_array_mut().unwrap().push(task("c", "C"));
+        s.reread_task("c");
+        assert_eq!(titles(&s), ["A2", "B", "C"]);
+        s.config["tasks"].as_array_mut().unwrap().remove(1);
+        s.reread_task("b");
+        assert_eq!(titles(&s), ["A2", "C"]);
+        s.reread_task("zz");
+        assert_eq!(titles(&s), ["A2", "C"]);
+    }
+
     #[test]
     fn config_brings_projects_and_the_default_agent() {
         let mut s = Store::default();

@@ -1,7 +1,8 @@
 //! The Tasks view driven as a user would, on a vornd with its own HOME:
 //! the list and the board, the add dialog and its editor, the detail panel
 //! with its pickers, images, workflow runs and diff review, the commit
-//! dialog, the card menu and a card dragged across the board.
+//! dialog, the card menu and a card dragged across the board, and a board
+//! of thousands that builds only the cards in view on a window and cells.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
@@ -18,13 +19,13 @@ use vorn_app::app::MOD;
 use vorn_app::runs::RunAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::tasks::{
-    card_id, column_id, comment_id, commit_id, desc_id, image_id, title_id,
+    card_id, column_id, column_scroll_id, comment_id, commit_id, desc_id, image_id, title_id,
 };
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::tasks::{Form, Mode, TaskAct};
-use vorn_app::ui::{item_id, Id};
-use vorn_app::App;
+use vorn_app::ui::{item_id, mods, Id, RenderMode, Ui};
+use vorn_app::{ui_config, App};
 
 fn control(place: &str, act: Act) -> Id {
     App::control(place, &act)
@@ -531,4 +532,125 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
     shot.until(&mut app, "the file removed", |_, _| {
         (!file.exists()).then_some(())
     });
+}
+
+/// A board of `LONG` tasks, alternately To do and Done, on a window or on
+/// cells: only the cards in view are built, yet every card is reached by
+/// scrolling, the arrows and a drag that scrolls the column it nears.
+fn long_board(cells: bool) {
+    const LONG: usize = 2000;
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    add_project(&mut app, &v, "web", json!({}));
+    let id = |i: usize| format!("t-{i:05}");
+    let mut config = app.rpc().call("config:load", Value::Null).unwrap();
+    config["tasks"] = (0..LONG)
+        .map(|i| {
+            json!({
+                "id": id(i), "projectName": "web", "title": format!("Task {i}"),
+                "description": "", "status": if i % 2 == 0 { "todo" } else { "done" },
+                "order": i, "createdAt": "2026-10-14T00:00:00.000Z",
+                "updatedAt": "2026-10-14T00:00:00.000Z"
+            })
+        })
+        .collect();
+    app.rpc().call("config:save", config).unwrap();
+    let (mut ui, size) = if cells {
+        let ui = Ui::cells(&ui_config(1.0));
+        (ui, vorn_app::ui::cells::units::px(180, 40))
+    } else {
+        (Ui::headless(RenderMode::Auto, &ui_config(1.0)), (1400.0, 900.0))
+    };
+    app.st.view = MainView::Tasks;
+    app.st.project = Some("web".into());
+    app.st.tasks.mode = Mode::Board;
+    let todo: Vec<String> = (0..LONG).step_by(2).map(id).collect();
+    let done: Vec<String> = (1..LONG).step_by(2).map(id).collect();
+    support::wait_for("the tasks", || {
+        app.frame(&mut ui, size);
+        ui.rect_of(card_id(&todo[0])).map(|_| ())
+    });
+    app.frame(&mut ui, size);
+    let built = |ui: &Ui| todo.iter().filter(|t| ui.rect_of(card_id(t)).is_some()).count();
+    assert!(built(&ui) < 40, "{} of {} To do cards built", built(&ui), todo.len());
+    assert!(ui.rect_of(card_id(&todo[todo.len() - 1])).is_none());
+
+    // Scrolled to the end, the last card shows inside its column.
+    let scroll = column_scroll_id("todo");
+    for _ in 0..6 {
+        ui.set_scroll_offset(scroll, f32::MAX / 4.0);
+        app.frame(&mut ui, size);
+    }
+    let view = ui.rect_of(scroll).expect("the To do column");
+    let last = ui.rect_of(card_id(&todo[todo.len() - 1])).expect("the last card");
+    assert!(last.h > 0.0 && last.y + last.h <= view.y + view.h + 1.0, "{last:?} in {view:?}");
+    assert!(built(&ui) < 40);
+    ui.set_scroll_offset(scroll, 0.0);
+    app.frame(&mut ui, size);
+
+    // The arrows walk the cards, scrolling them into view.
+    let send = |app: &mut App, ui: &mut Ui, code: &str, m: u16| {
+        app.frame(ui, size);
+        app.send(ui, key(code, m, None));
+        app.frame(ui, size);
+    };
+    ui.set_focus(Some(card_id(&todo[0])));
+    send(&mut app, &mut ui, "ArrowDown", 0);
+    assert_eq!(ui.focus(), Some(card_id(&todo[1])));
+    send(&mut app, &mut ui, "ArrowRight", 0);
+    assert_eq!(ui.focus(), Some(card_id(&done[1])));
+    for _ in 0..60 {
+        send(&mut app, &mut ui, "ArrowDown", 0);
+    }
+    assert_eq!(ui.focus(), Some(card_id(&done[61])));
+    let column = ui.rect_of(column_scroll_id("done")).expect("the Done column");
+    let card = ui.rect_of(card_id(&done[61])).expect("the focused card");
+    assert!(card.h > 0.0 && card.y >= column.y - 0.5, "{card:?} in {column:?}");
+    assert!(card.y + card.h <= column.y + column.h + 0.5, "{card:?} in {column:?}");
+    // Option-Left moves it a column over, still focused.
+    send(&mut app, &mut ui, "ArrowLeft", mods::ALT);
+    let moved = app.store.tasks.iter().find(|t| t.id == done[61]).unwrap();
+    assert_eq!(json!(moved.status), "in_review");
+    assert_eq!(ui.focus(), Some(card_id(&done[61])));
+    ui.set_focus(None);
+
+    // A card held at the foot of Done scrolls it, and drops there.
+    let from = ui.rect_of(card_id(&todo[0])).expect("the first card");
+    let target = ui.rect_of(column_scroll_id("done")).expect("the Done column");
+    let before = ui.scroll_offset(column_scroll_id("done"));
+    ui.pointer_move(from.x + from.w / 2.0, from.y + from.h / 2.0);
+    ui.pointer_down();
+    app.events(&mut ui);
+    let (x1, y1) = (target.x + target.w / 2.0, target.y + target.h - 0.5);
+    for i in 1..=30 {
+        let f = (i as f32 / 8.0).min(1.0);
+        let (x0, y0) = (from.x + from.w / 2.0, from.y + from.h / 2.0);
+        ui.pointer_move(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+        app.events(&mut ui);
+        app.frame(&mut ui, size);
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+    assert_eq!(app.st.tasks.dragging, Some((todo[0].clone(), Some("done".to_owned()))));
+    let after = ui.scroll_offset(column_scroll_id("done"));
+    assert!(after > before, "the column scrolled: {before} to {after}");
+    ui.pointer_up();
+    app.events(&mut ui);
+    app.frame(&mut ui, size);
+    let dropped = app.store.tasks.iter().find(|t| t.id == todo[0]).unwrap();
+    assert_eq!(json!(dropped.status), "done");
+    support::wait_for("the drop saved", || {
+        (saved(&app, &todo[0])?["status"] == "done").then_some(())
+    });
+}
+
+#[test]
+fn a_long_board_builds_only_the_cards_in_view() {
+    long_board(false);
+}
+
+#[test]
+fn a_long_board_on_cells_builds_only_the_cards_in_view() {
+    long_board(true);
 }
