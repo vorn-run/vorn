@@ -79,13 +79,13 @@ pub fn run(argv: &[String], io: &mut dyn Io) -> ExitCode {
 /// Hands `url` to the system's default browser.
 fn open(url: &str) -> std::io::Result<()> {
     let mut command = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
+        vorn_spawn::command("open")
     } else if cfg!(windows) {
-        let mut c = std::process::Command::new("rundll32");
+        let mut c = vorn_spawn::command("rundll32");
         c.arg("url.dll,FileProtocolHandler");
         c
     } else {
-        std::process::Command::new("xdg-open")
+        vorn_spawn::command("xdg-open")
     };
     let status = command.arg(url).status()?;
     if status.success() {
