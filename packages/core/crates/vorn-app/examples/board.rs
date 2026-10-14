@@ -119,8 +119,8 @@ mod bench {
             "createdAt": "2026-10-01T10:00:00.000Z",
             "updatedAt": "2026-10-01T10:00:00.000Z",
         });
-        if i % 3 == 0 {
-            t["assignedAgent"] = json!("claude");
+        if i.is_multiple_of(3) {
+            t["assignedAgent"] = json!("shell");
         }
         if matches!(status, "done" | "cancelled") {
             t["completedAt"] = json!("2026-10-02T10:00:00.000Z");
