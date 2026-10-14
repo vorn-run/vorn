@@ -1,5 +1,5 @@
-//! Extensions, hosted here: the programs that speak the extension API,
-//! routed to by the bridge's [`Router`]; the extensions of 0.8 that add to a
+//! Extensions, hosted here: the programs that speak the extension API, which
+//! the bridge's [`Router`] calls, and the extensions of 0.8 that add to a
 //! card, one process per extension and project; installing, linking and
 //! removing them; the `extension:*` calls clients make about them, the bands
 //! and panes they show, and the bridge a card extension speaks back on

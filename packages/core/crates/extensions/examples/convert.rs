@@ -11,7 +11,9 @@ fn main() -> ExitCode {
     };
     let read = std::fs::read_to_string(&path)
         .map_err(|e| e.to_string())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string()));
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+        });
     let manifest = match read {
         Ok(serde_json::Value::Object(payload)) => {
             vorn_extensions::manifest::file::from_pack_json(&payload).map_err(|e| e.to_string())

@@ -645,3 +645,68 @@ async fn pages_are_served_on_a_loopback_port_of_their_own() {
     assert!(routes::bridge_route(&hyper::Method::GET, "/extensions/x/pane/p/n/").is_none());
     w.ext.stop().await;
 }
+
+/// A program linked from a folder answers its action, through `extension:call`
+/// and as `<id>:<action>`, and removing it leaves nothing listed or routed.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_linked_program_answers_and_is_removed_without_trace() {
+    let w = world();
+    let folder = tempfile::tempdir().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/tests/fixtures/hello-bash");
+    for file in ["vorn-extension.toml", "greet.sh"] {
+        fs::copy(fixture.join(file), folder.path().join(file)).unwrap();
+    }
+    let linked = result(
+        w.call("extension:link", json!({ "path": folder.path() }))
+            .await,
+    );
+    assert_eq!(
+        (linked["id"].as_str(), linked["linked"].as_bool()),
+        (Some("test.hello"), Some(true))
+    );
+    assert!(w.ext.owns("test.hello:greet"));
+    assert!(!w.ext.owns("git:greet") && !w.ext.owns("test.hello:") && !w.ext.owns("nope:greet"));
+
+    let routed = w
+        .ext
+        .call_action("test.hello:greet", json!({ "name": "Vorn" }))
+        .await;
+    assert_eq!(routed, Answer::Result(json!({ "greeting": "hello Vorn" })));
+    let called = result(
+        w.call(
+            "extension:call",
+            json!({ "id": "test.hello", "action": "greet", "args": { "name": "you" } }),
+        )
+        .await,
+    );
+    assert_eq!(called, json!({ "greeting": "hello you" }));
+    let installed = result(w.call("extension:installed", json!({})).await);
+    let ids: Vec<&str> = installed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"test.hello"), "{ids:?}");
+
+    let removed = result(
+        w.call("extension:remove", json!({ "id": "test.hello" }))
+            .await,
+    );
+    assert_eq!(removed, json!({ "removed": "test.hello" }));
+    assert!(!w.ext.owns("test.hello:greet"));
+    assert!(!w.packs.path().join("test.hello").exists());
+    assert!(
+        folder.path().join("greet.sh").exists(),
+        "a linked folder is the person's"
+    );
+    let again = w
+        .call("extension:remove", json!({ "id": "test.hello" }))
+        .await;
+    assert_eq!(
+        again,
+        Answer::Error("No extension \"test.hello\" is installed".into())
+    );
+}
