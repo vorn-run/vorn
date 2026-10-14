@@ -218,6 +218,14 @@ jobs:
           cargo build --profile ci --locked -p vornd -p vorn-sessiond -p vorn-app --example many_panes
           target/ci/examples/many_panes --panes 4 --cases mixed,hidden --seconds 2
 
+      # How fast the app opens, nightly on macOS. A shared runner's numbers are
+      # reported, not held to the budgets.
+      - name: Startup bench
+        if: ${{ runner.os == 'macOS' && github.event_name == 'schedule' }}
+        working-directory: packages/core
+        timeout-minutes: 15
+        run: STARTUP_BENCH_REPORT_ONLY=1 ./scripts/startup-bench.sh
+
       # The terminal scrolling test again, saving what each step looks like.
       - name: Scroll screenshots
         if: ${{ runner.os == 'Linux' && !inputs.crates }}
