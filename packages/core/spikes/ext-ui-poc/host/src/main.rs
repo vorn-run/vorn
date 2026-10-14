@@ -599,8 +599,10 @@ fn main() {
         let t = Instant::now();
         let mut b = wasm::UiB::with(&engine, &ui_c, false, SCALE, true);
         let init = t.elapsed().as_secs_f64() * 1e3;
+        let after_init = b.store.data().peak;
         b.data(&rows_json);
         b.frame(w, h, &[]);
+        let after_first = b.store.data().peak;
         let mut log = Vec::new();
         for (label, steps) in script(spots, false) {
             let ins: Vec<wasm::Input> = steps.iter().map(to_input).collect();
@@ -628,6 +630,8 @@ fn main() {
                 "interaction": timings(&log),
                 "scroll_500_rows": stats(sc),
                 "peak_linear_memory_mb": round(b.store.data().peak as f64 / 1048576.0),
+                "peak_after_init_mb": round(after_init as f64 / 1048576.0),
+                "peak_after_first_frame_mb": round(after_first as f64 / 1048576.0),
             }),
         );
     }
