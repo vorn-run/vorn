@@ -1,0 +1,640 @@
+{
+  "protocol": 1,
+  "id": "gitlab",
+  "name": "GitLab",
+  "version": "0.1.2",
+  "kind": "connector",
+  "description": "Trigger workflows from GitLab issues, merge requests and pipeline results, and create or comment on issues and merge requests from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8627 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8627 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"
+    ]
+  },
+  "auth": {
+    "rung": "cli",
+    "probe": {
+      "command": "glab",
+      "args": ["auth", "status"]
+    },
+    "borrow": {
+      "env": ["GITLAB_TOKEN"],
+      "tokenArgs": ["glab", "config", "get", "token"],
+      "tokenEnv": "GITLAB_TOKEN"
+    }
+  },
+  "triggers": [
+    {
+      "type": "issueCreated",
+      "label": "An issue is created",
+      "description": "Fires once for each issue created in the project since the last poll.",
+      "statusMapping": [
+        {
+          "upstream": "opened",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "closed",
+          "suggestedLocal": "done"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "GitLab: issues",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "gitlab",
+        "triggerType": "issueCreated",
+        "env": [
+          {
+            "name": "GITLAB_BASE_URL",
+            "required": false,
+            "secret": false,
+            "description": "Instance URL without a trailing slash. Leave the default for gitlab.com.",
+            "builderHint": "Every request goes to <baseUrl>/api/v4. A self-managed instance under a relative root (https://host/gitlab) works as-is. Declared requests append the path verbatim, so a trailing slash here would double it."
+          },
+          {
+            "name": "GITLAB_PROJECT",
+            "required": true,
+            "secret": false,
+            "description": "Path such as group/project, or the numeric id. The triggers poll this project.",
+            "builderHint": "Sent URL-encoded (group%2Fproject) as the :id segment, as the docs require for namespaced paths. Actions take their own project input so one connection can act on several."
+          },
+          {
+            "name": "GITLAB_TOKEN",
+            "required": false,
+            "secret": true,
+            "description": "Leave empty to borrow the glab CLI login. Needs scope api, or read_api for the triggers and read-only actions.",
+            "builderHint": "Created under Edit profile, Access, Personal access tokens, Generate token; prefixed glpat-, 365-day default expiry. Filled, it is sent as-is and glab is never run; empty, the connector asks glab config get token --host <host>."
+          },
+          {
+            "name": "GITLAB_REF",
+            "required": false,
+            "secret": false,
+            "description": "Branch or tag whose pipelines to watch. Blank for every ref.",
+            "builderHint": "Sent as the ref filter on GET /projects/:id/pipelines; the other two triggers ignore it."
+          }
+        ]
+      }
+    },
+    {
+      "type": "mergeRequestOpened",
+      "label": "A merge request is opened",
+      "description": "Fires once for each merge request opened in the project since the last poll.",
+      "statusMapping": [
+        {
+          "upstream": "opened",
+          "suggestedLocal": "in_progress"
+        },
+        {
+          "upstream": "merged",
+          "suggestedLocal": "done"
+        },
+        {
+          "upstream": "closed",
+          "suggestedLocal": "done"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "GitLab: merge requests",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "gitlab",
+        "triggerType": "mergeRequestOpened",
+        "env": [
+          {
+            "name": "GITLAB_BASE_URL",
+            "required": false,
+            "secret": false,
+            "description": "Instance URL without a trailing slash. Leave the default for gitlab.com.",
+            "builderHint": "Every request goes to <baseUrl>/api/v4. A self-managed instance under a relative root (https://host/gitlab) works as-is. Declared requests append the path verbatim, so a trailing slash here would double it."
+          },
+          {
+            "name": "GITLAB_PROJECT",
+            "required": true,
+            "secret": false,
+            "description": "Path such as group/project, or the numeric id. The triggers poll this project.",
+            "builderHint": "Sent URL-encoded (group%2Fproject) as the :id segment, as the docs require for namespaced paths. Actions take their own project input so one connection can act on several."
+          },
+          {
+            "name": "GITLAB_TOKEN",
+            "required": false,
+            "secret": true,
+            "description": "Leave empty to borrow the glab CLI login. Needs scope api, or read_api for the triggers and read-only actions.",
+            "builderHint": "Created under Edit profile, Access, Personal access tokens, Generate token; prefixed glpat-, 365-day default expiry. Filled, it is sent as-is and glab is never run; empty, the connector asks glab config get token --host <host>."
+          },
+          {
+            "name": "GITLAB_REF",
+            "required": false,
+            "secret": false,
+            "description": "Branch or tag whose pipelines to watch. Blank for every ref.",
+            "builderHint": "Sent as the ref filter on GET /projects/:id/pipelines; the other two triggers ignore it."
+          }
+        ]
+      }
+    },
+    {
+      "type": "pipelineFinished",
+      "label": "A pipeline finishes",
+      "description": "Fires once for each pipeline that reaches success, failed, canceled or skipped, with the status on the item.",
+      "statusMapping": [
+        {
+          "upstream": "success",
+          "suggestedLocal": "done"
+        },
+        {
+          "upstream": "failed",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "canceled",
+          "suggestedLocal": "cancelled"
+        },
+        {
+          "upstream": "skipped",
+          "suggestedLocal": "cancelled"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "GitLab: pipelines",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "gitlab",
+        "triggerType": "pipelineFinished",
+        "env": [
+          {
+            "name": "GITLAB_BASE_URL",
+            "required": false,
+            "secret": false,
+            "description": "Instance URL without a trailing slash. Leave the default for gitlab.com.",
+            "builderHint": "Every request goes to <baseUrl>/api/v4. A self-managed instance under a relative root (https://host/gitlab) works as-is. Declared requests append the path verbatim, so a trailing slash here would double it."
+          },
+          {
+            "name": "GITLAB_PROJECT",
+            "required": true,
+            "secret": false,
+            "description": "Path such as group/project, or the numeric id. The triggers poll this project.",
+            "builderHint": "Sent URL-encoded (group%2Fproject) as the :id segment, as the docs require for namespaced paths. Actions take their own project input so one connection can act on several."
+          },
+          {
+            "name": "GITLAB_TOKEN",
+            "required": false,
+            "secret": true,
+            "description": "Leave empty to borrow the glab CLI login. Needs scope api, or read_api for the triggers and read-only actions.",
+            "builderHint": "Created under Edit profile, Access, Personal access tokens, Generate token; prefixed glpat-, 365-day default expiry. Filled, it is sent as-is and glab is never run; empty, the connector asks glab config get token --host <host>."
+          },
+          {
+            "name": "GITLAB_REF",
+            "required": false,
+            "secret": false,
+            "description": "Branch or tag whose pipelines to watch. Blank for every ref.",
+            "builderHint": "Sent as the ref filter on GET /projects/:id/pipelines; the other two triggers ignore it."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "createIssue",
+      "label": "Create an issue",
+      "description": "Open a new issue in a project.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "description": "Issue title"
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "type": "string",
+          "required": false,
+          "description": "Markdown body, up to 1,048,576 characters"
+        },
+        {
+          "key": "labels",
+          "label": "Labels",
+          "type": "string",
+          "required": false,
+          "description": "Comma-separated label names",
+          "builderHint": "GitLab takes labels as one comma-separated string, so this is passed through as typed."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "Global issue id"
+        },
+        {
+          "key": "iid",
+          "type": "number",
+          "description": "The number shown in the project, as in #12"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        },
+        {
+          "key": "title",
+          "description": "The title as saved"
+        },
+        {
+          "key": "state",
+          "description": "opened"
+        },
+        {
+          "key": "createdAt",
+          "description": "When it was created"
+        }
+      ]
+    },
+    {
+      "type": "commentOnIssue",
+      "label": "Comment on an issue",
+      "description": "Post a note on an issue.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        },
+        {
+          "key": "iid",
+          "label": "Issue number",
+          "type": "number",
+          "required": true,
+          "description": "The issue number shown in the project (its iid, not the global id)"
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "Markdown, up to 1,000,000 characters"
+        },
+        {
+          "key": "internal",
+          "label": "Internal note",
+          "type": "boolean",
+          "required": false,
+          "description": "Visible to project members only. Defaults to false.",
+          "builderHint": "The documented replacement for the deprecated confidential flag on notes."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The note id"
+        },
+        {
+          "key": "body",
+          "description": "The comment as posted"
+        },
+        {
+          "key": "author",
+          "description": "Who posted it, as {id, username, name}"
+        },
+        {
+          "key": "createdAt",
+          "description": "When it was posted"
+        },
+        {
+          "key": "noteableIid",
+          "type": "number",
+          "description": "The iid it was posted on"
+        },
+        {
+          "key": "noteableType",
+          "description": "Issue or MergeRequest"
+        },
+        {
+          "key": "internal",
+          "type": "boolean",
+          "description": "Whether only members can see it"
+        }
+      ]
+    },
+    {
+      "type": "commentOnMergeRequest",
+      "label": "Comment on a merge request",
+      "description": "Post a note on a merge request.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        },
+        {
+          "key": "iid",
+          "label": "Merge request number",
+          "type": "number",
+          "required": true,
+          "description": "The merge request number shown in the project (its iid)"
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "Markdown, up to 1,000,000 characters"
+        },
+        {
+          "key": "internal",
+          "label": "Internal note",
+          "type": "boolean",
+          "required": false,
+          "description": "Visible to project members only. Defaults to false.",
+          "builderHint": "The documented replacement for the deprecated confidential flag on notes."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The note id"
+        },
+        {
+          "key": "body",
+          "description": "The comment as posted"
+        },
+        {
+          "key": "author",
+          "description": "Who posted it, as {id, username, name}"
+        },
+        {
+          "key": "createdAt",
+          "description": "When it was posted"
+        },
+        {
+          "key": "noteableIid",
+          "type": "number",
+          "description": "The iid it was posted on"
+        },
+        {
+          "key": "noteableType",
+          "description": "Issue or MergeRequest"
+        },
+        {
+          "key": "internal",
+          "type": "boolean",
+          "description": "Whether only members can see it"
+        }
+      ]
+    },
+    {
+      "type": "getProject",
+      "label": "Get a project",
+      "description": "Read a project by path or id.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "Project id"
+        },
+        {
+          "key": "name",
+          "description": "Display name"
+        },
+        {
+          "key": "path",
+          "description": "The last segment of the path"
+        },
+        {
+          "key": "pathWithNamespace",
+          "description": "group/project"
+        },
+        {
+          "key": "description",
+          "description": "Project description"
+        },
+        {
+          "key": "defaultBranch",
+          "description": "Usually main or master"
+        },
+        {
+          "key": "visibility",
+          "description": "private, internal or public"
+        },
+        {
+          "key": "url",
+          "description": "Where to open it"
+        },
+        {
+          "key": "httpUrlToRepo",
+          "description": "Clone URL over HTTPS"
+        },
+        {
+          "key": "sshUrlToRepo",
+          "description": "Clone URL over SSH"
+        },
+        {
+          "key": "createdAt",
+          "description": "When the project was created"
+        },
+        {
+          "key": "lastActivityAt",
+          "description": "When something last happened in it"
+        },
+        {
+          "key": "archived",
+          "type": "boolean",
+          "description": "Whether it is archived"
+        },
+        {
+          "key": "namespace",
+          "description": "The owning group or user, as {id, name, path, fullPath, kind}"
+        },
+        {
+          "key": "starCount",
+          "type": "number",
+          "description": "Stars"
+        },
+        {
+          "key": "forksCount",
+          "type": "number",
+          "description": "Forks"
+        },
+        {
+          "key": "topics",
+          "description": "Topic names"
+        }
+      ],
+      "sample": {
+        "project": "gitlab-org/gitlab"
+      }
+    },
+    {
+      "type": "listOpenMergeRequests",
+      "label": "List open merge requests",
+      "description": "The open merge requests of a project, most recently updated first.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        },
+        {
+          "key": "limit",
+          "label": "Maximum",
+          "type": "number",
+          "required": false,
+          "description": "How many to return, 1 to 100. Defaults to 20.",
+          "builderHint": "Sent as per_page; 100 is the documented maximum."
+        },
+        {
+          "key": "targetBranch",
+          "label": "Target branch",
+          "type": "string",
+          "required": false,
+          "description": "Only merge requests into this branch. Blank for all."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many merge requests came back"
+        },
+        {
+          "key": "items",
+          "description": "One entry per merge request, shaped as the merge request trigger delivers it: externalId (the iid), title, url, description, status, labels, updatedAt, and data with id, iid, projectId, sourceBranch, targetBranch, draft, sha, author, createdAt, changedAt, mergedAt, closedAt, hasConflicts, detailedMergeStatus"
+        }
+      ],
+      "sample": {
+        "project": "gitlab-org/gitlab"
+      }
+    },
+    {
+      "type": "getIssue",
+      "label": "Get an issue",
+      "description": "Read one issue by its number.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": true,
+          "description": "Project path such as group/project, or its numeric id",
+          "builderHint": "The path is what the URL shows after the host; the id is on the project page. Either is sent URL-encoded as the :id segment."
+        },
+        {
+          "key": "iid",
+          "label": "Issue number",
+          "type": "number",
+          "required": true,
+          "description": "The issue number shown in the project (its iid)"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "Global issue id"
+        },
+        {
+          "key": "iid",
+          "type": "number",
+          "description": "The number shown in the project"
+        },
+        {
+          "key": "projectId",
+          "type": "number",
+          "description": "The project it belongs to"
+        },
+        {
+          "key": "title",
+          "description": "Issue title"
+        },
+        {
+          "key": "description",
+          "description": "Markdown body"
+        },
+        {
+          "key": "state",
+          "description": "opened or closed"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        },
+        {
+          "key": "labels",
+          "description": "Label names"
+        },
+        {
+          "key": "author",
+          "description": "Who opened it, as {id, username, name}"
+        },
+        {
+          "key": "assignees",
+          "description": "Each as {id, username, name}"
+        },
+        {
+          "key": "createdAt",
+          "description": "When it was opened"
+        },
+        {
+          "key": "updatedAt",
+          "description": "When it last changed"
+        },
+        {
+          "key": "closedAt",
+          "description": "When it was closed, or null"
+        },
+        {
+          "key": "issueType",
+          "description": "issue, incident, test_case or task"
+        },
+        {
+          "key": "confidential",
+          "type": "boolean",
+          "description": "Whether only members can see it"
+        }
+      ],
+      "sample": {
+        "project": "gitlab-org/gitlab",
+        "iid": "1"
+      }
+    }
+  ]
+}

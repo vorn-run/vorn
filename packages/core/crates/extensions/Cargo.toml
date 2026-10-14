@@ -6,16 +6,22 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Extensions for Vorn: installed packs, where their contributions show, the child each runs as per project, and the channel it talks back on"
+description = "Extensions for Vorn: the one manifest and package store, the extension API generated from its WIT, the lifecycle every program runs under, the router and gate between programs and Vorn, and installing from git"
+
 
 [dependencies]
-vorn-connectors = { path = "../connectors" }
+vorn-spawn = { path = "../spawn", features = ["tokio"] }
 data-encoding = "2"
 getrandom = "0.4"
+# `vorn ext pack` bundles a folder as a .tar.gz, as 0.8's packs were; both already in the tree.
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
 # Link handler patterns are JavaScript regular expressions, matched as a browser would.
 regress = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# vorn-extension.toml is TOML a person writes; 1.x reports the span of every key, so errors name their line. Already in the tree.
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std", "display"] }
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time", "macros"] }
 tracing = "0.1"
 
@@ -24,6 +30,5 @@ tracing = "0.1"
 libc = "0.2"
 
 [dev-dependencies]
-vorn-connectors = { path = "../connectors", features = ["test-support"] }
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros", "test-util"] }

@@ -1,0 +1,14 @@
+{
+  "id": "lazygit",
+  "name": "Lazygit",
+  "version": "2.0.0",
+  "kind": "extension",
+  "protocol": 1,
+  "permissions": ["agent.usage", "terminal.send"],
+  "contributes": {
+    "panes": [{ "id": "git", "title": "Git", "command": ["lazygit", "-p", "."] }],
+    "footers": [
+      { "id": "usage", "title": "Usage", "every": 5.5, "when": { "workspaceContains": [".git"] } }
+    ]
+  }
+}

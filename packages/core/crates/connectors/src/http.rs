@@ -225,7 +225,7 @@ pub fn execute(http: &Http, action: &str, profile: &Profile, args: &Map<String, 
                 .and_then(Value::as_object)
                 .map(|h| {
                     h.iter()
-                        .map(|(k, v)| (k.clone(), crate::js::to_string(v)))
+                        .map(|(k, v)| (k.clone(), vorn_extensions::js::to_string(v)))
                         .collect()
                 })
                 .unwrap_or_default();

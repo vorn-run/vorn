@@ -1,6 +1,9 @@
-//! One child spoken to in Vorn's connector protocol: a JSON-RPC message per
-//! line on its stdin and stdout, its stderr kept as a short tail for the
-//! messages a failure gives.
+//! One child spoken to in JSON-RPC, a message per line on its stdin and
+//! stdout, its stderr kept as a short tail for the messages a failure gives.
+//!
+//! A child in the connector protocol only answers. One speaking the extension
+//! API also asks: its requests and notifications go to the inbox it was
+//! started with, and are answered through its [`Writer`].
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -87,6 +90,8 @@ pub struct ErrorData {
     pub kind: Option<String>,
     pub retryable: Option<bool>,
     pub field: Option<String>,
+    /// The extension API's own error code (`ext-error.code`).
+    pub code: Option<String>,
 }
 
 /// The error kinds protocol 1 names; any other is dropped.
@@ -109,13 +114,15 @@ pub enum CallError {
     },
     /// The child, or its pipe, failed before it answered.
     Transport(String),
+    /// The child did not answer in time; it may still be running.
+    Timeout(String),
 }
 
 impl CallError {
     pub fn code(&self) -> Option<i64> {
         match self {
             CallError::Answered { code, .. } => Some(*code),
-            CallError::Transport(_) => None,
+            CallError::Transport(_) | CallError::Timeout(_) => None,
         }
     }
 }
@@ -123,9 +130,9 @@ impl CallError {
 impl fmt::Display for CallError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallError::Answered { message, .. } | CallError::Transport(message) => {
-                f.write_str(message)
-            }
+            CallError::Answered { message, .. }
+            | CallError::Transport(message)
+            | CallError::Timeout(message) => f.write_str(message),
         }
     }
 }
@@ -133,6 +140,18 @@ impl fmt::Display for CallError {
 impl std::error::Error for CallError {}
 
 type Reply = oneshot::Sender<Result<Value, CallError>>;
+
+/// A request or notification the child sent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Incoming {
+    /// Absent for a notification, which is not answered.
+    pub id: Option<Value>,
+    pub method: String,
+    pub params: Value,
+}
+
+/// Where a child's own requests go; bounded, so a flood waits on the bridge.
+pub type Inbox = mpsc::Sender<Incoming>;
 
 #[derive(Default)]
 struct State {
@@ -194,7 +213,8 @@ enum Signal {
 /// A running child. Dropping it does not stop the child; [`Child::close`] does.
 pub struct Child {
     name: String,
-    stdin: tokio::sync::Mutex<Option<ChildStdin>>,
+    pid: Option<u32>,
+    stdin: Writer,
     state: Arc<Mutex<State>>,
     next_id: AtomicU64,
     signals: mpsc::UnboundedSender<Signal>,
@@ -214,6 +234,16 @@ fn lock(state: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
 impl Child {
     /// Starts `launch`; `name` is how its messages and logs name it.
     pub fn start(launch: &Launch, name: String) -> Result<Child, String> {
+        Child::start_with(launch, name, None)
+    }
+
+    /// Starts `launch` with an inbox for what the child asks; without one, a
+    /// request from the child is logged and dropped, as protocol 1 has none.
+    pub fn start_with(
+        launch: &Launch,
+        name: String,
+        inbox: Option<Inbox>,
+    ) -> Result<Child, String> {
         let mut command = vorn_spawn::tokio_command(&launch.program);
         command
             .args(&launch.args)
@@ -249,6 +279,7 @@ impl Child {
             name.clone(),
             Arc::clone(&state),
             signals.clone(),
+            inbox,
         ));
         let pid = child.id();
         let waiter_name = name.clone();
@@ -284,9 +315,14 @@ impl Child {
             let _ = exit_tx.send(Some(ended));
         });
 
+        let stdin = Writer {
+            name: Arc::from(name.as_str()),
+            stdin: Arc::new(tokio::sync::Mutex::new(Some(stdin))),
+        };
         Ok(Child {
             name,
-            stdin: tokio::sync::Mutex::new(Some(stdin)),
+            pid,
+            stdin,
             state,
             next_id: AtomicU64::new(1),
             signals,
@@ -332,15 +368,9 @@ impl Child {
             }
             st.pending.insert(id, (method.to_owned(), tx));
         }
-        let mut line = serde_json::to_vec(
-            &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
-        )
-        .unwrap_or_default();
-        line.push(b'\n');
-        if let Some(stdin) = self.stdin.lock().await.as_mut() {
-            if let Err(err) = stdin.write_all(&line).await {
-                warn!("{} stdin: {err}", self.name);
-            }
+        let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        if let Err(err) = self.stdin.write(&message).await {
+            warn!("{err}");
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(answer)) => answer,
@@ -350,13 +380,28 @@ impl Child {
             ))),
             Err(_) => {
                 lock(&self.state).pending.remove(&id);
-                Err(CallError::Transport(format!(
+                Err(CallError::Timeout(format!(
                     "{} did not answer {method} within {} s",
                     self.name,
                     timeout.as_secs_f64().round()
                 )))
             }
         }
+    }
+
+    /// The process id, while it runs.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
+    }
+
+    /// A handle that writes to its stdin, for whoever answers what it asks.
+    pub fn writer(&self) -> Writer {
+        self.stdin.clone()
+    }
+
+    /// Sends `method` without an id; nothing answers it.
+    pub async fn notify(&self, method: &str, params: Value) -> Result<(), CallError> {
+        self.stdin.notify(method, params).await
     }
 
     /// Ends its stdin, then `SIGTERM` and `SIGKILL` if it lingers; returns
@@ -371,7 +416,7 @@ impl Child {
         if self.exited() {
             return;
         }
-        drop(self.stdin.lock().await.take());
+        self.stdin.close().await;
         let started = tokio::time::Instant::now();
         let ended = self.wait();
         tokio::pin!(ended);
@@ -388,6 +433,59 @@ impl Child {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Writes JSON-RPC messages to a child's stdin, a line each.
+#[derive(Clone)]
+pub struct Writer {
+    name: Arc<str>,
+    stdin: Arc<tokio::sync::Mutex<Option<ChildStdin>>>,
+}
+
+impl fmt::Debug for Writer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Writer").field("name", &self.name).finish()
+    }
+}
+
+impl Writer {
+    async fn write(&self, message: &Value) -> Result<(), CallError> {
+        let mut line = serde_json::to_vec(message).unwrap_or_default();
+        line.push(b'\n');
+        match self.stdin.lock().await.as_mut() {
+            Some(stdin) => stdin.write_all(&line).await.map_err(|err| {
+                CallError::Transport(format!("{} stopped reading: {err}", self.name))
+            }),
+            None => Err(CallError::Transport(format!(
+                "{} is not running",
+                self.name
+            ))),
+        }
+    }
+
+    async fn close(&self) {
+        drop(self.stdin.lock().await.take());
+    }
+
+    /// Sends `method` without an id; nothing answers it.
+    pub async fn notify(&self, method: &str, params: Value) -> Result<(), CallError> {
+        self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+            .await
+    }
+
+    /// Answers the child's request `id`: a result, or a code, message and data.
+    pub async fn reply(&self, id: Value, answer: Result<Value, (i64, String, Value)>) {
+        let message = match answer {
+            Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+            Err((code, message, data)) => json!({
+                "jsonrpc": "2.0", "id": id,
+                "error": { "code": code, "message": message, "data": data }
+            }),
+        };
+        if let Err(err) = self.write(&message).await {
+            warn!("{err}");
         }
     }
 }
@@ -447,6 +545,7 @@ async fn read_stdout(
     name: String,
     state: Arc<Mutex<State>>,
     signals: mpsc::UnboundedSender<Signal>,
+    inbox: Option<Inbox>,
 ) {
     let mut reader = BufReader::new(stdout);
     let mut buf = Vec::new();
@@ -478,28 +577,43 @@ async fn read_stdout(
         if js::trim(line).is_empty() {
             continue;
         }
-        on_line(&name, &state, line);
+        if let Some(incoming) = on_line(&name, &state, line, inbox.is_some()) {
+            if let Some(inbox) = &inbox {
+                // Waits while the bridge is busy, so the child waits on its pipe.
+                if inbox.send(incoming).await.is_err() {
+                    return;
+                }
+            }
+        }
     }
 }
 
-fn on_line(name: &str, state: &Mutex<State>, line: &str) {
+/// Settles an answer, or hands back a request the child made.
+fn on_line(name: &str, state: &Mutex<State>, line: &str, asks: bool) -> Option<Incoming> {
     let Ok(message) = serde_json::from_str::<Value>(line) else {
         warn!(
             "{name} wrote a line that is not JSON: {}",
             js::slice16(line, 200)
         );
-        return;
+        return None;
     };
     let Some(frame) = message.as_object() else {
         warn!(
             "{name} wrote a line that is not a message: {}",
             js::slice16(line, 200)
         );
-        return;
+        return None;
     };
     if let Some(method) = frame.get("method").and_then(Value::as_str) {
-        warn!("{name} sent {method}, which a connector does not send in protocol 1");
-        return;
+        if !asks {
+            warn!("{name} sent {method}, which a connector does not send in protocol 1");
+            return None;
+        }
+        return Some(Incoming {
+            id: frame.get("id").cloned().filter(|id| !id.is_null()),
+            method: method.to_owned(),
+            params: frame.get("params").cloned().unwrap_or(Value::Null),
+        });
     }
     let entry = frame
         .get("id")
@@ -511,13 +625,14 @@ fn on_line(name: &str, state: &Mutex<State>, line: &str) {
             .get("id")
             .map_or_else(|| "undefined".to_owned(), |id| id.to_string());
         warn!("{name} answered a request nobody is waiting for: {id}");
-        return;
+        return None;
     };
     let answer = match frame.get("error") {
         Some(error) => Err(call_error(&method, error)),
         None => Ok(frame.get("result").cloned().unwrap_or(Value::Null)),
     };
     let _ = reply.send(answer);
+    None
 }
 
 fn call_error(method: &str, error: &Value) -> CallError {
@@ -541,6 +656,10 @@ fn call_error(method: &str, error: &Value) -> CallError {
             .and_then(Value::as_bool),
         field: data
             .and_then(|d| d.get("field"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        code: data
+            .and_then(|d| d.get("code"))
             .and_then(Value::as_str)
             .map(str::to_owned),
     };

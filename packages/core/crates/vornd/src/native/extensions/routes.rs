@@ -95,7 +95,7 @@ where
                 return refuse(403, "That request came from another site");
             }
             let caller = bridge::bearer(header(req.headers(), header::AUTHORIZATION))
-                .and_then(|token| extensions.supervisor.by_token(&id, token))
+                .and_then(|token| extensions.hosts.by_token(&id, token))
                 .map(|key| Caller {
                     extension_id: key.extension_id,
                     project_path: key.project_path,
@@ -148,7 +148,7 @@ where
     };
     let pack = caller
         .as_ref()
-        .and_then(|c| extensions.supervisor.store().describe(&c.extension_id));
+        .and_then(|c| extensions.hosts.store().describe(&c.extension_id));
     if let Err(refusal) = bridge::admit(caller.as_ref(), pack.as_ref(), method) {
         return refused(refusal);
     }
@@ -266,7 +266,7 @@ async fn serve_page(
         return not_found();
     }
     let Some(pack) = extensions
-        .supervisor
+        .hosts
         .store()
         .describe(id)
         .filter(InstalledPack::is_extension)

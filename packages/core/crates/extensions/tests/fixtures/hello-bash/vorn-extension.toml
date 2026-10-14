@@ -1,0 +1,8 @@
+id = "test.hello"
+name = "Hello"
+version = "0.1.0"
+api = "vorn:extension@0.9"
+
+[actions.greet]
+title = "Say hello"
+command = ["bash", "greet.sh"]

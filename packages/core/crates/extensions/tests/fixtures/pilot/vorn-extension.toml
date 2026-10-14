@@ -1,0 +1,37 @@
+id = "test.feeds"
+name = "Feeds"
+version = "1.2.0"
+api = "vorn:connector@1"
+publisher = "Vorn tests"
+description = "A connector that reads feeds, for the bridge's tests."
+
+[build]
+command = ["node", "build.mjs"]
+
+[service]
+command = ["node", "dist/main.mjs"]
+
+[actions.read]
+title = "Read a feed"
+command = ["node", "dist/main.mjs"]
+
+[checks]
+command = ["node", "dist/main.mjs", "--check"]
+
+[declares]
+network = ["feeds.example.com"]
+
+[connector.auth]
+rung = "none"
+
+[[connector.triggers]]
+type = "new-item"
+label = "New item"
+
+[[connector.actions]]
+type = "read"
+label = "Read a feed"
+
+[[connector.actions.inputs]]
+key = "url"
+required = true

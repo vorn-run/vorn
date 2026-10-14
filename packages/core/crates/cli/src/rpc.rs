@@ -392,7 +392,18 @@ impl Client {
     /// Sends one request and waits for its answer: the `result`, or `null`
     /// when the server sent none.
     pub async fn call(&self, method: &str, params: Option<Value>) -> Result<Value, CallError> {
-        let ms = self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+        self.call_within(method, params, DEFAULT_TIMEOUT_MS).await
+    }
+
+    /// As [`Client::call`], waiting `default_ms` unless `--timeout` says otherwise:
+    /// for a call that does real work, such as cloning and building an extension.
+    pub async fn call_within(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        default_ms: u64,
+    ) -> Result<Value, CallError> {
+        let ms = self.timeout_ms.unwrap_or(default_ms);
         let (request, port) = self.connection()?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let exchange = self.exchange(request, port, id, method, params);

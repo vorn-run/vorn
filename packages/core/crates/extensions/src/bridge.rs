@@ -92,6 +92,7 @@ pub fn admit(
     let permission = permission_of(method)
         .ok_or_else(|| Refusal::new(404, format!("The host serves no method \"{method}\"")))?;
     if !pack
+        .manifest
         .permissions
         .as_deref()
         .unwrap_or_default()

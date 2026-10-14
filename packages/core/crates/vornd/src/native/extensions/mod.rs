@@ -1,12 +1,16 @@
-//! Extensions, hosted here: one process per extension and project, the
-//! `extension:*` calls clients make about them, the bands and panes they
-//! show, and the bridge each speaks back on ([`routes`]).
+//! Extensions, hosted here: the programs that speak the extension API, which
+//! the bridge's [`Router`] calls, and the extensions of 0.8 that add to a
+//! card, one process per extension and project; installing, linking and
+//! removing them; the `extension:*` calls clients make about them, the bands
+//! and panes they show, and the bridge a card extension speaks back on
+//! ([`routes`]). Every process runs under the one lifecycle vornd holds.
 //!
 //! The rules are [`vorn_extensions`]'s. This module runs them against what
 //! vornd has around it ([`Around`]): the session records, the session host,
 //! its own endpoint and the clients the server holds.
 
 pub mod routes;
+pub mod world;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,11 +24,16 @@ use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_extensions::activation::{self, Subject};
+use vorn_extensions::api::types::CallCtx;
+use vorn_extensions::api::ExtError;
 use vorn_extensions::footer::{Declared, Footers, Key};
 use vorn_extensions::grants::{Grant, Grants, Lookup, GRANT_IDLE_MS};
-use vorn_extensions::host::{Asked, HostKey, Supervisor};
+use vorn_extensions::host::{Asked, Host, HostKey, Hosts};
+use vorn_extensions::install::Installs;
+use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
+use vorn_extensions::router::Router;
 use vorn_extensions::{links, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
@@ -40,6 +49,48 @@ pub const METHODS: &[&str] = &[
     "extension:closePane",
     "extension:runHandler",
     "extension:matchLinks",
+    "extension:installed",
+    "extension:inspect",
+    "extension:install",
+    "extension:link",
+    "extension:remove",
+    "extension:call",
+    "extension:rows",
+    "extension:running",
+];
+
+/// Core method groups, which no extension id may take: `<id>:<action>` routes to an extension.
+pub const RESERVED: &[&str] = &[
+    "agent",
+    "bridge",
+    "config",
+    "connection",
+    "connector",
+    "credentials",
+    "device",
+    "browser",
+    "extension",
+    "file",
+    "git",
+    "headless",
+    "hooks",
+    "http",
+    "ide",
+    "pairing",
+    "script",
+    "server",
+    "session",
+    "sessions",
+    "shell",
+    "tailscale",
+    "task",
+    "terminal",
+    "token",
+    "vornd",
+    "widget",
+    "workflow",
+    "worktree",
+    "vorn",
 ];
 
 /// The notification a window answers a selection request with.
@@ -119,6 +170,14 @@ pub trait Around: Send + Sync + 'static {
     fn write(&self, id: &str, text: &str) -> BoxFuture<'static, Result<(), String>>;
     /// The git to read a worktree with.
     fn git(&self) -> Git;
+    /// A package was installed or linked: the connector it brings comes with it.
+    fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
+    /// A package was removed: the connections made with it go with it.
+    fn pack_removed(&self, _id: &str) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
 }
 
 #[derive(Default)]
@@ -129,7 +188,9 @@ struct Bands {
 
 /// The extension host: its processes, panes, bands and pending selections.
 pub struct Extensions {
-    supervisor: Arc<Supervisor>,
+    hosts: Arc<Hosts>,
+    router: Arc<Router>,
+    installs: Arc<Installs>,
     around: Arc<dyn Around>,
     /// Where an extension's process and programs reach the bridge.
     bridge_origin: String,
@@ -141,6 +202,8 @@ pub struct Extensions {
     grants: Mutex<Grants>,
     bands: Mutex<Bands>,
     selections: Mutex<HashMap<u64, oneshot::Sender<String>>>,
+    /// Each open pane keeps its extension's host running: a pane's program holds that host's token.
+    pane_hosts: Mutex<HashMap<String, Lease<Host>>>,
     next_selection: AtomicU64,
     /// The newest sync asked for each session; reading git can finish them out of order.
     syncs: Mutex<HashMap<String, u64>>,
@@ -171,20 +234,33 @@ fn iso_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+/// Runs `work` off the runtime: git and builds block.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|e| Err(format!("the extension work failed in vornd: {e}")))
+}
+
 fn text<'a>(params: &'a Value, key: &str) -> &'a str {
     params.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
 impl Extensions {
     pub fn new(
-        supervisor: Arc<Supervisor>,
+        hosts: Arc<Hosts>,
+        router: Arc<Router>,
+        installs: Arc<Installs>,
         around: Arc<dyn Around>,
         bridge_origin: String,
         ancestors: Vec<String>,
         home: PathBuf,
     ) -> Arc<Extensions> {
         Arc::new_cyclic(|me| Extensions {
-            supervisor,
+            hosts,
+            router,
+            installs,
             around,
             bridge_origin,
             page_origin: OnceLock::new(),
@@ -193,6 +269,7 @@ impl Extensions {
             grants: Mutex::default(),
             bands: Mutex::default(),
             selections: Mutex::default(),
+            pane_hosts: Mutex::default(),
             next_selection: AtomicU64::new(0),
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
@@ -207,7 +284,12 @@ impl Extensions {
 
     /// The extension processes running.
     pub fn hosts(&self) -> usize {
-        self.supervisor.running().len()
+        self.hosts.running().len()
+    }
+
+    /// The router programs are called and woken through.
+    pub fn router(&self) -> &Arc<Router> {
+        &self.router
     }
 
     /// The panes open.
@@ -226,7 +308,8 @@ impl Extensions {
     pub async fn stop(&self) {
         let closed = guard(&self.grants).close_where(|_| true);
         self.kill_terminals(&closed);
-        self.supervisor.stop_all().await;
+        self.hosts.stop_all().await;
+        self.router.lifecycle().stop_all().await;
     }
 
     /// Answers one of [`METHODS`].
@@ -234,8 +317,68 @@ impl Extensions {
         let session = || self.live(text(params, "sessionId"));
         let answered = match method {
             "extension:list" => {
-                Ok(serde_json::to_value(self.supervisor.store().extensions()).unwrap_or_default())
+                Ok(serde_json::to_value(self.hosts.store().extensions()).unwrap_or_default())
             }
+            "extension:installed" => Ok(self.installed()),
+            "extension:inspect" => {
+                let (url, branch) = (text(params, "url").to_owned(), params.get("branch"));
+                let branch = branch.and_then(Value::as_str).map(str::to_owned);
+                let installs = Arc::clone(&self.installs);
+                blocking(move || installs.inspect_git(&url, branch.as_deref()))
+                    .await
+                    .map(|sheet| json!(sheet))
+            }
+            "extension:install" => {
+                let (token, typed) = (
+                    text(params, "token").to_owned(),
+                    text(params, "confirm").to_owned(),
+                );
+                let installs = Arc::clone(&self.installs);
+                match blocking(move || installs.confirm(&token, &typed)).await {
+                    Ok(pack) => {
+                        self.package_changed(&pack.id).await;
+                        Ok(json!(pack))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            "extension:link" => {
+                let path = PathBuf::from(text(params, "path"));
+                let installs = Arc::clone(&self.installs);
+                match blocking(move || installs.link(&path)).await {
+                    Ok(pack) => {
+                        self.package_changed(&pack.id).await;
+                        Ok(json!(pack))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            "extension:remove" => self.remove(text(params, "id")).await,
+            "extension:call" => {
+                let ctx = CallCtx {
+                    caller: "client".to_owned(),
+                    project: params
+                        .get("project")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                };
+                let args = params.get("args").cloned().unwrap_or(Value::Null);
+                self.router
+                    .call(text(params, "id"), text(params, "action"), args, ctx)
+                    .await
+                    .map_err(|e| e.message)
+            }
+            "extension:rows" => Ok(Value::Array(
+                self.router
+                    .rows(text(params, "id"), text(params, "collection")),
+            )),
+            "extension:running" => Ok(json!(self
+                .router
+                .lifecycle()
+                .running()
+                .into_iter()
+                .map(|k| json!({ "extensionId": k.extension, "scope": k.scope }))
+                .collect::<Vec<_>>())),
             "extension:activation" => match session() {
                 Ok(s) => Ok(Value::Array(self.states(&s).await)),
                 Err(err) => Err(err),
@@ -273,6 +416,74 @@ impl Extensions {
         answered.map_or_else(Answer::Error, Answer::Result)
     }
 
+    /// Every installed package, each saying whether a program of it runs.
+    fn installed(&self) -> Value {
+        let running = self.router.lifecycle().running();
+        let packs: Vec<Value> = self
+            .hosts
+            .store()
+            .list()
+            .into_iter()
+            .map(|pack| {
+                let mut value = json!(pack);
+                value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
+                value
+            })
+            .collect();
+        Value::Array(packs)
+    }
+
+    /// Stops every process of `id`, drops what it published, removes its
+    /// files and the connection it came with: nothing of it is left.
+    async fn remove(&self, id: &str) -> Result<Value, String> {
+        if self.hosts.store().inspect(id).is_err()
+            && !self.hosts.store().ids().iter().any(|i| i == id)
+        {
+            return Err(format!("No extension \"{id}\" is installed"));
+        }
+        let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
+        self.kill_terminals(&closed);
+        self.hosts.stop_extension(id).await;
+        self.router.forget(id).await;
+        let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
+        blocking(move || installs.remove(&owned)).await?;
+        self.around.pack_removed(id).await;
+        Ok(json!({ "removed": id }))
+    }
+
+    /// After an install or a link, nothing runs its old files and its connector, if any, appears.
+    async fn package_changed(&self, id: &str) {
+        self.pack_changed(id).await;
+        self.router.lifecycle().stop_extension(id).await;
+        self.around.pack_changed(id).await;
+    }
+
+    /// Whether `method` is `<id>:<action>` for an installed program extension.
+    pub fn owns(&self, method: &str) -> bool {
+        let Some((id, action)) = method.split_once(':') else {
+            return false;
+        };
+        !RESERVED.contains(&id) && !action.is_empty() && self.router.program(id).is_some()
+    }
+
+    /// A client's call to `<id>:<action>`, routed to the extension.
+    pub async fn call_action(&self, method: &str, params: Value) -> Answer {
+        let Some((id, action)) = method.split_once(':') else {
+            return Answer::Unanswered;
+        };
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: params
+                .get("project")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        };
+        match self.router.call(id, action, params, ctx).await {
+            Ok(value) => Answer::Result(value),
+            Err(ExtError { message, .. }) => Answer::Error(message),
+        }
+    }
+
     /// The running session `id`, worded as the server words a missing one.
     fn live(&self, id: &str) -> Result<Live, String> {
         self.session(id)
@@ -299,7 +510,7 @@ impl Extensions {
 
     /// What every installed extension shows on `session`.
     async fn states(&self, session: &Live) -> Vec<Value> {
-        let packs = self.supervisor.store().extensions();
+        let packs = self.hosts.store().extensions();
         let remote = self.remote_host(session, &packs).await;
         let subject = subject_of(session, remote.as_deref());
         packs.iter().map(|p| state(p, &subject)).collect()
@@ -309,7 +520,7 @@ impl Extensions {
     async fn sync(&self, session: Live) {
         let turn = self.next_sync.fetch_add(1, Ordering::Relaxed) + 1;
         guard(&self.syncs).insert(session.id.clone(), turn);
-        let packs = self.supervisor.store().extensions();
+        let packs = self.hosts.store().extensions();
         let remote = self.remote_host(&session, &packs).await;
         if guard(&self.syncs).get(&session.id) != Some(&turn) {
             return;
@@ -372,7 +583,7 @@ impl Extensions {
         }
         let (Some(session), Some(pack)) = (
             self.session(&key.session),
-            self.supervisor.store().describe(&key.extension),
+            self.hosts.store().describe(&key.extension),
         ) else {
             return Some(None);
         };
@@ -380,7 +591,7 @@ impl Extensions {
             extension_id: key.extension.clone(),
             project_path: session.project_path.clone(),
         };
-        let answer = match self.supervisor.get_or_start(&host_key).await {
+        let answer = match self.hosts.get_or_start(&host_key).await {
             Ok(host) => host.footer(&key.footer, session.asked()).await,
             Err(err) => Err(err),
         };
@@ -390,7 +601,7 @@ impl Extensions {
         }
         let outcome = guard(&self.bands)
             .footers
-            .record(key, &pack.name, answer, iso_now());
+            .record(key, pack.name(), answer, iso_now());
         if let Some(readings) = outcome.publish {
             self.around.broadcast(
                 FOOTER_ITEMS,
@@ -415,32 +626,45 @@ impl Extensions {
         let closed = guard(&self.grants).close_where(|g| g.session_id == session.id);
         self.kill_terminals(&closed);
         // A pane's own terminal that ended takes only its authority with it.
-        guard(&self.grants).close_where(|g| g.terminal_id.as_deref() == Some(session.id.as_str()));
+        let ended = guard(&self.grants)
+            .close_where(|g| g.terminal_id.as_deref() == Some(session.id.as_str()));
+        self.let_go(&ended);
         let still_open = self.around.live().is_some_and(|live| {
             live.iter()
                 .any(|s| s.id != session.id && s.project_path == session.project_path)
         });
         if !still_open {
-            self.supervisor.stop_project(&session.project_path).await;
+            self.hosts.stop_project(&session.project_path).await;
         }
+        let exited = json!({ "sessionId": session.id, "projectPath": session.project_path });
+        self.router.emit("session.exited", exited).await;
     }
 
     /// After a pack changed, no process keeps running its old files.
     async fn pack_changed(&self, extension_id: &str) {
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
-        self.supervisor.stop_extension(extension_id).await;
+        self.hosts.stop_extension(extension_id).await;
     }
 
     fn kill_terminals(&self, closed: &[Grant]) {
         for terminal in closed.iter().filter_map(|g| g.terminal_id.as_deref()) {
             self.around.kill_terminal(terminal);
         }
+        self.let_go(closed);
+    }
+
+    /// Closed panes no longer keep their hosts from idling.
+    fn let_go(&self, closed: &[Grant]) {
+        let mut held = guard(&self.pane_hosts);
+        for grant in closed {
+            held.remove(&grant.nonce);
+        }
     }
 
     async fn open_pane(&self, ext: &str, pane_id: &str, session: &Live) -> Result<Grant, String> {
         let pack = self
-            .supervisor
+            .hosts
             .store()
             .describe(ext)
             .filter(InstalledPack::is_extension);
@@ -454,7 +678,7 @@ impl Extensions {
             project_path: session.project_path.clone(),
         };
         // Started first, so a page's first read or a program's first line has a bridge to talk to.
-        self.supervisor.get_or_start(&key).await?;
+        let host = self.hosts.get_or_start(&key).await?;
         let nonce = token::mint().map_err(|e| e.to_string())?;
         let mut grant = Grant {
             nonce,
@@ -482,6 +706,7 @@ impl Extensions {
             }
         }
         guard(&self.grants).insert(grant.clone());
+        guard(&self.pane_hosts).insert(grant.nonce.clone(), host);
         Ok(grant)
     }
 
@@ -496,7 +721,7 @@ impl Extensions {
         use super::sessions::{set, INITIAL_COLS, INITIAL_ROWS, PTY_TERM};
         let id = uuid::Uuid::new_v4().to_string();
         let mut env = self.around.base_env();
-        if let Some(token) = self.supervisor.token_for(key) {
+        if let Some(token) = self.hosts.token_for(key) {
             set(&mut env, "VORN_EXTENSION_TOKEN", token);
         }
         let host = format!("{}/extensions/{ext}/bridge", self.bridge_origin);
@@ -556,7 +781,7 @@ impl Extensions {
             extension_id: ext.to_owned(),
             project_path: session.project_path.clone(),
         };
-        let host = self.supervisor.get_or_start(&key).await?;
+        let host = self.hosts.get_or_start(&key).await?;
         let Some(asked) = host.handler(handler, session.asked(), url).await? else {
             return Ok(json!({}));
         };
@@ -569,7 +794,7 @@ impl Extensions {
         if text.is_empty() {
             return json!([]);
         }
-        let packs = self.supervisor.store().extensions();
+        let packs = self.hosts.store().extensions();
         let remote = self.remote_host(session, &packs).await;
         let subject = subject_of(session, remote.as_deref());
         serde_json::to_value(links::match_links(&packs, &subject, text)).unwrap_or_default()
@@ -625,7 +850,7 @@ fn subject_of<'a>(session: &'a Live, remote_host: Option<&'a str>) -> Subject<'a
 fn state(pack: &InstalledPack, subject: &Subject<'_>) -> Value {
     let mut state = Map::new();
     state.insert("extensionId".into(), json!(pack.id));
-    state.insert("extensionName".into(), json!(pack.name));
+    state.insert("extensionName".into(), json!(pack.name()));
     if let Ok(Value::Object(shown)) = serde_json::to_value(activation::shown_on(pack, subject)) {
         state.extend(shown);
     }
@@ -694,10 +919,7 @@ async fn next_note(notes: &mut Option<broadcast::Receiver<Value>>) {
 /// and settles every session again after a pack changed.
 async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value>>) {
     let mut known: HashMap<String, Live> = HashMap::new();
-    let Some(mut packs) = me
-        .upgrade()
-        .map(|e| fingerprint(e.supervisor.store().root()))
-    else {
+    let Some(mut packs) = me.upgrade().map(|e| fingerprint(e.hosts.store().root())) else {
         return;
     };
     let mut tick = tokio::time::interval(PACK_CHECK);
@@ -709,7 +931,7 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         let Some(extensions) = me.upgrade() else {
             return;
         };
-        let now = fingerprint(extensions.supervisor.store().root());
+        let now = fingerprint(extensions.hosts.store().root());
         let moved = changed(&packs, &now);
         packs = now;
         for id in &moved {
@@ -870,6 +1092,26 @@ impl Around for Wired {
                 .await
                 .map(|_| ())
                 .map_err(String::from)
+        })
+    }
+
+    fn pack_changed(&self, id: &str) -> BoxFuture<'static, ()> {
+        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let id = id.to_owned();
+        Box::pin(async move {
+            if let Some(connectors) = connectors {
+                connectors.package_changed(&id).await;
+            }
+        })
+    }
+
+    fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
+        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let id = id.to_owned();
+        Box::pin(async move {
+            if let Some(connectors) = connectors {
+                connectors.package_removed(&id).await;
+            }
         })
     }
 

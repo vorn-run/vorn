@@ -135,20 +135,58 @@ pub const METHODS: &[&str] = &[
 /// The desktop's main process claiming its connection ([`desktop`]).
 pub const IDENTIFY: &str = "bridge:identify";
 
-/// Whether vornd answers `method`.
-pub fn answers(method: &str) -> bool {
-    work::METHODS.contains(&method)
-        || extensions::METHODS.contains(&method)
-        || connectors::METHODS.contains(&method)
-        || desktop::answers(method)
-        || method == IDENTIFY
-        || tasks::METHODS.contains(&method)
-        || widget::METHODS.contains(&method)
-        || about::METHODS.contains(&method)
-        || method == script::METHOD
-        || credential::METHODS.contains(&method)
-        || hooks::METHODS.contains(&method)
-        || METHODS.contains(&method)
+/// Where a call is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    Desktop,
+    Identify,
+    Config,
+    Tasks,
+    Widget,
+    About,
+    Script,
+    Credential,
+    Hooks,
+    Extensions,
+    Work,
+    Connectors,
+    /// The calls vornd answers on its blocking threads ([`METHODS`]).
+    Native,
+}
+
+/// Each module's methods and where they go, in the order they are matched.
+const ROUTES: &[(&[&str], Route)] = &[
+    (config::METHODS, Route::Config),
+    (tasks::METHODS, Route::Tasks),
+    (widget::METHODS, Route::Widget),
+    (about::METHODS, Route::About),
+    (&[script::METHOD], Route::Script),
+    (credential::METHODS, Route::Credential),
+    (hooks::METHODS, Route::Hooks),
+    (extensions::METHODS, Route::Extensions),
+    (work::METHODS, Route::Work),
+    (
+        &["connector:inboxComplete", "connector:inboxRenew"],
+        Route::Work,
+    ),
+    (connectors::METHODS, Route::Connectors),
+    (METHODS, Route::Native),
+];
+
+/// Where core answers `method`; an extension's own methods are routed by
+/// [`Native::answers`], which also looks at what is installed.
+pub fn route(method: &str) -> Option<Route> {
+    if desktop::answers(method) {
+        return Some(Route::Desktop);
+    }
+    if method == IDENTIFY {
+        return Some(Route::Identify);
+    }
+    ROUTES
+        .iter()
+        .find(|(methods, _)| methods.contains(&method))
+        .map(|(_, route)| *route)
+        .or_else(|| work::is_work(method).then_some(Route::Work))
 }
 
 /// The group a method belongs to: everything before the first colon.
@@ -255,6 +293,8 @@ pub struct Native {
     extensions: OnceLock<Arc<extensions::Extensions>>,
     /// The desktop's main process, which answers the browser and device calls.
     main: Arc<desktop::Desktop>,
+    /// The one lifecycle every extension program and connector child runs under.
+    lifecycle: Arc<vorn_extensions::lifecycle::Lifecycle>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -306,6 +346,7 @@ impl Native {
             connectors: OnceLock::new(),
             extensions: OnceLock::new(),
             main: Arc::default(),
+            lifecycle: vorn_extensions::lifecycle::Lifecycle::new(Default::default()),
         })
     }
 
@@ -430,6 +471,21 @@ impl Native {
         self.extensions.get()
     }
 
+    /// Whether vornd answers `method`: a core method, or an installed extension's own.
+    pub fn answers(&self, method: &str) -> bool {
+        route(method).is_some() || self.extensions.get().is_some_and(|e| e.owns(method))
+    }
+
+    /// The lifecycle every extension program and connector child runs under.
+    pub fn lifecycle(&self) -> &Arc<vorn_extensions::lifecycle::Lifecycle> {
+        &self.lifecycle
+    }
+
+    /// The git vornd runs.
+    pub(crate) fn git_bin(&self) -> String {
+        self.env.git_bin()
+    }
+
     /// The environment vornd's children start from.
     pub(crate) fn child_env(&self) -> env::Env {
         self.env.get()
@@ -524,72 +580,68 @@ impl Native {
         params: Value,
         viewer: &config::Viewer,
     ) -> Answer {
-        if desktop::answers(&method) {
-            return match self.main.request(&method, params, desktop::TIMEOUT).await {
-                Ok(Some(result)) => Answer::Result(result),
-                Ok(None) => Answer::Void,
-                Err(message) => Answer::Error(message),
-            };
-        }
-        if config::METHODS.contains(&method.as_str()) {
-            return config::answer(self, &method, params, viewer).await;
-        }
-        if tasks::METHODS.contains(&method.as_str()) {
-            return tasks::answer(self, &method, params).await;
-        }
-        if widget::METHODS.contains(&method.as_str()) {
-            return widget::answer(self);
-        }
-        if about::METHODS.contains(&method.as_str()) {
-            return about::answer(self, &method, params).await;
-        }
-        if method == script::METHOD {
-            return script::execute(self, params).await;
-        }
-        if credential::METHODS.contains(&method.as_str()) {
-            return credential::answer(self, &method, params).await;
-        }
-        if hooks::METHODS.contains(&method.as_str()) {
-            return hooks::answer(self, &method, &params);
-        }
-        if extensions::METHODS.contains(&method.as_str()) {
-            let Some(host) = self.extensions.get().cloned() else {
-                return Answer::Error("vornd is not hosting extensions".to_owned());
-            };
-            let m = method.clone();
-            let running = tokio::spawn(async move { host.answer(&m, &params).await });
-            return running.await.unwrap_or_else(|err| {
-                warn!(%method, %err, "an extension call failed");
-                Answer::Error(format!("{method} failed in vornd"))
-            });
-        }
-        if work::is_work(&method)
-            || matches!(
-                method.as_str(),
-                "connector:inboxComplete" | "connector:inboxRenew"
-            )
-        {
-            let Some(work) = self.work.get().cloned() else {
-                return Answer::Error("vornd does not run workflows".to_owned());
-            };
-            let m = method.clone();
-            let running = tokio::spawn(async move { work.answer(&m, &params).await });
-            return running.await.unwrap_or_else(|err| {
-                warn!(%method, %err, "a work call failed");
-                Answer::Error(format!("{method} failed in vornd"))
-            });
-        }
-        if connectors::METHODS.contains(&method.as_str()) {
-            // Only a vornd with no database starts none.
-            let Some(connectors) = self.connectors.get().cloned() else {
-                return Answer::Unanswered;
-            };
-            let m = method.clone();
-            let running = tokio::spawn(async move { connectors.answer(&m, params).await });
-            return running.await.unwrap_or_else(|err| {
-                warn!(%method, %err, "a connector call failed");
-                Answer::Error(format!("{method} failed in vornd"))
-            });
+        match route(&method) {
+            Some(Route::Desktop) => {
+                return match self.main.request(&method, params, desktop::TIMEOUT).await {
+                    Ok(Some(result)) => Answer::Result(result),
+                    Ok(None) => Answer::Void,
+                    Err(message) => Answer::Error(message),
+                };
+            }
+            Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
+            Some(Route::Tasks) => return tasks::answer(self, &method, params).await,
+            Some(Route::Widget) => return widget::answer(self),
+            Some(Route::About) => return about::answer(self, &method, params).await,
+            Some(Route::Script) => return script::execute(self, params).await,
+            Some(Route::Credential) => return credential::answer(self, &method, params).await,
+            Some(Route::Hooks) => return hooks::answer(self, &method, &params),
+            Some(Route::Extensions) => {
+                let Some(host) = self.extensions.get().cloned() else {
+                    return Answer::Error("vornd is not hosting extensions".to_owned());
+                };
+                let m = method.clone();
+                let running = tokio::spawn(async move { host.answer(&m, &params).await });
+                return running.await.unwrap_or_else(|err| {
+                    warn!(%method, %err, "an extension call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                });
+            }
+            Some(Route::Work) => {
+                let Some(work) = self.work.get().cloned() else {
+                    return Answer::Error("vornd does not run workflows".to_owned());
+                };
+                let m = method.clone();
+                let running = tokio::spawn(async move { work.answer(&m, &params).await });
+                return running.await.unwrap_or_else(|err| {
+                    warn!(%method, %err, "a work call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                });
+            }
+            Some(Route::Connectors) => {
+                // Only a vornd with no database starts none.
+                let Some(connectors) = self.connectors.get().cloned() else {
+                    return Answer::Unanswered;
+                };
+                let m = method.clone();
+                let running = tokio::spawn(async move { connectors.answer(&m, params).await });
+                return running.await.unwrap_or_else(|err| {
+                    warn!(%method, %err, "a connector call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                });
+            }
+            Some(Route::Identify | Route::Native) => {}
+            None => {
+                // `<id>:<action>`, an installed extension's own method.
+                let Some(host) = self.extensions.get().cloned().filter(|e| e.owns(&method)) else {
+                    return Answer::Unanswered;
+                };
+                let m = method.clone();
+                let running = tokio::spawn(async move { host.call_action(&m, params).await });
+                return running.await.unwrap_or_else(|err| {
+                    warn!(%method, %err, "an extension call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                });
+            }
         }
         if sessions::starts(&method) {
             self.await_holder().await;
@@ -920,7 +972,7 @@ impl Conn {
             self.identify(text);
             return Offer::Taken;
         }
-        match request_of(text).filter(|_| answers(method)) {
+        match request_of(text).filter(|_| self.native.answers(method)) {
             Some((id, params)) => {
                 self.answer(method.to_owned(), id, params);
                 Offer::Taken
@@ -1047,11 +1099,14 @@ mod tests {
     #[test]
     fn answers_the_calls_its_modules_list() {
         for method in METHODS.iter().chain(work::METHODS) {
-            assert!(answers(method), "{method}");
+            assert!(route(method).is_some(), "{method}");
         }
         for method in ["server:shutdown", "subscribe:set", "nope:never"] {
-            assert!(!answers(method), "{method}");
+            assert!(route(method).is_none(), "{method}");
         }
+        assert_eq!(route("extension:install"), Some(Route::Extensions));
+        assert_eq!(route("connector:inboxRenew"), Some(Route::Work));
+        assert_eq!(route("browser:readPage"), Some(Route::Desktop));
         assert_eq!(group_of("git:status"), "git");
         assert_eq!(group_of("ping"), "ping");
     }

@@ -1,0 +1,580 @@
+{
+  "protocol": 1,
+  "id": "ollama",
+  "name": "Ollama",
+  "version": "0.1.1",
+  "kind": "connector",
+  "description": "Trigger workflows when a local Ollama model is added, updated or loaded into memory, and chat, generate, embed, and list, show, pull, copy or delete models from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M9 8H15A5 5 0 0 1 20 13V17A5 5 0 0 1 15 22H9A5 5 0 0 1 4 17V13A5 5 0 0 1 9 8ZM6 3.5A1.5 1.5 0 0 1 7.5 2A1.5 1.5 0 0 1 9 3.5V10H6ZM15 3.5A1.5 1.5 0 0 1 16.5 2A1.5 1.5 0 0 1 18 3.5V10H15ZM8.3 14A1.2 1.2 0 0 0 10.7 14A1.2 1.2 0 0 0 8.3 14ZM13.3 14A1.2 1.2 0 0 0 15.7 14A1.2 1.2 0 0 0 13.3 14ZM11.25 17.5A1.25 1.25 0 0 0 10 18.75A1.25 1.25 0 0 0 11.25 20H12.75A1.25 1.25 0 0 0 14 18.75A1.25 1.25 0 0 0 12.75 17.5Z"
+    ]
+  },
+  "auth": {
+    "rung": "none"
+  },
+  "triggers": [
+    {
+      "type": "modelChanged",
+      "label": "A model was added or updated",
+      "description": "Fires once per model build from GET /api/tags: a new name, or a pull that changed a digest. The first poll delivers every model present.",
+      "defaultWorkflow": {
+        "name": "Ollama: added or updated models",
+        "defaultCronFromMinutes": 15
+      },
+      "setup": {
+        "connectorId": "ollama",
+        "triggerType": "modelChanged",
+        "env": [
+          {
+            "name": "OLLAMA_HOST",
+            "required": false,
+            "secret": false,
+            "description": "The server origin, http://localhost:11434 by default. A trailing / or /api is stripped and a bare host:port gets http://.",
+            "builderHint": "The same variable the ollama CLI reads. A hosted or proxied server that wants a key takes it from OLLAMA_API_KEY in the environment, sent as Authorization: Bearer; the SDK refuses a secret field on a connector that needs no sign-in, so there is no config field for it."
+          }
+        ]
+      }
+    },
+    {
+      "type": "modelLoaded",
+      "label": "A model was loaded into memory",
+      "description": "Fires when a model appears in GET /api/ps with an expiry not yet seen. Every request extends the expiry, so a busy model fires again on each poll; poll slowly.",
+      "defaultWorkflow": {
+        "name": "Ollama: loaded models",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "ollama",
+        "triggerType": "modelLoaded",
+        "env": [
+          {
+            "name": "OLLAMA_HOST",
+            "required": false,
+            "secret": false,
+            "description": "The server origin, http://localhost:11434 by default. A trailing / or /api is stripped and a bare host:port gets http://.",
+            "builderHint": "The same variable the ollama CLI reads. A hosted or proxied server that wants a key takes it from OLLAMA_API_KEY in the environment, sent as Authorization: Bearer; the SDK refuses a secret field on a connector that needs no sign-in, so there is no config field for it."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "chat",
+      "label": "Chat",
+      "description": "Generate the next assistant message of a conversation with POST /api/chat. Every call runs a generation.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "A name that is not on the server answers 404 and is reported as \"not present; pull it first\"; nothing is pulled on the caller's behalf."
+        },
+        {
+          "key": "messages",
+          "label": "Messages",
+          "type": "string",
+          "required": true,
+          "description": "A single user text, or a JSON array of { \"role\", \"content\" } with role system, user, assistant or tool.",
+          "builderHint": "Text becomes [{ role: \"user\", content: text }]; a value starting with [ is parsed as the array and passed through, so images and tool_calls on a turn survive."
+        },
+        {
+          "key": "system",
+          "label": "System prompt",
+          "type": "string",
+          "required": false,
+          "description": "Instructions for the model, kept apart from the conversation.",
+          "builderHint": "On chat it is prepended as a system turn unless the messages already start with one; on generate it is sent as system."
+        },
+        {
+          "key": "format",
+          "label": "Format",
+          "type": "string",
+          "required": false,
+          "description": "json for any valid JSON, or a JSON schema object the answer must match.",
+          "builderHint": "Sent as format untouched. With a schema, also describe it in the prompt so the model grounds its answer; the reply is text, so parse content yourself."
+        },
+        {
+          "key": "options",
+          "label": "Options",
+          "type": "json",
+          "required": false,
+          "description": "Runtime options such as { \"temperature\": 0.2, \"num_predict\": 256 }.",
+          "builderHint": "Passed through as options: temperature, num_predict, seed, top_k, top_p, min_p, stop, num_ctx and any other Modelfile parameter."
+        },
+        {
+          "key": "keepAlive",
+          "label": "Keep alive",
+          "type": "string",
+          "required": false,
+          "description": "How long the model stays loaded after the reply, such as 10m; 0 unloads it at once.",
+          "builderHint": "Sent as keep_alive. A duration string or a number of seconds; a negative number keeps it loaded until the server stops."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "content",
+          "description": "The assistant message text"
+        },
+        {
+          "key": "thinking",
+          "description": "The thinking text when the model produced one, else null"
+        },
+        {
+          "key": "toolCalls",
+          "description": "The tool_calls array when the model made any, else null"
+        },
+        {
+          "key": "doneReason",
+          "description": "stop, length or load"
+        },
+        {
+          "key": "evalCount",
+          "type": "number",
+          "description": "Tokens generated in the reply"
+        },
+        {
+          "key": "promptEvalCount",
+          "type": "number",
+          "description": "Prompt tokens evaluated"
+        },
+        {
+          "key": "totalDuration",
+          "type": "number",
+          "description": "Whole call in nanoseconds"
+        },
+        {
+          "key": "loadDuration",
+          "type": "number",
+          "description": "Loading the model, in nanoseconds"
+        },
+        {
+          "key": "promptEvalDuration",
+          "type": "number",
+          "description": "Evaluating the prompt, in nanoseconds"
+        },
+        {
+          "key": "evalDuration",
+          "type": "number",
+          "description": "Generating the reply, in nanoseconds"
+        },
+        {
+          "key": "model",
+          "description": "The model that answered"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ]
+    },
+    {
+      "type": "generate",
+      "label": "Generate a completion",
+      "description": "Generate a response for a prompt with POST /api/generate. Every call runs a generation.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "A name that is not on the server answers 404 and is reported as \"not present; pull it first\"; nothing is pulled on the caller's behalf."
+        },
+        {
+          "key": "prompt",
+          "label": "Prompt",
+          "type": "string",
+          "required": true,
+          "description": "Text for the model to generate a response from.",
+          "builderHint": "Sent as prompt. Use chat for a conversation with roles; this is the raw completion endpoint."
+        },
+        {
+          "key": "system",
+          "label": "System prompt",
+          "type": "string",
+          "required": false,
+          "description": "Instructions for the model, kept apart from the conversation.",
+          "builderHint": "On chat it is prepended as a system turn unless the messages already start with one; on generate it is sent as system."
+        },
+        {
+          "key": "format",
+          "label": "Format",
+          "type": "string",
+          "required": false,
+          "description": "json for any valid JSON, or a JSON schema object the answer must match.",
+          "builderHint": "Sent as format untouched. With a schema, also describe it in the prompt so the model grounds its answer; the reply is text, so parse content yourself."
+        },
+        {
+          "key": "options",
+          "label": "Options",
+          "type": "json",
+          "required": false,
+          "description": "Runtime options such as { \"temperature\": 0.2, \"num_predict\": 256 }.",
+          "builderHint": "Passed through as options: temperature, num_predict, seed, top_k, top_p, min_p, stop, num_ctx and any other Modelfile parameter."
+        },
+        {
+          "key": "keepAlive",
+          "label": "Keep alive",
+          "type": "string",
+          "required": false,
+          "description": "How long the model stays loaded after the reply, such as 10m; 0 unloads it at once.",
+          "builderHint": "Sent as keep_alive. A duration string or a number of seconds; a negative number keeps it loaded until the server stops."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "response",
+          "description": "The generated text"
+        },
+        {
+          "key": "thinking",
+          "description": "The thinking text when the model produced one, else null"
+        },
+        {
+          "key": "doneReason",
+          "description": "stop, length or load"
+        },
+        {
+          "key": "evalCount",
+          "type": "number",
+          "description": "Tokens generated in the reply"
+        },
+        {
+          "key": "promptEvalCount",
+          "type": "number",
+          "description": "Prompt tokens evaluated"
+        },
+        {
+          "key": "totalDuration",
+          "type": "number",
+          "description": "Whole call in nanoseconds"
+        },
+        {
+          "key": "loadDuration",
+          "type": "number",
+          "description": "Loading the model, in nanoseconds"
+        },
+        {
+          "key": "promptEvalDuration",
+          "type": "number",
+          "description": "Evaluating the prompt, in nanoseconds"
+        },
+        {
+          "key": "evalDuration",
+          "type": "number",
+          "description": "Generating the reply, in nanoseconds"
+        },
+        {
+          "key": "model",
+          "description": "The model that answered"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ]
+    },
+    {
+      "type": "embed",
+      "label": "Generate embeddings",
+      "description": "Turn text into embedding vectors with POST /api/embed. The same input and model give the same vectors.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "A name that is not on the server answers 404 and is reported as \"not present; pull it first\"; nothing is pulled on the caller's behalf. A runner that does not serve embeddings answers 501; showModel lists embedding under capabilities when it does."
+        },
+        {
+          "key": "input",
+          "label": "Input",
+          "type": "string",
+          "required": true,
+          "description": "Text, or a JSON array of texts, to embed in one call.",
+          "builderHint": "A value starting with [ is parsed as the array; one vector comes back per entry, in order."
+        },
+        {
+          "key": "truncate",
+          "label": "Truncate",
+          "type": "boolean",
+          "required": false,
+          "description": "Truncate an input that exceeds the context window instead of failing. The server default is true.",
+          "builderHint": "Sent as truncate only when set; false makes an oversized input an error."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "embeddings",
+          "description": "One number array per input, in input order"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many vectors"
+        },
+        {
+          "key": "model",
+          "description": "The model used"
+        },
+        {
+          "key": "promptEvalCount",
+          "type": "number",
+          "description": "Input tokens processed"
+        },
+        {
+          "key": "totalDuration",
+          "type": "number",
+          "description": "Whole call in nanoseconds"
+        },
+        {
+          "key": "loadDuration",
+          "type": "number",
+          "description": "Loading the model, in nanoseconds"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ],
+      "sample": {
+        "model": "qwen2.5-coder:7b",
+        "input": "hello"
+      }
+    },
+    {
+      "type": "listModels",
+      "label": "List models",
+      "description": "List the models on the server with GET /api/tags.",
+      "idempotent": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "models",
+          "description": "Array of { name, model, modified_at, size, digest, details }"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many models"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ],
+      "sample": {}
+    },
+    {
+      "type": "showModel",
+      "label": "Show a model",
+      "description": "Read a model’s details, capabilities, parameters, template and license with POST /api/show.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "A name that is not on the server answers 404 and is reported as \"not present; pull it first\"; nothing is pulled on the caller's behalf."
+        },
+        {
+          "key": "verbose",
+          "label": "Verbose",
+          "type": "boolean",
+          "required": false,
+          "description": "Include the large fields, such as the full tokenizer, in modelInfo.",
+          "builderHint": "Sent as verbose only when true; the reply can run to megabytes."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "model",
+          "description": "The model name asked for; the reply carries none"
+        },
+        {
+          "key": "details",
+          "description": "{ parent_model, format, family, families, parameter_size, quantization_level }"
+        },
+        {
+          "key": "capabilities",
+          "description": "Array such as completion, tools, vision, embedding"
+        },
+        {
+          "key": "modifiedAt",
+          "description": "When the model was last modified, ISO 8601"
+        },
+        {
+          "key": "parameters",
+          "description": "Model parameter settings as text"
+        },
+        {
+          "key": "template",
+          "description": "The prompt template"
+        },
+        {
+          "key": "license",
+          "description": "The license text"
+        },
+        {
+          "key": "modelInfo",
+          "description": "Additional model metadata"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ],
+      "sample": {
+        "model": "qwen2.5-coder:7b"
+      }
+    },
+    {
+      "type": "listRunningModels",
+      "label": "List running models",
+      "description": "List the models loaded into memory with GET /api/ps.",
+      "idempotent": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "models",
+          "description": "Array of { name, model, size, digest, details, expires_at, size_vram, context_length }"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many models are loaded"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ],
+      "sample": {}
+    },
+    {
+      "type": "version",
+      "label": "Get the server version",
+      "description": "Read the server version with GET /api/version. The live check probes this.",
+      "idempotent": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "key": "version",
+          "description": "The server version, such as 0.12.6"
+        }
+      ],
+      "sample": {}
+    },
+    {
+      "type": "pullModel",
+      "label": "Pull a model",
+      "description": "Download a model from the library with POST /api/pull. Downloads, so it is slow and not repeatable in a live check.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "A library name such as gemma3, or user/model for a shared one. A cancelled pull resumes where it left off."
+        },
+        {
+          "key": "insecure",
+          "label": "Insecure",
+          "type": "boolean",
+          "required": false,
+          "description": "Allow downloading over an insecure connection.",
+          "builderHint": "Sent as insecure only when true; only for a library you run yourself during development."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "status",
+          "description": "The final status, success when the model is present"
+        },
+        {
+          "key": "raw",
+          "description": "The whole response as the server returned it"
+        }
+      ]
+    },
+    {
+      "type": "deleteModel",
+      "label": "Delete a model",
+      "description": "Delete a model and its data with DELETE /api/delete. A second call answers 404.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "model",
+          "label": "Model",
+          "type": "string",
+          "required": true,
+          "description": "The model name in model:tag form; the tag defaults to latest. listModels returns what is present.",
+          "builderHint": "Deleting a tag another name was copied from leaves the copy in place; layers are shared."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "deleted",
+          "type": "boolean",
+          "description": "True once the server answered 200"
+        },
+        {
+          "key": "model",
+          "description": "The model that was deleted"
+        }
+      ]
+    },
+    {
+      "type": "copyModel",
+      "label": "Copy a model",
+      "description": "Create a new name for an existing model with POST /api/copy. Creates a tag, so it is not repeatable.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "source",
+          "label": "Source",
+          "type": "string",
+          "required": true,
+          "description": "Existing model name to copy from.",
+          "builderHint": "A missing source answers 404 and is reported as not present."
+        },
+        {
+          "key": "destination",
+          "label": "Destination",
+          "type": "string",
+          "required": true,
+          "description": "New model name to create.",
+          "builderHint": "model:tag form; an existing name is overwritten."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "copied",
+          "type": "boolean",
+          "description": "True once the server answered 200"
+        },
+        {
+          "key": "source",
+          "description": "The name copied from"
+        },
+        {
+          "key": "destination",
+          "description": "The name created"
+        }
+      ]
+    }
+  ]
+}

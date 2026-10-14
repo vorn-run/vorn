@@ -17,6 +17,7 @@ pub mod args;
 pub mod attach;
 pub mod client;
 pub mod exit;
+pub mod ext;
 pub mod js;
 pub mod launch;
 pub mod mcp;
@@ -47,6 +48,7 @@ Usage
   vorn workflow run <name> [--input k=v]                 Start one
   vorn workflow stop <run>                               Stop a run
   vorn workflow runs [--workflow <name>] [--json]        Their runs
+  vorn ext install|link|remove|list|pack                 Extensions
   vorn server serve|token                                Run a server, or its tokens
   vorn mcp                                               Vorn's MCP server, over stdio
   vorn --help | --version
@@ -79,8 +81,8 @@ pub fn find_command(argv: &[String]) -> Option<&str> {
     None
 }
 
-const COMMANDS: [&str; 8] = [
-    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach",
+const COMMANDS: [&str; 9] = [
+    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach", "ext",
 ];
 
 /// An option that swallowed the command because its own value was missing:
@@ -129,6 +131,8 @@ async fn client_command(argv: &[String], io: &mut dyn Io, mcp: bool) -> ExitCode
     let mut ctx = client::Context::new(io, args);
     if noun.as_deref() == Some("session") {
         session::run(&mut ctx).await
+    } else if noun.as_deref() == Some("ext") {
+        ext::run(&mut ctx).await
     } else {
         workflow::run(&mut ctx).await
     }
@@ -189,14 +193,14 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
         "server" => server::run(&without_command(argv, command), io),
         // `vorn-server` was called this way for as long as it existed.
         "serve" | "token" => server::run(argv, io),
-        "session" | "workflow" => client_command(argv, io, false).await,
+        "session" | "workflow" | "ext" => client_command(argv, io, false).await,
         "mcp" => client_command(&without_command(argv, command), io, true).await,
         _ => {
             if let Some(code) = eaten(io, argv) {
                 return code;
             }
             io.write_err(&format!(
-                "vorn: unknown command \"{command}\". Try: session, workflow, server, help\n"
+                "vorn: unknown command \"{command}\". Try: session, workflow, ext, server, help\n"
             ));
             ExitCode::Usage
         }
@@ -251,7 +255,7 @@ mod tests {
         assert_eq!(code, 2);
         assert_eq!(
             io.err,
-            "vorn: unknown command \"bogus\". Try: session, workflow, server, help\n"
+            "vorn: unknown command \"bogus\". Try: session, workflow, ext, server, help\n"
         );
 
         let (code, io) = run_sync(&["--data-dir", "session", "list"]);

@@ -20,6 +20,10 @@ pub trait Io {
     fn write_err(&mut self, text: &str);
     /// Whether a terminal is watching stdout.
     fn is_tty(&self) -> bool;
+    /// One line a person typed, without its newline; `None` when stdin is not a terminal.
+    fn read_line(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// The process's own stdout and stderr.
@@ -45,6 +49,17 @@ impl Io for StdIo {
         use std::io::IsTerminal;
         std::io::stdout().is_terminal()
     }
+
+    fn read_line(&mut self) -> Option<String> {
+        use std::io::{BufRead, IsTerminal};
+        let stdin = std::io::stdin();
+        if !stdin.is_terminal() {
+            return None;
+        }
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line).ok()?;
+        Some(line.trim_end_matches(['\r', '\n']).to_owned())
+    }
 }
 
 /// What a command wrote, for tests.
@@ -53,6 +68,8 @@ pub struct Captured {
     pub out: String,
     pub err: String,
     pub tty: bool,
+    /// What a person types, a line each.
+    pub typed: std::collections::VecDeque<String>,
 }
 
 impl Io for Captured {
@@ -66,6 +83,10 @@ impl Io for Captured {
 
     fn is_tty(&self) -> bool {
         self.tty
+    }
+
+    fn read_line(&mut self) -> Option<String> {
+        self.typed.pop_front()
     }
 }
 

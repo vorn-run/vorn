@@ -1,0 +1,529 @@
+{
+  "protocol": 1,
+  "id": "mysql",
+  "name": "MySQL",
+  "version": "0.1.1",
+  "kind": "connector",
+  "description": "Trigger workflows from new or updated rows in a MySQL or MariaDB database, and query or write to it from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M12 3c-4.97 0-9 1.34-9 3s4.03 3 9 3 9-1.34 9-3-4.03-3-9-3z",
+      "M3 8v9c0 1.66 4.03 3 9 3s9-1.34 9-3V8h-2v9c0 .35-2.6 1-7 1s-7-.65-7-1V8z",
+      "M7.5 16.5v-6h1.6l2.9 3.6 2.9-3.6h1.6v6h-1.6v-3.6L12 15.6l-2.9-2.7v3.6z"
+    ]
+  },
+  "auth": {
+    "rung": "key",
+    "keys": ["connectionString"]
+  },
+  "triggers": [
+    {
+      "type": "newRows",
+      "label": "New rows in a table",
+      "description": "Fires once per row inserted after the last seen value of the ordering column.",
+      "defaultWorkflow": {
+        "name": "MySQL: new rows",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "mysql",
+        "triggerType": "newRows",
+        "env": [
+          {
+            "name": "MYSQL_URL",
+            "required": true,
+            "secret": true,
+            "description": "mysql://user:password@host:3306/database. Your provider shows it on the database page; otherwise ask your DBA. The user needs SELECT, INSERT, UPDATE or DELETE on the tables the workflow touches, as the steps demand.",
+            "builderHint": "Percent-encode @ / : ? # and % in the password. The port defaults to 3306; the database after the slash is the default schema. An ssl-mode=… attribute is honoured when the ssl setting is blank."
+          },
+          {
+            "name": "MYSQL_SSL",
+            "required": false,
+            "secret": false,
+            "description": "One of disabled, required, verify-full. Default disabled. \"required\" encrypts without checking the certificate, which the driver strongly discourages; \"verify-full\" checks the chain and host name.",
+            "builderHint": "Cloud providers usually want verify-full with their CA bundle in sslCa, or required when the bundle is unavailable."
+          },
+          {
+            "name": "MYSQL_SSL_CA",
+            "required": false,
+            "secret": false,
+            "description": "Path to a PEM CA bundle for verify-full against a private CA. Blank uses Node's roots."
+          },
+          {
+            "name": "MYSQL_TABLE",
+            "required": false,
+            "secret": false,
+            "description": "For both triggers: table or db.table to watch.",
+            "builderHint": "Used by the triggers only; actions take the table as an argument."
+          },
+          {
+            "name": "MYSQL_ORDERING_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "For \"new rows\": a column that only grows, such as an AUTO_INCREMENT id or created_at.",
+            "builderHint": "The cursor is this column's last seen value; an updated_at that moves backwards will miss rows."
+          },
+          {
+            "name": "MYSQL_KEY_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "The primary key column. Defaults to the ordering column for \"new rows\"; required for \"updated rows\"."
+          },
+          {
+            "name": "MYSQL_UPDATED_AT_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "For \"updated rows\": a DATETIME or TIMESTAMP column, ideally ON UPDATE CURRENT_TIMESTAMP."
+          },
+          {
+            "name": "MYSQL_WHERE",
+            "required": false,
+            "secret": false,
+            "description": "Optional SQL placed after WHERE to narrow the rows a trigger watches, e.g. status = 'open'. No placeholders."
+          },
+          {
+            "name": "MYSQL_START_FROM",
+            "required": false,
+            "secret": false,
+            "description": "Value of the ordering column to start after (\"new rows\") or of updated_at to start at (\"updated rows\"). Blank means the newest page."
+          },
+          {
+            "name": "MYSQL_TITLE_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "Column to use as the item title. Blank uses the table and key."
+          },
+          {
+            "name": "MYSQL_LIMIT",
+            "required": false,
+            "secret": false,
+            "description": "Default 100, at most 1000."
+          }
+        ]
+      }
+    },
+    {
+      "type": "updatedRows",
+      "label": "Updated rows in a table",
+      "description": "Fires once per change to a row, tracked by its updated_at column and primary key.",
+      "defaultWorkflow": {
+        "name": "MySQL: updated rows",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "mysql",
+        "triggerType": "updatedRows",
+        "env": [
+          {
+            "name": "MYSQL_URL",
+            "required": true,
+            "secret": true,
+            "description": "mysql://user:password@host:3306/database. Your provider shows it on the database page; otherwise ask your DBA. The user needs SELECT, INSERT, UPDATE or DELETE on the tables the workflow touches, as the steps demand.",
+            "builderHint": "Percent-encode @ / : ? # and % in the password. The port defaults to 3306; the database after the slash is the default schema. An ssl-mode=… attribute is honoured when the ssl setting is blank."
+          },
+          {
+            "name": "MYSQL_SSL",
+            "required": false,
+            "secret": false,
+            "description": "One of disabled, required, verify-full. Default disabled. \"required\" encrypts without checking the certificate, which the driver strongly discourages; \"verify-full\" checks the chain and host name.",
+            "builderHint": "Cloud providers usually want verify-full with their CA bundle in sslCa, or required when the bundle is unavailable."
+          },
+          {
+            "name": "MYSQL_SSL_CA",
+            "required": false,
+            "secret": false,
+            "description": "Path to a PEM CA bundle for verify-full against a private CA. Blank uses Node's roots."
+          },
+          {
+            "name": "MYSQL_TABLE",
+            "required": false,
+            "secret": false,
+            "description": "For both triggers: table or db.table to watch.",
+            "builderHint": "Used by the triggers only; actions take the table as an argument."
+          },
+          {
+            "name": "MYSQL_ORDERING_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "For \"new rows\": a column that only grows, such as an AUTO_INCREMENT id or created_at.",
+            "builderHint": "The cursor is this column's last seen value; an updated_at that moves backwards will miss rows."
+          },
+          {
+            "name": "MYSQL_KEY_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "The primary key column. Defaults to the ordering column for \"new rows\"; required for \"updated rows\"."
+          },
+          {
+            "name": "MYSQL_UPDATED_AT_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "For \"updated rows\": a DATETIME or TIMESTAMP column, ideally ON UPDATE CURRENT_TIMESTAMP."
+          },
+          {
+            "name": "MYSQL_WHERE",
+            "required": false,
+            "secret": false,
+            "description": "Optional SQL placed after WHERE to narrow the rows a trigger watches, e.g. status = 'open'. No placeholders."
+          },
+          {
+            "name": "MYSQL_START_FROM",
+            "required": false,
+            "secret": false,
+            "description": "Value of the ordering column to start after (\"new rows\") or of updated_at to start at (\"updated rows\"). Blank means the newest page."
+          },
+          {
+            "name": "MYSQL_TITLE_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "Column to use as the item title. Blank uses the table and key."
+          },
+          {
+            "name": "MYSQL_LIMIT",
+            "required": false,
+            "secret": false,
+            "description": "Default 100, at most 1000."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "runQuery",
+      "label": "Run a query",
+      "description": "Run one SQL statement with positional parameters; returns rows for a read and the counts for a write.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "sql",
+          "label": "SQL",
+          "type": "string",
+          "required": true,
+          "description": "One SQL statement, with ? placeholders.",
+          "builderHint": "Values go in params; never interpolate them into the text."
+        },
+        {
+          "key": "params",
+          "label": "Parameters",
+          "type": "json",
+          "required": false,
+          "description": "Positional values for the placeholders, a JSON array."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "rows",
+          "description": "The rows of a read, empty for a write"
+        },
+        {
+          "key": "rowCount",
+          "type": "number",
+          "description": "Rows returned, or rows a write touched"
+        },
+        {
+          "key": "affectedRows",
+          "type": "number",
+          "description": "Rows a write touched, 0 for a read"
+        },
+        {
+          "key": "insertId",
+          "type": "number",
+          "description": "The AUTO_INCREMENT value of an insert, else 0"
+        },
+        {
+          "key": "warningStatus",
+          "type": "number",
+          "description": "How many warnings the server raised"
+        }
+      ]
+    },
+    {
+      "type": "selectRows",
+      "label": "Select rows",
+      "description": "Read rows from a table, with an optional parameterised WHERE.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table or db.table"
+        },
+        {
+          "key": "columns",
+          "label": "Columns",
+          "type": "json",
+          "required": false,
+          "description": "JSON array of column names; all columns when omitted."
+        },
+        {
+          "key": "where",
+          "label": "Where",
+          "type": "string",
+          "required": false,
+          "description": "SQL placed after WHERE, with ? placeholders, e.g. status = ?"
+        },
+        {
+          "key": "params",
+          "label": "Parameters",
+          "type": "json",
+          "required": false,
+          "description": "Values for the placeholders, a JSON array."
+        },
+        {
+          "key": "orderBy",
+          "label": "Order by",
+          "type": "string",
+          "required": false,
+          "description": "Column name to order by."
+        },
+        {
+          "key": "descending",
+          "label": "Descending",
+          "type": "boolean",
+          "required": false,
+          "description": "Order descending; default ascending."
+        },
+        {
+          "key": "limit",
+          "label": "Limit",
+          "type": "number",
+          "required": false,
+          "description": "Default 100, at most 1000."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "rows",
+          "description": "The rows"
+        },
+        {
+          "key": "rowCount",
+          "type": "number",
+          "description": "How many came back"
+        }
+      ],
+      "sample": {
+        "table": "information_schema.TABLES",
+        "limit": "1"
+      }
+    },
+    {
+      "type": "insertRow",
+      "label": "Insert a row",
+      "description": "Insert one row and return its AUTO_INCREMENT id.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table or db.table"
+        },
+        {
+          "key": "values",
+          "label": "Values",
+          "type": "json",
+          "required": true,
+          "description": "JSON object of column: value, non-empty.",
+          "builderHint": "An object or array value is sent as JSON text, so a JSON column takes any JSON."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "insertId",
+          "type": "number",
+          "description": "The AUTO_INCREMENT value, or 0"
+        },
+        {
+          "key": "affectedRows",
+          "type": "number",
+          "description": "1 when a row was inserted"
+        }
+      ]
+    },
+    {
+      "type": "updateRows",
+      "label": "Update rows",
+      "description": "Set columns on the rows a WHERE matches and return how many matched.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table or db.table"
+        },
+        {
+          "key": "values",
+          "label": "Values",
+          "type": "json",
+          "required": true,
+          "description": "JSON object of column: new value, non-empty."
+        },
+        {
+          "key": "where",
+          "label": "Where",
+          "type": "string",
+          "required": true,
+          "description": "SQL placed after WHERE, with ? placeholders. Required, so a step cannot update every row by omission."
+        },
+        {
+          "key": "params",
+          "label": "Parameters",
+          "type": "json",
+          "required": false,
+          "description": "Values for the where placeholders, a JSON array; bound after the SET values."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "affectedRows",
+          "type": "number",
+          "description": "Rows matched"
+        },
+        {
+          "key": "info",
+          "type": "string",
+          "description": "The server's Rows matched / Changed / Warnings text"
+        }
+      ]
+    },
+    {
+      "type": "deleteRows",
+      "label": "Delete rows",
+      "description": "Delete the rows a WHERE matches and return how many went.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table or db.table"
+        },
+        {
+          "key": "where",
+          "label": "Where",
+          "type": "string",
+          "required": true,
+          "description": "SQL placed after WHERE, with ? placeholders. Required, so a step cannot delete every row by omission."
+        },
+        {
+          "key": "params",
+          "label": "Parameters",
+          "type": "json",
+          "required": false,
+          "description": "Values for the placeholders, a JSON array."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "affectedRows",
+          "type": "number",
+          "description": "Rows deleted"
+        }
+      ]
+    },
+    {
+      "type": "listTables",
+      "label": "List tables",
+      "description": "List the tables and views in a database that the user can see.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the database in the connection URL."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "tables",
+          "description": "Array of { name, type, engine, rows }"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many"
+        }
+      ],
+      "sample": {}
+    },
+    {
+      "type": "describeTable",
+      "label": "Describe a table",
+      "description": "List the columns of a table with their types, nullability, keys and defaults.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table (the URL's database) or db.table"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "columns",
+          "description": "Array of { name, type, dataType, nullable, key, default, extra, position }"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many"
+        }
+      ],
+      "sample": {
+        "table": "information_schema.TABLES"
+      }
+    },
+    {
+      "type": "countRows",
+      "label": "Count rows",
+      "description": "Count the rows in a table, optionally those a WHERE matches.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "required": true,
+          "description": "table or db.table"
+        },
+        {
+          "key": "where",
+          "label": "Where",
+          "type": "string",
+          "required": false,
+          "description": "SQL placed after WHERE, with ? placeholders, e.g. status = ?"
+        },
+        {
+          "key": "params",
+          "label": "Parameters",
+          "type": "json",
+          "required": false,
+          "description": "Values for the placeholders, a JSON array."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "type": "number",
+          "description": "The row count"
+        }
+      ],
+      "sample": {
+        "table": "information_schema.TABLES"
+      }
+    }
+  ]
+}

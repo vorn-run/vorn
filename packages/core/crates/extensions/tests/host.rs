@@ -1,14 +1,14 @@
 //! The hosts against a real child: started with a token of their own,
-//! answering footers and handlers, started again after a crash, stopped
-//! with their project.
+//! answering footers and handlers, started again on the next use after a
+//! crash, stopped with their project.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde_json::{json, Value};
-use vorn_extensions::host::{Asked, HostKey, HostSettings, Supervisor};
+use vorn_extensions::host::{Asked, HostKey, HostSettings, Hosts};
+use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
 
 const FIXTURE: &str = include_str!("fixtures/extension.mjs");
@@ -34,7 +34,7 @@ fn extension(id: &str) -> Value {
 struct World {
     _packs: tempfile::TempDir,
     project: tempfile::TempDir,
-    hosts: Arc<Supervisor>,
+    hosts: Arc<Hosts>,
 }
 
 fn world() -> World {
@@ -44,10 +44,10 @@ fn world() -> World {
     let mut outdated = extension("old");
     outdated.as_object_mut().unwrap().remove("protocol");
     install(packs.path(), "old", outdated);
-    let hosts = Supervisor::new(
+    let hosts = Hosts::new(
+        Lifecycle::new(Policy::default()),
         PackStore::new(packs.path()),
         HostSettings {
-            program: PathBuf::from("node"),
             base_env: std::env::vars()
                 .filter(|(k, _)| k == "PATH" || k == "SYSTEMROOT")
                 .collect(),
@@ -120,8 +120,9 @@ async fn a_host_holds_its_own_token_and_answers() {
 
     // One start is shared by whoever asks meanwhile.
     let again = w.hosts.get_or_start(&x).await.unwrap();
-    assert!(Arc::ptr_eq(&host, &again));
+    assert!(Arc::ptr_eq(&host.shared(), &again.shared()));
 
+    drop((y, again));
     w.hosts.stop_project(&x.project_path).await;
     assert!(w.hosts.running().is_empty());
     assert!(host.exited());
@@ -141,22 +142,14 @@ async fn a_crashed_host_starts_again_with_a_new_token() {
     );
     assert!(err.ends_with("Error: asked to crash"), "{err}");
 
-    let mut restarted = None;
-    for _ in 0..100 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        if let Some(token) = w.hosts.token_for(&x) {
-            restarted = Some(token);
-            break;
-        }
-    }
-    let token = restarted.expect("the host started again");
-    assert_ne!(token, old);
+    drop(first);
+    // Nothing runs until it is next needed; then it starts with a new token.
+    assert_eq!(w.hosts.token_for(&x), None);
     assert_eq!(w.hosts.by_token("x", &old), None);
     let host = w.hosts.get_or_start(&x).await.unwrap();
-    assert_eq!(
-        value_of(&host.footer("f", ASKED).await.unwrap(), "token"),
-        token
-    );
+    let token = value_of(&host.footer("f", ASKED).await.unwrap(), "token");
+    assert_ne!(token, old);
+    assert_eq!(w.hosts.token_for(&x), Some(token));
     w.hosts.stop_all().await;
 }
 

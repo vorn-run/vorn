@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 use crate::fetch::Fetch;
-use crate::manifest;
+use vorn_extensions::manifest;
 
 /// Where the published catalog lives.
 pub const CATALOG_URL: &str =

@@ -46,7 +46,7 @@ pub fn platform() -> &'static str {
 pub fn names_remote_host(packs: &[InstalledPack]) -> bool {
     packs.iter().any(|pack| {
         let rules = pack.contributions().into_iter().flat_map(|c| c.rules());
-        std::iter::once(pack.activates.as_ref())
+        std::iter::once(pack.manifest.activates.as_ref())
             .chain(rules)
             .any(|rule| rule.is_some_and(|r| !r.remote_host.is_empty()))
     })
@@ -97,7 +97,7 @@ fn shown<'a>(
 /// What `pack` shows on `subject`; nothing for a connector or when its own
 /// rule does not hold.
 pub fn shown_on(pack: &InstalledPack, subject: &Subject<'_>) -> Shown {
-    if !pack.is_extension() || !matches(pack.activates.as_ref(), subject) {
+    if !pack.is_extension() || !matches(pack.manifest.activates.as_ref(), subject) {
         return Shown::default();
     }
     let Some(c) = pack.contributions() else {

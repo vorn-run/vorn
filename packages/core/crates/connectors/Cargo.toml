@@ -6,13 +6,11 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Connectors for Vorn: the packs on disk and their manifests, the child each runs in the connector protocol, the catalog, and the built-in HTTP and MCP connectors"
-
-[features]
-# The pack fixture, for the tests of crates built on this one.
-test-support = []
+description = "Connectors for Vorn: connections, the catalog, polls, sign-in, the 0.8 pack installer, and the built-in HTTP and MCP connectors"
 
 [dependencies]
+# The pack store, the child and the manifest every package carries.
+vorn-extensions = { path = "../extensions" }
 vorn-spawn = { path = "../spawn", features = ["tokio"] }
 data-encoding = "2"
 flate2 = "1"

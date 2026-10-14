@@ -1,0 +1,603 @@
+{
+  "protocol": 1,
+  "id": "github",
+  "name": "GitHub",
+  "version": "0.3.0",
+  "kind": "connector",
+  "description": "Trigger workflows from GitHub issues and pull requests; comment, review, approve and merge from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+    ]
+  },
+  "auth": {
+    "rung": "cli",
+    "probe": {
+      "command": "gh",
+      "args": ["auth", "status"]
+    }
+  },
+  "triggers": [
+    {
+      "type": "issueCreated",
+      "label": "An issue is created",
+      "description": "Fires for each issue opened since the last poll.",
+      "statusMapping": [
+        {
+          "upstream": "open",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "closed",
+          "suggestedLocal": "done"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "GitHub: issues",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "github",
+        "triggerType": "issueCreated",
+        "env": [
+          {
+            "name": "GITHUB_OWNER",
+            "required": true,
+            "secret": false,
+            "description": "User or organisation, e.g. vorn-run"
+          },
+          {
+            "name": "GITHUB_REPO",
+            "required": true,
+            "secret": false,
+            "description": "Repository name on its own, without the owner"
+          },
+          {
+            "name": "GITHUB_LABELS",
+            "required": false,
+            "secret": false,
+            "description": "Comma-separated. Applies to the issue trigger only."
+          }
+        ]
+      }
+    },
+    {
+      "type": "prOpened",
+      "label": "A pull request is opened",
+      "description": "Fires for each pull request opened since the last poll.",
+      "statusMapping": [
+        {
+          "upstream": "open",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "closed",
+          "suggestedLocal": "done"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "GitHub: pull requests",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "github",
+        "triggerType": "prOpened",
+        "env": [
+          {
+            "name": "GITHUB_OWNER",
+            "required": true,
+            "secret": false,
+            "description": "User or organisation, e.g. vorn-run"
+          },
+          {
+            "name": "GITHUB_REPO",
+            "required": true,
+            "secret": false,
+            "description": "Repository name on its own, without the owner"
+          },
+          {
+            "name": "GITHUB_LABELS",
+            "required": false,
+            "secret": false,
+            "description": "Comma-separated. Applies to the issue trigger only."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "createIssue",
+      "label": "Create an issue",
+      "description": "Open a new issue in the connected repository.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "labels",
+          "label": "Labels",
+          "type": "string",
+          "required": false,
+          "description": "Comma-separated"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "number",
+          "type": "number",
+          "description": "The new issue number"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        }
+      ]
+    },
+    {
+      "type": "closeIssue",
+      "label": "Close an issue",
+      "description": "Close an issue or pull request in the connected repository.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Issue #",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "number",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        }
+      ]
+    },
+    {
+      "type": "commentOnIssue",
+      "label": "Comment on an issue",
+      "description": "Post a comment on an issue or pull request.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Issue #",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "url",
+          "description": "Where to read the comment"
+        }
+      ]
+    },
+    {
+      "type": "createPullRequest",
+      "label": "Open a pull request",
+      "description": "Open a pull request from a pushed branch into the base branch.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "head",
+          "label": "Branch",
+          "type": "string",
+          "required": true,
+          "description": "The pushed branch"
+        },
+        {
+          "key": "base",
+          "label": "Into",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to main"
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "body",
+          "label": "Description",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "draft",
+          "label": "Draft",
+          "type": "string",
+          "required": false,
+          "description": "true to open it as a draft"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "number",
+          "type": "number",
+          "description": "The new pull request number"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        }
+      ]
+    },
+    {
+      "type": "getPullRequest",
+      "label": "Read a pull request",
+      "description": "Title, body, branches, head commit, size, whether it can merge, and each reviewer's verdict.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "number",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "Where to read it"
+        },
+        {
+          "key": "title"
+        },
+        {
+          "key": "body"
+        },
+        {
+          "key": "state",
+          "description": "open or closed"
+        },
+        {
+          "key": "draft",
+          "type": "boolean"
+        },
+        {
+          "key": "merged",
+          "type": "boolean"
+        },
+        {
+          "key": "mergeable",
+          "type": "boolean",
+          "description": "null while GitHub is still working it out"
+        },
+        {
+          "key": "mergeableState",
+          "description": "clean, blocked, behind, dirty, unstable…"
+        },
+        {
+          "key": "author"
+        },
+        {
+          "key": "headBranch"
+        },
+        {
+          "key": "headSha",
+          "description": "The commit a review is of"
+        },
+        {
+          "key": "baseBranch"
+        },
+        {
+          "key": "changedFiles",
+          "type": "number"
+        },
+        {
+          "key": "reviews",
+          "type": "array",
+          "description": "{ author, state } — each reviewer's latest verdict"
+        }
+      ]
+    },
+    {
+      "type": "listPullRequestFiles",
+      "label": "List the files a pull request changes",
+      "description": "Every changed file with its unified diff — what a reviewer reads.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "files",
+          "type": "array",
+          "description": "{ filename, status, additions, deletions, patch, previousFilename? } for each"
+        },
+        {
+          "key": "count",
+          "type": "number"
+        }
+      ]
+    },
+    {
+      "type": "listPullRequestComments",
+      "label": "Read the review discussion",
+      "description": "Comments on lines of the diff and on the conversation, so a review does not repeat itself.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "inline",
+          "type": "array",
+          "description": "{ id, author, body, path, line, inReplyTo?, url } for each"
+        },
+        {
+          "key": "conversation",
+          "type": "array",
+          "description": "{ id, author, body, url } for each"
+        }
+      ]
+    },
+    {
+      "type": "commentOnPullRequest",
+      "label": "Comment on a pull request",
+      "description": "Comment on the conversation, on a line of a file, or in reply to an inline comment.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "Markdown."
+        },
+        {
+          "key": "path",
+          "label": "File",
+          "type": "string",
+          "required": false,
+          "description": "Path in the repository, e.g. src/app.ts. Blank comments on the conversation."
+        },
+        {
+          "key": "line",
+          "label": "Line",
+          "type": "number",
+          "required": false,
+          "description": "Line in the new version of the file. Blank with a file comments on the whole file."
+        },
+        {
+          "key": "replyTo",
+          "label": "Reply to",
+          "type": "number",
+          "required": false,
+          "description": "An inline comment id from listPullRequestComments."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The new comment id"
+        },
+        {
+          "key": "url",
+          "description": "Where to read the comment"
+        }
+      ]
+    },
+    {
+      "type": "reviewPullRequest",
+      "label": "Review a pull request",
+      "description": "Approve, request changes or comment — with a summary and line comments, sent as one review.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "event",
+          "label": "Verdict",
+          "type": "select",
+          "required": true,
+          "description": "Requesting changes or commenting needs a body.",
+          "options": [
+            {
+              "value": "approve",
+              "label": "Approve"
+            },
+            {
+              "value": "requestChanges",
+              "label": "Request changes"
+            },
+            {
+              "value": "comment",
+              "label": "Comment"
+            }
+          ]
+        },
+        {
+          "key": "body",
+          "label": "Summary",
+          "type": "string",
+          "required": false,
+          "description": "Markdown."
+        },
+        {
+          "key": "comments",
+          "label": "Line comments",
+          "type": "json",
+          "required": false,
+          "description": "A list of { path, line, body }, or one such object."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number"
+        },
+        {
+          "key": "state",
+          "description": "APPROVED, CHANGES_REQUESTED or COMMENTED"
+        },
+        {
+          "key": "url",
+          "description": "Where to read the review"
+        }
+      ]
+    },
+    {
+      "type": "requestReviewers",
+      "label": "Request reviewers",
+      "description": "Ask people or teams to review a pull request.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "reviewers",
+          "label": "Reviewers",
+          "type": "string",
+          "required": true,
+          "description": "Comma-separated logins, and org/team for a team."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "requested",
+          "type": "array",
+          "description": "Everyone now asked to review"
+        }
+      ]
+    },
+    {
+      "type": "mergePullRequest",
+      "label": "Merge a pull request",
+      "description": "Merge it at the reviewed commit — refused if anything was pushed since, or branch protection says no.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "number",
+          "label": "Pull request #",
+          "type": "string",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "method",
+          "label": "Merge method",
+          "type": "select",
+          "required": false,
+          "description": "Defaults to squash.",
+          "options": [
+            {
+              "value": "squash",
+              "label": "Squash and merge"
+            },
+            {
+              "value": "merge",
+              "label": "Create a merge commit"
+            },
+            {
+              "value": "rebase",
+              "label": "Rebase and merge"
+            }
+          ]
+        },
+        {
+          "key": "title",
+          "label": "Commit title",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to GitHub's."
+        },
+        {
+          "key": "message",
+          "label": "Commit message",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to GitHub's."
+        },
+        {
+          "key": "sha",
+          "label": "Reviewed commit",
+          "type": "string",
+          "required": false,
+          "description": "The headSha a review step read, e.g. {{steps.getPullRequest.headSha}}. The merge is refused if anything was pushed since. Blank merges the head as it is when this step runs."
+        },
+        {
+          "key": "keepBranch",
+          "label": "Keep branch",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep the head branch after merging. It is deleted by default."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "merged",
+          "type": "boolean"
+        },
+        {
+          "key": "sha",
+          "description": "The merge commit"
+        },
+        {
+          "key": "branchDeleted",
+          "type": "boolean"
+        }
+      ]
+    }
+  ]
+}

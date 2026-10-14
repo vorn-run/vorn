@@ -1,19 +1,20 @@
-//! A connector package's child, opened in the connector protocol: started,
-//! greeted with `vorn/hello`, then asked for its manifest, a preflight, a
-//! select's options, a page of a trigger, or an action.
+//! A program in the connector protocol, opened: started, greeted with
+//! `vorn/hello`, then asked for its manifest, a preflight, a select's
+//! options, a page of a trigger, or an action. The bridge's lifecycle keeps
+//! it ([`crate::lifecycle`]); this is only how it is spoken to.
 //!
 //! An installed pack names the protocol it speaks; a checkout or a stored
 //! command is asked. A child that never heard of the hello was built for the
 //! MCP-era SDK, and is told so rather than run.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 
 use crate::child::{CallError, Child, ErrorData, Launch, CONNECTOR_ERROR};
+use crate::lifecycle::Running;
 use crate::manifest::{self, Manifest};
 
 /// Every protocol this build speaks, offered in `vorn/hello`.
@@ -132,7 +133,7 @@ impl From<CallError> for SdkError {
     fn from(err: CallError) -> SdkError {
         match err {
             CallError::Answered { message, data, .. } => SdkError { message, data },
-            CallError::Transport(message) => SdkError {
+            CallError::Transport(message) | CallError::Timeout(message) => SdkError {
                 message,
                 data: ErrorData::default(),
             },
@@ -213,6 +214,12 @@ pub async fn open(
         timeouts,
         manifest: Mutex::new(None),
     })
+}
+
+impl Running for SdkClient {
+    fn child(&self) -> &Child {
+        &self.child
+    }
 }
 
 impl SdkClient {
@@ -411,78 +418,6 @@ pub async fn probe(
     match read {
         Ok(manifest) => json!({ "ok": true, "manifest": manifest }),
         Err(err) => json!({ "ok": false, "error": err.message }),
-    }
-}
-
-/// One key's child, once started.
-type Slot = Arc<Mutex<Option<Arc<SdkClient>>>>;
-
-/// Children kept one per key (a connection), started on first use.
-#[derive(Debug, Default)]
-pub struct Children {
-    live: std::sync::Mutex<std::collections::HashMap<String, Slot>>,
-}
-
-impl Children {
-    fn slot(&self, key: &str) -> Slot {
-        Arc::clone(
-            self.live
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .entry(key.to_owned())
-                .or_default(),
-        )
-    }
-
-    /// `key`'s child, or one started by `start`; two callers share a start.
-    pub async fn get_or_start<F, Fut>(&self, key: &str, start: F) -> Result<Arc<SdkClient>, String>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<SdkClient, String>>,
-    {
-        let slot = self.slot(key);
-        let mut held = slot.lock().await;
-        if let Some(client) = held.as_ref().filter(|c| !c.exited()) {
-            return Ok(Arc::clone(client));
-        }
-        let client = Arc::new(start().await?);
-        *held = Some(Arc::clone(&client));
-        Ok(client)
-    }
-
-    /// The running child of `key`, if any.
-    pub async fn get(&self, key: &str) -> Option<Arc<SdkClient>> {
-        let slot = self.slot(key);
-        let held = slot.lock().await;
-        held.as_ref().filter(|c| !c.exited()).cloned()
-    }
-
-    /// Stops `key`'s child, if it has one.
-    pub async fn stop(&self, key: &str) {
-        let slot = self
-            .live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(key);
-        if let Some(slot) = slot {
-            if let Some(client) = slot.lock().await.take() {
-                client.close().await;
-            }
-        }
-    }
-
-    /// Stops every child.
-    pub async fn stop_all(&self) {
-        let keys: Vec<String> = self
-            .live
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect();
-        for key in keys {
-            self.stop(&key).await;
-        }
     }
 }
 

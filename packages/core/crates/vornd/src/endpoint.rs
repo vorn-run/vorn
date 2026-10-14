@@ -184,6 +184,7 @@ impl Daemon {
             &dir,
             format!("http://{addr}"),
             bridge,
+            Arc::clone(native.lifecycle()),
         );
         native.set_connectors(Arc::clone(&connectors));
         tokio::spawn(async move { connectors.reconcile().await });
@@ -194,7 +195,9 @@ impl Daemon {
     /// which it reads the extensions' terminals through.
     pub async fn start_extensions(self: &Arc<Self>) {
         use crate::native::extensions::{routes, Extensions, Wired};
-        use vorn_extensions::host::{HostSettings, Supervisor};
+        use vorn_extensions::host::{HostSettings, Hosts};
+        use vorn_extensions::install::Installs;
+        use vorn_extensions::router::{Router, RouterSettings};
         use vorn_extensions::{pack::PackStore, page};
         let native = &self.native;
         let (Some(db_dir), Some(mut addr)) = (
@@ -220,12 +223,24 @@ impl Daemon {
         };
         let bridge_origin = format!("http://{addr}");
         let settings = HostSettings {
-            program: "node".into(),
             base_env: native.child_env(),
             bridge_origin: bridge_origin.clone(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
         };
-        let supervisor = Supervisor::new(PackStore::new(db_dir.join("connectors")), settings);
+        // Connectors and extensions are one kind of package, kept in one store.
+        let store = PackStore::new(db_dir.join("connectors"));
+        let lifecycle = Arc::clone(native.lifecycle());
+        let hosts = Hosts::new(Arc::clone(&lifecycle), store.clone(), settings);
+        let world = Arc::new(crate::native::extensions::world::Wired {
+            native: Arc::downgrade(native),
+        });
+        let router = Router::new(
+            store.clone(),
+            lifecycle,
+            world,
+            RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION")),
+        );
+        let installs = Arc::new(Installs::new(store, native.git_bin(), native.child_env()));
         let daemon = Arc::downgrade(self);
         let around = Wired {
             native: Arc::downgrade(native),
@@ -240,8 +255,15 @@ impl Daemon {
         let ancestors =
             page::frame_ancestors(&[addr.port(), self.server_port()], declared.as_deref());
         let home = crate::native::shell::home_dir().into();
-        let extensions =
-            Extensions::new(supervisor, Arc::new(around), bridge_origin, ancestors, home);
+        let extensions = Extensions::new(
+            hosts,
+            router,
+            installs,
+            Arc::new(around),
+            bridge_origin,
+            ancestors,
+            home,
+        );
         if let Err(err) = routes::start_pages(&extensions).await {
             warn!(%err, "pane pages have no origin; panes will not open");
         }
