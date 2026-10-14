@@ -60,6 +60,8 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     string("name"),
     string("branch"),
     string("workflow"),
+    string("confirm"),
+    string("out"),
     OptionSpec {
         name: "input",
         kind: Kind::String,
@@ -392,6 +394,10 @@ pub struct ClientArgs {
     pub name: Option<String>,
     pub branch: Option<String>,
     pub workflow: Option<String>,
+    /// `vorn ext install --confirm <id>`: the typed confirmation, given up front.
+    pub confirm: Option<String>,
+    /// `vorn ext pack --out <file>`: where the bundle goes.
+    pub out: Option<String>,
     /// `--input key=value`, in the order given; a repeated key keeps its last value.
     pub inputs: Option<serde_json::Map<String, serde_json::Value>>,
     pub data_dir: Option<String>,
@@ -460,6 +466,8 @@ impl ClientArgs {
             name: owned("name"),
             branch: owned("branch"),
             workflow: owned("workflow"),
+            confirm: owned("confirm"),
+            out: owned("out"),
             inputs,
             data_dir,
             lines: positive_int(parsed.str("lines"), "--lines")?,

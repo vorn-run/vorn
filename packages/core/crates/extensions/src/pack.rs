@@ -356,7 +356,7 @@ pub fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
 }
 
 /// Packs written straight to disk, for tests here and in the crates built on this one.
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(test)]
 pub mod fixture {
     use super::*;
     use serde_json::json;

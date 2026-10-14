@@ -6495,6 +6495,7 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "vorn-app",
+ "vorn-extensions",
  "vorn-protocol",
  "vorn-spawn",
  "vorn-store",
@@ -6557,11 +6558,13 @@ name = "vorn-extensions"
 version = "0.0.0"
 dependencies = [
  "data-encoding",
+ "flate2",
  "getrandom 0.4.3",
  "libc",
  "regress",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
  "toml 1.1.6+spec-1.1.0",

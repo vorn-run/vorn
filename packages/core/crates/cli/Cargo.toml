@@ -27,6 +27,8 @@ tokio-tungstenite = "0.28"
 uuid = { version = "1", features = ["v4"] }
 vorn-protocol = { path = "../protocol" }
 vorn-store = { path = "../store" }
+# `vorn ext pack` reads and checks a manifest where the author works, without a server.
+vorn-extensions = { path = "../extensions" }
 
 # `vorn` and `vorn attach`: the app's screens in this terminal.
 vorn-app = { path = "../vorn-app", default-features = false }

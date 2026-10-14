@@ -548,7 +548,7 @@ pub struct Packed {
 }
 
 /// Validates `folder`'s manifest, runs its recorded checks, and lists what a
-/// bundle of it holds, writing the list to `out` (one path per line) when given.
+/// bundle of it holds, writing the bundle to `out` as a `.tar.gz` when given.
 pub fn pack(
     folder: &Path,
     env: &[(String, String)],
@@ -579,10 +579,8 @@ pub fn pack(
     walk(folder, "", &mut files).map_err(|e| e.to_string())?;
     files.sort();
     if let Some(out) = out {
-        let mut listing = fs::File::create(out).map_err(|e| e.to_string())?;
-        for f in &files {
-            writeln!(listing, "{f}").map_err(|e| e.to_string())?;
-        }
+        bundle(folder, &files, &format!("{}-{}", manifest.id, manifest.version), out)
+            .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
     }
     let bytes = files
         .iter()
@@ -596,6 +594,17 @@ pub fn pack(
         bytes,
         checks,
     })
+}
+
+/// `files` of `folder` under `top/`, gzipped.
+fn bundle(folder: &Path, files: &[String], top: &str, out: &Path) -> std::io::Result<()> {
+    let file = fs::File::create(out)?;
+    let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut tar = tar::Builder::new(gz);
+    for f in files {
+        tar.append_path_with_name(folder.join(f), format!("{top}/{f}"))?;
+    }
+    tar.into_inner()?.finish()?.flush()
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> {
@@ -786,8 +795,19 @@ uses = ["sessions.read"]
         assert!(pack.linked);
         // Linking the same folder again is a no-op; another id in its place is not.
         installs.link(folder.path()).unwrap();
-        let packed = super::pack(folder.path(), &env(), None).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let bundle = out.path().join("marker.tar.gz");
+        let packed = super::pack(folder.path(), &env(), Some(&bundle)).unwrap();
         assert_eq!(packed.files, ["hello.sh", "vorn-extension.toml"]);
+        let mut names: Vec<String> = tar::Archive::new(flate2::read::GzDecoder::new(
+            fs::File::open(&bundle).unwrap(),
+        ))
+        .entries()
+        .unwrap()
+        .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+        .collect();
+        names.sort();
+        assert_eq!(names, ["test.marker-1.0.0/hello.sh", "test.marker-1.0.0/vorn-extension.toml"]);
         assert_eq!(packed.checks.as_deref(), Some("3 checks passed"));
         installs.remove("test.marker").unwrap();
         assert!(folder.path().join("hello.sh").exists(), "a linked folder stays");
