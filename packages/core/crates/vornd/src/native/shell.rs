@@ -318,7 +318,12 @@ fn read_version(family: Family, shell: &str) -> Option<String> {
     } else {
         Duration::from_secs(2)
     };
-    let mut child = vorn_spawn::command(shell)
+    version_of(Path::new(shell), limit)
+}
+
+/// The first version `bin --version` prints within `limit`.
+pub(crate) fn version_of(bin: &Path, limit: Duration) -> Option<String> {
+    let mut child = vorn_spawn::command(bin)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

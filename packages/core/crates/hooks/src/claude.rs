@@ -26,6 +26,35 @@ pub const EVENTS: [&str; 8] = [
     "SessionEnd",
 ];
 
+/// The events Vorn still needs from a Claude Code that reports its own
+/// status (OSC 7501): the conversation it starts, to resume it, and its
+/// permission requests, to answer them from Vorn.
+pub const ANSWER_EVENTS: [&str; 2] = ["SessionStart", "PermissionRequest"];
+
+/// The first Claude Code that reports its own status.
+const REPORTS_SINCE: [u32; 3] = [2, 1, 295];
+
+/// Whether the Claude Code that printed `version` reports its own status.
+pub fn reports_status(version: &str) -> bool {
+    let mut parts = version
+        .trim()
+        .split(|c: char| !c.is_ascii_digit())
+        .skip_while(|p| p.is_empty())
+        .take(3)
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let v = [0; 3].map(|_| parts.next().unwrap_or(0));
+    v >= REPORTS_SINCE
+}
+
+/// The events to install hooks for.
+pub fn events(reports_status: bool) -> &'static [&'static str] {
+    if reports_status {
+        &ANSWER_EVENTS
+    } else {
+        &EVENTS
+    }
+}
+
 fn entry(port: u16, token: &str) -> Value {
     json!({
         "type": "http",
@@ -84,19 +113,25 @@ fn hooks_of(settings: &mut Value) -> &mut Map<String, Value> {
         .expect("made an object above")
 }
 
-/// `settings` with Vorn's hooks for every event pointing at `port`, any
+/// `settings` with Vorn's hooks for `events` pointing at `port`, any
 /// earlier ones of Vorn's removed.
-pub fn install(mut settings: Value, port: u16, token: &str) -> Value {
+pub fn install(mut settings: Value, port: u16, token: &str, events: &[&str]) -> Value {
     let hooks = hooks_of(&mut settings);
     for event in EVENTS {
-        let existing = hooks
-            .get(event)
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let mut kept = without_vorn(existing, false);
-        kept.push(json!({ "hooks": [entry(port, token)] }));
-        hooks.insert(event.into(), Value::Array(kept));
+        let existing = hooks.get(event).and_then(Value::as_array).cloned();
+        let had = existing.is_some();
+        let mut kept = without_vorn(existing.unwrap_or_default(), false);
+        if events.contains(&event) {
+            kept.push(json!({ "hooks": [entry(port, token)] }));
+        }
+        if kept.is_empty() && !had {
+            continue;
+        }
+        if kept.is_empty() {
+            hooks.remove(event);
+        } else {
+            hooks.insert(event.into(), Value::Array(kept));
+        }
     }
     settings
 }
@@ -121,7 +156,7 @@ pub fn uninstall(mut settings: Value) -> Value {
 }
 
 /// Installs into the settings file, read as `{}` when absent or unreadable.
-pub fn install_file(file: &Path, port: u16, token: &str) -> io::Result<()> {
+pub fn install_file(file: &Path, port: u16, token: &str, events: &[&str]) -> io::Result<()> {
     let settings = std::fs::read_to_string(file)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -130,7 +165,7 @@ pub fn install_file(file: &Path, port: u16, token: &str) -> io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let text =
-        serde_json::to_string_pretty(&install(settings, port, token)).map_err(io::Error::other)?;
+        serde_json::to_string_pretty(&install(settings, port, token, events)).map_err(io::Error::other)?;
     std::fs::write(file, text)
 }
 
@@ -164,7 +199,7 @@ mod tests {
                 { "matcher": "*", "hooks": [mine(), entry(1, "old")] },
             ]}
         });
-        let installed = install(settings, 56432, "tok");
+        let installed = install(settings, 56432, "tok", &EVENTS);
         let stop = installed["hooks"]["Stop"].as_array().unwrap();
         assert_eq!(stop.len(), 3);
         assert_eq!(stop[1], json!({ "matcher": "*", "hooks": [mine()] }));
@@ -188,10 +223,28 @@ mod tests {
     }
 
     #[test]
+    fn a_claude_reporting_its_status_keeps_only_the_hooks_it_needs_answered() {
+        assert!(!reports_status("2.1.294 (Claude Code)"));
+        assert!(reports_status("2.1.295 (Claude Code)"));
+        assert!(reports_status("v2.2.0"));
+        assert!(!reports_status("1.9.999"));
+        assert!(!reports_status(""));
+
+        let full = install(json!({ "hooks": { "Stop": [{ "hooks": [mine()] }] } }), 1, "t", &EVENTS);
+        let trimmed = install(full, 1, "t", events(true));
+        let hooks = trimmed["hooks"].as_object().unwrap();
+        let mut names: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["PermissionRequest", "SessionStart", "Stop"]);
+        assert_eq!(hooks["Stop"], json!([{ "hooks": [mine()] }]));
+        assert!(is_vorn(&hooks["PermissionRequest"][0]["hooks"][0]));
+    }
+
+    #[test]
     fn keeps_the_settings_file_whole_through_install_and_uninstall() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(".claude/settings.json");
-        install_file(&file, 9, "t").unwrap();
+        install_file(&file, 9, "t", &EVENTS).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains("\n  \"hooks\": {"), "{text}");
         uninstall_file(&file).unwrap();

@@ -890,6 +890,9 @@ struct Statuses {
     /// Each session's program status records, with the effect that set
     /// them, kept as `screens` are.
     programs: HashMap<String, (vorn_engine::Programs, Stamp)>,
+    /// Terminals with a permission request open in Vorn: they wait,
+    /// whatever their program reports, until it is answered.
+    asking: HashSet<String>,
 }
 
 /// The registry: every record the server holds, as it last told them.
@@ -1346,11 +1349,16 @@ impl Registry {
             .as_ref()
             .and_then(|st| st.screens.get(id))
             .map(|&(s, _)| s);
+        let asking = self
+            .statuses
+            .as_ref()
+            .is_some_and(|st| st.asking.contains(id));
         let row = self.terminals.get_mut(id).filter(|r| !r.ended)?;
         let was = row.record.program_status.take();
         let next = ProgramStatus::read(p, was.as_ref());
         let stopped = was.as_ref().is_some_and(|w| w.native) && !p.native;
         let status = match next.as_ref().and_then(ProgramStatus::status) {
+            Some(_) if asking => Some(AgentStatus::Waiting),
             Some(s) => Some(s),
             None if stopped => Some(if follows_screen(row) {
                 screen.unwrap_or(AgentStatus::Idle)
@@ -1376,6 +1384,19 @@ impl Registry {
         } else {
             None
         }
+    }
+
+    /// Whether terminal `id` has a permission request open in Vorn. While
+    /// one is, a program reporting itself still shows as waiting.
+    pub fn asking(&mut self, id: &str, open: bool) -> Option<Value> {
+        let st = self.statuses.as_mut()?;
+        let changed = if open {
+            st.asking.insert(id.to_owned())
+        } else {
+            st.asking.remove(id)
+        };
+        let (p, at) = st.programs.get(id).filter(|_| changed)?.clone();
+        self.take_program(id, &p, at)
     }
 
     /// A person looked at terminal `id`: a finished report is seen.
@@ -1448,6 +1469,7 @@ impl Registry {
             st.screens.remove(id);
             st.exits.remove(id);
             st.programs.remove(id);
+            st.asking.remove(id);
         }
     }
 
@@ -2446,6 +2468,13 @@ impl SessionRegistry {
         self.tell(note);
     }
 
+    /// [`Registry::asking`].
+    pub fn asking(&self, id: &str, open: bool) {
+        let mut fed = self.lock();
+        let note = fed.registry.asking(id, open);
+        self.tell(note);
+    }
+
     /// [`Registry::seen`].
     pub fn seen(&self, id: &str) {
         let mut fed = self.lock();
@@ -3268,6 +3297,18 @@ mod tests {
         assert_eq!(note["record"]["status"], "waiting");
         assert_eq!(note["record"]["programStatus"]["records"][0]["state"], "blocked");
         r.session_closed("b");
+    }
+
+    #[test]
+    fn a_permission_request_open_in_vorn_keeps_a_reporting_program_waiting() {
+        use vorn_engine::ProgramState::Working;
+        let mut r = deciding();
+        r.program_status("a", &programs(true, &[("", Working)]), at(1, 1, 0)).unwrap();
+        assert_eq!(r.asking("a", true).unwrap()["record"]["status"], "waiting");
+        assert!(r.asking("a", true).is_none());
+        assert!(r.program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0)).is_none());
+        assert_eq!(status(&r, "a"), AgentStatus::Waiting);
+        assert_eq!(r.asking("a", false).unwrap()["record"]["status"], "running");
     }
 
     #[test]
