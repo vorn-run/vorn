@@ -410,6 +410,17 @@ async fn a_program_pane_runs_in_a_terminal_holding_the_extensions_token() {
         "http://127.0.0.1:9/extensions/x/bridge"
     );
     assert_eq!(env["VORN_SESSION_ID"], terminal);
+    // An open pane keeps its host, and so the token its program holds, past any idle time.
+    let lifecycle = w.ext.router().lifecycle();
+    lifecycle.set_policy(Policy {
+        idle: Duration::ZERO,
+        ..Policy::default()
+    });
+    lifecycle.reap();
+    assert_eq!(
+        env.get("VORN_EXTENSION_TOKEN"),
+        w.ext.hosts.token_for(&w.key("x")).as_ref()
+    );
 
     let nonce = grant["nonce"].as_str().unwrap();
     w.call("extension:closePane", json!({ "nonce": nonce }))

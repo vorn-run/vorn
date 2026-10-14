@@ -28,8 +28,9 @@ use vorn_extensions::api::types::CallCtx;
 use vorn_extensions::api::ExtError;
 use vorn_extensions::footer::{Declared, Footers, Key};
 use vorn_extensions::grants::{Grant, Grants, Lookup, GRANT_IDLE_MS};
-use vorn_extensions::host::{Asked, HostKey, Hosts};
+use vorn_extensions::host::{Asked, Host, HostKey, Hosts};
 use vorn_extensions::install::Installs;
+use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::router::Router;
@@ -201,6 +202,8 @@ pub struct Extensions {
     grants: Mutex<Grants>,
     bands: Mutex<Bands>,
     selections: Mutex<HashMap<u64, oneshot::Sender<String>>>,
+    /// Each open pane keeps its extension's host running: a pane's program holds that host's token.
+    pane_hosts: Mutex<HashMap<String, Lease<Host>>>,
     next_selection: AtomicU64,
     /// The newest sync asked for each session; reading git can finish them out of order.
     syncs: Mutex<HashMap<String, u64>>,
@@ -266,6 +269,7 @@ impl Extensions {
             grants: Mutex::default(),
             bands: Mutex::default(),
             selections: Mutex::default(),
+            pane_hosts: Mutex::default(),
             next_selection: AtomicU64::new(0),
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
@@ -622,7 +626,9 @@ impl Extensions {
         let closed = guard(&self.grants).close_where(|g| g.session_id == session.id);
         self.kill_terminals(&closed);
         // A pane's own terminal that ended takes only its authority with it.
-        guard(&self.grants).close_where(|g| g.terminal_id.as_deref() == Some(session.id.as_str()));
+        let ended = guard(&self.grants)
+            .close_where(|g| g.terminal_id.as_deref() == Some(session.id.as_str()));
+        self.let_go(&ended);
         let still_open = self.around.live().is_some_and(|live| {
             live.iter()
                 .any(|s| s.id != session.id && s.project_path == session.project_path)
@@ -645,6 +651,15 @@ impl Extensions {
         for terminal in closed.iter().filter_map(|g| g.terminal_id.as_deref()) {
             self.around.kill_terminal(terminal);
         }
+        self.let_go(closed);
+    }
+
+    /// Closed panes no longer keep their hosts from idling.
+    fn let_go(&self, closed: &[Grant]) {
+        let mut held = guard(&self.pane_hosts);
+        for grant in closed {
+            held.remove(&grant.nonce);
+        }
     }
 
     async fn open_pane(&self, ext: &str, pane_id: &str, session: &Live) -> Result<Grant, String> {
@@ -663,7 +678,7 @@ impl Extensions {
             project_path: session.project_path.clone(),
         };
         // Started first, so a page's first read or a program's first line has a bridge to talk to.
-        self.hosts.get_or_start(&key).await?;
+        let host = self.hosts.get_or_start(&key).await?;
         let nonce = token::mint().map_err(|e| e.to_string())?;
         let mut grant = Grant {
             nonce,
@@ -691,6 +706,7 @@ impl Extensions {
             }
         }
         guard(&self.grants).insert(grant.clone());
+        guard(&self.pane_hosts).insert(grant.nonce.clone(), host);
         Ok(grant)
     }
 
