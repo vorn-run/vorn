@@ -100,7 +100,7 @@ fn share(s: &Screen<'_>, n: &Network) -> El {
         "Share this machine",
     )
     .ring(12.0);
-    let mut el = div().col().child(row(
+    let mut el = div().col().child_if(this_computer(s, n)).child(row(
         "Share this machine",
         "Let other devices open Vorn in a browser",
         None,
@@ -114,6 +114,63 @@ fn share(s: &Screen<'_>, n: &Network) -> El {
         el = el.child_if(addresses(s, n)).child(devices(s, n));
     }
     el
+}
+
+/// The web client on this computer: its address, to copy or open. Not in the
+/// web client itself, which is that page already.
+fn this_computer(s: &Screen<'_>, n: &Network) -> Option<El> {
+    if cfg!(target_arch = "wasm32") {
+        return None;
+    }
+    let open = s.acts.on("net-open-web", Act::OpenWebClient);
+    let hot = s.ui.hover(open);
+    let open_btn = div()
+        .id(open)
+        .on(Action::Click)
+        .ring(6.0)
+        .ml(8.0)
+        .shrink0()
+        .px(8.0)
+        .py(4.0)
+        .rounded(6.0)
+        .bg(white(0.06).mix(white(0.1), hot))
+        .role(Role::Button, "Open in browser")
+        .child(
+            text("Open", 12.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
+                .line_height(16.0)
+                .silent(),
+        );
+    Some(
+        card()
+            .mb(16.0)
+            .child(caption("On this computer").mb(6.0))
+            .child(
+                div()
+                    .row()
+                    .items_center()
+                    .child(
+                        div().row().grow().min_w0().child(
+                            text(s.web_url, 14.0, c(look::GRAY_200))
+                                .mono()
+                                .line_height(20.0)
+                                .truncate(),
+                        ),
+                    )
+                    .child(copy_button(s, n, s.web_url))
+                    .child(open_btn),
+            )
+            .child(
+                text(
+                    "The port changes each time the server starts. In a terminal, vorn web opens it.",
+                    12.0,
+                    c(look::GRAY_600),
+                )
+                .line_height(16.0)
+                .mt(8.0)
+                .wrapping()
+                .silent(),
+            ),
+    )
 }
 
 /// What the wide bind costs, before it happens without a tailnet.

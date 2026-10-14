@@ -498,6 +498,10 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
             items.push(Item::option(label, s.st.columns == n, Act::Columns(n)));
         }
     }
+    // The browser is where the web client already runs.
+    if !cfg!(target_arch = "wasm32") {
+        items.push(Item::new("globe", "Open in Browser", Act::OpenWebClient).sep());
+    }
     items
 }
 

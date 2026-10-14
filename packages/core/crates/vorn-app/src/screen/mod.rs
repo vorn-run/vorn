@@ -79,6 +79,8 @@ pub struct Screen<'a> {
     pub chrome: bool,
     /// macOS: the traffic lights sit over the top bar's left end.
     pub traffic: bool,
+    /// The web client of the vornd this app talks to, on this machine.
+    pub web_url: &'a str,
 }
 
 impl Screen<'_> {

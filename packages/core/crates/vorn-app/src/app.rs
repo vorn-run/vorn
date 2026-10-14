@@ -306,6 +306,8 @@ pub struct App {
     spoken: HashMap<String, String>,
     pub st: State,
     pub acts: Acts,
+    /// The web client of the vornd this app talks to.
+    pub web_url: String,
     preedit: String,
     /// The composer showed last frame: it takes the keyboard when it appears.
     was_composing: bool,
@@ -436,6 +438,7 @@ impl App {
             spoken: HashMap::new(),
             st,
             acts: Acts::default(),
+            web_url: ep.web_url(),
             preedit: String::new(),
             was_composing: false,
             calls: Vec::new(),
@@ -1260,8 +1263,10 @@ impl App {
             MenuKind::GroupIcon(g) => Some(Acts::id("sidebar-group", &Act::Group(Some(g.clone())))),
             _ => src.id,
         };
-        let rect = trigger.and_then(|id| ui.rect_of(id));
-        let mut at = match (src.at, rect) {
+        // In the units the anchor is written in, which on cells are not the layout's.
+        let rect = trigger.and_then(|id| ui.authored_rect(id));
+        let src_at = src.at.map(|p| ui.authored_point(p));
+        let mut at = match (src_at, rect) {
             // `right-0 top-full mt-1` of an empty box at the row's end, so
             // from the row's middle; the row ends 8 px past its More.
             (None, Some(r)) if matches!(kind, MenuKind::Group(_) | MenuKind::Project(_)) => {
@@ -1283,12 +1288,8 @@ impl App {
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
             }
-            // `OpenInButton` opens upwards, its right edge on the chip's.
-            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => {
-                let n = self.st.git.ides.as_ref().map_or(0, Vec::len);
-                let h = crate::screen::git::open_in_height(n);
-                (r.x + r.w - w, (r.y - h - 4.0).max(8.0))
-            }
+            // `OpenInButton` opens upwards from the chip's top, its right edge on the chip's.
+            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => (r.x + r.w - w, r.y - 4.0),
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
@@ -1931,6 +1932,7 @@ impl App {
             Act::Run(a) => self.run_run(a),
             Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
+            Act::OpenWebClient => tasks::open_url(&self.web_url),
             Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
                 self.close_task_dialog(ui);
             }
@@ -2886,6 +2888,7 @@ impl App {
             size: self.size,
             chrome: self.chrome,
             traffic: self.traffic,
+            web_url: &self.web_url,
         }
     }
 

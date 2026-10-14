@@ -40,6 +40,114 @@ pub struct Terminal {
     prev: Option<Buffer>,
     kitty: bool,
     active: bool,
+    /// The terminal takes OSC 22 pointer shapes.
+    shapes: bool,
+    /// The pointer shape last asked for.
+    pointer: &'static str,
+    /// Icons drawn as images, where the terminal shows kitty graphics.
+    graphics: Option<Graphics>,
+}
+
+/// The icons sent to a terminal that shows kitty graphics, drawn in place of
+/// Unicode placeholders so the diff and the terminal's own scrolling keep them.
+struct Graphics {
+    /// A cell's size in pixels, which each icon is rasterized to.
+    cell: (u32, u32),
+    /// Each icon in each colour sent, and its image id.
+    sent: std::collections::HashMap<(u32, [u8; 3]), u32>,
+    next: u32,
+}
+
+/// The placeholder for the image's top-left (and only) cell: U+10EEEE, row 0, column 0.
+const PLACEHOLDER: &str = "\u{10EEEE}\u{0305}\u{0305}";
+
+impl Graphics {
+    /// The cell size the terminal reports, when it reports one.
+    fn new() -> Option<Graphics> {
+        let ws = terminal::window_size().ok()?;
+        if ws.width == 0 || ws.height == 0 || ws.columns == 0 || ws.rows == 0 {
+            return None;
+        }
+        let cell = (
+            u32::from(ws.width / ws.columns),
+            u32::from(ws.height / ws.rows),
+        );
+        (cell.0 >= 4 && cell.1 >= 4).then(|| Graphics {
+            cell,
+            sent: std::collections::HashMap::new(),
+            next: 1,
+        })
+    }
+
+    /// The image id for icon `key` in `fg`, sent first if it has not been;
+    /// `None` when the icon cannot be drawn and its glyph stands in.
+    fn image(&mut self, w: &mut impl Write, key: u32, fg: [u8; 3]) -> io::Result<Option<u32>> {
+        if let Some(id) = self.sent.get(&(key, fg)) {
+            return Ok(Some(*id));
+        }
+        let Some(rgba) = icon_rgba(key, fg, self.cell) else {
+            return Ok(None);
+        };
+        let id = self.next;
+        // Ids ride in the 24-bit foreground of the placeholder.
+        if id > 0x00ff_ffff {
+            return Ok(None);
+        }
+        self.next += 1;
+        let data = base64(&rgba);
+        let chunks: Vec<&[u8]> = data.as_bytes().chunks(4096).collect();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let more = u8::from(i + 1 < chunks.len());
+            if i == 0 {
+                let (cw, ch) = self.cell;
+                write!(w, "\x1b_Gq=2,a=t,f=32,s={cw},v={ch},i={id},m={more};")?;
+            } else {
+                write!(w, "\x1b_Gq=2,m={more};")?;
+            }
+            w.write_all(chunk)?;
+            w.write_all(b"\x1b\\")?;
+        }
+        write!(w, "\x1b_Gq=2,a=p,U=1,i={id},c=1,r=1\x1b\\")?;
+        self.sent.insert((key, fg), id);
+        Ok(Some(id))
+    }
+}
+
+/// Icon `key` in `fg` over a transparent `cell`, centred and as large as fits.
+fn icon_rgba(key: u32, fg: [u8; 3], (cw, ch): (u32, u32)) -> Option<Vec<u8>> {
+    let svg = super::icon_svg(key)?;
+    let side = cw.min(ch);
+    let mask = crate::rasterize_svg(&svg, side)?;
+    let (ox, oy) = ((cw - side) / 2, (ch - side) / 2);
+    let mut out = vec![0u8; (cw * ch * 4) as usize];
+    for y in 0..side {
+        for x in 0..side {
+            let a = mask[(y * side + x) as usize];
+            let at = (((y + oy) * cw + x + ox) * 4) as usize;
+            out[at..at + 4].copy_from_slice(&[fg[0], fg[1], fg[2], a]);
+        }
+    }
+    Some(out)
+}
+
+/// Standard base64, as the graphics protocol carries pixels.
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ABC[(n >> (18 - 6 * i) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 impl Terminal {
@@ -72,6 +180,12 @@ impl Terminal {
             prev: None,
             kitty,
             active: true,
+            shapes: takes_pointer_shapes(
+                std::env::var("TERM_PROGRAM").ok().as_deref(),
+                std::env::var("TERM").ok().as_deref(),
+            ),
+            pointer: "default",
+            graphics: images_wanted().then(Graphics::new).flatten(),
         })
     }
 
@@ -87,9 +201,14 @@ impl Terminal {
         self.kitty
     }
 
-    /// Forgets the last frame, so the next one is written whole.
+    /// Forgets the last frame, so the next one is written whole; icons are
+    /// sent again at the cell size the terminal now has.
     pub fn invalidate(&mut self) {
         self.prev = None;
+        if self.graphics.is_some() {
+            let _ = write!(self.out, "\x1b_Ga=d,d=A,q=2\x1b\\");
+            self.graphics = Graphics::new();
+        }
     }
 
     /// Writes the cells of `frame` that changed since the last one, then
@@ -107,6 +226,23 @@ impl Terminal {
             }
             if pen != Some((x, y)) {
                 queue!(w, cursor::MoveTo(x, y))?;
+            }
+            let image = match (&mut self.graphics, c.icon) {
+                (Some(g), key) if key != 0 => g.image(&mut w, key, c.fg)?,
+                _ => None,
+            };
+            if let Some(id) = image {
+                let [_, r, g, b] = id.to_be_bytes();
+                queue!(
+                    w,
+                    SetBackgroundColor(color(c.bg, self.depth)),
+                    SetForegroundColor(Color::Rgb { r, g, b }),
+                    Print(PLACEHOLDER)
+                )?;
+                style = None;
+                pen = Some((x + 1, y));
+                written += 1;
+                continue;
             }
             let mut s = *c;
             s.sym = Sym::SPACE;
@@ -135,6 +271,24 @@ impl Terminal {
         Ok(written)
     }
 
+    /// Shows `cursor` as the mouse pointer, where the terminal takes OSC 22;
+    /// elsewhere controls show they can be clicked by their fill instead.
+    pub fn set_pointer(&mut self, cursor: crate::Cursor) -> io::Result<()> {
+        let name = match cursor {
+            crate::Cursor::Default => "default",
+            crate::Cursor::Pointer => "pointer",
+            crate::Cursor::Text => "text",
+            crate::Cursor::ColResize => "ew-resize",
+            crate::Cursor::RowResize => "ns-resize",
+        };
+        if !self.shapes || name == self.pointer {
+            return Ok(());
+        }
+        self.pointer = name;
+        write!(self.out, "\x1b]22;{name}\x1b\\")?;
+        self.out.flush()
+    }
+
     /// The next event within `timeout`, if any.
     pub fn poll(timeout: Duration) -> io::Result<Option<TermEvent>> {
         if !event::poll(timeout)? {
@@ -149,6 +303,10 @@ impl Terminal {
             return Ok(());
         }
         self.active = false;
+        let _ = self.set_pointer(crate::Cursor::Default);
+        if self.graphics.is_some() {
+            let _ = write!(self.out, "\x1b_Ga=d,d=A,q=2\x1b\\");
+        }
         if self.kitty {
             execute!(self.out, PopKeyboardEnhancementFlags)?;
         }
@@ -170,6 +328,37 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.leave();
     }
+}
+
+/// Whether the terminal named by `TERM_PROGRAM` and `TERM` changes the mouse
+/// pointer on OSC 22. Terminal.app and iTerm2 do not; the rest are left alone too,
+/// since an unknown OSC can print.
+fn takes_pointer_shapes(program: Option<&str>, term: Option<&str>) -> bool {
+    let program = program.unwrap_or_default().to_ascii_lowercase();
+    let term = term.unwrap_or_default();
+    matches!(program.as_str(), "ghostty" | "wezterm" | "kitty")
+        || term.starts_with("xterm-kitty")
+        || term.starts_with("xterm-ghostty")
+        || term.starts_with("foot")
+        || term == "wezterm"
+}
+
+/// Whether to draw icons as images: on a terminal that shows kitty graphics
+/// in true colour, unless `VORN_TUI_IMAGES=0` says not to.
+fn images_wanted() -> bool {
+    let env = |k: &str| std::env::var(k).ok();
+    env("VORN_TUI_IMAGES").as_deref() != Some("0")
+        && Depth::from_env() == Depth::True
+        && takes_images(env("TERM_PROGRAM").as_deref(), env("TERM").as_deref())
+}
+
+/// Terminals that place kitty graphics at Unicode placeholders.
+fn takes_images(program: Option<&str>, term: Option<&str>) -> bool {
+    let program = program.unwrap_or_default().to_ascii_lowercase();
+    let term = term.unwrap_or_default();
+    matches!(program.as_str(), "ghostty" | "kitty")
+        || term.starts_with("xterm-kitty")
+        || term.starts_with("xterm-ghostty")
 }
 
 fn color(c: [u8; 3], depth: Depth) -> Color {
@@ -411,5 +600,60 @@ mod tests {
                 text: None
             })
         );
+    }
+
+    #[test]
+    fn pointer_shapes_go_only_to_terminals_that_take_them() {
+        assert!(takes_pointer_shapes(Some("ghostty"), Some("xterm-ghostty")));
+        assert!(takes_pointer_shapes(Some("WezTerm"), None));
+        assert!(takes_pointer_shapes(None, Some("xterm-kitty")));
+        assert!(takes_pointer_shapes(None, Some("foot-extra")));
+        assert!(!takes_pointer_shapes(
+            Some("Apple_Terminal"),
+            Some("xterm-256color")
+        ));
+        assert!(!takes_pointer_shapes(
+            Some("iTerm.app"),
+            Some("xterm-256color")
+        ));
+        assert!(!takes_pointer_shapes(None, None));
+    }
+
+    #[test]
+    fn base64_is_the_standard_alphabet_with_padding() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(&[0xff, 0xfe, 0xfd, 0x00]), "//79AA==");
+    }
+
+    #[test]
+    fn icons_are_images_only_where_placeholders_work() {
+        assert!(takes_images(Some("ghostty"), None));
+        assert!(takes_images(None, Some("xterm-kitty")));
+        assert!(!takes_images(
+            Some("Apple_Terminal"),
+            Some("xterm-256color")
+        ));
+        assert!(
+            !takes_images(Some("WezTerm"), None),
+            "no placeholder support there yet"
+        );
+    }
+
+    #[test]
+    fn an_icon_fills_its_cell_in_its_colour() {
+        let key = super::super::icon_key(crate::icons::PLUS);
+        let px = icon_rgba(key, [10, 20, 30], (8, 16)).expect("pixels");
+        assert_eq!(px.len(), 8 * 16 * 4);
+        assert!(px
+            .chunks(4)
+            .any(|p| p == [10, 20, 30, 255] || (p[..3] == [10, 20, 30] && p[3] > 0)));
+        assert!(
+            px.chunks(4).take(8).all(|p| p[3] == 0),
+            "the top row of a tall cell is clear"
+        );
+        assert_eq!(icon_rgba(0, [0; 3], (8, 16)), None);
     }
 }

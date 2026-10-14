@@ -91,6 +91,11 @@ fn remote_access_page() {
     assert!(!sharing(&app), "a fresh HOME shares nothing");
     assert!(!app.st.network.can_scan(), "loopback only: no code to scan");
     assert_eq!(app.st.network.active().len(), 0);
+    // This computer's web client, before sharing anything: its address to copy or open.
+    assert_eq!(app.web_url, format!("http://127.0.0.1:{port}/app/"));
+    shot.frame(&mut app);
+    let open = vorn_app::App::control("net-open-web", &vorn_app::act::Act::OpenWebClient);
+    assert!(shot.ui.rect_of(open).is_some(), "the Open button shows");
     shot.save(&mut app, "page");
 
     // Share this machine. Off a tailnet it asks first.

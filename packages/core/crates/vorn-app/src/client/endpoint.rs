@@ -88,6 +88,11 @@ impl Endpoint {
         })
     }
 
+    /// The web client this vornd serves, on this machine.
+    pub fn web_url(&self) -> String {
+        format!("http://127.0.0.1:{}/app/", self.port)
+    }
+
     /// The vornd that served this page, admitting `token`.
     #[cfg(target_arch = "wasm32")]
     pub fn page(token: String) -> Endpoint {
@@ -188,6 +193,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn the_web_client_is_under_app_on_the_found_port() {
+        let ep = Endpoint {
+            port: 51324,
+            pid: 1,
+            token: "t".into(),
+            grid: String::new(),
+            ws: String::new(),
+        };
+        assert_eq!(ep.web_url(), "http://127.0.0.1:51324/app/");
     }
 
     #[test]

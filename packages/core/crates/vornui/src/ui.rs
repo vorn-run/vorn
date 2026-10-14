@@ -1161,6 +1161,29 @@ impl Ui {
     /// A box on cells: its fill, its border as box drawing, its rules, and
     /// keyboard focus as one step brighter.
     fn record_box(&mut self, cx: &Cx<'_>, el: &El, rl: Rect, ring: bool) {
+        // A button's states: a faint fill at rest, brighter under the pointer
+        // or keyboard focus, brightest while pressed.
+        if let Some(id) = el.id.filter(|_| is_button(el)) {
+            let fill = if self.pressed(id) {
+                0.24
+            } else if ring || self.hover(id) > 0.5 {
+                0.14
+            } else if (icon_only(el) || (rl.w <= 16.0 && rl.h <= 1.0))
+                && el.bg.is_none_or(|b| b.0[3] < 0.05)
+                && el.opacity > 0.5
+            {
+                // Rows highlight on hover alone; a compact control shows at rest.
+                0.07
+            } else {
+                0.0
+            };
+            if fill > 0.0 {
+                let op = cells::Op::Fill {
+                    color: Rgba::white(fill),
+                };
+                self.record(cx, op, rl);
+            }
+        }
         let shape = Shape::of(el);
         // A chip a pixel surface tints faintly still reads as one in cells.
         let chip = |c: Rgba| {
@@ -1180,6 +1203,7 @@ impl Ui {
                 Shape::Dot => cells::Op::Glyph {
                     glyph: "●".into(),
                     color: bg,
+                    icon: 0,
                 },
             };
             self.record(cx, op, rl);
@@ -1229,7 +1253,11 @@ impl Ui {
                 _ => theme::color::INK,
             });
             let glyph = g.to_owned();
-            self.record(cx, cells::Op::Glyph { glyph, color }, inner);
+            let icon = match &el.content {
+                Content::Icon { svg, .. } => cells::icon_key(svg),
+                _ => 0,
+            };
+            self.record(cx, cells::Op::Glyph { glyph, color, icon }, inner);
             return;
         }
         match &el.content {
@@ -1803,6 +1831,19 @@ fn fixed(d: taffy::Dimension) -> Option<f32> {
 
 /// Whether a bordered box keeps its frame on cells: a column taller than
 /// 40 px; rows (chips, pills, buttons) and shorter fields tint instead.
+/// A control a press activates: on a terminal it gets room and a fill.
+fn is_button(el: &El) -> bool {
+    el.a11y.role == Some(Role::Button) && el.action == Some(Action::Click) && !el.a11y.disabled
+}
+
+/// A button that shows only an icon.
+fn icon_only(el: &El) -> bool {
+    let icon = |e: &El| {
+        matches!(e.content, Content::Icon { .. } | Content::Svg { .. }) || e.glyph.is_some()
+    };
+    icon(el) || (el.children.len() == 1 && icon(&el.children[0]))
+}
+
 fn framed(el: &El) -> bool {
     let column = matches!(
         el.style.flex_direction,
@@ -1902,6 +1943,25 @@ fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
     s.inset.bottom = lpa(s.inset.bottom, sy);
     s.gap.width = lp(s.gap.width, sx);
     s.gap.height = lp(s.gap.height, sy);
+    // A button reads as one on a terminal: a cell of room either side, and a
+    // cell between buttons that sit side by side, so their fills do not run together.
+    let at_least = |l: Lp, n: f32| match px(l.into_raw()) {
+        Some(v) if v >= n => l,
+        _ => Lp::length(n),
+    };
+    // Buttons hidden until hover keep their size, so the row they share keeps its width.
+    if is_button(el) && el.opacity >= 0.99 {
+        s.padding.left = at_least(s.padding.left, 1.0);
+        s.padding.right = at_least(s.padding.right, 1.0);
+    }
+    let row = matches!(
+        s.flex_direction,
+        taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse
+    );
+    let shown = |c: &&El| is_button(c) && c.opacity >= 0.99;
+    if row && el.children.iter().filter(shown).count() >= 2 {
+        s.gap.width = at_least(s.gap.width, 1.0);
+    }
     // Frames in the window's flow share edges: each draws its top and left
     // and touches its neighbours, so a run of cards costs one column each.
     if !float && el.children.iter().any(shows_frame) {

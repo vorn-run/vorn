@@ -172,6 +172,10 @@ fn is_local(hosts: Option<&Value>) -> bool {
 /// jump to a card.
 pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
+    // The web client already runs in the browser.
+    if cfg!(target_arch = "wasm32") {
+        out.retain(|e| e.act != Act::OpenWebClient);
+    }
     for s in &store.sessions {
         let kind = if s.is_shell() {
             "Shell"
@@ -300,6 +304,13 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
         )
         .shortcut(format!("{m},"))
         .keys(&["preferences", "config", "options"]),
+        Entry::new(
+            Cat::Actions,
+            "Open in Browser",
+            Glyph::Icon("globe"),
+            Act::OpenWebClient,
+        )
+        .keys(&["web", "browser", "url", "remote", "phone", "app"]),
         Entry::new(
             Cat::Actions,
             "Toggle Sidebar",
