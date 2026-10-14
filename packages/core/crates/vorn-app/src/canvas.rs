@@ -23,8 +23,6 @@ const LOOP_BODY_PAD: f64 = 16.0;
 const LOOP_FOOTER: f64 = 18.0 + 22.0 + 40.0;
 /// The dashed box an empty body shows.
 const EMPTY_BODY: f64 = 52.0;
-/// Where a loop's body starts, from the top of its frame.
-pub const LOOP_BODY_TOP: f64 = LOOP_HEADER + LOOP_BODY_PAD;
 /// `STRAIGHT_EDGE_TOLERANCE`.
 const STRAIGHT: f64 = 16.0;
 /// `OPENING_TOP`.

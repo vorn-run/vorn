@@ -16,15 +16,6 @@ export function isAiAgent(agentType: AgentType | undefined): agentType is AiAgen
   return agentType !== undefined && agentType !== 'shell'
 }
 
-/**
- * True for sessions Vorn renders itself — a plain pty whose output is ordinary
- * scrollback, so command boundaries, the spine and the input bar all apply.
- * Agent sessions paint their own full-screen interface and are excluded.
- */
-export function isShellSession(agentType: AgentType | undefined): boolean {
-  return agentType === 'shell'
-}
-
 export function supportsExactSessionResume(agentType: AgentType): boolean {
   return agentType !== 'gemini' && agentType !== 'shell'
 }
@@ -1919,17 +1910,10 @@ export const IPC = {
   TERMINAL_NOTIFY: 'terminal:notify',
   TERMINAL_RESYNC: 'terminal:resync',
   TERMINAL_EXIT: 'terminal:exit',
-  /** A version 2 terminal frame from vornd, passed to the renderer undecoded. */
-  TERMINAL_FRAME: 'terminal:frame',
   TERMINAL_RESIZED: 'terminal:resized',
-  /** The bridge connected again after losing its socket: attachments are gone. */
-  TERMINAL_RECONNECTED: 'terminal:reconnected',
   SESSION_CREATED: 'session:created',
   SESSION_UPDATED: 'session:updated',
   SESSION_REORDERED: 'session:reordered',
-  TERMINAL_RENAME: 'terminal:rename-session',
-  TERMINAL_REORDER: 'terminal:reorder-sessions',
-  TERMINAL_SET_GROUP: 'terminal:set-group',
   CONFIG_LOAD: 'config:load',
   CONFIG_SAVE: 'config:save',
   CONFIG_CHANGED: 'config:changed',
@@ -1937,7 +1921,6 @@ export const IPC = {
   SESSIONS_RESUME: 'sessions:resume',
   SESSIONS_CLEAR: 'sessions:clear',
   SESSIONS_GET_RECENT: 'sessions:getRecent',
-  DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',
   IDE_DETECT: 'ide:detect',
   PROJECT_DETECT_MOBILE: 'project:detectMobile',
   IDE_OPEN: 'ide:open',
@@ -1956,9 +1939,6 @@ export const IPC = {
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
-  VORND_STATUS: 'vornd:status',
-  VORND_SESSION_HOLDERS: 'vornd:session-holders',
-  VORND_END_SESSION_HOLDER: 'vornd:end-session-holder',
   WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
   WORKTREE_REMOVE_MANY: 'worktree:removeMany',
   WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',
@@ -1968,9 +1948,7 @@ export const IPC = {
   GIT_DIFF_FULL: 'git:diffFull',
   GIT_COMMIT: 'git:commit',
   GIT_PUSH: 'git:push',
-  DIALOG_OPEN_FILE: 'dialog:openFile',
   SCHEDULER_EXECUTE: 'scheduler:execute',
-  SCHEDULER_STOP_RUN: 'scheduler:stopRun',
   SCHEDULER_MISSED: 'scheduler:missed',
   SCHEDULER_GET_LOG: 'scheduler:getLog',
   SCHEDULER_GET_NEXT_RUN: 'scheduler:getNextRun',
@@ -1988,64 +1966,14 @@ export const IPC = {
   ARTIFACT_SEND: 'artifact:send',
   ARTIFACT_READ_SOURCE: 'artifact:readSource',
   ARTIFACT_SAVE_USER_VERSION: 'artifact:saveUserVersion',
-  /** Renderer asks main for the quote selected in the pane's artifact, if any. */
-  BROWSER_ARTIFACT_SELECTION: 'browser:artifactSelection',
-  /** Renderer asks main to highlight comment anchors in the pane's artifact. */
-  BROWSER_ARTIFACT_PAINT: 'browser:artifactPaint',
-  /** Renderer asks main to scroll one anchor into view. */
-  BROWSER_ARTIFACT_REVEAL: 'browser:artifactReveal',
-  /** Renderer asks main to drop the page's selection once it became a comment. */
-  BROWSER_ARTIFACT_CLEAR: 'browser:artifactClear',
-  WINDOW_MINIMIZE: 'window:minimize',
-  WINDOW_MAXIMIZE: 'window:maximize',
-  WINDOW_CLOSE: 'window:close',
-  WINDOW_IS_MAXIMIZED: 'window:isMaximized',
-  WINDOW_MAXIMIZED_CHANGED: 'window:maximizedChanged',
   WIDGET_STATUS_UPDATE: 'widget:status-update',
   WIDGET_FOCUS_TERMINAL: 'widget:focus-terminal',
-  WIDGET_HIDE: 'widget:hide',
-  WIDGET_TOGGLE: 'widget:toggle',
-  WIDGET_RENDERER_STATUS: 'widget:renderer-status',
-  WIDGET_SET_ENABLED: 'widget:set-enabled',
   WIDGET_PERMISSION_REQUEST: 'widget:permission-request',
-  WIDGET_PERMISSION_RESPONSE: 'widget:permission-response',
   WIDGET_PERMISSION_CANCELLED: 'widget:permission-cancelled',
   SHELL_CREATE: 'shell:create',
-  /** Renderer reports a browser guest's webContentsId once it attaches, which
-   *  is the only thread tying a `<webview>` back to the session that owns it. */
-  BROWSER_ATTACH: 'browser:attach',
-  BROWSER_DETACH: 'browser:detach',
-  /** Renderer names the design file its pane is showing, so main can watch it.
-   *  Null stops watching. The renderer decides because it is the side that read
-   *  the manifest and knows the page is a design. */
-  BROWSER_WATCH_FILE: 'browser:watchFile',
-  /** Main tells the renderer a watched design changed on disk. */
-  BROWSER_FILE_CHANGED: 'browser:fileChanged',
-  /** Renderer asks what the loaded page declares itself to be, so the pane can
-   *  draw artifact chrome instead of an address bar. Only main can ask the
-   *  guest — the renderer has no CDP. */
-  BROWSER_READ_MANIFEST: 'browser:readManifest',
-  /** Renderer writes one declared tweak value into the page. */
-  BROWSER_SET_TWEAK: 'browser:setTweak',
-  BROWSER_ARTBOARD_ATTACH: 'browser:artboardAttach',
-  BROWSER_ARTBOARD_DETACH: 'browser:artboardDetach',
-  BROWSER_ARTBOARD_TWEAKS: 'browser:artboardTweaks',
-  BROWSER_ARTBOARD_POINT: 'browser:artboardPoint',
-  /** Renderer arms the element picker; main pushes the result back on pick. */
-  BROWSER_PICK_START: 'browser:pickStart',
-  BROWSER_PICK_CANCEL: 'browser:pickCancel',
-  BROWSER_PICKED: 'browser:picked',
-  /** Freehand ink over the page, resolved to the elements it covers. */
-  BROWSER_ANNOTATE: 'browser:annotate',
   /** Main asks the renderer to open (or retarget) a session's browser pane.
    *  The pane lives in renderer state, so main cannot create one itself. */
   BROWSER_OPEN_PANE: 'browser:openPane',
-  /** Main asks the renderer to add, close, or switch a tab in that pane. */
-  BROWSER_TAB_COMMAND: 'browser:tabCommand',
-  /** Renderer reports what its tab strip holds, after any change to it. The
-   *  strip is renderer state, so this is the only way main can answer a
-   *  listing without keeping a second copy that would drift. */
-  BROWSER_TABS_CHANGED: 'browser:tabsChanged',
   /** Main asks the renderer to open a session's device pane. As with the
    *  browser, the pane is renderer state, so main can only ask. */
   DEVICE_OPEN_PANE: 'device:openPane',
@@ -2053,48 +1981,15 @@ export const IPC = {
    *  unlike the browser pane there is nothing the renderer can drive directly —
    *  every frame and every touch goes through main. */
   DEVICE_SCREENSHOT: 'device:screenshot',
-  DEVICE_SCREEN_INFO: 'device:screenInfo',
-  DEVICE_VIDEO_START: 'device:videoStart',
-  DEVICE_VIDEO_STOP: 'device:videoStop',
   DEVICE_INTERACT: 'device:interact',
   DEVICE_LIST: 'device:list',
   DEVICE_CHROME: 'device:chrome',
   DEVICE_CLAIM: 'device:claim',
   DEVICE_RELEASE: 'device:release',
-  /**
-   * Resolve a point the person picked on the device pane to the element there.
-   *
-   * Unlike the browser's picker there is nothing to arm in main: the pane is
-   * showing a still it already has, so arming and highlighting are purely
-   * renderer-local and only the point→element lookup needs the companion.
-   */
-  DEVICE_PICKED: 'device:picked',
-  /** Freehand ink over the device screen, resolved to the elements beneath. */
-  DEVICE_ANNOTATE: 'device:annotate',
-  UPDATE_INSTALL: 'update:install',
-  UPDATE_SET_CHANNEL: 'update:set-channel',
-  /** Pushed on every updater transition, so the renderer holds one value. */
-  UPDATE_STATUS: 'update:status',
-  /** Manual check, from the Updates settings panel. */
-  UPDATE_CHECK: 'update:check',
-  /** Start a transfer the user deferred by turning auto-download off. */
-  UPDATE_DOWNLOAD: 'update:download',
-  /** Mirrors the config toggle onto the live updater, no restart needed. */
-  UPDATE_SET_AUTO_DOWNLOAD: 'update:set-auto-download',
-  /** Synchronous read, so a freshly-opened panel renders without waiting. */
-  UPDATE_GET_STATUS: 'update:get-status',
-  /** Which build is serving this machine's terminals, and whether it can move. */
-  SERVER_RUNTIME_STATUS: 'server:runtime-status',
-  /** Synchronous read, so a freshly-opened panel renders without waiting. */
-  SERVER_GET_RUNTIME_STATUS: 'server:get-runtime-status',
-  /** Move the running server onto this app's build, keeping every terminal. */
-  SERVER_UPGRADE: 'server:upgrade',
   TASK_IMAGE_SAVE: 'task:imageSave',
   TASK_IMAGE_DELETE: 'task:imageDelete',
   TASK_IMAGE_GET_PATH: 'task:imageGetPath',
   TASK_IMAGE_CLEANUP: 'task:imageCleanup',
-  DIALOG_OPEN_IMAGE: 'dialog:openImage',
-  DIALOG_SAVE_TEXT_FILE: 'dialog:saveTextFile',
   HEADLESS_CREATE: 'headless:create',
   HEADLESS_KILL: 'headless:kill',
   HEADLESS_LIST: 'headless:list',
@@ -2141,13 +2036,10 @@ export const IPC = {
   CREDENTIAL_GET_ENCRYPTED_KEY: 'credential:getEncryptedKey',
   CREDENTIAL_SAFE_STORAGE_AVAILABLE: 'credential:safeStorageAvailable',
   SSH_TEST_CONNECTION: 'ssh:testConnection',
-  OPEN_EXTERNAL: 'shell:openExternal',
   FILE_LIST_DIR: 'file:listDir',
   FILE_READ_CONTENT: 'file:readContent',
   FILE_STAMP: 'file:stamp',
   FILE_WRITE_CONTENT: 'file:writeContent',
-  CLI_STATUS: 'cli:status',
-  CLI_INSTALL: 'cli:install',
   SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
   SHELL_LIST_INSTALLED: 'shell:listInstalled',
   CONNECTOR_LIST: 'connector:list',
@@ -2156,8 +2048,6 @@ export const IPC = {
   CONNECTION_CREATE: 'connection:create',
   CONNECTION_UPDATE: 'connection:update',
   CONNECTION_DELETE: 'connection:delete',
-  CONNECTION_SIGN_IN: 'connection:signIn',
-  CONNECTION_SIGN_OUT: 'connection:signOut',
   CONNECTION_GET_SOURCE_LINK: 'connection:getSourceLink',
   CONNECTOR_DETECT_REPO: 'connector:detectRepo',
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
@@ -2831,19 +2721,6 @@ export interface BrowserNetworkRequest {
   url: string
   status?: number
   timestamp: number
-}
-
-/**
- * The Chromium partition a session's browser guests live in.
- *
- * Shared because two sides must agree exactly: the renderer puts its
- * `<webview>` in this partition, and main installs the filter that bounds what
- * files those guests may read on the same one. Spelled out twice, a rename
- * would leave the filter attached to a partition no guest uses — installing
- * successfully, logging nothing, and enforcing nothing.
- */
-export function browserPartition(sessionId: string): string {
-  return `persist:vorn-browser-${sessionId}`
 }
 
 /** The browser profile a connection signs in through; it is that connection's secret. */

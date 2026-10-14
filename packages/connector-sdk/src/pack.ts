@@ -22,15 +22,7 @@ import {
 } from './packaging'
 import type { Connector } from './types'
 
-export {
-  bundleDependencyFindings,
-  bundledRequireFindings,
-  lifecycleScriptFindings,
-  readNearestPackageJson,
-  MAX_PACK_BYTES,
-  MAX_UNPACKED_BYTES
-}
-export type { BundleOutput, BundleRequest }
+export type { BundleOutput }
 
 export interface PackOptions {
   /** Module specifier the connector was loaded from, bundled as the pack entry. */

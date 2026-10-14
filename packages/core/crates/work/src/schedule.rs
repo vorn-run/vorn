@@ -14,10 +14,6 @@ use crate::cron::Cron;
 use crate::is_truthy;
 use crate::trigger::{js_date, zone_of, Trigger};
 
-/// How long a server takes to notice a minute it fires in; a planned
-/// occurrence not seen by then is a difference.
-pub const FIRE_GRACE_MS: i64 = 10_000;
-
 /// One workflow's armed trigger.
 #[derive(Clone, Debug, PartialEq)]
 enum Arm {
