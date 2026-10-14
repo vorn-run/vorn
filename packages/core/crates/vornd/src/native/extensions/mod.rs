@@ -455,13 +455,7 @@ impl Extensions {
         let Some((id, action)) = method.split_once(':') else {
             return false;
         };
-        !RESERVED.contains(&id)
-            && !action.is_empty()
-            && self
-                .hosts
-                .store()
-                .describe(id)
-                .is_some_and(|p| p.manifest.speaks_api())
+        !RESERVED.contains(&id) && !action.is_empty() && self.router.program(id).is_some()
     }
 
     /// A client's call to `<id>:<action>`, routed to the extension.

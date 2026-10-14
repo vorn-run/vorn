@@ -22,7 +22,7 @@ use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
 use crate::gate::{self, Caller, World};
 use crate::lifecycle::{Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
-use crate::pack::{InstalledPack, PackStore};
+use crate::pack::{InstalledPack, PackStore, Stamp};
 
 /// What every program is started with.
 #[derive(Debug, Clone)]
@@ -70,6 +70,9 @@ impl Running for Program {
 
 type Rows = HashMap<(String, String), Map<String, Value>>;
 
+/// Packages as last read, re-read only when their files change.
+type Packs = HashMap<String, (Stamp, Arc<InstalledPack>)>;
+
 /// Calls and events in, rows out.
 pub struct Router {
     store: PackStore,
@@ -77,6 +80,7 @@ pub struct Router {
     world: Arc<dyn World>,
     settings: RouterSettings,
     rows: Mutex<Rows>,
+    packs: Mutex<Packs>,
     me: Weak<Router>,
 }
 
@@ -116,6 +120,7 @@ impl Router {
             world,
             settings,
             rows: Mutex::default(),
+            packs: Mutex::default(),
             me: me.clone(),
         })
     }
@@ -128,10 +133,30 @@ impl Router {
         &self.lifecycle
     }
 
-    fn program_pack(&self, id: &str) -> Result<InstalledPack, ExtError> {
+    /// Package `id`, from what was last read of it while its files are
+    /// unchanged: two `stat`s a call instead of a read and a parse.
+    pub fn pack(&self, id: &str) -> Result<Arc<InstalledPack>, String> {
+        let cached = guard(&self.packs).get(id).cloned();
+        if let Some((stamp, pack)) = cached {
+            if self.store.stamp(&pack) == Some(stamp) {
+                return Ok(pack);
+            }
+        }
+        let pack = Arc::new(self.store.inspect_unmeasured(id)?);
+        if let Some(stamp) = self.store.stamp(&pack) {
+            guard(&self.packs).insert(id.to_owned(), (stamp, Arc::clone(&pack)));
+        }
+        Ok(pack)
+    }
+
+    /// Package `id`, if it is a program in the extension API.
+    pub fn program(&self, id: &str) -> Option<Arc<InstalledPack>> {
+        self.pack(id).ok().filter(|p| p.manifest.speaks_api())
+    }
+
+    fn program_pack(&self, id: &str) -> Result<Arc<InstalledPack>, ExtError> {
         let pack = self
-            .store
-            .inspect(id)
+            .pack(id)
             .map_err(|e| ExtError::new("not-installed", e))?;
         if !pack.manifest.speaks_api() {
             return Err(ExtError::new(
@@ -199,11 +224,11 @@ impl Router {
     /// Delivers `event` to every service that declares it, starting the
     /// ones that are not running; answers how many it reached.
     pub async fn emit(&self, event: &str, data: Value) -> usize {
-        let subscribers: Vec<InstalledPack> = self
+        let subscribers: Vec<Arc<InstalledPack>> = self
             .store
-            .list()
-            .into_iter()
-            .filter(|p| p.manifest.speaks_api())
+            .ids()
+            .iter()
+            .filter_map(|id| self.program(id))
             .filter(|p| {
                 p.manifest
                     .service
@@ -261,6 +286,7 @@ impl Router {
     pub async fn forget(&self, id: &str) {
         self.lifecycle.stop_extension(id).await;
         guard(&self.rows).retain(|(ext, _), _| ext != id);
+        guard(&self.packs).remove(id);
     }
 
     fn launch(&self, pack: &InstalledPack, argv: &[String]) -> Result<Launch, String> {

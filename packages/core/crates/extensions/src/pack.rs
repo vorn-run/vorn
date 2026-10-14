@@ -177,6 +177,10 @@ pub fn is_safe_version(version: &str) -> bool {
         && !version.contains("..")
 }
 
+/// When a package's pointer and manifest were last written, and their sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp((std::time::SystemTime, u64), (std::time::SystemTime, u64));
+
 /// What `current.json` says.
 #[derive(Debug, Clone)]
 struct Current {
@@ -256,6 +260,35 @@ impl PackStore {
 
     /// The installed package `id`, or why it cannot be used.
     pub fn inspect(&self, id: &str) -> Result<InstalledPack, String> {
+        self.read(id, true)
+    }
+
+    /// As [`PackStore::inspect`], without walking its files for their size:
+    /// what a call needs, which must not cost a walk of `node_modules`.
+    pub fn inspect_unmeasured(&self, id: &str) -> Result<InstalledPack, String> {
+        self.read(id, false)
+    }
+
+    /// What `id`'s package was read from: its pointer and its manifest, by
+    /// when each was last written. A package whose stamp is unchanged is unchanged.
+    pub fn stamp(&self, pack: &InstalledPack) -> Option<Stamp> {
+        let written = |p: PathBuf| {
+            let meta = fs::metadata(p).ok()?;
+            Some((meta.modified().ok()?, meta.len()))
+        };
+        let manifest = pack.path.join(file::FILE);
+        let manifest = if manifest.is_file() {
+            manifest
+        } else {
+            pack.path.join(MANIFEST_FILE)
+        };
+        Some(Stamp(
+            written(self.root.join(&pack.id).join(CURRENT_FILE))?,
+            written(manifest)?,
+        ))
+    }
+
+    fn read(&self, id: &str, measure: bool) -> Result<InstalledPack, String> {
         if !is_safe_id(id) {
             return Err(format!("\"{id}\" is not an extension id"));
         }
@@ -277,7 +310,7 @@ impl PackStore {
             ));
         }
         // A linked folder holds its dependencies and history; its size says nothing.
-        let bytes = if linked {
+        let bytes = if linked || !measure {
             0
         } else {
             directory_bytes(&path).map_err(|e| e.to_string())?

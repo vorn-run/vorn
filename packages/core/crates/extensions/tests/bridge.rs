@@ -391,7 +391,7 @@ async fn twenty_idle_node_services_all_stop() {
     let ids: Vec<String> = (0..20).map(|i| format!("svc{i:02}")).collect();
     let names: Vec<&str> = ids.iter().map(String::as_str).collect();
     let policy = Policy {
-        idle: Duration::from_millis(800),
+        idle: Duration::from_secs(3),
         cap: 32,
         ..Policy::default()
     };
