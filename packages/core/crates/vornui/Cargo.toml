@@ -23,17 +23,17 @@ pollster = "0.4"
 unicode-segmentation = "1"
 rayon = "1"
 unicode-width = "0.2"
-# The Cells backend's terminal: raw mode, diffed writes and input.
-crossterm = "0.29"
 
 # The desktop window (window.rs): the system clipboard, a pixel buffer, the
-# accessibility adapter and system fonts. A browser has none of them.
+# accessibility adapter, system fonts and a terminal. A browser has none of them.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
 accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
 arboard = { version = "3", default-features = false }
 softbuffer = { version = "0.4", default-features = false }
+# The Cells backend's terminal: raw mode, diffed writes and input.
+crossterm = "0.29"
 
 # In a browser wgpu draws through WebGPU, or WebGL2 where there is none (web.rs).
 [target.'cfg(target_arch = "wasm32")'.dependencies]

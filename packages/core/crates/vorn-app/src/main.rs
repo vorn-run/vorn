@@ -391,8 +391,8 @@ fn term(args: &Args) -> Result<(), String> {
         None => (120, 36),
     };
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
-    let grid =
-        vorn_app::grid::Grid::connect(&ep.grid, Arc::new(|| {})).map_err(|e| e.to_string())?;
+    let grid = vorn_app::grid::Grid::connect(&ep.grid, &ep.token, Arc::new(|| {}))
+        .map_err(|e| e.to_string())?;
     grid.attach(session, cols, rows, 0);
     grid.resize(session, cols, rows);
     let until = Instant::now() + Duration::from_secs(10);

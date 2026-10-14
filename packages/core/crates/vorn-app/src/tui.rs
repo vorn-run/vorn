@@ -64,8 +64,8 @@ fn route(input: Input) -> Key {
         OURS.contains(&code.as_str()) || code.strip_prefix("Digit").is_some_and(|d| d != "0");
     let shifted = matches!(code.as_str(), "KeyW" | "KeyA" | "KeyD");
     let chord = match m {
-        mods::ALT if ours => MOD,
-        _ if m == mods::ALT | mods::SHIFT && shifted => MOD | mods::SHIFT,
+        mods::ALT if ours => MOD(),
+        _ if m == mods::ALT | mods::SHIFT && shifted => MOD() | mods::SHIFT,
         _ => m,
     };
     if chord != m {
@@ -173,9 +173,9 @@ mod tests {
         assert_eq!(route(key("Backslash", mods::CTRL)), Key::Detach);
         assert_eq!(
             route(key("Digit2", mods::ALT)),
-            Key::App(key("Digit2", MOD))
+            Key::App(key("Digit2", MOD()))
         );
-        assert_eq!(route(key("KeyB", mods::ALT)), Key::App(key("KeyB", MOD)));
+        assert_eq!(route(key("KeyB", mods::ALT)), Key::App(key("KeyB", MOD())));
         assert_eq!(
             route(key("KeyB", mods::CTRL)),
             Key::App(key("KeyB", mods::CTRL))
@@ -184,10 +184,10 @@ mod tests {
             route(key("Digit0", mods::ALT)),
             Key::App(key("Digit0", mods::ALT))
         );
-        assert_eq!(route(key("KeyK", mods::ALT)), Key::App(key("KeyK", MOD)));
+        assert_eq!(route(key("KeyK", mods::ALT)), Key::App(key("KeyK", MOD())));
         assert_eq!(
             route(key("KeyW", mods::ALT | mods::SHIFT)),
-            Key::App(key("KeyW", MOD | mods::SHIFT))
+            Key::App(key("KeyW", MOD() | mods::SHIFT))
         );
         assert_eq!(
             route(key("KeyK", mods::ALT | mods::SHIFT)),

@@ -60,6 +60,7 @@ pub mod state;
 pub mod system;
 pub mod tasks;
 pub mod templates;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 pub mod ui;
 pub mod update;
