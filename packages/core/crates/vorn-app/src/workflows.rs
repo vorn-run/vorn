@@ -208,8 +208,6 @@ pub struct Workflows {
     pub launching: Option<f64>,
     pub prompt: Option<Prompt>,
     pub missed: Vec<Missed>,
-    /// The export dialog's workflow; none for import.
-    pub file: Option<String>,
     /// `connection:list`, for naming a sign-in and the library's groups.
     pub connections: Vec<Value>,
     /// The canvas's view and the gesture on it.
@@ -393,11 +391,6 @@ pub fn prompt_id(key: &str) -> crate::ui::Id {
 /// The run prompt's branch.
 pub fn prompt_branch() -> crate::ui::Id {
     crate::ui::Id::new("wf-prompt-branch")
-}
-
-/// The export or import dialog's path.
-pub fn file_id() -> crate::ui::Id {
-    crate::ui::Id::new("wf-file")
 }
 
 /// The step library's search.
@@ -1932,8 +1925,6 @@ pub enum WfAct {
     MissedToggle(usize),
     MissedRun,
     MissedSkip,
-    /// The export or import dialog's go.
-    File,
     /// The canvas controls.
     ZoomIn,
     ZoomOut,

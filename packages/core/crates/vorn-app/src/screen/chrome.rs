@@ -3,11 +3,14 @@
 //! badge and recent-sessions popovers, the restored banner and toasts.
 
 use super::{c, ico, truncate, white, MainView, Screen, MOD_LABEL};
-use crate::act::{Act, Acts};
-use crate::look;
-use crate::state::{now_ms, short_duration, time_ago, MenuKind};
+use crate::act::Act;
+use crate::components::glyph;
+use crate::headless::Headless;
+use crate::look::{self, Rgb};
+use crate::state::{now_ms, time_ago, MenuKind};
 use crate::ui::widgets::{self, Pill, ToastKind};
-use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Role, Sense};
+use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
+use crate::workflows::WfAct;
 use serde_json::Value;
 
 /// The toolbar's drag region; a double press maximizes.
@@ -247,24 +250,29 @@ fn dock(s: &Screen<'_>) -> Option<El> {
     dock(s.ui, ids, state, items)
 }
 
+/// `useFilteredHeadless`: the sessions the badge counts and lists.
+fn headless_visible<'a>(s: &Screen<'a>) -> Vec<&'a Headless> {
+    crate::headless::shown(s.store, s.st)
+}
+
 /// HeadlessBadge: hidden without headless sessions; a zap and the count,
-/// with a green dot while one runs and a red one if one failed.
+/// with a pulsing green dot while one runs, else a red one if one failed.
 fn headless_badge(s: &Screen<'_>) -> Option<El> {
-    let list = &s.st.headless;
+    let list = headless_visible(s);
     if list.is_empty() {
         return None;
     }
-    let running = list.iter().filter(|h| h.status == "running").count();
-    let errored = list.iter().filter(|h| h.status == "error").count();
+    let running = list.iter().filter(|h| h.running()).count();
+    let errored = list.iter().filter(|h| h.errored()).count();
     let id = s.acts.on("toolbar", Act::Open(MenuKind::Headless));
     let hot = s.ui.hover(id);
     let mut tip = format!("{} headless", list.len());
     if running > 0 {
         tip.push_str(&format!(" \u{b7} {running} running"));
-    }
-    if errored > 0 {
+    } else if errored > 0 {
         tip.push_str(&format!(" \u{b7} {errored} errored"));
     }
+    let fg = c(look::GRAY_300).mix(c(look::WHITE), hot);
     let mut b = div()
         .id(id)
         .on(Action::Click)
@@ -274,133 +282,274 @@ fn headless_badge(s: &Screen<'_>) -> Option<El> {
         .h(26.0)
         .px(8.0)
         .rounded(6.0)
-        .border(1.0, white(0.06))
-        .bg(c(look::SURFACE_OVERLAY).mix(c(look::SURFACE_RAISED), hot))
+        .border(1.0, white(0.06).mix(white(0.12), hot))
+        .bg(c(look::SURFACE_OVERLAY))
         .role(Role::Button, tip.as_str())
-        .child(ico("zap", 12.0, 2.0, c(look::GRAY_300)))
+        .child(ico("zap", 12.0, 1.5, fg))
         .child(
-            text(list.len().to_string(), 11.0, c(look::GRAY_300))
+            text(list.len().to_string(), 11.0, fg)
                 .mono()
                 .line_height(11.0)
                 .silent(),
         );
-    if running > 0 || errored > 0 {
-        let dot = if errored > 0 {
-            look::RED_400
-        } else {
-            look::GREEN_400
-        };
-        b = b.child(div().size(6.0, 6.0).rounded(3.0).bg(c(dot)));
+    let dot = |color: Rgba| {
+        div()
+            .absolute_right(-2.0, -2.0)
+            .size(6.0, 6.0)
+            .rounded(3.0)
+            .bg(color)
+    };
+    if running > 0 {
+        b = b.child(dot(c(look::GREEN_500).alpha(glyph::pulse(s.ui))));
+    } else if errored > 0 {
+        b = b.child(dot(c(look::RED_500)));
     }
-    Some(tooltip(s.ui, b, id, &tip, None))
+    Some(tooltip_at(s.ui, b, id, &tip, None, Place::Below))
 }
 
-/// The headless popover: a pill per session with kill and hide on hover.
+/// The headless popover: a HeadlessPill per session.
 pub(super) fn headless_panel(s: &Screen<'_>) -> El {
     let now = now_ms();
     let mut col = div()
+        .id(Id::new("headless-list"))
         .col()
+        .scroll_y()
         .min_w(280.0)
+        .max_h(s.size.1 * 0.6)
         .p(6.0)
         .gap(6.0)
         .bg(c(look::SURFACE_OVERLAY))
         .border(1.0, white(0.08))
-        .rounded(8.0)
-        .role(Role::Menu, "Headless sessions");
-    for h in &s.st.headless {
-        let row_id = Acts::id("headless", &Act::ToggleHeadless(h.id.clone()));
-        let hot = s.ui.hovered(row_id) || s.ui.hover(row_id) > 0.0;
-        let dot = match h.status.as_str() {
-            "running" => look::GREEN_400,
-            "error" => look::RED_400,
-            _ => look::GRAY_500,
-        };
-        let mut pill = div()
-            .id(row_id)
-            .sense(Sense::HOVER)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .px(8.0)
-            .h(26.0)
-            .rounded(6.0)
-            .border(1.0, white(0.06))
-            .bg(white(0.02))
-            .role(Role::Group, h.name.as_str())
-            .child(div().size(6.0, 6.0).rounded(3.0).bg(c(dot)))
-            .child(super::agent_icon(s, &h.agent, 14.0))
-            .child(
-                text(truncate(&h.name, 28), 11.0, c(look::GRAY_200))
-                    .line_height(14.0)
-                    .silent(),
-            );
-        if let Some(b) = &h.branch {
-            pill = pill.child(
-                text(truncate(b, 18), 10.0, c(look::GRAY_500))
-                    .mono()
-                    .line_height(14.0)
-                    .silent(),
-            );
-        }
-        pill = pill.child(div().grow());
-        if h.started > 0.0 {
-            pill = pill.child(
-                text(short_duration(now - h.started), 10.0, c(look::GRAY_500))
-                    .mono()
-                    .line_height(14.0)
-                    .silent(),
+        .rounded(6.0)
+        .role(Role::Dialog, "Headless sessions");
+    for h in headless_visible(s) {
+        col = col.child(headless_pill(s, h, now));
+    }
+    col
+}
+
+/// HeadlessPill: status, agent, name, branch, the last line of output and
+/// how long it ran; kill and hide on hover; a click unfolds its log.
+fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
+    let id = s.acts.on("headless", Act::ToggleHeadless(h.id.clone()));
+    let hot = s.ui.hovered(id) || s.ui.hover(id) > 0.0;
+    let expanded = s.st.headless.expanded(&h.id);
+    let running = h.running();
+    let errored = h.errored();
+    let mono = |t: String, size: f32, color: Rgb| {
+        text(t, size, c(color)).mono().line_height(14.0).silent()
+    };
+    let dot_color = if running {
+        look::GREEN_500
+    } else if errored {
+        look::RED_500
+    } else {
+        look::GRAY_500
+    };
+    let mut dot = div()
+        .size(6.0, 6.0)
+        .shrink0()
+        .child(div().size(6.0, 6.0).rounded(3.0).bg(c(dot_color)));
+    if running {
+        if let Some((scale, left)) = glyph::ping(s.ui, 2.0) {
+            dot = dot.child(
+                div()
+                    .absolute(-1.0, -1.0)
+                    .size(8.0, 8.0)
+                    .rounded(4.0)
+                    .bg(c(look::GREEN_500).alpha(0.4 * left))
+                    .transform(scale, (0.0, 0.0)),
             );
         }
-        if let Some(code) = h.exit {
-            pill = pill.child(
-                text(
-                    format!("exit {code}"),
-                    10.0,
-                    c(if code == 0 {
-                        look::GRAY_500
-                    } else {
-                        look::RED_400
-                    }),
-                )
-                .mono()
+    }
+    let mut row = div()
+        .row()
+        .items_center()
+        .gap(6.0)
+        .child(dot)
+        .child(super::agent_icon(s, &h.agent, 14.0))
+        .child(
+            text(h.name.as_str(), 11.0, c(look::GRAY_200))
+                .weight(500)
+                .line_height(14.0)
+                .max_w(100.0)
+                .truncate()
+                .silent(),
+        )
+        .child(
+            text("\u{b7}", 10.0, c(look::GRAY_600))
                 .line_height(14.0)
                 .silent(),
-            );
-        }
-        let small = |place: &str, act: Act, name: &str, label: &str| {
-            let id = s.acts.on(place, act);
+        );
+    if let Some(b) = &h.branch {
+        row = row.child(
             div()
+                .row()
+                .items_center()
+                .gap(2.0)
+                .max_w(90.0)
+                .child(ico("git-branch", 9.0, 1.5, c(look::GRAY_500)))
+                .child(mono(b.clone(), 10.0, look::GRAY_500).truncate()),
+        );
+    }
+    if !expanded && !hot {
+        if let Some(last) = s.st.headless.last(&h.id) {
+            row = row
+                .child(
+                    text("\u{b7}", 10.0, c(look::GRAY_600))
+                        .line_height(14.0)
+                        .silent(),
+                )
+                .child(
+                    mono(last.to_owned(), 10.0, look::GRAY_600)
+                        .max_w(140.0)
+                        .truncate(),
+                );
+        }
+    }
+    row = row.child(div().grow());
+    if hot {
+        let small = |act: Act, name: &str, label: &str, color: Rgb, over: Rgb, wash: Rgba| {
+            let id = s.acts.on("headless", act);
+            let t = s.ui.hover(id);
+            let b = div()
                 .id(id)
                 .on(Action::Click)
                 .p(2.0)
                 .rounded(4.0)
+                .bg(white(0.0).mix(wash, t))
                 .role(Role::Button, label)
-                .child(ico(
-                    name,
-                    11.0,
-                    2.0,
-                    c(look::GRAY_400).mix(c(look::WHITE), s.ui.hover(id)),
-                ))
+                .child(ico(name, 10.0, 2.0, c(color).mix(c(over), t)));
+            tooltip_at(s.ui, b, id, label, None, Place::Below)
         };
-        if hot {
-            if h.status == "running" {
-                pill = pill.child(small(
-                    "headless",
-                    Act::KillHeadless(h.id.clone()),
-                    "square",
-                    "Kill",
-                ));
-            }
-            pill = pill.child(small(
-                "headless",
-                Act::HideHeadless(h.id.clone()),
-                "x",
-                "Hide",
+        let mut acts = div().row().items_center().gap(4.0);
+        if running {
+            acts = acts.child(small(
+                Act::KillHeadless(h.id.clone()),
+                "square",
+                "Kill process",
+                look::RED_400,
+                look::RED_300,
+                c(look::RED_500).alpha(0.1),
             ));
         }
-        col = col.child(pill);
+        row = row.child(acts.child(small(
+            Act::HideHeadless(h.id.clone()),
+            "x",
+            "Hide",
+            look::GRAY_500,
+            look::GRAY_300,
+            white(0.06),
+        )));
+    } else {
+        row = row.child(mono(h.duration(now), 10.0, look::GRAY_500));
+        if let Some(code) = h.exit {
+            let (fg, bg, mark) = if code == 0 {
+                (look::GREEN_400, look::GREEN_500, '\u{2713}')
+            } else {
+                (look::RED_400, look::RED_500, '\u{2717}')
+            };
+            row = row.child(
+                div()
+                    .px(4.0)
+                    .py(1.0)
+                    .rounded(4.0)
+                    .bg(c(bg).alpha(0.1))
+                    .child(mono(format!("{mark} {code}"), 9.0, fg).line_height(12.0)),
+            );
+        }
     }
-    col
+    let border = if running {
+        white(0.1).mix(white(0.28), glyph::border_pulse(s.ui))
+    } else if errored {
+        c(look::RED_500).alpha(0.25)
+    } else {
+        white(0.06)
+    };
+    let border = if hot { white(0.12) } else { border };
+    let mut pill = div()
+        .id(id)
+        .on(Action::Click)
+        .sense(Sense::HOVER)
+        .col()
+        .px(10.0)
+        .py(4.0)
+        .rounded(6.0)
+        .border(1.0, border)
+        .bg(c(look::SURFACE_OVERLAY))
+        .opacity(if running { 1.0 } else { 0.65 })
+        .role(Role::Button, h.name.as_str())
+        .expanded(expanded)
+        .child(row);
+    if expanded {
+        pill = pill.w(320.0);
+    }
+    if let (Some(wid), Some(name)) = (&h.workflow_id, &h.workflow_name) {
+        if let Some(w) = s.store.workflows.iter().find(|w| &w.id == wid) {
+            let tag = s
+                .acts
+                .on("headless", Act::Workflow(WfAct::Edit(wid.clone())));
+            let t = s.ui.hover(tag);
+            let tint = super::sidebar::stored_color(Some(w.icon_color.as_str()))
+                .unwrap_or(c(look::GRAY_500));
+            pill = pill.child(
+                div()
+                    .id(tag)
+                    .on(Action::Click)
+                    .row()
+                    .items_center()
+                    .gap(4.0)
+                    .mt(-2.0)
+                    .ml(20.0)
+                    .role(Role::Button, name.as_str())
+                    .child(ico(
+                        look::icon_map(&w.icon).unwrap_or("workflow"),
+                        9.0,
+                        1.5,
+                        tint,
+                    ))
+                    .child(
+                        text(
+                            name.as_str(),
+                            10.0,
+                            c(look::GRAY_500).mix(c(look::GRAY_300), t),
+                        )
+                        .line_height(14.0)
+                        .max_w(120.0)
+                        .truncate()
+                        .silent(),
+                    ),
+            );
+        }
+    }
+    if expanded {
+        let log = s.st.headless.log(&h.id);
+        let body = if !log.is_empty() {
+            log.to_owned()
+        } else {
+            s.st.headless
+                .last(&h.id)
+                .unwrap_or("Waiting for output...")
+                .to_owned()
+        };
+        pill = pill.child(
+            div()
+                .id(crate::headless::log_id(&h.id))
+                .scroll_y()
+                .mt(6.0)
+                .max_h(180.0)
+                .p(8.0)
+                .rounded(4.0)
+                .bg(c(look::SURFACE_SUNKEN))
+                .border(1.0, white(0.06))
+                .child(
+                    mono(body, 10.0, look::GRAY_400)
+                        .line_height(16.25)
+                        .wrapping(),
+                ),
+        );
+    }
+    pill
 }
 
 /// RecentSessionsPopover: the sessions this machine ran here, newest

@@ -86,6 +86,16 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     assert_eq!(tabs(&app, &sid), ["http://localhost:3000/"]);
     shot.save(&mut app, "browser");
 
+    // Escape puts the address back to the page actually loaded.
+    shot.click(&mut app, address);
+    shot.type_text(&mut app, "/elsewhere");
+    assert!(shot.ui.edit_text(address).contains("/elsewhere"));
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert_eq!(shot.ui.edit_text(address), "http://localhost:3000/");
+    assert!(shot.ui.focused(address));
+    assert_eq!(tabs(&app, &sid), ["http://localhost:3000/"]);
+
     // A second tab, then the agent's view of them.
     shot.click(&mut app, pane(PaneAct::AddTab(sid.clone())));
     assert_eq!(tabs(&app, &sid).len(), 2);

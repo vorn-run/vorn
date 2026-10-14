@@ -5,11 +5,12 @@
 use serde_json::{json, Map, Value};
 use vorn_mcp::workflow::portability as port;
 
-use super::{list, App, Call, Src, MOD};
+use super::{list, App, Call, Picked, Src, MOD};
 use crate::client::RpcError;
 use crate::runs::{self, s};
 use crate::screen::MainView;
 use crate::state::{now_ms, Dialog};
+use crate::system::Pick;
 use crate::templates;
 use crate::ui::{mods, Event as UiEvent, Input, Ui};
 use crate::workflows::{self as wf, Draft, Missed, Panel, Prompt, WfAct};
@@ -782,29 +783,13 @@ impl App {
             WfAct::Export(id) => {
                 let Some(w) = self.workflow(&id) else { return };
                 let name = format!("{}{SUFFIX}", port::slugify(s(&w, "name").unwrap_or("")));
-                let path = downloads().join(name);
-                ui.set_edit_text(wf::file_id(), &path.to_string_lossy());
-                ui.set_focus(Some(wf::file_id()));
-                self.st.wf.file = Some(id);
-                self.st.dialog = Some(Dialog::WfFile);
+                let at = downloads().join(name);
+                let title = "Export workflow".to_owned();
+                self.start_pick(Picked::Export(id), Pick::Save { title, at });
             }
             WfAct::Import => {
-                ui.set_edit_text(wf::file_id(), "");
-                ui.set_focus(Some(wf::file_id()));
-                self.st.wf.file = None;
-                self.st.dialog = Some(Dialog::WfFile);
-            }
-            WfAct::File => {
-                let path = ui.edit_text(wf::file_id()).trim().to_owned();
-                if path.is_empty() {
-                    return;
-                }
-                self.st.dialog = None;
-                ui.set_focus(None);
-                match self.st.wf.file.take() {
-                    Some(id) => self.export(&id, &path),
-                    None => self.import(&path),
-                }
+                let title = "Import workflow file".to_owned();
+                self.start_pick(Picked::Import, Pick::Workflow(title));
             }
             WfAct::Delete(id) => {
                 self.change_workflows(None, |list| {
@@ -1088,7 +1073,7 @@ impl App {
     }
 
     /// `handleExport`.
-    fn export(&mut self, id: &str, path: &str) {
+    pub(super) fn export(&mut self, id: &str, path: &str) {
         let Some(w) = self.workflow(id) else { return };
         let named = w
             .get("nodes")
@@ -1139,7 +1124,7 @@ impl App {
     }
 
     /// `handleImport`.
-    fn import(&mut self, path: &str) {
+    pub(super) fn import(&mut self, path: &str) {
         let active = self.st.project.clone();
         let Some(project) = active
             .as_deref()
@@ -1250,10 +1235,6 @@ impl App {
                 false
             }
             UiEvent::Submit(id) => {
-                if id == wf::file_id() {
-                    self.run_wf(ui, WfAct::File, Src::default());
-                    return true;
-                }
                 if id == wf::prompt_branch()
                     || self.st.wf.prompt.as_ref().is_some_and(|p| {
                         p.inputs

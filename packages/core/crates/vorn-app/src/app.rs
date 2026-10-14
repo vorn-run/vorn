@@ -17,12 +17,12 @@ use crate::look;
 use crate::models::Catalog;
 use crate::paint;
 use crate::screen::{
-    card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_NAME,
-    PROJECT_PATH, VIEWS, VIEW_ORDER,
+    card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_COLOR,
+    PROJECT_ICON, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use crate::scroll::{self, Route, Rows, Scroll};
 use crate::state::{
-    basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
+    basename, now_ms, Dialog, Filter, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
     decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
@@ -188,6 +188,19 @@ pub fn carried_cause(entry: &Value) -> &'static str {
     }
 }
 
+/// What an open file picker was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Picked {
+    /// A connector pack to install.
+    Pack,
+    /// The add-project dialog's folder.
+    Folder,
+    /// Where a workflow is exported to.
+    Export(String),
+    /// A workflow file to import.
+    Import,
+}
+
 /// A call whose answer changes the screen.
 enum Call {
     /// The composer's `terminal:create`.
@@ -339,8 +352,18 @@ pub struct App {
     widget_was_enabled: bool,
     /// A permission request arrived; the frame decides whether the widget shows.
     widget_wanted: bool,
-    /// The OS file picker, while it is open.
-    picking: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    /// The OS file picker, what it is for, while it is open.
+    picking: Option<(
+        Picked,
+        std::sync::mpsc::Receiver<Option<std::path::PathBuf>>,
+    )>,
+    /// Answers the file pickers; the OS dialogs outside tests.
+    picker: crate::system::Picker,
+    /// When `headless:list` was last asked, and exited sessions last pruned.
+    headless_polled: std::time::Instant,
+    headless_pruned: std::time::Instant,
+    /// The sidebar's left edge while its handle is dragged.
+    sidebar_left: Option<f32>,
     /// The window's updater; none offscreen.
     updater: Option<Arc<crate::update::Updater>>,
     /// The launch step's notice about the `vorn` command, on its way.
@@ -413,6 +436,10 @@ impl App {
             widget_wanted: false,
             hotkeys: None,
             picking: None,
+            picker: crate::system::os_picker(),
+            headless_polled: std::time::Instant::now(),
+            headless_pruned: std::time::Instant::now(),
+            sidebar_left: None,
             updater: None,
             cli_launch: None,
             cli_prompt: None,
@@ -453,6 +480,90 @@ impl App {
 
     /// Shows notices through `sink` instead of the OS: tests and offscreen
     /// frames must never post a real notification.
+    /// Answers file pickers with `picker` in place of the OS dialogs.
+    pub fn set_picker(&mut self, picker: crate::system::Picker) {
+        self.picker = picker;
+    }
+
+    /// Opens the OS picker for `what`, unless one is already up.
+    fn start_pick(&mut self, purpose: Picked, what: crate::system::Pick) {
+        if self.picking.is_none() {
+            let wake = Arc::clone(&self.wake);
+            self.picking = Some((purpose, crate::system::pick(&self.picker, what, wake)));
+        }
+    }
+
+    /// `headless:exit` and `headless:data` between polls.
+    fn headless_notified(&mut self, method: &str, params: &Value) {
+        let Some(id) = params.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        if method == "headless:exit" {
+            let code = params.get("exitCode").and_then(Value::as_i64);
+            self.st.headless.exited(id, code, now_ms());
+        } else if let Some(data) = params.get("data").and_then(Value::as_str) {
+            self.st.headless.data(id, data);
+        }
+    }
+
+    /// Polls `headless:list` every 5 s, drops exited sessions past
+    /// `headlessRetentionMinutes` every 30 s, and folds the pills once
+    /// their popover closes.
+    fn headless_tick(&mut self, ui: &mut Ui, now: std::time::Instant) {
+        if now >= self.headless_polled + crate::headless::POLL {
+            self.headless_polled = now;
+            self.call(Call::Headless, "headless:list", Value::Null);
+        }
+        if now >= self.headless_pruned + crate::headless::PRUNE {
+            self.headless_pruned = now;
+            let minutes = self
+                .store
+                .config
+                .pointer("/defaults/headlessRetentionMinutes")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            self.st.headless.prune(minutes * 60_000.0, now_ms());
+        }
+        ui.wake_at(self.headless_polled + crate::headless::POLL);
+        if !self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Headless)
+        {
+            self.st.headless.collapse_all();
+        } else if crate::headless::shown(&self.store, &self.st).is_empty() {
+            // The badge, and the popover under it, go with the last pill.
+            self.st.menu = None;
+            self.st.headless.collapse_all();
+        }
+        for id in self.st.headless.take_grew() {
+            ui.scroll_to_end(crate::headless::log_id(&id));
+        }
+    }
+
+    /// Once a frame: what the open picker chose, sent where it was asked for.
+    fn pick_tick(&mut self, ui: &mut Ui) {
+        let Some((_, rx)) = &self.picking else { return };
+        let Ok(picked) = rx.try_recv() else { return };
+        let Some((purpose, _)) = self.picking.take() else {
+            return;
+        };
+        let Some(path) = picked else { return };
+        let path = path.to_string_lossy().into_owned();
+        match purpose {
+            Picked::Pack => self.plug_picked(&path),
+            Picked::Folder => {
+                if matches!(self.st.dialog, Some(Dialog::Project(_))) {
+                    ui.set_edit_text(PROJECT_PATH, &path);
+                    self.project_path_changed(ui);
+                }
+            }
+            Picked::Export(id) => self.export(&id, &path),
+            Picked::Import => self.import(&path),
+        }
+    }
+
     pub fn set_notice_sink(&mut self, sink: Arc<dyn crate::notify::Sink>) {
         self.notice_sink = sink;
     }
@@ -578,6 +689,10 @@ impl App {
                     self.pane_notified(&method, &params);
                     if method == "terminal:command" {
                         self.shell_notified(&method, &params);
+                        continue;
+                    }
+                    if method == "headless:exit" || method == "headless:data" {
+                        self.headless_notified(&method, &params);
                         continue;
                     }
                     if method == "server:identity" {
@@ -769,10 +884,13 @@ impl App {
                 self.st.recent = list(answer).iter().filter_map(Recent::from_value).collect();
             }
             Call::Headless => {
-                self.st.headless = list(answer)
-                    .iter()
-                    .filter_map(Headless::from_value)
-                    .collect();
+                if answer.is_ok() {
+                    let list = list(answer);
+                    let sessions = list
+                        .iter()
+                        .filter_map(crate::headless::Headless::from_value);
+                    self.st.headless.sync(sessions.collect());
+                }
             }
             Call::Restored => self.restored(list(answer)),
             Call::Installed => {
@@ -1750,7 +1868,6 @@ impl App {
                 self.st.dialog = None;
                 self.st.composer_open = false;
                 self.st.wf.prompt = None;
-                self.st.wf.file = None;
             }
             Act::Settings => {
                 self.st.dialog = None;
@@ -1830,7 +1947,7 @@ impl App {
             Act::AddProject => {
                 ui.set_edit_text(PROJECT_PATH, "");
                 ui.set_edit_text(PROJECT_NAME, "");
-                ui.set_focus(Some(PROJECT_PATH));
+                ui.set_focus(Some(PROJECT_NAME));
                 self.st.form = Default::default();
                 self.st.dialog = Some(Dialog::Project(None));
             }
@@ -1860,9 +1977,19 @@ impl App {
                 ui.set_edit_text(PROJECT_PATH, &p.path);
                 ui.set_edit_text(PROJECT_NAME, &p.name);
                 ui.set_focus(Some(PROJECT_NAME));
+                let host = p
+                    .host_ids
+                    .as_ref()
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .find(|h| *h != "local")
+                    .map(str::to_owned);
                 self.st.form = crate::state::ProjectForm {
-                    icon: p.icon.clone(),
-                    icon_color: p.icon_color.clone(),
+                    icon: p.icon.clone().filter(|i| !i.is_empty()),
+                    icon_color: p.icon_color.clone().filter(|c| !c.is_empty()),
+                    host,
                     auto_name: String::new(),
                 };
                 self.st.dialog = Some(Dialog::Project(Some(name)));
@@ -1953,7 +2080,13 @@ impl App {
                 self.save_config(config, Call::Toast(format!("Project \"{name}\" deleted")));
             }
             Act::SaveProject => self.save_project(ui),
-            Act::BrowseFolder => ui.set_focus(Some(PROJECT_PATH)),
+            Act::BrowseFolder => self.start_pick(
+                Picked::Folder,
+                crate::system::Pick::Folder("Select Project Folder".to_owned()),
+            ),
+            Act::ProjectIcon(icon) => self.st.form.icon = Some(icon),
+            Act::ProjectColor(color) => self.st.form.icon_color = Some(color),
+            Act::ProjectHost(host) => self.st.form.host = host,
             Act::Restore => {
                 for (s, cause) in std::mem::take(&mut self.carried) {
                     self.show_carried(s, cause);
@@ -1990,10 +2123,9 @@ impl App {
             }
             Act::KillHeadless(id) => {
                 self.call(Call::Quiet, "headless:kill", json!(id));
-                self.st.headless.retain(|h| h.id != id);
             }
-            Act::HideHeadless(id) => self.st.headless.retain(|h| h.id != id),
-            Act::ToggleHeadless(_) => {}
+            Act::HideHeadless(id) => self.st.headless.dismiss(&id),
+            Act::ToggleHeadless(id) => self.st.headless.toggle(&id),
             Act::PickProject(name) => self.pick_project(name),
             Act::PickAgent(agent) => {
                 self.st.launch.agent = Some(agent);
@@ -2019,6 +2151,16 @@ impl App {
             Act::PickBranch(b) => self.st.launch.branch = b,
             Act::Launch => self.launch(),
             Act::Nothing => {}
+        }
+    }
+
+    /// The folder's name, until another name is typed.
+    fn project_path_changed(&mut self, ui: &mut Ui) {
+        let name = ui.edit_text(PROJECT_NAME).to_owned();
+        if name.is_empty() || name == self.st.form.auto_name {
+            let auto = basename(ui.edit_text(PROJECT_PATH)).to_owned();
+            ui.set_edit_text(PROJECT_NAME, &auto);
+            self.st.form.auto_name = auto;
         }
     }
 
@@ -2054,13 +2196,14 @@ impl App {
             || json!({ "preferredAgents": ["claude"] }),
             |i| list[i].clone(),
         );
+        let form = &self.st.form;
         project["name"] = json!(name);
         project["path"] = json!(path);
-        if let Some(icon) = &self.st.form.icon {
-            project["icon"] = json!(icon);
-        }
-        if let Some(color) = &self.st.form.icon_color {
-            project["iconColor"] = json!(color);
+        project["icon"] = json!(form.icon.as_deref().unwrap_or(PROJECT_ICON));
+        project["iconColor"] = json!(form.icon_color.as_deref().unwrap_or(PROJECT_COLOR));
+        project["hostIds"] = json!([form.host.as_deref().unwrap_or("local")]);
+        if project.get("workspaceId").is_none_or(Value::is_null) {
+            project["workspaceId"] = json!(self.store.workspace());
         }
         let verb = match old {
             Some(i) => {
@@ -2113,7 +2256,12 @@ impl App {
                             | Act::Layout(_)
                     ) || self.st.menu.as_ref().is_some_and(|m| {
                         matches!(m.kind, MenuKind::Recent | MenuKind::Headless)
-                            && matches!(act, Act::ToggleHeadless(_))
+                            && matches!(
+                                act,
+                                Act::ToggleHeadless(_)
+                                    | Act::KillHeadless(_)
+                                    | Act::HideHeadless(_)
+                            )
                             || m.kind == MenuKind::WfIcon
                                 && matches!(
                                     act,
@@ -2227,15 +2375,7 @@ impl App {
                 self.pane_resized(ui, id, ratio, true);
             }
             UiEvent::Changed(id) if id == MODEL_ID => self.st.models.invalid = None,
-            UiEvent::Changed(id) if id == PROJECT_PATH => {
-                // The folder's name, until another name is typed.
-                let name = ui.edit_text(PROJECT_NAME).to_owned();
-                if name.is_empty() || name == self.st.form.auto_name {
-                    let auto = basename(ui.edit_text(PROJECT_PATH)).to_owned();
-                    ui.set_edit_text(PROJECT_NAME, &auto);
-                    self.st.form.auto_name = auto;
-                }
-            }
+            UiEvent::Changed(id) if id == PROJECT_PATH => self.project_path_changed(ui),
             _ => {}
         }
     }
@@ -2414,6 +2554,9 @@ impl App {
             self.compose(input.clone());
             return true;
         }
+        if code == "Escape" && *m == 0 && self.address_revert(ui) {
+            return true;
+        }
         // Escape in the switcher's form cancels the form, not the switcher.
         if code == "Escape" && self.st.ws_form.is_some() {
             self.run(ui, Act::CancelWorkspace, Src::default());
@@ -2428,7 +2571,6 @@ impl App {
         } else if self.st.dialog.is_some() {
             self.st.dialog = None;
             self.st.wf.prompt = None;
-            self.st.wf.file = None;
             ui.set_focus(None);
         } else if self.st.renaming.is_some() {
             self.st.renaming = None;
@@ -2678,6 +2820,8 @@ impl App {
         self.tasks_tick(ui);
         self.net_tick(ui);
         self.plug_tick();
+        self.pick_tick(ui);
+        self.headless_tick(ui, now);
         if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
             self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
         }

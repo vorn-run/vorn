@@ -314,50 +314,97 @@ mod win {
     }
 }
 
-/// Asks the OS for one file on a thread, waking the app with the answer;
-/// `None` when the picker was cancelled or this system has none.
-pub fn pick_file(
-    prompt: &str,
+/// What the OS is asked to choose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pick {
+    /// An existing connector pack.
+    Pack(String),
+    /// An existing folder.
+    Folder(String),
+    /// An existing workflow file.
+    Workflow(String),
+    /// Where to write a file, offering `at`.
+    Save { title: String, at: PathBuf },
+}
+
+/// Answers a [`Pick`]; the OS dialogs unless a test swaps them.
+pub type Picker = std::sync::Arc<dyn Fn(Pick) -> Option<PathBuf> + Send + Sync>;
+
+/// The system's own dialogs.
+pub fn os_picker() -> Picker {
+    std::sync::Arc::new(run_picker)
+}
+
+/// Runs `picker` on a thread, waking the app with the answer; `None` when
+/// the picker was cancelled or this system has none.
+pub fn pick(
+    picker: &Picker,
+    what: Pick,
     wake: crate::client::rpc::Wake,
 ) -> std::sync::mpsc::Receiver<Option<PathBuf>> {
     let (tx, rx) = std::sync::mpsc::channel();
-    let prompt = prompt.to_owned();
+    let picker = picker.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(run_picker(&prompt));
+        let _ = tx.send(picker(what));
         wake();
     });
     rx
 }
 
-fn run_picker(prompt: &str) -> Option<PathBuf> {
+fn run_picker(what: Pick) -> Option<PathBuf> {
     let attempts: Vec<std::process::Command> = if cfg!(target_os = "macos") {
+        let script = match &what {
+            Pick::Folder(_) => "POSIX path of (choose folder with prompt (item 1 of argv))",
+            Pick::Save { .. } => {
+                "POSIX path of (choose file name with prompt (item 1 of argv) default name (item 2 of argv) default location (POSIX file (item 3 of argv)))"
+            }
+            Pick::Pack(_) | Pick::Workflow(_) => {
+                "POSIX path of (choose file with prompt (item 1 of argv))"
+            }
+        };
         let mut c = vorn_spawn::command("osascript");
-        c.args([
-            "-e",
-            "on run argv",
-            "-e",
-            "POSIX path of (choose file with prompt (item 1 of argv))",
-            "-e",
-            "end run",
-            prompt,
-        ]);
+        c.args(["-e", "on run argv", "-e", script, "-e", "end run"]);
+        c.args(pick_args(&what));
         vec![c]
     } else if cfg!(windows) {
+        let (script, filter) = match &what {
+            Pick::Folder(_) => (WINDOWS_FOLDER, ""),
+            Pick::Save { .. } => (WINDOWS_SAVE, WORKFLOW_FILTER),
+            Pick::Workflow(_) => (WINDOWS_OPEN, WORKFLOW_FILTER),
+            Pick::Pack(_) => (
+                WINDOWS_OPEN,
+                "Vorn packs (*.vorn.tgz)|*.vorn.tgz|All files (*.*)|*.*",
+            ),
+        };
+        let args = pick_args(&what);
         let mut c = vorn_spawn::command("powershell");
-        c.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-STA",
-            "-Command",
-            WINDOWS_PICKER,
-        ])
-        .env("VORN_PICK_TITLE", prompt);
+        c.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", script])
+            .env("VORN_PICK_TITLE", &args[0])
+            .env("VORN_PICK_NAME", args.get(1).map_or("", String::as_str))
+            .env("VORN_PICK_DIR", args.get(2).map_or("", String::as_str))
+            .env("VORN_PICK_FILTER", filter);
         vec![c]
     } else {
+        let args = pick_args(&what);
+        let title = args[0].as_str();
         let mut z = vorn_spawn::command("zenity");
-        z.args(["--file-selection", "--title", prompt]);
+        z.args(["--file-selection", "--title", title]);
         let mut k = vorn_spawn::command("kdialog");
-        k.args(["--getopenfilename", ".", "--title", prompt]);
+        match &what {
+            Pick::Folder(_) => {
+                z.arg("--directory");
+                k.args(["--getexistingdirectory", "."]);
+            }
+            Pick::Save { at, .. } => {
+                z.args(["--save", "--confirm-overwrite", "--filename"])
+                    .arg(at);
+                k.arg("--getsavefilename").arg(at);
+            }
+            Pick::Pack(_) | Pick::Workflow(_) => {
+                k.args(["--getopenfilename", "."]);
+            }
+        }
+        k.args(["--title", title]);
         vec![z, k]
     };
     for mut c in attempts {
@@ -370,12 +417,45 @@ fn run_picker(prompt: &str) -> Option<PathBuf> {
     None
 }
 
-/// The system's open dialog, its title from the environment so it is never read as script.
-const WINDOWS_PICKER: &str = r"
+/// The dialog's title, then, when saving, the name and folder offered.
+fn pick_args(what: &Pick) -> Vec<String> {
+    match what {
+        Pick::Pack(t) | Pick::Folder(t) | Pick::Workflow(t) => vec![t.clone()],
+        Pick::Save { title, at } => {
+            let name = at.file_name().unwrap_or_default().to_string_lossy();
+            let dir = at.parent().unwrap_or(at).to_string_lossy();
+            vec![title.clone(), name.into_owned(), dir.into_owned()]
+        }
+    }
+}
+
+const WORKFLOW_FILTER: &str = "Vorn workflow (*.json)|*.json|All files (*.*)|*.*";
+
+/// The system's open dialog; its title and filter come from the environment so they are never read as script.
+const WINDOWS_OPEN: &str = r"
 Add-Type -AssemblyName System.Windows.Forms
 $d = New-Object System.Windows.Forms.OpenFileDialog
 $d.Title = $env:VORN_PICK_TITLE
-$d.Filter = 'Vorn packs (*.vorn.tgz)|*.vorn.tgz|All files (*.*)|*.*'
+$d.Filter = $env:VORN_PICK_FILTER
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }
+";
+
+/// The system's folder dialog.
+const WINDOWS_FOLDER: &str = r"
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = $env:VORN_PICK_TITLE
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }
+";
+
+/// The system's save dialog.
+const WINDOWS_SAVE: &str = r"
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.SaveFileDialog
+$d.Title = $env:VORN_PICK_TITLE
+$d.FileName = $env:VORN_PICK_NAME
+$d.Filter = $env:VORN_PICK_FILTER
+$d.InitialDirectory = $env:VORN_PICK_DIR
 if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileName }
 ";
 

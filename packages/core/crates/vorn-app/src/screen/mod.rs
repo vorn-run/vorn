@@ -19,7 +19,7 @@ pub(crate) mod plugins;
 pub mod runs;
 pub mod settings;
 pub mod side;
-mod sidebar;
+pub mod sidebar;
 mod signin;
 pub mod tasks;
 pub mod workflows;
@@ -36,7 +36,7 @@ use crate::view::PaneView;
 pub use cards::{
     block_of, card_index, intent_id, log_id, rename_id, term_id, CARD_ID_BASE, SETTLE,
 };
-pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
+pub use dialogs::{PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH};
 pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
@@ -218,10 +218,11 @@ impl Screen<'_> {
 
     /// The sidebar's width: in a narrow terminal it takes under a third of the window.
     pub fn sidebar_w(&self) -> f32 {
+        let w = self.st.sidebar_width.unwrap_or(look::SIDEBAR_W);
         if self.ui.is_cells() {
-            look::SIDEBAR_W.min((self.size.0 * 0.3).round())
+            w.min((self.size.0 * 0.3).round())
         } else {
-            look::SIDEBAR_W
+            w
         }
     }
 

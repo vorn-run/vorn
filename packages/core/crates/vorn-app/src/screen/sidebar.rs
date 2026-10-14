@@ -9,11 +9,13 @@ use crate::app::GROUP_NAME;
 use crate::client::Session;
 use crate::look;
 use crate::state::{MenuKind, SidebarMode};
-use crate::ui::{div, field, text, tooltip, tooltip_at, Action, El, Place, Rgba, Role, TextStyle};
+use crate::ui::{
+    div, field, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense, TextStyle,
+};
 use vorn_protocol::{ProjectConfig, SessionGroupConfig, WorkspaceConfig};
 
 /// A configured colour, `#rrggbb`.
-fn stored_color(hex: Option<&str>) -> Option<Rgba> {
+pub(crate) fn stored_color(hex: Option<&str>) -> Option<Rgba> {
     hex.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
         .map(Rgba::hex)
 }
@@ -1676,7 +1678,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
         .px(12.0)
         .scroll_y()
         .child(body);
-    div()
+    let mut aside = div()
         .col()
         .w(s.sidebar_w())
         .h_full()
@@ -1698,8 +1700,31 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
                         .child(footer(s)),
                 )
                 .child(div().w(1.0).h_full().bg(white(0.06))),
-        )
+        );
+    // A terminal has no pointer to drag it with.
+    if !s.ui.is_cells() {
+        let hot = if s.ui.pressed(SIDEBAR_HANDLE) {
+            white(0.12)
+        } else {
+            white(0.0).mix(white(0.08), s.ui.hover(SIDEBAR_HANDLE))
+        };
+        aside = aside.child(
+            div()
+                .id(SIDEBAR_HANDLE)
+                .absolute_right(0.0, 0.0)
+                .w(6.0)
+                .h_full()
+                .sense(Sense::DRAG)
+                .vertical(true)
+                .bg(hot)
+                .role(Role::Splitter, "Resize sidebar"),
+        );
+    }
+    aside
 }
+
+/// The handle on the sidebar's right edge that resizes it.
+pub const SIDEBAR_HANDLE: Id = Id(0x7369_6465_6261_7268);
 
 #[cfg(test)]
 mod tests {
