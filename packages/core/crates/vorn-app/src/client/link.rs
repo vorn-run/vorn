@@ -9,6 +9,8 @@ use tokio::sync::mpsc;
 pub enum Frame {
     Text(String),
     Binary(Vec<u8>),
+    /// Text the link writes out, so a large message is not serialized on the UI thread.
+    Json(serde_json::Value),
 }
 
 /// Why a link ended.
@@ -118,6 +120,7 @@ mod native {
                                 frame = out.recv() => {
                                     let msg = match frame {
                                         Some(Frame::Text(t)) => Message::text(t),
+                                        Some(Frame::Json(v)) => Message::text(v.to_string()),
                                         Some(Frame::Binary(b)) => Message::binary(b),
                                         None => {
                                             let _ = ws.close(None).await;
@@ -179,7 +182,7 @@ mod native {
                             break;
                         }
                     }
-                    Some(Frame::Text(_)) => {}
+                    Some(Frame::Text(_) | Frame::Json(_)) => {}
                     None => break,
                 }
             }
@@ -313,6 +316,7 @@ mod page {
                 while let Some(f) = if open { out.recv().await } else { None } {
                     let sent = match f {
                         Frame::Text(t) => ws.send_with_str(&t),
+                        Frame::Json(v) => ws.send_with_str(&v.to_string()),
                         Frame::Binary(b) => ws.send_with_u8_array(&b),
                     };
                     if sent.is_err() {

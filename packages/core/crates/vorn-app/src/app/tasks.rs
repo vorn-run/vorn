@@ -133,7 +133,7 @@ impl App {
                     let agent = info.agent_type.to_string();
                     let wt = info.worktree_path.clone();
                     let sid = info.id.clone();
-                    self.change_tasks(None, |c, now| {
+                    self.change_tasks(&id, None, |c, now| {
                         tasks::start(c, &id, &sid, &agent, wt.as_deref(), now)
                     });
                 }
@@ -156,12 +156,19 @@ impl App {
     }
 
     /// Saves the config with the tasks `f` changed, toasting `text`.
-    fn change_tasks(&mut self, text: Option<&str>, f: impl FnOnce(&mut Value, &str) -> bool) {
-        let mut config = self.store.config.clone();
-        if !f(&mut config, &tasks::now_iso()) {
+    /// Changes the task `id` with `f` and saves, rereading only that task:
+    /// the store's config changes in place, and vornd is sent a copy.
+    fn change_tasks(
+        &mut self,
+        id: &str,
+        text: Option<&str>,
+        f: impl FnOnce(&mut Value, &str) -> bool,
+    ) {
+        if !f(&mut self.store.config, &tasks::now_iso()) {
             return;
         }
-        self.save_config(config, Call::Quiet);
+        self.store.reread_task(id);
+        self.queue_save(self.store.config.clone(), Call::Quiet);
         if let Some(text) = text {
             self.st.toast(text, false);
         }
@@ -191,7 +198,7 @@ impl App {
     /// `StatusPicker`'s change; moving into progress says nothing.
     fn set_status(&mut self, id: &str, status: &str) {
         let toast = (status != "in_progress").then(|| tasks::status_toast(status));
-        self.change_tasks(toast, |c, now| tasks::set_status(c, id, status, now));
+        self.change_tasks(id, toast, |c, now| tasks::set_status(c, id, status, now));
     }
 
     /// Opens a task, or the create form, in the detail panel.
@@ -299,7 +306,7 @@ impl App {
         f.branch = ui.edit_text(branch_id()).to_owned();
         let title = ui.edit_text(title_id(Form::Detail)).to_owned();
         let desc = ui.edit_text(desc_id(Form::Detail)).to_owned();
-        self.change_tasks(None, |c, now| {
+        self.change_tasks(&f.id, None, |c, now| {
             tasks::patch(c, &f.id, now, |t| tasks::apply_form(t, &f, &title, &desc))
         });
     }
@@ -423,14 +430,14 @@ impl App {
         };
         let f = self.st.tasks.dialog_form.clone();
         if f.editing {
-            self.change_tasks(Some("Task updated"), |c, now| {
+            self.change_tasks(&f.id, Some("Task updated"), |c, now| {
                 tasks::patch(c, &f.id, now, |t| {
                     tasks::apply_form(t, &f, &title, &desc);
                     t.insert("status".into(), json!(f.status));
                 })
             });
         } else {
-            self.change_tasks(Some("Task created"), |c, now| {
+            self.change_tasks(&f.id, Some("Task created"), |c, now| {
                 tasks::add(c, &f, &title, &desc, now);
                 true
             });
@@ -445,7 +452,7 @@ impl App {
         let mut f = self.st.tasks.detail_form.clone();
         f.branch = ui.edit_text(branch_id()).to_owned();
         f.status = "todo".into();
-        self.change_tasks(Some("Task created"), |c, now| {
+        self.change_tasks(&f.id, Some("Task created"), |c, now| {
             tasks::add(c, &f, &title, &desc, now);
             true
         });
@@ -612,10 +619,10 @@ impl App {
             TaskAct::Complete(id) => self.set_status(&id, "done"),
             TaskAct::Cancel(id) => self.set_status(&id, "cancelled"),
             TaskAct::Reopen(id) => self.set_status(&id, "todo"),
-            TaskAct::Archive(id) => self.change_tasks(Some("Task archived"), |c, now| {
+            TaskAct::Archive(id) => self.change_tasks(&id, Some("Task archived"), |c, now| {
                 tasks::set_archived(c, &id, true, now)
             }),
-            TaskAct::Unarchive(id) => self.change_tasks(Some("Task unarchived"), |c, now| {
+            TaskAct::Unarchive(id) => self.change_tasks(&id, Some("Task unarchived"), |c, now| {
                 tasks::set_archived(c, &id, false, now)
             }),
             TaskAct::AskDelete(id) => self.st.tasks.confirm_delete = (!id.is_empty()).then_some(id),
@@ -625,7 +632,7 @@ impl App {
                     self.st.tasks.selected = None;
                     self.st.tasks.dirty = None;
                 }
-                self.change_tasks(Some("Task deleted"), |c, _| tasks::remove(c, &id));
+                self.change_tasks(&id, Some("Task deleted"), |c, _| tasks::remove(c, &id));
                 self.call(Call::Quiet, "task:imageCleanup", json!(id));
             }
             TaskAct::ReviewDiff(id) => {
@@ -811,7 +818,7 @@ impl App {
             "cancelled" => Some("Task cancelled"),
             _ => None,
         };
-        self.change_tasks(toast, |c, now| tasks::set_status(c, id, status, now));
+        self.change_tasks(id, toast, |c, now| tasks::set_status(c, id, status, now));
     }
 
     /// The board's columns as it shows them, each its tasks' ids in order.
