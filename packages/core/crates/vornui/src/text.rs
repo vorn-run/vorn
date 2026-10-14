@@ -231,6 +231,16 @@ impl TextSystem {
             // A missing file leaves fallback to pick the face.
             let _ = fonts.db_mut().load_font_file(crate::theme::font::SF_FILE);
         }
+        // A UI component has no system font lookup: it reads the faces its host lent it.
+        #[cfg(target_os = "wasi")]
+        for f in [
+            crate::theme::font::SF_FILE,
+            "/System/Library/Fonts/Menlo.ttc",
+        ] {
+            if let Ok(bytes) = std::fs::read(f) {
+                fonts.db_mut().load_font_data(bytes);
+            }
+        }
         fonts.db_mut().set_sans_serif_family(ui);
         fonts.db_mut().set_monospace_family(mono);
         let mut t = TextSystem {

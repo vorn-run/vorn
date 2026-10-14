@@ -9,7 +9,6 @@ description = "Vorn's thin UI layer: winit windows, wgpu or CPU drawing, cosmic-
 
 [dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "std"] }
-winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 accesskit = "0.25"
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 # std's clock on a desktop; the page's `performance.now()` in a browser.
@@ -36,8 +35,12 @@ softbuffer = { version = "0.4", default-features = false }
 crossterm = "0.29"
 vorn-spawn = { path = "../spawn" }
 
+# A window exists on a desktop and in a browser; a WASI UI component drawn by its host has none.
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+
 # In a browser wgpu draws through WebGPU, or WebGL2 where there is none (web.rs).
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "std", "webgpu", "webgl"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

@@ -3,7 +3,9 @@
 //! into these; benches and tests inject them directly, so both go through
 //! the same app handler.
 
+#[cfg(not(target_os = "wasi"))]
 use winit::event::{ElementState, Ime, KeyEvent, Modifiers, WindowEvent};
+#[cfg(not(target_os = "wasi"))]
 use winit::keyboard::{ModifiersState, PhysicalKey};
 
 /// Modifier bits, the terminal wire's layout.
@@ -82,6 +84,7 @@ impl Input {
     }
 }
 
+#[cfg(not(target_os = "wasi"))]
 pub fn mods_of(m: &Modifiers) -> u16 {
     let s: ModifiersState = m.state();
     let mut out = 0;
@@ -101,6 +104,7 @@ pub fn mods_of(m: &Modifiers) -> u16 {
 }
 
 /// The app-level input for a winit window event, if it is one.
+#[cfg(not(target_os = "wasi"))]
 pub fn from_winit(ev: &WindowEvent, mods: u16) -> Option<Input> {
     match ev {
         WindowEvent::KeyboardInput {
@@ -129,6 +133,7 @@ pub fn from_winit(ev: &WindowEvent, mods: u16) -> Option<Input> {
     }
 }
 
+#[cfg(not(target_os = "wasi"))]
 pub fn from_ime(ime: &Ime) -> Option<Input> {
     match ime {
         Ime::Preedit(s, _) => Some(Input::Preedit(s.clone())),
@@ -162,6 +167,7 @@ pub fn wheel_lines() -> Option<f32> {
 }
 
 #[cfg(test)]
+#[cfg(not(target_os = "wasi"))]
 mod tests {
     use super::*;
 

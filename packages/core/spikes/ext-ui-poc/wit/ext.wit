@@ -1,0 +1,48 @@
+package vorn:ext-ui-poc@0.1.0;
+
+/// The extension's backend: the part that runs beside vornd in both models.
+world backend {
+  /// Model A only: the view template, as JSON.
+  export view: func() -> string;
+  /// Keyed rows from vornd's `worktree:inventory` answer.
+  export rows: func(inventory: string) -> string;
+  /// The `worktree:removeMany` items for the chosen row ids, or an error.
+  export remove-plan: func(ids: list<string>) -> result<string, string>;
+}
+
+interface surface {
+  /// One input, in logical pixels (cells on the Cells surface).
+  variant input {
+    pointer-move(tuple<f32, f32>),
+    pointer-down,
+    pointer-up,
+    wheel(f32),
+    key(key-press),
+  }
+  record key-press {
+    code: string,
+    text: option<string>,
+    mods: u16,
+  }
+  record cell {
+    sym: string,
+    fg: u32,
+    bg: u32,
+    attr: u8,
+  }
+  /// What one frame drew: RGBA pixels, or a grid of cells.
+  variant frame {
+    pixels(list<u8>),
+    cells(list<cell>),
+  }
+}
+
+/// Model B: the extension's own UI, run by each client on its own surface.
+world ui {
+  use surface.{input, frame};
+  /// Calls the extension's backend (through the client and vornd).
+  import call: func(method: string, args: string) -> result<string, string>;
+  export init: func(cells: bool, scale: f32);
+  export data: func(rows: string);
+  export frame: func(w: u32, h: u32, inputs: list<input>) -> frame;
+}

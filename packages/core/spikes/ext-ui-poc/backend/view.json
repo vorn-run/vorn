@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "state": { "filter": "", "confirming": false },
+  "view": {
+    "c": "column",
+    "gap": 12,
+    "pad": 16,
+    "children": [
+      {
+        "c": "row",
+        "justify": "between",
+        "children": [
+          {
+            "c": "column",
+            "gap": 2,
+            "children": [
+              { "c": "text", "role": "title", "value": "Worktree cleanup" },
+              {
+                "c": "text",
+                "role": "secondary",
+                "value": "{rows.count} worktrees · {rows.removable} can go"
+              }
+            ]
+          },
+          {
+            "c": "row",
+            "gap": 8,
+            "children": [
+              {
+                "c": "field",
+                "id": "filter",
+                "model": "filter",
+                "placeholder": "Filter",
+                "w": 200
+              },
+              {
+                "c": "confirm",
+                "id": "remove",
+                "label": "Remove {selected.count}",
+                "enabled": "selected.count",
+                "open": "confirming",
+                "message": "Remove {selected.count} worktrees? Their branches stay.",
+                "ok": "Remove",
+                "danger": true,
+                "on": {
+                  "open": { "set": { "confirming": true } },
+                  "cancel": { "set": { "confirming": false } },
+                  "ok": { "call": "remove", "args": "selected", "set": { "confirming": false } }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "c": "list",
+        "id": "worktrees",
+        "from": "rows",
+        "match": { "fields": ["name", "branch"], "state": "filter" },
+        "select": { "mode": "multi", "drag": true, "when": "removable" },
+        "item": {
+          "c": "row",
+          "gap": 12,
+          "children": [
+            { "c": "check" },
+            { "c": "text", "role": "body", "value": "{row.name}", "w": 160 },
+            { "c": "text", "role": "mono", "value": "{row.branch}", "grow": true },
+            {
+              "c": "badge",
+              "value": "{row.status}",
+              "tone": { "merged": "good", "stale": "warn", "dirty": "bad", "active": "info" }
+            },
+            { "c": "text", "role": "secondary", "value": "{row.size}", "w": 64 }
+          ]
+        }
+      },
+      { "c": "text", "role": "secondary", "value": "{status}" }
+    ]
+  }
+}

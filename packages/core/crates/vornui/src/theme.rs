@@ -163,7 +163,7 @@ pub mod font {
     pub const WEB_UI: &str = "Inter";
     pub const WEB_MONO: &str = "JetBrains Mono";
 
-    pub const UI: &str = if cfg!(target_arch = "wasm32") {
+    pub const UI: &str = if cfg!(all(target_arch = "wasm32", not(target_os = "wasi"))) {
         WEB_UI
     } else if cfg!(target_os = "macos") {
         SF
@@ -204,7 +204,7 @@ pub mod font {
         (px / size).max(0.0)
     }
 
-    pub const MONO: &str = if cfg!(target_arch = "wasm32") {
+    pub const MONO: &str = if cfg!(all(target_arch = "wasm32", not(target_os = "wasi"))) {
         WEB_MONO
     } else if cfg!(target_os = "macos") {
         "Menlo"
