@@ -75,6 +75,12 @@ Each release ships Vorn, the desktop app built on Vorn's GPU UI:
 | Windows  | `Vorn-Setup-<version>.exe`, a per-user installer                                       |
 | Linux    | `Vorn-<version>.AppImage` or `vorn_<version>_amd64.deb`; needs WebKitGTK 4.1 and GTK 3 |
 
+On Linux ARM64 boards, `install.sh` installs the server alone from
+`vorn-server-<version>-linux-arm64.tar.gz`: vornd, its session holder and the `vorn` command in
+`~/.local/lib/vorn`, run by the systemd user unit `vornd`. Connect to it from another device. Its
+options, such as `--host 0.0.0.0`, go in `~/.config/vorn/server.env`; `VORN_NO_SERVICE=1` installs
+without starting it.
+
 The app updates itself from the release feed for the channel chosen in Settings (stable or
 beta): it downloads in the background, checks the checksum and signature, and swaps itself in
 when you restart. Terminals survive the restart on macOS and Linux. The .deb does not update
