@@ -239,7 +239,15 @@ function stopAll(work, data) {
       run('taskkill', ['/F', '/T', '/IM', im])
     }
   } else {
-    run('pkill', ['-f', work])
+    // This script's own command line names the work dir too.
+    const pids = run('pgrep', ['-f', work]).out.split(/\s+/).filter(Boolean).map(Number)
+    for (const pid of pids.filter((p) => p !== process.pid && p !== process.ppid)) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
   }
 }
 
