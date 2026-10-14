@@ -13,6 +13,9 @@ use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
 use crate::output::table;
 
+/// A clone, or a build fetching its dependencies, takes longer than a call.
+const WORK_TIMEOUT_MS: u64 = 15 * 60 * 1000;
+
 pub const EXT_USAGE: &str = "Usage
   vorn ext install <git url> [--branch <name>] [--confirm <id>] [--json]
   vorn ext link <folder> [--json]
@@ -107,7 +110,10 @@ async fn install(ctx: &mut Context<'_>, url: Option<&str>) -> Result<ExitCode, C
     if let Some(branch) = &ctx.args.branch {
         params["branch"] = json!(branch);
     }
-    let sheet = ctx.call("extension:inspect", Some(params)).await?;
+    let sheet = ctx
+        .rpc
+        .call_within("extension:inspect", Some(params), WORK_TIMEOUT_MS)
+        .await?;
     let id = text(&sheet, "confirm").to_owned();
     ctx.io.write_err(&render_sheet(&sheet));
     let typed = match ctx.args.confirm.clone() {
@@ -132,7 +138,11 @@ async fn install(ctx: &mut Context<'_>, url: Option<&str>) -> Result<ExitCode, C
         return Ok(ExitCode::Failure);
     }
     let params = json!({ "token": text(&sheet, "token"), "confirm": typed.trim() });
-    let pack = ctx.call("extension:install", Some(params)).await?;
+    ctx.io.write_err("Installing; its build runs now.\n");
+    let pack = ctx
+        .rpc
+        .call_within("extension:install", Some(params), WORK_TIMEOUT_MS)
+        .await?;
     if ctx.args.json {
         ctx.io.write(&format!("{pack}\n"));
     } else {
