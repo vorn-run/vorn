@@ -26,6 +26,9 @@ pub const TRAFFIC_LIGHT_PAD: f32 = 80.0;
 /// Where the traffic lights sit (`trafficLightPosition`).
 pub const TRAFFIC_LIGHTS: (f32, f32) = (16.0, 13.0);
 pub const SIDEBAR_W: f32 = 256.0;
+/// `useSidebarResize`'s bounds.
+pub const SIDEBAR_MIN: f32 = 180.0;
+pub const SIDEBAR_MAX: f32 = 400.0;
 pub const COMPOSER_MAX_W: f32 = 800.0;
 /// The terminal font size, in points.
 pub const TERM_FONT: f32 = 12.0;

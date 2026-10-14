@@ -347,3 +347,33 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
 fn open_sub(app: &App) -> Option<usize> {
     app.st.menu.as_ref().and_then(|m| m.sub.open)
 }
+
+#[test]
+fn the_sidebar_resizes_from_its_edge_within_its_bounds() {
+    use vorn_app::screen::sidebar::SIDEBAR_HANDLE;
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let handle = shot.until(&mut app, "the handle", |_, ui| ui.rect_of(SIDEBAR_HANDLE));
+    // The sidebar starts 256 wide at the window's left edge.
+    assert_eq!(handle.x + handle.w, 256.0);
+    let y = handle.y + handle.h / 2.0;
+    let drag = |shot: &mut Shot, app: &mut App, to: f32| {
+        let from = shot.ui.rect_of(SIDEBAR_HANDLE).expect("its handle");
+        shot.ui.pointer_move(from.x + 3.0, y);
+        shot.ui.pointer_down();
+        shot.ui.pointer_move(to, y);
+        app.events(&mut shot.ui);
+        shot.ui.pointer_up();
+        app.events(&mut shot.ui);
+        shot.frame(app);
+        let after = shot.ui.rect_of(SIDEBAR_HANDLE).expect("its handle");
+        after.x + after.w
+    };
+    assert_eq!(drag(&mut shot, &mut app, 320.0), 320.0);
+    shot.save(&mut app, "sidebar-wide");
+    assert_eq!(drag(&mut shot, &mut app, 900.0), 400.0);
+    assert_eq!(drag(&mut shot, &mut app, 150.0), 180.0);
+}

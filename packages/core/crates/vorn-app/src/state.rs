@@ -409,6 +409,8 @@ pub struct State {
     /// The card on the focused stage.
     pub focused: Option<String>,
     pub sidebar: bool,
+    /// Dragged by its right edge, between 180 and 400; 256 until then.
+    pub sidebar_width: Option<f32>,
     /// The grid's project filter (the sidebar's active project).
     pub project: Option<String>,
     /// The grid's group filter (the sidebar's active group).

@@ -52,7 +52,7 @@ impl App {
     /// The canvas pane's size now: the window less the sidebar and panel.
     pub(super) fn canvas_size(&self) -> (f64, f64) {
         let side = if self.st.sidebar {
-            look::SIDEBAR_W
+            self.st.sidebar_width.unwrap_or(look::SIDEBAR_W)
         } else {
             0.0
         };

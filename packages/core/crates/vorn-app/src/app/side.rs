@@ -880,6 +880,20 @@ impl App {
     /// A divider moved: the card's split, a column's weights, a Files
     /// pane's tree, or the Changes panel's width. Saved when it ends.
     pub(super) fn pane_resized(&mut self, ui: &Ui, id: Id, ratio: f32, end: bool) -> bool {
+        if id == crate::screen::sidebar::SIDEBAR_HANDLE {
+            // The handle sits on the sidebar's right edge, so the sidebar's
+            // left is that edge less its width, taken as the drag starts.
+            let now = self.st.sidebar_width.unwrap_or(crate::look::SIDEBAR_W);
+            let left = self
+                .sidebar_left
+                .or_else(|| ui.rect_of(id).map(|r| r.x + r.w - now));
+            if let (Some(left), Some((x, _))) = (left, ui.pointer()) {
+                let w = (x - left).clamp(crate::look::SIDEBAR_MIN, crate::look::SIDEBAR_MAX);
+                self.st.sidebar_width = Some(w.round());
+            }
+            self.sidebar_left = if end { None } else { left };
+            return true;
+        }
         let Some(which) = crate::screen::side::divider_of(&self.st, id) else {
             return false;
         };

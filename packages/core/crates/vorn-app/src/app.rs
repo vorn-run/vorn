@@ -362,6 +362,8 @@ pub struct App {
     /// When `headless:list` was last asked, and exited sessions last pruned.
     headless_polled: std::time::Instant,
     headless_pruned: std::time::Instant,
+    /// The sidebar's left edge while its handle is dragged.
+    sidebar_left: Option<f32>,
     /// The window's updater; none offscreen.
     updater: Option<Arc<crate::update::Updater>>,
     /// The launch step's notice about the `vorn` command, on its way.
@@ -437,6 +439,7 @@ impl App {
             picker: crate::system::os_picker(),
             headless_polled: std::time::Instant::now(),
             headless_pruned: std::time::Instant::now(),
+            sidebar_left: None,
             updater: None,
             cli_launch: None,
             cli_prompt: None,
