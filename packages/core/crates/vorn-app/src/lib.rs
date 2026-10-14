@@ -28,6 +28,7 @@ pub mod gates;
 pub mod git;
 pub mod graph;
 pub mod grid;
+pub mod headless;
 pub mod highlight;
 pub mod hotkeys;
 pub mod intent;

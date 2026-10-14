@@ -342,44 +342,6 @@ impl Recent {
     }
 }
 
-/// One of `headless:list`'s sessions.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Headless {
-    pub id: String,
-    pub name: String,
-    pub agent: String,
-    pub branch: Option<String>,
-    pub status: String,
-    pub exit: Option<i64>,
-    pub started: f64,
-}
-
-impl Headless {
-    pub fn from_value(v: &Value) -> Option<Headless> {
-        let name = ["displayName", "name", "agentType"]
-            .iter()
-            .find_map(|k| v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()))
-            .unwrap_or("headless");
-        Some(Headless {
-            id: v.get("id")?.as_str()?.to_owned(),
-            name: name.to_owned(),
-            agent: v
-                .get("agentType")
-                .and_then(Value::as_str)
-                .unwrap_or("shell")
-                .to_owned(),
-            branch: v.get("branch").and_then(Value::as_str).map(str::to_owned),
-            status: v
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or("running")
-                .to_owned(),
-            exit: v.get("exitCode").and_then(Value::as_i64),
-            started: v.get("createdAt").and_then(Value::as_f64).unwrap_or(0.0),
-        })
-    }
-}
-
 /// A git worktree of a project (`git:listWorktrees`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
@@ -490,7 +452,7 @@ pub struct State {
     pub banner: Vec<TerminalSession>,
     pub restoring: bool,
     pub recent: Vec<Recent>,
-    pub headless: Vec<Headless>,
+    pub headless: crate::headless::Tracker,
     pub worktrees: HashMap<String, Vec<Worktree>>,
     pub branches: HashMap<String, Vec<String>>,
     pub composer: Composer,
@@ -657,16 +619,6 @@ pub fn time_ago(then_ms: f64, now_ms: f64) -> String {
     }
 }
 
-/// A duration as the headless pill shows it: 45s, 3m, 2h 5m.
-pub fn short_duration(ms: f64) -> String {
-    let s = (ms / 1000.0).max(0.0) as u64;
-    match s {
-        0..=59 => format!("{s}s"),
-        60..=3599 => format!("{}m", s / 60),
-        _ => format!("{}h {}m", s / 3600, s % 3600 / 60),
-    }
-}
-
 /// Milliseconds since the epoch, as vornd stamps things.
 pub fn now_ms() -> f64 {
     std::time::SystemTime::now()
@@ -693,8 +645,6 @@ mod tests {
         assert_eq!(time_ago(0.0, 5.0 * 60_000.0), "5m ago");
         assert_eq!(time_ago(0.0, 3.0 * 3_600_000.0), "3h ago");
         assert_eq!(time_ago(0.0, 2.0 * 86_400_000.0), "2d ago");
-        assert_eq!(short_duration(45_000.0), "45s");
-        assert_eq!(short_duration(7_500_000.0), "2h 5m");
     }
 
     #[test]

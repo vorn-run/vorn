@@ -13,7 +13,7 @@ use crate::ui::{div, field, text, tooltip, tooltip_at, Action, El, Place, Rgba, 
 use vorn_protocol::{ProjectConfig, SessionGroupConfig, WorkspaceConfig};
 
 /// A configured colour, `#rrggbb`.
-fn stored_color(hex: Option<&str>) -> Option<Rgba> {
+pub(crate) fn stored_color(hex: Option<&str>) -> Option<Rgba> {
     hex.and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
         .map(Rgba::hex)
 }

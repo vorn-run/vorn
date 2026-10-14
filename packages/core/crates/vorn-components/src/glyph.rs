@@ -128,6 +128,29 @@ pub fn pulse(ui: &Ui) -> f32 {
     envelope(ui.anim_time(), 0.0, 2.0, (1.0, 0.5), PULSE) as f32
 }
 
+/// `borderPulse` 2.5 s ease-in-out: 0 at rest, 1 at its peak, which a
+/// caller maps onto its border and glow. A terminal holds it at rest.
+pub fn border_pulse(ui: &Ui) -> f32 {
+    if ui.is_cells() {
+        return 0.0;
+    }
+    ui.wake_at(ui.now() + FRAME);
+    envelope(ui.anim_time(), 0.0, 2.5, (0.0, 1.0), EASE_IN_OUT) as f32
+}
+
+/// `animate-ping` over `period` seconds: the ring's scale (1 → 2) and the
+/// share of its opacity left (1 → 0), both done three quarters in.
+/// None in a terminal, which cannot draw the ring.
+pub fn ping(ui: &Ui, period: f64) -> Option<(f32, f32)> {
+    if ui.is_cells() {
+        return None;
+    }
+    ui.wake_at(ui.now() + FRAME);
+    let t = (ui.anim_time() % period / period / 0.75).min(1.0);
+    let p = bezier(t, (0.0, 0.0, 0.2, 1.0)) as f32;
+    Some((1.0 + p, 1.0 - p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

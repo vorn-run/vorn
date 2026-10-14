@@ -464,7 +464,12 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
     shot.click(&mut app2, control("toolbar", Act::Open(MenuKind::Headless)));
     assert_eq!(menu(&app2), Some(MenuKind::Headless));
     shot.save(&mut app2, "headless-menu");
+    // A click unfolds the pill's log; the menu stays open.
     let row = control("headless", Act::ToggleHeadless(hid.clone()));
+    shot.click(&mut app2, row);
+    assert!(app2.st.headless.expanded(&hid));
+    assert_eq!(menu(&app2), Some(MenuKind::Headless));
+    shot.save(&mut app2, "headless-expanded");
     let r = shot.ui.rect_of(row).expect("its row");
     shot.ui.pointer_move(r.x + r.w / 2.0, r.y + r.h / 2.0);
     shot.frame(&mut app2);

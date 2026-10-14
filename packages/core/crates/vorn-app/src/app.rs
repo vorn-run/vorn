@@ -22,7 +22,7 @@ use crate::screen::{
 };
 use crate::scroll::{self, Route, Rows, Scroll};
 use crate::state::{
-    basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
+    basename, now_ms, Dialog, Filter, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
     decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
@@ -359,6 +359,9 @@ pub struct App {
     )>,
     /// Answers the file pickers; the OS dialogs outside tests.
     picker: crate::system::Picker,
+    /// When `headless:list` was last asked, and exited sessions last pruned.
+    headless_polled: std::time::Instant,
+    headless_pruned: std::time::Instant,
     /// The window's updater; none offscreen.
     updater: Option<Arc<crate::update::Updater>>,
     /// The launch step's notice about the `vorn` command, on its way.
@@ -432,6 +435,8 @@ impl App {
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),
+            headless_polled: std::time::Instant::now(),
+            headless_pruned: std::time::Instant::now(),
             updater: None,
             cli_launch: None,
             cli_prompt: None,
@@ -482,6 +487,51 @@ impl App {
         if self.picking.is_none() {
             let wake = Arc::clone(&self.wake);
             self.picking = Some((purpose, crate::system::pick(&self.picker, what, wake)));
+        }
+    }
+
+    /// `headless:exit` and `headless:data` between polls.
+    fn headless_notified(&mut self, method: &str, params: &Value) {
+        let Some(id) = params.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        if method == "headless:exit" {
+            let code = params.get("exitCode").and_then(Value::as_i64);
+            self.st.headless.exited(id, code, now_ms());
+        } else if let Some(data) = params.get("data").and_then(Value::as_str) {
+            self.st.headless.data(id, data);
+        }
+    }
+
+    /// Polls `headless:list` every 5 s, drops exited sessions past
+    /// `headlessRetentionMinutes` every 30 s, and folds the pills once
+    /// their popover closes.
+    fn headless_tick(&mut self, ui: &mut Ui, now: std::time::Instant) {
+        if now >= self.headless_polled + crate::headless::POLL {
+            self.headless_polled = now;
+            self.call(Call::Headless, "headless:list", Value::Null);
+        }
+        if now >= self.headless_pruned + crate::headless::PRUNE {
+            self.headless_pruned = now;
+            let minutes = self
+                .store
+                .config
+                .pointer("/defaults/headlessRetentionMinutes")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            self.st.headless.prune(minutes * 60_000.0, now_ms());
+        }
+        ui.wake_at(self.headless_polled + crate::headless::POLL);
+        if !self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Headless)
+        {
+            self.st.headless.collapse_all();
+        }
+        for id in self.st.headless.take_grew() {
+            ui.scroll_to_end(crate::headless::log_id(&id));
         }
     }
 
@@ -632,6 +682,10 @@ impl App {
                     self.pane_notified(&method, &params);
                     if method == "terminal:command" {
                         self.shell_notified(&method, &params);
+                        continue;
+                    }
+                    if method == "headless:exit" || method == "headless:data" {
+                        self.headless_notified(&method, &params);
                         continue;
                     }
                     if method == "server:identity" {
@@ -823,10 +877,13 @@ impl App {
                 self.st.recent = list(answer).iter().filter_map(Recent::from_value).collect();
             }
             Call::Headless => {
-                self.st.headless = list(answer)
-                    .iter()
-                    .filter_map(Headless::from_value)
-                    .collect();
+                if answer.is_ok() {
+                    let list = list(answer);
+                    let sessions = list
+                        .iter()
+                        .filter_map(crate::headless::Headless::from_value);
+                    self.st.headless.sync(sessions.collect());
+                }
             }
             Call::Restored => self.restored(list(answer)),
             Call::Installed => {
@@ -2059,10 +2116,9 @@ impl App {
             }
             Act::KillHeadless(id) => {
                 self.call(Call::Quiet, "headless:kill", json!(id));
-                self.st.headless.retain(|h| h.id != id);
             }
-            Act::HideHeadless(id) => self.st.headless.retain(|h| h.id != id),
-            Act::ToggleHeadless(_) => {}
+            Act::HideHeadless(id) => self.st.headless.dismiss(&id),
+            Act::ToggleHeadless(id) => self.st.headless.toggle(&id),
             Act::PickProject(name) => self.pick_project(name),
             Act::PickAgent(agent) => {
                 self.st.launch.agent = Some(agent);
@@ -2193,7 +2249,12 @@ impl App {
                             | Act::Layout(_)
                     ) || self.st.menu.as_ref().is_some_and(|m| {
                         matches!(m.kind, MenuKind::Recent | MenuKind::Headless)
-                            && matches!(act, Act::ToggleHeadless(_))
+                            && matches!(
+                                act,
+                                Act::ToggleHeadless(_)
+                                    | Act::KillHeadless(_)
+                                    | Act::HideHeadless(_)
+                            )
                             || m.kind == MenuKind::WfIcon
                                 && matches!(
                                     act,
@@ -2750,6 +2811,7 @@ impl App {
         self.net_tick(ui);
         self.plug_tick();
         self.pick_tick(ui);
+        self.headless_tick(ui, now);
         if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
             self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
         }
