@@ -1944,17 +1944,23 @@ fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
     s.gap.width = lp(s.gap.width, sx);
     s.gap.height = lp(s.gap.height, sy);
     // A button reads as one on a terminal: a cell of room either side, and a
-    // cell before whatever follows an icon-only one, so neighbours do not run together.
-    if is_button(el) {
-        let at_least = |l: Lp, n: f32| match px(l.into_raw()) {
-            Some(v) if v >= n => l,
-            _ => Lp::length(n),
-        };
+    // cell between buttons that sit side by side, so their fills do not run together.
+    let at_least = |l: Lp, n: f32| match px(l.into_raw()) {
+        Some(v) if v >= n => l,
+        _ => Lp::length(n),
+    };
+    // Buttons hidden until hover keep their size, so the row they share keeps its width.
+    if is_button(el) && el.opacity >= 0.99 {
         s.padding.left = at_least(s.padding.left, 1.0);
         s.padding.right = at_least(s.padding.right, 1.0);
-        if icon_only(el) && px(s.margin.right.into_raw()).is_some_and(|v| v < 1.0) {
-            s.margin.right = Lpa::length(1.0);
-        }
+    }
+    let row = matches!(
+        s.flex_direction,
+        taffy::FlexDirection::Row | taffy::FlexDirection::RowReverse
+    );
+    let shown = |c: &&El| is_button(c) && c.opacity >= 0.99;
+    if row && el.children.iter().filter(shown).count() >= 2 {
+        s.gap.width = at_least(s.gap.width, 1.0);
     }
     // Frames in the window's flow share edges: each draws its top and left
     // and touches its neighbours, so a run of cards costs one column each.
