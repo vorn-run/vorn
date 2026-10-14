@@ -4,6 +4,7 @@
 # writes the release's update feeds with release-feeds.mjs. The release
 # workflow calls it with the tag to upload the assets to; a pull request that
 # changes the packaging runs it to check every platform still packages.
+# Before the feeds go up, the previous release's app updates onto this build.
 name: Native app
 
 on:
@@ -19,8 +20,12 @@ on:
       - '.github/workflows/native-app.yml'
       - 'packages/core/scripts/package-native.mjs'
       - 'packages/core/scripts/release-feeds.mjs'
+      - 'packages/core/scripts/update-path.mjs'
       - 'packages/core/scripts/vorn.nsi'
       - 'packages/core/crates/vorn-app/src/cli_link.rs'
+      - 'packages/core/crates/vorn-app/src/launch.rs'
+      - 'packages/core/crates/vorn-app/src/update.rs'
+      - '.github/workflows/release.yml'
 
 jobs:
   package:
@@ -290,9 +295,69 @@ jobs:
             dist-native/*.yml
           if-no-files-found: error
 
+  # The previous release, installed with a temp HOME and data dir, updates
+  # onto this build through `Vorn update`, from a feed served on the runner.
+  update-path:
+    name: update path ${{ matrix.name }}
+    needs: [package, feeds]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac-arm64
+            os: macos-15
+          - name: win-x64
+            os: windows-2022
+          - name: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: vorn-native-${{ matrix.name }}
+          path: update-path
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: vorn-update-feeds
+          path: update-path
+
+      # The app links WebKitGTK for the browser pane.
+      - name: Web view libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0
+
+      - name: An installed Vorn updates to this build
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          node packages/core/scripts/update-path.mjs
+          --dir update-path --key ${{ matrix.name }} --work "$RUNNER_TEMP/update-path-work"
+
+  # The feeds go up last, so no install sees a release its predecessor cannot update onto.
+  publish-feeds:
+    if: inputs.tag != ''
+    needs: [feeds, update-path]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: vorn-update-feeds
+          path: dist-native
+
       - name: Upload to release
-        if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" dist-native/vorn-update.json dist-native/*.yml --clobber
+        run: gh release upload "$TAG" dist-native/vorn-update.json dist-native/*.yml --clobber --repo "$GITHUB_REPOSITORY"
