@@ -189,6 +189,8 @@ pub fn carried_cause(entry: &Value) -> &'static str {
 
 /// What an open file picker was asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// A browser installs no packs and downloads exports instead.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Picked {
     /// A connector pack to install.
     Pack,
@@ -528,7 +530,7 @@ impl App {
     /// Polls `headless:list` every 5 s, drops exited sessions past
     /// `headlessRetentionMinutes` every 30 s, and folds the pills once
     /// their popover closes.
-    fn headless_tick(&mut self, ui: &mut Ui, now: std::time::Instant) {
+    fn headless_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
         if now >= self.headless_polled + crate::headless::POLL {
             self.headless_polled = now;
             self.call(Call::Headless, "headless:list", Value::Null);
