@@ -103,7 +103,9 @@ mod bench {
         let status = MIX[i % MIX.len()];
         let word = WORDS[i % WORDS.len()];
         let title = if i % 7 == 3 {
-            format!("Task {i}: tidy the {word} module and move its tests next to the code they cover")
+            format!(
+                "Task {i}: tidy the {word} module and move its tests next to the code they cover"
+            )
         } else {
             format!("Task {i}: tidy the {word} module")
         };

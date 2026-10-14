@@ -66,7 +66,12 @@ pub fn list(store: &mut Store, params: &Value) -> Result<Value> {
     let page = |k: &str| get(k).as_f64().filter(|n| n.is_finite() && *n >= 0.0);
     let tasks = store.call(
         "dbListTasks",
-        json!([get("projectName"), get("status"), page("offset"), page("limit")]),
+        json!([
+            get("projectName"),
+            get("status"),
+            page("offset"),
+            page("limit")
+        ]),
     )?;
     if params
         .get("includeDescription")

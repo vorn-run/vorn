@@ -561,7 +561,10 @@ fn long_board(cells: bool) {
         let ui = Ui::cells(&ui_config(1.0));
         (ui, vorn_app::ui::cells::units::px(180, 40))
     } else {
-        (Ui::headless(RenderMode::Auto, &ui_config(1.0)), (1400.0, 900.0))
+        (
+            Ui::headless(RenderMode::Auto, &ui_config(1.0)),
+            (1400.0, 900.0),
+        )
     };
     app.st.view = MainView::Tasks;
     app.st.project = Some("web".into());
@@ -573,8 +576,17 @@ fn long_board(cells: bool) {
         ui.rect_of(card_id(&todo[0])).map(|_| ())
     });
     app.frame(&mut ui, size);
-    let built = |ui: &Ui| todo.iter().filter(|t| ui.rect_of(card_id(t)).is_some()).count();
-    assert!(built(&ui) < 40, "{} of {} To do cards built", built(&ui), todo.len());
+    let built = |ui: &Ui| {
+        todo.iter()
+            .filter(|t| ui.rect_of(card_id(t)).is_some())
+            .count()
+    };
+    assert!(
+        built(&ui) < 40,
+        "{} of {} To do cards built",
+        built(&ui),
+        todo.len()
+    );
     assert!(ui.rect_of(card_id(&todo[todo.len() - 1])).is_none());
 
     // Scrolled to the end, the last card shows inside its column.
@@ -584,8 +596,13 @@ fn long_board(cells: bool) {
         app.frame(&mut ui, size);
     }
     let view = ui.rect_of(scroll).expect("the To do column");
-    let last = ui.rect_of(card_id(&todo[todo.len() - 1])).expect("the last card");
-    assert!(last.h > 0.0 && last.y + last.h <= view.y + view.h + 1.0, "{last:?} in {view:?}");
+    let last = ui
+        .rect_of(card_id(&todo[todo.len() - 1]))
+        .expect("the last card");
+    assert!(
+        last.h > 0.0 && last.y + last.h <= view.y + view.h + 1.0,
+        "{last:?} in {view:?}"
+    );
     assert!(built(&ui) < 40);
     ui.set_scroll_offset(scroll, 0.0);
     app.frame(&mut ui, size);
@@ -605,10 +622,18 @@ fn long_board(cells: bool) {
         send(&mut app, &mut ui, "ArrowDown", 0);
     }
     assert_eq!(ui.focus(), Some(card_id(&done[61])));
-    let column = ui.rect_of(column_scroll_id("done")).expect("the Done column");
+    let column = ui
+        .rect_of(column_scroll_id("done"))
+        .expect("the Done column");
     let card = ui.rect_of(card_id(&done[61])).expect("the focused card");
-    assert!(card.h > 0.0 && card.y >= column.y - 0.5, "{card:?} in {column:?}");
-    assert!(card.y + card.h <= column.y + column.h + 0.5, "{card:?} in {column:?}");
+    assert!(
+        card.h > 0.0 && card.y >= column.y - 0.5,
+        "{card:?} in {column:?}"
+    );
+    assert!(
+        card.y + card.h <= column.y + column.h + 0.5,
+        "{card:?} in {column:?}"
+    );
     // Option-Left moves it a column over, still focused.
     send(&mut app, &mut ui, "ArrowLeft", mods::ALT);
     let moved = app.store.tasks.iter().find(|t| t.id == done[61]).unwrap();
@@ -618,7 +643,9 @@ fn long_board(cells: bool) {
 
     // A card held at the foot of Done scrolls it, and drops there.
     let from = ui.rect_of(card_id(&todo[0])).expect("the first card");
-    let target = ui.rect_of(column_scroll_id("done")).expect("the Done column");
+    let target = ui
+        .rect_of(column_scroll_id("done"))
+        .expect("the Done column");
     let before = ui.scroll_offset(column_scroll_id("done"));
     ui.pointer_move(from.x + from.w / 2.0, from.y + from.h / 2.0);
     ui.pointer_down();
@@ -632,7 +659,10 @@ fn long_board(cells: bool) {
         app.frame(&mut ui, size);
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
-    assert_eq!(app.st.tasks.dragging, Some((todo[0].clone(), Some("done".to_owned()))));
+    assert_eq!(
+        app.st.tasks.dragging,
+        Some((todo[0].clone(), Some("done".to_owned())))
+    );
     let after = ui.scroll_offset(column_scroll_id("done"));
     assert!(after > before, "the column scrolled: {before} to {after}");
     ui.pointer_up();

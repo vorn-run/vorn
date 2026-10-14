@@ -407,7 +407,10 @@ impl Store {
             .config
             .get("tasks")
             .and_then(Value::as_array)
-            .and_then(|l| l.iter().find(|t| t.get("id").and_then(Value::as_str) == Some(id)))
+            .and_then(|l| {
+                l.iter()
+                    .find(|t| t.get("id").and_then(Value::as_str) == Some(id))
+            })
             .and_then(|t| TaskConfig::deserialize(t).ok());
         let at = self.tasks.iter().position(|t| t.id == id);
         match (read, at) {
@@ -457,7 +460,10 @@ fn groups(config: &Value) -> Vec<SessionGroupConfig> {
 /// [`records`] without taking `list`.
 fn records_in<T: serde::de::DeserializeOwned>(list: Option<&Value>) -> Vec<T> {
     match list {
-        Some(Value::Array(items)) => items.iter().filter_map(|v| T::deserialize(v).ok()).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| T::deserialize(v).ok())
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -596,25 +602,40 @@ mod tests {
     #[test]
     fn a_config_change_rereads_only_the_tasks_that_changed() {
         let mut s = Store::default();
-        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B")] }));
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B")] }),
+        );
         assert_eq!(titles(&s), ["A", "B"]);
-        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B2")] }));
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B2")] }),
+        );
         assert_eq!(titles(&s), ["A", "B2"]);
         let three = json!({ "tasks": [task("c", "C"), { "bad": 1 }, task("a", "A")] });
         s.apply("config:changed", three);
         assert_eq!(titles(&s), ["C", "A"]);
-        s.apply("config:changed", json!({ "tasks": [task("c", "C"), task("a", "A1")] }));
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("c", "C"), task("a", "A1")] }),
+        );
         assert_eq!(titles(&s), ["C", "A1"]);
     }
 
     #[test]
     fn a_task_rereads_alone_when_changed_added_or_gone() {
         let mut s = Store::default();
-        s.apply("config:changed", json!({ "tasks": [task("a", "A"), task("b", "B")] }));
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B")] }),
+        );
         s.config["tasks"][0]["title"] = json!("A2");
         s.reread_task("a");
         assert_eq!(titles(&s), ["A2", "B"]);
-        s.config["tasks"].as_array_mut().unwrap().push(task("c", "C"));
+        s.config["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(task("c", "C"));
         s.reread_task("c");
         assert_eq!(titles(&s), ["A2", "B", "C"]);
         s.config["tasks"].as_array_mut().unwrap().remove(1);

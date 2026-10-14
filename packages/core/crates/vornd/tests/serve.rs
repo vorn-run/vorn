@@ -184,9 +184,7 @@ async fn pages_the_task_list() {
     let mut ws = open(served.port, Some(CREDENTIAL), "").await;
     next(&mut ws).await.unwrap();
     next(&mut ws).await.unwrap();
-    let call = |id: u64, method: &str, params: Value| {
-        json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
-    };
+    let call = |id: u64, method: &str, params: Value| json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
     send(&mut ws, call(1, "config:load", Value::Null)).await;
     let mut config = answer(&mut ws, 1).await["result"].clone();
     let path = home.path().to_string_lossy();
@@ -195,14 +193,27 @@ async fn pages_the_task_list() {
     answer(&mut ws, 2).await;
     for (i, title) in ["one", "two", "three", "four"].iter().enumerate() {
         let id = 10 + i as u64;
-        send(&mut ws, call(id, "task:create", json!({ "projectName": "p", "title": title }))).await;
+        send(
+            &mut ws,
+            call(
+                id,
+                "task:create",
+                json!({ "projectName": "p", "title": title }),
+            ),
+        )
+        .await;
         assert_eq!(answer(&mut ws, id).await["result"]["ok"], true);
     }
     let titles = |v: &Value| -> Vec<String> {
         let list = v["result"].as_array().unwrap().iter();
-        list.map(|t| t["title"].as_str().unwrap().to_owned()).collect()
+        list.map(|t| t["title"].as_str().unwrap().to_owned())
+            .collect()
     };
-    send(&mut ws, call(20, "task:list", json!({ "offset": 1, "limit": 2 }))).await;
+    send(
+        &mut ws,
+        call(20, "task:list", json!({ "offset": 1, "limit": 2 })),
+    )
+    .await;
     assert_eq!(titles(&answer(&mut ws, 20).await), ["two", "three"]);
     send(&mut ws, call(21, "task:list", json!({ "offset": 3 }))).await;
     assert_eq!(titles(&answer(&mut ws, 21).await), ["four"]);

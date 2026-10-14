@@ -508,7 +508,11 @@ fn list(s: &Screen<'_>, content: El, shown: &[&TaskConfig]) -> El {
             let empty = Id::new("task-list-empty").child(st.key);
             lines.push((empty, Line::Empty(st)));
         }
-        lines.extend(in_status.into_iter().map(|t| (card_id(&t.id), Line::Task(t))));
+        lines.extend(
+            in_status
+                .into_iter()
+                .map(|t| (card_id(&t.id), Line::Task(t))),
+        );
         lines.push((pad(st.key, 2), Line::Pad));
     }
     let keys: Vec<Id> = lines.iter().map(|(id, _)| *id).collect();
@@ -716,10 +720,9 @@ fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
             );
         }
         let keys: Vec<Id> = in_status.iter().map(|t| card_id(&t.id)).collect();
-        let cards = s
-            .ui
-            .windowed(scroll, &keys, CARD_GUESS, &keep)
-            .fill(cards, |i| kanban_card(s, in_status[i], false));
+        let cards =
+            s.ui.windowed(scroll, &keys, CARD_GUESS, &keep)
+                .fill(cards, |i| kanban_card(s, in_status[i], false));
         let add = s.acts.on(
             "task-column-add",
             Act::Task(TaskAct::New(st.key.to_owned())),

@@ -79,11 +79,7 @@ impl Windowed {
 /// An empty box `h` layout units tall that does not shrink.
 fn spacer(h: f32, cells: bool) -> El {
     // On cells an empty box is spacing, which counts a row per ROW_GAP pixels.
-    let px = if cells {
-        h.round() * units::ROW_GAP
-    } else {
-        h
-    };
+    let px = if cells { h.round() * units::ROW_GAP } else { h };
     div().h(px.max(0.0)).shrink0()
 }
 
@@ -106,11 +102,9 @@ impl Ui {
             };
         }
         let v = self.st.virt.get(&scroll);
-        let guess = v.and_then(Virt::estimate).unwrap_or(if cells {
-            units::height(est)
-        } else {
-            est
-        });
+        let guess =
+            v.and_then(Virt::estimate)
+                .unwrap_or(if cells { units::height(est) } else { est });
         let (gap, top) = v.map_or((0.0, 0.0), |v| (v.gap, v.top));
         // Before the first layout, the window's height bounds the view's.
         let view = v.map_or(
@@ -248,7 +242,10 @@ mod tests {
             })
             .collect();
         // 44 skipped rows of 58 px, less the gap the spacer brings itself.
-        assert_eq!(spaces, vec![44.0 * 58.0 - 8.0, 38.0 * 58.0 - 8.0, 9.0 * 58.0 - 8.0]);
+        assert_eq!(
+            spaces,
+            vec![44.0 * 58.0 - 8.0, 38.0 * 58.0 - 8.0, 9.0 * 58.0 - 8.0]
+        );
     }
 
     #[test]

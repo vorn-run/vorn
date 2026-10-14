@@ -356,7 +356,12 @@ impl App {
     /// A card dragged near the top or bottom of a column scrolls it, faster
     /// the nearer the edge, frame after frame while it is held there.
     fn edge_scroll(&mut self, ui: &mut Ui) {
-        let over = self.st.tasks.dragging.as_ref().and_then(|(_, over)| over.clone());
+        let over = self
+            .st
+            .tasks
+            .dragging
+            .as_ref()
+            .and_then(|(_, over)| over.clone());
         let now = ui.now();
         let last = self.st.tasks.edge_scrolled.take();
         let (Some(over), Some((x, y))) = (over, ui.pointer()) else {
