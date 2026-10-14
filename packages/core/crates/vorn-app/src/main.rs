@@ -96,6 +96,7 @@ fn shot(args: &Args) -> Result<(), String> {
         None => look::WINDOW,
     };
     let mut app = connect(&args.data_dir()?, Arc::new(|| {}))?;
+    app.set_notice_sink(Arc::new(vorn_app::notify::Recorded::default()));
     app.chrome = args.get("chrome") != Some("off");
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;

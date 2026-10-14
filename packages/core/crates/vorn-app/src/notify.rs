@@ -6,6 +6,8 @@
 //! seconds, as the renderer does. A run that ends is told regardless.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -244,12 +246,52 @@ fn ended(wf: &Value, run: &Value) -> Notice {
     }
 }
 
-/// Hands `notice` to the OS on a thread of its own, so a slow helper never
-/// holds up a frame. Failing to show one is not worth reporting.
-pub fn show(notice: Notice) {
-    std::thread::spawn(move || {
-        let _ = command(&notice.title, &notice.body).status();
-    });
+/// Where admitted notices go. The app shows them through [`Os`]; tests and
+/// offscreen frames swap in [`Recorded`], so they never reach the OS.
+pub trait Sink: Send + Sync {
+    fn show(&self, notice: Notice);
+}
+
+/// The OS's notifier.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Os;
+
+/// Notices handed to the OS by this process.
+static OS_SHOWN: AtomicUsize = AtomicUsize::new(0);
+
+/// How many notices this process has handed to the OS's notifier.
+pub fn os_shown() -> usize {
+    OS_SHOWN.load(Ordering::Relaxed)
+}
+
+impl Sink for Os {
+    /// Hands `notice` to the OS on a thread of its own, so a slow helper
+    /// never holds up a frame. Failing to show one is not worth reporting.
+    fn show(&self, notice: Notice) {
+        OS_SHOWN.fetch_add(1, Ordering::Relaxed);
+        std::thread::spawn(move || {
+            let _ = command(&notice.title, &notice.body).status();
+        });
+    }
+}
+
+/// Keeps the notices it is given, for a test to read; clones share them.
+#[derive(Debug, Default, Clone)]
+pub struct Recorded(Arc<Mutex<Vec<Notice>>>);
+
+impl Recorded {
+    /// The notices shown so far, oldest first.
+    pub fn notices(&self) -> Vec<Notice> {
+        self.0.lock().map(|n| n.clone()).unwrap_or_default()
+    }
+}
+
+impl Sink for Recorded {
+    fn show(&self, notice: Notice) {
+        if let Ok(mut n) = self.0.lock() {
+            n.push(notice);
+        }
+    }
 }
 
 /// The OS's own notifier, given the text as arguments or environment so
@@ -414,5 +456,19 @@ mod tests {
             ..notice
         };
         assert!(n.admit(&ended, true, now), "a run's end is told regardless");
+    }
+
+    #[test]
+    fn a_recorded_sink_keeps_notices_and_reaches_no_os() {
+        let sink = Recorded::default();
+        let shown = os_shown();
+        let notice = Notice {
+            title: "Vorn".into(),
+            body: "done".into(),
+            key: None,
+        };
+        sink.clone().show(notice.clone());
+        assert_eq!(sink.notices(), [notice]);
+        assert_eq!(os_shown(), shown);
     }
 }

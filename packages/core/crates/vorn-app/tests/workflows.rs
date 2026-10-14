@@ -8,12 +8,15 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::forms::field_of;
 use vorn_app::app::MOD;
 use vorn_app::gates::{self, GateOp, Mode, Place};
+use vorn_app::notify::{self, Recorded};
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
@@ -387,6 +390,49 @@ fn the_landing_answers_a_gate_and_the_prompt_asks_for_inputs() {
     );
     shot.click(&mut app, control("wf-missed-skip", WfAct::MissedSkip));
     assert_eq!(app.st.dialog, None);
+}
+
+#[test]
+fn a_finished_run_is_recorded_as_a_notice_and_never_reaches_the_os() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = workflows_view(&v);
+    let seen = Recorded::default();
+    app.set_notice_sink(Arc::new(seen.clone()));
+    let web = v.home.join("web");
+    seed(
+        &mut app,
+        &mut shot,
+        json!({
+            "id": "wf-tell", "name": "Tell me", "icon": "Rocket", "iconColor": "#22c55e",
+            "enabled": true, "workspaceId": "personal",
+            "nodes": [
+                { "id": "t", "type": "trigger", "label": "Manual", "position": { "x": 0, "y": 0 },
+                  "config": { "triggerType": "manual" } },
+                { "id": "s", "type": "script", "label": "Wait", "position": { "x": 0, "y": 100 },
+                  "config": { "scriptType": "bash", "scriptContent": "sleep 1",
+                              "projectName": "web", "projectPath": web } }
+            ],
+            "edges": [{ "id": "e", "source": "t", "target": "s" }]
+        }),
+    );
+    // Unfocused, as a test window is, so nothing holds a notice back.
+    shot.ui.set_window_focused(false);
+    app.rpc()
+        .call("workflow:run", json!({ "workflowId": "wf-tell" }))
+        .expect("the run starts");
+    let notice = shot.until(&mut app, "the run's notice", |_, _| {
+        seen.notices()
+            .into_iter()
+            .find(|n| n.body.starts_with("Workflow \"Tell me\""))
+    });
+    assert_eq!(notice.title, "Vorn");
+    assert!(
+        notice.body.starts_with("Workflow \"Tell me\" completed"),
+        "{notice:?}"
+    );
+    assert_eq!(notify::os_shown(), 0, "no notifier process is spawned");
 }
 
 fn gate(op: GateOp) -> Id {

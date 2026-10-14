@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use vorn_app::client::Endpoint;
+use vorn_app::notify::Recorded;
 use vorn_app::ui::{Id, Input, Offscreen, RenderMode, Ui};
 use vorn_app::{look, ui_config, App};
 
@@ -269,6 +270,8 @@ pub fn first_run(v: &TestVornd) -> App {
         "the grid endpoint is derived as vornd names it"
     );
     let mut app = App::connect(&ep, std::sync::Arc::new(|| {})).expect("connects and loads");
+    // The headless window is unfocused: notices would reach the real OS.
+    app.set_notice_sink(std::sync::Arc::new(Recorded::default()));
     app.set_data_dir(v.home.clone());
     assert_eq!(app.grid_error, None);
     wait_for("the startup calls", || {
