@@ -120,6 +120,44 @@ pub fn wait_quiet() -> Duration {
     t.elapsed()
 }
 
+/// Looks for builds once a second while a case runs, so a timing a build overlapped can be thrown out and run again.
+pub struct BuildWatch {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: std::thread::JoinHandle<Vec<String>>,
+}
+
+impl BuildWatch {
+    pub fn start() -> BuildWatch {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let s = std::sync::Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let mut seen: Vec<String> = Vec::new();
+            while !s.load(Ordering::Relaxed) {
+                for b in builds() {
+                    if !seen.contains(&b) {
+                        seen.push(b);
+                    }
+                }
+                for _ in 0..10 {
+                    if s.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+            seen
+        });
+        BuildWatch { stop, thread }
+    }
+
+    /// The build processes seen while the case ran, none when it was quiet.
+    pub fn finish(self) -> Vec<String> {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.thread.join().unwrap_or_default()
+    }
+}
+
 /// The load average over the last minute.
 pub fn load() -> f64 {
     let mut avg = [0f64; 3];

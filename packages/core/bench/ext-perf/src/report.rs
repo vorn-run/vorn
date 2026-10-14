@@ -26,13 +26,18 @@ fn group_key(v: &Value) -> String {
     )
 }
 
+/// A row the tables leave out: its case failed, or a build ran while it was timed.
+pub fn invalid(v: &Value) -> bool {
+    v.get("error").is_some() || v["builds_during"].as_array().is_some_and(|b| !b.is_empty())
+}
+
 fn load(dir: &Path) -> Result<(Groups, usize), String> {
     let text = std::fs::read_to_string(dir.join("raw.jsonl")).map_err(|e| e.to_string())?;
     let mut groups = Groups::new();
     let mut failed = 0;
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let v: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-        if v.get("error").is_some() {
+        if invalid(&v) {
             failed += 1;
             continue;
         }
@@ -155,7 +160,7 @@ pub fn write(dir: &Path) -> Result<(), String> {
     let _ = writeln!(out, "# Tasks and Workflows as extensions: measurements\n");
     let _ = writeln!(
         out,
-        "Machine: {}. Cells: median of the repeated runs (lowest–highest). Failed cases: {failed}.",
+        "Machine: {}. Cells: median of the repeated runs (lowest–highest). Rows left out (failed, or a build ran during them): {failed}.",
         meta["machine"]
     );
     let _ = writeln!(out, "Components: {}", meta["components"]);
@@ -325,12 +330,17 @@ pub fn write(dir: &Path) -> Result<(), String> {
                     &rows,
                     Some(("ext", "builtin")),
                 );
+                // With runs in parallel, one run's wall time per step measures how the engine shares out steps, not its cost, so it counts alone.
+                let solo = conc == "1";
                 for (label, p) in [
                     ("trigger→first p99", "/trigger_to_first_ms/p99"),
                     ("per step p99", "/per_step_us/p99"),
                     ("CPU per step", "/cpu_us_per_step/p50"),
                     ("peak KB/run", "/peak_kb_per_run/p50"),
                 ] {
+                    if p == "/per_step_us/p99" && !solo {
+                        continue;
+                    }
                     rule.check(
                         format!("Workflows {steps}×{conc}: {label}"),
                         runs,
@@ -338,6 +348,15 @@ pub fn write(dir: &Path) -> Result<(), String> {
                         "builtin",
                         p,
                     );
+                }
+                if let Some(r) = ratio(
+                    spread(
+                        runs.get("builtin").unwrap_or(&Vec::new()),
+                        "/steps_per_s/p50",
+                    ),
+                    spread(runs.get("ext").unwrap_or(&Vec::new()), "/steps_per_s/p50"),
+                ) {
+                    rule.lines.push((format!("Workflows {steps}×{conc}: time per step at throughput (builtin steps/s ÷ ext)"), r));
                 }
             }
             "gates" => {

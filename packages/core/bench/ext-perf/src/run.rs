@@ -99,6 +99,47 @@ fn compile(wasm: &Path, out: &Path) -> Result<Value, String> {
     Ok(Value::Object(sizes))
 }
 
+/// The cases a resumed run need not repeat: those that ended well with no build seen while they ran.
+fn kept(out: &Path) -> Result<Vec<(u64, Vec<String>)>, String> {
+    let Ok(text) = std::fs::read_to_string(out.join("raw.jsonl")) else {
+        return Ok(Vec::new());
+    };
+    let mut keep = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        if crate::report::invalid(&v) {
+            continue;
+        }
+        if let (Some(rep), Some(argv)) = (v["rep"].as_u64(), case_argv(&v, out)) {
+            keep.push((rep, argv));
+        }
+    }
+    Ok(keep)
+}
+
+/// The arguments a row was measured with: recorded since resuming existed, rebuilt from its fields before.
+fn case_argv(v: &Value, out: &Path) -> Option<Vec<String>> {
+    if let Some(a) = v["argv"].as_array() {
+        return a.iter().map(|x| x.as_str().map(str::to_owned)).collect();
+    }
+    let n = |k: &str| v[k].as_u64().map(|x| x.to_string());
+    let kind = v["kind"].as_str()?;
+    let mut argv = vec!["case".to_owned(), kind.to_owned()];
+    match kind {
+        "micro" => argv.extend([n("tier")?, out.join("cwasm").display().to_string()]),
+        _ => {
+            argv.push(v["variant"].as_str()?.to_owned());
+            match kind {
+                "tasks" | "board" => argv.push(n("tier")?),
+                "flows" => argv.extend([n("steps")?, n("concurrent")?]),
+                "gates" => argv.push(n("concurrent")?),
+                _ => {}
+            }
+        }
+    }
+    Some(argv)
+}
+
 /// `run`: every group, `reps` times, the variants of a group in turn and their order rotated each time.
 pub fn run(args: &[String]) -> Result<(), String> {
     let wasm = PathBuf::from(flag(args, "wasm").ok_or("--wasm is needed")?);
@@ -116,16 +157,20 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .split(',')
         .map(|t| t.parse().map_err(|_| format!("bad tier {t:?}")))
         .collect::<Result<_, _>>()?;
+    let resume = args.iter().any(|a| a == "--resume");
     let cwasm = out.join("cwasm");
-    let compiled = compile(&wasm, &cwasm)?;
+    let kept = if resume { kept(&out)? } else { Vec::new() };
+    // A resumed run keeps the components and meta of the run it finishes, so every row measured the same build.
+    if !resume || !cwasm.join("workflows.cwasm").exists() {
+        let compiled = compile(&wasm, &cwasm)?;
+        let meta = json!({ "machine": sys::machine(), "components": compiled, "reps": reps, "tiers": tiers });
+        std::fs::write(
+            out.join("meta.json"),
+            serde_json::to_string_pretty(&meta).unwrap_or_default(),
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let meta =
-        json!({ "machine": sys::machine(), "components": compiled, "reps": reps, "tiers": tiers });
-    std::fs::write(
-        out.join("meta.json"),
-        serde_json::to_string_pretty(&meta).unwrap_or_default(),
-    )
-    .map_err(|e| e.to_string())?;
     let mut raw = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -148,12 +193,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     argv.extend(g.rest.iter().cloned());
                 }
                 done += 1;
+                if kept.contains(&(rep as u64, argv.clone())) {
+                    continue;
+                }
                 eprintln!(
                     "ext-perf [{done}/{total}] rep {} {}",
                     rep + 1,
                     argv[1..].join(" ")
                 );
                 let load = sys::load();
+                let watch = sys::BuildWatch::start();
                 let t = Instant::now();
                 let child = Command::new(&exe)
                     .args(&argv)
@@ -174,6 +223,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 line["load_before"] = json!(load);
                 line["waited_s"] = json!(waited.as_secs_f64());
                 line["wall_s"] = json!(t.elapsed().as_secs_f64());
+                line["argv"] = json!(argv);
+                line["builds_during"] = json!(watch.finish());
                 writeln!(raw, "{line}").map_err(|e| e.to_string())?;
             }
         }
