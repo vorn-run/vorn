@@ -72,9 +72,12 @@ pub fn compile(engine: &Engine, path: &str) -> (Component, f64) {
     (c, compiled)
 }
 
-fn store(engine: &Engine, fonts: bool) -> Store<Host> {
+fn store(engine: &Engine, fonts: bool, layout_only: bool) -> Store<Host> {
     let mut b = WasiCtx::builder();
     b.inherit_stderr();
+    if layout_only {
+        b.env("VORN_POC_LAYOUT_ONLY", "1");
+    }
     if fonts {
         // The UI component reads the system faces, read-only, and nothing else.
         b.preopened_dir(
@@ -106,7 +109,7 @@ impl Backend {
     pub fn new(engine: &Engine, c: &Component) -> Backend {
         let mut linker: Linker<Host> = Linker::new(engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("wasi");
-        let mut store = store(engine, false);
+        let mut store = store(engine, false, false);
         let api = backend::Backend::instantiate(&mut store, c, &linker).expect("backend");
         Backend { store, api }
     }
@@ -132,10 +135,14 @@ pub struct UiB {
 
 impl UiB {
     pub fn new(engine: &Engine, c: &Component, cells: bool, scale: f32) -> UiB {
+        UiB::with(engine, c, cells, scale, false)
+    }
+    /// A UI component that lays out and stops: the guest side of a client-drawn display list.
+    pub fn with(engine: &Engine, c: &Component, cells: bool, scale: f32, layout_only: bool) -> UiB {
         let mut linker: Linker<Host> = Linker::new(engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("wasi");
         ui::Ui::add_to_linker::<_, HasSelf<Host>>(&mut linker, |h| h).expect("imports");
-        let mut store = store(engine, true);
+        let mut store = store(engine, true, layout_only);
         let api = ui::Ui::instantiate(&mut store, c, &linker).expect("ui");
         api.call_init(&mut store, cells, scale).expect("init");
         UiB { store, api }

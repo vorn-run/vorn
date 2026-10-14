@@ -592,6 +592,46 @@ fn main() {
         );
     }
 
+    // B's guest side when the client draws its display list: lay out, stop before raster.
+    {
+        let (spots, _) = spots_px.as_ref().unwrap();
+        let (w, h) = ((LOGICAL.0 * SCALE) as u32, (LOGICAL.1 * SCALE) as u32);
+        let t = Instant::now();
+        let mut b = wasm::UiB::with(&engine, &ui_c, false, SCALE, true);
+        let init = t.elapsed().as_secs_f64() * 1e3;
+        b.data(&rows_json);
+        b.frame(w, h, &[]);
+        let mut log = Vec::new();
+        for (label, steps) in script(spots, false) {
+            let ins: Vec<wasm::Input> = steps.iter().map(to_input).collect();
+            let t = Instant::now();
+            b.frame(w, h, &ins);
+            log.push((label, t.elapsed().as_secs_f64() * 1e3));
+        }
+        b.data(&Value::Array(many(&rows_json, 500)).to_string());
+        b.frame(w, h, &[]);
+        b.frame(w, h, &[wasm::Input::PointerMove(spots.rows[1])]);
+        let mut sc = Vec::new();
+        for i in 0..40 {
+            let t = Instant::now();
+            b.frame(
+                w,
+                h,
+                &[wasm::Input::Wheel(if i < 20 { 24.0 } else { -24.0 })],
+            );
+            sc.push(t.elapsed().as_secs_f64() * 1e3);
+        }
+        report.insert(
+            "b_pixels_layout_only".into(),
+            json!({
+                "instantiate_and_init_ms": round(init),
+                "interaction": timings(&log),
+                "scroll_500_rows": stats(sc),
+                "peak_linear_memory_mb": round(b.store.data().peak as f64 / 1048576.0),
+            }),
+        );
+    }
+
     // Many extensions open: twenty B instances on Pixels, against twenty A templates.
     let before = rss_mb();
     let t = Instant::now();
