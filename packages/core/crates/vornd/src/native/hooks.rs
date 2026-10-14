@@ -248,27 +248,33 @@ impl Hooks {
     /// is known; one that reports its own status gets only the hooks it needs.
     fn probe_claude(self: &Arc<Self>, native: &Arc<Native>) {
         let (weak, env) = (Arc::downgrade(self), Arc::clone(&native.env));
-        tokio::task::spawn_blocking(move || {
-            env.prime();
-            let deadline = Instant::now() + CLAUDE_PROBE_WAIT;
-            while !env.resolved() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(250));
-            }
-            let version = env
-                .find("claude")
-                .and_then(|bin| super::shell::version_of(&bin, Duration::from_secs(5)));
-            let Some(hooks) = weak.upgrade() else { return };
-            let reports = version.as_deref().is_some_and(claude::reports_status);
-            info!(?version, reports, "the Claude Code on PATH");
-            if !reports || hooks.claude_reports.swap(true, Ordering::SeqCst) {
-                return;
-            }
-            if hooks.owns_registration() && !hooks.stopped.load(Ordering::SeqCst) {
-                if let Err(err) = hooks.install_claude() {
-                    warn!(%err, "could not trim the hooks in Claude's settings");
+        // A thread of its own, so a slow probe never holds vornd's shutdown.
+        let spawned = std::thread::Builder::new()
+            .name("claude-probe".into())
+            .spawn(move || {
+                env.prime();
+                let deadline = Instant::now() + CLAUDE_PROBE_WAIT;
+                while !env.resolved() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(250));
                 }
-            }
-        });
+                let version = env
+                    .find("claude")
+                    .and_then(|bin| super::shell::version_of(&bin, Duration::from_secs(5)));
+                let Some(hooks) = weak.upgrade() else { return };
+                let reports = version.as_deref().is_some_and(claude::reports_status);
+                info!(?version, reports, "the Claude Code on PATH");
+                if !reports || hooks.claude_reports.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                if hooks.owns_registration() && !hooks.stopped.load(Ordering::SeqCst) {
+                    if let Err(err) = hooks.install_claude() {
+                        warn!(%err, "could not trim the hooks in Claude's settings");
+                    }
+                }
+            });
+        if let Err(err) = spawned {
+            warn!(%err, "could not probe Claude's version");
+        }
     }
 
     /// Denies what is pending and gives the registration up, when it is still this vornd's.
@@ -559,9 +565,16 @@ fn asks_permission(record: &Value) -> bool {
     let Some(p) = record.get("programStatus").filter(|p| p["native"] == true) else {
         return false;
     };
-    p["records"].as_array().into_iter().flatten().any(|r| {
-        r["state"] == "blocked" && r.get("kind").is_none_or(|k| k == "permission")
-    })
+    p["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(blocked_on_permission)
+}
+
+fn blocked_on_permission(r: &Value) -> bool {
+    let kind = r.get("kind");
+    r["state"] == "blocked" && kind.is_none_or(|k| k == "permission")
 }
 
 fn hook_status(native: &Native, id: &str, status: Option<Status>, promote: bool) {
