@@ -2547,6 +2547,9 @@ impl App {
             self.compose(input.clone());
             return true;
         }
+        if code == "Escape" && *m == 0 && self.address_revert(ui) {
+            return true;
+        }
         // Escape in the switcher's form cancels the form, not the switcher.
         if code == "Escape" && self.st.ws_form.is_some() {
             self.run(ui, Act::CancelWorkspace, Src::default());

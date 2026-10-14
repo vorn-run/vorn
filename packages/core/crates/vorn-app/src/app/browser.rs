@@ -2027,6 +2027,25 @@ impl App {
         true
     }
 
+    /// Escape in an address bar puts back the page actually loaded.
+    pub(super) fn address_revert(&mut self, ui: &mut Ui) -> bool {
+        let Some(id) = ui.focus() else { return false };
+        let Some(Act::Pane(PaneAct::Address(s))) = self.acts.text_of(id) else {
+            return false;
+        };
+        let url = self
+            .st
+            .bench
+            .browsers
+            .get(&s)
+            .and_then(|p| p.active())
+            .map_or("", |t| t.current());
+        let shown = if url == "about:blank" { "" } else { url }.to_owned();
+        ui.set_edit_text(id, &shown);
+        self.st.bench.live_mut(&s).draft = None;
+        true
+    }
+
     /// Escape closes the device picker or the versions menu.
     pub(super) fn pane_escape(&mut self) -> bool {
         if self.st.bench.picker.take().is_some() {
