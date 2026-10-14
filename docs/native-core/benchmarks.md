@@ -241,14 +241,14 @@ measured or guessed height, so a frame costs about the same at any size.
 Window 1440x900@2 (median of 3 runs after, 3 before at 100 and 1,000 and 1 at
 10,000); cells 180x32, 1 run. Frame p99 over the scroll and drag scripts.
 
-| Surface | Tasks  | Scroll p99 before | Drag p99 before | Scroll p99 after | Drag p99 after | Max after | Footprint before | Footprint after |
+| Surface |  Tasks | Scroll p99 before | Drag p99 before | Scroll p99 after | Drag p99 after | Max after | Footprint before | Footprint after |
 | ------- | -----: | ----------------: | --------------: | ---------------: | -------------: | --------: | ---------------: | --------------: |
-| Window  | 100    | 33.9 ms           | 37.6 ms         | 7.8 ms           | 8.3 ms         | 9.5 ms    | 93 MB            | 84 MB           |
-| Window  | 1,000  | 326 ms            | 453 ms          | 8.9 ms           | 9.0 ms         | 10.6 ms   | 886 MB           | 93 MB           |
-| Window  | 10,000 | 3,398 ms          | 3,811 ms        | 9.5 ms           | 8.2 ms         | 14.0 ms   | 3,588 MB         | 123 MB          |
-| Cells   | 100    | 48.1 ms           | 49.6 ms         | 9.1 ms           | 8.6 ms         | 9.3 ms    | 17 MB            | 13 MB           |
-| Cells   | 1,000  | 474 ms            | 469 ms          | 9.5 ms           | 12.5 ms        | 12.6 ms   | 648 MB           | 22 MB           |
-| Cells   | 10,000 | 5,030 ms          | 4,765 ms        | 11.0 ms          | 9.7 ms         | 15.5 ms   | 885 MB           | 52 MB           |
+| Window  |    100 |           33.9 ms |         37.6 ms |           7.8 ms |         8.3 ms |    9.5 ms |            93 MB |           84 MB |
+| Window  |  1,000 |            326 ms |          453 ms |           8.9 ms |         9.0 ms |   10.6 ms |           886 MB |           93 MB |
+| Window  | 10,000 |          3,398 ms |        3,811 ms |           9.5 ms |         8.2 ms |   14.0 ms |         3,588 MB |          123 MB |
+| Cells   |    100 |           48.1 ms |         49.6 ms |           9.1 ms |         8.6 ms |    9.3 ms |            17 MB |           13 MB |
+| Cells   |  1,000 |            474 ms |          469 ms |           9.5 ms |        12.5 ms |   12.6 ms |           648 MB |           22 MB |
+| Cells   | 10,000 |          5,030 ms |        4,765 ms |          11.0 ms |         9.7 ms |   15.5 ms |           885 MB |           52 MB |
 
 Before, every frame missed the budget at every tier; after, none does. Showing
 the board at 10,000 tasks takes 102 ms on a window (7.0 s before) and 98 ms on
