@@ -43,6 +43,41 @@ pub enum Effect {
     },
     /// A shell's OSC 133 prompt or command mark.
     Command(Mark),
+    /// An OSC 7501 program status report, checked against the protocol's limits.
+    ProgramStatus(ProgramReport),
+}
+
+/// What a program says it is doing (OSC 7501).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramState {
+    Idle,
+    Working,
+    Done,
+    Blocked,
+    Error,
+    /// Removes the record and every record beneath it; an empty id removes them all.
+    Clear,
+}
+
+/// What a blocked program needs from the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockedKind {
+    Permission,
+    Question,
+    Auth,
+}
+
+/// One OSC 7501 report: it replaces the record with its id ("" is the program itself).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramReport {
+    pub state: ProgramState,
+    pub kind: Option<BlockedKind>,
+    /// 0 to 100 for working or blocked work that gave one.
+    pub progress: Option<u8>,
+    pub id: String,
+    pub app: String,
+    pub title: String,
+    pub msg: String,
 }
 
 /// Where a shell is in running a command, as its OSC 133 marks say.
@@ -127,6 +162,8 @@ impl Theme {
 #[derive(Debug)]
 pub struct Emulator {
     pub(crate) term: Terminal<'static, 'static>,
+    /// `term`'s handle, which program status reports are routed by.
+    raw: libghostty_vt::ffi::Terminal,
     effects: Rc<RefCell<Vec<Effect>>>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
@@ -142,6 +179,12 @@ pub struct Emulator {
     pub(crate) parsed: u64,
     /// Synchronized output holds started, counted by Ghostty's render hold callback.
     holds: Rc<Cell<u64>>,
+}
+
+impl Drop for Emulator {
+    fn drop(&mut self) {
+        program::forget(self.raw);
+    }
 }
 
 impl Emulator {
@@ -164,6 +207,9 @@ impl Emulator {
         let effects = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&effects);
         term.on_pty_write(move |_, bytes| sink.borrow_mut().push(Effect::Reply(bytes.to_vec())))?;
+        // Ghostty registers userdata with each handler, which is how the raw handle is found.
+        let raw = libghostty_vt::ffi::last_userdata_terminal();
+        program::listen(raw, &effects)?;
         let sink = Rc::clone(&effects);
         term.on_bell(move |_| sink.borrow_mut().push(Effect::Bell))?;
         let sink = Rc::clone(&effects);
@@ -257,6 +303,7 @@ impl Emulator {
         })?;
         Ok(Self {
             term,
+            raw,
             effects,
             cols,
             rows,
@@ -577,6 +624,91 @@ fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
+/// OSC 7501 reports, which the Rust wrapper has no handler for: set on the raw handle and routed
+/// back to the emulator's effects through a per-thread table, as an emulator never leaves its thread.
+mod program {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::{Rc, Weak};
+
+    use libghostty_vt::ffi;
+
+    use super::{BlockedKind, Effect, ProgramReport, ProgramState};
+
+    type Sink = Weak<RefCell<Vec<Effect>>>;
+
+    thread_local! {
+        static SINKS: RefCell<HashMap<usize, Sink>> = RefCell::new(HashMap::new());
+    }
+
+    pub(super) fn listen(raw: ffi::Terminal, effects: &Rc<RefCell<Vec<Effect>>>) -> crate::Result<()> {
+        if raw.is_null() {
+            return Err(crate::Error::Ghostty(libghostty_vt::Error::InvalidValue));
+        }
+        SINKS.with(|s| s.borrow_mut().insert(raw as usize, Rc::downgrade(effects)));
+        let callback: ffi::TerminalProgramStatusFn = Some(report);
+        // SAFETY: `raw` is the live terminal just given userdata; the callback matches the option's ABI.
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                raw,
+                ffi::TerminalOption::PROGRAM_STATUS,
+                callback.map_or(std::ptr::null(), |f| f as *const std::ffi::c_void),
+            )
+        };
+        if result == ffi::Result::SUCCESS {
+            Ok(())
+        } else {
+            Err(crate::Error::Ghostty(libghostty_vt::Error::InvalidValue))
+        }
+    }
+
+    pub(super) fn forget(raw: ffi::Terminal) {
+        // Thread teardown may have dropped the table already.
+        let _ = SINKS.try_with(|s| s.borrow_mut().remove(&(raw as usize)));
+    }
+
+    unsafe extern "C" fn report(
+        raw: ffi::Terminal,
+        _: *mut std::ffi::c_void,
+        report: *const ffi::TerminalProgramStatus,
+    ) {
+        // SAFETY: Ghostty passes a valid report, and its strings, for the length of the call.
+        let r = unsafe { &*report };
+        let text = |s: ffi::String| {
+            // SAFETY: As above.
+            String::from_utf8_lossy(unsafe { s.to_bytes() }).into_owned()
+        };
+        let state = match r.state {
+            ffi::ProgramStatusState::IDLE => ProgramState::Idle,
+            ffi::ProgramStatusState::WORKING => ProgramState::Working,
+            ffi::ProgramStatusState::DONE => ProgramState::Done,
+            ffi::ProgramStatusState::BLOCKED => ProgramState::Blocked,
+            ffi::ProgramStatusState::ERROR => ProgramState::Error,
+            ffi::ProgramStatusState::CLEAR => ProgramState::Clear,
+            _ => return,
+        };
+        let kind = match r.kind {
+            ffi::ProgramStatusKind::PERMISSION => Some(BlockedKind::Permission),
+            ffi::ProgramStatusKind::QUESTION => Some(BlockedKind::Question),
+            ffi::ProgramStatusKind::AUTH => Some(BlockedKind::Auth),
+            _ => None,
+        };
+        let effect = Effect::ProgramStatus(ProgramReport {
+            state,
+            kind,
+            progress: u8::try_from(r.progress).ok().filter(|p| *p <= 100),
+            id: text(r.id),
+            app: text(r.app),
+            title: text(r.title),
+            msg: text(r.message),
+        });
+        let sink = SINKS.with(|s| s.borrow().get(&(raw as usize)).and_then(Weak::upgrade));
+        if let Some(sink) = sink {
+            sink.borrow_mut().push(effect);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,6 +756,76 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn programs(fx: &[Effect]) -> Vec<ProgramReport> {
+        fx.iter()
+            .filter_map(|f| match f {
+                Effect::ProgramStatus(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn program_status_reports_become_effects() {
+        let mut em = Emulator::new(80, 24).unwrap();
+        let mut fx = Vec::new();
+        // "Apply?" and "Signing in" in base64.
+        em.feed(
+            b"\x1b]7501;state=blocked:kind=auth:app=terraform:msg=QXBwbHk/\x1b\\\
+              \x1b]7501;state=working:progress=40:id=build/test:title=dGVzdHM=\x07\
+              \x1b]7501;state=clear:id=build\x1b\\",
+            &mut fx,
+        );
+        let got = programs(&fx);
+        assert_eq!(got.len(), 3);
+        assert_eq!(
+            got[0],
+            ProgramReport {
+                state: ProgramState::Blocked,
+                kind: Some(BlockedKind::Auth),
+                progress: None,
+                id: String::new(),
+                app: "terraform".into(),
+                title: String::new(),
+                msg: "Apply?".into(),
+            }
+        );
+        assert_eq!(
+            (got[1].state, got[1].progress, got[1].id.as_str()),
+            (ProgramState::Working, Some(40), "build/test")
+        );
+        assert_eq!(got[1].title, "tests");
+        assert_eq!((got[2].state, got[2].id.as_str()), (ProgramState::Clear, "build"));
+    }
+
+    #[test]
+    fn program_status_query_is_answered_and_bad_reports_dropped() {
+        let mut em = Emulator::new(80, 24).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b]7501;?\x1b\\", &mut fx);
+        let replies = replies(std::mem::take(&mut fx));
+        assert_eq!(replies.len(), 1);
+        assert!(replies[0].starts_with("\x1b]7501;?"), "{replies:?}");
+        // A control character in the message drops the report; "\x01" in base64 is "AQ==".
+        em.feed(b"\x1b]7501;state=working:msg=AQ==\x1b\\", &mut fx);
+        assert!(programs(&fx).is_empty());
+    }
+
+    #[test]
+    fn each_terminal_hears_only_its_own_reports() {
+        let mut a = Emulator::new(80, 24).unwrap();
+        let mut b = Emulator::new(80, 24).unwrap();
+        let (mut fa, mut fb) = (Vec::new(), Vec::new());
+        b.feed(b"\x1b]7501;state=done\x1b\\", &mut fb);
+        a.feed(b"\x1b]7501;state=error\x1b\\", &mut fa);
+        assert_eq!(programs(&fa)[0].state, ProgramState::Error);
+        assert_eq!(programs(&fb)[0].state, ProgramState::Done);
+        assert_eq!((fa.len(), fb.len()), (1, 1));
+        drop(a);
+        b.feed(b"\x1b]7501;state=idle\x1b\\", &mut fb);
+        assert_eq!(programs(&fb).len(), 2);
     }
 
     #[test]
@@ -770,3 +972,4 @@ mod tests {
         assert_eq!(replies(fx), ["\x1b[?997;1n", "\x1b[?997;2n"]);
     }
 }
+

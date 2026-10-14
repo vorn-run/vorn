@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0";
+const GHOSTTY_COMMIT: &str = "b7207b2ef6aa3e05af992a6febb9ee83ad69bb8c";
 
 /// Fixes applied to the fetched commit until upstream has them, in order. A
 /// `GHOSTTY_SOURCE_DIR` or pkg-config build uses its source as it is.
