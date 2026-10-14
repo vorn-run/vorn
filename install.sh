@@ -48,6 +48,79 @@ path_hint() {
   fi
 }
 
+# Linux ARM64 has no desktop app yet: the server and the vorn command, kept running by a systemd user unit.
+install_server() {
+  ARCHIVE="vorn-server-${VERSION_NUM}-$1.tar.gz"
+  LIB_DIR="${HOME}/.local/lib/vorn"
+  BIN_DIR="${HOME}/.local/bin"
+  CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}"
+  TMPDIR_INSTALL="$(mktemp -d)"
+
+  # VORN_ARCHIVE installs an archive already on this machine instead of downloading it.
+  if [ -n "$VORN_ARCHIVE" ]; then
+    cp "$VORN_ARCHIVE" "${TMPDIR_INSTALL}/${ARCHIVE}"
+  else
+    echo "Downloading ${ARCHIVE}..."
+    if ! curl -fSL --progress-bar -o "${TMPDIR_INSTALL}/${ARCHIVE}" \
+      "https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"; then
+      echo "Error: ${VERSION} has no ${ARCHIVE}. Set VORN_VERSION=vX.Y.Z to a release that lists one."
+      exit 1
+    fi
+  fi
+  tar -xzf "${TMPDIR_INSTALL}/${ARCHIVE}" -C "$TMPDIR_INSTALL"
+
+  # A running server keeps its files until it restarts below.
+  mkdir -p "$(dirname "$LIB_DIR")" "$BIN_DIR"
+  rm -rf "${LIB_DIR}.new"
+  mv "${TMPDIR_INSTALL}/${ARCHIVE%.tar.gz}" "${LIB_DIR}.new"
+  rm -rf "$LIB_DIR"
+  mv "${LIB_DIR}.new" "$LIB_DIR"
+  rm -rf "$TMPDIR_INSTALL"
+  ln -sf "${LIB_DIR}/bin/vorn" "${BIN_DIR}/vorn"
+
+  mkdir -p "${CONFIG_DIR}/vorn" "${CONFIG_DIR}/systemd/user"
+  if [ ! -f "${CONFIG_DIR}/vorn/server.env" ]; then
+    cat > "${CONFIG_DIR}/vorn/server.env" <<'ENV'
+# Options for `vorn server serve`, e.g. --host 0.0.0.0 to listen on every interface.
+VORN_SERVER_ARGS=
+ENV
+  fi
+  cat > "${CONFIG_DIR}/systemd/user/vornd.service" <<UNIT
+[Unit]
+Description=Vorn server
+
+[Service]
+EnvironmentFile=-${CONFIG_DIR}/vorn/server.env
+Environment=VORN_APP_VERSION=${VERSION_NUM}
+ExecStart="${LIB_DIR}/bin/vorn" server serve \$VORN_SERVER_ARGS
+# A restart or stop ends vornd only; vorn-sessiond keeps the terminals running.
+KillMode=process
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+
+  echo "${APP_NAME} server ${VERSION} installed to ${LIB_DIR}"
+  echo "The vorn command is at ${BIN_DIR}/vorn"
+  if [ -z "$VORN_NO_SERVICE" ] && command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user daemon-reload 2>/dev/null; then
+    systemctl --user enable vornd.service
+    systemctl --user restart vornd.service
+    # Lingering keeps the server up with nobody logged in.
+    loginctl enable-linger "$(id -un)" 2>/dev/null \
+      || echo "Run 'sudo loginctl enable-linger $(id -un)' to keep the server up after you log out."
+    echo "The server runs as the user unit vornd: systemctl --user status vornd"
+  else
+    echo "Start the server with: ${BIN_DIR}/vorn server serve"
+    echo "Or as a service: systemctl --user enable --now vornd"
+  fi
+  echo "Its options are in ${CONFIG_DIR}/vorn/server.env."
+  echo "Give a device access with: vorn server token create --name <device>"
+  path_hint "$BIN_DIR"
+}
+
 VERSION="${VORN_VERSION:-$(get_latest_version)}"
 
 if [ -z "$VERSION" ]; then
@@ -111,6 +184,13 @@ SHIM
     ;;
 
   Linux)
+    case "$ARCH" in
+      aarch64|arm64)
+        install_server linux-arm64
+        echo "Done!"
+        exit 0
+        ;;
+    esac
     ARTIFACT="${APP_NAME}-${VERSION_NUM}.AppImage"
     URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARTIFACT}"
     BIN_DIR="${HOME}/.local/bin"

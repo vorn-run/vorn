@@ -1,0 +1,133 @@
+# The Vorn server for Linux ARM64 boards, built natively and packed for install.sh; release.yml uploads it.
+name: Server (Linux ARM64)
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release to upload the archive to; empty keeps it as an artifact only
+        type: string
+        default: ''
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/server-linux-arm64.yml'
+
+jobs:
+  server:
+    name: linux-arm64
+    # The oldest supported Ubuntu, so the binaries run on older glibc too.
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 150
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Python setuptools
+        run: pip install setuptools
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install
+
+      # vornd serves it under /app.
+      - name: Build the web client
+        run: yarn build:web
+
+      # vornd's session engine parses with libghostty-vt, which needs Zig 0.16.0.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      # The version comes from packages/core/rust-toolchain.toml; the ARM64 image may lack rustup.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: server-linux-arm64-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: server-linux-arm64-
+
+      - name: Sync version from tag
+        if: inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag }}
+        run: npm pkg set version="${TAG#v}"
+
+      # The crates' versions follow package.json, so the binaries report the tag.
+      - name: Sync crate versions
+        run: bash scripts/sync-versions.sh
+
+      - name: Build
+        working-directory: packages/core
+        run: cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-cli
+
+      - name: Package
+        run: node packages/core/scripts/package-native.mjs --package server
+
+      # The archive's server, helpers and CLI run, and vornd serves the web client beside them.
+      - name: Packaged server runs
+        timeout-minutes: 10
+        run: |
+          dir=$(mktemp -d)
+          tar -xzf dist-native/vorn-server-*-linux-arm64.tar.gz -C "$dir"
+          bin=$(echo "$dir"/vorn-server-*/bin)
+          file "$bin/vornd" | tee /dev/stderr | grep -q 'ARM aarch64'
+          "$bin/vorn-sessiond" --version
+          "$bin/vorn" --version
+          export VORN_EXIT_WITH=$$ VORN_TAILSCALE=none
+          HOME="$dir/home" "$bin/vorn" server serve --data-dir "$dir/data" --port 0 > "$dir/serve.out" 2>&1 &
+          server=$!
+          for _ in $(seq 1 100); do grep -q '^{"port":' "$dir/serve.out" && break; sleep 0.2; done
+          cat "$dir/serve.out"
+          port=$(grep -o '^{"port":[0-9]*' "$dir/serve.out" | grep -o '[0-9]*$')
+          test -n "$port"
+          curl -fsS "http://127.0.0.1:$port/app/" | grep -qi '<html'
+          kill "$server"
+
+      - name: install.sh installs it
+        timeout-minutes: 10
+        run: |
+          dir=$(mktemp -d)
+          # The runner sets XDG_CONFIG_HOME, which install.sh honours.
+          HOME="$dir/home" XDG_CONFIG_HOME="$dir/home/.config" VORN_VERSION="v$(node -p 'require("./package.json").version')" \
+            VORN_ARCHIVE="$(echo "$PWD"/dist-native/vorn-server-*-linux-arm64.tar.gz)" VORN_NO_SERVICE=1 sh install.sh
+          test "$(readlink "$dir/home/.local/bin/vorn")" = "$dir/home/.local/lib/vorn/bin/vorn"
+          HOME="$dir/home" "$dir/home/.local/bin/vorn" --version
+          cat "$dir/home/.config/systemd/user/vornd.service"
+          systemd-analyze verify "$dir/home/.config/systemd/user/vornd.service"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vorn-server-linux-arm64
+          path: dist-native/vorn-server-*
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" dist-native/vorn-server-* --clobber

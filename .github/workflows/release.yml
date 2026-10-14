@@ -58,6 +58,14 @@ jobs:
       tag: ${{ needs.create-release.outputs.tag }}
     secrets: inherit
 
+  # The server alone for Linux ARM64 boards, which have no desktop app yet.
+  server-linux-arm64:
+    needs: create-release
+    uses: ./.github/workflows/server-linux-arm64.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit
+
   publish-npm:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest

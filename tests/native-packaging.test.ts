@@ -5,6 +5,7 @@ import {
   debControl,
   desktopEntry,
   infoPlist,
+  serverArchiveName,
   windowsVersion
 } from '../packages/core/scripts/package-native.mjs'
 import { electronFeed, feeds, nativeFeed } from '../packages/core/scripts/release-feeds.mjs'
@@ -40,6 +41,12 @@ describe('native packages', () => {
       appimage: 'Vorn-0.8.0-beta.9.AppImage',
       deb: 'vorn_0.8.0-beta.9_amd64.deb'
     })
+  })
+
+  it('names the server archive install.sh downloads', () => {
+    expect(serverArchiveName(version, 'linux', 'arm64')).toBe(
+      'vorn-server-0.8.0-beta.9-linux-arm64.tar.gz'
+    )
   })
 
   it('keeps the bundle identity and registers vorn:// links', () => {

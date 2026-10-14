@@ -6,6 +6,7 @@
 //   macOS    Vorn-<v>-arm64-mac.zip and Vorn-<v>-arm64.dmg (x64: Vorn-<v>-mac.zip, Vorn-<v>.dmg)
 //   Windows  Vorn-Setup-<v>.exe, an NSIS installer (scripts/vorn.nsi)
 //   Linux    Vorn-<v>.AppImage and vorn_<v>_amd64.deb
+//   server   vorn-server-<v>-<os>-<arch>.tar.gz (--package server), for machines without a desktop
 //
 // The app keeps the identity the Electron app had (com.vorn.app, "Vorn", the
 // same executable and install folder), so an existing install updates in
@@ -18,6 +19,7 @@
 //   --web-dir <dir>     the built web client (default: packages/web/dist)
 //   --out <dir>         default: dist-native at the repository root
 //   --version <v>       default: the root package.json's
+//   --package <kind>    app (default) or server
 //
 // macOS signs with the Developer ID identity in the keychain (or
 // VORN_SIGN_IDENTITY; `-` for ad hoc) and notarizes when APPLE_ID,
@@ -63,6 +65,11 @@ export function assetNames(version, platform, arch) {
     return { appimage: `Vorn-${version}.AppImage`, deb: `vorn_${version}_amd64.deb` }
   }
   throw new Error(`no package for ${platform}`)
+}
+
+/** The server-only archive for `platform` and `arch` (Node's names: linux, arm64). */
+export function serverArchiveName(version, platform, arch) {
+  return `vorn-server-${version}-${platform}-${arch}.tar.gz`
 }
 
 /** The four-part version Windows resources take: 0.8.0-beta.9 is 0.8.0.9. */
@@ -491,6 +498,28 @@ function packageLinux(opts) {
   return { assets: [image, deb], signing: 'unsigned', notarized: false }
 }
 
+/** The server alone: bin/ with vornd, vorn-sessiond and vorn, and web/dist, which vorn finds above bin/. */
+function packageServer({ daemonDir, webDir, out, version, work }) {
+  if (process.platform === 'win32') throw new Error('no server archive for Windows')
+  const name = serverArchiveName(version, process.platform, os.arch())
+  const top = name.replace(/\.tar\.gz$/, '')
+  const root = path.join(work, top)
+  for (const d of ['vornd', 'vorn-sessiond', 'vorn']) {
+    copyExe(path.join(daemonDir, d), path.join(root, 'bin', d))
+  }
+  if (!existsSync(path.join(webDir, 'index.html'))) {
+    throw new Error(`${webDir} has no index.html; run yarn build:web first`)
+  }
+  cpSync(webDir, path.join(root, 'web', 'dist'), { recursive: true })
+  for (const f of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+    copyFileSync(path.join(repo, f), path.join(root, f))
+  }
+  const archive = path.join(out, name)
+  rmSync(archive, { force: true })
+  run('tar', ['-czf', archive, '-C', work, top])
+  return { assets: [archive], signing: 'unsigned', notarized: false }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2))
   const binDir = path.resolve(args['bin-dir'] ?? path.join(core, 'target', 'release'))
@@ -505,7 +534,12 @@ function main() {
       args.version ?? JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).version,
     work: mkdtempSync(path.join(os.tmpdir(), 'vorn-package-'))
   }
-  const pack = { darwin: packageMac, win32: packageWindows, linux: packageLinux }[process.platform]
+  const kind = args.package ?? 'app'
+  if (kind !== 'app' && kind !== 'server') throw new Error(`--package ${kind}: app or server`)
+  const pack =
+    kind === 'server'
+      ? packageServer
+      : { darwin: packageMac, win32: packageWindows, linux: packageLinux }[process.platform]
   if (!pack) throw new Error(`no package for ${process.platform}`)
   try {
     const { assets, signing, notarized } = pack(opts)
