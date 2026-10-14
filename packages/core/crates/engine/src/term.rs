@@ -5,16 +5,22 @@
 //!
 //! Blob layout, format [`FORMAT`]: the fidelity byte, the last agent status
 //! (u32), the UTF-8 bytes a record split for the analyzer (a length byte and
-//! up to three bytes), then the screen checkpoint and the analyzer's state,
-//! each as a u32 length and its bytes. All integers little-endian.
+//! up to three bytes), then the screen checkpoint, the analyzer's state and
+//! the program status records, each as a u32 length and its bytes. All
+//! integers little-endian. Format 2 had no records.
 
 use vorn_analysis::rules::{Cursor, Rules, Screen};
 use vorn_analysis::Analyzer;
 use vorn_screen::{Checkpoint, Counters, Effect, Emulator, Theme, Uncut};
 
-/// The checkpoint format this engine writes and the only one it reads. A
-/// checkpoint in any other format is not a restore base.
-pub const FORMAT: u16 = 2;
+use crate::program::Store;
+
+/// The checkpoint format this engine writes. It reads this and the one
+/// before it; a checkpoint in any other format is not a restore base.
+pub const FORMAT: u16 = 3;
+
+/// The format before program status records, read as having none.
+pub(crate) const FORMAT_NO_PROGRAMS: u16 = 2;
 
 /// Whether a session's terminal is what a vornd that never died would have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +76,8 @@ pub(crate) struct Term {
     pub(crate) rules: Option<&'static Rules>,
     /// The rows the rules last read, kept for their allocations.
     rows: Vec<String>,
+    /// The program's OSC 7501 records.
+    pub(crate) programs: Store,
 }
 
 impl Term {
@@ -83,6 +91,7 @@ impl Term {
             colors: None,
             rules: None,
             rows: Vec::new(),
+            programs: Store::default(),
         })
     }
 
@@ -208,7 +217,9 @@ impl Term {
         self.set_colors(self.colors);
         let screen = cut?.encode();
         let analysis = self.analyzer.save();
-        let mut out = Vec::with_capacity(16 + screen.len() + analysis.len());
+        let mut programs = Vec::new();
+        self.programs.encode(&mut programs);
+        let mut out = Vec::with_capacity(20 + screen.len() + analysis.len() + programs.len());
         out.push(match self.fidelity {
             Fidelity::Exact => 0,
             Fidelity::Approximate => 1,
@@ -217,19 +228,19 @@ impl Term {
         // At most three bytes: a longer run was decoded already.
         out.push(self.carry.len() as u8);
         out.extend_from_slice(&self.carry);
-        for part in [&screen, &analysis] {
+        for part in [&screen, &analysis, &programs] {
             out.extend_from_slice(&(part.len() as u32).to_le_bytes());
             out.extend_from_slice(part);
         }
         Ok(out)
     }
 
-    /// The terminal a blob of format [`FORMAT`] holds, after the restore
-    /// check. A blob whose screen rebuilds but fails the check comes back
-    /// as `Err((RestoreCheck, Some(term)))`, the best a session without a
+    /// The terminal a blob of `format` holds, after the restore check. A
+    /// blob whose screen rebuilds but fails the check comes back as
+    /// `Err((RestoreCheck, Some(term)))`, the best a session without a
     /// valid base has.
-    pub(crate) fn load(blob: &[u8]) -> Result<Term, (Rejected, Option<Box<Term>>)> {
-        let (term, cp) = Term::unpack(blob).map_err(|why| (why, None))?;
+    pub(crate) fn load(blob: &[u8], format: u16) -> Result<Term, (Rejected, Option<Box<Term>>)> {
+        let (term, cp) = Term::unpack(blob, format).map_err(|why| (why, None))?;
         if cp.matches(&term.em) {
             Ok(term)
         } else {
@@ -238,8 +249,12 @@ impl Term {
     }
 
     /// The terminal a blob holds, with its screen checkpoint, unchecked.
-    fn unpack(blob: &[u8]) -> Result<(Term, Checkpoint), Rejected> {
-        let parts = split(blob).ok_or(Rejected::Decode)?;
+    fn unpack(blob: &[u8], format: u16) -> Result<(Term, Checkpoint), Rejected> {
+        let parts = split(blob, format).ok_or(Rejected::Decode)?;
+        let programs = match parts.programs {
+            Some(b) => Store::decode(b).ok_or(Rejected::Decode)?,
+            None => Store::default(),
+        };
         let cp = Checkpoint::decode(parts.screen).ok_or(Rejected::Decode)?;
         let analyzer = Analyzer::restore(parts.analysis).ok_or(Rejected::Decode)?;
         let em = Emulator::restore(&cp).map_err(|_| Rejected::Rebuild)?;
@@ -252,6 +267,7 @@ impl Term {
             colors: None,
             rules: None,
             rows: Vec::new(),
+            programs,
         };
         Ok((term, cp))
     }
@@ -295,7 +311,7 @@ impl Packed {
     /// decode then, so decoding it again rebuilds that same terminal. The
     /// check walks every cell, which a wake on attach cannot afford.
     pub(crate) fn wake(&self) -> Result<Term, Rejected> {
-        let (mut term, _) = Term::unpack(&self.blob)?;
+        let (mut term, _) = Term::unpack(&self.blob, FORMAT)?;
         term.em.set_counters(self.counters);
         term.set_colors(self.colors);
         Ok(term)
@@ -308,9 +324,10 @@ struct Parts<'a> {
     carry: &'a [u8],
     screen: &'a [u8],
     analysis: &'a [u8],
+    programs: Option<&'a [u8]>,
 }
 
-fn split(blob: &[u8]) -> Option<Parts<'_>> {
+fn split(blob: &[u8], format: u16) -> Option<Parts<'_>> {
     let (&fid, rest) = blob.split_first()?;
     let fidelity = match fid {
         0 => Fidelity::Exact,
@@ -325,6 +342,14 @@ fn split(blob: &[u8]) -> Option<Parts<'_>> {
     let (carry, rest) = take(rest, usize::from(n))?;
     let (screen, rest) = sized(rest)?;
     let (analysis, rest) = sized(rest)?;
+    let (programs, rest) = match format {
+        FORMAT => {
+            let (p, rest) = sized(rest)?;
+            (Some(p), rest)
+        }
+        FORMAT_NO_PROGRAMS => (None, rest),
+        _ => return None,
+    };
     if !rest.is_empty() {
         return None;
     }
@@ -334,6 +359,7 @@ fn split(blob: &[u8]) -> Option<Parts<'_>> {
         carry,
         screen,
         analysis,
+        programs,
     })
 }
 
@@ -436,7 +462,7 @@ any = ['^>']
     fn a_saved_term_loads_back_and_carries_on_alike() {
         let mut a = fed(&[b"\x1b[31mone\r\ntwo \xe2\x82", b"\xac\r\n$ "]);
         let blob = a.save().unwrap();
-        let mut b = Term::load(&blob).map_err(|(r, _)| r).unwrap();
+        let mut b = Term::load(&blob, FORMAT).map_err(|(r, _)| r).unwrap();
         let mut fx = Vec::new();
         for t in [&mut a, &mut b] {
             t.feed(b"three\r\n(y/n) ", true, &mut fx);
@@ -484,7 +510,7 @@ any = ['^>']
             "Ghostty's cube: {replies:?}"
         );
         let blob = t.save().expect("a checkpoint with default colours set");
-        assert!(Term::load(&blob).is_ok());
+        assert!(Term::load(&blob, FORMAT).is_ok());
         fx.clear();
         t.feed(b"\x1b]10;?\x1b\\", true, &mut fx);
         assert_eq!(fx.len(), 1, "still answered after the cut: {fx:?}");
@@ -512,14 +538,41 @@ any = ['^>']
     }
 
     #[test]
+    fn a_format_2_blob_loads_with_no_records() {
+        let mut a = fed(&[b"hello"]);
+        a.programs.report(vorn_screen::ProgramReport {
+            state: vorn_screen::ProgramState::Working,
+            kind: None,
+            progress: Some(3),
+            id: "a".into(),
+            app: String::new(),
+            title: String::new(),
+            msg: "m".into(),
+        });
+        a.programs.take_changed();
+        let blob = a.save().unwrap();
+        let mut programs = Vec::new();
+        a.programs.encode(&mut programs);
+        let old = &blob[..blob.len() - 4 - programs.len()];
+        let b = Term::load(old, FORMAT_NO_PROGRAMS)
+            .map_err(|(r, _)| r)
+            .unwrap();
+        assert_eq!(b.programs, Store::default());
+        assert!(Term::load(old, FORMAT).is_err());
+        assert!(Term::load(&blob, FORMAT_NO_PROGRAMS).is_err());
+        let c = Term::load(&blob, FORMAT).map_err(|(r, _)| r).unwrap();
+        assert_eq!(c.programs, a.programs);
+    }
+
+    #[test]
     fn damaged_blobs_are_rejected_not_trusted() {
         let mut a = fed(&[b"hello"]);
         let blob = a.save().unwrap();
         for n in 0..blob.len() {
-            assert!(Term::load(&blob[..n]).is_err(), "{n}");
+            assert!(Term::load(&blob[..n], FORMAT).is_err(), "{n}");
         }
         let mut longer = blob.clone();
         longer.push(0);
-        assert!(Term::load(&longer).is_err());
+        assert!(Term::load(&longer, FORMAT).is_err());
     }
 }
