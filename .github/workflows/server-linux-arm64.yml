@@ -111,7 +111,8 @@ jobs:
         timeout-minutes: 10
         run: |
           dir=$(mktemp -d)
-          HOME="$dir/home" VORN_VERSION="v$(node -p 'require("./package.json").version')" \
+          # The runner sets XDG_CONFIG_HOME, which install.sh honours.
+          HOME="$dir/home" XDG_CONFIG_HOME="$dir/home/.config" VORN_VERSION="v$(node -p 'require("./package.json").version')" \
             VORN_ARCHIVE="$(echo "$PWD"/dist-native/vorn-server-*-linux-arm64.tar.gz)" VORN_NO_SERVICE=1 sh install.sh
           test "$(readlink "$dir/home/.local/bin/vorn")" = "$dir/home/.local/lib/vorn/bin/vorn"
           HOME="$dir/home" "$dir/home/.local/bin/vorn" --version
