@@ -8,6 +8,7 @@ use crate::exit::ExitCode;
 use crate::js::{self, field, present, truthy};
 use crate::output::{paint_status, short_id, table, time_ago};
 use crate::paths;
+use crate::status;
 
 const AGENTS: [&str; 5] = ["claude", "copilot", "codex", "opencode", "gemini"];
 
@@ -28,6 +29,7 @@ Options for start
   --branch <branch>   Branch to check out
   --worktree          Run in a new git worktree
   --headless          No terminal pane; the agent runs to completion
+  --wait              With --headless, stay until it ends and show it to the terminal
   --name <label>      Display name for the session
 ";
 
@@ -219,10 +221,15 @@ async fn start_session(ctx: &mut Context<'_>, agent: &str) -> Result<ExitCode, C
         "terminal:create"
     };
     let session = ctx.call(method, Some(Value::Object(payload))).await?;
+    let wait = args.headless && args.wait;
 
     if ctx.args.json {
         ctx.io.write(&js::as_json(&session));
-        return Ok(ExitCode::Ok);
+        return if wait {
+            wait_headless(ctx, &session).await
+        } else {
+            Ok(ExitCode::Ok)
+        };
     }
 
     let path = match field(&session, "worktreePath") {
@@ -241,7 +248,42 @@ async fn start_session(ctx: &mut Context<'_>, agent: &str) -> Result<ExitCode, C
     }
     lines.push(String::new());
     ctx.io.write(&lines.join("\n"));
+    if wait {
+        return wait_headless(ctx, &session).await;
+    }
     Ok(ExitCode::Ok)
+}
+
+/// Waits for headless `session` to end, reporting it to a terminal (OSC
+/// 7501) as it goes; fails when its agent does.
+async fn wait_headless(ctx: &mut Context<'_>, session: &Value) -> Result<ExitCode, CommandError> {
+    let id = text(field(session, "id"));
+    let name = [field(session, "displayName"), field(session, "agentType")]
+        .into_iter()
+        .map(text)
+        .find(|n| !n.is_empty())
+        .unwrap_or_else(|| "headless".to_owned());
+    let report = ctx.io.is_tty() && !ctx.args.json;
+    let mut reporter = status::Reporter::default();
+    loop {
+        let now = items(ctx.call("headless:list", None).await?)
+            .into_iter()
+            .find(|s| field(s, "id").and_then(Value::as_str) == Some(id.as_str()))
+            .ok_or_else(|| CommandError::Refused(format!("session {} is gone", short_id(&id))))?;
+        let record = status::headless_record(&now, &name);
+        let state = record.state;
+        if report {
+            let out = reporter.changes(vec![record]);
+            if !out.is_empty() {
+                ctx.io.write(&out);
+            }
+        }
+        match state {
+            "done" => return Ok(ExitCode::Ok),
+            "error" => return Ok(ExitCode::Failure),
+            _ => tokio::time::sleep(status::POLL).await,
+        }
+    }
 }
 
 /// Where a project by that name lives, so `--project` means the same thing everywhere.
