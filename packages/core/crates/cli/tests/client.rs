@@ -217,11 +217,19 @@ async fn starts_a_server_when_none_is_running() {
     assert_eq!(output.status.code(), Some(0), "{err}");
     assert_eq!(err, "No server running, starting one.\nNo workflows.\n");
     let argv = std::fs::read_to_string(data.path().join("argv.txt")).unwrap();
-    assert_eq!(argv, format!("--data-dir {}", data.path().display()));
-    // What the server printed went to its log, not to this command's output.
+    // The server writes, and rotates, its own log.
+    let log = data.path().join("server.log");
+    assert_eq!(
+        argv,
+        format!(
+            "--data-dir {} --log-file {}",
+            data.path().display(),
+            log.display()
+        )
+    );
+    // Nothing it printed reached this command's output.
     assert!(output.stdout.is_empty());
-    let log = std::fs::read_to_string(data.path().join("server.log")).unwrap();
-    assert!(log.contains("--data-dir"), "{log}");
+    assert!(data.path().join("server.stderr").is_file());
 }
 
 #[tokio::test]

@@ -459,12 +459,7 @@ fn stage_mac(app: &Path, zip: &Path, version: &str) -> Result<PathBuf, String> {
     // for a restart, that launch finds it done. A refusal here is the launch's to report.
     let _ = run(
         "spctl",
-        &[
-            os("--assess"),
-            os("--type"),
-            os("execute"),
-            new.as_os_str(),
-        ],
+        &[os("--assess"), os("--type"), os("execute"), new.as_os_str()],
     );
     Ok(new)
 }
