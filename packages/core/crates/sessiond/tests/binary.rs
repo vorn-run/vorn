@@ -170,7 +170,7 @@ async fn sigterm_leaves_nothing_in_run() {
 }
 
 /// RC-T11: an old sessiond drains. New sessions go to the new one, and the
-/// old one exits after its last session is released.
+/// old one exits once its last session ends: no vornd is left to release it.
 #[tokio::test]
 async fn an_old_sessiond_drains_and_exits() {
     let home = tempfile::tempdir().unwrap();
@@ -209,14 +209,9 @@ async fn an_old_sessiond_drains_and_exits() {
             }
         }
     }
-    assert!(launch::alive(old.pid), "it waits for the release");
-    o.send(ToSessiond::Release(SessionRef {
-        session: kept.session,
-    }))
-    .await;
     assert!(
         gone_within(old.pid, Duration::from_secs(5)),
-        "the old one exits"
+        "the old one exits without waiting for a release"
     );
     let left = launch::running(home.path());
     assert_eq!(left, vec![new.clone()]);
