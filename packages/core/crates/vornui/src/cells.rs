@@ -1017,6 +1017,17 @@ fn span_html(out: &mut String, c: &Cell, text: &str) {
 
 /// The nearest of the xterm 256 colours to `c`.
 pub fn ansi256(c: [u8; 3]) -> u8 {
+    // The surfaces are a few levels apart, under the ramp's step of ten: chosen
+    // a step each, in order, so panels and wells stay apart on Terminal.app.
+    const SURFACES: [([u8; 3], u8); 4] = [
+        ([0x0d, 0x0d, 0x0f], 232),
+        ([0x10, 0x10, 0x12], 233),
+        ([0x14, 0x14, 0x16], 234),
+        ([0x1c, 0x1c, 0x20], 235),
+    ];
+    if let Some((_, i)) = SURFACES.iter().find(|(rgb, _)| *rgb == c) {
+        return *i;
+    }
     const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
     let near = |v: u8| -> usize {
         STEPS
@@ -1028,7 +1039,7 @@ pub fn ansi256(c: [u8; 3]) -> u8 {
     let (r, g, b) = (near(c[0]), near(c[1]), near(c[2]));
     let cube = [STEPS[r], STEPS[g], STEPS[b]];
     let avg = (u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2])) / 3;
-    let gray_i = ((avg.saturating_sub(8)) / 10).min(23) as u8;
+    let gray_i = ((avg.saturating_sub(8) + 5) / 10).min(23) as u8;
     let gray = 8 + gray_i * 10;
     let dist = |a: [u8; 3]| -> i32 {
         (0..3)
@@ -1323,5 +1334,23 @@ mod edit_tests {
         );
         let empty = edit_cells("", 0, &[], (5, 1), false);
         assert_eq!((empty.runs.len(), empty.caret), (0, Some((0, 0))));
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+
+    #[test]
+    fn the_surfaces_keep_their_order_a_step_apart_in_256_colours() {
+        let idx: Vec<u8> = [0x0d0d0f, 0x101012, 0x141416, 0x1c1c20]
+            .map(|h: u32| ansi256([(h >> 16) as u8, (h >> 8) as u8, h as u8]))
+            .to_vec();
+        assert_eq!(idx, [232, 233, 234, 235]);
+        // A hover tint over the base is a visible step up from every surface.
+        let tint = over([0x0d, 0x0d, 0x0f], Rgba::white(0.14), 1.0);
+        assert!(ansi256(tint) > 235, "{tint:?} -> {}", ansi256(tint));
+        assert_eq!(ansi256([255, 255, 255]), 231);
+        assert_eq!(ansi256([0x6c, 0x6c, 0x6c]), 242);
     }
 }

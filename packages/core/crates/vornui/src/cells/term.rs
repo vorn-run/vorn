@@ -40,6 +40,10 @@ pub struct Terminal {
     prev: Option<Buffer>,
     kitty: bool,
     active: bool,
+    /// The terminal takes OSC 22 pointer shapes.
+    shapes: bool,
+    /// The pointer shape last asked for.
+    pointer: &'static str,
 }
 
 impl Terminal {
@@ -72,6 +76,11 @@ impl Terminal {
             prev: None,
             kitty,
             active: true,
+            shapes: takes_pointer_shapes(
+                std::env::var("TERM_PROGRAM").ok().as_deref(),
+                std::env::var("TERM").ok().as_deref(),
+            ),
+            pointer: "default",
         })
     }
 
@@ -135,6 +144,24 @@ impl Terminal {
         Ok(written)
     }
 
+    /// Shows `cursor` as the mouse pointer, where the terminal takes OSC 22;
+    /// elsewhere controls show they can be clicked by their fill instead.
+    pub fn set_pointer(&mut self, cursor: crate::Cursor) -> io::Result<()> {
+        let name = match cursor {
+            crate::Cursor::Default => "default",
+            crate::Cursor::Pointer => "pointer",
+            crate::Cursor::Text => "text",
+            crate::Cursor::ColResize => "ew-resize",
+            crate::Cursor::RowResize => "ns-resize",
+        };
+        if !self.shapes || name == self.pointer {
+            return Ok(());
+        }
+        self.pointer = name;
+        write!(self.out, "\x1b]22;{name}\x1b\\")?;
+        self.out.flush()
+    }
+
     /// The next event within `timeout`, if any.
     pub fn poll(timeout: Duration) -> io::Result<Option<TermEvent>> {
         if !event::poll(timeout)? {
@@ -149,6 +176,7 @@ impl Terminal {
             return Ok(());
         }
         self.active = false;
+        let _ = self.set_pointer(crate::Cursor::Default);
         if self.kitty {
             execute!(self.out, PopKeyboardEnhancementFlags)?;
         }
@@ -170,6 +198,19 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.leave();
     }
+}
+
+/// Whether the terminal named by `TERM_PROGRAM` and `TERM` changes the mouse
+/// pointer on OSC 22. Terminal.app and iTerm2 do not; the rest are left alone too,
+/// since an unknown OSC can print.
+fn takes_pointer_shapes(program: Option<&str>, term: Option<&str>) -> bool {
+    let program = program.unwrap_or_default().to_ascii_lowercase();
+    let term = term.unwrap_or_default();
+    matches!(program.as_str(), "ghostty" | "wezterm" | "kitty")
+        || term.starts_with("xterm-kitty")
+        || term.starts_with("xterm-ghostty")
+        || term.starts_with("foot")
+        || term == "wezterm"
 }
 
 fn color(c: [u8; 3], depth: Depth) -> Color {
@@ -411,5 +452,22 @@ mod tests {
                 text: None
             })
         );
+    }
+
+    #[test]
+    fn pointer_shapes_go_only_to_terminals_that_take_them() {
+        assert!(takes_pointer_shapes(Some("ghostty"), Some("xterm-ghostty")));
+        assert!(takes_pointer_shapes(Some("WezTerm"), None));
+        assert!(takes_pointer_shapes(None, Some("xterm-kitty")));
+        assert!(takes_pointer_shapes(None, Some("foot-extra")));
+        assert!(!takes_pointer_shapes(
+            Some("Apple_Terminal"),
+            Some("xterm-256color")
+        ));
+        assert!(!takes_pointer_shapes(
+            Some("iTerm.app"),
+            Some("xterm-256color")
+        ));
+        assert!(!takes_pointer_shapes(None, None));
     }
 }

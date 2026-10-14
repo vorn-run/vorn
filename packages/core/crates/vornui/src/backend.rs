@@ -81,6 +81,8 @@ impl Backend for Cells {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(t) = &mut self.terminal {
             t.draw(&self.buffer).map_err(|e| e.to_string())?;
+            t.set_pointer(ui.terminal_pointer())
+                .map_err(|e| e.to_string())?;
         }
         Ok(true)
     }

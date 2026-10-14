@@ -711,6 +711,28 @@ impl Ui {
         self.st.cursor
     }
 
+    /// The pointer's shape on a terminal: [`Ui::cursor`], with a hand over
+    /// anything a press activates, since a terminal shows a text beam otherwise.
+    pub fn terminal_pointer(&self) -> Cursor {
+        if self.st.cursor != Cursor::Default {
+            return self.st.cursor;
+        }
+        let Some(p) = self.st.pointer else {
+            return Cursor::Default;
+        };
+        let clickable = self
+            .st
+            .stack(p)
+            .filter(|h| h.action.is_some() || h.sense.has(Sense::CLICK) || h.frames.is_some())
+            .last()
+            .is_some();
+        if clickable {
+            Cursor::Pointer
+        } else {
+            Cursor::Default
+        }
+    }
+
     /// Whether something is animating, so the next frame should come on
     /// the display's beat.
     pub fn animating(&self) -> bool {

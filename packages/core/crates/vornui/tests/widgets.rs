@@ -872,3 +872,32 @@ fn on_cells_a_fresh_field_takes_keys_and_shows_its_caret() {
     let cursor = ui.paint_list().and_then(|l| l.cursor).expect("caret");
     assert_eq!((cursor.col, cursor.row), (2, 0));
 }
+
+#[test]
+fn a_terminal_shows_a_hand_over_controls_and_a_beam_over_fields() {
+    let (b, f) = (Id::new("press-me"), Id::new("type-here"));
+    let build = |ui: &Ui| {
+        div()
+            .col()
+            .child(widgets::button(ui, b, "Save"))
+            .child(
+                widgets::field(f, "Name", "", vornui::TextStyle::ui(12.0), color::GRAY_300)
+                    .w(200.0),
+            )
+            .child(vornui::text("plain", 12.0, color::GRAY_300))
+    };
+    let mut r = Rig::new();
+    r.frame(&build);
+    let at = |r: &Rig, id: Id| {
+        let x = r.ui.rect_of(id).unwrap();
+        (x.x + x.w / 2.0, x.y + x.h / 2.0)
+    };
+    let (x, y) = at(&r, b);
+    r.ui.pointer_move(x, y);
+    assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Pointer);
+    let (x, y) = at(&r, f);
+    r.ui.pointer_move(x, y);
+    assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Text);
+    r.ui.pointer_move(SIZE.0 - 2.0, SIZE.1 - 2.0);
+    assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Default);
+}
