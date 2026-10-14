@@ -157,7 +157,7 @@ fn shot(args: &Args) -> Result<(), String> {
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
     if let Some(c) = args.get("clipboard") {
-        ui.set_clipboard(Box::new(MemoryClipboard(Some(c.to_owned()))));
+        ui.set_clipboard(Box::new(MemoryClipboard::text(c)));
     }
     // The startup calls answer before the first frame is drawn.
     let until = Instant::now() + Duration::from_secs(5);

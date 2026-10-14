@@ -15,18 +15,39 @@ use crate::input::{mods, Input};
 pub trait Clipboard {
     fn get(&mut self) -> Option<String>;
     fn set(&mut self, text: &str);
+    /// Whether it holds an image (a screenshot), which a program in a
+    /// terminal reads for itself when sent Ctrl+V.
+    fn has_image(&mut self) -> bool {
+        false
+    }
 }
 
 /// A clipboard that lives as long as the [`Ui`](crate::Ui).
 #[derive(Debug, Default)]
-pub struct MemoryClipboard(pub Option<String>);
+pub struct MemoryClipboard {
+    pub text: Option<String>,
+    pub image: bool,
+}
+
+impl MemoryClipboard {
+    pub fn text(text: &str) -> MemoryClipboard {
+        MemoryClipboard {
+            text: Some(text.to_owned()),
+            image: false,
+        }
+    }
+}
 
 impl Clipboard for MemoryClipboard {
     fn get(&mut self) -> Option<String> {
-        self.0.clone()
+        self.text.clone()
     }
     fn set(&mut self, text: &str) {
-        self.0 = Some(text.to_owned());
+        self.text = Some(text.to_owned());
+        self.image = false;
+    }
+    fn has_image(&mut self) -> bool {
+        self.image
     }
 }
 
@@ -463,7 +484,7 @@ mod tests {
         e.key(&key("KeyA", mods::CTRL), false, &mut c);
         e.key(&key("KeyC", mods::CTRL), false, &mut c);
         e.key(&key("KeyX", mods::CTRL), false, &mut c);
-        assert_eq!((e.text(), c.0.as_deref()), ("secret", None));
+        assert_eq!((e.text(), c.text.as_deref()), ("secret", None));
     }
 
     #[test]
@@ -475,7 +496,7 @@ mod tests {
             e.key(&key("KeyX", mods::CTRL), false, &mut c),
             Outcome::Changed
         );
-        assert_eq!((e.text(), c.0.as_deref()), ("", Some("abc")));
+        assert_eq!((e.text(), c.text.as_deref()), ("", Some("abc")));
         e.key(&key("KeyV", mods::SUPER), true, &mut c);
         e.key(&key("KeyV", mods::SUPER), true, &mut c);
         assert_eq!(e.text(), "abcabc");

@@ -41,7 +41,7 @@ pub mod window;
 /// The browser's host behind the desktop's names, so an app opens the same way in both.
 #[cfg(target_arch = "wasm32")]
 pub mod window {
-    pub use crate::host::{App, UserEvent, Waker, WindowOptions};
+    pub use crate::host::{App, Dropped, UserEvent, Waker, WindowOptions};
     pub use crate::web::{run, run_with};
 }
 
@@ -66,4 +66,4 @@ pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
     ROOT_NODE,
 };
-pub use window::{run, run_with, App, UserEvent, Waker, WindowOptions};
+pub use window::{run, run_with, App, Dropped, UserEvent, Waker, WindowOptions};
