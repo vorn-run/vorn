@@ -1,0 +1,170 @@
+{
+  "protocol": 1,
+  "id": "linear",
+  "name": "Linear",
+  "version": "0.1.3",
+  "kind": "connector",
+  "description": "Trigger workflows from Linear issues, and comment or close them from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M3.035 12.943c.207 1.98 1.07 3.904 2.587 5.421 1.517 1.517 3.441 2.38 5.42 2.587z",
+      "M3 11.494L12.492 20.986c.806-.045 1.606-.198 2.378-.459L3.459 9.115A9.6 9.6 0 003 11.494z",
+      "M3.867 8.11l12.009 12.009a9.6 9.6 0 001.773-1.123L4.99 6.337a9.6 9.6 0 00-1.123 1.773z",
+      "M5.663 5.595c3.518-3.474 9.186-3.46 12.687.04 3.501 3.501 3.515 9.169.041 12.687z"
+    ]
+  },
+  "auth": {
+    "rung": "key",
+    "keys": ["apiKey"]
+  },
+  "triggers": [
+    {
+      "type": "issueCreated",
+      "label": "An issue is created or changed",
+      "description": "Fires for each issue the query returns that Vorn has not seen at this time.",
+      "statusMapping": [
+        {
+          "upstream": "backlog",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "unstarted",
+          "suggestedLocal": "todo"
+        },
+        {
+          "upstream": "started",
+          "suggestedLocal": "in_progress"
+        },
+        {
+          "upstream": "completed",
+          "suggestedLocal": "done"
+        },
+        {
+          "upstream": "canceled",
+          "suggestedLocal": "cancelled"
+        }
+      ],
+      "defaultWorkflow": {
+        "name": "Linear: issues",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "linear",
+        "triggerType": "issueCreated",
+        "env": [
+          {
+            "name": "LINEAR_API_KEY",
+            "required": true,
+            "secret": true,
+            "description": "Create a personal API key at linear.app/settings/api."
+          },
+          {
+            "name": "LINEAR_TEAM_KEY",
+            "required": false,
+            "secret": false,
+            "description": "Upper-case key such as ENG. Leave blank for every team you can see."
+          },
+          {
+            "name": "LINEAR_STATE_TYPE",
+            "required": false,
+            "secret": false,
+            "description": "One of backlog, unstarted, started, completed, canceled. Blank for all states."
+          },
+          {
+            "name": "LINEAR_LIMIT",
+            "required": false,
+            "secret": false
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "commentOnIssue",
+      "label": "Comment on an issue",
+      "description": "Post a comment on a Linear issue.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "identifier",
+          "label": "Issue",
+          "type": "string",
+          "required": true,
+          "description": "e.g. ENG-123"
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "url",
+          "description": "Where to read the comment"
+        }
+      ]
+    },
+    {
+      "type": "createIssue",
+      "label": "Create an issue",
+      "description": "Open a new Linear issue and return its identifier and url.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "teamKey",
+          "label": "Team key",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the connection’s team."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "identifier",
+          "description": "e.g. ENG-123"
+        },
+        {
+          "key": "url",
+          "description": "Where to open it"
+        }
+      ]
+    },
+    {
+      "type": "closeIssue",
+      "label": "Close an issue",
+      "description": "Move an issue to the first completed state its team defines.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "identifier",
+          "label": "Issue",
+          "type": "string",
+          "required": true,
+          "description": "e.g. ENG-123"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "state",
+          "description": "The state it now holds"
+        }
+      ]
+    }
+  ]
+}

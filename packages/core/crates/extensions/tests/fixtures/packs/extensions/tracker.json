@@ -1,0 +1,33 @@
+{
+  "id": "tracker",
+  "name": "Tracker links",
+  "version": "1.4.2",
+  "kind": "extension",
+  "protocol": 1,
+  "permissions": ["git.read", "terminal.selection", "card.rename"],
+  "activates": {
+    "remoteHost": ["github.com"],
+    "agent": ["claude", "copilot"],
+    "platform": ["darwin", "linux"]
+  },
+  "contributes": {
+    "linkHandlers": [
+      {
+        "id": "issue",
+        "title": "Open the issue",
+        "pattern": "PROJ-\\d+",
+        "example": "PROJ-12",
+        "when": { "agent": ["claude"] }
+      }
+    ],
+    "panes": [
+      {
+        "id": "issue",
+        "title": "Issue",
+        "description": "The issue a link names",
+        "web": "web/issue.html",
+        "icon": { "viewBox": "0 0 24 24", "paths": ["M4 4h16v16H4z"] }
+      }
+    ]
+  }
+}

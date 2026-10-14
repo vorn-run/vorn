@@ -1,0 +1,802 @@
+{
+  "protocol": 1,
+  "id": "ado",
+  "name": "Azure DevOps",
+  "version": "0.4.1",
+  "kind": "connector",
+  "description": "Trigger workflows from work items and pull requests, and review, comment, vote and update from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M0 8.877L2.247 5.91l8.405-3.416V.022l7.37 5.393L2.966 8.338v8.225L0 15.707zm24-4.45v14.651l-5.753 4.9-9.303-3.057v3.056l-5.978-7.416 15.057 1.798V5.415z"
+    ]
+  },
+  "auth": {
+    "rung": "cli",
+    "probe": {
+      "command": "az",
+      "args": ["account", "show"]
+    }
+  },
+  "triggers": [
+    {
+      "type": "workItem",
+      "label": "Work item matches the query",
+      "description": "Fires once per work item the WIQL query newly returns.",
+      "setup": {
+        "connectorId": "ado",
+        "triggerType": "workItem",
+        "env": [
+          {
+            "name": "ADO_ORGANIZATION",
+            "required": true,
+            "secret": false,
+            "description": "Name or URL, e.g. \"contoso\" or https://dev.azure.com/contoso"
+          },
+          {
+            "name": "ADO_PROJECT",
+            "required": true,
+            "secret": false
+          },
+          {
+            "name": "ADO_QUERY",
+            "required": false,
+            "secret": false,
+            "description": "Work items to poll, for the work item trigger, e.g. SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'New' AND [System.ChangedDate] >= @Today - 7 ORDER BY [System.ChangedDate] DESC. A date bound keeps each poll cheap."
+          },
+          {
+            "name": "ADO_REPOSITORY",
+            "required": false,
+            "secret": false,
+            "description": "Repository name. Narrows the pull request trigger to it, and is where createPullRequest opens one. Blank watches every repository in the project."
+          },
+          {
+            "name": "ADO_TOP",
+            "required": false,
+            "secret": false,
+            "description": "Upper bound on work items read in one poll."
+          }
+        ]
+      }
+    },
+    {
+      "type": "pullRequestOpened",
+      "label": "A pull request is opened",
+      "description": "Fires once for each active pull request opened since the last poll — the start of an automated review.",
+      "setup": {
+        "connectorId": "ado",
+        "triggerType": "pullRequestOpened",
+        "env": [
+          {
+            "name": "ADO_ORGANIZATION",
+            "required": true,
+            "secret": false,
+            "description": "Name or URL, e.g. \"contoso\" or https://dev.azure.com/contoso"
+          },
+          {
+            "name": "ADO_PROJECT",
+            "required": true,
+            "secret": false
+          },
+          {
+            "name": "ADO_QUERY",
+            "required": false,
+            "secret": false,
+            "description": "Work items to poll, for the work item trigger, e.g. SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'New' AND [System.ChangedDate] >= @Today - 7 ORDER BY [System.ChangedDate] DESC. A date bound keeps each poll cheap."
+          },
+          {
+            "name": "ADO_REPOSITORY",
+            "required": false,
+            "secret": false,
+            "description": "Repository name. Narrows the pull request trigger to it, and is where createPullRequest opens one. Blank watches every repository in the project."
+          },
+          {
+            "name": "ADO_TOP",
+            "required": false,
+            "secret": false,
+            "description": "Upper bound on work items read in one poll."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "createWorkItem",
+      "label": "Create a work item",
+      "description": "Add a work item to the board and return its id and url.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "type",
+          "label": "Work item type",
+          "type": "string",
+          "required": false,
+          "description": "Bug, Task, User Story… Defaults to Task."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "assignedTo",
+          "label": "Assign to",
+          "type": "string",
+          "required": false,
+          "description": "An email address."
+        },
+        {
+          "key": "project",
+          "label": "Project",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to ADO_PROJECT."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "Id of the work item created"
+        },
+        {
+          "key": "url",
+          "description": "Where to open it on the board"
+        }
+      ]
+    },
+    {
+      "type": "updateWorkItem",
+      "label": "Update a work item",
+      "description": "Change the title, state, description or assignee of a work item.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "id",
+          "label": "Work item id",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "state",
+          "label": "State",
+          "type": "string",
+          "required": false,
+          "description": "Active, Resolved, Closed…"
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "type": "string",
+          "required": false
+        },
+        {
+          "key": "assignedTo",
+          "label": "Assign to",
+          "type": "string",
+          "required": false,
+          "description": "An email address."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "Where to open it on the board"
+        },
+        {
+          "key": "state",
+          "description": "State after the update"
+        }
+      ]
+    },
+    {
+      "type": "getWorkItem",
+      "label": "Read a work item",
+      "description": "Every field of one work item, for a step that needs more than the trigger carried.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "id",
+          "label": "Work item id",
+          "type": "number",
+          "required": true,
+          "description": "The work item number."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "Where to open it on the board"
+        },
+        {
+          "key": "title"
+        },
+        {
+          "key": "state"
+        },
+        {
+          "key": "type",
+          "description": "Bug, Task, User Story…"
+        },
+        {
+          "key": "description",
+          "description": "HTML, as the board stores it"
+        },
+        {
+          "key": "assignedTo",
+          "description": "Display name of the assignee, if any"
+        },
+        {
+          "key": "fields",
+          "type": "object",
+          "description": "Every field, by reference name"
+        }
+      ]
+    },
+    {
+      "type": "commentOnWorkItem",
+      "label": "Comment on a work item",
+      "description": "Add a comment to a work item's discussion.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "id",
+          "label": "Work item id",
+          "type": "number",
+          "required": true,
+          "description": "The work item number."
+        },
+        {
+          "key": "text",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "Plain text, or HTML for links and lists."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "commentId",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "The work item the comment is on"
+        }
+      ]
+    },
+    {
+      "type": "createPullRequest",
+      "label": "Open a pull request",
+      "description": "Open a pull request from a pushed branch, optionally linked to work items.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "sourceBranch",
+          "label": "Branch",
+          "type": "string",
+          "required": true,
+          "description": "The pushed branch."
+        },
+        {
+          "key": "targetBranch",
+          "label": "Into",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the repository's default branch."
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "description": "Pull request title."
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "type": "string",
+          "required": false,
+          "description": "Markdown."
+        },
+        {
+          "key": "repository",
+          "label": "Repository",
+          "type": "string",
+          "required": false,
+          "description": "Repository name. Defaults to ADO_REPOSITORY."
+        },
+        {
+          "key": "draft",
+          "label": "Draft",
+          "type": "boolean",
+          "required": false,
+          "description": "Open it as a draft."
+        },
+        {
+          "key": "workItems",
+          "label": "Work items",
+          "type": "string",
+          "required": false,
+          "description": "Comma-separated work item ids to link."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The new pull request number"
+        },
+        {
+          "key": "url",
+          "description": "Where to review it"
+        }
+      ]
+    },
+    {
+      "type": "getPullRequest",
+      "label": "Read a pull request",
+      "description": "Title, description, branches, commits, merge status and every reviewer's vote.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "Where to review it"
+        },
+        {
+          "key": "title"
+        },
+        {
+          "key": "description"
+        },
+        {
+          "key": "status",
+          "description": "active, completed or abandoned"
+        },
+        {
+          "key": "isDraft",
+          "type": "boolean"
+        },
+        {
+          "key": "repository"
+        },
+        {
+          "key": "sourceBranch"
+        },
+        {
+          "key": "targetBranch"
+        },
+        {
+          "key": "author"
+        },
+        {
+          "key": "mergeStatus",
+          "description": "succeeded, conflicts, queued…"
+        },
+        {
+          "key": "sourceCommit",
+          "description": "Head of the branch being merged"
+        },
+        {
+          "key": "targetCommit",
+          "description": "Head of the branch merged into"
+        },
+        {
+          "key": "reviewers",
+          "type": "array",
+          "description": "{ name, vote, isRequired } for each"
+        }
+      ]
+    },
+    {
+      "type": "listPullRequestChanges",
+      "label": "List the files a pull request changes",
+      "description": "Every changed path as of the latest push, with the two commits to diff between.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "files",
+          "type": "array",
+          "description": "{ path, changeType, originalPath? } for each"
+        },
+        {
+          "key": "count",
+          "type": "number"
+        },
+        {
+          "key": "sourceCommit",
+          "description": "git diff <targetCommit> <sourceCommit> shows the change"
+        },
+        {
+          "key": "targetCommit"
+        }
+      ]
+    },
+    {
+      "type": "listPullRequestComments",
+      "label": "Read the review discussion",
+      "description": "Comment threads on a pull request, most recently active first, with status and the line each is on — so a review does not repeat itself.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "status",
+          "label": "Only these statuses",
+          "type": "string",
+          "required": false,
+          "description": "Comma-separated: active, fixed, wontFix, closed, byDesign. \"active\" is what triage wants. Blank reads every thread."
+        },
+        {
+          "key": "top",
+          "label": "At most",
+          "type": "number",
+          "required": false,
+          "description": "Keep only the most recently active threads. Defaults to 50; total says how many matched."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "threads",
+          "type": "array",
+          "description": "{ id, status, filePath, line, updatedAt, comments: [{ id, author, content }] } for each; filePath and line are null off a file or line"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "Threads returned"
+        },
+        {
+          "key": "total",
+          "type": "number",
+          "description": "Threads that matched, before top"
+        }
+      ]
+    },
+    {
+      "type": "commentOnPullRequest",
+      "label": "Comment on a pull request",
+      "description": "Start a thread on the overview or on a line of a file, or reply to an existing thread.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "text",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "Markdown."
+        },
+        {
+          "key": "filePath",
+          "label": "File",
+          "type": "string",
+          "required": false,
+          "description": "Path in the repository, e.g. /src/app.ts. Blank comments on the overview."
+        },
+        {
+          "key": "line",
+          "label": "Line",
+          "type": "number",
+          "required": false,
+          "description": "Line in the new version of the file. Needs a file."
+        },
+        {
+          "key": "threadId",
+          "label": "Reply to thread",
+          "type": "number",
+          "required": false,
+          "description": "A thread id from listPullRequestComments. Replies instead of starting a thread."
+        },
+        {
+          "key": "status",
+          "label": "Thread status",
+          "type": "select",
+          "required": false,
+          "description": "Defaults to active for a new thread; unchanged for a reply.",
+          "options": [
+            {
+              "value": "active",
+              "label": "Active"
+            },
+            {
+              "value": "fixed",
+              "label": "Resolved"
+            },
+            {
+              "value": "wontFix",
+              "label": "Won't fix"
+            },
+            {
+              "value": "closed",
+              "label": "Closed"
+            },
+            {
+              "value": "byDesign",
+              "label": "By design"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "key": "threadId",
+          "type": "number",
+          "description": "Thread the comment is in"
+        },
+        {
+          "key": "commentId",
+          "type": "number"
+        },
+        {
+          "key": "url",
+          "description": "The thread, on the pull request"
+        }
+      ]
+    },
+    {
+      "type": "resolvePullRequestThread",
+      "label": "Resolve a review thread",
+      "description": "Mark a comment thread fixed, won't fix, closed, by design — or active again.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "threadId",
+          "label": "Thread",
+          "type": "number",
+          "required": true,
+          "description": "A thread id from listPullRequestComments."
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "select",
+          "required": false,
+          "description": "Defaults to fixed.",
+          "options": [
+            {
+              "value": "active",
+              "label": "Active"
+            },
+            {
+              "value": "fixed",
+              "label": "Resolved"
+            },
+            {
+              "value": "wontFix",
+              "label": "Won't fix"
+            },
+            {
+              "value": "closed",
+              "label": "Closed"
+            },
+            {
+              "value": "byDesign",
+              "label": "By design"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "key": "threadId",
+          "type": "number"
+        },
+        {
+          "key": "status",
+          "description": "Status after the change"
+        }
+      ]
+    },
+    {
+      "type": "votePullRequest",
+      "label": "Approve or reject a pull request",
+      "description": "Cast your vote as the signed-in identity: approve, approve with suggestions, wait for author, reject, or reset.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "vote",
+          "label": "Vote",
+          "type": "select",
+          "required": true,
+          "description": "Pair it with commentOnPullRequest to say why.",
+          "options": [
+            {
+              "value": "approve",
+              "label": "Approve"
+            },
+            {
+              "value": "approveWithSuggestions",
+              "label": "Approve with suggestions"
+            },
+            {
+              "value": "waitForAuthor",
+              "label": "Wait for author"
+            },
+            {
+              "value": "reject",
+              "label": "Reject"
+            },
+            {
+              "value": "reset",
+              "label": "Reset vote"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "key": "vote",
+          "description": "The vote now recorded"
+        },
+        {
+          "key": "url",
+          "description": "Where to review it"
+        }
+      ]
+    },
+    {
+      "type": "completePullRequest",
+      "label": "Complete (merge) a pull request",
+      "description": "Merge now, or set auto-complete so it merges itself once approvals and policies pass.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "pullRequestId",
+          "label": "Pull request",
+          "type": "number",
+          "required": true,
+          "description": "The pull request number, e.g. {{trigger.item.externalId}}."
+        },
+        {
+          "key": "autoComplete",
+          "label": "Auto-complete",
+          "type": "boolean",
+          "required": false,
+          "description": "Merge when every required approval and policy passes, rather than now. Recommended where approvals are required."
+        },
+        {
+          "key": "mergeStrategy",
+          "label": "Merge type",
+          "type": "select",
+          "required": false,
+          "description": "Defaults to squash.",
+          "options": [
+            {
+              "value": "squash",
+              "label": "Squash commit"
+            },
+            {
+              "value": "noFastForward",
+              "label": "Merge (no fast-forward)"
+            },
+            {
+              "value": "rebase",
+              "label": "Rebase and fast-forward"
+            },
+            {
+              "value": "rebaseMerge",
+              "label": "Semi-linear merge"
+            }
+          ]
+        },
+        {
+          "key": "keepSourceBranch",
+          "label": "Keep branch",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep the source branch after merging. It is deleted by default."
+        },
+        {
+          "key": "transitionWorkItems",
+          "label": "Close linked work items",
+          "type": "boolean",
+          "required": false,
+          "description": "Move linked work items to their completed state."
+        },
+        {
+          "key": "message",
+          "label": "Merge commit message",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the one Azure DevOps writes."
+        },
+        {
+          "key": "commitId",
+          "label": "Reviewed commit",
+          "type": "string",
+          "required": false,
+          "description": "The sourceCommit a review step read, e.g. {{steps.getPullRequest.sourceCommit}}. Merging now is refused if the branch has moved past it. Blank merges the branch as it is when this step runs."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "status",
+          "description": "completed when merged now; active while auto-complete waits"
+        },
+        {
+          "key": "autoComplete",
+          "type": "boolean",
+          "description": "Whether auto-complete is set"
+        },
+        {
+          "key": "mergeStatus",
+          "description": "succeeded, conflicts, queued…"
+        },
+        {
+          "key": "url",
+          "description": "Where to review it"
+        }
+      ]
+    }
+  ]
+}

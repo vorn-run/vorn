@@ -1,0 +1,593 @@
+{
+  "protocol": 1,
+  "id": "discord",
+  "name": "Discord",
+  "version": "0.1.1",
+  "kind": "connector",
+  "description": "Trigger workflows from new Discord messages, members and threads, and send messages, reply in threads, react, pin or read channels and members from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 0 0-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 0 0-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z"
+    ]
+  },
+  "auth": {
+    "rung": "key",
+    "keys": ["botToken"]
+  },
+  "triggers": [
+    {
+      "type": "messageInChannel",
+      "label": "A message is posted in a channel",
+      "description": "Fires once per new message in the channel or thread. Bot and system messages are skipped unless the connection includes them. Reading the text needs the Message Content intent.",
+      "defaultWorkflow": {
+        "name": "Discord: messages",
+        "defaultCronFromMinutes": 1
+      },
+      "setup": {
+        "connectorId": "discord",
+        "triggerType": "messageInChannel",
+        "env": [
+          {
+            "name": "DISCORD_BOT_TOKEN",
+            "required": true,
+            "secret": true,
+            "description": "From https://discord.com/developers/applications: open the application, Bot tab, Reset Token, and paste the token it shows once. Sent as `Authorization: Bot <token>`.",
+            "builderHint": "A bot token, not an OAuth2 Bearer token. Reading message text needs the Message Content intent and listing members the Server Members intent, both under Privileged Gateway Intents on the same Bot page. A pasted \"Bot \" prefix is stripped."
+          },
+          {
+            "name": "DISCORD_CHANNEL_ID",
+            "required": false,
+            "secret": false,
+            "description": "Channel or thread id (Developer Mode → right-click → Copy Channel ID). Required by the message trigger; narrows the thread trigger to one parent channel.",
+            "builderHint": "A snowflake, so keep it a string. A thread is a channel: point a second connection at the thread id to watch its replies."
+          },
+          {
+            "name": "DISCORD_GUILD_ID",
+            "required": false,
+            "secret": false,
+            "description": "Guild (server) id. Required by the member and thread triggers.",
+            "builderHint": "Also a snowflake. Right-click the server name with Developer Mode on to copy it."
+          },
+          {
+            "name": "DISCORD_INCLUDE_BOTS",
+            "required": false,
+            "secret": false,
+            "description": "Deliver messages whose author is a bot, including this one’s. Off by default so a workflow that posts into the channel it watches does not loop."
+          },
+          {
+            "name": "DISCORD_INCLUDE_SYSTEM",
+            "required": false,
+            "secret": false,
+            "description": "Deliver joins, pins, boosts, thread notices and other messages nobody typed."
+          },
+          {
+            "name": "DISCORD_LOOKBACK_MINUTES",
+            "required": false,
+            "secret": false,
+            "description": "How far back the very first poll looks. Later polls continue from where the last one stopped."
+          },
+          {
+            "name": "DISCORD_MAX_PAGES",
+            "required": false,
+            "secret": false,
+            "description": "Pages of 100 messages or 1000 members one poll walks before leaving the rest for the next."
+          }
+        ]
+      }
+    },
+    {
+      "type": "memberJoined",
+      "label": "A member joins the server",
+      "description": "Fires once per member who joined the guild since the last poll. Needs the Server Members intent.",
+      "defaultWorkflow": {
+        "name": "Discord: new members",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "discord",
+        "triggerType": "memberJoined",
+        "env": [
+          {
+            "name": "DISCORD_BOT_TOKEN",
+            "required": true,
+            "secret": true,
+            "description": "From https://discord.com/developers/applications: open the application, Bot tab, Reset Token, and paste the token it shows once. Sent as `Authorization: Bot <token>`.",
+            "builderHint": "A bot token, not an OAuth2 Bearer token. Reading message text needs the Message Content intent and listing members the Server Members intent, both under Privileged Gateway Intents on the same Bot page. A pasted \"Bot \" prefix is stripped."
+          },
+          {
+            "name": "DISCORD_CHANNEL_ID",
+            "required": false,
+            "secret": false,
+            "description": "Channel or thread id (Developer Mode → right-click → Copy Channel ID). Required by the message trigger; narrows the thread trigger to one parent channel.",
+            "builderHint": "A snowflake, so keep it a string. A thread is a channel: point a second connection at the thread id to watch its replies."
+          },
+          {
+            "name": "DISCORD_GUILD_ID",
+            "required": false,
+            "secret": false,
+            "description": "Guild (server) id. Required by the member and thread triggers.",
+            "builderHint": "Also a snowflake. Right-click the server name with Developer Mode on to copy it."
+          },
+          {
+            "name": "DISCORD_INCLUDE_BOTS",
+            "required": false,
+            "secret": false,
+            "description": "Deliver messages whose author is a bot, including this one’s. Off by default so a workflow that posts into the channel it watches does not loop."
+          },
+          {
+            "name": "DISCORD_INCLUDE_SYSTEM",
+            "required": false,
+            "secret": false,
+            "description": "Deliver joins, pins, boosts, thread notices and other messages nobody typed."
+          },
+          {
+            "name": "DISCORD_LOOKBACK_MINUTES",
+            "required": false,
+            "secret": false,
+            "description": "How far back the very first poll looks. Later polls continue from where the last one stopped."
+          },
+          {
+            "name": "DISCORD_MAX_PAGES",
+            "required": false,
+            "secret": false,
+            "description": "Pages of 100 messages or 1000 members one poll walks before leaving the rest for the next."
+          }
+        ]
+      }
+    },
+    {
+      "type": "threadCreated",
+      "label": "A thread is created",
+      "description": "Fires once per active thread created since the last poll, in every channel of the guild or only under the configured channel.",
+      "defaultWorkflow": {
+        "name": "Discord: new threads",
+        "defaultCronFromMinutes": 5
+      },
+      "setup": {
+        "connectorId": "discord",
+        "triggerType": "threadCreated",
+        "env": [
+          {
+            "name": "DISCORD_BOT_TOKEN",
+            "required": true,
+            "secret": true,
+            "description": "From https://discord.com/developers/applications: open the application, Bot tab, Reset Token, and paste the token it shows once. Sent as `Authorization: Bot <token>`.",
+            "builderHint": "A bot token, not an OAuth2 Bearer token. Reading message text needs the Message Content intent and listing members the Server Members intent, both under Privileged Gateway Intents on the same Bot page. A pasted \"Bot \" prefix is stripped."
+          },
+          {
+            "name": "DISCORD_CHANNEL_ID",
+            "required": false,
+            "secret": false,
+            "description": "Channel or thread id (Developer Mode → right-click → Copy Channel ID). Required by the message trigger; narrows the thread trigger to one parent channel.",
+            "builderHint": "A snowflake, so keep it a string. A thread is a channel: point a second connection at the thread id to watch its replies."
+          },
+          {
+            "name": "DISCORD_GUILD_ID",
+            "required": false,
+            "secret": false,
+            "description": "Guild (server) id. Required by the member and thread triggers.",
+            "builderHint": "Also a snowflake. Right-click the server name with Developer Mode on to copy it."
+          },
+          {
+            "name": "DISCORD_INCLUDE_BOTS",
+            "required": false,
+            "secret": false,
+            "description": "Deliver messages whose author is a bot, including this one’s. Off by default so a workflow that posts into the channel it watches does not loop."
+          },
+          {
+            "name": "DISCORD_INCLUDE_SYSTEM",
+            "required": false,
+            "secret": false,
+            "description": "Deliver joins, pins, boosts, thread notices and other messages nobody typed."
+          },
+          {
+            "name": "DISCORD_LOOKBACK_MINUTES",
+            "required": false,
+            "secret": false,
+            "description": "How far back the very first poll looks. Later polls continue from where the last one stopped."
+          },
+          {
+            "name": "DISCORD_MAX_PAGES",
+            "required": false,
+            "secret": false,
+            "description": "Pages of 100 messages or 1000 members one poll walks before leaving the rest for the next."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "sendMessage",
+      "label": "Send a message",
+      "description": "Post a message to a channel or thread, optionally as a reply and with embeds.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "channel",
+          "label": "Channel",
+          "type": "string",
+          "required": true,
+          "description": "Channel or thread id.",
+          "builderHint": "Defaults to nothing: a step names the channel it posts to, which is often {{trigger.item.channel_id}}."
+        },
+        {
+          "key": "content",
+          "label": "Message",
+          "type": "string",
+          "required": false,
+          "description": "Text, up to 2000 characters. Required unless embeds are given.",
+          "builderHint": "Markdown as Discord renders it; mentions are <@userId>."
+        },
+        {
+          "key": "embeds",
+          "label": "Embeds",
+          "type": "json",
+          "required": false,
+          "description": "A JSON array of up to 10 embed objects (title, description, url, color, fields, footer, image, thumbnail, author, timestamp).",
+          "builderHint": "Needs the Embed Links permission to render. One object is taken as a single embed."
+        },
+        {
+          "key": "replyTo",
+          "label": "Reply to",
+          "type": "string",
+          "required": false,
+          "description": "Message id to reply to, from {{trigger.item.id}}.",
+          "builderHint": "Sent as message_reference with fail_if_not_exists false, so a deleted target posts a plain message rather than failing."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "description": "Id of the message"
+        },
+        {
+          "key": "channelId",
+          "description": "The channel it landed in"
+        },
+        {
+          "key": "content",
+          "description": "The text as stored"
+        },
+        {
+          "key": "timestamp",
+          "description": "When Discord received it"
+        },
+        {
+          "key": "url",
+          "description": "Link to the message"
+        }
+      ]
+    },
+    {
+      "type": "createThread",
+      "label": "Reply in a thread",
+      "description": "Start a thread from a message, or use the one it already has, and post a reply in it.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "channel",
+          "label": "Channel",
+          "type": "string",
+          "required": true,
+          "description": "The parent channel id."
+        },
+        {
+          "key": "message",
+          "label": "Message",
+          "type": "string",
+          "required": true,
+          "description": "The message to thread from, from {{trigger.item.id}}.",
+          "builderHint": "A thread shares its id with the source message, so a thread that already exists is found by this id."
+        },
+        {
+          "key": "name",
+          "label": "Thread name",
+          "type": "string",
+          "required": true,
+          "description": "Thread name, 1 to 100 characters. Ignored when the thread already exists."
+        },
+        {
+          "key": "content",
+          "label": "Reply",
+          "type": "string",
+          "required": true,
+          "description": "The reply to post in the thread, up to 2000 characters."
+        },
+        {
+          "key": "autoArchiveDuration",
+          "label": "Auto-archive after",
+          "type": "select",
+          "required": false,
+          "description": "Minutes of inactivity before the thread archives: 60, 1440, 4320 or 10080. Defaults to 1440.",
+          "options": [
+            {
+              "value": "60",
+              "label": "1 hour"
+            },
+            {
+              "value": "1440",
+              "label": "1 day"
+            },
+            {
+              "value": "4320",
+              "label": "3 days"
+            },
+            {
+              "value": "10080",
+              "label": "1 week"
+            }
+          ],
+          "builderHint": "Discord accepts only these four values; anything else is refused before the call."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "threadId",
+          "description": "Id of the thread, the same as the source message"
+        },
+        {
+          "key": "threadName",
+          "description": "Name of the thread"
+        },
+        {
+          "key": "created",
+          "type": "boolean",
+          "description": "Whether this call made the thread"
+        },
+        {
+          "key": "messageId",
+          "description": "Id of the reply posted in the thread"
+        },
+        {
+          "key": "url",
+          "description": "Link to the reply"
+        }
+      ]
+    },
+    {
+      "type": "addReaction",
+      "label": "Add a reaction",
+      "description": "React to a message with a Unicode or custom emoji.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "channel",
+          "label": "Channel",
+          "type": "string",
+          "required": true,
+          "description": "Channel or thread id."
+        },
+        {
+          "key": "message",
+          "label": "Message",
+          "type": "string",
+          "required": true,
+          "description": "Message id."
+        },
+        {
+          "key": "emoji",
+          "label": "Emoji",
+          "type": "string",
+          "required": true,
+          "description": "A Unicode emoji such as 👍, or name:id for a custom one.",
+          "builderHint": "URL-encoded into the path; a pasted <:name:id> is reduced to name:id. Needs Read Message History and Add Reactions."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "ok",
+          "type": "boolean",
+          "description": "True once Discord answered 204"
+        }
+      ]
+    },
+    {
+      "type": "pinMessage",
+      "label": "Pin a message",
+      "description": "Pin a message in its channel. Pinning one already pinned is a no-op.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "channel",
+          "label": "Channel",
+          "type": "string",
+          "required": true,
+          "description": "Channel or thread id."
+        },
+        {
+          "key": "message",
+          "label": "Message",
+          "type": "string",
+          "required": true,
+          "description": "Message id.",
+          "builderHint": "Needs the Pin Messages permission; a channel holds at most 250 pins and Discord answers 30003 past that."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "ok",
+          "type": "boolean",
+          "description": "True once Discord answered 204"
+        }
+      ]
+    },
+    {
+      "type": "listChannels",
+      "label": "List channels",
+      "description": "The channels of a guild, sorted by position. Threads are not included.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "guild",
+          "label": "Server",
+          "type": "string",
+          "required": true,
+          "description": "Guild (server) id."
+        },
+        {
+          "key": "type",
+          "label": "Channel type",
+          "type": "number",
+          "required": false,
+          "description": "Keep only this type: 0 text, 2 voice, 4 category, 5 announcement, 13 stage, 15 forum, 16 media.",
+          "builderHint": "Discord’s channel type numbers; blank keeps every type."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "channels",
+          "description": "One entry per channel: id, name, type, parentId, position, topic, nsfw"
+        }
+      ],
+      "sample": {
+        "guild": "$DISCORD_GUILD_ID"
+      }
+    },
+    {
+      "type": "getChannel",
+      "label": "Get a channel",
+      "description": "Read one channel or thread by id.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "channel",
+          "label": "Channel",
+          "type": "string",
+          "required": true,
+          "description": "Channel or thread id."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "description": "Channel id"
+        },
+        {
+          "key": "name",
+          "description": "Channel name"
+        },
+        {
+          "key": "type",
+          "type": "number",
+          "description": "Channel type number"
+        },
+        {
+          "key": "guildId",
+          "description": "Guild the channel belongs to, or null for a DM"
+        },
+        {
+          "key": "parentId",
+          "description": "Category or parent channel id, or null"
+        },
+        {
+          "key": "topic",
+          "description": "Channel topic, or null"
+        },
+        {
+          "key": "nsfw",
+          "type": "boolean",
+          "description": "Whether the channel is age-restricted"
+        },
+        {
+          "key": "lastMessageId",
+          "description": "Id of the newest message, or null"
+        },
+        {
+          "key": "rateLimitPerUser",
+          "type": "number",
+          "description": "Slowmode seconds, or null"
+        },
+        {
+          "key": "threadMetadata",
+          "description": "Thread metadata for a thread, or null"
+        },
+        {
+          "key": "messageCount",
+          "type": "number",
+          "description": "Messages in a thread, or null"
+        },
+        {
+          "key": "memberCount",
+          "type": "number",
+          "description": "Members of a thread, or null"
+        }
+      ],
+      "sample": {
+        "channel": "$DISCORD_CHANNEL_ID"
+      }
+    },
+    {
+      "type": "getGuildMember",
+      "label": "Get a server member",
+      "description": "Read one member of a guild, with their nickname, roles and join date.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "guild",
+          "label": "Server",
+          "type": "string",
+          "required": true,
+          "description": "Guild (server) id."
+        },
+        {
+          "key": "user",
+          "label": "User",
+          "type": "string",
+          "required": true,
+          "description": "User id, from {{trigger.item.author.id}}.",
+          "builderHint": "Needs no privileged intent, unlike listing members. 10007 Unknown Member when the user is not in the guild."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "userId",
+          "description": "User id"
+        },
+        {
+          "key": "username",
+          "description": "Account username"
+        },
+        {
+          "key": "globalName",
+          "description": "Display name, or null"
+        },
+        {
+          "key": "nick",
+          "description": "Nickname in this guild, or null"
+        },
+        {
+          "key": "roles",
+          "description": "Role ids"
+        },
+        {
+          "key": "joinedAt",
+          "description": "When they joined the guild"
+        },
+        {
+          "key": "premiumSince",
+          "description": "When they started boosting, or null"
+        },
+        {
+          "key": "pending",
+          "type": "boolean",
+          "description": "Whether membership screening is still pending"
+        },
+        {
+          "key": "communicationDisabledUntil",
+          "description": "End of a timeout, or null"
+        },
+        {
+          "key": "isBot",
+          "type": "boolean",
+          "description": "Whether the user is a bot"
+        }
+      ],
+      "sample": {
+        "guild": "$DISCORD_GUILD_ID",
+        "user": "$DISCORD_USER_ID"
+      }
+    }
+  ]
+}

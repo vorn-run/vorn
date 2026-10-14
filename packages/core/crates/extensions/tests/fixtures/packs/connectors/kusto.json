@@ -1,0 +1,116 @@
+{
+  "protocol": 1,
+  "id": "kusto",
+  "name": "Azure Data Explorer",
+  "version": "0.6.3",
+  "kind": "connector",
+  "description": "Trigger workflows from the rows a KQL query returns.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z",
+      "M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z",
+      "M4 15.4v2.1C4 19.4 7.6 21 12 21c.3 0 .6 0 .9-.1a5.6 5.6 0 01-1-1.9H12c-3.6 0-6-1.2-6-2v-1.6z",
+      "M17.5 13a4.5 4.5 0 103.1 7.7l1.6 1.6a1 1 0 001.4-1.4l-1.6-1.6A4.5 4.5 0 0017.5 13zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5z"
+    ]
+  },
+  "auth": {
+    "rung": "cli",
+    "probe": {
+      "command": "az",
+      "args": ["account", "show"]
+    }
+  },
+  "triggers": [
+    {
+      "type": "queryResult",
+      "label": "Query returns a row",
+      "description": "Fires once per new row returned by the configured KQL query.",
+      "setup": {
+        "connectorId": "kusto",
+        "triggerType": "queryResult",
+        "env": [
+          {
+            "name": "KUSTO_CLUSTER",
+            "required": true,
+            "secret": false,
+            "description": "Cluster name or URL, e.g. \"help\" or https://help.kusto.windows.net"
+          },
+          {
+            "name": "KUSTO_DATABASE",
+            "required": true,
+            "secret": false
+          },
+          {
+            "name": "KUSTO_QUERY",
+            "required": true,
+            "secret": false,
+            "description": "Query to poll. Reference vorn_since and vorn_limit to bound it."
+          },
+          {
+            "name": "KUSTO_ID_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "Column holding a stable per-row id. Vorn dedupes on it."
+          },
+          {
+            "name": "KUSTO_TIMESTAMP_COLUMN",
+            "required": false,
+            "secret": false,
+            "description": "Column the poll watermark advances from."
+          },
+          {
+            "name": "KUSTO_TITLE_COLUMN",
+            "required": false,
+            "secret": false
+          },
+          {
+            "name": "KUSTO_URL_COLUMN",
+            "required": false,
+            "secret": false
+          },
+          {
+            "name": "KUSTO_LOOKBACK",
+            "required": false,
+            "secret": false,
+            "description": "How far back the very first poll looks, e.g. 30m, 2h, 7d."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "runQuery",
+      "label": "Run a KQL query",
+      "description": "Run a read-only query and return its rows.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "query",
+          "label": "KQL query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to KUSTO_DATABASE"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "rowCount",
+          "type": "number",
+          "description": "Number of rows returned"
+        },
+        {
+          "key": "columns",
+          "description": "Column names, in order"
+        }
+      ]
+    }
+  ]
+}

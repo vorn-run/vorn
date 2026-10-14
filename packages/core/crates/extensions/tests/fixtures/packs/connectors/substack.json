@@ -1,0 +1,831 @@
+{
+  "protocol": 1,
+  "id": "substack",
+  "name": "Substack",
+  "version": "0.2.4",
+  "kind": "connector",
+  "description": "Trigger workflows from new posts on a Substack publication, and read, search, like, restack and comment on posts, post and read Notes, or save and update a draft with pictures from a step.",
+  "icon": {
+    "viewBox": "0 0 24 24",
+    "paths": [
+      "M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"
+    ]
+  },
+  "auth": {
+    "rung": "browser",
+    "browser": {
+      "signInUrl": "https://substack.com/sign-in",
+      "origins": ["https://substack.com", "https://*.substack.com"],
+      "check": {
+        "url": "https://substack.com/api/v1/user/profile/self",
+        "identity": ["name", "handle"]
+      }
+    }
+  },
+  "triggers": [
+    {
+      "type": "newPost",
+      "label": "New post",
+      "description": "A post appears in the publication's RSS feed. Reading the feed needs no sign-in; it holds about the last twenty posts, so a burst larger than that between polls loses the oldest.",
+      "setup": {
+        "connectorId": "substack",
+        "triggerType": "newPost",
+        "env": [
+          {
+            "name": "SUBSTACK_PUBLICATION",
+            "required": false,
+            "secret": false,
+            "description": "Your publication's substack.com subdomain, such as exampleletter. The new-post trigger reads its feed, and a step that names no publication uses it.",
+            "builderHint": "The part before .substack.com in the publication address; a custom domain works for reading only."
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "readFeed",
+      "label": "Read feed",
+      "description": "The newest posts of any publication from its RSS feed, up to 20, with each body as text and HTML. Needs no sign-in.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "Its substack.com subdomain or address; the connection's publication when empty."
+        },
+        {
+          "key": "limit",
+          "label": "Posts",
+          "type": "number",
+          "required": false,
+          "description": "How many of the newest posts, from 1 to 20; 10 when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "publication",
+          "type": "string",
+          "description": "The host the feed was read from"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many posts came back, in `posts`"
+        }
+      ]
+    },
+    {
+      "type": "searchPosts",
+      "label": "Search posts",
+      "description": "Posts across Substack matching a query, a page at a time, as Substack search ranks them. Needs no sign-in.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "query",
+          "label": "Query",
+          "type": "string",
+          "required": true,
+          "description": "Words to search posts for."
+        },
+        {
+          "key": "page",
+          "label": "Page",
+          "type": "number",
+          "required": false,
+          "description": "Which page of results, from 0; 0 when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many posts are on this page, in `posts`"
+        },
+        {
+          "key": "more",
+          "type": "boolean",
+          "description": "Whether a next page exists"
+        }
+      ]
+    },
+    {
+      "type": "readComments",
+      "label": "Read comments",
+      "description": "Every comment on a post, newest first, with replies after the comment they answer. Needs no sign-in for a public post.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "post",
+          "label": "Post",
+          "type": "string",
+          "required": false,
+          "description": "The post's address, or its slug on the publication; not needed when its id is given."
+        },
+        {
+          "key": "postId",
+          "label": "Post id",
+          "type": "number",
+          "required": false,
+          "description": "The post's id, as Search posts returns it; saves looking the post up by address."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "Its substack.com subdomain or address; the connection's publication when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "postId",
+          "type": "number",
+          "description": "The post's id"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many comments came back, in `comments`"
+        }
+      ]
+    },
+    {
+      "type": "listPosts",
+      "label": "List posts",
+      "description": "A publication's archive, newest first, up to 500 posts, where the feed holds only the last twenty. Needs no sign-in.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "Its substack.com subdomain or address; the connection's publication when empty."
+        },
+        {
+          "key": "limit",
+          "label": "Posts",
+          "type": "number",
+          "required": false,
+          "description": "How many of the newest posts, from 1 to 500; 50 when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "publication",
+          "type": "string",
+          "description": "The host the archive was read from"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many posts came back, in `posts`"
+        }
+      ]
+    },
+    {
+      "type": "getPost",
+      "label": "Get post",
+      "description": "One post with its whole body as HTML and as text, and its likes and restacks. Needs no sign-in for a public post.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "post",
+          "label": "Post",
+          "type": "string",
+          "required": true,
+          "description": "The post's address, or its slug on the publication."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "Its substack.com subdomain or address; the connection's publication when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The post's id"
+        },
+        {
+          "key": "title",
+          "type": "string",
+          "description": "The post's title"
+        },
+        {
+          "key": "url",
+          "type": "string",
+          "description": "The post's address"
+        },
+        {
+          "key": "text",
+          "type": "string",
+          "description": "The body as plain text"
+        }
+      ]
+    },
+    {
+      "type": "createDraft",
+      "label": "Save draft",
+      "description": "Save a new draft on your publication from a title and markdown, for you to review and publish in Substack. It never publishes, since publishing emails every subscriber.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "description": "The draft's title."
+        },
+        {
+          "key": "subtitle",
+          "label": "Subtitle",
+          "type": "string",
+          "required": false,
+          "description": "The line under the title."
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "type": "string",
+          "required": true,
+          "description": "The post in markdown: headings, lists, quotes, code, links and emphasis carry over."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "select",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one.",
+          "loadOptions": "publications"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The draft's id"
+        },
+        {
+          "key": "editUrl",
+          "type": "string",
+          "description": "Where to open the draft in the Substack editor"
+        }
+      ]
+    },
+    {
+      "type": "updateDraft",
+      "label": "Update draft",
+      "description": "Replace a draft's title, subtitle and body with new markdown. A published post is refused, and it never publishes.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "draftId",
+          "label": "Draft id",
+          "type": "number",
+          "required": true,
+          "description": "The id Save draft returned."
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "description": "The draft's title."
+        },
+        {
+          "key": "subtitle",
+          "label": "Subtitle",
+          "type": "string",
+          "required": false,
+          "description": "The line under the title; empty leaves the draft without one."
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "type": "string",
+          "required": true,
+          "description": "The whole post in markdown, replacing what the draft held."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "select",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one.",
+          "loadOptions": "publications"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "updated",
+          "type": "boolean",
+          "description": "Whether the draft was saved"
+        },
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The draft's id"
+        },
+        {
+          "key": "editUrl",
+          "type": "string",
+          "description": "Where to open the draft in the Substack editor"
+        }
+      ]
+    },
+    {
+      "type": "saveDraft",
+      "label": "Save or update draft",
+      "description": "Update the draft a step names, or save a new one when it names none or that draft has since been deleted or published, from a title and markdown with an optional cover picture. Run again with the id it returned, it updates the same draft. It never publishes.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "draftId",
+          "label": "Draft id",
+          "type": "number",
+          "required": false,
+          "description": "The id this action returned before; empty or 0 saves a new draft.",
+          "builderHint": "Keep the id from the first run somewhere a later run can read it, so reruns update one draft."
+        },
+        {
+          "key": "title",
+          "label": "Title",
+          "type": "string",
+          "required": true,
+          "description": "The draft's title."
+        },
+        {
+          "key": "subtitle",
+          "label": "Subtitle",
+          "type": "string",
+          "required": false,
+          "description": "The line under the title; empty leaves the draft without one."
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "type": "string",
+          "required": true,
+          "description": "The whole post in markdown. A line holding only a picture Upload image returned, as ![alt](address), becomes a picture in the post."
+        },
+        {
+          "key": "coverImage",
+          "label": "Cover picture",
+          "type": "string",
+          "required": false,
+          "description": "A picture's address, as Upload image returns it: the post's cover, shown in previews and on social sites. Empty leaves the cover as it is."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "select",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one.",
+          "loadOptions": "publications"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The draft's id, to hand the next run"
+        },
+        {
+          "key": "title",
+          "type": "string",
+          "description": "The draft's title"
+        },
+        {
+          "key": "editUrl",
+          "type": "string",
+          "description": "Where to open the draft in the Substack editor"
+        },
+        {
+          "key": "created",
+          "type": "boolean",
+          "description": "Whether a new draft was saved rather than one updated"
+        }
+      ]
+    },
+    {
+      "type": "deleteDraft",
+      "label": "Delete draft",
+      "description": "Delete a draft on your publication. A published post is refused, so this never removes one.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "draftId",
+          "label": "Draft id",
+          "type": "number",
+          "required": true,
+          "description": "The id Save draft returned."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "deleted",
+          "type": "boolean",
+          "description": "Whether the draft was deleted"
+        }
+      ]
+    },
+    {
+      "type": "uploadImage",
+      "label": "Upload image",
+      "description": "Upload a JPEG or PNG from this computer to Substack's picture storage, for a draft's body or cover. It appears nowhere until a draft uses it.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "file",
+          "label": "Picture file",
+          "type": "string",
+          "required": true,
+          "description": "A JPEG or PNG, as an absolute path or one starting with ~/, of at most about 730 KB.",
+          "builderHint": "Shrink a larger picture first, for example with sips on macOS; a relative path is refused."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "select",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one.",
+          "loadOptions": "publications"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "url",
+          "type": "string",
+          "description": "The picture's address, for Save or update draft"
+        },
+        {
+          "key": "width",
+          "type": "number",
+          "description": "Its width in pixels"
+        },
+        {
+          "key": "height",
+          "type": "number",
+          "description": "Its height in pixels"
+        },
+        {
+          "key": "bytes",
+          "type": "number",
+          "description": "Its size as stored"
+        },
+        {
+          "key": "contentType",
+          "type": "string",
+          "description": "Its type, image/jpeg or image/png"
+        }
+      ]
+    },
+    {
+      "type": "commentOnPost",
+      "label": "Comment on post",
+      "description": "Post a comment on a post as the signed-in account.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "post",
+          "label": "Post",
+          "type": "string",
+          "required": false,
+          "description": "The post's address, or its slug on the publication; not needed when its id is given."
+        },
+        {
+          "key": "postId",
+          "label": "Post id",
+          "type": "number",
+          "required": false,
+          "description": "The post's id, as Search posts returns it; saves looking the post up by address."
+        },
+        {
+          "key": "body",
+          "label": "Comment",
+          "type": "string",
+          "required": true,
+          "description": "The comment, as plain text."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "The publication a post given by slug is on, as its substack.com subdomain or address; the connection's publication when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The new comment's id"
+        },
+        {
+          "key": "postId",
+          "type": "number",
+          "description": "The post's id"
+        }
+      ]
+    },
+    {
+      "type": "setCommentLike",
+      "label": "Like or unlike comment",
+      "description": "Like a comment as the signed-in account, or take the like back. Setting the same state twice changes nothing.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "commentId",
+          "label": "Comment id",
+          "type": "number",
+          "required": true,
+          "description": "The id Read comments returned."
+        },
+        {
+          "key": "liked",
+          "label": "Liked",
+          "type": "boolean",
+          "required": true,
+          "description": "true to like it, false to take the like back."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "The publication the comment's post is on; the connection's when empty, else the account's primary one."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "liked",
+          "type": "boolean",
+          "description": "The state now set"
+        }
+      ]
+    },
+    {
+      "type": "deleteComment",
+      "label": "Delete comment",
+      "description": "Delete one of the signed-in account's comments, or one on its own publication.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "commentId",
+          "label": "Comment id",
+          "type": "number",
+          "required": true,
+          "description": "The id Read comments or Comment on post returned."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "The publication the comment's post is on; the connection's when empty, else the account's primary one."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "deleted",
+          "type": "boolean",
+          "description": "Whether the comment was deleted"
+        }
+      ]
+    },
+    {
+      "type": "setPostLike",
+      "label": "Like or unlike post",
+      "description": "Like a post as the signed-in account, or take the like back.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "post",
+          "label": "Post",
+          "type": "string",
+          "required": false,
+          "description": "The post's address, or its slug on the publication; not needed when its id is given."
+        },
+        {
+          "key": "postId",
+          "label": "Post id",
+          "type": "number",
+          "required": false,
+          "description": "The post's id, as Search posts returns it; saves looking the post up by address."
+        },
+        {
+          "key": "liked",
+          "label": "Liked",
+          "type": "boolean",
+          "required": true,
+          "description": "true to like it, false to take the like back."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "The publication a post given by slug is on, as its substack.com subdomain or address; the connection's publication when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "liked",
+          "type": "boolean",
+          "description": "The state now set"
+        }
+      ]
+    },
+    {
+      "type": "setPostRestack",
+      "label": "Restack or undo restack post",
+      "description": "Restack a post to the signed-in account's followers, or take the restack back. Posts only, not Notes.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "post",
+          "label": "Post",
+          "type": "string",
+          "required": false,
+          "description": "The post's address, or its slug on the publication; not needed when its id is given."
+        },
+        {
+          "key": "postId",
+          "label": "Post id",
+          "type": "number",
+          "required": false,
+          "description": "The post's id, as Search posts returns it; saves looking the post up by address."
+        },
+        {
+          "key": "restacked",
+          "label": "Restacked",
+          "type": "boolean",
+          "required": true,
+          "description": "true to restack it, false to take the restack back."
+        },
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "string",
+          "required": false,
+          "description": "The publication a post given by slug is on, as its substack.com subdomain or address; the connection's publication when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "restacked",
+          "type": "boolean",
+          "description": "The state now set"
+        }
+      ]
+    },
+    {
+      "type": "postNote",
+      "label": "Post a note",
+      "description": "Post a Note as the signed-in account. Followers see it in their feeds as soon as it posts; Delete note takes it down.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "body",
+          "label": "Note",
+          "type": "string",
+          "required": true,
+          "description": "The Note in markdown, converted the way a draft's body is."
+        },
+        {
+          "key": "link",
+          "label": "Link card",
+          "type": "string",
+          "required": false,
+          "description": "An https address to show as a preview card under the Note, the card Substack's composer makes from a pasted link; it is not added to the text.",
+          "builderHint": "Leave the address out of the Note's text when it goes here, or it shows twice."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "id",
+          "type": "number",
+          "description": "The Note's id"
+        },
+        {
+          "key": "url",
+          "type": "string",
+          "description": "The Note's address"
+        }
+      ]
+    },
+    {
+      "type": "readNotes",
+      "label": "Read notes",
+      "description": "A profile's Notes, newest first, up to 100, from its activity feed as the signed-in account sees it.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "profile",
+          "label": "Profile",
+          "type": "string",
+          "required": false,
+          "description": "A Substack handle, with or without @; the signed-in account when empty."
+        },
+        {
+          "key": "limit",
+          "label": "Notes",
+          "type": "number",
+          "required": false,
+          "description": "How many of the newest Notes, from 1 to 100; 20 when empty."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "profile",
+          "type": "string",
+          "description": "The handle the Notes are from"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "description": "How many Notes came back, in `notes`"
+        }
+      ]
+    },
+    {
+      "type": "deleteNote",
+      "label": "Delete note",
+      "description": "Delete one of the signed-in account's Notes.",
+      "idempotent": false,
+      "inputs": [
+        {
+          "key": "noteId",
+          "label": "Note id",
+          "type": "number",
+          "required": true,
+          "description": "The id Post a note or Read notes returned."
+        }
+      ],
+      "outputs": [
+        {
+          "key": "deleted",
+          "type": "boolean",
+          "description": "Whether the Note was deleted"
+        }
+      ]
+    },
+    {
+      "type": "readSubscriberCount",
+      "label": "Read subscriber count",
+      "description": "Your publication's subscriber, email and view figures, as its dashboard shows them. Needs the signed-in account to run the publication.",
+      "idempotent": true,
+      "inputs": [
+        {
+          "key": "publication",
+          "label": "Publication",
+          "type": "select",
+          "required": false,
+          "description": "Its substack.com subdomain; the connection's publication when empty, else the account's primary one.",
+          "loadOptions": "publications"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "subscribers",
+          "type": "number",
+          "description": "Every subscriber, free and paid: the count the dashboard's subscribers page shows"
+        },
+        {
+          "key": "paidSubscribers",
+          "type": "number",
+          "description": "Paid subscribers only"
+        },
+        {
+          "key": "appSubscribers",
+          "type": "number",
+          "description": "The dashboard summary’s app subscriber figure"
+        },
+        {
+          "key": "views",
+          "type": "number",
+          "description": "The dashboard summary’s view count"
+        },
+        {
+          "key": "openRate",
+          "type": "number",
+          "description": "Email open rate, as the dashboard summary reports it"
+        }
+      ]
+    }
+  ]
+}
