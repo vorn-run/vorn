@@ -375,6 +375,13 @@ impl App {
         true
     }
 
+    /// Whether `id` shows as command blocks over its live rows.
+    pub fn is_split(&self, id: &str) -> bool {
+        self.store
+            .session(id)
+            .is_some_and(|s| blocks::split(&self.store.config, s, self.st.shells.get(id)).is_some())
+    }
+
     /// A split shell's live rows: its PTY sized to the whole pane, the rows
     /// from its prompt to the cursor drawn in the box they got. Returns where
     /// its whole screen sits, for pointer selection.

@@ -613,3 +613,64 @@ fn a_ready_update_is_offered_in_the_sidebar_until_dismissed() {
         vorn_app::settings::Category::Updates
     );
 }
+
+/// What `id`'s screen shows, line by line.
+fn lines(app: &App, id: &str) -> Vec<String> {
+    app.pane(id)
+        .map(|p| p.text().lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = support::connect(&v);
+    let repo = seed_acme(&mut app, &v);
+    // bash gets the shell integration, so its commands show as blocks.
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    config["defaults"]["shell"] = json!("/bin/bash");
+    app.rpc().call("config:save", config).expect("saved");
+    let mut shot = Shot::new();
+    let sid = agent(&mut shot, &mut app, &repo);
+    hover_card(&mut shot, &mut app, &sid);
+    shot.click(
+        &mut app,
+        control("card", Act::Side(SideAct::ToggleTerminals(sid.clone()))),
+    );
+    let held = shot.until(&mut app, "the panel's shell", |a, _| {
+        a.st.side
+            .saved
+            .panels
+            .get(&sid)
+            .and_then(|p| p.terminals.first().cloned())
+    });
+    shot.until(&mut app, "its prompt", |a, _| {
+        lines(a, &held)
+            .iter()
+            .any(|l| !l.trim().is_empty())
+            .then_some(())
+    });
+    shot.click(&mut app, vorn_app::screen::term_id(&held));
+    shot.until(&mut app, "the marked prompt", |a, _| {
+        a.is_split(&held).then_some(())
+    });
+    shot.type_line(&mut app, "echo first-$((1+1))");
+    shot.type_line(&mut app, "echo second-$((1+2))");
+    // Finished commands stay on screen in the panel, in its log of blocks.
+    let log = vorn_app::screen::log_id(&held);
+    shot.until(&mut app, "the panel's log of finished commands", |_, ui| {
+        ui.rect_of(log).filter(|r| r.h > 1.0).map(|_| ())
+    });
+    shot.until(&mut app, "both answers", |a, _| {
+        let text = lines(a, &held).join("\n");
+        (text.contains("first-2") && text.contains("second-3")).then_some(())
+    });
+    for _ in 0..30 {
+        shot.frame(&mut app);
+        app.pump();
+        assert!(shot.ui.rect_of(log).is_some_and(|r| r.h > 1.0));
+    }
+    shot.save(&mut app, "p-terminal-blocks");
+}
