@@ -206,7 +206,7 @@ impl Grid {
             Inbound {
                 frame: Box::new(move |f| match f {
                     Frame::Binary(bytes) => rd.receive(&bytes),
-                    Frame::Text(_) => true,
+                    Frame::Text(_) | Frame::Json(_) => true,
                 }),
                 ended: Box::new(move |_| {
                     end.lock().closed = true;

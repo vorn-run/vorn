@@ -212,6 +212,48 @@ For a 16-terminal row, add `{ terminals: 16, shown: 16, key: '16t', ... }` to
 `node_modules` and a Chromium (see Running it above); it was not rerun for the
 numbers here.
 
+## The Tasks board
+
+`yarn bench:board` (or `packages/core/scripts/board-bench.sh`) builds the test
+daemons and `crates/vorn-app/examples/board.rs` in the ci profile and runs it.
+Each tier starts its own vornd on a temporary HOME and data directory, seeds
+that many tasks across the five columns, and drives the board offscreen on a
+60 Hz clock: idle frames, a wheel scroll down the first column, and a card
+dragged across the board and dropped.
+
+```sh
+yarn bench:board                                          # 100, 1,000 and 10,000 tasks, window
+yarn bench:board --surface cells                          # the terminal UI's cell grid
+yarn bench:board --tiers 10000 --reps 1 --out run.json    # one tier; JSON as well as the table
+```
+
+- **Frame**: build, layout and paint of one frame (and GPU submit on a window).
+  The budget is 16.7 ms.
+- **Board** and **Footprint**: the process's physical footprint once the board
+  is shown, less the footprint before it, and at the end of the run.
+
+Columns build only the cards in or near view; the rest are spacers of their
+measured or guessed height, so a frame costs about the same at any size.
+`packages/core/bench/board` keeps the JSON of the runs below.
+
+### Before and after: Apple M2 Pro
+
+Window 1440x900@2 (median of 3 runs after, 3 before at 100 and 1,000 and 1 at
+10,000); cells 180x32, 1 run. Frame p99 over the scroll and drag scripts.
+
+| Surface |  Tasks | Scroll p99 before | Drag p99 before | Scroll p99 after | Drag p99 after | Max after | Footprint before | Footprint after |
+| ------- | -----: | ----------------: | --------------: | ---------------: | -------------: | --------: | ---------------: | --------------: |
+| Window  |    100 |           33.9 ms |         37.6 ms |           7.8 ms |         8.3 ms |    9.5 ms |            93 MB |           84 MB |
+| Window  |  1,000 |            326 ms |          453 ms |           8.9 ms |         9.0 ms |   10.6 ms |           886 MB |           93 MB |
+| Window  | 10,000 |          3,398 ms |        3,811 ms |           9.5 ms |         8.2 ms |   14.0 ms |         3,588 MB |          123 MB |
+| Cells   |    100 |           48.1 ms |         49.6 ms |           9.1 ms |         8.6 ms |    9.3 ms |            17 MB |           13 MB |
+| Cells   |  1,000 |            474 ms |          469 ms |           9.5 ms |        12.5 ms |   12.6 ms |           648 MB |           22 MB |
+| Cells   | 10,000 |          5,030 ms |        4,765 ms |          11.0 ms |         9.7 ms |   15.5 ms |           885 MB |           52 MB |
+
+Before, every frame missed the budget at every tier; after, none does. Showing
+the board at 10,000 tasks takes 102 ms on a window (7.0 s before) and 98 ms on
+cells (4.9 s before).
+
 ## Caveats
 
 - The renderer suite runs in Chromium, not Electron (the same engine, without the

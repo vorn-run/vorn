@@ -13,8 +13,8 @@ use crate::client::rpc::decode;
 use crate::client::RpcError;
 use crate::runs::{self, RunAct};
 use crate::screen::tasks::{
-    branch_id, card_id, column_id, comment_id, commit_id, desc_id, image_id, link_id, slash_open,
-    title_id,
+    branch_id, card_id, column_id, column_scroll_id, comment_id, commit_id, desc_id, image_id,
+    link_id, slash_open, title_id,
 };
 use crate::screen::MainView;
 use crate::state::Dialog;
@@ -25,6 +25,11 @@ use crate::ui::{decode_png, mods, Event as UiEvent, Input, Ui};
 
 /// How long the detail panel waits after an edit before saving it.
 const AUTOSAVE: Duration = Duration::from_millis(500);
+
+/// How near a column's top or bottom a dragged card scrolls it, logical pixels.
+const EDGE: f32 = 48.0;
+/// How fast a column scrolls with the pointer at its very edge, logical pixels a second.
+const EDGE_SPEED: f32 = 1200.0;
 
 /// A task call whose answer changes the screen.
 pub(super) enum TaskCall {
@@ -128,7 +133,7 @@ impl App {
                     let agent = info.agent_type.to_string();
                     let wt = info.worktree_path.clone();
                     let sid = info.id.clone();
-                    self.change_tasks(None, |c, now| {
+                    self.change_tasks(&id, None, |c, now| {
                         tasks::start(c, &id, &sid, &agent, wt.as_deref(), now)
                     });
                 }
@@ -151,12 +156,19 @@ impl App {
     }
 
     /// Saves the config with the tasks `f` changed, toasting `text`.
-    fn change_tasks(&mut self, text: Option<&str>, f: impl FnOnce(&mut Value, &str) -> bool) {
-        let mut config = self.store.config.clone();
-        if !f(&mut config, &tasks::now_iso()) {
+    /// Changes the task `id` with `f` and saves, rereading only that task:
+    /// the store's config changes in place, and vornd is sent a copy.
+    fn change_tasks(
+        &mut self,
+        id: &str,
+        text: Option<&str>,
+        f: impl FnOnce(&mut Value, &str) -> bool,
+    ) {
+        if !f(&mut self.store.config, &tasks::now_iso()) {
             return;
         }
-        self.save_config(config, Call::Quiet);
+        self.store.reread_task(id);
+        self.queue_save(self.store.config.clone(), Call::Quiet);
         if let Some(text) = text {
             self.st.toast(text, false);
         }
@@ -186,7 +198,7 @@ impl App {
     /// `StatusPicker`'s change; moving into progress says nothing.
     fn set_status(&mut self, id: &str, status: &str) {
         let toast = (status != "in_progress").then(|| tasks::status_toast(status));
-        self.change_tasks(toast, |c, now| tasks::set_status(c, id, status, now));
+        self.change_tasks(id, toast, |c, now| tasks::set_status(c, id, status, now));
     }
 
     /// Opens a task, or the create form, in the detail panel.
@@ -294,7 +306,7 @@ impl App {
         f.branch = ui.edit_text(branch_id()).to_owned();
         let title = ui.edit_text(title_id(Form::Detail)).to_owned();
         let desc = ui.edit_text(desc_id(Form::Detail)).to_owned();
-        self.change_tasks(None, |c, now| {
+        self.change_tasks(&f.id, None, |c, now| {
             tasks::patch(c, &f.id, now, |t| tasks::apply_form(t, &f, &title, &desc))
         });
     }
@@ -338,6 +350,52 @@ impl App {
         {
             self.st.tasks.copied = None;
         }
+        self.edge_scroll(ui);
+    }
+
+    /// A card dragged near the top or bottom of a column scrolls it, faster
+    /// the nearer the edge, frame after frame while it is held there.
+    fn edge_scroll(&mut self, ui: &mut Ui) {
+        let over = self
+            .st
+            .tasks
+            .dragging
+            .as_ref()
+            .and_then(|(_, over)| over.clone());
+        let now = ui.now();
+        let last = self.st.tasks.edge_scrolled.take();
+        let (Some(over), Some((x, y))) = (over, ui.pointer()) else {
+            return;
+        };
+        let scroll = column_scroll_id(&over);
+        let Some(r) = ui.rect_of(scroll).filter(|r| x >= r.x && x < r.x + r.w) else {
+            return;
+        };
+        // On cells a row is the edge, and a speed in rows.
+        let (edge, speed) = if ui.is_cells() {
+            (1.0, EDGE_SPEED / 28.0)
+        } else {
+            (EDGE, EDGE_SPEED)
+        };
+        let pull = if y < r.y + edge {
+            -((r.y + edge - y) / edge).min(1.0)
+        } else if y > r.y + r.h - edge {
+            ((y - (r.y + r.h - edge)) / edge).min(1.0)
+        } else {
+            0.0
+        };
+        let offset = ui.scroll_offset(scroll);
+        let max = ui.scroll_max(scroll);
+        if pull == 0.0 || (pull < 0.0 && offset <= 0.0) || (pull > 0.0 && offset >= max) {
+            return;
+        }
+        // The first frame at the edge only starts the clock.
+        if let Some(last) = last {
+            let dt = now.saturating_duration_since(last).as_secs_f32().min(0.05);
+            ui.set_scroll_offset(scroll, offset + pull * speed * dt);
+        }
+        self.st.tasks.edge_scrolled = Some(now);
+        ui.wake_at(now + Duration::from_millis(16));
     }
 
     pub(super) fn close_task_dialog(&mut self, ui: &mut Ui) {
@@ -377,14 +435,14 @@ impl App {
         };
         let f = self.st.tasks.dialog_form.clone();
         if f.editing {
-            self.change_tasks(Some("Task updated"), |c, now| {
+            self.change_tasks(&f.id, Some("Task updated"), |c, now| {
                 tasks::patch(c, &f.id, now, |t| {
                     tasks::apply_form(t, &f, &title, &desc);
                     t.insert("status".into(), json!(f.status));
                 })
             });
         } else {
-            self.change_tasks(Some("Task created"), |c, now| {
+            self.change_tasks(&f.id, Some("Task created"), |c, now| {
                 tasks::add(c, &f, &title, &desc, now);
                 true
             });
@@ -399,7 +457,7 @@ impl App {
         let mut f = self.st.tasks.detail_form.clone();
         f.branch = ui.edit_text(branch_id()).to_owned();
         f.status = "todo".into();
-        self.change_tasks(Some("Task created"), |c, now| {
+        self.change_tasks(&f.id, Some("Task created"), |c, now| {
             tasks::add(c, &f, &title, &desc, now);
             true
         });
@@ -566,10 +624,10 @@ impl App {
             TaskAct::Complete(id) => self.set_status(&id, "done"),
             TaskAct::Cancel(id) => self.set_status(&id, "cancelled"),
             TaskAct::Reopen(id) => self.set_status(&id, "todo"),
-            TaskAct::Archive(id) => self.change_tasks(Some("Task archived"), |c, now| {
+            TaskAct::Archive(id) => self.change_tasks(&id, Some("Task archived"), |c, now| {
                 tasks::set_archived(c, &id, true, now)
             }),
-            TaskAct::Unarchive(id) => self.change_tasks(Some("Task unarchived"), |c, now| {
+            TaskAct::Unarchive(id) => self.change_tasks(&id, Some("Task unarchived"), |c, now| {
                 tasks::set_archived(c, &id, false, now)
             }),
             TaskAct::AskDelete(id) => self.st.tasks.confirm_delete = (!id.is_empty()).then_some(id),
@@ -579,7 +637,7 @@ impl App {
                     self.st.tasks.selected = None;
                     self.st.tasks.dirty = None;
                 }
-                self.change_tasks(Some("Task deleted"), |c, _| tasks::remove(c, &id));
+                self.change_tasks(&id, Some("Task deleted"), |c, _| tasks::remove(c, &id));
                 self.call(Call::Quiet, "task:imageCleanup", json!(id));
             }
             TaskAct::ReviewDiff(id) => {
@@ -765,7 +823,85 @@ impl App {
             "cancelled" => Some("Task cancelled"),
             _ => None,
         };
-        self.change_tasks(toast, |c, now| tasks::set_status(c, id, status, now));
+        self.change_tasks(id, toast, |c, now| tasks::set_status(c, id, status, now));
+    }
+
+    /// The board's columns as it shows them, each its tasks' ids in order.
+    fn board_columns(&self) -> Vec<Vec<String>> {
+        let names: Vec<&str> = self
+            .store
+            .workspace_projects()
+            .map(|p| p.name.as_str())
+            .collect();
+        let shown = self
+            .st
+            .tasks
+            .visible(&self.store.tasks, self.st.project.as_deref(), &names);
+        STATUSES
+            .iter()
+            .map(|st| {
+                tasks::in_status(&shown, st.key)
+                    .into_iter()
+                    .map(|t| t.id.clone())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Arrows between the board's focused cards, and Option-Left/Right
+    /// moving the focused card to the column beside it.
+    fn board_key(&mut self, ui: &mut Ui, code: &str, held: u16) -> bool {
+        let board = self.st.view == MainView::Tasks && self.st.tasks.mode == tasks::Mode::Board;
+        let Some(focus) = ui.focus().filter(|_| board) else {
+            return false;
+        };
+        let step: isize = match code {
+            "ArrowUp" | "ArrowLeft" => -1,
+            "ArrowDown" | "ArrowRight" => 1,
+            _ => return false,
+        };
+        let across = matches!(code, "ArrowLeft" | "ArrowRight");
+        if held != 0 && !(held == mods::ALT && across) {
+            return false;
+        }
+        let cols = self.board_columns();
+        let Some((c, i)) = cols.iter().enumerate().find_map(|(c, ids)| {
+            ids.iter()
+                .position(|id| card_id(id) == focus)
+                .map(|i| (c, i))
+        }) else {
+            return false;
+        };
+        let beside = |c: usize| c.checked_add_signed(step).filter(|&c| c < cols.len());
+        if held == mods::ALT {
+            let id = cols[c][i].clone();
+            let mut to = beside(c);
+            while let Some(t) = to {
+                if tasks::drop_status(STATUSES[c].key, STATUSES[t].key).is_some() {
+                    break;
+                }
+                to = beside(t);
+            }
+            if let Some(t) = to {
+                self.drop_task(&id, STATUSES[t].key);
+                ui.reveal(card_id(&id));
+            }
+            return true;
+        }
+        let next = if across {
+            let mut to = beside(c);
+            while let Some(t) = to.filter(|&t| cols[t].is_empty()) {
+                to = beside(t);
+            }
+            to.map(|t| &cols[t][i.min(cols[t].len() - 1)])
+        } else {
+            i.checked_add_signed(step).and_then(|i| cols[c].get(i))
+        };
+        if let Some(id) = next {
+            ui.focus_from_keys(card_id(id));
+            ui.reveal(card_id(id));
+        }
+        true
     }
 
     /// The run `key` names: what vornd last reported, else the list the
@@ -899,9 +1035,24 @@ impl App {
     /// the fields that submit or autosave. True when one was used.
     pub(super) fn task_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
         match *event {
-            UiEvent::Move { id, x, y, .. } => {
-                let Some(task) = self.store.tasks.iter().find(|t| card_id(&t.id) == id) else {
-                    return false;
+            UiEvent::Move { id, dx, dy, x, y } => {
+                let held = self
+                    .st
+                    .tasks
+                    .dragging
+                    .as_ref()
+                    .map(|(t, _)| t.clone())
+                    .filter(|t| card_id(t) == id);
+                let task = match held {
+                    Some(t) => t,
+                    None => {
+                        let Some(t) = self.store.tasks.iter().find(|t| card_id(&t.id) == id) else {
+                            return false;
+                        };
+                        let r = ui.rect_of(id).unwrap_or_default();
+                        self.st.tasks.grab = Some((x - dx - r.x, y - dy - r.y, r.w));
+                        t.id.clone()
+                    }
                 };
                 let over = STATUSES
                     .iter()
@@ -910,13 +1061,14 @@ impl App {
                             .is_some_and(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
                     })
                     .map(|s| s.key.to_owned());
-                self.st.tasks.dragging = Some((task.id.clone(), over));
+                self.st.tasks.dragging = Some((task, over));
                 true
             }
             UiEvent::Drop { id, .. } => {
                 let Some((task, over)) = self.st.tasks.dragging.take() else {
                     return false;
                 };
+                self.st.tasks.grab = None;
                 if card_id(&task) == id {
                     if let Some(to) = over {
                         self.drop_task(&task, &to);
@@ -999,6 +1151,9 @@ impl App {
             return true;
         }
         let focus = ui.focus();
+        if self.st.dialog.is_none() && self.board_key(ui, code, held) {
+            return true;
+        }
         let editor = [Form::Dialog, Form::Detail]
             .into_iter()
             .find(|&f| focus == Some(desc_id(f)));

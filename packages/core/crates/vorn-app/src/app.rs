@@ -1654,6 +1654,11 @@ impl App {
         if self.store.workspace() != before {
             self.workspace_switched();
         }
+        self.queue_save(config, call);
+    }
+
+    /// Sends `config` to vornd once the saves before it are done.
+    fn queue_save(&mut self, config: Value, call: Call) {
         self.saves.push_back((config, call));
         self.next_save();
     }

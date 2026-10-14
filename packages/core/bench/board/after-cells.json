@@ -1,0 +1,175 @@
+{
+  "machine": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10
+  },
+  "results": [
+    {
+      "tier": 100,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 29.12,
+      "idle_p50": 8.2,
+      "scroll_p50": 8.5,
+      "scroll_p99": 9.13,
+      "drag_p50": 8.19,
+      "drag_p99": 8.58,
+      "max": 9.3,
+      "frames": 234.0,
+      "over_16_7": 0.0,
+      "dropped": true,
+      "board_mb": 3.92,
+      "end_mb": 13.08,
+      "runs": [
+        {
+          "tier": 100,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 29.12,
+          "idle_ms": {
+            "p50": 8.2,
+            "p99": 10.68,
+            "max": 10.68,
+            "n": 30
+          },
+          "scroll_ms": {
+            "p50": 8.5,
+            "p99": 9.13,
+            "max": 9.3,
+            "n": 121
+          },
+          "drag_ms": {
+            "p50": 8.19,
+            "p99": 8.58,
+            "max": 8.6,
+            "n": 83
+          },
+          "frames": 234,
+          "over_16_7": 0,
+          "dropped": true,
+          "footprint_mb": {
+            "before": 8.58,
+            "loaded": 12.5,
+            "board": 3.92,
+            "end": 13.08
+          }
+        }
+      ]
+    },
+    {
+      "tier": 1000,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 35.66,
+      "idle_p50": 8.27,
+      "scroll_p50": 8.95,
+      "scroll_p99": 9.47,
+      "drag_p50": 8.71,
+      "drag_p99": 12.52,
+      "max": 12.64,
+      "frames": 234.0,
+      "over_16_7": 0.0,
+      "dropped": true,
+      "board_mb": 7.03,
+      "end_mb": 21.81,
+      "runs": [
+        {
+          "tier": 1000,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 35.66,
+          "idle_ms": {
+            "p50": 8.27,
+            "p99": 8.64,
+            "max": 8.64,
+            "n": 30
+          },
+          "scroll_ms": {
+            "p50": 8.95,
+            "p99": 9.47,
+            "max": 9.51,
+            "n": 121
+          },
+          "drag_ms": {
+            "p50": 8.71,
+            "p99": 12.52,
+            "max": 12.64,
+            "n": 83
+          },
+          "frames": 234,
+          "over_16_7": 0,
+          "dropped": true,
+          "footprint_mb": {
+            "before": 8.63,
+            "loaded": 15.66,
+            "board": 7.03,
+            "end": 21.81
+          }
+        }
+      ]
+    },
+    {
+      "tier": 10000,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 98.11,
+      "idle_p50": 9.23,
+      "scroll_p50": 9.59,
+      "scroll_p99": 11.02,
+      "drag_p50": 9.02,
+      "drag_p99": 9.71,
+      "max": 15.53,
+      "frames": 234.0,
+      "over_16_7": 0.0,
+      "dropped": true,
+      "board_mb": 36.48,
+      "end_mb": 51.86,
+      "runs": [
+        {
+          "tier": 10000,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 98.11,
+          "idle_ms": {
+            "p50": 9.23,
+            "p99": 10.36,
+            "max": 10.36,
+            "n": 30
+          },
+          "scroll_ms": {
+            "p50": 9.59,
+            "p99": 11.02,
+            "max": 11.08,
+            "n": 121
+          },
+          "drag_ms": {
+            "p50": 9.02,
+            "p99": 9.71,
+            "max": 15.53,
+            "n": 83
+          },
+          "frames": 234,
+          "over_16_7": 0,
+          "dropped": true,
+          "footprint_mb": {
+            "before": 10.72,
+            "loaded": 47.2,
+            "board": 36.48,
+            "end": 51.86
+          }
+        }
+      ]
+    }
+  ]
+}

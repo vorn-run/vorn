@@ -59,10 +59,20 @@ fn num(n: f64) -> Value {
     }
 }
 
-/// `task:list`: the board, without descriptions unless asked for.
+/// `task:list`: the board, without descriptions unless asked for, and
+/// from `offset` at most `limit` tasks when given.
 pub fn list(store: &mut Store, params: &Value) -> Result<Value> {
     let get = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
-    let tasks = store.call("dbListTasks", json!([get("projectName"), get("status")]))?;
+    let page = |k: &str| get(k).as_f64().filter(|n| n.is_finite() && *n >= 0.0);
+    let tasks = store.call(
+        "dbListTasks",
+        json!([
+            get("projectName"),
+            get("status"),
+            page("offset"),
+            page("limit")
+        ]),
+    )?;
     if params
         .get("includeDescription")
         .is_some_and(crate::js::truthy)
@@ -301,6 +311,27 @@ mod tests {
         )
         .unwrap();
         s
+    }
+
+    #[test]
+    fn lists_a_page_of_the_board() {
+        let mut s = store();
+        for id in ["a", "b", "c"] {
+            let params = json!({ "projectName": "app", "title": id, "description": "long" });
+            create(&mut s, &params, id.into(), "t0").unwrap();
+        }
+        let ids = |v: Value| -> Vec<String> {
+            let list = v.as_array().unwrap().iter();
+            list.map(|t| t["id"].as_str().unwrap().to_owned()).collect()
+        };
+        assert_eq!(ids(list(&mut s, &json!({})).unwrap()), ["a", "b", "c"]);
+        let page = list(&mut s, &json!({ "offset": 1, "limit": 1 })).unwrap();
+        assert_eq!(page[0]["description"], "");
+        assert_eq!(ids(page), ["b"]);
+        assert_eq!(ids(list(&mut s, &json!({ "offset": 2 })).unwrap()), ["c"]);
+        // What is not a count is no page.
+        let odd = json!({ "offset": "x", "limit": -1 });
+        assert_eq!(ids(list(&mut s, &odd).unwrap()).len(), 3);
     }
 
     #[test]

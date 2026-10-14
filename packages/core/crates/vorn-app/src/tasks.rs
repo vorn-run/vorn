@@ -729,6 +729,11 @@ pub struct Tasks {
     pub link_pos: (f32, f32),
     /// The kanban card being dragged and the column under it.
     pub dragging: Option<(String, Option<String>)>,
+    /// Where the dragged card was taken from: the pointer's offset into it
+    /// and its width, so it follows the pointer while its column scrolls.
+    pub grab: Option<(f32, f32, f32)>,
+    /// When a drag near a column's edge last scrolled it.
+    pub edge_scrolled: Option<Instant>,
 }
 
 impl Tasks {

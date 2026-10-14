@@ -43,6 +43,17 @@ impl Store {
         project_name: Option<&str>,
         status: Option<&str>,
     ) -> Result<Vec<TaskConfig>> {
+        self.db_list_tasks_page(project_name, status, 0, None)
+    }
+
+    /// [`Store::db_list_tasks`] from the `offset`th task on, at most `limit` of them.
+    pub fn db_list_tasks_page(
+        &self,
+        project_name: Option<&str>,
+        status: Option<&str>,
+        offset: u64,
+        limit: Option<u64>,
+    ) -> Result<Vec<TaskConfig>> {
         let mut sql = String::from("SELECT * FROM tasks");
         let mut clauses = Vec::new();
         let mut args = Vec::new();
@@ -59,7 +70,14 @@ impl Store {
             sql.push_str(" WHERE ");
             sql.push_str(&clauses.join(" AND "));
         }
-        sql.push_str(r#" ORDER BY "order""#);
+        // `rowid` breaks ties the way the unordered scan did, so pages never overlap.
+        sql.push_str(r#" ORDER BY "order", rowid"#);
+        if limit.is_some() || offset > 0 {
+            // SQLite reads a negative LIMIT as none.
+            let limit = limit.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
+            let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+            sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
+        }
         let mut stmt = self.conn().prepare(&sql)?;
         let mut rows = stmt.query(params_from_iter(args))?;
         let mut tasks = Vec::new();
@@ -285,6 +303,36 @@ mod tests {
             .db_update_task("a", &serde_json::Map::new(), &["completedAt".into()])
             .unwrap();
         assert_eq!(store.db_get_task("a").unwrap().unwrap().completed_at, None);
+    }
+
+    #[test]
+    fn pages_through_tasks_in_their_order() {
+        let store = test_support::store();
+        for (id, order) in [("c", 1.0), ("a", 0.0), ("b", 1.0), ("d", 2.0)] {
+            store.db_insert_task(&task(id, order)).unwrap();
+        }
+        let page = |offset, limit| -> Vec<String> {
+            store
+                .db_list_tasks_page(Some("p"), None, offset, limit)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        };
+        // Tied orders keep the order they were written in, page after page.
+        assert_eq!(page(0, None), ["a", "c", "b", "d"]);
+        assert_eq!(page(1, Some(2)), ["c", "b"]);
+        assert_eq!(page(3, Some(5)), ["d"]);
+        assert!(page(9, Some(2)).is_empty());
+        assert_eq!(page(2, None), ["b", "d"]);
+        let mut store = store;
+        let mut call = |args| -> Vec<String> {
+            let listed = store.call("dbListTasks", args).unwrap();
+            let ids = listed.as_array().unwrap().iter();
+            ids.map(|t| t["id"].as_str().unwrap().to_owned()).collect()
+        };
+        assert_eq!(call(json!(["p", null, 1, 1])), ["c"]);
+        assert_eq!(call(json!(["p"])).len(), 4);
     }
 
     #[test]

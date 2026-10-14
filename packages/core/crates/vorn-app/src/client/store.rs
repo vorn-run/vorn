@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 use vorn_protocol::{
     ProjectConfig, SessionGroupConfig, TaskConfig, TerminalSession, WorkflowDefinition,
@@ -116,6 +117,9 @@ pub struct Store {
     pub approvals: HashMap<String, usize>,
     /// The latest of every run vornd reported since loading, by run id.
     pub runs: HashMap<String, Value>,
+    /// Whether `tasks` were read from `config` (not `task:list`), so a
+    /// change to it rereads only the tasks that changed.
+    tasks_of_config: bool,
 }
 
 fn subscription() -> Value {
@@ -161,11 +165,19 @@ impl Store {
 
     fn from_answers(answers: [Result<Value, RpcError>; 6]) -> Result<Store, RpcError> {
         let [config, projects, sessions, tasks, workflows, waiting] = answers;
+        let (config, tasks) = (config?, tasks?);
+        // The configuration's tasks, as every change after brings them.
+        let tasks_of_config = config.get("tasks").is_some_and(Value::is_array);
         let mut store = Store {
-            config: config?,
+            tasks: if tasks_of_config {
+                records_in(config.get("tasks"))
+            } else {
+                records(tasks)
+            },
+            config,
             projects: records(projects?),
-            tasks: records(tasks?),
             workflows: records(workflows?),
+            tasks_of_config,
             ..Store::default()
         };
         store.groups = groups(&store.config);
@@ -372,14 +384,42 @@ impl Store {
                 }
             }
             "config:changed" => {
-                self.config = params;
-                self.projects = records(self.config.get("projects").cloned().unwrap_or_default());
-                self.tasks = records(self.config.get("tasks").cloned().unwrap_or_default());
-                self.workflows = records(self.config.get("workflows").cloned().unwrap_or_default());
+                let was = std::mem::replace(&mut self.config, params);
+                self.projects = records_in(self.config.get("projects"));
+                let tasks = std::mem::take(&mut self.tasks);
+                let was = was.get("tasks").filter(|_| self.tasks_of_config);
+                self.tasks = records_since(self.config.get("tasks"), was, tasks);
+                self.tasks_of_config = true;
+                self.workflows = records_in(self.config.get("workflows"));
                 self.groups = groups(&self.config);
                 Change::Config
             }
             _ => Change::Nothing,
+        }
+    }
+}
+
+impl Store {
+    /// Rereads the task `id` from `config` after a change there: changed,
+    /// added (last, as it was added) or gone.
+    pub fn reread_task(&mut self, id: &str) {
+        let read = self
+            .config
+            .get("tasks")
+            .and_then(Value::as_array)
+            .and_then(|l| {
+                l.iter()
+                    .find(|t| t.get("id").and_then(Value::as_str) == Some(id))
+            })
+            .and_then(|t| TaskConfig::deserialize(t).ok());
+        let at = self.tasks.iter().position(|t| t.id == id);
+        match (read, at) {
+            (Some(t), Some(i)) => self.tasks[i] = t,
+            (Some(t), None) => self.tasks.push(t),
+            (None, Some(i)) => {
+                self.tasks.remove(i);
+            }
+            (None, None) => {}
         }
     }
 }
@@ -415,6 +455,42 @@ fn groups(config: &Value) -> Vec<SessionGroupConfig> {
     out.retain(|g| g.workspace_id == workspace);
     out.sort_by(|a, b| a.order.total_cmp(&b.order));
     out
+}
+
+/// [`records`] without taking `list`.
+fn records_in<T: serde::de::DeserializeOwned>(list: Option<&Value>) -> Vec<T> {
+    match list {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| T::deserialize(v).ok())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The records of `list`, keeping those of `old` (read from `was`) whose
+/// entry is unchanged, so a change to one of thousands reads only that one.
+fn records_since<T: serde::de::DeserializeOwned>(
+    list: Option<&Value>,
+    was: Option<&Value>,
+    old: Vec<T>,
+) -> Vec<T> {
+    if let (Some(Value::Array(now)), Some(Value::Array(was))) = (list, was) {
+        if now.len() == was.len() && old.len() == was.len() {
+            let mut out = Vec::with_capacity(now.len());
+            for ((n, w), o) in now.iter().zip(was).zip(old) {
+                if n == w {
+                    out.push(o);
+                } else if let Ok(t) = T::deserialize(n) {
+                    out.push(t);
+                } else {
+                    return records_in(list);
+                }
+            }
+            return out;
+        }
+    }
+    records_in(list)
 }
 
 /// The entries of a list that read as `T`; one malformed record should not
@@ -511,6 +587,62 @@ mod tests {
         let done = json!([{ "nodeId": "a", "status": "completed" }]);
         assert_eq!(s.apply("workflow:runUpdated", run(done)), Change::Approvals);
         assert_eq!(s.approvals(), 0);
+    }
+
+    fn task(id: &str, title: &str) -> Value {
+        json!({ "id": id, "projectName": "web", "title": title, "description": "",
+                "status": "todo", "order": 0, "createdAt": "2026-10-14T00:00:00.000Z",
+                "updatedAt": "2026-10-14T00:00:00.000Z" })
+    }
+
+    fn titles(s: &Store) -> Vec<&str> {
+        s.tasks.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    #[test]
+    fn a_config_change_rereads_only_the_tasks_that_changed() {
+        let mut s = Store::default();
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B")] }),
+        );
+        assert_eq!(titles(&s), ["A", "B"]);
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B2")] }),
+        );
+        assert_eq!(titles(&s), ["A", "B2"]);
+        let three = json!({ "tasks": [task("c", "C"), { "bad": 1 }, task("a", "A")] });
+        s.apply("config:changed", three);
+        assert_eq!(titles(&s), ["C", "A"]);
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("c", "C"), task("a", "A1")] }),
+        );
+        assert_eq!(titles(&s), ["C", "A1"]);
+    }
+
+    #[test]
+    fn a_task_rereads_alone_when_changed_added_or_gone() {
+        let mut s = Store::default();
+        s.apply(
+            "config:changed",
+            json!({ "tasks": [task("a", "A"), task("b", "B")] }),
+        );
+        s.config["tasks"][0]["title"] = json!("A2");
+        s.reread_task("a");
+        assert_eq!(titles(&s), ["A2", "B"]);
+        s.config["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(task("c", "C"));
+        s.reread_task("c");
+        assert_eq!(titles(&s), ["A2", "B", "C"]);
+        s.config["tasks"].as_array_mut().unwrap().remove(1);
+        s.reread_task("b");
+        assert_eq!(titles(&s), ["A2", "C"]);
+        s.reread_task("zz");
+        assert_eq!(titles(&s), ["A2", "C"]);
     }
 
     #[test]

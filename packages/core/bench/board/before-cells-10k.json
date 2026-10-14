@@ -1,0 +1,65 @@
+{
+  "machine": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10
+  },
+  "results": [
+    {
+      "tier": 10000,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 4909.26,
+      "idle_p50": 4835.51,
+      "scroll_p50": 4842.03,
+      "scroll_p99": 5029.66,
+      "drag_p50": 4638.07,
+      "drag_p99": 4765.49,
+      "max": 5029.66,
+      "frames": 42.0,
+      "over_16_7": 42.0,
+      "dropped": false,
+      "board_mb": 1353.67,
+      "end_mb": 884.55,
+      "runs": [
+        {
+          "tier": 10000,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 4909.26,
+          "idle_ms": {
+            "p50": 4835.51,
+            "p99": 4880.29,
+            "max": 4880.29,
+            "n": 5
+          },
+          "scroll_ms": {
+            "p50": 4842.03,
+            "p99": 5029.66,
+            "max": 5029.66,
+            "n": 21
+          },
+          "drag_ms": {
+            "p50": 4638.07,
+            "p99": 4765.49,
+            "max": 4765.49,
+            "n": 16
+          },
+          "frames": 42,
+          "over_16_7": 42,
+          "dropped": false,
+          "footprint_mb": {
+            "before": 10.7,
+            "loaded": 1364.38,
+            "board": 1353.67,
+            "end": 884.55
+          }
+        }
+      ]
+    }
+  ]
+}

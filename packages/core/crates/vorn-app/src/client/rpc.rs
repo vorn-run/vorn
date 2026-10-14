@@ -10,7 +10,7 @@ use std::sync::{mpsc as std_mpsc, Arc, Mutex, MutexGuard, PoisonError};
 use web_time::Duration;
 
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::sync::mpsc;
 
 use super::endpoint::Endpoint;
@@ -146,7 +146,7 @@ impl Core {
 
     fn send(&self, frame: Value) -> bool {
         self.out()
-            .is_some_and(|out| out.send(Frame::Text(frame.to_string())).is_ok())
+            .is_some_and(|out| out.send(Frame::Json(frame)).is_ok())
     }
 
     /// Settles what one frame from vornd says; false once the link is gone.
@@ -251,7 +251,7 @@ impl Rpc {
             Inbound {
                 frame: Box::new(move |f| match f {
                     Frame::Text(t) => rd.incoming(&t),
-                    Frame::Binary(_) => true,
+                    Frame::Binary(_) | Frame::Json(_) => true,
                 }),
                 ended: Box::new(move |why| end.ended(why)),
             },
@@ -276,9 +276,13 @@ impl Rpc {
         let (reply, rx) = std_mpsc::channel();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.core.waiting().insert(id, reply);
-        let sent = self
-            .core
-            .send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        // Built by hand: `json!` would copy `params`, which can be the whole config.
+        let mut frame = Map::new();
+        frame.insert("jsonrpc".into(), "2.0".into());
+        frame.insert("id".into(), id.into());
+        frame.insert("method".into(), method.into());
+        frame.insert("params".into(), params);
+        let sent = self.core.send(Value::Object(frame));
         if !sent {
             if let Some(reply) = self.core.waiting().remove(&id) {
                 let _ = reply.send(Err(if self.rejected() {
@@ -503,8 +507,12 @@ mod tests {
                 if let Some(why) = self.0 {
                     return (inbound.ended)(why);
                 }
-                while let Some(Frame::Text(t)) = out.blocking_recv() {
-                    let v: Value = serde_json::from_str(&t).unwrap();
+                while let Some(f) = out.blocking_recv() {
+                    let v: Value = match f {
+                        Frame::Text(t) => serde_json::from_str(&t).unwrap(),
+                        Frame::Json(v) => v,
+                        Frame::Binary(_) => break,
+                    };
                     let reply = json!({"jsonrpc": "2.0", "id": v["id"], "result": v["method"]});
                     (inbound.frame)(Frame::Text(reply.to_string()));
                 }

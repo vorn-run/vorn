@@ -273,6 +273,8 @@ pub struct El {
     pub(crate) glyph_tint: Option<Rgba>,
     /// The text field this box frames: a press on its padding edits that field.
     pub(crate) frames: Option<Id>,
+    /// A scroll view whose children a [`crate::Windowed`] chose.
+    pub(crate) windowed: bool,
 }
 
 pub fn div() -> El {
@@ -304,6 +306,7 @@ pub fn div() -> El {
         backdrop_blur: None,
         glyph: None,
         glyph_tint: None,
+        windowed: false,
     }
 }
 
