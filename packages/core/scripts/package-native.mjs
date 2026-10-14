@@ -16,7 +16,7 @@
 //   --bin-dir <dir>     where vorn-app is (default: target/release)
 //   --daemon-dir <dir>  where vornd, vorn-sessiond, vorn and, on Windows, the
 //                       ConPTY beside them are (default: --bin-dir)
-//   --web-dir <dir>     the built web client (default: packages/web/dist)
+//   --web-dir <dir>     the built web client (default: packages/core/crates/vorn-web/dist)
 //   --out <dir>         default: dist-native at the repository root
 //   --version <v>       default: the root package.json's
 //   --package <kind>    app (default) or server
@@ -232,7 +232,7 @@ function layOut({ binDir, daemonDir, webDir }, resources, exe, platform) {
   if (platform === 'win32') helpers.push('conpty.dll', path.join('x64', 'OpenConsole.exe'))
   for (const d of helpers) copyExe(path.join(daemonDir, d), path.join(resources, 'vornd', d))
   if (!existsSync(path.join(webDir, 'index.html'))) {
-    throw new Error(`${webDir} has no index.html; run yarn build:web first`)
+    throw new Error(`${webDir} has no index.html; run packages/core/scripts/build-web.sh first`)
   }
   cpSync(webDir, path.join(resources, 'web', 'dist'), { recursive: true })
   for (const f of ['resources/idb.proto', 'THIRD_PARTY_NOTICES.md']) {
@@ -528,7 +528,9 @@ function main() {
   const opts = {
     binDir,
     daemonDir: path.resolve(args['daemon-dir'] ?? binDir),
-    webDir: path.resolve(args['web-dir'] ?? path.join(repo, 'packages', 'web', 'dist')),
+    webDir: path.resolve(
+      args['web-dir'] ?? path.join(repo, 'packages', 'core', 'crates', 'vorn-web', 'dist')
+    ),
     out,
     version:
       args.version ?? JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).version,

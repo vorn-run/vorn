@@ -204,7 +204,7 @@ fn extension_pane(s: &Screen<'_>, sid: &str) -> El {
         )
         .child(controls(s, sid, PaneKind::Extension, &p.title));
     let body = if p.url.is_some() {
-        web_box(s, &crate::extensions::page_key(sid)).bg(c(look::SURFACE_PANEL))
+        web_box(s, &crate::extensions::page_key(sid), p.url.as_deref()).bg(c(look::SURFACE_PANEL))
     } else {
         let slot = p
             .terminal_id
@@ -274,23 +274,47 @@ pub(super) fn maximized(s: &Screen<'_>, sid: &str) -> bool {
         .is_some_and(|k| kinds(s, sid).contains(k))
 }
 
-/// A web view's box, or the pane's own words where none can show.
-fn web_box(s: &Screen<'_>, key: &str) -> El {
+/// A web view's box, or the pane's own words where none can show, with a
+/// way to open `url` in a tab of its own.
+fn web_box(s: &Screen<'_>, key: &str, url: Option<&str>) -> El {
     match s.st.bench.slot_id(key) {
         Some(id) => custom(id).grow().min_h(0.0).min_w0(),
         None => {
             let mut el = div().grow().min_h(0.0).min_w0().center();
             if let Some(why) = &s.st.bench.unavailable {
-                el = el.p(16.0).child(
+                el = el.p(16.0).col().gap(10.0).child(
                     text(why.as_str(), 11.0, c(look::GRAY_500))
                         .wrapping()
                         .min_w0()
                         .role(Role::Status, why.as_str()),
                 );
+                if let Some(url) = url.filter(|u| u.starts_with("http")) {
+                    el = el.child(open_in_tab(s, url));
+                }
             }
             el
         }
     }
+}
+
+/// "Open in a new tab", for a page a web view cannot hold.
+fn open_in_tab(s: &Screen<'_>, url: &str) -> El {
+    let id = s.acts.on("pane", Act::OpenUrl(url.to_owned()));
+    let label = format!("Open {} in a new tab", browser::display_host(url));
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .px(10.0)
+        .py(5.0)
+        .rounded(6.0)
+        .border(1.0, white(0.10))
+        .bg(white(0.04).mix(white(0.10), s.ui.hover(id)))
+        .role(Role::Button, label.as_str())
+        .child(ico("external-link", 12.0, 2.0, c(look::GRAY_300)))
+        .child(text(label.as_str(), 12.0, c(look::GRAY_300)).truncate())
 }
 
 // ---- browser ------------------------------------------------------------
@@ -1092,7 +1116,11 @@ fn page_body(s: &Screen<'_>, sid: &str, live: Option<&Live>, agent: &str) -> El 
                 .min_w0()
                 .border_right(1.0, white(0.06))
                 .child(version_header(answered_on.unwrap_or_default()))
-                .child(web_box(s, &compare_key(sid))),
+                .child(web_box(
+                    s,
+                    &compare_key(sid),
+                    live.and_then(|l| l.compare_url.as_deref()),
+                )),
         );
     }
     let mut main = div().col().grow().min_w0().min_h(0.0);
@@ -1102,7 +1130,15 @@ fn page_body(s: &Screen<'_>, sid: &str, live: Option<&Live>, agent: &str) -> El 
     main = main.child(match (editing, bench.boards(sid)) {
         (Some(draft), _) => doc_editor(s, sid, draft, art, agent),
         (None, Some(boards)) => canvas(s, sid, boards),
-        (None, None) => web_box(s, &page_key(sid)),
+        (None, None) => web_box(
+            s,
+            &page_key(sid),
+            bench
+                .browsers
+                .get(sid)
+                .and_then(|p| p.active())
+                .map(|t| t.current()),
+        ),
     });
     body = body.child(main);
     if let (Some(board), Some(m), None) = (

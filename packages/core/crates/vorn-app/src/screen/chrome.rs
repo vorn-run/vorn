@@ -2,7 +2,7 @@
 //! drawn when there is no system title bar (`WindowControls`), the headless
 //! badge and recent-sessions popovers, the restored banner and toasts.
 
-use super::{c, ico, truncate, white, MainView, Screen, MOD_LABEL};
+use super::{c, ico, mod_label, truncate, white, MainView, Screen};
 use crate::act::Act;
 use crate::components::glyph;
 use crate::headless::Headless;
@@ -68,9 +68,9 @@ pub const VIEW_ORDER: [MainView; 3] = [MainView::Sessions, MainView::Tasks, Main
 /// `MainViewPills`: icon-only pills whose tooltips name the view.
 fn pills(s: &Screen<'_>) -> El {
     let keys = [
-        format!("{MOD_LABEL}S"),
-        format!("{MOD_LABEL}T"),
-        format!("{MOD_LABEL}\u{21e7}W"),
+        format!("{m}S", m = mod_label()),
+        format!("{m}T", m = mod_label()),
+        format!("{m}\u{21e7}W", m = mod_label()),
     ];
     let icons = look::PILLS.map(|(name, _)| look::icon(name, 2.0).unwrap_or_default());
     let waiting = waiting(s).len();
@@ -112,7 +112,7 @@ pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
             "panel-left",
             2.0,
             "Toggle sidebar",
-            Some(&format!("{MOD_LABEL}B")),
+            Some(&format!("{m}B", m = mod_label())),
             false,
         ))
         .child(divider())
@@ -754,7 +754,7 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
             "sliders-horizontal",
             1.5,
             "View options",
-            Some(&format!("{MOD_LABEL}J")),
+            Some(&format!("{m}J", m = mod_label())),
             open,
         );
         if s.st.options_changed() && !open {
@@ -832,7 +832,7 @@ fn task_options(s: &Screen<'_>) -> El {
         b,
         id,
         "View options",
-        Some(&format!("{MOD_LABEL}J")),
+        Some(&format!("{m}J", m = mod_label())),
         Place::Below,
     )
 }

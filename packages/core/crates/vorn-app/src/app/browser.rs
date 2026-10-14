@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, PoisonError};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::SystemTime;
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
@@ -244,7 +245,10 @@ impl App {
         self.web.host.attach(window);
         self.windowed = true;
         self.st.bench.unavailable = self.web.host.unavailable().map(str::to_owned);
-        self.answer_agents();
+        // The agents' browser and device tools stay with the desktop app.
+        if !cfg!(target_arch = "wasm32") {
+            self.answer_agents();
+        }
     }
 
     /// Claims vornd's bridge: the agents' browser and device calls come here.
@@ -719,6 +723,10 @@ impl App {
         work: impl FnOnce() -> Result<Value, String> + Send + 'static,
     ) {
         let responder = self.rpc.responder();
+        // A page has one thread; its device work fails at once.
+        if cfg!(target_arch = "wasm32") {
+            return responder.respond(id, work());
+        }
         let spawned = std::thread::Builder::new()
             .name("vorn-device".into())
             .spawn(move || responder.respond(id, work()));
@@ -730,6 +738,10 @@ impl App {
     fn spawn(&self, work: impl FnOnce() -> DevDone + Send + 'static) {
         let tx = self.web.tx.clone();
         let wake = Arc::clone(&self.web.wake);
+        if cfg!(target_arch = "wasm32") {
+            let _ = tx.send(work());
+            return wake();
+        }
         let spawned = std::thread::Builder::new()
             .name("vorn-device".into())
             .spawn(move || {

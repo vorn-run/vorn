@@ -3,7 +3,7 @@
 //! tasks slice makes it, on the config that `config:save` writes back.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use web_time::Instant;
 
 use serde_json::{json, Map, Value};
 use vorn_protocol::TaskConfig;
@@ -242,7 +242,7 @@ pub fn uuid() -> String {
     let mut bytes = [0u8; 16];
     for (i, chunk) in bytes.chunks_mut(8).enumerate() {
         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u128(std::time::UNIX_EPOCH.elapsed().map_or(0, |d| d.as_nanos()));
+        h.write_u128(web_time::UNIX_EPOCH.elapsed().map_or(0, |d| d.as_nanos()));
         h.write_usize(i);
         chunk.copy_from_slice(&h.finish().to_le_bytes());
     }

@@ -1,0 +1,4 @@
+# The browser build: 128-bit SIMD (every browser that runs WebGPU or WebGL2
+# has it), and getrandom through the page's crypto.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128", "--cfg", "getrandom_backend=\"wasm_js\""]

@@ -2,7 +2,7 @@
 //! the open menu or dialog, toasts. Kept apart from [`crate::app`] so the
 //! screens can read it whole.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -623,8 +623,8 @@ pub fn time_ago(then_ms: f64, now_ms: f64) -> String {
 
 /// Milliseconds since the epoch, as vornd stamps things.
 pub fn now_ms() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
 }
 

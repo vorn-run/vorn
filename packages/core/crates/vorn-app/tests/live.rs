@@ -81,7 +81,7 @@ fn tab_and_its_variants_reach_a_focused_terminal() {
     assert!(app.terminal_has_keys(&shot.ui));
 
     // Settings hold the keyboard: Tab moves between their controls.
-    shot.send(&mut app, key("Comma", MOD, Some(",")));
+    shot.send(&mut app, key("Comma", MOD(), Some(",")));
     assert!(app.st.settings.open);
     shot.send(&mut app, key("Tab", 0, Some("\t")));
     assert!(shot.ui.focus().is_some(), "Tab focuses a settings control");

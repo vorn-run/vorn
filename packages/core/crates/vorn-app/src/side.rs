@@ -390,7 +390,7 @@ impl Side {
     pub fn load(file: Option<PathBuf>) -> Side {
         let saved = file
             .as_deref()
-            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(crate::keep::read)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         Side {
@@ -404,11 +404,8 @@ impl Side {
     /// launch.
     pub fn save(&self) {
         let Some(f) = &self.file else { return };
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(s) = serde_json::to_string(&self.saved) {
-            let _ = std::fs::write(f, s);
+            let _ = crate::keep::write(f, &s);
         }
     }
 

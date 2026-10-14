@@ -2,16 +2,22 @@
 //! a process of its own, started when asked for or when an agent asks for
 //! permission while the window is in the background, and what it asks back.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Stdio};
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::Arc;
+use std::process::Child;
+#[cfg(not(target_arch = "wasm32"))]
+use std::process::Stdio;
+use std::sync::mpsc::Receiver;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{mpsc::channel, Arc};
 
 use serde_json::Value;
 
 use super::App;
 use crate::ui::{Ui, WindowRequest};
-use crate::widget::{parse, Request};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::widget::parse;
+use crate::widget::Request;
 
 /// The running widget and the lines it writes.
 pub(super) struct Running {
@@ -43,6 +49,10 @@ impl App {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn start_widget(&mut self) {}
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn start_widget(&mut self) {
         if self.widget.is_some() || !self.windowed {
             return;

@@ -3,7 +3,7 @@
 //! shortcuts panel. The steps, their copy and the setup commands are
 //! `onboarding-data.ts` and `mcp-data.ts` as values.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use serde_json::{json, Value};
 

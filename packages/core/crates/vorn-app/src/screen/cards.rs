@@ -5,7 +5,7 @@
 
 use super::chrome::{self, divider, draggable};
 use super::panes;
-use super::{c, ico, truncate, white, Screen, MOD_LABEL};
+use super::{c, ico, mod_label, truncate, white, Screen};
 use std::time::Duration;
 
 use crate::act::{Act, Acts};
@@ -171,7 +171,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
             toggle: s.acts.on("card", toggle),
             close: s.acts.on("card", Act::AskClose(sid)),
-            toggle_key: &format!("{MOD_LABEL}{key}"),
+            toggle_key: &format!("{m}{key}", m = mod_label()),
             confirming,
         },
         panes::card_buttons(s, session, variant),
@@ -235,7 +235,7 @@ fn position_badge(i: usize, dim: f32) -> El {
         .border(1.0, fade(look::WHITE, 0.06, dim))
         .child(
             text(
-                format!("{MOD_LABEL}{}", i + 1),
+                format!("{m}{}", i + 1, m = mod_label()),
                 10.0,
                 fade(look::GRAY_600, 1.0, dim),
             )
@@ -331,14 +331,14 @@ fn nav_hint(s: &Screen<'_>, sid: &str) -> Option<El> {
                 "chevron-left",
                 "Previous cell",
                 "Previous",
-                format!("{MOD_LABEL}["),
+                format!("{m}[", m = mod_label()),
             ))
             .child(arrow(
                 Act::Expand(neighbour(1)),
                 "chevron-right",
                 "Next cell",
                 "Next",
-                format!("{MOD_LABEL}]"),
+                format!("{m}]", m = mod_label()),
             )),
     )
 }
@@ -1308,10 +1308,14 @@ fn tab(s: &Screen<'_>, n: usize, session: &Session, active: bool) -> El {
                 .bg(white(0.06))
                 .border(1.0, white(0.1))
                 .child(
-                    text(format!("{MOD_LABEL}{}", n + 1), 9.0, c(look::GRAY_500))
-                        .mono()
-                        .line_height(9.0)
-                        .silent(),
+                    text(
+                        format!("{m}{}", n + 1, m = mod_label()),
+                        9.0,
+                        c(look::GRAY_500),
+                    )
+                    .mono()
+                    .line_height(9.0)
+                    .silent(),
                 ),
         )
     } else {

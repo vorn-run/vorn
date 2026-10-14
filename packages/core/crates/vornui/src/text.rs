@@ -199,11 +199,34 @@ pub struct TextSystem {
     clusters: HashMap<(Box<str>, u8), Rc<[CellPiece]>>,
 }
 
+/// Font files a host brings instead of the system's (a browser exposes none).
+static BUNDLED: std::sync::OnceLock<Vec<std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>>> =
+    std::sync::OnceLock::new();
+
+/// Makes every [`TextSystem`] made after this draw with only `faces` (TTF or
+/// OTF bytes). Set once, before the first; later calls are ignored.
+pub fn use_bundled_fonts(faces: Vec<Vec<u8>>) {
+    let faces = faces
+        .into_iter()
+        .map(|f| std::sync::Arc::new(f) as std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>)
+        .collect();
+    let _ = BUNDLED.set(faces);
+}
+
 impl TextSystem {
     /// `ui` and `mono` are family names; `term_size` the terminal font size
     /// in logical pixels.
     pub fn new(scale: f32, ui: &'static str, mono: &'static str, term_size: f32) -> TextSystem {
-        let mut fonts = FontSystem::new();
+        let mut fonts = match BUNDLED.get() {
+            Some(faces) => {
+                let mut db = cosmic_text::fontdb::Database::new();
+                for face in faces {
+                    db.load_font_source(cosmic_text::fontdb::Source::Binary(face.clone()));
+                }
+                FontSystem::new_with_locale_and_db("en-US".to_owned(), db)
+            }
+            None => FontSystem::new(),
+        };
         if ui == crate::theme::font::SF {
             // A missing file leaves fallback to pick the face.
             let _ = fonts.db_mut().load_font_file(crate::theme::font::SF_FILE);

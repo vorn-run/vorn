@@ -1,4 +1,4 @@
-// The wire between Vorn and a connector's child process; the app keeps a copy in shared/connector-protocol.ts.
+// The wire between Vorn and a connector's child process.
 
 // ---- protocol 1 ----
 

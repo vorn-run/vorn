@@ -118,24 +118,49 @@ pub struct Store {
     pub runs: HashMap<String, Value>,
 }
 
+fn subscription() -> Value {
+    json!({ "topics": TOPICS, "terminalBytes": false })
+}
+
+/// The loads [`Store::load`] waits on, sent together.
+fn load_calls(rpc: &Rpc) -> [Pending; 6] {
+    [
+        rpc.request("config:load", Value::Null),
+        rpc.request("project:list", Value::Null),
+        rpc.request("terminal:listActive", Value::Null),
+        rpc.request("task:list", json!({})),
+        rpc.request("workflow:list", Value::Null),
+        rpc.request("workflowRun:listWaiting", Value::Null),
+    ]
+}
+
 impl Store {
     /// Subscribes to [`TOPICS`] and loads everything, the calls in flight
     /// together. Subscribing first means nothing is missed between the two.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(rpc: &Rpc) -> Result<Store, RpcError> {
-        rpc.call(
-            "subscribe:set",
-            json!({ "topics": TOPICS, "terminalBytes": false }),
-        )?;
-        let calls: [Pending; 6] = [
-            rpc.request("config:load", Value::Null),
-            rpc.request("project:list", Value::Null),
-            rpc.request("terminal:listActive", Value::Null),
-            rpc.request("task:list", json!({})),
-            rpc.request("workflow:list", Value::Null),
-            rpc.request("workflowRun:listWaiting", Value::Null),
-        ];
-        let [config, projects, sessions, tasks, workflows, waiting] =
-            calls.map(|p| p.wait(CALL_TIMEOUT));
+        rpc.call("subscribe:set", subscription())?;
+        Store::from_answers(load_calls(rpc).map(|p| p.wait(CALL_TIMEOUT)))
+    }
+
+    /// [`Store::load`] without holding the page's one thread.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn load_async(rpc: &Rpc) -> Result<Store, RpcError> {
+        rpc.request("subscribe:set", subscription())
+            .answer(CALL_TIMEOUT)
+            .await?;
+        let mut answers = Vec::new();
+        for p in load_calls(rpc) {
+            answers.push(p.answer(CALL_TIMEOUT).await);
+        }
+        let answers: [Result<Value, RpcError>; 6] = answers
+            .try_into()
+            .map_err(|_| RpcError::Decode("missing answers".into()))?;
+        Store::from_answers(answers)
+    }
+
+    fn from_answers(answers: [Result<Value, RpcError>; 6]) -> Result<Store, RpcError> {
+        let [config, projects, sessions, tasks, workflows, waiting] = answers;
         let mut store = Store {
             config: config?,
             projects: records(projects?),

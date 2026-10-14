@@ -32,6 +32,7 @@ pub mod headless;
 pub mod highlight;
 pub mod hotkeys;
 pub mod intent;
+pub mod keep;
 pub mod launch;
 pub mod layout;
 pub mod library;
@@ -41,6 +42,8 @@ pub mod models;
 pub mod network;
 pub mod notify;
 pub mod onboarding;
+#[cfg(target_arch = "wasm32")]
+pub mod page;
 pub mod paint;
 pub mod palette;
 pub mod panes;
@@ -57,6 +60,7 @@ pub mod state;
 pub mod system;
 pub mod tasks;
 pub mod templates;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 pub mod ui;
 pub mod update;

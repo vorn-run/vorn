@@ -12,6 +12,32 @@ pub mod mods {
     pub const ALT: u16 = 2;
     pub const CTRL: u16 = 4;
     pub const SUPER: u16 = 8;
+
+    #[cfg(target_arch = "wasm32")]
+    static MAC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// Whether shortcuts are the Mac's (Cmd, not Ctrl): a desktop build
+    /// knows; a browser build learns it from the page it runs in.
+    pub fn mac() -> bool {
+        #[cfg(target_arch = "wasm32")]
+        return MAC.load(std::sync::atomic::Ordering::Relaxed);
+        #[cfg(not(target_arch = "wasm32"))]
+        cfg!(target_os = "macos")
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_mac(on: bool) {
+        MAC.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The platform's command modifier: Cmd on a Mac, Ctrl elsewhere.
+    pub fn primary() -> u16 {
+        if mac() {
+            SUPER
+        } else {
+            CTRL
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

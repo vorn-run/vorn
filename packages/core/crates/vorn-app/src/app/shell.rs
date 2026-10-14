@@ -1,7 +1,7 @@
 //! A shell's command blocks and its composer's history and completions:
 //! the marks vornd reports, the blocks cut from the grid, the menu's keys.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use serde_json::Value;
 

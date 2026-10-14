@@ -66,7 +66,7 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
     let mut app = connect(v);
     add_project(&mut app, v, "web", json!({}));
     let mut shot = Shot::new();
-    shot.send(&mut app, key("KeyT", MOD, None));
+    shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
     (app, shot)
 }
@@ -323,7 +323,7 @@ fn the_editor_runs_slash_commands_carries_lists_and_formats_a_selection() {
 
     shot.ui.edit_mut(desc).set_selection(6, 11);
     shot.save(&mut app, "task-toolbar");
-    shot.send(&mut app, key("KeyB", MOD, None));
+    shot.send(&mut app, key("KeyB", MOD(), None));
     assert_eq!(shot.ui.edit_text(desc), "- [ ] **first**\n\n");
     assert!(
         app.st.sidebar,
@@ -376,7 +376,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     let dir = add_project(&mut app, &v, "web", json!({}));
     repo(&dir);
     let mut shot = Shot::new();
-    shot.send(&mut app, key("KeyT", MOD, None));
+    shot.send(&mut app, key("KeyT", MOD(), None));
     let id = create(&mut shot, &mut app, "Add two");
     shot.click(&mut app, card_id(&id));
     shot.click(
@@ -411,7 +411,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     );
     assert_eq!(shot.ui.focus(), Some(comment_id()));
     shot.type_text(&mut app, "Say three too");
-    shot.send(&mut app, key("Enter", MOD, Some("\r")));
+    shot.send(&mut app, key("Enter", MOD(), Some("\r")));
     let c = &app.st.tasks.diff.comments;
     assert_eq!(c.len(), 1);
     assert_eq!(
@@ -434,7 +434,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     assert_eq!(shot.ui.focus(), Some(commit_id()));
     shot.type_text(&mut app, "Add two");
     shot.save(&mut app, "task-commit");
-    shot.send(&mut app, key("Enter", MOD, Some("\r")));
+    shot.send(&mut app, key("Enter", MOD(), Some("\r")));
     toast(&mut shot, &mut app, "Changes committed");
     assert_eq!(app.st.dialog, None);
     let log = Command::new("git")

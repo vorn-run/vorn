@@ -1,7 +1,7 @@
 //! The Remote Access page's model (`NetworkSettings`): sharing this machine,
 //! pairing devices with a code, and using another machine from here.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde::Deserialize;
 

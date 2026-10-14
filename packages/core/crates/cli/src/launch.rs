@@ -7,7 +7,7 @@
 //!   it serves is `resources/web/dist`.
 //! - In a checkout it is `packages/core/vornd` beside `packages/core/vorn`, or
 //!   in the same `target/<profile>` directory; the web client is
-//!   `packages/web/dist`.
+//!   `packages/core/crates/vorn-web/dist`.
 //!
 //! `VORN_VORND_PATH` names a vornd elsewhere.
 
@@ -107,7 +107,7 @@ fn web_client(dir: &Path) -> Option<PathBuf> {
     dir.ancestors().take(5).find_map(|up| {
         [
             up.join("web").join("dist"),
-            up.join("packages").join("web").join("dist"),
+            up.join("crates").join("vorn-web").join("dist"),
         ]
         .into_iter()
         .find(|d| d.is_dir())

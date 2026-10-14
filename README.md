@@ -192,6 +192,7 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 
 ### More
 
+- **Web Client** — the same app in a browser or on your phone, compiled to WebAssembly and served by vornd (`vornd --web`); pair a phone or another computer with a code from the desktop app
 - **Remote Hosts** — launch terminals on remote machines via SSH
 - **Terminal Panel** — lightweight shell tabs for quick operations
 - **Project Management** — organize sessions by project with custom icons, colors, and preferred agents
@@ -212,7 +213,7 @@ Any CLI tool that runs in a terminal works with Vorn. These are the agents with 
 
 ## Development
 
-**Prerequisites:** Node.js 20+, Yarn, a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/) for the native core
+**Prerequisites:** a Rust toolchain and [Zig 0.16.0](https://ziglang.org/download/) for the native core; Node.js 22 and Yarn for the MCP server, the connector SDK and the tests; `brotli` for the web client
 
 ```bash
 # Install dependencies
@@ -221,14 +222,14 @@ yarn install
 # Build vornd, the server, with its session holder and the vorn command
 yarn build:core
 
-# Start in development mode
-yarn dev
+# Run the desktop app
+cd packages/core && cargo run --release -p vorn-app
 
-# Build for production
-yarn build
+# Build the web client (the app compiled to WebAssembly) into packages/core/crates/vorn-web/dist
+yarn build:web
 
-# Package for your platform
-yarn dist
+# Check it in headless Chromium against a test vornd
+cd packages/core && node crates/vorn-web/tests/smoke.mjs
 ```
 
 ## Contributing

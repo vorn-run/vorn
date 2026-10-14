@@ -1,15 +1,13 @@
 import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
   define: {
     'process.env.NODE_ENV': JSON.stringify('test')
   },
   test: {
     globals: true,
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    include: ['tests/**/*.test.ts'],
     globalSetup: ['tests/setup/global-sandbox.ts'],
     setupFiles: ['tests/setup/sandbox.ts'],
     coverage: {
@@ -17,32 +15,19 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'lcov'],
       include: [
         'packages/connector-sdk/src/**/*.ts',
-        'packages/shared/src/**/*.ts',
-        'packages/web/src/renderer/lib/**/*.ts',
-        'packages/web/src/renderer/components/**/*.tsx'
+        'packages/mcp/src/**/*.ts',
+        'packages/shared/src/**/*.ts'
       ],
-      exclude: [
-        'packages/web/src/renderer/lib/terminal-registry.ts',
-        'packages/web/src/renderer/lib/workflow-execution.ts',
-        'packages/web/src/renderer/lib/workflow-triggers.ts',
-        'packages/web/src/renderer/lib/terminal-close.ts',
-        // Heavy settings page dominated by IPC-backed form state —
-        // matches the established exclusion pattern for this category.
-        'packages/web/src/renderer/components/settings/ConnectorSettings.tsx',
-        '**/*.d.ts'
-      ]
+      exclude: ['**/*.d.ts']
     }
   },
   resolve: {
     alias: {
-      '@shared': path.resolve(__dirname, 'packages/web/src/shared'),
-      '@renderer': path.resolve(__dirname, 'packages/web/src/renderer'),
       // Connector packages depend on the published SDK. Tests must exercise
       // the SDK source, not whatever `dist` a previous build left behind.
       '@vornrun/connector-sdk': path.resolve(__dirname, 'packages/connector-sdk/src/index.ts'),
       // Pinned to this checkout; in a worktree the bare specifier would resolve through the main clone.
-      '@vornrun/shared/': `${path.resolve(__dirname, 'packages/shared/src')}/`,
-      '@vornrun/shared': path.resolve(__dirname, 'packages/shared/src/index.ts')
+      '@vornrun/shared/': `${path.resolve(__dirname, 'packages/shared/src')}/`
     }
   }
 })

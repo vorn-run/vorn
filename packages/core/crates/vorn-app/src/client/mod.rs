@@ -3,6 +3,7 @@
 //! ([`store`]).
 
 pub mod endpoint;
+pub mod link;
 pub mod rpc;
 pub mod store;
 

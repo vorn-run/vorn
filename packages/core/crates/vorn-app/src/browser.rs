@@ -96,9 +96,8 @@ pub struct Panes {
 impl Panes {
     /// The panes saved in `path`; none when it is missing or unreadable.
     pub fn load(path: &Path) -> Panes {
-        std::fs::read(path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Panes>(&b).ok())
+        crate::keep::read(path)
+            .and_then(|b| serde_json::from_str::<Panes>(&b).ok())
             .map(Panes::intent)
             .unwrap_or_default()
     }
@@ -106,8 +105,8 @@ impl Panes {
     /// Writes the panes to `path`. As the renderer's `savePanes`, only what
     /// was asked for is kept: what a page reported is seen again next run.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let body = serde_json::to_vec(&self.clone().intent()).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        let body = serde_json::to_string(&self.clone().intent()).map_err(std::io::Error::other)?;
+        crate::keep::write(path, &body)
     }
 
     fn intent(mut self) -> Panes {
@@ -517,7 +516,7 @@ pub fn loadable_url(input: &str, root: Option<&Path>) -> Option<String> {
     if parsed.host_str().is_some_and(|h| !h.is_empty()) {
         return None;
     }
-    let real = parsed.to_file_path().ok()?.canonicalize().ok()?;
+    let real = file_path(&parsed)?.canonicalize().ok()?;
     real.starts_with(real_root?).then_some(normalized)
 }
 
@@ -535,11 +534,18 @@ pub fn parse_cursor(cursor: Option<&str>, generation: u32) -> usize {
 
 /// The design file a `file:` address shows, which its tweaks are kept by.
 pub fn design_path(url: &str) -> Option<std::path::PathBuf> {
-    Url::parse(url)
-        .ok()
-        .filter(|u| u.scheme() == "file")?
-        .to_file_path()
-        .ok()
+    file_path(&Url::parse(url).ok().filter(|u| u.scheme() == "file")?)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn file_path(url: &Url) -> Option<std::path::PathBuf> {
+    url.to_file_path().ok()
+}
+
+/// A page has no files of its own to show.
+#[cfg(target_arch = "wasm32")]
+fn file_path(_url: &Url) -> Option<std::path::PathBuf> {
+    None
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use accesskit::{HasPopup, Node, NodeId, Orientation, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use taffy::prelude::{AvailableSpace, Dimension, Size, TaffyTree};
@@ -34,6 +34,9 @@ pub const ROOT_NODE: NodeId = NodeId(0);
 
 /// Accessibility content of a custom box: role, label, value.
 pub type CustomA11y = (Role, String, String);
+
+/// A CPU frame's bytes, its size and the rows that changed.
+pub type CpuPixels<'a> = (&'a [u8], (u32, u32), &'a [(u32, u32)]);
 
 /// Fonts and sizes a [`Ui`] starts with.
 #[derive(Clone, Copy, Debug)]
@@ -1527,6 +1530,14 @@ impl Ui {
     /// or the sizes differ.
     pub fn copy_cpu_frame(&self, dst: &mut [u32], whole: bool) -> Option<&[(u32, u32)]> {
         self.renderer.cpu_frame()?.copy_xrgb(dst, whole)
+    }
+
+    /// The CPU renderer's last frame (4 bytes a pixel, in the order its
+    /// format names), its size and the rows that changed, for a host that
+    /// presents the bytes itself: a browser's 2D canvas.
+    pub fn cpu_pixels(&self) -> Option<CpuPixels<'_>> {
+        let r = self.renderer.cpu_frame()?;
+        Some((r.bytes(), r.size(), r.damage()))
     }
 
     /// The pixels of the last frame drawn into `target`, as RGBA rows.

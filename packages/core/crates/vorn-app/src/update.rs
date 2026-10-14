@@ -22,11 +22,13 @@
 //!
 //! `Vorn update` runs the same steps without a window ([`update_now`]).
 
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -172,6 +174,29 @@ pub fn beta_feed_url(releases: &Value) -> Option<String> {
         .map(|(_, url)| url)
 }
 
+/// Why a browser has no updater: vornd's machine updates the app it serves.
+#[cfg(target_arch = "wasm32")]
+const IN_BROWSER: &str = "The browser runs the version vornd serves.";
+
+#[cfg(target_arch = "wasm32")]
+fn get_json(_url: &str) -> Result<Value, String> {
+    Err(IN_BROWSER.to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn download(_asset: &Asset, _dir: &Path, _progress: &dyn Fn(u32)) -> Result<PathBuf, String> {
+    Err(IN_BROWSER.to_owned())
+}
+
+fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg(not(target_arch = "wasm32"))]
+    return vorn_spawn::command(program);
+    #[cfg(target_arch = "wasm32")]
+    // spawn-visible: a browser has no processes; this only type-checks there.
+    Command::new(program)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -183,6 +208,7 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .new_agent()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn get_json(url: &str) -> Result<Value, String> {
     let mut response = agent(Duration::from_secs(60))
         .get(url)
@@ -200,6 +226,7 @@ fn get_json(url: &str) -> Result<Value, String> {
     serde_json::from_str(&body).map_err(|e| format!("The update feed is not readable: {e}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn host(url: &str) -> String {
     url::Url::parse(url)
         .ok()
@@ -251,6 +278,7 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
 
 /// Downloads `asset` into `dir`, checking its size and SHA-256; `progress`
 /// hears the percent done. A file already there that matches is kept.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn download(asset: &Asset, dir: &Path, progress: &dyn Fn(u32)) -> Result<PathBuf, String> {
     let name = Path::new(&asset.name)
         .file_name()
@@ -333,7 +361,7 @@ pub struct Staged {
 }
 
 fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<String, String> {
-    let out = vorn_spawn::command(cmd)
+    let out = command(cmd)
         .args(args)
         .output()
         .map_err(|e| format!("{cmd}: {e}"))?;
@@ -544,15 +572,14 @@ fn spawn_detached(command: &mut Command) -> Result<(), String> {
 /// A shell that waits for this process to end, then runs `then`.
 #[cfg(unix)]
 fn after_exit(then: &str, args: &[&Path]) -> Command {
-    let mut command = vorn_spawn::command("/bin/sh");
-    command
-        .arg("-c")
+    let mut sh = command("/bin/sh");
+    sh.arg("-c")
         .arg(format!(
             "while kill -0 \"$0\" 2>/dev/null; do sleep 0.2; done; {then}"
         ))
         .arg(std::process::id().to_string())
         .args(args);
-    command
+    sh
 }
 
 /// Installs `staged` and starts the new app once this one exits, on
@@ -575,7 +602,7 @@ pub fn install(staged: &Staged, data_dir: Option<&Path>) -> Result<(), String> {
             spawn_detached(&mut command)
         }
         Install::Windows => {
-            let mut command = vorn_spawn::command(&staged.path);
+            let mut command = command(&staged.path);
             command.args(["/S", "--updated", "--force-run"]);
             // The installer starts the app with its own environment, so the data directory goes there.
             if let Some(dir) = data_dir {
@@ -702,6 +729,7 @@ impl Updater {
         let install = Install::current();
         let forced = std::env::var_os(FEED_ENV).is_some_and(|v| !v.is_empty());
         let status = match &install {
+            _ if cfg!(target_arch = "wasm32") => UpdateStatus::Unsupported,
             Install::Dev if !forced => UpdateStatus::Unsupported,
             _ => UpdateStatus::Idle { last_checked: None },
         };

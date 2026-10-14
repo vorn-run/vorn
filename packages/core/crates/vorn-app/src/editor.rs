@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -282,7 +282,7 @@ impl Drafts {
     pub fn load(file: Option<PathBuf>) -> Drafts {
         let all = file
             .as_deref()
-            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(crate::keep::read)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         Drafts { file, all }
@@ -290,12 +290,9 @@ impl Drafts {
 
     fn save(&self) {
         let Some(f) = &self.file else { return };
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         // A full disk costs the draft's survival, not the edit on screen.
         if let Ok(s) = serde_json::to_string(&self.all) {
-            let _ = std::fs::write(f, s);
+            let _ = crate::keep::write(f, &s);
         }
     }
 

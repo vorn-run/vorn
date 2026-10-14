@@ -135,7 +135,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     );
     assert!(app.st.settings.shell_editing);
     let shell = vorn_app::screen::settings::SHELL_PATH;
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_line(&mut app, "/bin/sh");
     saved(&mut app, "the typed shell", |c| {
         c.pointer("/defaults/shell") == Some(&json!("/bin/sh"))
@@ -246,7 +246,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     );
     shot.save(&mut app, "set-ssh-host");
     shot.click(&mut app, host_id("host-1", HostField::User));
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_text(&mut app, "deploy");
     saved(&mut app, "the host's user", |c| {
         c.pointer("/remoteHosts/0/user") == Some(&json!("deploy"))
@@ -307,6 +307,6 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
 
     shot.send(&mut app, key("Escape", 0, None));
     assert!(!app.st.settings.open, "Escape closes the page");
-    shot.send(&mut app, key("Comma", MOD, None));
+    shot.send(&mut app, key("Comma", MOD(), None));
     assert!(app.st.settings.open, "Mod+Comma opens it again");
 }

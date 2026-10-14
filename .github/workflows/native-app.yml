@@ -19,6 +19,7 @@ on:
     paths:
       - '.github/workflows/native-app.yml'
       - 'packages/core/scripts/package-native.mjs'
+      - 'packages/core/scripts/build-web.sh'
       - 'packages/core/scripts/release-feeds.mjs'
       - 'packages/core/scripts/update-path.mjs'
       - 'packages/core/scripts/vorn.nsi'
@@ -28,8 +29,44 @@ on:
       - '.github/workflows/release.yml'
 
 jobs:
+  # The web client is WebAssembly, the same on every platform, so it is built once.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: Brotli
+        run: sudo apt-get update && sudo apt-get install -y brotli
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: web-v1-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: web-v1-${{ runner.os }}-
+
+      - name: Build the web client
+        run: sh packages/core/scripts/build-web.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-client
+          path: packages/core/crates/vorn-web/dist
+          retention-days: 1
+          if-no-files-found: error
+
   package:
     name: ${{ matrix.name }}
+    needs: web
     strategy:
       fail-fast: false
       matrix:
@@ -72,8 +109,10 @@ jobs:
         run: yarn install
 
       # vornd serves it from resources/web/dist.
-      - name: Build the web client
-        run: yarn build:web
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-client
+          path: packages/core/crates/vorn-web/dist
 
       # vornd's session engine parses with libghostty-vt, which needs Zig 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1

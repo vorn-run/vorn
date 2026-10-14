@@ -10,6 +10,7 @@ use std::sync::mpsc::Receiver;
 use serde_json::{json, Value};
 
 use crate::client::rpc::{Event as RpcEvent, Rpc};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::Endpoint;
 use crate::components::{agent_icon, AgentMarks};
 use crate::runs::s;
@@ -169,6 +170,7 @@ pub struct Widget {
 
 impl Widget {
     /// Connects to vornd at `ep` and asks for the list.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn connect(ep: &Endpoint, wake: crate::client::rpc::Wake) -> Result<Widget, String> {
         let (rpc, events) = Rpc::connect(ep, wake).map_err(|e| e.to_string())?;
         let topics = [

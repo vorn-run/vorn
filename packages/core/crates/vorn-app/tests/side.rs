@@ -130,7 +130,7 @@ fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
         ),
     );
     shot.type_text(&mut app, "Name this better");
-    shot.send(&mut app, key("Enter", MOD, Some("\r")));
+    shot.send(&mut app, key("Enter", MOD(), Some("\r")));
     assert_eq!(app.st.git.diff.comments.len(), 1);
     shot.save(&mut app, "p-review");
     shot.click(
@@ -308,7 +308,7 @@ fn panes_browse_edit_save_and_hold_terminals() {
     shot.frame(&mut app);
     assert_eq!(app.st.side.saved.files[&sid].preview, None);
     shot.save(&mut app, "p-dirty");
-    shot.send(&mut app, key("KeyS", MOD, None));
+    shot.send(&mut app, key("KeyS", MOD(), None));
     shot.until(&mut app, "the save", |a, _| {
         a.st.editors
             .buffers

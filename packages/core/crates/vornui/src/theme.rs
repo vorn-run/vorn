@@ -1,10 +1,8 @@
-//! The app's design tokens: the colours in `packages/web/src/renderer/theme.css`, the
-//! Tailwind v4 defaults the components use (grays, type scale, radii,
-//! transitions) and the global rules in `global.css` (focus ring,
-//! scrollbar). Widgets read these instead of literals so a port stays a
-//! port: a test checks the colours against `theme.css` itself.
+//! The app's design tokens: the palette, grays, type scale, radii,
+//! transitions, focus ring and scrollbar. Widgets read these instead of
+//! literals, so each value is written once.
 
-use std::time::Duration;
+use web_time::Duration;
 
 use crate::scene::Rgba;
 
@@ -161,7 +159,13 @@ pub mod font {
     pub const SF: &str = "System Font";
     pub const SF_FILE: &str = "/System/Library/Fonts/SFNS.ttf";
 
-    pub const UI: &str = if cfg!(target_os = "macos") {
+    /// The faces a browser build bundles (`use_bundled_fonts`).
+    pub const WEB_UI: &str = "Inter";
+    pub const WEB_MONO: &str = "JetBrains Mono";
+
+    pub const UI: &str = if cfg!(target_arch = "wasm32") {
+        WEB_UI
+    } else if cfg!(target_os = "macos") {
         SF
     } else if cfg!(windows) {
         "Segoe UI"
@@ -200,7 +204,9 @@ pub mod font {
         (px / size).max(0.0)
     }
 
-    pub const MONO: &str = if cfg!(target_os = "macos") {
+    pub const MONO: &str = if cfg!(target_arch = "wasm32") {
+        WEB_MONO
+    } else if cfg!(target_os = "macos") {
         "Menlo"
     } else if cfg!(windows) {
         "Consolas"
@@ -246,7 +252,7 @@ pub const TRANSITION: Duration = Duration::from_millis(150);
 
 /// Motion beyond hover fades.
 pub mod motion {
-    use std::time::Duration;
+    use web_time::Duration;
     /// `animate-pulse`: opacity 1 → 0.5 → 1, `cubic-bezier(0.4, 0, 0.6, 1)`.
     pub const PULSE: Duration = Duration::from_secs(2);
     /// `animate-spin`: one turn, linear.
@@ -314,56 +320,6 @@ pub mod scrollbar {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn parse(css: &str, name: &str) -> Option<Rgba> {
-        let line = css.lines().find(|l| l.trim_start().starts_with(name))?;
-        let v = line.split(':').nth(1)?.split(';').next()?.trim();
-        if let Some(hex) = v.strip_prefix('#') {
-            return u32::from_str_radix(hex, 16).ok().map(Rgba::hex);
-        }
-        let inner = v.strip_prefix("rgba(")?.strip_suffix(')')?;
-        let n: Vec<f32> = inner
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        Some(Rgba::rgba_const(n[0] as u8, n[1] as u8, n[2] as u8, n[3]))
-    }
-
-    #[test]
-    fn colors_match_theme_css() {
-        let css = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../web/src/renderer/theme.css"
-        ));
-        let pairs = [
-            ("--color-bronzo:", color::BRONZO),
-            ("--color-bronzo-dark:", color::BRONZO_DARK),
-            ("--color-danger:", color::DANGER),
-            ("--color-ink:", color::INK),
-            ("--color-ink-secondary:", color::INK_SECONDARY),
-            ("--color-ink-faint:", color::INK_FAINT),
-            ("--color-ink-ghost:", color::INK_GHOST),
-            ("--color-status-slate:", color::STATUS_SLATE),
-            ("--color-status-blue:", color::STATUS_BLUE),
-            ("--color-status-sage:", color::STATUS_SAGE),
-            ("--color-diff-add:", color::DIFF_ADD),
-            ("--color-diff-remove:", color::DIFF_REMOVE),
-            ("--color-surface-base:", color::SURFACE_BASE),
-            ("--color-surface-sunken:", color::SURFACE_SUNKEN),
-            ("--color-surface-panel:", color::SURFACE_PANEL),
-            ("--color-surface-overlay:", color::SURFACE_OVERLAY),
-        ];
-        for (name, ours) in pairs {
-            let theirs = parse(css, name).unwrap_or_else(|| panic!("{name} not in theme.css"));
-            for c in 0..4 {
-                assert!(
-                    (theirs.0[c] - ours.0[c]).abs() < 1e-3,
-                    "{name}: {theirs:?} != {ours:?}"
-                );
-            }
-        }
-        assert!(css.contains("--color-surface-raised: var(--color-surface-sunken)"));
-    }
 
     #[test]
     fn easing_matches_css_endpoints_and_shape() {

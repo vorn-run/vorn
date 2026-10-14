@@ -36,22 +36,48 @@ impl Gpu {
         instance: &wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
     ) -> Result<wgpu::Adapter, String> {
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: surface,
-            force_fallback_adapter: false,
-        }))
-        .map_err(|e| format!("no GPU adapter: {e}"))
+        pollster::block_on(Gpu::adapter_async(instance, surface))
+    }
+
+    /// [`Gpu::adapter`] for a host that cannot block: a browser.
+    pub async fn adapter_async(
+        instance: &wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<wgpu::Adapter, String> {
+        instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: surface,
+                force_fallback_adapter: false,
+            })
+            .await
+            .map_err(|e| format!("no GPU adapter: {e}"))
     }
 
     /// Opens a device on `adapter`.
     pub fn open(instance: wgpu::Instance, adapter: wgpu::Adapter) -> Result<Gpu, String> {
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("vornui"),
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU device: {e}"))?;
+        pollster::block_on(Gpu::open_async(instance, adapter))
+    }
+
+    /// [`Gpu::open`] for a host that cannot block. WebGL2 lacks some of
+    /// the downlevel defaults, so the limits are the adapter's own there.
+    pub async fn open_async(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+    ) -> Result<Gpu, String> {
+        let base = if adapter.get_info().backend == wgpu::Backend::Gl {
+            wgpu::Limits::downlevel_webgl2_defaults()
+        } else {
+            wgpu::Limits::downlevel_defaults()
+        };
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("vornui"),
+                required_limits: base.using_resolution(adapter.limits()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| format!("no GPU device: {e}"))?;
         Ok(Gpu {
             instance,
             adapter,

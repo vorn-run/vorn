@@ -6,9 +6,6 @@
 //! placeholders against a project and rebinds a connection where this machine
 //! has one unambiguous answer.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::json;
@@ -418,10 +415,35 @@ pub fn from_portable(
     ])
 }
 
-static MACHINE_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(^|["'\s\x{feff}])(/(Users|home)/|[A-Za-z]:[\\/]|\\\\[^\\/\s\x{feff}]+[\\/])"#)
-        .expect("MACHINE_PATH is a valid pattern")
-});
+/// Whether `s` holds an absolute path of some machine (`/Users/`, `/home/`,
+/// a drive or a UNC share) at its start or after a quote or a space.
+fn machine_path(s: &str) -> bool {
+    let after_break = s
+        .char_indices()
+        .filter(|&(_, c)| matches!(c, '"' | '\'' | '\u{feff}') || c.is_whitespace())
+        .map(|(i, c)| i + c.len_utf8());
+    std::iter::once(0)
+        .chain(after_break)
+        .any(|i| absolute_at(&s[i..]))
+}
+
+fn absolute_at(t: &str) -> bool {
+    let b = t.as_bytes();
+    let slash = |c: u8| c == b'/' || c == b'\\';
+    if t.starts_with("/Users/") || t.starts_with("/home/") {
+        return true;
+    }
+    if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && slash(b[2]) {
+        return true;
+    }
+    let Some(share) = t.strip_prefix("\\\\") else {
+        return false;
+    };
+    share
+        .char_indices()
+        .find(|&(_, c)| c == '/' || c == '\\' || c == '\u{feff}' || c.is_whitespace())
+        .is_some_and(|(i, c)| i > 0 && (c == '/' || c == '\\'))
+}
 
 /// `residualAbsolutePaths`: what is still machine-specific after export.
 pub fn residual_absolute_paths(portable: &Value) -> Vec<String> {
@@ -429,7 +451,7 @@ pub fn residual_absolute_paths(portable: &Value) -> Vec<String> {
     for node in crate::tools::items(portable.get("nodes")) {
         for (key, value) in spread(node.get("config")) {
             if let Value::String(s) = value {
-                if MACHINE_PATH.is_match(&s) {
+                if machine_path(&s) {
                     found.push(format!("{}.{key}", json::display(node.get("id"))));
                 }
             }
@@ -441,6 +463,54 @@ pub fn residual_absolute_paths(portable: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_machine_paths_where_a_value_or_word_starts() {
+        for yes in [
+            "/Users/me/x",
+            "/home/me",
+            r"C:\x",
+            "d:/x",
+            r"\\srv\share",
+            "cd /home/me",
+            "\"/Users/a\"",
+            "'c:/x'",
+            "\u{feff}/home/x",
+            "a\u{3000}/home/x",
+        ] {
+            assert!(machine_path(yes), "{yes}");
+        }
+        for no in [
+            "",
+            "x/Users/me",
+            "/usr/bin",
+            "C:x",
+            "1:/x",
+            r"\\/x",
+            r"\\srv",
+            r"\\s v\x",
+            "~/home/x",
+        ] {
+            assert!(!machine_path(no), "{no}");
+        }
+        let was = regex::Regex::new(
+            r#"(^|["'\s\x{feff}])(/(Users|home)/|[A-Za-z]:[\\/]|\\\\[^\\/\s\x{feff}]+[\\/])"#,
+        )
+        .unwrap();
+        let parts = [
+            "", " ", "\"", "'", "\u{feff}", "/", "\\", "a", "C:", "Users/", "home/", "\u{3000}",
+        ];
+        for a in parts {
+            for b in parts {
+                for c in parts {
+                    for d in parts {
+                        let s = format!("{a}{b}{c}{d}");
+                        assert_eq!(machine_path(&s), was.is_match(&s), "{s:?}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn slugs_as_the_typescript_does() {

@@ -2,7 +2,7 @@
 //! calls they make, as `TaskBoardView`, `TaskDetailPanel`, `AddTaskDialog`
 //! and `CommitDialog` do them.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use vorn_protocol::TerminalSession;
@@ -985,7 +985,7 @@ impl App {
             return false;
         };
         let held = *m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
-        let (plain, with_mod) = (held == 0, held == MOD);
+        let (plain, with_mod) = (held == 0, held == MOD());
         if let Some((form, start, matches)) = slash_open(ui, self.st.tasks.slash_closed) {
             let n = matches.len();
             let sel = self.st.tasks.slash.min(n - 1);
@@ -1065,15 +1065,20 @@ pub(super) fn open_url(url: &str) {
     if !web {
         return;
     }
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(windows) {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    // spawn-visible: the system opener shows the link; nothing to do without one.
-    let _ = std::process::Command::new(opener).arg(url).spawn();
+    #[cfg(target_arch = "wasm32")]
+    crate::page::open_tab(url);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(windows) {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        // spawn-visible: the system opener shows the link; nothing to do without one.
+        let _ = std::process::Command::new(opener).arg(url).spawn();
+    }
 }
 
 #[cfg(test)]

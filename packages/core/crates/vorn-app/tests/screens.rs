@@ -160,7 +160,7 @@ fn the_sessions_screens() {
         control("sidebar-project", Act::Project(Some("demo".into()))),
     );
     let ids: Vec<String> = (0..3).map(|_| new_shell(&mut shot, &mut app)).collect();
-    shot.send(&mut app, key("Digit1", MOD, Some("1")));
+    shot.send(&mut app, key("Digit1", MOD(), Some("1")));
     assert_eq!(app.st.selected.as_deref(), Some(ids[0].as_str()));
     // The project keeps the fold it took while it had no sessions.
     assert!(app.st.collapsed.contains("demo"));
@@ -184,32 +184,32 @@ fn the_sessions_screens() {
         escape(&mut shot, &mut app);
     }
 
-    shot.send(&mut app, key("KeyB", MOD, Some("b")));
+    shot.send(&mut app, key("KeyB", MOD(), Some("b")));
     assert!(!app.st.sidebar);
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar-closed");
-    shot.send(&mut app, key("KeyB", MOD, Some("b")));
+    shot.send(&mut app, key("KeyB", MOD(), Some("b")));
     assert!(!app.st.collapsed.contains("demo"), "reopened, it unfolds");
 
-    shot.send(&mut app, key("KeyO", MOD, Some("o")));
+    shot.send(&mut app, key("KeyO", MOD(), Some("o")));
     assert_eq!(app.st.focused.as_deref(), Some(ids[0].as_str()));
     park(&mut shot, &mut app);
     shot.save(&mut app, "focused");
-    shot.send(&mut app, key("KeyW", MOD, Some("w")));
+    shot.send(&mut app, key("KeyW", MOD(), Some("w")));
     assert_eq!(app.st.focused, None);
 
-    shot.send(&mut app, key("KeyJ", MOD, Some("j")));
+    shot.send(&mut app, key("KeyJ", MOD(), Some("j")));
     assert_eq!(menu(&app), Some(MenuKind::ViewOptions));
     shot.save(&mut app, "view-options");
     shot.click(&mut app, control("layout", Act::Layout(LayoutMode::Tabs)));
     escape(&mut shot, &mut app);
     park(&mut shot, &mut app);
     shot.save(&mut app, "tabs");
-    shot.send(&mut app, key("KeyJ", MOD, Some("j")));
+    shot.send(&mut app, key("KeyJ", MOD(), Some("j")));
     shot.click(&mut app, control("layout", Act::Layout(LayoutMode::Grid)));
     escape(&mut shot, &mut app);
 
-    shot.send(&mut app, key("KeyN", MOD, Some("n")));
+    shot.send(&mut app, key("KeyN", MOD(), Some("n")));
     assert!(app.st.composer_open);
     park(&mut shot, &mut app);
     shot.save(&mut app, "launcher");
@@ -247,7 +247,7 @@ fn the_sessions_screens() {
     shot.type_line(&mut app, "-bad");
     assert_eq!(app.st.models.invalid, Some(vorn_app::models::INVALID_ID));
     assert_eq!(menu(&app), Some(MenuKind::LaunchModel));
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_line(&mut app, "my-model");
     assert_eq!(menu(&app), None);
     assert_eq!(
@@ -346,7 +346,7 @@ fn session_groups_work_through_their_menus() {
     // Rename through the inline field.
     choose(&mut shot, &mut app, "Rename group");
     assert_eq!(shot.ui.edit_text(GROUP_NAME), "Backend");
-    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_line(&mut app, "API");
     shot.until(&mut app, "the rename saved", |app, _| {
         let c = app.rpc().call("config:load", Value::Null).ok()?;
@@ -427,7 +427,7 @@ fn the_tasks_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
-    shot.send(&mut app, key("KeyT", MOD, None));
+    shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
     park(&mut shot, &mut app);
     shot.save(&mut app, "tasks-list");
@@ -460,7 +460,7 @@ fn the_workflows_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
-    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     park(&mut shot, &mut app);
     shot.save(&mut app, "w-landing-empty");

@@ -177,7 +177,7 @@ fn the_sidebar_adds_and_edits_a_project_through_the_dialog() {
     );
     assert_eq!(app.st.view, MainView::Workflows);
     shot.save(&mut app, "sidebar-workflows");
-    shot.send(&mut app, key("KeyB", MOD, None));
+    shot.send(&mut app, key("KeyB", MOD(), None));
     assert!(!app.st.sidebar);
 }
 
@@ -256,7 +256,7 @@ fn cards_take_their_menus_rename_close_and_the_intent_bar() {
     shot.click(&mut app, control("card-box", Act::Select(b.clone())));
     shot.send(&mut app, key("F2", 0, None));
     assert_eq!(app.st.renaming.as_deref(), Some(b.as_str()));
-    shot.send(&mut app, key("KeyA", MOD, Some("a")));
+    shot.send(&mut app, key("KeyA", MOD(), Some("a")));
     shot.type_text(&mut app, "build");
     shot.save(&mut app, "rename");
     shot.send(&mut app, key("Enter", 0, Some("\r")));
@@ -317,27 +317,27 @@ fn the_focused_stage_tabs_shortcuts_and_filters() {
     let b = new_shell(&mut shot, &mut app);
 
     // Mod+1 and Mod+] move between cards; Mod+O puts one on the stage.
-    shot.send(&mut app, key("Digit1", MOD, Some("1")));
+    shot.send(&mut app, key("Digit1", MOD(), Some("1")));
     assert_eq!(app.st.selected.as_deref(), Some(a.as_str()));
-    shot.send(&mut app, key("BracketRight", MOD, Some("]")));
+    shot.send(&mut app, key("BracketRight", MOD(), Some("]")));
     assert_eq!(app.st.selected.as_deref(), Some(b.as_str()));
-    shot.send(&mut app, key("KeyO", MOD, Some("o")));
+    shot.send(&mut app, key("KeyO", MOD(), Some("o")));
     assert_eq!(app.st.focused.as_deref(), Some(b.as_str()));
     shot.until(&mut app, "the stage's screen", |app, _| {
         app.pane(&b).map(|_| ())
     });
     shot.save(&mut app, "focused");
-    shot.send(&mut app, key("BracketLeft", MOD, Some("[")));
+    shot.send(&mut app, key("BracketLeft", MOD(), Some("[")));
     assert_eq!(
         app.st.focused.as_deref(),
         Some(a.as_str()),
         "the stage follows"
     );
-    shot.send(&mut app, key("KeyW", MOD, Some("w")));
+    shot.send(&mut app, key("KeyW", MOD(), Some("w")));
     assert_eq!(app.st.focused, None);
 
     // Mod+J opens the view options; the layout is saved to the config.
-    shot.send(&mut app, key("KeyJ", MOD, Some("j")));
+    shot.send(&mut app, key("KeyJ", MOD(), Some("j")));
     assert_eq!(menu(&app), Some(MenuKind::ViewOptions));
     shot.frame(&mut app);
     shot.save(&mut app, "view-options");
@@ -365,14 +365,14 @@ fn the_focused_stage_tabs_shortcuts_and_filters() {
     shot.send(&mut app, key("Digit1", mods::ALT, None));
 
     // Mod+/ toggles the shortcuts panel; Escape closes it.
-    shot.send(&mut app, key("Slash", MOD, Some("/")));
+    shot.send(&mut app, key("Slash", MOD(), Some("/")));
     assert_eq!(app.st.dialog, Some(Dialog::Shortcuts));
     shot.save(&mut app, "shortcuts");
     escape(&mut shot, &mut app);
     assert_eq!(app.st.dialog, None);
 
     // Mod+N opens the launcher over the cards, with its pickers.
-    shot.send(&mut app, key("KeyN", MOD, Some("n")));
+    shot.send(&mut app, key("KeyN", MOD(), Some("n")));
     assert!(app.st.composer_open);
     shot.frame(&mut app);
     shot.save(&mut app, "launcher");

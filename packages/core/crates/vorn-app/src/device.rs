@@ -132,6 +132,7 @@ pub fn parse_simctl(json: &Value, claims: &HashMap<String, String>) -> Vec<Devic
 }
 
 /// Why a device call failed, said as what to do about it.
+#[cfg(not(target_arch = "wasm32"))]
 fn explain(msg: &str) -> String {
     let lower = msg.to_lowercase();
     if lower.contains("xcode-select")
@@ -148,6 +149,16 @@ fn explain(msg: &str) -> String {
     msg.to_owned()
 }
 
+/// Why a browser shows no device.
+pub const IN_BROWSER: &str =
+    "Simulators run beside the desktop app. Open this session in Vorn on the Mac to see its device.";
+
+#[cfg(target_arch = "wasm32")]
+fn simctl(_args: &[&str]) -> Result<String, String> {
+    Err(IN_BROWSER.to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn simctl(args: &[&str]) -> Result<String, String> {
     if !cfg!(target_os = "macos") {
         return Err("Simulators need macOS with Xcode.".to_owned());
@@ -166,6 +177,9 @@ fn simctl(args: &[&str]) -> Result<String, String> {
 
 /// Every simulator on this machine, with who holds it. Empty off macOS.
 pub fn list(claims: &HashMap<String, String>) -> Result<Vec<Device>, String> {
+    if cfg!(target_arch = "wasm32") {
+        return Err(IN_BROWSER.to_owned());
+    }
     if !cfg!(target_os = "macos") {
         return Ok(Vec::new());
     }

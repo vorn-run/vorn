@@ -3,28 +3,14 @@
   "version": "0.8.0-beta.9",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
     "./types": "./src/types.ts",
-    "./agent-defaults": "./src/agent-defaults.ts",
     "./agent-models": "./src/agent-models.ts",
-    "./prompt-builder": "./src/prompt-builder.ts",
     "./protocol": "./src/protocol.ts",
-    "./string-utils": "./src/string-utils.ts",
     "./json-schema-utils": "./src/json-schema-utils.ts",
-    "./config-scope": "./src/config-scope.ts",
-    "./session-restore": "./src/session-restore.ts",
-    "./topics": "./src/topics.ts",
     "./workflow-portability": "./src/workflow-portability.ts",
-    "./viewer-settings-store": "./src/viewer-settings-store.ts",
     "./template-vars": "./src/template-vars.ts",
     "./workflow-graph": "./src/workflow-graph.ts",
-    "./item-list": "./src/item-list.ts",
-    "./terminal-frame": "./src/terminal-frame.ts",
-    "./connector-origins": "./src/connector-origins.ts",
-    "./connector-protocol": "./src/connector-protocol.ts",
-    "./markdown": "./src/markdown.ts"
+    "./item-list": "./src/item-list.ts"
   }
 }

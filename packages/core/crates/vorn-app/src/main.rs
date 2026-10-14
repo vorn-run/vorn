@@ -34,7 +34,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use vorn_app::client::rpc::Wake;
 use vorn_app::client::{data_dir, Endpoint};
@@ -391,8 +391,8 @@ fn term(args: &Args) -> Result<(), String> {
         None => (120, 36),
     };
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
-    let grid =
-        vorn_app::grid::Grid::connect(&ep.grid, Arc::new(|| {})).map_err(|e| e.to_string())?;
+    let grid = vorn_app::grid::Grid::connect(&ep.grid, &ep.token, Arc::new(|| {}))
+        .map_err(|e| e.to_string())?;
     grid.attach(session, cols, rows, 0);
     grid.resize(session, cols, rows);
     let until = Instant::now() + Duration::from_secs(10);
@@ -412,7 +412,7 @@ fn key(spec: &str) -> Input {
     let mut code = spec;
     while let Some((head, rest)) = code.split_once('+') {
         m |= match head {
-            "Mod" => vorn_app::app::MOD,
+            "Mod" => vorn_app::app::MOD(),
             "Ctrl" => mods::CTRL,
             "Alt" => mods::ALT,
             "Shift" => mods::SHIFT,

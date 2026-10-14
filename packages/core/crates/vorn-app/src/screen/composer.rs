@@ -2,7 +2,7 @@
 //! prompt box with its pickers and send button, and the line under it.
 
 use super::menus::launch_name;
-use super::{agent_icon, c, ico, truncate, white, Screen, MOD_LABEL};
+use super::{agent_icon, c, ico, mod_label, truncate, white, Screen};
 use crate::act::Act;
 use crate::app::MODEL_ID;
 use crate::look;
@@ -520,7 +520,7 @@ fn hint(s: &Screen<'_>) -> El {
     }
     let kbd = div().px(4.0).py(2.0).rounded(4.0).bg(white(0.06)).child(
         text(
-            format!("{MOD_LABEL}1\u{2013}{MOD_LABEL}9"),
+            format!("{m}1\u{2013}{m}9", m = mod_label()),
             10.0,
             c(look::GRAY_500),
         )

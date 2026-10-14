@@ -87,6 +87,12 @@ impl App {
             PlugAct::CloseForm if p.from_editor => self.plug_leave(),
             PlugAct::CloseForm => p.adding = None,
             PlugAct::Install(key) => self.plug_inspect(&key, true),
+            #[cfg(target_arch = "wasm32")]
+            PlugAct::InstallFile => {
+                let why = "Install a pack from a file in the desktop app; the catalog works here.";
+                self.st.toast(why.to_owned(), true);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
             PlugAct::InstallFile => {
                 p.report = None;
                 p.pending = None;

@@ -1,7 +1,7 @@
 //! What the Remote Access page's controls do, and the answers to its calls:
 //! `tailscale:status`, `server:reachableUrls`, `token:*` and `pairing:*`.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Value};
 

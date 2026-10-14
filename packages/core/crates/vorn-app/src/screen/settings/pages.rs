@@ -679,14 +679,14 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             shell_picker(s),
             false,
         ))
-        .child(switch_row(
+        .child_if((!settings::IN_BROWSER).then(|| switch_row(
             s,
             "startAtLogin",
             flag(s, "startAtLogin", false),
             "Start Vorn When I Sign In",
             "Vorn opens with the machine, so a restart puts you back where you were.",
             reopen.then_some("With Reopen Sessions on, your agents start again at sign-in rather than when you next open Vorn."),
-        ))
+        )))
         .child(switch_row(
             s,
             "reopenSessions",
@@ -728,23 +728,24 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             None,
         ));
     rows = rows.child_if(cli_row(s));
-    rows = rows
-        .child(switch_row(
+    if !settings::IN_BROWSER {
+        rows = rows.child(switch_row(
             s,
             "widgetEnabled",
             flag(s, "widgetEnabled", false),
             "Floating Widget",
             "Show agent status widget when app is not focused",
             None,
-        ))
-        .child(switch_row(
-            s,
-            "showHeadlessAgents",
-            headless,
-            "Show Headless Agents",
-            "Display background agent sessions above the session grid",
-            None,
         ));
+    }
+    rows = rows.child(switch_row(
+        s,
+        "showHeadlessAgents",
+        headless,
+        "Show Headless Agents",
+        "Display background agent sessions above the session grid",
+        None,
+    ));
     if headless {
         rows = rows.child(select_row(
             s,

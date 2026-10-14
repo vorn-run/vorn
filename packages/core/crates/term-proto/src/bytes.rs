@@ -438,8 +438,7 @@ mod tests {
         );
     }
 
-    /// The exact bytes `tests/terminal-frame.test.ts` decodes, so the two
-    /// ends agree on the layout.
+    /// The exact bytes of one frame, so the layout cannot drift unnoticed.
     #[test]
     fn the_layout_the_typescript_decoder_reads() {
         let mut wire = Vec::new();

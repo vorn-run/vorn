@@ -788,6 +788,12 @@ pub fn add_to_path(dir: PathBuf, wake: Wake) -> Receiver<Result<bool, String>> {
     rx
 }
 
+#[cfg(target_arch = "wasm32")]
+fn run_add_to_path(_dir: &Path) -> Result<bool, String> {
+    Err("A browser can't change the system's PATH.".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn run_add_to_path(dir: &Path) -> Result<bool, String> {
     // The folder arrives as an argument, quoted by AppleScript, never as script.
     let out = vorn_spawn::command("osascript")

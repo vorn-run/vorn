@@ -9,7 +9,7 @@
 //! keeps one per key (see `Ui::animate`) and asks for frames only while one
 //! is unsettled; once everything settles the window sleeps.
 
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use crate::scene::Rgba;
 use crate::theme;

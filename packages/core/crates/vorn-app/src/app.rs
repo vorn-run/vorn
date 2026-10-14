@@ -50,12 +50,11 @@ mod term;
 mod widget;
 mod workflows;
 
-/// The modifier the renderer's shortcuts use (`modKey`).
-pub const MOD: u16 = if cfg!(target_os = "macos") {
-    mods::SUPER
-} else {
-    mods::CTRL
-};
+/// The modifier the app's shortcuts use: Cmd on a Mac, Ctrl elsewhere.
+#[allow(non_snake_case)]
+pub fn MOD() -> u16 {
+    mods::primary()
+}
 
 /// What a key does before it reaches a field, a terminal or the composer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,7 +98,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     if code == "Backquote" && only(mods::CTRL) {
         return Some(Shortcut::NewShell);
     }
-    if only(MOD | mods::SHIFT) {
+    if only(MOD() | mods::SHIFT) {
         return match code {
             "KeyW" => Some(Shortcut::View(MainView::Workflows)),
             "KeyA" => Some(Shortcut::Permission(true)),
@@ -121,7 +120,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             .copied()
             .map(Shortcut::Filter);
     }
-    if !only(MOD) {
+    if !only(MOD()) {
         return None;
     }
     Some(match code {
@@ -190,6 +189,8 @@ pub fn carried_cause(entry: &Value) -> &'static str {
 
 /// What an open file picker was asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// A browser installs no packs and downloads exports instead.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Picked {
     /// A connector pack to install.
     Pack,
@@ -296,7 +297,10 @@ pub struct App {
     /// Each terminal's scroll through its history; only painted ones move.
     scrolls: HashMap<String, Scroll>,
     /// The wheel gesture under way: its pane, where it goes, and its last event.
-    wheel: Option<(String, Route, Rows, std::time::Instant)>,
+    wheel: Option<(String, Route, Rows, web_time::Instant)>,
+    /// Each terminal's screen as text, for assistive technology; made when
+    /// its view changes.
+    spoken: HashMap<String, String>,
     pub st: State,
     pub acts: Acts,
     preedit: String,
@@ -360,8 +364,8 @@ pub struct App {
     /// Answers the file pickers; the OS dialogs outside tests.
     picker: crate::system::Picker,
     /// When `headless:list` was last asked, and exited sessions last pruned.
-    headless_polled: std::time::Instant,
-    headless_pruned: std::time::Instant,
+    headless_polled: web_time::Instant,
+    headless_pruned: web_time::Instant,
     /// The sidebar's left edge while its handle is dragged.
     sidebar_left: Option<f32>,
     /// The window's updater; none offscreen.
@@ -375,13 +379,29 @@ pub struct App {
 impl App {
     /// Connects to the vornd at `ep`, loads the models and opens the grid;
     /// `wake` runs whenever either has news for the next frame.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
-        let app_wake = Arc::clone(&wake);
         let store = Store::load(&rpc)?;
+        Ok(App::with(ep, wake, rpc, events, store))
+    }
+
+    /// [`App::connect`] without holding the page's one thread.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn connect_async(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
+        let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
+        let store = Store::load_async(&rpc).await?;
+        let mut app = App::with(ep, wake, rpc, events, store);
+        app.chrome = false;
+        app.traffic = false;
+        Ok(app)
+    }
+
+    fn with(ep: &Endpoint, wake: Wake, rpc: Rpc, events: Receiver<Event>, store: Store) -> App {
+        let app_wake = Arc::clone(&wake);
         let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
-        let (grid, grid_error) = match Grid::connect(&ep.grid, wake) {
+        let (grid, grid_error) = match Grid::connect(&ep.grid, &ep.token, wake) {
             Ok(g) => (Some(g), None),
             Err(e) => (None, Some(format!("grid {}: {e}", ep.grid))),
         };
@@ -405,6 +425,7 @@ impl App {
             word_pending: false,
             scrolls: HashMap::new(),
             wheel: None,
+            spoken: HashMap::new(),
             st,
             acts: Acts::default(),
             preedit: String::new(),
@@ -437,8 +458,8 @@ impl App {
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),
-            headless_polled: std::time::Instant::now(),
-            headless_pruned: std::time::Instant::now(),
+            headless_polled: web_time::Instant::now(),
+            headless_pruned: web_time::Instant::now(),
             sidebar_left: None,
             updater: None,
             cli_launch: None,
@@ -448,7 +469,7 @@ impl App {
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:detectInstalled", Value::Null);
-        Ok(app)
+        app
     }
 
     /// `useState(sessionCount > 0)`: a project first seen without sessions
@@ -509,7 +530,7 @@ impl App {
     /// Polls `headless:list` every 5 s, drops exited sessions past
     /// `headlessRetentionMinutes` every 30 s, and folds the pills once
     /// their popover closes.
-    fn headless_tick(&mut self, ui: &mut Ui, now: std::time::Instant) {
+    fn headless_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
         if now >= self.headless_polled + crate::headless::POLL {
             self.headless_polled = now;
             self.call(Call::Headless, "headless:list", Value::Null);
@@ -730,7 +751,7 @@ impl App {
                                 name: s.title(),
                             })
                         },
-                        std::time::Instant::now(),
+                        web_time::Instant::now(),
                     );
                     self.notices.extend(heard);
                     if method == "widget:permission-request" {
@@ -767,7 +788,7 @@ impl App {
                     if old.is_none_or(|o| o.rev != v.rev) {
                         self.st
                             .last_output
-                            .insert(id.clone(), std::time::Instant::now());
+                            .insert(id.clone(), web_time::Instant::now());
                     }
                     if let (Some(s), Some(o)) = (self.scrolls.get_mut(&id), old) {
                         if !v.primary {
@@ -788,6 +809,7 @@ impl App {
                     if self.store.session(&id).is_some_and(|s| s.is_shell()) {
                         shells.push(id.clone());
                     }
+                    self.spoken.insert(id.clone(), v.text());
                     self.views.insert(id, v);
                 }
             }
@@ -808,7 +830,7 @@ impl App {
             .retain(|id, _| self.store.session(id).is_some());
         self.pump_web();
         self.detect_mobile();
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         self.st.toasts.retain(|t| t.until > now);
         let gone = |id: &Option<String>, store: &Store| {
             id.as_deref().is_some_and(|id| store.session(id).is_none())
@@ -2503,7 +2525,7 @@ impl App {
             return true;
         }
         if let Input::Key { code, mods: m, .. } = input {
-            let with_mod = *m & MOD != 0;
+            let with_mod = *m & MOD() != 0;
             if !self.st.settings.open
                 && (self.git_key(ui, code, with_mod)
                     || self.pane_key(ui, code, with_mod, *m & mods::SHIFT != 0))
@@ -2562,7 +2584,7 @@ impl App {
             self.run(ui, Act::CancelWorkspace, Src::default());
             return true;
         }
-        if self.st.menu.is_some() || code != "Escape" || *m & (MOD | mods::ALT) != 0 {
+        if self.st.menu.is_some() || code != "Escape" || *m & (MOD() | mods::ALT) != 0 {
             return false;
         }
         if self.st.dialog == Some(Dialog::AddTask) {
@@ -2637,6 +2659,31 @@ impl App {
                 g.text(&id, &s);
             }
         }
+    }
+
+    /// Text a page pasted: into the focused field, else as a paste into the
+    /// terminal being typed into.
+    pub fn paste(&mut self, ui: &mut Ui, text: String) {
+        let chord = Input::Key {
+            code: "KeyV".into(),
+            mods: MOD(),
+            text: None,
+        };
+        let busy = self.st.dialog.is_some() || self.st.menu.is_some() || self.st.settings.open;
+        if self.intercept(ui, &chord) || ui.key(&chord) || busy {
+            return self.events(ui);
+        }
+        if self.composing() || self.st.view != MainView::Sessions {
+            self.input(Input::Commit(text));
+        } else if let (Some(g), Some(id)) = (&self.grid, self.typing_target()) {
+            g.paste(&id, &text);
+        }
+        self.events(ui);
+    }
+
+    /// Whether vornd refused this client's key.
+    pub fn rejected(&self) -> bool {
+        self.rpc.rejected()
     }
 
     /// Input as a window delivers it: shortcuts first, then the UI, then
@@ -2809,7 +2856,7 @@ impl App {
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         for notice in std::mem::take(&mut self.notices) {
             if self.notifier.admit(&notice, ui.window_focused(), now) {
                 self.notice_sink.show(notice);
@@ -2877,10 +2924,12 @@ impl App {
         let root = self.screen(ui).build();
         self.seed_texts(ui);
         ui.custom_a11y.clear();
+        let views = &self.views;
+        self.spoken.retain(|id, _| views.contains_key(id));
         for (i, s) in self.store.sessions.iter().enumerate() {
             let id = crate::screen::CARD_ID_BASE + i as u64;
-            ui.custom_a11y
-                .insert(id, (Role::Terminal, s.title(), String::new()));
+            let text = self.spoken.get(&s.info.id).cloned().unwrap_or_default();
+            ui.custom_a11y.insert(id, (Role::Terminal, s.title(), text));
         }
         root
     }
@@ -3131,30 +3180,33 @@ mod tests {
     #[test]
     fn shortcuts_match_the_renderer() {
         assert_eq!(
-            shortcut("KeyS", MOD),
+            shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        assert_eq!(shortcut("KeyT", MOD), Some(Shortcut::View(MainView::Tasks)));
         assert_eq!(
-            shortcut("KeyW", MOD | mods::SHIFT),
+            shortcut("KeyT", MOD()),
+            Some(Shortcut::View(MainView::Tasks))
+        );
+        assert_eq!(
+            shortcut("KeyW", MOD() | mods::SHIFT),
             Some(Shortcut::View(MainView::Workflows))
         );
-        assert_eq!(shortcut("Digit3", MOD), Some(Shortcut::Jump(2)));
-        assert_eq!(shortcut("Digit0", MOD), None);
-        assert_eq!(shortcut("BracketRight", MOD), Some(Shortcut::Cycle(true)));
+        assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));
+        assert_eq!(shortcut("Digit0", MOD()), None);
+        assert_eq!(shortcut("BracketRight", MOD()), Some(Shortcut::Cycle(true)));
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
-        assert_eq!(shortcut("Slash", MOD), Some(Shortcut::Shortcuts));
-        assert_eq!(shortcut("KeyK", MOD), Some(Shortcut::Palette));
+        assert_eq!(shortcut("Slash", MOD()), Some(Shortcut::Shortcuts));
+        assert_eq!(shortcut("KeyK", MOD()), Some(Shortcut::Palette));
         assert_eq!(
-            shortcut("KeyA", MOD | mods::SHIFT),
+            shortcut("KeyA", MOD() | mods::SHIFT),
             Some(Shortcut::Permission(true))
         );
         assert_eq!(
-            shortcut("KeyD", MOD | mods::SHIFT),
+            shortcut("KeyD", MOD() | mods::SHIFT),
             Some(Shortcut::Permission(false))
         );
-        assert_eq!(shortcut("KeyJ", MOD), Some(Shortcut::ViewOptions));
-        assert_eq!(shortcut("KeyB", MOD), Some(Shortcut::Sidebar));
+        assert_eq!(shortcut("KeyJ", MOD()), Some(Shortcut::ViewOptions));
+        assert_eq!(shortcut("KeyB", MOD()), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));
         assert_eq!(
             shortcut("Digit3", mods::ALT),
@@ -3163,7 +3215,7 @@ mod tests {
         assert_eq!(shortcut("Digit6", mods::ALT), None);
         // Unmodified and extra-modified keys belong to the terminal.
         assert_eq!(shortcut("KeyS", 0), None);
-        assert_eq!(shortcut("KeyS", MOD | mods::ALT), None);
+        assert_eq!(shortcut("KeyS", MOD() | mods::ALT), None);
         assert_eq!(shortcut("Escape", 0), None);
     }
 
@@ -3183,11 +3235,11 @@ mod tests {
         assert!(!terminal_key("KeyA", 0));
         // App shortcuts on the command key stay the app's.
         for code in ["KeyK", "KeyN", "KeyW", "KeyB", "BracketRight", "Slash"] {
-            assert!(!terminal_key(code, MOD), "{code}");
+            assert!(!terminal_key(code, MOD()), "{code}");
         }
-        assert!(!terminal_key("KeyW", MOD | mods::SHIFT));
+        assert!(!terminal_key("KeyW", MOD() | mods::SHIFT));
         assert!(!terminal_key("Backquote", mods::CTRL));
-        assert!(!terminal_key("KeyJ", MOD));
+        assert!(!terminal_key("KeyJ", MOD()));
     }
 
     #[test]

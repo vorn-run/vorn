@@ -3,7 +3,7 @@
 //! and the footer.
 
 use super::chrome::{draggable, tool};
-use super::{c, ico, white, MainView, Screen, MOD_LABEL};
+use super::{c, ico, mod_label, white, MainView, Screen};
 use crate::act::{Act, Acts};
 use crate::app::GROUP_NAME;
 use crate::client::Session;
@@ -135,7 +135,7 @@ fn header(s: &Screen<'_>) -> El {
             "panel-left",
             2.0,
             "Toggle sidebar",
-            Some(&format!("{MOD_LABEL}B")),
+            Some(&format!("{m}B", m = mod_label())),
             false,
         ));
     let bar = draggable(s, div().col().shrink0().child(bar));
@@ -144,19 +144,19 @@ fn header(s: &Screen<'_>) -> El {
             MainView::Sessions,
             "monitor",
             "Sessions",
-            format!("{MOD_LABEL}S"),
+            format!("{m}S", m = mod_label()),
         ),
         (
             MainView::Tasks,
             "list-todo",
             "Tasks",
-            format!("{MOD_LABEL}T"),
+            format!("{m}T", m = mod_label()),
         ),
         (
             MainView::Workflows,
             "workflow",
             "Workflows",
-            format!("{MOD_LABEL}\u{21e7}W"),
+            format!("{m}\u{21e7}W", m = mod_label()),
         ),
     ];
     let mut row = div()

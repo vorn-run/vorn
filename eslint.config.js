@@ -1,7 +1,5 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
 import vitest from '@vitest/eslint-plugin'
 import prettier from 'eslint-config-prettier'
 
@@ -16,6 +14,7 @@ export default tseslint.config(
       '**/*.config.cjs',
       'scripts/',
       'packages/core/scripts/',
+      'packages/core/crates/vorn-web/tests/',
       'apps/macos/scripts/',
       'apps/macos/Sources/VornUI/Resources/shiki.js',
       'packages/core/target/',
@@ -39,23 +38,7 @@ export default tseslint.config(
   },
 
   {
-    files: ['packages/web/src/**/*.{ts,tsx}'],
-    plugins: {
-      'react-hooks': reactHooks,
-      'react-refresh': reactRefresh
-    },
-    rules: {
-      ...reactHooks.configs.recommended.rules,
-      'react-hooks/exhaustive-deps': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/refs': 'warn',
-      'react-hooks/static-components': 'warn',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }]
-    }
-  },
-
-  {
-    files: ['tests/**/*.test.{ts,tsx}'],
+    files: ['tests/**/*.test.ts'],
     plugins: { vitest },
     languageOptions: {
       globals: {

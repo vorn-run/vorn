@@ -7,7 +7,8 @@
 //! `max` the oldest line of history. Wheel `dy` is positive towards the
 //! live bottom (it shows what is below), as vornui reports it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use vornui::motion::spring;
 use vornui::WheelPhase;

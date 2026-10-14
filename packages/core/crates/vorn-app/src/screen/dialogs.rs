@@ -1,7 +1,7 @@
 //! The modal dialogs: the keyboard shortcuts panel and the add or edit
 //! project dialog.
 
-use super::{c, ico, white, Screen, ALT_LABEL, MOD_LABEL};
+use super::{alt_label, c, ico, mod_label, white, Screen};
 use crate::act::Act;
 use crate::look;
 use crate::state::Dialog;
@@ -19,8 +19,8 @@ pub const PROJECT_COLOR: &str = "#6b7280";
 /// The shortcuts panel's rows: its categories, each with description and
 /// keys, as `keyboard-shortcuts.ts` lists them.
 pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
-    let m = MOD_LABEL;
-    let a = ALT_LABEL;
+    let m = mod_label();
+    let a = alt_label();
     vec![
         (
             "Navigation",

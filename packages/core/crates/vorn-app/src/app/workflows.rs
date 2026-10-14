@@ -134,6 +134,7 @@ impl App {
                     let Some(id) = s(&v, "workflowId").map(str::to_owned) else {
                         return;
                     };
+                    #[cfg(not(target_arch = "wasm32"))]
                     if self.workflow(&id).is_none() {
                         if let Ok(config) = self.rpc.call("config:load", Value::Null) {
                             self.store.apply("config:changed", config);
@@ -783,9 +784,14 @@ impl App {
             WfAct::Export(id) => {
                 let Some(w) = self.workflow(&id) else { return };
                 let name = format!("{}{SUFFIX}", port::slugify(s(&w, "name").unwrap_or("")));
-                let at = downloads().join(name);
-                let title = "Export workflow".to_owned();
-                self.start_pick(Picked::Export(id), Pick::Save { title, at });
+                #[cfg(target_arch = "wasm32")]
+                self.export(&id, &name);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let at = downloads().join(name);
+                    let title = "Export workflow".to_owned();
+                    self.start_pick(Picked::Export(id), Pick::Save { title, at });
+                }
             }
             WfAct::Import => {
                 let title = "Import workflow file".to_owned();
@@ -1099,9 +1105,12 @@ impl App {
             Ok(t) => t + "\n",
             Err(e) => return self.st.toast(e.to_string(), true),
         };
+        #[cfg(not(target_arch = "wasm32"))]
         if let Err(e) = std::fs::write(path, contents) {
             return self.st.toast(e.to_string(), true);
         }
+        #[cfg(target_arch = "wasm32")]
+        crate::page::download(path, "application/json", contents.as_bytes());
         let residual = port::residual_absolute_paths(&portable);
         if residual.is_empty() {
             let name = s(&w, "name").unwrap_or("");
@@ -1115,6 +1124,13 @@ impl App {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn connections(&self) -> Vec<Value> {
+        self.st.wf.connections.clone()
+    }
+
+    /// A workflow file the page's picker read, imported.
+    #[cfg(not(target_arch = "wasm32"))]
     fn connections(&self) -> Vec<Value> {
         self.rpc
             .call("connection:list", Value::Null)
@@ -1333,7 +1349,7 @@ impl App {
         if ui.focus().is_some() {
             return false;
         }
-        let approve = code == "Enter" && held == MOD;
+        let approve = code == "Enter" && held == MOD();
         let reject = code == "KeyR" && held == 0;
         if !approve && !reject {
             return false;
@@ -1370,6 +1386,7 @@ impl App {
 }
 
 /// Where an export goes first: the Downloads folder, else home.
+#[cfg(not(target_arch = "wasm32"))]
 fn downloads() -> std::path::PathBuf {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -1383,6 +1400,17 @@ fn downloads() -> std::path::PathBuf {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn read_file(path: &str) -> Result<String, String> {
+    let bytes = crate::page::picked(std::path::Path::new(path))
+        .ok_or_else(|| "That is not a workflow file".to_owned())?;
+    if bytes.len() as u64 > MAX_FILE {
+        return Err("That file is too large to be a workflow".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "That is not a workflow file".into())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn read_file(path: &str) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|_| "That is not a workflow file".to_owned())?;
     if meta.len() > MAX_FILE {

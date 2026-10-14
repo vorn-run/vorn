@@ -184,7 +184,7 @@ fn a_published_artifact_shows_its_bar_editor_and_rail() {
     assert!(app.st.bench.live(&sid).is_some_and(|l| l.commenting));
     shot.click(&mut app, note_id(&sid));
     shot.type_text(&mut app, "Tighten the intro");
-    shot.send(&mut app, key("Enter", MOD, Some("\r")));
+    shot.send(&mut app, key("Enter", MOD(), Some("\r")));
     shot.until(&mut app, "the note saved", |app, _| {
         let (drafts, _) = app.st.bench.comments(&sid);
         drafts

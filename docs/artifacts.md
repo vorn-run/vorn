@@ -127,7 +127,7 @@ An approval gate with a review page shows the page in the same viewer, on deskto
 
 That is a JSON list of `{ quote, comment, anchored }` from the latest round. `anchored` is false for a comment that quotes nothing, such as one sent through `resolve_gate` without a `quote`. `{{steps.<gate>.feedback}}` still holds the general note.
 
-The web client shows the review page as before, with a general note only.
+The web client opens the review page in a new browser tab; a request for changes from there carries a general note only.
 
 ## Where artifacts live
 

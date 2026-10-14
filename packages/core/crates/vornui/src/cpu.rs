@@ -132,7 +132,6 @@ impl CpuRaster {
     }
 
     /// Row ranges `[y0, y1)` the last [`CpuRaster::render`] changed.
-    #[cfg(test)]
     pub fn damage(&self) -> &[(u32, u32)] {
         &self.damage
     }

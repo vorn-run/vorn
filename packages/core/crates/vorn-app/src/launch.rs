@@ -12,13 +12,19 @@
 //! web client is `web/dist` beside that `vornd` directory.
 
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+#[cfg(not(target_arch = "wasm32"))]
+use web_time::{Duration, Instant};
 
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::Value;
 
-use crate::client::rpc::{Event, Rpc};
-use crate::client::Endpoint;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::client::{
+    rpc::{Event, Rpc},
+    Endpoint,
+};
 
 /// Names a vornd elsewhere, as the CLI honours it.
 pub const VORND_PATH_ENV: &str = "VORN_VORND_PATH";
@@ -103,6 +109,7 @@ impl Server {
     }
 
     /// The command that serves `data_dir`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn command(&self, data_dir: &Path) -> Command {
         let mut command = vorn_spawn::command(&self.vornd);
         command.arg("--data-dir").arg(data_dir);
@@ -123,6 +130,7 @@ impl Server {
 
     /// Starts vornd detached, so it outlives this app. A rival started at
     /// the same moment stands down by itself.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn start(&self, data_dir: &Path) -> Result<(), String> {
         refuse_default(data_dir)?;
         create_private_dir(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
@@ -152,6 +160,7 @@ pub struct Identity {
 }
 
 impl Identity {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(params: &Value) -> Identity {
         let field = |k: &str| params[k].as_str().unwrap_or("unknown").to_owned();
         Identity {
@@ -175,6 +184,7 @@ pub fn replaces(incumbent: &Identity, version: &str, channel: &str) -> bool {
 /// After an update: stops the running vornd for `dir` when it is an older
 /// packaged build, so the caller starts the one shipped with this app.
 /// Whether it stopped one.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn retire_older(dir: &Path, server: &Server) -> bool {
     let Ok(ep) = Endpoint::find(dir) else {
         return false;
@@ -216,6 +226,7 @@ pub fn retire_older(dir: &Path, server: &Server) -> bool {
 
 /// A debug build never starts vornd on `~/.vorn` unless told to, so a test
 /// that forgets its own directory cannot reach a person's data.
+#[cfg(not(target_arch = "wasm32"))]
 fn refuse_default(dir: &Path) -> Result<(), String> {
     if !cfg!(debug_assertions) || std::env::var(ALLOW_DEFAULT_ENV).is_ok_and(|v| v == "1") {
         return Ok(());
@@ -243,7 +254,7 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
         .create(dir)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }

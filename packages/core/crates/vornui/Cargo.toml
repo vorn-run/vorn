@@ -8,24 +8,48 @@ publish = false
 description = "Vorn's thin UI layer: winit windows, wgpu or CPU drawing, cosmic-text and swash text, taffy layout, AccessKit accessibility, and the widgets the app is built from"
 
 [dependencies]
-wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
+wgpu = { version = "29", default-features = false, features = ["wgsl", "std"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 accesskit = "0.25"
-accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
-cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+# std's clock on a desktop; the page's `performance.now()` in a browser.
+web-time = "1"
 taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 etagere = "0.2"
 resvg = { version = "0.48", default-features = false }
 png = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
-arboard = { version = "3", default-features = false }
 unicode-segmentation = "1"
-softbuffer = { version = "0.4", default-features = false }
 rayon = "1"
 unicode-width = "0.2"
+
+# The desktop window (window.rs): the system clipboard, a pixel buffer, the
+# accessibility adapter, system fonts and a terminal. A browser has none of them.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
+arboard = { version = "3", default-features = false }
+softbuffer = { version = "0.4", default-features = false }
 # The Cells backend's terminal: raw mode, diffed writes and input.
 crossterm = "0.29"
+
+# In a browser wgpu draws through WebGPU, or WebGL2 where there is none (web.rs).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "29", default-features = false, features = ["wgsl", "std", "webgpu", "webgl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+raw-window-handle = "0.6"
+web-sys = { version = "0.3", features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlTextAreaElement",
+  "CssStyleDeclaration", "CanvasRenderingContext2d", "ImageData", "Navigator", "Clipboard",
+  "ClipboardEvent", "DataTransfer", "KeyboardEvent", "InputEvent", "CompositionEvent", "Event",
+  "EventTarget", "MouseEvent", "Node", "DomRect", "ResizeObserver", "ResizeObserverEntry",
+  "ResizeObserverSize", "ResizeObserverOptions", "ResizeObserverBoxOptions", "MediaQueryList",
+  "console", "Location", "UrlSearchParams", "Text",
+] }
 
 # Linux has no single window system: X11 and Wayland are both loaded at run
 # time, and the screen reader is reached over D-Bus.

@@ -27,15 +27,15 @@ fn the_palette_filters_moves_and_runs_a_command() {
     add_project(&mut app, &v, "api", json!({}));
     let mut shot = Shot::new();
 
-    shot.send(&mut app, key("KeyK", MOD, None));
+    shot.send(&mut app, key("KeyK", MOD(), None));
     assert!(palette_open(&app));
     assert_eq!(shot.ui.focus(), Some(PALETTE_INPUT));
     shot.save(&mut app, "palette");
 
     // Mod+K again closes it, as the renderer's toggle does.
-    shot.send(&mut app, key("KeyK", MOD, None));
+    shot.send(&mut app, key("KeyK", MOD(), None));
     assert!(!palette_open(&app));
-    shot.send(&mut app, key("KeyK", MOD, None));
+    shot.send(&mut app, key("KeyK", MOD(), None));
 
     shot.send(&mut app, key("ArrowDown", 0, None));
     assert_eq!(app.st.palette.active, 1);
@@ -55,7 +55,7 @@ fn the_palette_filters_moves_and_runs_a_command() {
     assert!(!palette_open(&app));
     assert_eq!(app.st.view, MainView::Tasks);
 
-    shot.send(&mut app, key("KeyK", MOD, None));
+    shot.send(&mut app, key("KeyK", MOD(), None));
     shot.type_text(&mut app, "zzzz-nothing");
     shot.save(&mut app, "palette-empty");
     shot.send(&mut app, key("Escape", 0, None));
@@ -115,7 +115,7 @@ fn a_waiting_gate_badges_the_workflows_pill() {
     std::thread::sleep(std::time::Duration::from_millis(450));
     shot.save(&mut app, "badge");
     assert_eq!(app.st.view, MainView::Sessions);
-    shot.send(&mut app, key("KeyW", MOD | mods::SHIFT, None));
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
 }
 
@@ -128,10 +128,10 @@ fn the_approve_and_deny_keys_wait_for_a_request() {
     let mut shot = Shot::new();
     // Before any agent has asked, the keys are the terminal's.
     shot.frame(&mut app);
-    assert!(!app.intercept(&mut shot.ui, &key("KeyA", MOD | mods::SHIFT, None)));
+    assert!(!app.intercept(&mut shot.ui, &key("KeyA", MOD() | mods::SHIFT, None)));
     app.st.permission_keys = true;
-    assert!(app.intercept(&mut shot.ui, &key("KeyA", MOD | mods::SHIFT, None)));
-    assert!(app.intercept(&mut shot.ui, &key("KeyD", MOD | mods::SHIFT, None)));
+    assert!(app.intercept(&mut shot.ui, &key("KeyA", MOD() | mods::SHIFT, None)));
+    assert!(app.intercept(&mut shot.ui, &key("KeyD", MOD() | mods::SHIFT, None)));
 }
 
 #[test]

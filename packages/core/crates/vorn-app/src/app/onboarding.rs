@@ -27,7 +27,7 @@ impl App {
             OnbAct::ToggleMcp => self.st.onboard.mcp_open = !self.st.onboard.mcp_open,
             OnbAct::Copy(text) => {
                 ui.clipboard().set(&text);
-                self.st.onboard.copied = Some((text, std::time::Instant::now()));
+                self.st.onboard.copied = Some((text, web_time::Instant::now()));
             }
             OnbAct::Redetect => {
                 // What was found stays on screen until the answer replaces it.
