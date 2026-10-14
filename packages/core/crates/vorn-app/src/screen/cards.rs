@@ -627,9 +627,10 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     let mut screen = custom(CARD_ID_BASE + i as u64).grow();
     let back = s.panes.get(sid).is_some_and(|v| v.back() > 0);
     if back && s.st.focused.as_deref() != Some(sid) {
-        screen = screen.overlay(scroll_to_bottom(s, sid), Place::InsideEnd, 8.0);
+        // Clear of the scrollbar, whose thumb sits at the bottom then.
+        screen = screen.overlay(scroll_to_bottom(s, sid), Place::InsideEnd, 16.0);
     }
-    let inner = inner.child(screen);
+    let inner = inner.child(screen).child_if(scrollbar(s, sid));
     s.acts
         .context(inner, id, Act::Open(MenuKind::Terminal(sid.to_owned())))
         .on(Action::Click)
@@ -813,6 +814,79 @@ fn running_row(s: &Screen<'_>, r: &Running) -> El {
                 .line_height(14.0)
                 .silent(),
         )
+}
+
+/// The terminal's scrollbar: its track, the part above its thumb, the thumb.
+pub fn scrollbar_id(sid: &str) -> Id {
+    Id::new("term-scrollbar").child(sid)
+}
+
+/// The scrollbar's thumb, dragged through the history.
+pub fn thumb_id(sid: &str) -> Id {
+    Id::new("term-thumb").child(sid)
+}
+
+/// The overlay scrollbar down a terminal's right edge: it shows while the
+/// terminal scrolls and under the pointer, then fades; the thumb drags, the
+/// track pages. Nothing when there is no history.
+pub(super) fn scrollbar(s: &Screen<'_>, sid: &str) -> Option<El> {
+    let v = s.panes.get(sid)?;
+    let track = s.ui.rect_of(term_id(sid))?.h - 4.0;
+    let t = crate::scrollbar::thumb(track, v.rows, v.history, v.back())?;
+    let (bar, thumb) = (scrollbar_id(sid), thumb_id(sid));
+    let now = s.ui.now();
+    let at = s.st.scrolled_at.get(sid).copied();
+    let held = s.ui.hover(bar) > 0.0 || s.ui.pressed(thumb);
+    let a = crate::scrollbar::alpha(at.map(|t| now.saturating_duration_since(t)), held);
+    if let Some(at) = at.filter(|_| !held) {
+        let fade = at + crate::scrollbar::SHOW;
+        s.ui.wake_at(if now < fade { fade } else { now });
+    }
+    let hot =
+        s.ui.hover(thumb)
+            .max(if s.ui.pressed(thumb) { 1.0 } else { 0.0 });
+    let fill = white(0.22 + 0.2 * hot).alpha(a);
+    let mut el = div()
+        .id(bar)
+        .sense(Sense::HOVER)
+        .absolute_right(2.0, 2.0)
+        .w(10.0)
+        .h(track)
+        .col()
+        .role(Role::ScrollBar, "Scrollback");
+    // Hidden, it only listens for the pointer: a click near the edge still reaches the terminal.
+    let part = |id: Option<Id>, h: Option<f32>| {
+        let mut p = div().w_full();
+        p = match h {
+            Some(h) => p.h(h).shrink0(),
+            None => p.grow(),
+        };
+        match id.filter(|_| a > 0.0) {
+            Some(id) => p.id(id).on(Action::Click),
+            None => p,
+        }
+    };
+    let up = s
+        .acts
+        .on("scrollbar", Act::ScrollPage(sid.to_owned(), true));
+    let down = s
+        .acts
+        .on("scrollbar", Act::ScrollPage(sid.to_owned(), false));
+    let mut knob = div().w_full().h(t.h).shrink0().row().justify_end().child(
+        div()
+            .w(crate::ui::theme::scrollbar::WIDTH)
+            .h_full()
+            .rounded(crate::ui::theme::scrollbar::RADIUS)
+            .bg(fill),
+    );
+    if a > 0.0 {
+        knob = knob.id(thumb).sense(Sense::MOVE);
+    }
+    el = el
+        .child(part(Some(up), Some(t.top)))
+        .child(knob)
+        .child(part(Some(down), None));
+    Some(el)
 }
 
 /// The arrow over a terminal scrolled back into its history: straight

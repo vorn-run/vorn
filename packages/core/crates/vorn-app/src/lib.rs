@@ -51,6 +51,7 @@ pub mod plugins;
 pub mod runs;
 pub mod screen;
 pub mod scroll;
+pub mod scrollbar;
 pub mod select;
 pub mod settings;
 pub mod side;

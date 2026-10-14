@@ -75,6 +75,8 @@ pub struct Scroll {
     spent: bool,
     /// Reduce motion: a notch jumps instead of easing.
     pub reduced: bool,
+    /// Rows a wheel notch moves, as the system is set; `None` for a page.
+    pub lines: Option<f32>,
 }
 
 impl Default for Scroll {
@@ -89,6 +91,7 @@ impl Default for Scroll {
             motion: Motion::Rest,
             spent: false,
             reduced: false,
+            lines: Some(NOTCH_ROWS),
         }
     }
 }
@@ -142,6 +145,11 @@ impl Scroll {
         }
     }
 
+    /// Straight to `pos`, as a scrollbar drag puts it.
+    pub fn jump(&mut self, pos: f32) {
+        self.rest_at(pos.clamp(0.0, self.max));
+    }
+
     /// Straight back to the live screen, as typing does.
     pub fn reset(&mut self) {
         self.pos = 0.0;
@@ -152,7 +160,15 @@ impl Scroll {
     /// A wheel or trackpad event of `dy` pixels at `now`.
     pub fn wheel(&mut self, dy: f32, phase: WheelPhase, now: Instant) {
         match phase {
-            WheelPhase::Line => self.notch(dy / vornui::WHEEL_LINE, now),
+            WheelPhase::Line => {
+                let notches = dy / vornui::WHEEL_LINE;
+                if (notches - notches.round()).abs() < 1e-3 {
+                    self.notch(notches, now);
+                } else {
+                    // A fraction of a notch (a precision touchpad, a free-spinning wheel) moves by the pixel.
+                    self.moved(notches * self.notch_rows() * self.row, now);
+                }
+            }
             WheelPhase::Began => self.began(now),
             WheelPhase::Moved => self.moved(dy, now),
             WheelPhase::Ended => self.ended(now),
@@ -164,7 +180,7 @@ impl Scroll {
             Motion::Ease { to, .. } => to,
             _ => self.pos,
         };
-        let to = self.snapped(base - notches * NOTCH_ROWS * self.row);
+        let to = self.snapped(base - notches * self.notch_rows() * self.row);
         if self.reduced {
             self.rest_at(to);
             return;
@@ -175,6 +191,12 @@ impl Scroll {
             to,
             start: now,
         };
+    }
+
+    /// Rows one notch moves: the system's lines, or a page less a row.
+    fn notch_rows(&self) -> f32 {
+        self.lines
+            .unwrap_or_else(|| (self.span / self.row - 1.0).max(1.0))
     }
 
     fn began(&mut self, now: Instant) {
@@ -439,15 +461,19 @@ impl Rows {
     /// one wheel report to a program, [`NOTCH_ROWS`] arrow presses.
     pub fn take(&mut self, dy: f32, phase: WheelPhase, row: f32, route: Route) -> i32 {
         let rows = match phase {
+            // A fraction of a notch carries to the next, so a touchpad's small steps add up.
             WheelPhase::Line => {
-                self.rest = 0.0;
-                let notches = dy / vornui::WHEEL_LINE;
                 let per = if route == Route::Arrows {
                     NOTCH_ROWS
                 } else {
                     1.0
                 };
-                return (notches * per).round() as i32;
+                let notches = dy / vornui::WHEEL_LINE;
+                if (notches - notches.round()).abs() < 1e-3 {
+                    self.rest = 0.0;
+                    return (notches.round() * per) as i32;
+                }
+                self.rest + notches * per
             }
             WheelPhase::Began | WheelPhase::Ended => {
                 self.rest = 0.0;
@@ -455,7 +481,8 @@ impl Rows {
             }
             WheelPhase::Moved => self.rest + dy / row.max(1.0),
         };
-        let whole = rows.trunc();
+        // Ten tenths of a notch make one, float rounding or not.
+        let whole = (rows + rows.signum() * 1e-4).trunc();
         self.rest = rows - whole;
         whole as i32
     }
@@ -668,5 +695,84 @@ mod tests {
         let notch = vornui::WHEEL_LINE;
         assert_eq!(r.take(notch, WheelPhase::Line, ROW, p), 1);
         assert_eq!(r.take(-notch, WheelPhase::Line, ROW, Route::Arrows), -3);
+    }
+
+    #[test]
+    fn a_fraction_of_a_notch_moves_by_the_pixel_and_settles_on_a_row() {
+        let t0 = Instant::now();
+        let mut s = Scroll::default();
+        s.set_metrics(ROW, 400.0, 100);
+        // A precision touchpad's tenths of a notch, upward into history.
+        for i in 0..5 {
+            s.wheel(-0.1 * vornui::WHEEL_LINE, WheelPhase::Line, at(t0, i * 8));
+        }
+        let moved = 5.0 * 0.1 * NOTCH_ROWS * ROW;
+        assert!(
+            (s.pos() - moved).abs() < 0.01,
+            "{} by the pixel, no ease",
+            s.pos()
+        );
+        let mut now = at(t0, 40);
+        while let Some(next) = s.tick(now) {
+            now = next.max(now + Duration::from_millis(16));
+        }
+        assert_eq!(s.pos() % ROW, 0.0, "rests on a row");
+    }
+
+    #[test]
+    fn a_notch_moves_the_systems_lines_or_a_page() {
+        let t0 = Instant::now();
+        let mut s = Scroll {
+            reduced: true,
+            ..Scroll::default()
+        };
+        s.set_metrics(ROW, 200.0, 100);
+        s.lines = Some(5.0);
+        s.wheel(-vornui::WHEEL_LINE, WheelPhase::Line, t0);
+        assert_eq!(s.pos(), 5.0 * ROW);
+        s.lines = None;
+        s.wheel(-vornui::WHEEL_LINE, WheelPhase::Line, t0);
+        assert_eq!(s.pos(), 5.0 * ROW + 9.0 * ROW, "a page less a row");
+    }
+
+    #[test]
+    fn tenths_of_a_notch_add_up_to_whole_reports_for_a_program() {
+        let mut rows = Rows::default();
+        let sent: i32 = (0..10)
+            .map(|_| {
+                rows.take(
+                    0.1 * vornui::WHEEL_LINE,
+                    WheelPhase::Line,
+                    ROW,
+                    Route::Program,
+                )
+            })
+            .sum();
+        assert_eq!(sent, 1);
+        let mut arrows = Rows::default();
+        assert_eq!(
+            arrows.take(vornui::WHEEL_LINE, WheelPhase::Line, ROW, Route::Arrows),
+            3
+        );
+        assert_eq!(
+            arrows.take(
+                -0.5 * vornui::WHEEL_LINE,
+                WheelPhase::Line,
+                ROW,
+                Route::Arrows
+            ),
+            -1
+        );
+    }
+
+    #[test]
+    fn a_jump_lands_inside_the_history() {
+        let mut s = Scroll::default();
+        s.set_metrics(ROW, 400.0, 10);
+        s.jump(5.0 * ROW);
+        assert_eq!(s.pos(), 5.0 * ROW);
+        s.jump(1e6);
+        assert_eq!(s.pos(), 10.0 * ROW);
+        assert!(s.resting());
     }
 }

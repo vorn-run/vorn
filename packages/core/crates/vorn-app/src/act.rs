@@ -73,6 +73,8 @@ pub enum Act {
     ConfirmPaste(bool),
     /// Back to a terminal's live screen from its history.
     ScrollToBottom(String),
+    /// A page up (true) or down through a terminal's history, from its scrollbar's track.
+    ScrollPage(String, bool),
     FitToDevice(String),
     LockSize(String, bool),
     Shortcuts,

@@ -1266,7 +1266,8 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
             .pt(2.0)
             .bg(c(look::SURFACE_SUNKEN))
             .child(div().w(8.0).shrink0())
-            .child(body);
+            .child(body)
+            .child_if(blocks.is_none().then(|| cards::scrollbar(s, sid)).flatten());
         s.acts
             .bind(id, pane(SideAct::FocusTerminal(sid.to_owned())));
         let surface = s
