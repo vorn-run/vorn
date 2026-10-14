@@ -455,6 +455,17 @@ fn stage_mac(app: &Path, zip: &Path, version: &str) -> Result<PathBuf, String> {
     if bundle_id(&new).map_err(fail)? != bundle_id(app).unwrap_or_else(|_| "com.vorn.app".into()) {
         return Err(fail("The update is a different app".into()));
     }
+    // Gatekeeper assesses a new build on its first launch; done now, while the update waits
+    // for a restart, that launch finds it done. A refusal here is the launch's to report.
+    let _ = run(
+        "spctl",
+        &[
+            os("--assess"),
+            os("--type"),
+            os("execute"),
+            new.as_os_str(),
+        ],
+    );
     Ok(new)
 }
 
