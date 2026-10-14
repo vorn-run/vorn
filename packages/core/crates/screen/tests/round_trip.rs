@@ -148,6 +148,13 @@ fn a_scrolling_region_keeps_the_cursor() {
     assert!(once.contains("\x1b[2;20r\x1b[7;10H"), "{once:?}");
 }
 
+/// Origin mode keeps the cursor where it was on replay.
+#[test]
+fn origin_mode_keeps_the_cursor() {
+    let (once, twice) = round_trip("\x1b[?6h\x1b[2;5r\x1b[2;3Hx", 30, 6);
+    assert_eq!(once, twice);
+}
+
 /// Accepted differences: input whose restore is not exact, and why. Each is
 /// pinned, so the day it restores exactly this test says so.
 mod fixtures {
@@ -156,14 +163,6 @@ mod fixtures {
     /// The formatter formats the active screen only (RC §4): with the
     /// alternate screen up, the primary screen is not in the output, and a
     /// checkpoint carries it separately as `primary_scrollback`.
-    /// Origin mode makes the formatter's absolute cursor position relative to
-    /// the scrolling region on replay, so the cursor lands lower than it was.
-    #[test]
-    fn origin_mode_moves_the_cursor() {
-        let (once, twice) = round_trip("\x1b[?6h\x1b[2;5r\x1b[2;3Hx", 30, 6);
-        assert_ne!(once, twice);
-    }
-
     #[test]
     fn alternate_screen_hides_the_primary() {
         let (once, _) = round_trip("primary text\x1b[?1049halt text", 40, 5);
