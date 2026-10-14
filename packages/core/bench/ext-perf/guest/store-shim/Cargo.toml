@@ -1,0 +1,16 @@
+[package]
+name = "vorn-ext-perf-store-shim"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The store as an extension reaches it: each named call crosses a bridge as JSON, so Tasks' own code runs unchanged in a component"
+
+[features]
+# Natively, a store in memory behind the same bridge, so the Tasks tests run through it.
+real = ["dep:vorn-store"]
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+vorn-store = { path = "../../../../crates/store", optional = true }

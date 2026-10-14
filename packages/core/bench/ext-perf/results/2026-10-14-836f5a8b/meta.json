@@ -1,0 +1,27 @@
+{
+  "machine": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10,
+    "memory_gb": 17.0
+  },
+  "components": {
+    "ext_perf_tasks.wasm": {
+      "wasm_kb": 172,
+      "cwasm_kb": 468,
+      "compile_ms": 127.24095799999999
+    },
+    "ext_perf_workflows.wasm": {
+      "wasm_kb": 1668,
+      "cwasm_kb": 3751,
+      "compile_ms": 1271.3183749999998
+    }
+  },
+  "reps": 5,
+  "tiers": [
+    100,
+    1000,
+    10000
+  ]
+}

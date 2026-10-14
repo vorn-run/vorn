@@ -11,6 +11,8 @@
 //! client; what it no longer does is run any of this.
 
 pub mod db;
+#[cfg(feature = "ext-spike")]
+mod ext_spike;
 pub mod host;
 pub mod routes;
 pub mod schedule;
@@ -176,6 +178,8 @@ impl Work {
     /// on, and picks up what the last vornd left: gates waiting and runs
     /// still marked running.
     pub fn start(self: &Arc<Self>) {
+        #[cfg(feature = "ext-spike")]
+        crate::native::ext_spike::get();
         tokio::spawn(Arc::clone(self).listen());
         tokio::spawn(Arc::clone(self).schedule());
         tokio::spawn(Arc::clone(self).deliver_inbox());
@@ -540,7 +544,13 @@ impl Work {
                 tokio::spawn(async move { engine.stop(&id).await });
                 Answer::Void
             }
-            "workflow:resolveGate" => self.resolve_gate(params).await,
+            "workflow:resolveGate" => {
+                #[cfg(feature = "ext-spike")]
+                if let Some(answer) = self.spike_resolve_gate(params).await {
+                    return answer;
+                }
+                self.resolve_gate(params).await
+            }
             "workflow:sessionRestored" => {
                 let id = text(params, "sessionId").unwrap_or_default();
                 let session = self

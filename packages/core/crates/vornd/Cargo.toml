@@ -16,6 +16,8 @@ default = ["engine"]
 # The session engine parses every session's output with libghostty-vt, which
 # Zig 0.16.0 builds from source. Without it vornd only keeps the holder.
 engine = ["dep:vorn-engine"]
+# A benchmark spike: Tasks and the workflow step loop as components, chosen at start by VORN_EXT_SPIKE.
+ext-spike = ["dep:vorn-ext-perf-host", "dep:vorn-ext-perf-guest"]
 
 [dependencies]
 vorn-spawn = { path = "../spawn", features = ["tokio"] }
@@ -38,6 +40,8 @@ vorn-logfile = { path = "../logfile" }
 vorn-sessiond = { path = "../sessiond" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
+vorn-ext-perf-host = { path = "../../bench/ext-perf/host", optional = true }
+vorn-ext-perf-guest = { path = "../../bench/ext-perf/guest", optional = true }
 vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
 vorn-git = { path = "../vorn-git" }

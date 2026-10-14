@@ -36,8 +36,12 @@ members = [
   "crates/logfile",
   "crates/spawn",
   "bench/scale",
+  "bench/ext-perf/guest",
+  "bench/ext-perf/guest/store-shim",
+  "bench/ext-perf/host",
+  "bench/ext-perf",
 ]
-exclude = ["vendor"]
+exclude = ["vendor", "bench/ext-perf/component"]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]
