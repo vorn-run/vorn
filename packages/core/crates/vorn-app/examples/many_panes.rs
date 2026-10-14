@@ -19,6 +19,8 @@
 //!   renderer suite of `yarn bench` gives each terminal.
 //! - `hidden`: as `agent`, with the probe's card expanded, so the other
 //!   panes stream into cards that are not on screen.
+//! - `resize`: as `agent`, while the window is dragged between its size and
+//!   60% by 70% of it and back every two seconds, a new target each frame.
 //!
 //! The grid shows at most 16 cards and pages past what fits the window; every
 //! pane is attached, as if the person had paged through them all, and the
@@ -31,6 +33,8 @@
 //! key sent to the probe until a frame showing its echo has been drawn.
 //! **CPU** is the app process plus vornd and its holders over the run, in per
 //! cent of one core; the programs in the panes are the workload, not counted.
+//! **Memory** is the resident size of the app and of vornd with its holders
+//! at the end of the run.
 
 #[cfg(unix)]
 #[path = "../tests/support/mod.rs"]
@@ -353,6 +357,7 @@ mod bench {
         Mixed,
         Agent,
         Hidden,
+        Resize,
     }
 
     impl Case {
@@ -361,7 +366,8 @@ mod bench {
                 "mixed" => Ok(Case::Mixed),
                 "agent" => Ok(Case::Agent),
                 "hidden" => Ok(Case::Hidden),
-                _ => Err(format!("unknown case {s:?} (mixed, agent, hidden)")),
+                "resize" => Ok(Case::Resize),
+                _ => Err(format!("unknown case {s:?} (mixed, agent, hidden, resize)")),
             }
         }
 
@@ -370,6 +376,7 @@ mod bench {
                 Case::Mixed => "mixed",
                 Case::Agent => "agent",
                 Case::Hidden => "hidden",
+                Case::Resize => "resize",
             }
         }
 
@@ -490,11 +497,14 @@ mod bench {
             .collect::<Result<_, _>>()?;
 
         let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(opts.scale));
-        let px = (
-            (opts.size.0 * opts.scale).round() as u32,
-            (opts.size.1 * opts.scale).round() as u32,
-        );
-        let target = ui.offscreen(px);
+        let px = |size: (f32, f32)| {
+            (
+                (size.0 * opts.scale).round() as u32,
+                (size.1 * opts.scale).round() as u32,
+            )
+        };
+        let mut target = ui.offscreen(px(opts.size));
+        let mut size = opts.size;
         // Cards attach their terminals when first laid out; the grid pages past
         // 16, so the rest attach here as if the person had paged through them.
         draw(&mut app, &mut ui, &target, opts.size);
@@ -560,6 +570,7 @@ mod bench {
         let mut pending: Option<(char, Instant)> = None;
         let mut probe_at = started + PROBE_GAP;
         let mut next = started;
+        let mut resizes = 0usize;
         while Instant::now() < until {
             // Between frames: the probe's key goes when it is due.
             loop {
@@ -589,7 +600,14 @@ mod bench {
             } else {
                 t0 + FRAME
             };
-            draw(&mut app, &mut ui, &target, opts.size);
+            if case == Case::Resize {
+                size = dragged(opts.size, t0 - started);
+                if px(size) != target.size {
+                    target = ui.offscreen(px(size));
+                    resizes += 1;
+                }
+            }
+            draw(&mut app, &mut ui, &target, size);
             let t1 = Instant::now();
             frames.push(ms(t1 - t0));
             let Some((c, sent)) = pending else {
@@ -620,6 +638,8 @@ mod bench {
             .filter(|id| on_screen(&ui, id) || app.st.focused.as_ref() == Some(*id))
             .count();
         let over = frames.iter().filter(|&&f| f > ms(FRAME)).count();
+        let mem_app = procs_rss(&[std::process::id()]);
+        let mem_daemons = procs_rss(&pids);
         Ok(json!({
             "case": case.name(),
             "panes": n,
@@ -629,6 +649,7 @@ mod bench {
             "size": format!("{}x{}@{}", opts.size.0, opts.size.1, opts.scale),
             "seconds": round(wall),
             "frames": frames.len(),
+            "resizes": resizes,
             "frame_ms": { "p50": pct(&frames, 50.0), "p99": pct(&frames, 99.0), "max": pct(&frames, 100.0) },
             "over_budget_pct": round(100.0 * over as f64 / frames.len().max(1) as f64),
             "input_to_pixel_ms": {
@@ -642,7 +663,18 @@ mod bench {
                 "daemons": round(daemon_cpu),
                 "per_pane": round((app_cpu + daemon_cpu) / n as f64),
             },
+            "rss_mb": { "app": round(mem_app), "daemons": round(mem_daemons) },
         }))
+    }
+
+    /// The window's size `t` into a two-second drag to 60% by 70% and back.
+    fn dragged(full: (f32, f32), t: Duration) -> (f32, f32) {
+        let phase = (t.as_secs_f32() / 2.0).fract();
+        let f = 1.0 - (2.0 * phase - 1.0).abs();
+        (
+            (full.0 * (1.0 - 0.4 * f)).round(),
+            (full.1 * (1.0 - 0.3 * f)).round(),
+        )
     }
 
     /// One frame: build, lay out, paint and draw, as the window does.
@@ -735,6 +767,26 @@ mod bench {
             .sum()
     }
 
+    /// The resident size of `pids` together, in MB.
+    fn procs_rss(pids: &[u32]) -> f64 {
+        let list = pids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let Ok(out) = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &list])
+            .output()
+        else {
+            return 0.0;
+        };
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse::<f64>().ok())
+            .sum::<f64>()
+            / 1024.0
+    }
+
     fn machine() -> Value {
         let sysctl = |k: &str| {
             std::process::Command::new("sysctl")
@@ -755,13 +807,13 @@ mod bench {
     /// The results as a Markdown table.
     fn table(results: &[Value]) -> String {
         let mut s = String::from(
-            "| Case | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99 | CPU app | CPU vornd | CPU per pane |\n\
-             | ---- | ----: | ----: | --------: | --------: | -----------: | -----------------: | --: | ------: | --------: | -----------: |\n",
+            "| Case | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99 | CPU app | CPU vornd | CPU per pane | RSS app | RSS vornd |\n\
+             | ---- | ----: | ----: | --------: | --------: | -----------: | -----------------: | --: | ------: | --------: | -----------: | ------: | --------: |\n",
         );
         for r in results {
             let _ = writeln!(
                 s,
-                "| {} | {} | {} | {} ms | {} ms | {}% | {} ms | {} ms | {}% | {}% | {}% |",
+                "| {} | {} | {} | {} ms | {} ms | {}% | {} ms | {} ms | {}% | {}% | {}% | {} MB | {} MB |",
                 r["case"].as_str().unwrap_or_default(),
                 r["panes"],
                 r["shown"],
@@ -773,6 +825,8 @@ mod bench {
                 r["cpu_pct"]["app"],
                 r["cpu_pct"]["daemons"],
                 r["cpu_pct"]["per_pane"],
+                r["rss_mb"]["app"],
+                r["rss_mb"]["daemons"],
             );
         }
         if let Some(r) = results.first() {
