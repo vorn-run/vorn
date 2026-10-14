@@ -8,7 +8,7 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 use support::{add_project, connect, key, Shot, TestVornd};
@@ -20,6 +20,7 @@ use vorn_app::notify::{self, Recorded};
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::MainView;
 use vorn_app::state::{Dialog, MenuKind};
+use vorn_app::system::Pick as FilePick;
 use vorn_app::tasks::{Form, TaskAct};
 use vorn_app::ui::{item_id, mods, Id};
 use vorn_app::workflows::{self as wf, Anchor, Missed, Panel, Pick, WfAct};
@@ -231,22 +232,28 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
         App::control("wf-editor", &Act::Open(MenuKind::EditorMore)),
     );
     shot.save(&mut app, "w-editor-more");
-    choose(&mut shot, &mut app, "Export as file\u{2026}");
-    assert_eq!(app.st.dialog, Some(Dialog::WfFile));
     let path = v.home.join("hello.vornflow.json");
-    shot.ui
-        .set_edit_text(wf::file_id(), &path.to_string_lossy());
-    shot.save(&mut app, "w-export");
-    shot.click(
-        &mut app,
-        App::control("wf-dialog-foot", &Act::Workflow(WfAct::File)),
-    );
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let (seen, answer) = (Arc::clone(&asked), path.clone());
+    app.set_picker(Arc::new(move |p| {
+        seen.lock().expect("picks").push(p);
+        Some(answer.clone())
+    }));
+    choose(&mut shot, &mut app, "Export as file\u{2026}");
+    assert_eq!(app.st.dialog, None, "the system's save dialog asks");
     shot.until(&mut app, "the file written", |_, _| {
         path.is_file().then_some(())
     });
     let file: Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
     assert_eq!(file["name"], "Hello flow");
+    match asked.lock().expect("picks").as_slice() {
+        [FilePick::Save { title, at }] => {
+            assert_eq!(title, "Export workflow");
+            assert!(at.ends_with("hello-flow.vorn-workflow.json"), "{at:?}");
+        }
+        other => panic!("{other:?}"),
+    }
 
     shot.click(
         &mut app,
@@ -261,8 +268,10 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
         &mut app,
         App::control("sidebar", &Act::Workflow(WfAct::Import)),
     );
-    assert_eq!(app.st.dialog, Some(Dialog::WfFile));
-    shot.type_line(&mut app, &path.to_string_lossy());
+    assert_eq!(
+        asked.lock().expect("picks").last(),
+        Some(&FilePick::Workflow("Import workflow file".into()))
+    );
     let back = shot.until(&mut app, "imported", |app, _| {
         saved(app).into_iter().find(|w| w["name"] == "Hello flow")
     });

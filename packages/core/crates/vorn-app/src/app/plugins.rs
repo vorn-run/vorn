@@ -90,10 +90,10 @@ impl App {
             PlugAct::InstallFile => {
                 p.report = None;
                 p.pending = None;
-                if self.picking.is_none() {
-                    let wake = std::sync::Arc::clone(&self.wake);
-                    self.picking = Some(crate::system::pick_file("Install a connector pack", wake));
-                }
+                self.start_pick(
+                    super::Picked::Pack,
+                    crate::system::Pick::Pack("Install a connector pack".to_owned()),
+                );
             }
             PlugAct::ConfirmInstall => {
                 if let Some(pending) = p.pending.clone() {
@@ -978,8 +978,7 @@ impl App {
         }
     }
 
-    /// Once a frame: a picked file goes to vornd to be checked, and an
-    /// editor fix is put away once its panel is.
+    /// Once a frame: an editor fix is put away once its panel is.
     pub(super) fn plug_tick(&mut self) {
         let panel_open = self.st.wf.editor.is_some()
             && (self.st.wf.panel == crate::workflows::Panel::StartFrom
@@ -992,16 +991,15 @@ impl App {
             p.intent = None;
             p.report = None;
         }
-        let Some(rx) = &self.picking else { return };
-        let Ok(picked) = rx.try_recv() else { return };
-        self.picking = None;
-        if let Some(path) = picked {
-            self.call(
-                Call::Plug(PlugCall::InspectFile),
-                "connector:inspectPack",
-                json!({ "kind": "file", "path": path.to_string_lossy() }),
-            );
-        }
+    }
+
+    /// A pack picked from disk goes to vornd to be checked.
+    pub(super) fn plug_picked(&mut self, path: &str) {
+        self.call(
+            Call::Plug(PlugCall::InspectFile),
+            "connector:inspectPack",
+            json!({ "kind": "file", "path": path }),
+        );
     }
 
     pub(super) fn plug_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {

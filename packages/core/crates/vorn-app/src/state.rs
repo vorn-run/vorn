@@ -262,8 +262,6 @@ pub enum Dialog {
     RunPrompt,
     /// MissedSchedulesDialog.
     Missed,
-    /// The export or import path.
-    WfFile,
     /// GateReviewModal: the review page of a waiting gate.
     GateReview,
     /// The Changes panel's CommitDialog.
@@ -408,6 +406,8 @@ impl Worktree {
 pub struct ProjectForm {
     pub icon: Option<String>,
     pub icon_color: Option<String>,
+    /// The remote host picked; none for local.
+    pub host: Option<String>,
     /// The name last filled in from the folder, replaced while untouched.
     pub auto_name: String,
 }

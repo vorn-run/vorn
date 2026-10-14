@@ -16,7 +16,6 @@ pub fn dialog(s: &Screen<'_>) -> Option<El> {
     Some(match s.st.dialog.as_ref()? {
         Dialog::RunPrompt => prompt(s, s.st.wf.prompt.as_ref()?),
         Dialog::Missed => missed(s)?,
-        Dialog::WfFile => file(s),
         _ => return None,
     })
 }
@@ -559,81 +558,4 @@ fn missed(s: &Screen<'_>) -> Option<El> {
             .child(foot),
         false,
     ))
-}
-
-/// The export or import path, in place of the system file dialog.
-fn file(s: &Screen<'_>) -> El {
-    let export = s.st.wf.file.is_some();
-    let (title, sub, go) = if export {
-        (
-            "Export workflow",
-            "Save this workflow as a file you can share or import later.",
-            "Export",
-        )
-    } else {
-        (
-            "Import workflow",
-            "Add a workflow from a .vornflow.json file.",
-            "Import",
-        )
-    };
-    let head = div()
-        .col()
-        .px(24.0)
-        .py(16.0)
-        .child(
-            div()
-                .row()
-                .items_center()
-                .gap(8.0)
-                .child(ico(
-                    if export { "upload" } else { "download" },
-                    14.0,
-                    2.0,
-                    c(look::GRAY_400),
-                ))
-                .child(
-                    text(title, 15.0, c(look::WHITE))
-                        .weight(500)
-                        .line_height(22.0)
-                        .role(Role::Heading, title),
-                ),
-        )
-        .child(
-            div().mt(4.0).child(
-                text(sub, 12.0, c(look::GRAY_500))
-                    .line_height(16.0)
-                    .wrapping()
-                    .min_w0(),
-            ),
-        );
-    let id = wf::file_id();
-    let body = div().col().p(24.0).child(upper("File", false)).child(input(
-        s,
-        id,
-        "File",
-        "/path/to/workflow.vornflow.json",
-    ));
-    let ready = !s.ui.edit_text(id).trim().is_empty();
-    let foot = div()
-        .row()
-        .justify_end()
-        .gap(8.0)
-        .px(24.0)
-        .py(12.0)
-        .child(footer_button(s, Act::CloseDialog, "Cancel", false, true))
-        .child(footer_button(s, act(WfAct::File), go, true, ready));
-    frame(
-        s,
-        460.0,
-        title,
-        div()
-            .col()
-            .child(head)
-            .child(rule())
-            .child(body)
-            .child(rule())
-            .child(foot),
-        true,
-    )
 }

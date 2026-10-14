@@ -141,6 +141,10 @@ pub enum Act {
     DeleteProject(String),
     SaveProject,
     BrowseFolder,
+    /// The project dialog's icon, colour and host (none for local).
+    ProjectIcon(String),
+    ProjectColor(String),
+    ProjectHost(Option<String>),
     Restore,
     DismissBanner,
     DismissToast(String),

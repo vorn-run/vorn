@@ -10,6 +10,8 @@
 
 mod support;
 
+use std::sync::{Arc, Mutex};
+
 use serde_json::{json, Value};
 use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
@@ -19,6 +21,7 @@ use vorn_app::screen::{
     intent_id, term_id, MainView, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use vorn_app::state::{Dialog, Filter, LayoutMode, MenuKind};
+use vorn_app::system::Pick;
 use vorn_app::ui::{item_id, mods, Id};
 use vorn_app::App;
 
@@ -73,16 +76,37 @@ fn the_sidebar_adds_and_edits_a_project_through_the_dialog() {
     assert!(app.st.sidebar, "the sidebar starts open");
     shot.save(&mut app, "sidebar-empty");
 
-    shot.click(&mut app, control("sidebar", Act::AddProject));
-    assert_eq!(app.st.dialog, Some(Dialog::Project(None)));
     let dir = v.home.join("my-app");
     std::fs::create_dir_all(&dir).expect("dir");
-    shot.type_text(&mut app, &dir.to_string_lossy());
-    assert_eq!(shot.ui.edit_text(PROJECT_PATH), dir.to_string_lossy());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let (seen, answer) = (Arc::clone(&asked), dir.clone());
+    app.set_picker(Arc::new(move |p| {
+        seen.lock().expect("picks").push(p);
+        Some(answer.clone())
+    }));
+    shot.click(&mut app, control("sidebar", Act::AddProject));
+    assert_eq!(app.st.dialog, Some(Dialog::Project(None)));
+    shot.save(&mut app, "add-project-empty");
+    shot.click(&mut app, control("project-dialog", Act::BrowseFolder));
+    shot.until(&mut app, "the folder picked", |_, ui| {
+        (ui.edit_text(PROJECT_PATH) == dir.to_string_lossy()).then_some(())
+    });
+    assert_eq!(
+        *asked.lock().expect("picks"),
+        [Pick::Folder("Select Project Folder".into())]
+    );
     assert_eq!(
         shot.ui.edit_text(PROJECT_NAME),
         "my-app",
         "the folder names it"
+    );
+    shot.click(
+        &mut app,
+        control("project-icon", Act::ProjectIcon("Rocket".into())),
+    );
+    shot.click(
+        &mut app,
+        control("project-color", Act::ProjectColor("#22c55e".into())),
     );
     shot.save(&mut app, "add-project");
 
@@ -93,6 +117,11 @@ fn the_sidebar_adds_and_edits_a_project_through_the_dialog() {
         (saved["projects"][0]["name"] == "my-app").then_some(())
     });
     assert_eq!(app.store.projects[0].path, dir.to_string_lossy());
+    let saved = &app.store.projects[0];
+    assert_eq!(saved.icon.as_deref(), Some("Rocket"));
+    assert_eq!(saved.icon_color.as_deref(), Some("#22c55e"));
+    assert_eq!(saved.host_ids, Some(json!(["local"])));
+    assert_eq!(saved.workspace_id.as_deref(), Some("personal"));
     shot.until(&mut app, "the toast", |app, _| {
         app.st
             .toasts

@@ -6,12 +6,15 @@ use crate::act::Act;
 use crate::look;
 use crate::state::Dialog;
 use crate::ui::widgets::kbd;
-use crate::ui::{div, text, text_input, Action, El, Id, Role};
+use crate::ui::{div, text, text_input, tooltip, Action, El, Id, Role};
 
 /// The project dialog's folder field.
 pub const PROJECT_PATH: Id = Id(0x7072_6f6a_7061_7468);
 /// The project dialog's name field.
 pub const PROJECT_NAME: Id = Id(0x7072_6f6a_6e61_6d65);
+/// A new project's icon and colour until others are picked.
+pub const PROJECT_ICON: &str = "Folder";
+pub const PROJECT_COLOR: &str = "#6b7280";
 
 /// The shortcuts panel's rows: its categories, each with description and
 /// keys, as `keyboard-shortcuts.ts` lists them.
@@ -185,13 +188,127 @@ pub(super) fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
     crate::ui::widgets::scrim(id, s.size, alpha)
 }
 
+/// The dialog's `text-xs uppercase tracking-wider` field label.
 fn label(t: &str) -> El {
     div().pb(8.0).child(
-        text(t, 13.0, c(look::GRAY_400))
+        text(t.to_uppercase(), 12.0, c(look::GRAY_500))
             .weight(500)
-            .line_height(18.0)
+            .tracking(0.05)
+            .line_height(16.0)
             .silent(),
     )
+}
+
+/// The host selector's Local or remote host button.
+fn host_button(s: &Screen<'_>, host: Option<&String>, glyph: &str, name: &str, on: bool) -> El {
+    let id = s.acts.on("project-host", Act::ProjectHost(host.cloned()));
+    let hot = s.ui.hover(id);
+    let (border, bg, fg, icon) = match (on, host.is_some()) {
+        (true, false) => (white(0.15), white(0.06), c(look::WHITE), c(look::WHITE)),
+        (true, true) => (
+            c(look::BLUE_500).alpha(0.2),
+            c(look::BLUE_500).alpha(0.06),
+            c(look::BLUE_300),
+            c(look::BLUE_400),
+        ),
+        (false, _) => (
+            white(0.04).mix(white(0.10), hot),
+            white(0.02),
+            c(look::GRAY_500),
+            c(look::GRAY_500),
+        ),
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(8.0)
+        .rounded(8.0)
+        .border(1.0, border)
+        .bg(bg)
+        .role(Role::Button, name)
+        .selected(on)
+        .child(ico(glyph, 13.0, 1.5, icon))
+        .child(text(name, 14.0, fg).line_height(20.0).silent())
+}
+
+/// `IconColorPicker` with its labels and preview, as the project dialog shows it.
+fn icon_color(s: &Screen<'_>, icon: &str, color: &str) -> El {
+    let tint = super::workflows::hex(Some(color)).unwrap_or(c(look::ICON_DEFAULT));
+    // `grid-cols-8 gap-1.5` across the dialog's 472 px.
+    let cell = ((472.0 - 7.0 * 6.0) / 8.0_f32).floor();
+    let mut grid = div().row().wrap_children().gap(6.0);
+    for &(name, glyph, tip) in &look::ICON_OPTIONS {
+        let id = s.acts.on("project-icon", Act::ProjectIcon(name.to_owned()));
+        let on = icon == name;
+        let hot = s.ui.hover(id);
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .size(cell, 34.0)
+            .center()
+            .rounded(8.0)
+            .bg(if on {
+                white(0.08)
+            } else {
+                white(0.0).mix(white(0.04), hot)
+            })
+            .border(1.0, if on { white(0.2) } else { white(0.0) })
+            .role(Role::Button, tip)
+            .selected(on)
+            .child(ico(glyph, 16.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+        grid = grid.child(tooltip(s.ui, b, id, tip, None));
+    }
+    let mut swatches = div().row().wrap_children().items_center().gap(8.0);
+    for rgb in look::ICON_COLORS {
+        let hexs = format!("#{rgb:06x}");
+        let id = s.acts.on("project-color", Act::ProjectColor(hexs.clone()));
+        let on = color.eq_ignore_ascii_case(&hexs);
+        let hot = s.ui.hover(id);
+        let size = if on { 30.8 } else { 28.0 };
+        swatches = swatches.child(
+            div().size(28.0, 28.0).center().child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .size(size, size)
+                    .rounded(size / 2.0)
+                    .bg(c(rgb))
+                    .border(
+                        2.0,
+                        if on {
+                            c(look::WHITE)
+                        } else {
+                            white(0.0).mix(white(0.3), hot)
+                        },
+                    )
+                    .role(Role::Button, format!("Color {hexs}"))
+                    .selected(on),
+            ),
+        );
+    }
+    let glyph = look::icon_map(icon).unwrap_or("folder");
+    swatches = swatches.child(
+        div()
+            .row()
+            .items_center()
+            .gap(8.0)
+            .ml(12.0)
+            .child(ico(glyph, 20.0, 1.5, tint))
+            .child(
+                text("Preview", 12.0, c(look::GRAY_500))
+                    .line_height(16.0)
+                    .silent(),
+            ),
+    );
+    div()
+        .col()
+        .gap(20.0)
+        .child(div().col().child(label("Icon")).child(grid))
+        .child(div().col().child(label("Color")).child(swatches))
 }
 
 /// The dialog's `px-4 py-2.5` field on `white/[0.03]`.
@@ -232,21 +349,100 @@ fn project(s: &Screen<'_>, editing: Option<&str>) -> El {
                 .mt(2.0)
                 .silent(),
         );
-    let folder = div().col().child(label("Project Folder")).child(
-        div()
+    let form = &s.st.form;
+    let hosts: Vec<(String, String)> = s
+        .store
+        .config
+        .get("remoteHosts")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|h| {
+            Some((
+                h.get("id")?.as_str()?.to_owned(),
+                h.get("label")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    let remote = form.host.is_some();
+    let mut body = div().col().gap(20.0).p(24.0);
+    if !hosts.is_empty() {
+        let mut row = div()
             .row()
-            .items_center()
+            .wrap_children()
             .gap(8.0)
-            .child(ico("folder-open", 16.0, 1.5, c(look::GRAY_400)))
-            .child(input(s, PROJECT_PATH, "Project Folder", "No folder selected").grow()),
-    );
+            .child(host_button(s, None, "monitor", "Local", !remote));
+        for (id, name) in &hosts {
+            let on = form.host.as_deref() == Some(id.as_str());
+            row = row.child(host_button(s, Some(id), "server", name, on));
+        }
+        body = body.child(div().col().child(label("Host")).child(row));
+    }
+    let folder = if remote {
+        div()
+            .col()
+            .child(label("Remote Path"))
+            .child(input(s, PROJECT_PATH, "Remote Path", "/home/user/project").mono())
+    } else {
+        let browse = s.acts.on("project-dialog", Act::BrowseFolder);
+        let path = s.ui.edit_text(PROJECT_PATH);
+        let shown = if path.is_empty() {
+            "No folder selected"
+        } else {
+            path
+        };
+        div().col().child(label("Project Folder")).child(
+            div()
+                .row()
+                .gap(8.0)
+                .child(
+                    div()
+                        .id(browse)
+                        .on(Action::Click)
+                        .row()
+                        .items_center()
+                        .gap(8.0)
+                        .px(16.0)
+                        .py(10.0)
+                        .rounded(8.0)
+                        .bg(white(0.06).mix(white(0.10), s.ui.hover(browse)))
+                        .border(1.0, white(0.08))
+                        .role(Role::Button, "Browse")
+                        .child(ico("folder-open", 16.0, 1.5, c(look::GRAY_200)))
+                        .child(
+                            text("Browse", 14.0, c(look::GRAY_200))
+                                .line_height(20.0)
+                                .silent(),
+                        ),
+                )
+                .child(
+                    div()
+                        .grow()
+                        .min_w0()
+                        .px(16.0)
+                        .py(10.0)
+                        .rounded(8.0)
+                        .bg(white(0.03))
+                        .border(1.0, white(0.06))
+                        .child(
+                            text(shown, 14.0, c(look::GRAY_400))
+                                .line_height(20.0)
+                                .truncate(),
+                        ),
+                ),
+        )
+    };
     let name = div().col().child(label("Project Name")).child(input(
         s,
         PROJECT_NAME,
         "Project Name",
         "my-project",
     ));
-    let body = div().col().gap(20.0).p(24.0).child(folder).child(name);
+    let body = body.child(folder).child(name).child(icon_color(
+        s,
+        form.icon.as_deref().unwrap_or(PROJECT_ICON),
+        form.icon_color.as_deref().unwrap_or(PROJECT_COLOR),
+    ));
     let ready = !s.ui.edit_text(PROJECT_NAME).trim().is_empty()
         && !s.ui.edit_text(PROJECT_PATH).trim().is_empty();
     let cancel = s.acts.on("project-dialog", Act::CloseDialog);
@@ -319,7 +515,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Discard => super::side::discard(s),
         Dialog::Paste => paste(s)?,
         Dialog::Output => super::tasks::output(s),
-        Dialog::RunPrompt | Dialog::Missed | Dialog::WfFile => super::workflows::dialog(s)?,
+        Dialog::RunPrompt | Dialog::Missed => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,
         Dialog::Palette => super::palette::palette(s),
         Dialog::Welcome => super::onboarding::modal(s)?,
