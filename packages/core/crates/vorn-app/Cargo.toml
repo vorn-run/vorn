@@ -16,6 +16,10 @@ default = ["webview"]
 # The browser pane's OS web views; without them the terminal UI builds with no GTK.
 webview = ["dep:wry", "dep:gtk"]
 
+[dev-dependencies]
+# The board bench writes its tasks straight into vornd's database.
+vorn-store = { path = "../store" }
+
 [build-dependencies]
 # The app icon in vorn-app.exe, for Explorer, the taskbar and the installer.
 embed-resource = "3"

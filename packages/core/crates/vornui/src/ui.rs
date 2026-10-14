@@ -16,7 +16,7 @@ use crate::cells::{self, PaintList};
 use crate::edit::{Clipboard, MemoryClipboard, TextEdit};
 use crate::element::{Action, Content, EditLook, El, Id, Overlay, Place, Sense};
 use crate::gpu::{adapter_name, instance_desc, Gpu};
-use crate::interact::{EditGeom, Hit, State};
+use crate::interact::{EditGeom, Hit, Scroll, State};
 use crate::render::{read_texture, Offscreen, RenderMode, Renderer, OFFSCREEN_FORMAT};
 use crate::scene::{Rect, Rgba, Scene};
 use crate::text::{TextStyle, TextSystem};
@@ -438,7 +438,14 @@ impl Ui {
     ) -> LayoutNode {
         let mut scrolls = Vec::new();
         let cells = self.is_cells();
-        let node = build(&mut cx.taffy, el, &mut scrolls, cells, (false, float));
+        let bar = if cells { 1.0 } else { theme::scrollbar::WIDTH };
+        let node = build(
+            &mut cx.taffy,
+            el,
+            (&mut scrolls, &self.st.scroll, bar),
+            cells,
+            (false, float),
+        );
         if let Some(w) = min_w {
             if let Ok(s) = cx.taffy.style(node) {
                 let mut s = s.clone();
@@ -457,20 +464,36 @@ impl Ui {
         };
         self.compute(&mut cx.taffy, node, avail);
         // `overflow-y: auto` takes its scrollbar's width only when it
-        // overflows, which needs a second pass once that is known.
-        let mut again = false;
-        for n in scrolls {
-            let Ok(l) = cx.taffy.layout(n) else { continue };
-            if l.content_size.height + l.border.bottom > l.size.height + 0.5 {
-                if let Ok(s) = cx.taffy.style(n) {
+        // overflows, which needs another pass once that is known. A view
+        // that overflowed last frame starts with its bar and keeps it while
+        // it overflows by more than the bar could have caused; nearer the
+        // edge it goes back to the rule.
+        for _ in 0..2 {
+            let mut again = false;
+            for (n, has) in &mut scrolls {
+                let Ok(l) = cx.taffy.layout(*n) else { continue };
+                let over = l.content_size.height + l.border.bottom - l.size.height;
+                let set = match *has {
+                    Bar::Guessed if over <= 0.5 || over < l.size.height / 4.0 => {
+                        *has = Bar::Off;
+                        0.0
+                    }
+                    Bar::Off if over > 0.5 => {
+                        *has = Bar::Set;
+                        bar
+                    }
+                    _ => continue,
+                };
+                if let Ok(s) = cx.taffy.style(*n) {
                     let mut s = s.clone();
-                    s.scrollbar_width = if cells { 1.0 } else { theme::scrollbar::WIDTH };
-                    let _ = cx.taffy.set_style(n, s);
+                    s.scrollbar_width = set;
+                    let _ = cx.taffy.set_style(*n, s);
                     again = true;
                 }
             }
-        }
-        if again {
+            if !again {
+                break;
+            }
             self.compute(&mut cx.taffy, node, avail);
         }
         node
@@ -877,14 +900,65 @@ impl Ui {
                 if max < 1.0 {
                     max = 0.0;
                 }
+                // The children with ids: where each starts in the content, and how tall.
+                let items: Vec<(Id, f32, f32)> = if el.windowed || self.st.reveal.is_some() {
+                    children
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, ce)| {
+                            let c = cx.taffy.child_at_index(node, i).ok()?;
+                            let cl = cx.taffy.layout(c).ok()?;
+                            Some((ce.id?, cl.location.y - l.border.top, cl.size.height))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let find = |want: Id| items.iter().find(|i| i.0 == want).copied();
                 let s = self.st.scroll.entry(id).or_default();
                 s.max = max;
-                s.offset = if s.follow && s.at_end {
-                    max
-                } else {
-                    s.offset.clamp(0.0, max)
-                };
+                let mut offset = if s.follow && s.at_end { max } else { s.offset };
+                // What changed above the first item in view (a height measured
+                // in place of its guess, an item added) leaves it where it was.
+                if el.windowed && offset > 0.0 {
+                    let anchor = self.st.virt.get(&id).and_then(|v| v.anchor);
+                    if let Some((now, was)) = anchor.and_then(|(a, was)| Some((find(a)?.1, was))) {
+                        offset += now - was;
+                    }
+                }
+                let view = clip_box.h;
+                if let Some((_, top, h)) = self.st.reveal.and_then(find) {
+                    if top < offset || h > view {
+                        offset = top;
+                    } else if top + h > offset + view {
+                        offset = top + h - view;
+                    }
+                    self.st.reveal = None;
+                }
+                let s = self.st.scroll.entry(id).or_default();
+                s.offset = offset.clamp(0.0, max);
                 scrolled = s.offset;
+                if el.windowed {
+                    let gap = cx.taffy.style(node).map_or(0.0, |st| {
+                        let g = st.gap.height.into_raw();
+                        if g.tag() == taffy::CompactLength::LENGTH_TAG {
+                            g.value()
+                        } else {
+                            0.0
+                        }
+                    });
+                    let v = self.st.virt.entry(id).or_default();
+                    v.gap = gap;
+                    v.top = l.padding.top;
+                    v.view = view;
+                    for &(i, _, h) in &items {
+                        v.measured(i, h);
+                    }
+                    v.anchor = items
+                        .iter()
+                        .find(|i| i.1 + i.2 > scrolled)
+                        .map(|i| (i.0, i.1));
+                }
             }
         }
         let custom = match el.content {
@@ -1457,6 +1531,7 @@ impl Ui {
 
     /// Fixes up state the new layout invalidated.
     fn after_layout(&mut self, cx: &Cx<'_>) {
+        self.st.reveal = None;
         if !cx.focus_seen && self.st.focus.is_some_and(|f| self.st.hit(f).is_none()) {
             self.st.focus = None;
         }
@@ -1601,10 +1676,20 @@ impl Ui {
     }
 }
 
+/// Whether a scroll view has its scrollbar's width, and why.
+#[derive(Clone, Copy)]
+enum Bar {
+    /// It overflowed last frame.
+    Guessed,
+    Off,
+    /// It overflowed without.
+    Set,
+}
+
 fn build<'a>(
     t: &mut TaffyTree<Measure<'a>>,
     el: &'a El,
-    scrolls: &mut Vec<LayoutNode>,
+    (scrolls, last, bar): (&mut Vec<(LayoutNode, Bar)>, &HashMap<Id, Scroll>, f32),
     cells: bool,
     (in_row, float): (bool, bool),
 ) -> LayoutNode {
@@ -1623,9 +1708,14 @@ fn build<'a>(
             y: Overflow::Hidden,
         };
     }
+    let guess = el.scroll
+        && el
+            .id
+            .and_then(|id| last.get(&id))
+            .is_some_and(|s| s.max > 0.0);
     if el.scroll {
         style.overflow.y = Overflow::Scroll;
-        style.scrollbar_width = 0.0;
+        style.scrollbar_width = if guess { bar } else { 0.0 };
     }
     let ctx = match &el.content {
         _ if cells && cell_glyph(el).is_some() => None,
@@ -1655,14 +1745,14 @@ fn build<'a>(
             };
             let kids: Vec<LayoutNode> = kids
                 .iter()
-                .map(|c| build(t, c, scrolls, cells, (row, float)))
+                .map(|c| build(t, c, (&mut *scrolls, last, bar), cells, (row, float)))
                 .collect();
             t.new_with_children(style, &kids)
         }
     }
     .unwrap_or_else(|_| unreachable!("taffy fails only on unknown node ids"));
     if el.scroll {
-        scrolls.push(node);
+        scrolls.push((node, if guess { Bar::Guessed } else { Bar::Off }));
     }
     node
 }

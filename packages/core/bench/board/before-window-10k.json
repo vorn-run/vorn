@@ -1,0 +1,65 @@
+{
+  "machine": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10
+  },
+  "results": [
+    {
+      "tier": 10000,
+      "surface": "window",
+      "renderer": "Apple M2 Pro (Metal, IntegratedGpu)",
+      "size": "1440x900@2",
+      "reps": 1,
+      "load_ms": 7011.95,
+      "idle_p50": 3261.99,
+      "scroll_p50": 3184.95,
+      "scroll_p99": 3397.58,
+      "drag_p50": 3311.93,
+      "drag_p99": 3810.99,
+      "max": 3810.99,
+      "frames": 42.0,
+      "over_16_7": 42.0,
+      "dropped": false,
+      "board_mb": 1939.03,
+      "end_mb": 3588.36,
+      "runs": [
+        {
+          "tier": 10000,
+          "surface": "window",
+          "renderer": "Apple M2 Pro (Metal, IntegratedGpu)",
+          "size": "1440x900@2",
+          "load_ms": 7011.95,
+          "idle_ms": {
+            "p50": 3261.99,
+            "p99": 3558.8,
+            "max": 3558.8,
+            "n": 5
+          },
+          "scroll_ms": {
+            "p50": 3184.95,
+            "p99": 3397.58,
+            "max": 3397.58,
+            "n": 21
+          },
+          "drag_ms": {
+            "p50": 3311.93,
+            "p99": 3810.99,
+            "max": 3810.99,
+            "n": 16
+          },
+          "frames": 42,
+          "over_16_7": 42,
+          "dropped": false,
+          "footprint_mb": {
+            "before": 13.3,
+            "loaded": 1952.33,
+            "board": 1939.03,
+            "end": 3588.36
+          }
+        }
+      ]
+    }
+  ]
+}

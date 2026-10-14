@@ -233,6 +233,10 @@ pub(crate) struct State {
     /// The menu last closed, for [`Ui::reopen_menu`].
     pub closed_menu: Option<Menu>,
     pub scroll: HashMap<Id, Scroll>,
+    /// What each windowed scroll view measured, by its id.
+    pub virt: HashMap<Id, crate::virt::Virt>,
+    /// An item to scroll into view in the next layout.
+    pub reveal: Option<Id>,
     pub drag: Option<Id>,
     pub moving: Option<Moving>,
     pub selecting: Option<Id>,
@@ -274,6 +278,8 @@ impl State {
             menu: None,
             closed_menu: None,
             scroll: HashMap::new(),
+            virt: HashMap::new(),
+            reveal: None,
             drag: None,
             moving: None,
             selecting: None,
@@ -656,6 +662,11 @@ impl Ui {
         self.st.scroll.get(&id).map_or(0.0, |s| s.offset)
     }
 
+    /// How far scroll view `id` could scroll at its last layout.
+    pub fn scroll_max(&self, id: Id) -> f32 {
+        self.st.scroll.get(&id).map_or(0.0, |s| s.max)
+    }
+
     /// Scrolls scroll view `id` to `offset`, clamped once it is laid out.
     pub fn set_scroll_offset(&mut self, id: Id, offset: f32) {
         let s = self.st.scroll.entry(id).or_default();
@@ -665,6 +676,12 @@ impl Ui {
             offset.max(0.0)
         };
         s.moved();
+    }
+
+    /// Scrolls the scroll view `id` sits directly in by the least that
+    /// shows it, in the next layout.
+    pub fn reveal(&mut self, id: Id) {
+        self.st.reveal = Some(id);
     }
 
     /// Makes scroll view `id` keep to its end as its content grows, until

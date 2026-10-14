@@ -1,0 +1,120 @@
+{
+  "machine": {
+    "os": "macos",
+    "arch": "aarch64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10
+  },
+  "results": [
+    {
+      "tier": 100,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 49.09,
+      "idle_p50": 44.85,
+      "scroll_p50": 44.78,
+      "scroll_p99": 48.12,
+      "drag_p50": 44.91,
+      "drag_p99": 49.62,
+      "max": 50.92,
+      "frames": 234.0,
+      "over_16_7": 234.0,
+      "dropped": true,
+      "board_mb": 8.14,
+      "end_mb": 17.0,
+      "runs": [
+        {
+          "tier": 100,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 49.09,
+          "idle_ms": {
+            "p50": 44.85,
+            "p99": 45.8,
+            "max": 45.8,
+            "n": 30
+          },
+          "scroll_ms": {
+            "p50": 44.78,
+            "p99": 48.12,
+            "max": 48.71,
+            "n": 121
+          },
+          "drag_ms": {
+            "p50": 44.91,
+            "p99": 49.62,
+            "max": 50.92,
+            "n": 83
+          },
+          "frames": 234,
+          "over_16_7": 234,
+          "dropped": true,
+          "footprint_mb": {
+            "before": 8.31,
+            "loaded": 16.45,
+            "board": 8.14,
+            "end": 17.0
+          }
+        }
+      ]
+    },
+    {
+      "tier": 1000,
+      "surface": "cells",
+      "renderer": "cells",
+      "size": "180x32 cells",
+      "reps": 1,
+      "load_ms": 484.91,
+      "idle_p50": 446.02,
+      "scroll_p50": 458.81,
+      "scroll_p99": 474.43,
+      "drag_p50": 456.8,
+      "drag_p99": 468.61,
+      "max": 474.43,
+      "frames": 42.0,
+      "over_16_7": 42.0,
+      "dropped": true,
+      "board_mb": 116.58,
+      "end_mb": 647.67,
+      "runs": [
+        {
+          "tier": 1000,
+          "surface": "cells",
+          "renderer": "cells",
+          "size": "180x32 cells",
+          "load_ms": 484.91,
+          "idle_ms": {
+            "p50": 446.02,
+            "p99": 467.88,
+            "max": 467.88,
+            "n": 5
+          },
+          "scroll_ms": {
+            "p50": 458.81,
+            "p99": 474.43,
+            "max": 474.43,
+            "n": 21
+          },
+          "drag_ms": {
+            "p50": 456.8,
+            "p99": 468.61,
+            "max": 468.61,
+            "n": 16
+          },
+          "frames": 42,
+          "over_16_7": 42,
+          "dropped": true,
+          "footprint_mb": {
+            "before": 8.67,
+            "loaded": 125.25,
+            "board": 116.58,
+            "end": 647.67
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -421,7 +421,14 @@ export interface RequestMethods {
    * a desk and the difference between usable and not on a phone.
    */
   'task:list': {
-    params: { projectName?: string; status?: TaskStatus; includeDescription?: boolean } | void
+    params: {
+      projectName?: string
+      status?: TaskStatus
+      includeDescription?: boolean
+      /** Pages through the board in its order: skip `offset` tasks, return at most `limit`. */
+      offset?: number
+      limit?: number
+    } | void
     result: TaskConfig[]
   }
   'task:setStatus': { params: { id: string; status: TaskStatus }; result: { ok: boolean } }

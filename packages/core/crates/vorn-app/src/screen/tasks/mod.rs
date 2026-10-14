@@ -18,7 +18,7 @@ use crate::act::Act;
 use crate::look::{self, Rgb};
 use crate::screen::menus::{Item, AGENTS};
 use crate::state::MenuKind;
-use crate::tasks::{self, Form, Mode, Source, TaskAct, STATUSES};
+use crate::tasks::{self, Form, Mode, Source, Status, TaskAct, STATUSES};
 use crate::ui::{div, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
 
 pub fn title_id(form: Form) -> Id {
@@ -64,6 +64,16 @@ pub fn column_id(status: &str) -> Id {
 pub fn card_id(task: &str) -> Id {
     Id::new("task-card").child(task)
 }
+
+/// The scroll view of a board column's cards.
+pub fn column_scroll_id(status: &str) -> Id {
+    Id::new("task-column-scroll").child(status)
+}
+
+/// A one-line card's height, what a column guesses before it has measured one.
+const CARD_GUESS: f32 = 92.0;
+/// A list row's height, likewise.
+const LINE_GUESS: f32 = 36.0;
 
 pub(super) fn ink(a: f32) -> Rgba {
     Rgba::hexa(look::INK, a)
@@ -466,29 +476,54 @@ fn header(s: &Screen<'_>, status: &'static tasks::Status, count: usize, list: bo
         ))
 }
 
-fn list(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
-    let mut col = div().col().gap(4.0).w_full();
-    for st in &STATUSES {
+/// One of the list's lines: a section's header, its rows or empty line, and
+/// the space around them.
+#[derive(Clone, Copy)]
+enum Line<'a> {
+    Header(&'static Status, usize),
+    Empty(&'static Status),
+    Task(&'a TaskConfig),
+    Pad,
+}
+
+/// The list, its sections laid flat in `content` so it builds only the
+/// lines in view.
+fn list(s: &Screen<'_>, content: El, shown: &[&TaskConfig]) -> El {
+    let pad = |key: &str, n: u8| Id::new("task-list-pad").child(key).child(n);
+    let mut lines: Vec<(Id, Line)> = Vec::new();
+    for (i, st) in STATUSES.iter().enumerate() {
         let in_status = tasks::in_status(shown, st.key);
-        let mut section = div().col().child(header(s, st, in_status.len(), true));
-        if !s.st.tasks.collapsed.contains(st.key) {
-            let mut body = div().col().py(4.0);
-            if in_status.is_empty() {
-                body = body.child(
-                    div()
-                        .py(8.0)
-                        .pl(40.0)
-                        .child(text(st.empty, 12.0, faint()).line_height(16.0).silent()),
-                );
-            }
-            for t in in_status {
-                body = body.child(list_row(s, t));
-            }
-            section = section.child(body);
+        if i > 0 {
+            // The sections' gap.
+            lines.push((pad(st.key, 0), Line::Pad));
         }
-        col = col.child(section);
+        let head = Id::new("task-list-header").child(st.key);
+        lines.push((head, Line::Header(st, in_status.len())));
+        if s.st.tasks.collapsed.contains(st.key) {
+            continue;
+        }
+        // The body's padding above and below.
+        lines.push((pad(st.key, 1), Line::Pad));
+        if in_status.is_empty() {
+            let empty = Id::new("task-list-empty").child(st.key);
+            lines.push((empty, Line::Empty(st)));
+        }
+        lines.extend(in_status.into_iter().map(|t| (card_id(&t.id), Line::Task(t))));
+        lines.push((pad(st.key, 2), Line::Pad));
     }
-    col
+    let keys: Vec<Id> = lines.iter().map(|(id, _)| *id).collect();
+    let scroll = Id::new("task-content");
+    s.ui.windowed(scroll, &keys, LINE_GUESS, &kept(s))
+        .fill(content, |i| match lines[i] {
+            (id, Line::Header(st, n)) => div().id(id).col().child(header(s, st, n, true)),
+            (id, Line::Empty(st)) => div()
+                .id(id)
+                .py(8.0)
+                .pl(40.0)
+                .child(text(st.empty, 12.0, faint()).line_height(16.0).silent()),
+            (_, Line::Task(t)) => list_row(s, t),
+            (id, Line::Pad) => div().id(id).h(4.0).shrink0(),
+        })
 }
 
 /// A board card (`TaskCard` kanban): id, menu, status and title, agent and
@@ -623,8 +658,27 @@ fn kanban_card(s: &Screen<'_>, t: &TaskConfig, ghost: bool) -> El {
         })
 }
 
+/// The cards built wherever they are: the one being dragged, and the one a
+/// menu or a delete confirmation hangs from.
+fn kept(s: &Screen<'_>) -> Vec<Id> {
+    let menu = s.st.menu.as_ref().and_then(|m| match &m.kind {
+        MenuKind::TaskCard(id) => Some(id.as_str()),
+        _ => None,
+    });
+    [
+        s.st.tasks.dragging.as_ref().map(|(id, _)| id.as_str()),
+        menu,
+        s.st.tasks.confirm_delete.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(card_id)
+    .collect()
+}
+
 fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
     let mut row = div().row().gap(8.0).grow().min_h(0.0).w_full();
+    let keep = kept(s);
     for st in &STATUSES {
         let in_status = tasks::in_status(shown, st.key);
         let over =
@@ -632,8 +686,9 @@ fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
                 .dragging
                 .as_ref()
                 .is_some_and(|(_, col)| col.as_deref() == Some(st.key));
+        let scroll = column_scroll_id(st.key);
         let mut cards = div()
-            .id(Id::new("task-column-scroll").child(st.key))
+            .id(scroll)
             .col()
             .gap(8.0)
             .grow()
@@ -660,9 +715,11 @@ fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
                 ),
             );
         }
-        for t in &in_status {
-            cards = cards.child(kanban_card(s, t, false));
-        }
+        let keys: Vec<Id> = in_status.iter().map(|t| card_id(&t.id)).collect();
+        let cards = s
+            .ui
+            .windowed(scroll, &keys, CARD_GUESS, &keep)
+            .fill(cards, |i| kanban_card(s, in_status[i], false));
         let add = s.acts.on(
             "task-column-add",
             Act::Task(TaskAct::New(st.key.to_owned())),
@@ -756,7 +813,7 @@ pub(super) fn view(s: &Screen<'_>) -> El {
     } else if board {
         content.child(kanban(s, &shown))
     } else {
-        content.scroll_y().child(list(s, &shown))
+        list(s, content.scroll_y(), &shown)
     };
     let mut row = div().row().grow().min_h(0.0).child(content);
     if let Some(panel) = detail::panel(s) {
@@ -768,16 +825,17 @@ pub(super) fn view(s: &Screen<'_>) -> El {
 /// The dragged card, drawn at the pointer over everything.
 pub(super) fn ghost(s: &Screen<'_>) -> Option<El> {
     let (id, _) = s.st.tasks.dragging.as_ref()?;
-    let (mid, dx, dy) = s.ui.moving()?;
+    let (mid, _, _) = s.ui.moving()?;
     if mid != card_id(id) {
         return None;
     }
-    let r = s.ui.rect_of(mid)?;
+    let (gx, gy, w) = s.st.tasks.grab?;
+    let (px, py) = s.ui.pointer()?;
     let t = s.store.tasks.iter().find(|t| &t.id == id)?;
     Some(
         div()
-            .absolute(r.x + dx, r.y + dy)
-            .w(r.w)
+            .absolute(px - gx, py - gy)
+            .w(w)
             .opacity(0.9)
             .silent()
             .child(kanban_card(s, t, true)),

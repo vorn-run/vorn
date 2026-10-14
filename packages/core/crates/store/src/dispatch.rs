@@ -26,6 +26,14 @@ fn args<T: DeserializeOwned>(call: &str, args: Value) -> Result<T> {
     })
 }
 
+/// Positional arguments with the trailing ones a caller left out as `null`.
+fn padded(mut args: Value, n: usize) -> Value {
+    if let Value::Array(list) = &mut args {
+        list.resize(list.len().max(n), Value::Null);
+    }
+    args
+}
+
 fn out<T: Serialize>(value: T) -> Result<Value> {
     Ok(serde_json::to_value(value)?)
 }
@@ -63,8 +71,11 @@ pub(crate) fn call(store: &mut Store, call: &str, a: Value) -> Result<Value> {
 
         // Tasks.
         "dbListTasks" => {
-            let (project, status): (Option<String>, Option<String>) = args(c, a)?;
-            out(store.db_list_tasks(project.as_deref(), status.as_deref())?)
+            type List = (Option<String>, Option<String>, Option<f64>, Option<f64>);
+            let (project, status, offset, limit): List = args(c, padded(a, 4))?;
+            let offset = offset.map_or(0, |n| n.max(0.0) as u64);
+            let limit = limit.map(|n| n.max(0.0) as u64);
+            out(store.db_list_tasks_page(project.as_deref(), status.as_deref(), offset, limit)?)
         }
         "dbGetTask" => {
             let (id,): (String,) = args(c, a)?;

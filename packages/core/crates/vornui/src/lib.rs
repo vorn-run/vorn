@@ -33,6 +33,7 @@ pub mod scene;
 pub mod text;
 pub mod theme;
 mod ui;
+mod virt;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub mod widgets;
@@ -66,4 +67,5 @@ pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
     ROOT_NODE,
 };
+pub use virt::Windowed;
 pub use window::{run, run_with, App, Dropped, UserEvent, Waker, WindowOptions};
