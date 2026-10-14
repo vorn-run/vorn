@@ -145,6 +145,8 @@ pub(crate) struct Hit {
     /// The parent's box: what a split divider's ratio is measured against.
     pub parent: Rect,
     pub vertical: bool,
+    /// The text field this hit frames.
+    pub frames: Option<Id>,
 }
 
 /// A hover fade: CSS `transition-colors` for one element.
@@ -334,11 +336,17 @@ impl State {
             None => (Vec::new(), Cursor::Default, None),
             Some(p) => {
                 let stack: Vec<&Hit> = self.stack(p).collect();
-                let under = stack
+                // Over a field's frame is over the field.
+                let mut under: Vec<Id> = stack
                     .iter()
                     .filter(|h| h.sense.has(Sense::HOVER))
                     .map(|h| h.id)
                     .collect();
+                for field in stack.iter().filter_map(|h| h.frames) {
+                    if !under.contains(&field) {
+                        under.push(field);
+                    }
+                }
                 let cursor = stack
                     .iter()
                     .rev()
@@ -823,9 +831,18 @@ impl Ui {
                     || h.sense.has(Sense::WINDOW_DRAG)
                     || h.sense.has(Sense::DOUBLE)
                     || h.sense.has(Sense::MOVE)
+                    || h.frames.is_some()
             })
             .last()
             .cloned();
+        // A press on a field's frame lands on the field.
+        let top = match top {
+            Some(Hit {
+                frames: Some(field),
+                ..
+            }) => self.st.hit(field).cloned(),
+            other => other,
+        };
         if let Some(m) = self.st.menu {
             // A press outside the menu closes it and still lands, as a
             // document mousedown listener would let it.

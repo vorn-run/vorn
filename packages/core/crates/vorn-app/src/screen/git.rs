@@ -204,16 +204,21 @@ pub(super) fn branch_panel(s: &Screen<'_>) -> El {
         .p(8.0)
         .border_bottom(1.0, white(0.06))
         .child(
-            div().grow().px(8.0).py(4.0).child(
-                field(
-                    branch_filter_id(),
-                    "Filter branches",
-                    "Filter branches...",
-                    TextStyle::ui(12.0),
-                    c(look::GRAY_200),
-                )
-                .w_full(),
-            ),
+            div()
+                .grow()
+                .px(8.0)
+                .py(4.0)
+                .frames(branch_filter_id())
+                .child(
+                    field(
+                        branch_filter_id(),
+                        "Filter branches",
+                        "Filter branches...",
+                        TextStyle::ui(12.0),
+                        c(look::GRAY_200),
+                    )
+                    .w_full(),
+                ),
         )
         .child(tooltip(
             s.ui,

@@ -26,6 +26,7 @@ fn input(s: &Screen<'_>, agent: &str, f: AgentField, value: String, placeholder:
         .rounded(6.0)
         .bg(Rgba::hexa(0, 0.3))
         .border(1.0, if focus { white(0.15) } else { white(0.06) })
+        .frames(id)
         .child(
             field(
                 id,

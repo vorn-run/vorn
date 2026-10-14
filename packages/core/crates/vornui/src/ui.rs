@@ -735,6 +735,7 @@ impl Ui {
                     tip: el.tip,
                     parent,
                     vertical: el.a11y.vertical.unwrap_or(false),
+                    frames: el.frames,
                 });
             }
             if el.sense.has(Sense::FOCUS) {
@@ -1185,32 +1186,68 @@ impl Ui {
             }
             Content::Edit(look) => {
                 let Some(id) = el.id else { return };
-                let value = self.edit_text(id).to_owned();
-                let (text, color, attr) = if value.is_empty() {
+                // Registered as paint_edit does, so the field takes keys before it has text.
+                let e = self
+                    .st
+                    .edits
+                    .entry(id)
+                    .or_insert_with(|| TextEdit::new("", look.multiline));
+                e.set_multiline(look.multiline);
+                e.set_textarea(look.textarea);
+                e.set_secure(look.secure);
+                let (shown, pre) = e.display();
+                let caret = if pre.is_empty() { e.caret() } else { pre.end };
+                let sel = e.selection();
+                if shown.is_empty() {
+                    let op = cells::Op::Text {
+                        text: look.placeholder.clone(),
+                        color: look.placeholder_color,
+                        attr: cells::attr::DIM,
+                        wrap: look.multiline && !look.nowrap,
+                    };
+                    self.record(cx, op, inner);
+                }
+                let mask = crate::interact::MASK;
+                let (shown, caret, sel, pre) = if look.secure {
+                    let n = |i: usize| shown[..i].chars().count() * mask.len_utf8();
+                    let masked: String = shown.chars().map(|_| mask).collect();
                     (
-                        look.placeholder.clone(),
-                        look.placeholder_color,
-                        cells::attr::DIM,
+                        masked,
+                        n(caret),
+                        n(sel.start)..n(sel.end),
+                        n(pre.start)..n(pre.end),
                     )
-                } else if look.secure {
-                    let masked = value.chars().map(|_| crate::interact::MASK).collect();
-                    (masked, look.color, 0)
                 } else {
-                    (value.clone(), look.color, 0)
+                    (shown, caret, sel, pre)
                 };
-                let op = cells::Op::Text {
-                    text,
-                    color,
-                    attr,
-                    wrap: look.multiline && !look.nowrap,
-                };
-                self.record(cx, op, inner);
-                if focused {
-                    let col = inner.x + cells::width(&value) as f32;
+                let size = (inner.w.max(1.0) as usize, inner.h.max(1.0) as usize);
+                let marks = [
+                    (sel.clone(), cells::attr::INVERSE),
+                    (pre, cells::attr::UNDERLINE),
+                ];
+                let laid =
+                    cells::edit_cells(&shown, caret, &marks, size, look.multiline && !look.nowrap);
+                for run in laid.runs {
+                    let w = cells::width(&run.text) as f32;
+                    let at = Rect::new(
+                        inner.x + f32::from(run.col),
+                        inner.y + f32::from(run.row),
+                        w,
+                        1.0,
+                    );
+                    let op = cells::Op::Text {
+                        text: run.text,
+                        color: look.color,
+                        attr: run.attr,
+                        wrap: false,
+                    };
+                    self.record(cx, op, at);
+                }
+                if let (true, true, Some((col, row))) = (focused, sel.is_empty(), laid.caret) {
                     if let Some(list) = &mut self.cells {
                         list.cursor = Some(cells::CursorAt {
-                            col: col.min(inner.right() - 1.0).max(0.0) as u16,
-                            row: inner.y.max(0.0) as u16,
+                            col: (inner.x + f32::from(col)).max(0.0) as u16,
+                            row: (inner.y + f32::from(row)).max(0.0) as u16,
                             shape: cells::CursorShape::Bar,
                         });
                     }

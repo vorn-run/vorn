@@ -808,3 +808,67 @@ fn a_transformed_subtree_is_hit_where_it_is_drawn() {
     r.ui.pointer_up();
     assert_eq!(r.ui.take_events(), vec![Event::Click(dot)]);
 }
+
+#[test]
+fn a_press_on_a_fields_frame_edits_the_field() {
+    let f = Id::new("framed");
+    let build = |_: &Ui| {
+        let field = widgets::field(f, "Name", "", vornui::TextStyle::ui(12.0), color::GRAY_300);
+        div()
+            .w(240.0)
+            .px(12.0)
+            .py(10.0)
+            .frames(f)
+            .child(field.w_full())
+    };
+    let mut r = Rig::new();
+    r.frame(&build);
+    r.click(f);
+    r.typed("abc");
+    r.frame(&build);
+    r.ui.set_focus(None);
+    // Below the text, in the frame's padding, past the end of the line.
+    let field = r.ui.rect_of(f).expect("field");
+    r.ui.pointer_move(field.x + field.w - 2.0, field.y + field.h + 6.0);
+    r.ui.pointer_down();
+    r.ui.pointer_up();
+    assert_eq!(r.ui.focus(), Some(f));
+    assert_eq!(r.ui.edit(f).map(|e| e.caret()), Some(3));
+    r.wait(400);
+    assert!(r.ui.hover(f) > 0.99, "the frame's hover is the field's");
+    // Outside the frame, nothing takes the press.
+    r.frame(&build);
+    r.ui.pointer_move(400.0, 300.0);
+    r.ui.pointer_down();
+    r.ui.pointer_up();
+    assert_eq!(r.ui.focus(), None);
+}
+
+#[test]
+fn on_cells_a_fresh_field_takes_keys_and_shows_its_caret() {
+    let f = Id::new("cells-field");
+    let mut ui = Ui::cells(&UiConfig::system(1.0, 13.0));
+    let size = vornui::cells::units::px(40, 6);
+    let frame = |ui: &mut Ui| {
+        ui.begin(color::SURFACE_BASE);
+        let field = widgets::field(
+            f,
+            "Name",
+            "Name",
+            vornui::TextStyle::ui(12.0),
+            color::GRAY_300,
+        );
+        let root = div().w(size.0).h(size.1).child(field.w_full());
+        ui.layout(root, size);
+    };
+    frame(&mut ui);
+    ui.set_focus(Some(f));
+    for ch in "abc".chars() {
+        assert!(ui.key(&Input::char(ch)), "the field takes {ch:?}");
+    }
+    assert!(ui.key(&Input::named("ArrowLeft")));
+    frame(&mut ui);
+    assert_eq!(ui.edit_text(f), "abc");
+    let cursor = ui.paint_list().and_then(|l| l.cursor).expect("caret");
+    assert_eq!((cursor.col, cursor.row), (2, 0));
+}

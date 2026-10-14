@@ -1073,6 +1073,97 @@ pub fn ansi16(c: [u8; 3]) -> u8 {
         .map_or(0, |(i, _)| i as u8)
 }
 
+/// A stretch of an edit field's text on one cell row, in one attribute.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditRun {
+    pub text: String,
+    /// Column and row inside the field.
+    pub col: u16,
+    pub row: u16,
+    pub attr: u8,
+}
+
+/// An edit field laid out in cells: what shows, and where the caret is.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EditCells {
+    pub runs: Vec<EditRun>,
+    /// The caret's column and row inside the field, when it is in view.
+    pub caret: Option<(u16, u16)>,
+}
+
+/// Lays out `text` in a (columns, rows) field, scrolled to keep `caret` in view, `marks` in their attributes.
+pub fn edit_cells(
+    text: &str,
+    caret: usize,
+    marks: &[(std::ops::Range<usize>, u8)],
+    (w, h): (usize, usize),
+    wrap: bool,
+) -> EditCells {
+    let (w, h) = (w.max(1), h.max(1));
+    // Each visual line as a byte range of `text`.
+    let mut lines: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut start = 0;
+    for para in text.split('\n') {
+        let end = start + para.len();
+        let mut line = start;
+        let mut col = 0;
+        if wrap {
+            for (i, g) in para.grapheme_indices(true) {
+                let gw = grapheme_width(g);
+                if col + gw > w && col > 0 {
+                    lines.push(line..start + i);
+                    line = start + i;
+                    col = 0;
+                }
+                col += gw;
+            }
+        }
+        lines.push(line..end);
+        start = end + 1;
+    }
+    let row = lines
+        .iter()
+        .rposition(|l| l.start <= caret)
+        .unwrap_or_default();
+    let col = width(&text[lines[row].start..caret.clamp(lines[row].start, lines[row].end)]);
+    let top = row.saturating_sub(h - 1);
+    let left = if wrap { 0 } else { col.saturating_sub(w - 1) };
+    let attr_at = |i: usize| {
+        marks
+            .iter()
+            .filter(|(r, _)| r.contains(&i))
+            .fold(0, |a, (_, m)| a | m)
+    };
+    let mut runs: Vec<EditRun> = Vec::new();
+    for (r, line) in lines.iter().enumerate().skip(top).take(h) {
+        let mut x = 0;
+        for (i, g) in text[line.clone()].grapheme_indices(true) {
+            let gw = grapheme_width(g);
+            if x < left {
+                x += gw;
+                continue;
+            }
+            if x - left + gw > w {
+                break;
+            }
+            let attr = attr_at(line.start + i);
+            let (c, rr) = ((x - left) as u16, (r - top) as u16);
+            match runs.last_mut() {
+                Some(run) if run.row == rr && run.attr == attr => run.text.push_str(g),
+                _ => runs.push(EditRun {
+                    text: g.to_owned(),
+                    col: c,
+                    row: rr,
+                    attr,
+                }),
+            }
+            x += gw;
+        }
+    }
+    let caret = (col - left < w).then_some(((col - left) as u16, (row - top) as u16));
+    EditCells { runs, caret }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1165,5 +1256,72 @@ mod tests {
         assert_eq!(Depth::detect(None, Some("xterm")), Depth::Ansi16);
         assert_eq!(ansi256([255, 255, 255]), 231);
         assert_eq!(ansi16([250, 0, 0]), 9);
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    fn texts(e: &EditCells) -> Vec<(&str, u16, u16, u8)> {
+        e.runs
+            .iter()
+            .map(|r| (r.text.as_str(), r.col, r.row, r.attr))
+            .collect()
+    }
+
+    #[test]
+    fn the_caret_sits_where_the_next_character_goes() {
+        let e = edit_cells("hello", 2, &[], (10, 1), false);
+        assert_eq!(e.caret, Some((2, 0)));
+        assert_eq!(texts(&e), [("hello", 0, 0, 0)]);
+        let wide = edit_cells("日本語", 3, &[], (10, 1), false);
+        assert_eq!(
+            wide.caret,
+            Some((2, 0)),
+            "a wide character takes two columns"
+        );
+    }
+
+    #[test]
+    fn a_long_line_scrolls_to_keep_the_caret_in_view() {
+        let e = edit_cells("abcdefghij", 10, &[], (4, 1), false);
+        assert_eq!(e.caret, Some((3, 0)));
+        assert_eq!(texts(&e), [("hij", 0, 0, 0)]);
+    }
+
+    #[test]
+    fn marks_split_runs_by_attribute() {
+        let e = edit_cells(
+            "abcdef",
+            4,
+            &[(1..3, attr::INVERSE), (4..6, attr::UNDERLINE)],
+            (10, 1),
+            false,
+        );
+        assert_eq!(
+            texts(&e),
+            [
+                ("a", 0, 0, 0),
+                ("bc", 1, 0, attr::INVERSE),
+                ("d", 3, 0, 0),
+                ("ef", 4, 0, attr::UNDERLINE)
+            ]
+        );
+    }
+
+    #[test]
+    fn wrapped_lines_put_the_caret_on_its_row_and_scroll_down() {
+        let e = edit_cells("one\ntwo three", 13, &[], (5, 2), true);
+        assert_eq!(texts(&e), [("two t", 0, 0, 0), ("hree", 0, 1, 0)]);
+        assert_eq!(e.caret, Some((4, 1)));
+        let start = edit_cells("one\ntwo", 4, &[], (5, 3), true);
+        assert_eq!(
+            start.caret,
+            Some((0, 1)),
+            "just after a newline is the next row"
+        );
+        let empty = edit_cells("", 0, &[], (5, 1), false);
+        assert_eq!((empty.runs.len(), empty.caret), (0, Some((0, 0))));
     }
 }

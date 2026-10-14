@@ -534,6 +534,7 @@ fn tree(s: &Screen<'_>, owner: &str) -> El {
         .px(8.0)
         .py(4.0)
         .rounded(4.0)
+        .frames(fid)
         .bg(white(if focus { 0.13 } else { 0.09 }))
         .child(ico("search", 13.0, 2.0, c(look::GRAY_600)))
         .child(
@@ -953,7 +954,7 @@ fn find_bar(s: &Screen<'_>, key: &str, b: &Buffer, f: &editor::Find) -> El {
         .bg(pane_bg())
         .child(ico("search", 12.0, 2.0, c(look::GRAY_500)))
         .child(
-            div().grow().min_w0().child(
+            div().grow().min_w0().frames(find_id(key)).child(
                 field(
                     find_id(key),
                     "Find in file",

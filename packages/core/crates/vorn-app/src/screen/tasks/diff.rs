@@ -286,6 +286,7 @@ fn comment_input(s: &Screen<'_>, scope: Scope) -> El {
                     .rounded(4.0)
                     .bg(white(0.04))
                     .border(1.0, if focus { white(0.20) } else { white(0.08) })
+                    .frames(id)
                     .child(
                         area(
                             id,

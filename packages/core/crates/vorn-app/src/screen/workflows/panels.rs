@@ -107,6 +107,7 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
         .py(6.0)
         .rounded(6.0)
         .border(1.0, white(0.08))
+        .frames(wf::search_id())
         .child(ico("search", 12.0, 2.0, c(look::GRAY_500)))
         .child(
             field(

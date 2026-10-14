@@ -43,6 +43,7 @@ fn frame(s: &Screen<'_>, id: Id, inner: El) -> El {
                 white(0.06)
             },
         )
+        .frames(id)
         .child(inner)
 }
 

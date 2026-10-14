@@ -990,6 +990,7 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
             .rounded(4.0)
             .bg(white(0.06))
             .border(1.0, if focused { white(0.25) } else { white(0.15) })
+            .frames(GROUP_NAME)
             .child(field(
                 GROUP_NAME,
                 "Rename group",
@@ -1321,6 +1322,7 @@ fn workspace_form(s: &Screen<'_>) -> El {
         .rounded(4.0)
         .bg(white(0.06))
         .border(1.0, if focused { white(0.2) } else { white(0.1) })
+        .frames(crate::app::WS_NAME)
         .child(field(
             crate::app::WS_NAME,
             "Workspace name",

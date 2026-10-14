@@ -17,8 +17,8 @@ use crate::look;
 use crate::models::Catalog;
 use crate::paint;
 use crate::screen::{
-    card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_COLOR,
-    PROJECT_ICON, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
+    card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, COMPOSER_INPUT,
+    PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use crate::scroll::{self, Route, Rows, Scroll};
 use crate::state::{
@@ -304,6 +304,8 @@ pub struct App {
     pub st: State,
     pub acts: Acts,
     preedit: String,
+    /// The composer showed last frame: it takes the keyboard when it appears.
+    was_composing: bool,
     calls: Vec<(Call, Pending)>,
     /// Config saves not yet sent: vornd runs them in parallel, so a later
     /// one could land first.
@@ -429,6 +431,7 @@ impl App {
             st,
             acts: Acts::default(),
             preedit: String::new(),
+            was_composing: false,
             calls: Vec::new(),
             saves: VecDeque::new(),
             saving: false,
@@ -2396,6 +2399,9 @@ impl App {
             UiEvent::ResizeEnd { id, ratio } => {
                 self.pane_resized(ui, id, ratio, true);
             }
+            UiEvent::Changed(id) if id == COMPOSER_INPUT => {
+                ui.edit_text(id).clone_into(&mut self.st.composer.text);
+            }
             UiEvent::Changed(id) if id == MODEL_ID => self.st.models.invalid = None,
             UiEvent::Changed(id) if id == PROJECT_PATH => self.project_path_changed(ui),
             _ => {}
@@ -2403,6 +2409,10 @@ impl App {
     }
 
     fn submit(&mut self, ui: &mut Ui, id: Id) {
+        if id == COMPOSER_INPUT {
+            self.launch();
+            return;
+        }
         if id == PROJECT_NAME || id == PROJECT_PATH {
             self.save_project(ui);
             return;
@@ -2571,9 +2581,11 @@ impl App {
             return true;
         }
         // Tab in the composer picks the next project, not the next control.
-        let bare = self.st.dialog.is_none() && self.st.menu.is_none() && ui.focus().is_none();
+        let bare = self.st.dialog.is_none()
+            && self.st.menu.is_none()
+            && matches!(ui.focus(), None | Some(COMPOSER_INPUT));
         if code == "Tab" && bare && self.composing() {
-            self.compose(input.clone());
+            self.next_project(*m & mods::SHIFT != 0);
             return true;
         }
         if code == "Escape" && *m == 0 && self.address_revert(ui) {
@@ -2630,11 +2642,7 @@ impl App {
         if self.st.dialog.is_some() || self.st.menu.is_some() || self.st.settings.open {
             return;
         }
-        if self.composing() {
-            self.compose(input);
-            return;
-        }
-        if self.st.view != MainView::Sessions {
+        if self.composing() || self.st.view != MainView::Sessions {
             return;
         }
         let (Some(g), Some(id)) = (self.grid.clone(), self.typing_target()) else {
@@ -2673,7 +2681,10 @@ impl App {
         if self.intercept(ui, &chord) || ui.key(&chord) || busy {
             return self.events(ui);
         }
-        if self.composing() || self.st.view != MainView::Sessions {
+        if self.composing() {
+            ui.set_focus(Some(COMPOSER_INPUT));
+            ui.key(&Input::Commit(text));
+        } else if self.st.view != MainView::Sessions {
             self.input(Input::Commit(text));
         } else if let (Some(g), Some(id)) = (&self.grid, self.typing_target()) {
             g.paste(&id, &text);
@@ -2690,7 +2701,11 @@ impl App {
     /// the composer or the terminal, and what the UI reported after.
     pub fn send(&mut self, ui: &mut Ui, input: Input) {
         if !self.intercept(ui, &input) && !ui.key(&input) {
-            self.input(input);
+            if self.claim_typing(ui, &input) {
+                ui.key(&input);
+            } else {
+                self.input(input);
+            }
         }
         self.events(ui);
     }
@@ -2742,50 +2757,40 @@ impl App {
         Acts::id(place, act)
     }
 
-    /// A key in the composer: typing, Tab through the projects, Enter to
-    /// launch.
-    fn compose(&mut self, input: Input) {
-        match input {
+    /// Tab in the composer: the next project, or the one before with Shift.
+    fn next_project(&mut self, back: bool) {
+        let names: Vec<String> = self.store.projects.iter().map(|p| p.name.clone()).collect();
+        let at = self
+            .st
+            .composer
+            .project
+            .as_deref()
+            .and_then(|p| names.iter().position(|n| n == p));
+        if let Some(i) = cycle(at, names.len(), !back) {
+            self.pick_project(names[i].clone());
+        }
+    }
+
+    /// Typing no control took goes to the composer while it shows.
+    fn claim_typing(&self, ui: &mut Ui, input: &Input) -> bool {
+        let typing = match input {
             Input::Key {
                 code,
                 mods: m,
                 text,
-            } => match code.as_str() {
-                "Enter" if m & mods::SHIFT == 0 => self.launch(),
-                "Enter" => self.st.composer.text.push('\n'),
-                "Backspace" => {
-                    self.st.composer.text.pop();
-                }
-                "Tab" => {
-                    let back = m & mods::SHIFT != 0;
-                    let names: Vec<String> =
-                        self.store.projects.iter().map(|p| p.name.clone()).collect();
-                    let at = self
-                        .st
-                        .composer
-                        .project
-                        .as_deref()
-                        .and_then(|p| names.iter().position(|n| n == p));
-                    if let Some(i) = cycle(at, names.len(), !back) {
-                        self.pick_project(names[i].clone());
-                    }
-                }
-                _ if m & (mods::CTRL | mods::SUPER) == 0 => {
-                    if let Some(t) = text {
-                        self.st
-                            .composer
-                            .text
-                            .extend(t.chars().filter(|ch| !ch.is_control()));
-                    }
-                }
-                _ => {}
-            },
-            Input::Preedit(s) => self.preedit = s,
-            Input::Commit(s) => {
-                self.preedit.clear();
-                self.st.composer.text.push_str(&s);
+            } => {
+                m & (mods::CTRL | mods::SUPER) == 0
+                    && (text.is_some() || matches!(code.as_str(), "Backspace" | "Delete"))
+                    && !matches!(code.as_str(), "Tab" | "Escape")
             }
+            Input::Preedit(_) | Input::Commit(_) => true,
+        };
+        let free = self.st.dialog.is_none() && self.st.menu.is_none() && !self.st.settings.open;
+        let claim = typing && free && self.composing();
+        if claim {
+            ui.set_focus(Some(COMPOSER_INPUT));
         }
+        claim
     }
 
     /// PromptLauncher's launch: the chosen agent in the chosen project (or
@@ -2856,6 +2861,19 @@ impl App {
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
+        let composing = self.composing();
+        if composing {
+            if ui.edit_text(COMPOSER_INPUT) != self.st.composer.text {
+                ui.set_edit_text(COMPOSER_INPUT, &self.st.composer.text);
+            }
+            let free = self.st.dialog.is_none() && self.st.menu.is_none() && !self.st.settings.open;
+            if !self.was_composing && free && ui.focus().is_none() {
+                ui.set_focus(Some(COMPOSER_INPUT));
+            }
+        } else if ui.focus() == Some(COMPOSER_INPUT) {
+            ui.set_focus(None);
+        }
+        self.was_composing = composing;
         let now = web_time::Instant::now();
         for notice in std::mem::take(&mut self.notices) {
             if self.notifier.admit(&notice, ui.window_focused(), now) {

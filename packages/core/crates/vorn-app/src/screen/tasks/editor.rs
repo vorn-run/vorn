@@ -34,6 +34,7 @@ pub(super) fn editor(s: &Screen<'_>, form: Form, placeholder: &str, min_h: f32, 
         .rounded(8.0)
         .bg(white(0.03))
         .border(1.0, if focus { white(0.15) } else { white(0.06) })
+        .frames(id)
         .child(
             area(
                 id,
@@ -459,7 +460,7 @@ fn link_bar(s: &Screen<'_>) -> El {
         .border(1.0, white(0.10))
         .bg(c(look::SURFACE_OVERLAY))
         .child(
-            div().w(180.0).px(8.0).py(4.0).child(
+            div().w(180.0).px(8.0).py(4.0).frames(link_id()).child(
                 field(
                     link_id(),
                     "Link",

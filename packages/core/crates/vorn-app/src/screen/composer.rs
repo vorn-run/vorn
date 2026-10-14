@@ -8,7 +8,10 @@ use crate::app::MODEL_ID;
 use crate::look;
 use crate::models::{footer, rows, selects_models, Listing, Row, Status};
 use crate::state::{basename, MenuKind};
-use crate::ui::{div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
+use crate::ui::{area, div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
+
+/// The launcher's prompt field.
+pub const COMPOSER_INPUT: Id = Id(0x636f_6d70_6f73_6572);
 
 /// One of the composer's pickers: `px-2 py-1 rounded-md gap-1.5 text-xs`,
 /// opening its menu above it.
@@ -133,24 +136,22 @@ fn prompt_box(s: &Screen<'_>) -> El {
         .child(send);
     // The textarea's border-t white/[0.04] line above the settings bar.
     let rule = div().h(1.0).w_full().bg(white(0.04));
-    let typed = !composer.text.is_empty();
-    let shown = if typed {
-        text(&composer.text, 14.0, c(look::GRAY_200))
-            .line_height(20.0)
-            .wrapping()
-            .silent()
-    } else {
-        text(look::PLACEHOLDER, 14.0, c(look::GRAY_600))
-            .line_height(20.0)
-            .silent()
-    };
-    let input = div()
-        .px(16.0)
-        .h(83.0)
-        .py(16.0)
-        .role(Role::MultilineTextInput, "Describe your task")
-        .value(composer.text.as_str())
-        .child(shown);
+    // PromptLauncher's textarea: `px-4 py-4 text-sm`, three rows, no focus outline.
+    let input = area(
+        COMPOSER_INPUT,
+        "Describe your task",
+        look::PLACEHOLDER,
+        TextStyle {
+            line_height: 20.0,
+            ..TextStyle::ui(14.0)
+        },
+        c(look::GRAY_200),
+    )
+    .placeholder_color(c(look::GRAY_600))
+    .w_full()
+    .px(16.0)
+    .h(83.0)
+    .py(16.0);
     div()
         .col()
         .w_full()
@@ -370,6 +371,7 @@ pub(super) fn model_panel(s: &Screen<'_>) -> El {
                         .rounded(4.0)
                         .bg(white(0.04))
                         .border(1.0, border)
+                        .frames(MODEL_ID)
                         .child(
                             field(
                                 MODEL_ID,

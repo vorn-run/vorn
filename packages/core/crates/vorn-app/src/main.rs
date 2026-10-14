@@ -275,7 +275,11 @@ fn cells(args: &Args) -> Result<(), String> {
             &buffer_view(&target.buffer),
             png,
             scale,
-            vorn_app::paint::Caret::Hidden,
+            if target.buffer.cursor.is_some() {
+                vorn_app::paint::Caret::Live
+            } else {
+                vorn_app::paint::Caret::Hidden
+            },
         )?;
     }
     println!("{out}");
@@ -339,6 +343,11 @@ fn buffer_view(b: &vorn_app::ui::cells::Buffer) -> vorn_app::view::PaneView {
     }
     if let Some(c) = b.cursor {
         (v.cursor_x, v.cursor_y, v.cursor_visible) = (c.col, c.row, true);
+        v.cursor = match c.shape {
+            vorn_app::ui::cells::CursorShape::Block => vorn_app::view::Cursor::Block,
+            vorn_app::ui::cells::CursorShape::Bar => vorn_app::view::Cursor::Bar,
+            vorn_app::ui::cells::CursorShape::Underline => vorn_app::view::Cursor::Underline,
+        };
     }
     v
 }
