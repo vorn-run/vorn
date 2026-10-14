@@ -250,7 +250,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" dist-native/Vorn-* dist-native/vorn_* --clobber
+        shell: bash
+        run: |
+          shopt -s nullglob
+          gh release upload "$TAG" dist-native/Vorn-* dist-native/vorn_* --clobber
 
   # The update feeds, from every platform's assets: the native app's, and the
   # Electron updater's so the last Electron release updates onto this one.
