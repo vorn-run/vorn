@@ -464,6 +464,8 @@ pub struct State {
     /// The launcher's model picker.
     pub models: Models,
     pub form: ProjectForm,
+    /// When each terminal last scrolled: its scrollbar shows for a moment after.
+    pub scrolled_at: HashMap<String, web_time::Instant>,
     /// Agents installed here, when known.
     pub installed: Option<Vec<String>>,
     /// Where each installed agent's program is.

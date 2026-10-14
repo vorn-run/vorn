@@ -575,3 +575,92 @@ fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_quoted_paths() {
     assert_eq!(std::fs::read(&path).expect("the image was saved"), png);
     let _ = std::fs::remove_file(&path);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_terminal_shows_a_scrollbar_that_drags_pages_and_fades() {
+    use vorn_app::screen::{scrollbar_id, thumb_id};
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's first screen", |app, _| {
+        app.pane(&id).map(|_| ())
+    });
+    shot.type_line(&mut app, "seq 1 3000");
+    shot.until(&mut app, "3000 lines, most in history", |app, _| {
+        app.pane(&id)
+            .filter(|p| p.text().contains("3000") && p.history > 200)
+            .map(|_| ())
+    });
+    // At rest the bar only listens for the pointer.
+    shot.frame(&mut app);
+    assert!(shot.ui.rect_of(scrollbar_id(&id)).is_some());
+    assert_eq!(shot.ui.rect_of(thumb_id(&id)), None);
+
+    // A wheel notch shows it, its thumb up from the bottom.
+    shot.hover(&mut app, term_id(&id));
+    pad(
+        &mut shot,
+        &mut app,
+        -vorn_app::ui::WHEEL_LINE,
+        WheelPhase::Line,
+    );
+    settle(&mut shot, &mut app);
+    let thumb = shot.ui.rect_of(thumb_id(&id)).expect("the thumb shows");
+    let bar = shot.ui.rect_of(scrollbar_id(&id)).expect("bar");
+    assert!(
+        thumb.y + thumb.h > bar.y + bar.h - 8.0,
+        "near the bottom: {thumb:?} {bar:?}"
+    );
+    shot.save(&mut app, "scrollbar-shown");
+
+    // Dragged to the top, it shows the oldest line.
+    shot.ui
+        .pointer_move(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    shot.ui.pointer_down();
+    app.events(&mut shot.ui);
+    for step in 1..=10 {
+        shot.ui
+            .pointer_move(thumb.x + thumb.w / 2.0, thumb.y - step as f32 * 200.0);
+        app.events(&mut shot.ui);
+        shot.frame(&mut app);
+    }
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    settle(&mut shot, &mut app);
+    let p = app.pane(&id).expect("pane");
+    assert_eq!(p.back(), p.history, "the oldest line");
+    shot.save(&mut app, "scrollbar-top");
+
+    // A click in the track below the thumb pages down.
+    let thumb = shot.ui.rect_of(thumb_id(&id)).expect("thumb");
+    let before = app.pane(&id).expect("pane").back();
+    let rows = app.pane(&id).expect("pane").rows;
+    shot.ui
+        .pointer_move(thumb.x + thumb.w / 2.0, thumb.y + thumb.h + 40.0);
+    shot.ui.pointer_down();
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    settle(&mut shot, &mut app);
+    assert_eq!(
+        app.pane(&id).expect("pane").back(),
+        before - u64::from(rows - 1)
+    );
+
+    // Away from it and left alone, it fades.
+    shot.ui.pointer_move(1.0, 1.0);
+    let still = Instant::now();
+    while still.elapsed() < Duration::from_millis(1400) {
+        shot.frame(&mut app);
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert_eq!(shot.ui.rect_of(thumb_id(&id)), None, "faded");
+    shot.save(&mut app, "scrollbar-faded");
+}

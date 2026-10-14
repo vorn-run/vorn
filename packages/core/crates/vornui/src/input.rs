@@ -138,6 +138,29 @@ pub fn from_ime(ime: &Ime) -> Option<Input> {
     }
 }
 
+/// Lines one wheel notch scrolls as the system is set (Windows' "lines at
+/// a time"), or `None` for a page; three where the system has no setting.
+pub fn wheel_lines() -> Option<f32> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SystemParametersInfoW, SPI_GETWHEELSCROLLLINES,
+        };
+        let mut lines: u32 = 3;
+        // SAFETY: SPI_GETWHEELSCROLLLINES writes one u32 to the pointer, which lives for the call.
+        let ok = unsafe {
+            SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, (&raw mut lines).cast(), 0)
+        };
+        if ok == 0 {
+            return Some(3.0);
+        }
+        // WHEEL_PAGESCROLL: a notch is a page.
+        return (lines != u32::MAX).then_some(lines as f32);
+    }
+    #[allow(unreachable_code)]
+    Some(3.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

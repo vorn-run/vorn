@@ -299,6 +299,8 @@ pub struct App {
     scrolls: HashMap<String, Scroll>,
     /// The wheel gesture under way: its pane, where it goes, and its last event.
     wheel: Option<(String, Route, Rows, web_time::Instant)>,
+    /// A scrollbar thumb being dragged: its session and where the thumb was when the drag began.
+    thumb_drag: Option<(String, f32)>,
     /// Each terminal's screen as text, for assistive technology; made when
     /// its view changes.
     spoken: HashMap<String, String>,
@@ -428,6 +430,7 @@ impl App {
             word_pending: false,
             scrolls: HashMap::new(),
             wheel: None,
+            thumb_drag: None,
             spoken: HashMap::new(),
             st,
             acts: Acts::default(),
@@ -1870,6 +1873,17 @@ impl App {
             Act::CopySelection(id) => self.copy_selection(&id),
             Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
             Act::ScrollToBottom(id) => self.return_to_live(&id),
+            Act::ScrollPage(id, up) => {
+                if let Some(v) = self.views.get(&id) {
+                    let page = crate::scrollbar::page(v.rows);
+                    let back = if up {
+                        v.back().saturating_add(page)
+                    } else {
+                        v.back().saturating_sub(page)
+                    };
+                    self.scroll_back_to(ui, &id, back);
+                }
+            }
             Act::FitToDevice(id) => {
                 if let Some(g) = &self.grid {
                     g.take_size(&id);
@@ -2968,7 +2982,7 @@ impl App {
         let latched = self
             .wheel
             .take()
-            .filter(|w| phase != WheelPhase::Line && now.duration_since(w.3).as_millis() < 200);
+            .filter(|w| now.duration_since(w.3).as_millis() < 200);
         let (session, route, mut rows) = match latched {
             Some((s, route, rows, _)) => (s, route, rows),
             None => {
@@ -3004,7 +3018,9 @@ impl App {
             let s = self.scrolls.entry(session.clone()).or_default();
             s.set_metrics(cell.h, r.h * k, history);
             s.reduced = ui.reduced_motion();
+            s.lines = vornui::input::wheel_lines();
             s.wheel(dy, phase, now);
+            self.st.scrolled_at.insert(session.clone(), now);
             ui.wake_at(now);
         } else {
             let n = rows.take(dy, phase, cell.h, route);
@@ -3013,6 +3029,23 @@ impl App {
             g.wheel_rows(&session, n, route, col, row);
         }
         self.wheel = Some((session, route, rows, now));
+    }
+
+    /// `session`'s terminal at `back` rows up its history, at once: where a
+    /// scrollbar drag or page put it.
+    pub(crate) fn scroll_back_to(&mut self, ui: &mut Ui, session: &str, back: u64) {
+        let Some(v) = self.views.get(session) else {
+            return;
+        };
+        let back = back.min(v.history);
+        let row = ui.text.cell().h;
+        let span = self.term_boxes.get(session).map_or(row, |r| r.h);
+        let s = self.scrolls.entry(session.to_owned()).or_default();
+        s.set_metrics(row, span, v.history);
+        s.jump(back as f32 * row);
+        let now = ui.now();
+        self.st.scrolled_at.insert(session.to_owned(), now);
+        ui.wake_at(now);
     }
 
     /// Back to the live screen at once, as typing into a terminal does.

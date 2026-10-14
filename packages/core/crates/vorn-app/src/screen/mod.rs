@@ -36,6 +36,7 @@ use crate::view::PaneView;
 pub use cards::{
     block_of, card_index, intent_id, log_id, rename_id, term_id, CARD_ID_BASE, SETTLE,
 };
+pub use cards::{scrollbar_id, thumb_id};
 pub use composer::COMPOSER_INPUT;
 pub use dialogs::{PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH};
 pub use palette::{PALETTE_INPUT, PALETTE_LIST};

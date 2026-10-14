@@ -346,6 +346,41 @@ impl App {
         }
     }
 
+    /// A scrollbar thumb dragged: the history follows it.
+    fn thumb_event(&mut self, ui: &mut Ui, e: &UiEvent) -> bool {
+        let (UiEvent::Move { id, dy, .. } | UiEvent::Drop { id, dy, .. }) = *e else {
+            return false;
+        };
+        let Some(sid) = self
+            .term_boxes
+            .keys()
+            .find(|s| crate::screen::thumb_id(s) == id)
+            .cloned()
+        else {
+            return false;
+        };
+        let (Some(v), Some(r)) = (self.views.get(&sid), ui.rect_of(term_id(&sid))) else {
+            return true;
+        };
+        let track = r.h - 4.0;
+        let (rows, history) = (v.rows, v.history);
+        let start = match &self.thumb_drag {
+            Some((s, top)) if *s == sid => *top,
+            _ => {
+                let top =
+                    crate::scrollbar::thumb(track, rows, history, v.back()).map_or(0.0, |t| t.top);
+                self.thumb_drag = Some((sid.clone(), top));
+                top
+            }
+        };
+        let back = crate::scrollbar::back_at(track, rows, history, start + dy);
+        self.scroll_back_to(ui, &sid, back);
+        if matches!(e, UiEvent::Drop { .. }) {
+            self.thumb_drag = None;
+        }
+        true
+    }
+
     /// The session whose terminal box is `id`.
     fn term_at(&self, id: Id) -> Option<String> {
         self.term_boxes.keys().find(|s| term_id(s) == id).cloned()
@@ -367,6 +402,9 @@ impl App {
     /// A drag or double-click in a terminal selects; a click clears the
     /// selection. True when the event was the terminal's alone.
     pub(super) fn term_event(&mut self, ui: &mut Ui, e: &UiEvent) -> bool {
+        if self.thumb_event(ui, e) {
+            return true;
+        }
         match *e {
             UiEvent::Move { id, dx, dy, x, y } | UiEvent::Drop { id, dx, dy, x, y } => {
                 let Some(sid) = self.term_at(id) else {
