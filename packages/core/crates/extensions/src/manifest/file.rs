@@ -457,9 +457,9 @@ pub fn is_range(range: &str) -> bool {
         let op = &part[..part.len() - version.len()];
         matches!(op, "" | ">=" | ">" | "<=" | "<" | "=" | "^" | "~")
             && !version.is_empty()
-            && version.split(['.', '-', '+']).all(|p| {
-                !p.is_empty() && p.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'*')
-            })
+            && version
+                .split(['.', '-', '+'])
+                .all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'*'))
             && version
                 .split('.')
                 .next()
@@ -800,7 +800,8 @@ impl RawTrigger {
             m.insert("statusMapping".into(), Value::Array(entries));
         }
         if let Some(w) = &self.default_workflow {
-            let value = json!({ "name": w.name, "defaultCronFromMinutes": w.default_cron_from_minutes });
+            let value =
+                json!({ "name": w.name, "defaultCronFromMinutes": w.default_cron_from_minutes });
             if super::default_workflow(Some(&value)).is_none() {
                 return Err(at(
                     &format!("{field}.default_workflow"),
@@ -894,7 +895,10 @@ impl RawActivation {
     }
 
     fn len(&self) -> usize {
-        self.workspace_contains.len() + self.remote_host.len() + self.agent.len() + self.platform.len()
+        self.workspace_contains.len()
+            + self.remote_host.len()
+            + self.agent.len()
+            + self.platform.len()
     }
 }
 
@@ -942,9 +946,7 @@ fn contribution_json(
 impl RawContributes {
     fn to_json(&self, at: &At<'_>) -> Result<Value, FileError> {
         let mut out = Map::new();
-        let kept = |kind: &str, item: Value| {
-            super::contributes(Some(&json!({ kind: [item] })))
-        };
+        let kept = |kind: &str, item: Value| super::contributes(Some(&json!({ kind: [item] })));
         let mut panes = Vec::new();
         for (i, p) in self.panes.iter().enumerate() {
             let field = format!("contributes.panes[{i}]");

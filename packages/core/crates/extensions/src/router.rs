@@ -279,11 +279,7 @@ impl Router {
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.
-    fn spawn_program(
-        &self,
-        pack: &InstalledPack,
-        argv: &[String],
-    ) -> Result<Child, String> {
+    fn spawn_program(&self, pack: &InstalledPack, argv: &[String]) -> Result<Child, String> {
         let launch = self.launch(pack, argv)?;
         let (tx, rx): (Inbox, _) = mpsc::channel(64);
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
@@ -456,7 +452,10 @@ async fn answer(
     if method.side() == Side::Guest {
         return Some(Err((
             METHOD_NOT_FOUND,
-            format!("{} is answered by the extension, not by Vorn", method.name()),
+            format!(
+                "{} is answered by the extension, not by Vorn",
+                method.name()
+            ),
             Value::Null,
         )));
     }

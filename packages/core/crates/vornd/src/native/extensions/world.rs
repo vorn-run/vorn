@@ -94,8 +94,7 @@ impl World for Wired {
                     .collect(),
                 body: request.body,
             };
-            let answer =
-                tokio::task::spawn_blocking(move || Http.send(&sent, FETCH_TIMEOUT)).await;
+            let answer = tokio::task::spawn_blocking(move || Http.send(&sent, FETCH_TIMEOUT)).await;
             match answer {
                 Ok(Ok(r)) => Ok(Response {
                     status: r.status,
@@ -131,12 +130,13 @@ impl World for Wired {
                     format!("the connection {connection} is not {owner}'s"),
                 ));
             }
-            let found = tokio::task::spawn_blocking(move || match native.secrets.lookup(&connection) {
-                Known::Fields(fields) => fields.get(&field).map(|v| v.expose().to_owned()),
-                Known::None | Known::Unknown => None,
-            })
-            .await
-            .map_err(|e| ExtError::new("failed", e.to_string()))?;
+            let found =
+                tokio::task::spawn_blocking(move || match native.secrets.lookup(&connection) {
+                    Known::Fields(fields) => fields.get(&field).map(|v| v.expose().to_owned()),
+                    Known::None | Known::Unknown => None,
+                })
+                .await
+                .map_err(|e| ExtError::new("failed", e.to_string()))?;
             Ok(found)
         })
     }

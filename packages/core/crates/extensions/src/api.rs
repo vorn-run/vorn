@@ -37,7 +37,11 @@ impl types::ExtError {
 
     /// The JSON-RPC error it travels as.
     pub fn to_rpc(&self) -> (i64, String, Value) {
-        (EXT_ERROR, self.message.clone(), json!({ "code": self.code }))
+        (
+            EXT_ERROR,
+            self.message.clone(),
+            json!({ "code": self.code }),
+        )
     }
 }
 
@@ -232,18 +236,21 @@ impl Mapping {
                     };
                     for (f, t) in fields {
                         let field = object.get(f).unwrap_or(&Value::Null);
-                        self.check(t, field).map_err(|e| format!("{name}.{f}: {e}"))?;
+                        self.check(t, field)
+                            .map_err(|e| format!("{name}.{f}: {e}"))?;
                     }
                     Ok(())
                 }
                 Some(Def::Variant(cases)) => {
                     let found = match value {
                         Value::String(c) => cases.iter().any(|(n, t)| n == c && t.is_none()),
-                        Value::Object(o) if o.len() == 1 => o.iter().next().is_some_and(|(c, v)| {
-                            cases.iter().any(|(n, t)| {
-                                n == c && t.as_deref().is_some_and(|t| self.check(t, v).is_ok())
+                        Value::Object(o) if o.len() == 1 => {
+                            o.iter().next().is_some_and(|(c, v)| {
+                                cases.iter().any(|(n, t)| {
+                                    n == c && t.as_deref().is_some_and(|t| self.check(t, v).is_ok())
+                                })
                             })
-                        }),
+                        }
                         _ => false,
                     };
                     if found {
@@ -294,7 +301,8 @@ mod tests {
         for method in Method::ALL {
             let doc = m.method(method).expect("documented");
             for (p, t) in &doc.params {
-                m.check(t, &m.sample(t)).unwrap_or_else(|e| panic!("{p}: {e}"));
+                m.check(t, &m.sample(t))
+                    .unwrap_or_else(|e| panic!("{p}: {e}"));
             }
             if let Some(result) = &doc.result {
                 m.check(result, &m.sample(result)).unwrap();
@@ -305,13 +313,18 @@ mod tests {
     #[test]
     fn checks_values_against_the_types() {
         let m = mapping();
-        assert!(m.check("row-op", &json!({ "upsert": { "id": "a" } })).is_ok());
+        assert!(m
+            .check("row-op", &json!({ "upsert": { "id": "a" } }))
+            .is_ok());
         assert!(m.check("row-op", &json!("clear")).is_ok());
         assert!(m.check("row-op", &json!("delete")).is_err());
         assert!(m.check("level", &json!("warn")).is_ok());
         assert!(m.check("level", &json!("loud")).is_err());
         let err = m
-            .check("response", &json!({ "status": "ok", "headers": [], "body": "" }))
+            .check(
+                "response",
+                &json!({ "status": "ok", "headers": [], "body": "" }),
+            )
             .unwrap_err();
         assert!(err.starts_with("response.status:"), "{err}");
         assert!(m.check("option<string>", &Value::Null).is_ok());

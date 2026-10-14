@@ -165,7 +165,10 @@ const ROUTES: &[(&[&str], Route)] = &[
     (hooks::METHODS, Route::Hooks),
     (extensions::METHODS, Route::Extensions),
     (work::METHODS, Route::Work),
-    (&["connector:inboxComplete", "connector:inboxRenew"], Route::Work),
+    (
+        &["connector:inboxComplete", "connector:inboxRenew"],
+        Route::Work,
+    ),
     (connectors::METHODS, Route::Connectors),
     (METHODS, Route::Native),
 ];

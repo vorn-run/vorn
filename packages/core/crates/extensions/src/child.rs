@@ -239,7 +239,11 @@ impl Child {
 
     /// Starts `launch` with an inbox for what the child asks; without one, a
     /// request from the child is logged and dropped, as protocol 1 has none.
-    pub fn start_with(launch: &Launch, name: String, inbox: Option<Inbox>) -> Result<Child, String> {
+    pub fn start_with(
+        launch: &Launch,
+        name: String,
+        inbox: Option<Inbox>,
+    ) -> Result<Child, String> {
         let mut command = vorn_spawn::tokio_command(&launch.program);
         command
             .args(&launch.args)

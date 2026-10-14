@@ -236,7 +236,6 @@ impl SdkClient {
         self.child.close().await;
     }
 
-
     async fn call(
         &self,
         method: &str,

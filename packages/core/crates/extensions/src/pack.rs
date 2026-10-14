@@ -443,7 +443,11 @@ mod tests {
         install(root.path(), "e", "../up", &extension("E"));
         fs::create_dir_all(root.path().join(".staging")).unwrap();
         let store = PackStore::new(root.path());
-        let names: Vec<String> = store.list().into_iter().map(|p| p.name().to_owned()).collect();
+        let names: Vec<String> = store
+            .list()
+            .into_iter()
+            .map(|p| p.name().to_owned())
+            .collect();
         assert_eq!(names, ["Alpha", "beta", "Conn"]);
         assert_eq!(store.extensions().len(), 2);
         assert!(store.describe("../a").is_none());
@@ -492,7 +496,10 @@ mod tests {
             json!({ "linked": folder.path() }).to_string(),
         )
         .unwrap();
-        assert!(store.inspect("other").unwrap_err().contains("says its id is local.hello"));
+        assert!(store
+            .inspect("other")
+            .unwrap_err()
+            .contains("says its id is local.hello"));
     }
 
     #[test]

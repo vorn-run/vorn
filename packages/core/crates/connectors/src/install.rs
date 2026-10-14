@@ -15,9 +15,9 @@ use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 use crate::fetch::Fetch;
+use vorn_extensions::connector::outdated_message;
 use vorn_extensions::manifest::{self, Kind, Manifest};
 use vorn_extensions::pack::{is_safe_id, InstalledPack, PackStore, ENTRY_FILE};
-use vorn_extensions::connector::outdated_message;
 
 /// Largest archive Vorn will install, matched by the SDK's own pack gate.
 pub const MAX_PACK_BYTES: u64 = 8 * 1024 * 1024;

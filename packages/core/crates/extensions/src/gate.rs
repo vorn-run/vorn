@@ -232,10 +232,16 @@ header = "Authorization: Bearer {token}"
         let seen = Arc::new(Seen::default());
         let world: Arc<dyn World> = seen.clone();
         let m = manifest();
-        fetch(&world, &m, &caller(), get("https://api.example.com/v1"), Some("c1".into()))
-            .await
-            .unwrap();
-        let sent = &seen.0.lock().unwrap()[0];
+        fetch(
+            &world,
+            &m,
+            &caller(),
+            get("https://api.example.com/v1"),
+            Some("c1".into()),
+        )
+        .await
+        .unwrap();
+        let sent = seen.0.lock().unwrap().remove(0);
         let headers: Vec<(&str, &str)> = sent
             .headers
             .iter()
@@ -243,11 +249,20 @@ header = "Authorization: Bearer {token}"
             .collect();
         assert_eq!(
             headers,
-            [("Accept", "application/json"), ("Authorization", "Bearer t0ken")]
+            [
+                ("Accept", "application/json"),
+                ("Authorization", "Bearer t0ken")
+            ]
         );
-        let err = fetch(&world, &m, &caller(), get("https://api.example.com/"), Some("c9".into()))
-            .await
-            .unwrap_err();
+        let err = fetch(
+            &world,
+            &m,
+            &caller(),
+            get("https://api.example.com/"),
+            Some("c9".into()),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code, "signed-out");
     }
 
@@ -263,7 +278,9 @@ header = "Authorization: Bearer {token}"
             "https://api.example.com.evil.example/",
             "https://cdn.example.com/",
         ] {
-            let err = fetch(&world, &m, &caller(), get(url), None).await.unwrap_err();
+            let err = fetch(&world, &m, &caller(), get(url), None)
+                .await
+                .unwrap_err();
             assert_eq!(err.code, "denied", "{url}");
         }
         let err = fetch(&world, &m, &caller(), get("https://evil.example/x"), None)
@@ -271,9 +288,15 @@ header = "Authorization: Bearer {token}"
             .unwrap_err();
         assert_eq!(err.message, "x does not declare the host evil.example");
         assert!(seen.0.lock().unwrap().is_empty());
-        fetch(&world, &m, &caller(), get("https://a.cdn.example.com:443/x"), None)
-            .await
-            .unwrap();
+        fetch(
+            &world,
+            &m,
+            &caller(),
+            get("https://a.cdn.example.com:443/x"),
+            None,
+        )
+        .await
+        .unwrap();
     }
 
     #[test]
@@ -283,9 +306,15 @@ header = "Authorization: Bearer {token}"
         let err = admit_call(&m, "sessions.list").unwrap_err();
         assert_eq!(
             (err.code.as_str(), err.message.as_str()),
-            ("denied", "x does not declare sessions.read, which sessions.list needs")
+            (
+                "denied",
+                "x does not declare sessions.read, which sessions.list needs"
+            )
         );
-        assert_eq!(admit_call(&m, "fs.read").unwrap_err().code, "unknown-method");
+        assert_eq!(
+            admit_call(&m, "fs.read").unwrap_err().code,
+            "unknown-method"
+        );
     }
 
     #[test]

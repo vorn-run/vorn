@@ -24,15 +24,15 @@ use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_extensions::activation::{self, Subject};
-use vorn_extensions::footer::{Declared, Footers, Key};
-use vorn_extensions::grants::{Grant, Grants, Lookup, GRANT_IDLE_MS};
 use vorn_extensions::api::types::CallCtx;
 use vorn_extensions::api::ExtError;
+use vorn_extensions::footer::{Declared, Footers, Key};
+use vorn_extensions::grants::{Grant, Grants, Lookup, GRANT_IDLE_MS};
 use vorn_extensions::host::{Asked, HostKey, Hosts};
 use vorn_extensions::install::Installs;
-use vorn_extensions::router::Router;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
+use vorn_extensions::router::Router;
 use vorn_extensions::{links, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
@@ -60,10 +60,36 @@ pub const METHODS: &[&str] = &[
 
 /// Core method groups, which no extension id may take: `<id>:<action>` routes to an extension.
 pub const RESERVED: &[&str] = &[
-    "agent", "bridge", "config", "connection", "connector", "credentials", "device", "browser",
-    "extension", "file", "git", "headless", "hooks", "http", "ide", "pairing", "script",
-    "server", "session", "sessions", "shell", "tailscale", "task", "terminal", "token",
-    "vornd", "widget", "workflow", "worktree", "vorn",
+    "agent",
+    "bridge",
+    "config",
+    "connection",
+    "connector",
+    "credentials",
+    "device",
+    "browser",
+    "extension",
+    "file",
+    "git",
+    "headless",
+    "hooks",
+    "http",
+    "ide",
+    "pairing",
+    "script",
+    "server",
+    "session",
+    "sessions",
+    "shell",
+    "tailscale",
+    "task",
+    "terminal",
+    "token",
+    "vornd",
+    "widget",
+    "workflow",
+    "worktree",
+    "vorn",
 ];
 
 /// The notification a window answers a selection request with.
@@ -295,7 +321,10 @@ impl Extensions {
                     .map(|sheet| json!(sheet))
             }
             "extension:install" => {
-                let (token, typed) = (text(params, "token").to_owned(), text(params, "confirm").to_owned());
+                let (token, typed) = (
+                    text(params, "token").to_owned(),
+                    text(params, "confirm").to_owned(),
+                );
                 let installs = Arc::clone(&self.installs);
                 match blocking(move || installs.confirm(&token, &typed)).await {
                     Ok(pack) => {
@@ -320,7 +349,10 @@ impl Extensions {
             "extension:call" => {
                 let ctx = CallCtx {
                     caller: "client".to_owned(),
-                    project: params.get("project").and_then(Value::as_str).map(str::to_owned),
+                    project: params
+                        .get("project")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
                 };
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
                 self.router
@@ -396,7 +428,9 @@ impl Extensions {
     /// Stops every process of `id`, drops what it published, removes its
     /// files and the connection it came with: nothing of it is left.
     async fn remove(&self, id: &str) -> Result<Value, String> {
-        if self.hosts.store().inspect(id).is_err() && !self.hosts.store().ids().iter().any(|i| i == id) {
+        if self.hosts.store().inspect(id).is_err()
+            && !self.hosts.store().ids().iter().any(|i| i == id)
+        {
             return Err(format!("No extension \"{id}\" is installed"));
         }
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
@@ -437,7 +471,10 @@ impl Extensions {
         };
         let ctx = CallCtx {
             caller: "client".to_owned(),
-            project: params.get("project").and_then(Value::as_str).map(str::to_owned),
+            project: params
+                .get("project")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         };
         match self.router.call(id, action, params, ctx).await {
             Ok(value) => Answer::Result(value),
@@ -868,10 +905,7 @@ async fn next_note(notes: &mut Option<broadcast::Receiver<Value>>) {
 /// and settles every session again after a pack changed.
 async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value>>) {
     let mut known: HashMap<String, Live> = HashMap::new();
-    let Some(mut packs) = me
-        .upgrade()
-        .map(|e| fingerprint(e.hosts.store().root()))
-    else {
+    let Some(mut packs) = me.upgrade().map(|e| fingerprint(e.hosts.store().root())) else {
         return;
     };
     let mut tick = tokio::time::interval(PACK_CHECK);

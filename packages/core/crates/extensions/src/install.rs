@@ -264,7 +264,13 @@ impl Installs {
             .arg("-c")
             .arg(format!("core.hooksPath={}", no_hooks.display()))
             .args(["-c", "protocol.ext.allow=never"])
-            .args(["clone", "--quiet", "--depth", "1", "--no-recurse-submodules"]);
+            .args([
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                "--no-recurse-submodules",
+            ]);
         if let Some(branch) = branch {
             clone.args(["--branch", branch]);
         }
@@ -341,7 +347,11 @@ impl Installs {
         }
         if let Some(c) = &m.contributes {
             adds.extend(c.panes().iter().map(|p| format!("Pane: {}", p.base.title)));
-            adds.extend(c.footers().iter().map(|f| format!("Card footer: {}", f.base.title)));
+            adds.extend(
+                c.footers()
+                    .iter()
+                    .map(|f| format!("Card footer: {}", f.base.title)),
+            );
             adds.extend(
                 c.link_handlers()
                     .iter()
@@ -473,7 +483,11 @@ impl Installs {
         }
         fs::create_dir_all(&home).map_err(|e| e.to_string())?;
         write_current(&home, &json!({ "linked": folder, "installedAt": now_ms() }))?;
-        info!("[extensions] linked {} from {}", manifest.id, folder.display());
+        info!(
+            "[extensions] linked {} from {}",
+            manifest.id,
+            folder.display()
+        );
         self.store.inspect(&manifest.id)
     }
 
@@ -497,10 +511,7 @@ impl Installs {
 /// A git install carries `vorn-extension.toml`; 0.8 packs install as archives.
 fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     if !dir.join(file::FILE).is_file() {
-        return Err(format!(
-            "The repository has no {} at its root",
-            file::FILE
-        ));
+        return Err(format!("The repository has no {} at its root", file::FILE));
     }
     let manifest = read_dir_manifest(dir)?;
     if !is_safe_id(&manifest.id) {
@@ -549,11 +560,7 @@ pub struct Packed {
 
 /// Validates `folder`'s manifest, runs its recorded checks, and lists what a
 /// bundle of it holds, writing the bundle to `out` as a `.tar.gz` when given.
-pub fn pack(
-    folder: &Path,
-    env: &[(String, String)],
-    out: Option<&Path>,
-) -> Result<Packed, String> {
+pub fn pack(folder: &Path, env: &[(String, String)], out: Option<&Path>) -> Result<Packed, String> {
     let manifest = read_dir_manifest(folder)?;
     let checks = match &manifest.checks {
         Some(argv) => {
@@ -579,8 +586,13 @@ pub fn pack(
     walk(folder, "", &mut files).map_err(|e| e.to_string())?;
     files.sort();
     if let Some(out) = out {
-        bundle(folder, &files, &format!("{}-{}", manifest.id, manifest.version), out)
-            .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+        bundle(
+            folder,
+            &files,
+            &format!("{}-{}", manifest.id, manifest.version),
+            out,
+        )
+        .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
     }
     let bytes = files
         .iter()
@@ -785,7 +797,14 @@ uses = ["sessions.read"]
     #[test]
     fn links_a_folder_and_packs_it() {
         let folder = tempfile::tempdir().unwrap();
-        fs::write(folder.path().join(file::FILE), MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "[checks]\ncommand = [\"sh\", \"-c\", \"echo 3 checks passed\"]\n")).unwrap();
+        fs::write(
+            folder.path().join(file::FILE),
+            MANIFEST.replace(
+                "[build]\ncommand = [\"sh\", \"build.sh\"]\n",
+                "[checks]\ncommand = [\"sh\", \"-c\", \"echo 3 checks passed\"]\n",
+            ),
+        )
+        .unwrap();
         fs::write(folder.path().join("hello.sh"), "").unwrap();
         fs::create_dir_all(folder.path().join("node_modules/x")).unwrap();
         fs::write(folder.path().join("node_modules/x/i.js"), "").unwrap();
@@ -807,9 +826,18 @@ uses = ["sessions.read"]
         .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
         .collect();
         names.sort();
-        assert_eq!(names, ["test.marker-1.0.0/hello.sh", "test.marker-1.0.0/vorn-extension.toml"]);
+        assert_eq!(
+            names,
+            [
+                "test.marker-1.0.0/hello.sh",
+                "test.marker-1.0.0/vorn-extension.toml"
+            ]
+        );
         assert_eq!(packed.checks.as_deref(), Some("3 checks passed"));
         installs.remove("test.marker").unwrap();
-        assert!(folder.path().join("hello.sh").exists(), "a linked folder stays");
+        assert!(
+            folder.path().join("hello.sh").exists(),
+            "a linked folder stays"
+        );
     }
 }

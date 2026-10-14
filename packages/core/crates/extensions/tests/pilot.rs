@@ -34,7 +34,9 @@ fn has(program: &str) -> bool {
 
 fn env() -> Vec<(String, String)> {
     std::env::vars()
-        .filter(|(k, _)| ["PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP"].contains(&k.as_str()))
+        .filter(|(k, _)| {
+            ["PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP"].contains(&k.as_str())
+        })
         .collect()
 }
 
@@ -133,7 +135,11 @@ async fn a_connector_installs_from_git_and_polls_acts_crashes_and_times_out() {
     eprintln!("inspect: {:?}", started.elapsed());
     assert_eq!(sheet.publisher, "Vorn tests");
     assert_eq!(sheet.hosts, ["feeds.example.com"]);
-    assert!(sheet.adds.contains(&"Connector: Feeds".to_owned()), "{:?}", sheet.adds);
+    assert!(
+        sheet.adds.contains(&"Connector: Feeds".to_owned()),
+        "{:?}",
+        sheet.adds
+    );
     assert!(sheet.runs_as_you.contains("runs as you"));
     // Nothing of it has run: its build would have made dist/.
     let staged: Vec<_> = fs::read_dir(root.path())
@@ -153,10 +159,18 @@ async fn a_connector_installs_from_git_and_polls_acts_crashes_and_times_out() {
 
     // Polls from a service, which the next poll reuses.
     let lifecycle = Lifecycle::new(Policy::default());
-    let polled = service(&lifecycle, &pack).await.poll("new-item", None, None).await.unwrap();
+    let polled = service(&lifecycle, &pack)
+        .await
+        .poll("new-item", None, None)
+        .await
+        .unwrap();
     assert_eq!(polled["items"][0]["title"], "First post");
     let service_pid = polled["pid"].clone();
-    let again = service(&lifecycle, &pack).await.poll("new-item", Some("c1"), None).await.unwrap();
+    let again = service(&lifecycle, &pack)
+        .await
+        .poll("new-item", Some("c1"), None)
+        .await
+        .unwrap();
     assert_eq!(again["pid"], service_pid);
 
     // Runs an action one-shot: a process of its own, gone after.
@@ -174,19 +188,41 @@ async fn a_connector_installs_from_git_and_polls_acts_crashes_and_times_out() {
     assert_ne!(read["pid"], service_pid);
 
     // Survives a crash: the call fails, the next poll starts it again.
-    let crashed = service(&lifecycle, &pack).await.action("crash", &Map::new(), None).await.unwrap_err();
-    assert!(crashed.message.contains("Error: the feed went away"), "{crashed}");
-    let after_crash = service(&lifecycle, &pack).await.poll("new-item", None, None).await.unwrap();
+    let crashed = service(&lifecycle, &pack)
+        .await
+        .action("crash", &Map::new(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        crashed.message.contains("Error: the feed went away"),
+        "{crashed}"
+    );
+    let after_crash = service(&lifecycle, &pack)
+        .await
+        .poll("new-item", None, None)
+        .await
+        .unwrap();
     assert_ne!(after_crash["pid"], service_pid);
 
     // Survives a timeout: the call fails in time, the service answers the next.
-    let hung = service(&lifecycle, &pack).await.action("hang", &Map::new(), None).await.unwrap_err();
+    let hung = service(&lifecycle, &pack)
+        .await
+        .action("hang", &Map::new(), None)
+        .await
+        .unwrap_err();
     assert!(hung.message.contains("did not answer action/run"), "{hung}");
-    service(&lifecycle, &pack).await.poll("new-item", None, None).await.unwrap();
+    service(&lifecycle, &pack)
+        .await
+        .poll("new-item", None, None)
+        .await
+        .unwrap();
 
     // Passes its recorded checks.
     let packed = install::pack(&pack.path, &env(), None).unwrap();
-    assert_eq!(packed.checks.as_deref(), Some("manifest ok\npoll ok\n2 checks passed"));
+    assert_eq!(
+        packed.checks.as_deref(),
+        Some("manifest ok\npoll ok\n2 checks passed")
+    );
 
     lifecycle.stop_all().await;
     installs.remove("test.feeds").unwrap();
@@ -210,7 +246,12 @@ impl World for Nothing {
 }
 
 fn router(store: PackStore, lifecycle: Arc<Lifecycle>) -> Arc<Router> {
-    Router::new(store, lifecycle, Arc::new(Nothing), RouterSettings::new(env(), "test"))
+    Router::new(
+        store,
+        lifecycle,
+        Arc::new(Nothing),
+        RouterSettings::new(env(), "test"),
+    )
 }
 
 fn ctx() -> CallCtx {
@@ -230,7 +271,9 @@ async fn a_bash_extension_linked_from_a_folder_answers_an_action() {
     copy_dir(&fixture("hello-bash"), folder.path());
     let root = tempfile::tempdir().unwrap();
     let store = PackStore::new(root.path());
-    Installs::new(store.clone(), "git", env()).link(folder.path()).unwrap();
+    Installs::new(store.clone(), "git", env())
+        .link(folder.path())
+        .unwrap();
     let r = router(store, Lifecycle::new(Policy::default()));
     let started = Instant::now();
     let answer = r
@@ -245,7 +288,10 @@ async fn a_bash_extension_linked_from_a_folder_answers_an_action() {
         "read -r _\nprintf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"edited\"}\\n'\n",
     )
     .unwrap();
-    let edited = r.call("test.hello", "greet", json!({}), ctx()).await.unwrap();
+    let edited = r
+        .call("test.hello", "greet", json!({}), ctx())
+        .await
+        .unwrap();
     assert_eq!(edited, json!("edited"));
 }
 
@@ -263,17 +309,26 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
     fs::copy(fixture("program.mjs"), folder.path().join("program.mjs")).unwrap();
     let root = tempfile::tempdir().unwrap();
     let store = PackStore::new(root.path());
-    Installs::new(store.clone(), "git", env()).link(folder.path()).unwrap();
+    Installs::new(store.clone(), "git", env())
+        .link(folder.path())
+        .unwrap();
     let lifecycle = Lifecycle::new(Policy {
         idle: Duration::from_millis(300),
         ..Policy::default()
     });
     let r = router(store, Arc::clone(&lifecycle));
-    assert!(lifecycle.running().is_empty(), "nothing runs until something uses it");
+    assert!(
+        lifecycle.running().is_empty(),
+        "nothing runs until something uses it"
+    );
 
     assert_eq!(r.emit("test.tick", json!({ "n": 1 })).await, 1);
     assert_eq!(r.emit("test.other", json!({})).await, 0);
-    let first = r.call("test.ticks", "echo", json!({}), ctx()).await.unwrap()["pid"].clone();
+    let first = r
+        .call("test.ticks", "echo", json!({}), ctx())
+        .await
+        .unwrap()["pid"]
+        .clone();
     for _ in 0..100 {
         if lifecycle.running().is_empty() {
             break;
@@ -284,9 +339,16 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
 
     assert_eq!(r.emit("test.tick", json!({ "n": 2 })).await, 1);
     assert_eq!(lifecycle.running().len(), 1, "the next event starts it");
-    let events = r.call("test.ticks", "events", json!({}), ctx()).await.unwrap();
+    let events = r
+        .call("test.ticks", "events", json!({}), ctx())
+        .await
+        .unwrap();
     assert_eq!(events, json!([{ "name": "test.tick", "data": { "n": 2 } }]));
-    let second = r.call("test.ticks", "echo", json!({}), ctx()).await.unwrap()["pid"].clone();
+    let second = r
+        .call("test.ticks", "echo", json!({}), ctx())
+        .await
+        .unwrap()["pid"]
+        .clone();
     assert_ne!(first, second);
     lifecycle.stop_all().await;
 }

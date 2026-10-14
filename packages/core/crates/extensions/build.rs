@@ -91,7 +91,9 @@ struct Parser<'a> {
 
 type Fail = (usize, String);
 
-const PUNCT: &[&str] = &["->", "{", "}", "(", ")", "<", ">", ",", ";", ":", ".", "@", "="];
+const PUNCT: &[&str] = &[
+    "->", "{", "}", "(", ")", "<", ">", ",", ";", ":", ".", "@", "=",
+];
 
 fn tokens(text: &str) -> Vec<(usize, &str)> {
     let mut out = Vec::new();
@@ -113,9 +115,7 @@ fn tokens(text: &str) -> Vec<(usize, &str)> {
             let end = rest
                 .char_indices()
                 .find(|&(i, c)| {
-                    c.is_whitespace()
-                        || "{}()<>,;:.@=".contains(c)
-                        || rest[i..].starts_with("->")
+                    c.is_whitespace() || "{}()<>,;:.@=".contains(c) || rest[i..].starts_with("->")
                 })
                 .map_or(rest.len(), |(i, _)| i)
                 .max(1);
@@ -215,7 +215,12 @@ impl<'a> Parser<'a> {
             match self.next()? {
                 "import" => pkg.imports.push(self.ident()?),
                 "export" => pkg.exports.push(self.ident()?),
-                other => return Err((line, format!("a world holds imports and exports, not `{other}`"))),
+                other => {
+                    return Err((
+                        line,
+                        format!("a world holds imports and exports, not `{other}`"),
+                    ))
+                }
             }
             self.eat(";")?;
         }
@@ -334,7 +339,10 @@ impl<'a> Parser<'a> {
             self.next()?;
             let line = self.line();
             if self.peek() != Some("result") {
-                return Err((line, "a function returns a result<_, ext-error> here".into()));
+                return Err((
+                    line,
+                    "a function returns a result<_, ext-error> here".into(),
+                ));
             }
             self.next()?;
             self.eat("<")?;
@@ -487,8 +495,15 @@ impl Package {
             .rsplit_once('.')
             .map_or(self.version.as_str(), |(head, _)| head);
         let _ = writeln!(out, "/// The WIT package this build speaks.");
-        let _ = writeln!(out, "pub const PACKAGE: &str = \"{}@{}\";", self.name, self.version);
-        let _ = writeln!(out, "/// What a manifest's `api` names: the package without its patch.");
+        let _ = writeln!(
+            out,
+            "pub const PACKAGE: &str = \"{}@{}\";",
+            self.name, self.version
+        );
+        let _ = writeln!(
+            out,
+            "/// What a manifest's `api` names: the package without its patch."
+        );
         let _ = writeln!(out, "pub const API: &str = \"{}@{api}\";\n", self.name);
         let _ = writeln!(out, "/// The WIT's types, as they travel over stdio.");
         let _ = writeln!(out, "pub mod types {{");
@@ -499,7 +514,10 @@ impl Package {
             match def {
                 Def::Alias(_) => {}
                 Def::Record(fields) => {
-                    let _ = writeln!(out, "\n    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]");
+                    let _ = writeln!(
+                        out,
+                        "\n    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]"
+                    );
                     let _ = writeln!(out, "    pub struct {rust} {{");
                     let mut body = String::new();
                     for (f, t) in fields {
@@ -511,7 +529,10 @@ impl Package {
                     let _ = writeln!(out, "    }}");
                 }
                 Def::Variant(cases) => {
-                    let _ = writeln!(out, "\n    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]");
+                    let _ = writeln!(
+                        out,
+                        "\n    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]"
+                    );
                     let _ = writeln!(out, "    #[serde(rename_all = \"kebab-case\")]");
                     let _ = writeln!(out, "    pub enum {rust} {{");
                     for (c, payload) in cases {
@@ -540,7 +561,10 @@ impl Package {
         let _ = writeln!(out, "}}\n");
 
         // Params, one struct per function.
-        let _ = writeln!(out, "/// Each function's params, keyed by the WIT's parameter names.");
+        let _ = writeln!(
+            out,
+            "/// Each function's params, keyed by the WIT's parameter names."
+        );
         let _ = writeln!(out, "pub mod params {{");
         let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(out, "    use super::types::*;");
@@ -548,8 +572,16 @@ impl Package {
         for i in &self.interfaces {
             for f in &i.funcs {
                 let _ = writeln!(out, "\n    /// `{}.{}`", i.name, f.name);
-                let _ = writeln!(out, "    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]");
-                let _ = writeln!(out, "    pub struct {}{} {{", camel(&i.name), camel(&f.name));
+                let _ = writeln!(
+                    out,
+                    "    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]"
+                );
+                let _ = writeln!(
+                    out,
+                    "    pub struct {}{} {{",
+                    camel(&i.name),
+                    camel(&f.name)
+                );
                 let mut body = String::new();
                 for (p, t) in &f.params {
                     self.field(&mut body, p, t, true);
@@ -569,7 +601,10 @@ impl Package {
             .filter(|i| self.imports.contains(&i.name) || self.exports.contains(&i.name))
             .flat_map(|i| i.funcs.iter().map(move |f| (i, f)))
             .collect();
-        let _ = writeln!(out, "/// Every function of the world, as a JSON-RPC method over stdio.");
+        let _ = writeln!(
+            out,
+            "/// Every function of the world, as a JSON-RPC method over stdio."
+        );
         let _ = writeln!(out, "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]");
         let _ = writeln!(out, "pub enum Method {{");
         for (i, f) in &all {
@@ -583,29 +618,57 @@ impl Package {
             let _ = writeln!(out, "        Method::{}{},", camel(&i.name), camel(&f.name));
         }
         let _ = writeln!(out, "    ];\n");
-        let _ = writeln!(out, "    /// The JSON-RPC method name: `interface.function`.");
+        let _ = writeln!(
+            out,
+            "    /// The JSON-RPC method name: `interface.function`."
+        );
         let _ = writeln!(out, "    pub fn name(self) -> &'static str {{");
         let _ = writeln!(out, "        match self {{");
         for (i, f) in &all {
-            let _ = writeln!(out, "            Method::{}{} => \"{}.{}\",", camel(&i.name), camel(&f.name), i.name, f.name);
+            let _ = writeln!(
+                out,
+                "            Method::{}{} => \"{}.{}\",",
+                camel(&i.name),
+                camel(&f.name),
+                i.name,
+                f.name
+            );
         }
         let _ = writeln!(out, "        }}\n    }}\n");
         let _ = writeln!(out, "    /// Which end answers it.");
         let _ = writeln!(out, "    pub fn side(self) -> Side {{");
         let _ = writeln!(out, "        match self {{");
         for (i, f) in &all {
-            let _ = writeln!(out, "            Method::{}{} => Side::{},", camel(&i.name), camel(&f.name), self.side(&i.name));
+            let _ = writeln!(
+                out,
+                "            Method::{}{} => Side::{},",
+                camel(&i.name),
+                camel(&f.name),
+                self.side(&i.name)
+            );
         }
         let _ = writeln!(out, "        }}\n    }}\n");
-        let _ = writeln!(out, "    /// Whether it is sent without an id and never answered.");
+        let _ = writeln!(
+            out,
+            "    /// Whether it is sent without an id and never answered."
+        );
         let _ = writeln!(out, "    pub fn is_notification(self) -> bool {{");
         let _ = writeln!(out, "        match self {{");
         for (i, f) in &all {
-            let _ = writeln!(out, "            Method::{}{} => {},", camel(&i.name), camel(&f.name), f.ok.is_none());
+            let _ = writeln!(
+                out,
+                "            Method::{}{} => {},",
+                camel(&i.name),
+                camel(&f.name),
+                f.ok.is_none()
+            );
         }
         let _ = writeln!(out, "        }}\n    }}\n");
         let _ = writeln!(out, "    pub fn from_name(name: &str) -> Option<Method> {{");
-        let _ = writeln!(out, "        Method::ALL.into_iter().find(|m| m.name() == name)");
+        let _ = writeln!(
+            out,
+            "        Method::ALL.into_iter().find(|m| m.name() == name)"
+        );
         let _ = writeln!(out, "    }}");
         let _ = writeln!(out, "}}\n");
 
@@ -619,9 +682,7 @@ impl Package {
             .iter()
             .map(|n| {
                 let body = match &self.types[n] {
-                    Def::Alias(_) if n == "json" => {
-                        "{ \"inline\": \"any JSON value\" }".to_owned()
-                    }
+                    Def::Alias(_) if n == "json" => "{ \"inline\": \"any JSON value\" }".to_owned(),
                     Def::Alias(t) => format!("{{ \"alias\": \"{}\" }}", t.wit()),
                     Def::Record(fields) => format!(
                         "{{ \"record\": [{}] }}",
@@ -684,7 +745,10 @@ impl Package {
             .collect();
         stdio.push_str(&methods.join(",\n"));
         stdio.push_str("\n  ]\n}\n");
-        let _ = writeln!(out, "/// The stdio mapping, as `wit/stdio.json` publishes it.");
+        let _ = writeln!(
+            out,
+            "/// The stdio mapping, as `wit/stdio.json` publishes it."
+        );
         let _ = writeln!(out, "pub const STDIO: &str = r#\"{stdio}\"#;");
         out
     }

@@ -227,7 +227,10 @@ pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<V
     ] {
         conn.insert(key.into(), p.get(key).cloned().unwrap_or(Value::Null));
     }
-    if let Some(project) = p.get("executionProject").filter(|v| vorn_extensions::js::truthy(v)) {
+    if let Some(project) = p
+        .get("executionProject")
+        .filter(|v| vorn_extensions::js::truthy(v))
+    {
         conn.insert("executionProject".into(), project.clone());
     }
     conn.insert("createdAt".into(), json!(new.now));
@@ -460,7 +463,10 @@ pub fn sdk_action_def(action: &Value) -> Value {
         "label".into(),
         action.get("label").cloned().unwrap_or(Value::Null),
     );
-    if let Some(d) = action.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
+    if let Some(d) = action
+        .get("description")
+        .filter(|d| vorn_extensions::js::truthy(d))
+    {
         out.insert("description".into(), d.clone());
     }
     let fields: Vec<Value> = action
@@ -485,7 +491,10 @@ pub fn sdk_action_def(action: &Value) -> Value {
                 if let Some(t) = o.get("type").filter(|t| vorn_extensions::js::truthy(t)) {
                     p.insert("type".into(), t.clone());
                 }
-                if let Some(d) = o.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
+                if let Some(d) = o
+                    .get("description")
+                    .filter(|d| vorn_extensions::js::truthy(d))
+                {
                     p.insert("description".into(), d.clone());
                 }
                 (text(o, "key").to_owned(), Value::Object(p))
@@ -515,7 +524,10 @@ fn action_input_field(input: &Value) -> Value {
         input.get("required").cloned().unwrap_or(json!(false)),
     );
     out.insert("supportsTemplates".into(), json!(true));
-    if let Some(d) = input.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
+    if let Some(d) = input
+        .get("description")
+        .filter(|d| vorn_extensions::js::truthy(d))
+    {
         out.insert("description".into(), d.clone());
     }
     let options = input

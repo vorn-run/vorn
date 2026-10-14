@@ -184,7 +184,10 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
     let check_error = |answer: &Value| {
         let error = &answer["error"];
         assert_eq!(error["code"], -32000, "{answer}");
-        check("ext-error", &json!({ "code": error["data"]["code"], "message": error["message"] }));
+        check(
+            "ext-error",
+            &json!({ "code": error["data"]["code"], "message": error["message"] }),
+        );
     };
     for method in Method::ALL {
         let doc = map.method(method).expect("every method is in the mapping");
@@ -235,7 +238,10 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 );
             }
             (Side::Host, Method::HostPublish) => {
-                assert_eq!(b.relay(method, sample.clone()).await, json!({ "sent": true }));
+                assert_eq!(
+                    b.relay(method, sample.clone()).await,
+                    json!({ "sent": true })
+                );
                 let row = sample["ops"][0]["upsert"].clone();
                 let mut rows = Vec::new();
                 for _ in 0..50 {
@@ -268,7 +274,9 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                     }]
                 );
             }
-            (side, method) => panic!("{method:?} is answered by {side:?}, which nothing here drives"),
+            (side, method) => {
+                panic!("{method:?} is answered by {side:?}, which nothing here drives")
+            }
         }
     }
     // Params that do not read, a method the API does not have, and one only the extension answers.
@@ -303,7 +311,11 @@ async fn a_stalled_extension_adds_under_a_millisecond_to_another_extensions_call
     if !node() {
         return;
     }
-    let b = Arc::new(bench(&["a", "b"], Policy::default(), Duration::from_secs(60)));
+    let b = Arc::new(bench(
+        &["a", "b"],
+        Policy::default(),
+        Duration::from_secs(60),
+    ));
     timed_calls(&b, "a", 20).await;
     timed_calls(&b, "b", 20).await;
     let alone = timed_calls(&b, "b", 200).await;
@@ -333,7 +345,10 @@ async fn a_crash_and_a_timeout_cost_one_call() {
     let first = b.call("a", "echo", json!({})).await.unwrap()["pid"].clone();
     let crashed = b.call("a", "crash", json!({})).await.unwrap_err();
     assert_eq!(crashed.code, "exited");
-    assert!(crashed.message.ends_with("Error: asked to crash"), "{crashed}");
+    assert!(
+        crashed.message.ends_with("Error: asked to crash"),
+        "{crashed}"
+    );
     let second = b.call("a", "echo", json!({})).await.unwrap()["pid"].clone();
     assert_ne!(first, second);
 
@@ -387,7 +402,10 @@ async fn twenty_idle_node_services_all_stop() {
         pids.push(echo["pid"].as_u64().unwrap());
     }
     assert_eq!(b.lifecycle.running().len(), 20);
-    until("every idle service stopping", || b.lifecycle.running().is_empty()).await;
+    until("every idle service stopping", || {
+        b.lifecycle.running().is_empty()
+    })
+    .await;
     until("every process ending", || pids.iter().all(|p| !alive(*p))).await;
     // The next call starts one again.
     b.call("svc07", "echo", json!({})).await.unwrap();
@@ -408,12 +426,21 @@ async fn the_cap_stops_the_least_recently_used() {
     let b = bench(&["a", "b", "c", "d"], policy, Duration::from_secs(20));
     let mut pids = Vec::new();
     for id in ["a", "b", "c"] {
-        pids.push(b.call(id, "echo", json!({})).await.unwrap()["pid"].as_u64().unwrap());
+        pids.push(
+            b.call(id, "echo", json!({})).await.unwrap()["pid"]
+                .as_u64()
+                .unwrap(),
+        );
     }
     // `a` used again: `b` is now the least recently used.
     b.call("a", "echo", json!({})).await.unwrap();
     b.call("d", "echo", json!({})).await.unwrap();
-    let running: Vec<String> = b.lifecycle.running().into_iter().map(|k| k.extension).collect();
+    let running: Vec<String> = b
+        .lifecycle
+        .running()
+        .into_iter()
+        .map(|k| k.extension)
+        .collect();
     assert_eq!(running, ["a", "c", "d"]);
     until("the evicted process ending", || !alive(pids[1])).await;
     b.lifecycle.stop_all().await;
@@ -467,10 +494,17 @@ async fn remove_leaves_no_files_rows_or_processes() {
     let pid = b.call("a", "echo", json!({})).await.unwrap()["pid"]
         .as_u64()
         .unwrap();
-    b.call("a", "publish", json!({ "ops": [{ "upsert": { "id": "r1" } }] }))
-        .await
-        .unwrap();
-    until("the row arriving", || !b.router.rows("a", "rows").is_empty()).await;
+    b.call(
+        "a",
+        "publish",
+        json!({ "ops": [{ "upsert": { "id": "r1" } }] }),
+    )
+    .await
+    .unwrap();
+    until("the row arriving", || {
+        !b.router.rows("a", "rows").is_empty()
+    })
+    .await;
     b.router.forget("a").await;
     let installs = Installs::new(b.router.store().clone(), "git", Vec::new());
     installs.remove("a").unwrap();

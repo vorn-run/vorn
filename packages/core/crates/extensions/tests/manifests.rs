@@ -35,8 +35,8 @@ fn converts_and_reads_back(kind: &str, expected: usize) {
     let all = packs(kind);
     assert_eq!(all.len(), expected, "{kind}");
     for (name, json) in all {
-        let manifest = from_pack_json(json.as_object().unwrap())
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let manifest =
+            from_pack_json(json.as_object().unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
         let toml = to_toml(&manifest);
         let back = file::parse(&toml).unwrap_or_else(|e| panic!("{name}: {e}\n{toml}"));
         assert_eq!(back, manifest, "{name}\n{toml}");

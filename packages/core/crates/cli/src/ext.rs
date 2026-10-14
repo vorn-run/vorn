@@ -53,10 +53,7 @@ pub fn render_sheet(sheet: &Value) -> String {
     let source = &sheet["source"];
     if let Some(git) = source.get("git").and_then(Value::as_str) {
         let rev = text(source, "rev");
-        out.push_str(&format!(
-            "From {git} at {}\n",
-            rev.get(..12).unwrap_or(rev)
-        ));
+        out.push_str(&format!("From {git} at {}\n", rev.get(..12).unwrap_or(rev)));
     }
     if let Some(d) = sheet.get("description").and_then(Value::as_str) {
         out.push_str(&format!("{d}\n"));
@@ -307,7 +304,10 @@ mod tests {
         });
         let text = render_sheet(&sheet);
         assert!(text.starts_with("Y 1.0.0 (x.y)\nPublished by someone\nFrom https://example.com/y.git at 0123456789ab\n"), "{text}");
-        assert!(text.contains("  build      npm ci\n  action go  sh go.sh\n"), "{text}");
+        assert!(
+            text.contains("  build      npm ci\n  action go  sh go.sh\n"),
+            "{text}"
+        );
         assert!(text.contains("It reaches, through Vorn\n  api.example.com\n"));
         assert!(text.contains("It adds\n  nothing\n"));
         assert!(text.ends_with("\nY runs as you.\n"));
