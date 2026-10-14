@@ -137,7 +137,7 @@ impl Mapper {
             .collect();
         unlinked.sort_by(|a, b| b.created_at.total_cmp(&a.created_at));
         let Some(newest) = unlinked.first() else {
-            tracing::info!(
+            tracing::debug!(
                 session,
                 cwd = event.cwd(),
                 "no unlinked terminal for a conversation"

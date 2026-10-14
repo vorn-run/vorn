@@ -153,25 +153,23 @@ impl std::fmt::Display for StartError {
     }
 }
 
-/// Starts vornd as the server detached, so it outlives this command, with its
-/// output appended to the server log. A rival started by a second `vorn` at
+/// Starts vornd as the server detached, so it outlives this command, logging
+/// to the server log, which it rotates itself; what it prints outside the log
+/// (a panic) goes to `server.stderr`. A rival started by a second `vorn` at
 /// the same moment stands down by itself, so no lock is held here.
 fn start_detached(dir: &Path, log: &Path, data_dir_flag: Option<&str>) -> Result<(), StartError> {
     let data_dir = data_dir_flag.map_or_else(|| dir.to_owned(), PathBuf::from);
     crate::launch::refuse_default(&data_dir).map_err(StartError::Refused)?;
     std::fs::create_dir_all(dir).map_err(StartError::Io)?;
-    let out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log)
-        .map_err(StartError::Io)?;
-    let err = out.try_clone().map_err(StartError::Io)?;
+    let err = std::fs::File::create(dir.join("server.stderr")).map_err(StartError::Io)?;
 
     let server = crate::launch::locate().map_err(StartError::NotFound)?;
     let mut command = server.command(&data_dir, None, None);
     command
+        .arg("--log-file")
+        .arg(log)
         .stdin(std::process::Stdio::null())
-        .stdout(out)
+        .stdout(std::process::Stdio::null())
         .stderr(err)
         .current_dir(dir);
     detach(&mut command);
