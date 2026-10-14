@@ -242,6 +242,7 @@ enum Call {
     SignedIn(Option<String>),
     Net(network::NetCall),
     Intent(crate::intent::Need),
+    TermImage(term::TermImage),
 }
 
 /// The launcher model picker's id field.
@@ -888,6 +889,7 @@ impl App {
                 self.finish_signin(answer.map(|_| identity).map_err(|e| e.to_string()))
             }
             Call::Net(c) => self.net_answered(c, answer),
+            Call::TermImage(c) => self.term_image_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -2675,8 +2677,9 @@ impl App {
         }
         if self.composing() || self.st.view != MainView::Sessions {
             self.input(Input::Commit(text));
-        } else if let (Some(g), Some(id)) = (&self.grid, self.typing_target()) {
-            g.paste(&id, &text);
+        } else if let (Some(g), Some(id)) = (self.grid.clone(), self.typing_target()) {
+            self.return_to_live(&id);
+            g.paste_clipboard(&id, &text);
         }
         self.events(ui);
     }

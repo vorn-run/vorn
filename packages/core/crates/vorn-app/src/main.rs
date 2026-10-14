@@ -592,6 +592,10 @@ impl WindowApp for Win {
         self.guard(|app| app.intercept(ui, input))
     }
 
+    fn dropped(&mut self, ui: &mut Ui, what: vorn_app::ui::Dropped, at: Option<(f32, f32)>) {
+        self.guard(|app| app.dropped(ui, what, at));
+    }
+
     fn background(&self) -> Rgba {
         Rgba::hex(look::SURFACE_BASE)
     }

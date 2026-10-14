@@ -20,8 +20,8 @@ use web_time::{Duration, Instant};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{
-    CanvasRenderingContext2d, ClipboardEvent, CompositionEvent, DragEvent, HtmlCanvasElement, HtmlElement,
-    HtmlTextAreaElement, ImageData, KeyboardEvent, MouseEvent,
+    CanvasRenderingContext2d, ClipboardEvent, CompositionEvent, DragEvent, HtmlCanvasElement,
+    HtmlElement, HtmlTextAreaElement, ImageData, KeyboardEvent, MouseEvent,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};

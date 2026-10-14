@@ -248,6 +248,12 @@ impl WindowApp for Web {
         ui.key(&chord);
     }
 
+    fn dropped(&mut self, ui: &mut Ui, what: vorn_app::ui::Dropped, at: Option<(f32, f32)>) {
+        if let Phase::Running(app) = &mut self.phase {
+            app.dropped(ui, what, at);
+        }
+    }
+
     fn background(&self) -> Rgba {
         Rgba::hex(look::SURFACE_BASE)
     }

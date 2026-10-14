@@ -64,13 +64,16 @@ pub(crate) fn place_traffic_lights(window: &Window, (x, y): (f32, f32)) {
     }
 }
 
+type Landed = (Dropped, Option<(f32, f32)>);
+type OnDrag<R> = extern "C" fn(&AnyObject, Sel, &ProtocolObject<dyn NSDraggingInfo>) -> R;
+
 /// Drops read by [`take_drops`]' handlers, with where they landed in
 /// logical points, until the event loop hands them to the app.
-static DROPS: Mutex<Vec<(Dropped, Option<(f32, f32)>)>> = Mutex::new(Vec::new());
+static DROPS: Mutex<Vec<Landed>> = Mutex::new(Vec::new());
 static WAKE: Mutex<Option<Waker>> = Mutex::new(None);
 
 /// The drops since the last call.
-pub(crate) fn drops() -> Vec<(Dropped, Option<(f32, f32)>)> {
+pub(crate) fn drops() -> Vec<Landed> {
     std::mem::take(&mut *DROPS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
@@ -94,15 +97,13 @@ pub(crate) fn take_drops(window: &Window, waker: Waker) {
         return;
     };
     *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(waker);
-    let on_enter: extern "C" fn(&AnyObject, Sel, &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation =
-        dragging_entered;
-    let on_drop: extern "C" fn(&AnyObject, Sel, &ProtocolObject<dyn NSDraggingInfo>) -> Bool =
-        perform_drag;
     // SAFETY: both replace winit's methods of the same selectors with
     // functions of the same signatures; the casts only erase the arguments.
     unsafe {
-        entered.set_implementation(std::mem::transmute::<_, Imp>(on_enter));
-        perform.set_implementation(std::mem::transmute::<_, Imp>(on_drop));
+        entered.set_implementation(std::mem::transmute::<OnDrag<NSDragOperation>, Imp>(
+            dragging_entered,
+        ));
+        perform.set_implementation(std::mem::transmute::<OnDrag<Bool>, Imp>(perform_drag));
     }
     // SAFETY: plain AppKit calls on the main thread.
     let types = unsafe {
@@ -187,15 +188,18 @@ fn files(pb: &NSPasteboard) -> Option<Vec<std::path::PathBuf>> {
 
 fn image_types() -> Retained<NSArray<NSPasteboardType>> {
     // SAFETY: AppKit's constant strings.
-    unsafe { NSArray::from_vec(vec![NSPasteboardTypePNG.copy(), NSPasteboardTypeTIFF.copy()]) }
+    unsafe {
+        NSArray::from_vec(vec![
+            NSPasteboardTypePNG.copy(),
+            NSPasteboardTypeTIFF.copy(),
+        ])
+    }
 }
 
 fn has_image_in(pb: &NSPasteboard) -> bool {
     // SAFETY: a pasteboard read on the main thread.
     unsafe {
-        pb.availableTypeFromArray(&image_types())
-        .is_some()
-            || NSImage::canInitWithPasteboard(pb)
+        pb.availableTypeFromArray(&image_types()).is_some() || NSImage::canInitWithPasteboard(pb)
     }
 }
 
@@ -212,8 +216,8 @@ fn png_in(pb: &NSPasteboard) -> Option<Vec<u8>> {
             None => NSImage::initWithPasteboard(NSImage::alloc(), pb)?.TIFFRepresentation()?,
         };
         let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
-        let png =
-            rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())?;
+        let png = rep
+            .representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())?;
         Some(png.bytes().to_vec())
     }
 }

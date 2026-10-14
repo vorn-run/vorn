@@ -499,9 +499,8 @@ fn cursor_in(window: &Window) -> Option<(f32, f32)> {
     };
     let mut p = POINT { x: 0, y: 0 };
     // SAFETY: the handle is winit's live window; `p` is ours to write.
-    let ok = unsafe {
-        GetCursorPos(&mut p) != 0 && ScreenToClient(h.hwnd.get() as HWND, &mut p) != 0
-    };
+    let ok =
+        unsafe { GetCursorPos(&mut p) != 0 && ScreenToClient(h.hwnd.get() as HWND, &mut p) != 0 };
     let k = window.scale_factor() as f32;
     ok.then(|| (p.x as f32 / k, p.y as f32 / k))
 }
