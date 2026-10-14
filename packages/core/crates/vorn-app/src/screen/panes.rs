@@ -626,6 +626,7 @@ fn address_bar(s: &Screen<'_>, row: El, sid: &str, live: Option<&Live>, url: &st
             .rounded(999.0)
             .px(12.0)
             .py(4.0)
+            .frames(id)
             .bg(bg)
             .child(input.w_full()),
     )
@@ -930,6 +931,7 @@ fn tweak_control(s: &Screen<'_>, sid: &str, key: &str, t: &Tweak, live: Option<&
                                 white(0.08)
                             },
                         )
+                        .frames(id)
                         .child(field(id, label, "", TextStyle::ui(11.0), ink()).w_full()),
                 )
                 .child_if(unit.as_deref().map(|u| text(u, 10.5, faint()).silent()))
@@ -1751,6 +1753,7 @@ fn rail_field(s: &Screen<'_>, id: Id, name: &str, placeholder: &str) -> El {
         .rounded(4.0)
         .border(1.0, border)
         .bg(c(look::SURFACE_SUNKEN))
+        .frames(id)
         .child(textarea(id, name, placeholder, TextStyle::ui(12.0), ink()).w_full())
 }
 

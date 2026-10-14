@@ -83,6 +83,7 @@ fn boxed(s: &Screen<'_>, id: Id, el: El) -> El {
                 white(0.10)
             },
         )
+        .frames(id)
         .child(el.w_full())
 }
 
@@ -111,6 +112,7 @@ fn branch_box(s: &Screen<'_>, id: Id, name: &str, placeholder: &str) -> El {
                 white(0.10)
             },
         )
+        .frames(id)
         .child(ico("git-branch", 12.0, 2.0, c(look::GRAY_500)))
         .child(
             field(id, name, placeholder, TextStyle::ui(13.0), c(look::WHITE))

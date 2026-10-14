@@ -279,6 +279,7 @@ fn shell_picker(s: &Screen<'_>) -> El {
             .rounded(4.0)
             .bg(white(0.04))
             .border(1.0, if focus { white(0.25) } else { white(0.12) })
+            .frames(SHELL_PATH)
             .child(
                 crate::ui::field(
                     SHELL_PATH,
@@ -1446,6 +1447,7 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
                                     white(0.1)
                                 },
                             )
+                            .frames(id)
                             .child(
                                 crate::ui::field(
                                     id,

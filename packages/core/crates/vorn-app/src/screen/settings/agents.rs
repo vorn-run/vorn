@@ -26,6 +26,7 @@ fn input(s: &Screen<'_>, agent: &str, f: AgentField, value: String, placeholder:
         .rounded(6.0)
         .bg(Rgba::hexa(0, 0.3))
         .border(1.0, if focus { white(0.15) } else { white(0.06) })
+        .frames(id)
         .child(
             field(
                 id,
@@ -107,7 +108,15 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                     text(a.description, 11.0, c(look::GRAY_500))
                         .line_height(16.5)
                         .silent(),
-                ),
+                )
+                .child_if(s.st.agent_paths.get(a.key).map(|p| {
+                    let shown = crate::settings::home_relative(p);
+                    text(shown.as_str(), 11.0, c(look::GRAY_600))
+                        .mono()
+                        .line_height(16.5)
+                        .truncate()
+                        .role(Role::Label, format!("Found at {p}"))
+                })),
         );
     if modified(&cmd, a) {
         let id = s

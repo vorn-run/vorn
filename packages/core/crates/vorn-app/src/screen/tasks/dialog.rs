@@ -86,19 +86,24 @@ pub(in crate::screen) fn add_task(s: &Screen<'_>) -> El {
                     faint(),
                 )),
         );
-    let title = div().px(16.0).pt(12.0).pb(4.0).child(
-        field(
-            title_id(Form::Dialog),
-            "Task title",
-            "Task title",
-            TextStyle {
-                weight: 500,
-                ..TextStyle::ui(15.0)
-            },
-            primary(),
-        )
-        .w_full(),
-    );
+    let title = div()
+        .px(16.0)
+        .pt(12.0)
+        .pb(4.0)
+        .frames(title_id(Form::Dialog))
+        .child(
+            field(
+                title_id(Form::Dialog),
+                "Task title",
+                "Task title",
+                TextStyle {
+                    weight: 500,
+                    ..TextStyle::ui(15.0)
+                },
+                primary(),
+            )
+            .w_full(),
+        );
     let mut body = div()
         .id(Id::new("task-dialog-body"))
         .col()
@@ -410,6 +415,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
                 .rounded(8.0)
                 .bg(white(0.04))
                 .border(1.0, if focus { white(0.16) } else { white(0.08) })
+                .frames(field)
                 .child(
                     area(
                         field,

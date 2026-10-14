@@ -271,6 +271,8 @@ pub struct El {
     pub(crate) glyph: Option<Box<str>>,
     /// The glyph's ink, when it is not the content's.
     pub(crate) glyph_tint: Option<Rgba>,
+    /// The text field this box frames: a press on its padding edits that field.
+    pub(crate) frames: Option<Id>,
 }
 
 pub fn div() -> El {
@@ -298,6 +300,7 @@ pub fn div() -> El {
         layered: false,
         dashed: false,
         shadows: Vec::new(),
+        frames: None,
         backdrop_blur: None,
         glyph: None,
         glyph_tint: None,
@@ -897,6 +900,15 @@ impl El {
         self
     }
     /// Greys the element out of interaction: no clicks, focus or hover.
+    /// Frames text field `field` as a `<label>` does: a press anywhere in it edits the field.
+    pub fn frames(mut self, field: Id) -> El {
+        self.id = Some(field.child("frame"));
+        self.frames = Some(field);
+        self.cursor = Some(Cursor::Text);
+        self.sense = self.sense | Sense::HOVER;
+        self
+    }
+
     pub fn disabled(mut self, d: bool) -> El {
         self.a11y.disabled = d;
         if d {

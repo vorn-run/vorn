@@ -466,6 +466,8 @@ pub struct State {
     pub form: ProjectForm,
     /// Agents installed here, when known.
     pub installed: Option<Vec<String>>,
+    /// Where each installed agent's program is.
+    pub agent_paths: HashMap<String, String>,
     /// The selected card's terminal takes the keys on the next frame, as
     /// today's `term.focus()` after a jump or a new session.
     pub focus_terminal: bool,

@@ -131,6 +131,7 @@ fn input(
         .py(if size < 13.0 { 6.0 } else { 8.0 })
         .rounded(6.0)
         .bg(bg)
+        .frames(id)
         .border(1.0, if focus { white(0.2) } else { border })
         .child(
             field(id, placeholder, placeholder, style, c(look::WHITE))
@@ -175,6 +176,7 @@ fn var_area(
         .py(8.0)
         .rounded(6.0)
         .bg(white(0.06))
+        .frames(id)
         .border(1.0, if focus { white(0.2) } else { white(0.10) })
         .child(
             textarea(id, placeholder, placeholder, style, c(look::WHITE))
@@ -708,6 +710,7 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
                                 .rounded(4.0)
                                 .bg(white(0.04))
                                 .border(1.0, white(0.08))
+                                .frames(fid)
                                 .child(
                                     field(
                                         fid,
@@ -1473,6 +1476,7 @@ pub fn node_panel(s: &Screen<'_>, d: &Draft, n: &Value) -> El {
                 .py(2.0)
                 .rounded(4.0)
                 .bg(white(lhot))
+                .frames(lid)
                 .child(
                     field(
                         lid,
@@ -2040,6 +2044,7 @@ fn inputs_editor(s: &Screen<'_>, id: &str, n: &Value) -> El {
                         white(0.10)
                     },
                 )
+                .frames(fid)
                 .child(
                     field(
                         fid,
@@ -2497,6 +2502,7 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             s.acts
                 .text(fid, Act::Workflow(WfAct::Text(b)), cfg_str(n, "branch"));
             row = row
+                .frames(fid)
                 .child(ico("git-branch", 12.0, 2.0, c(look::GRAY_500)))
                 .child(
                     field(
@@ -2699,7 +2705,13 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
         let mut schema = vec![
             label("Output Schema"),
             div().w_full().px(12.0).py(8.0).rounded(6.0).bg(white(0.06))
-                .border(1.0, if err.is_some() { Rgba::hexa(look::DANGER, 0.5) } else { white(0.10) })
+                .border(1.0, match (err.is_some(), s.ui.focused(fid)) {
+                    (true, true) => Rgba::hexa(look::DANGER, 0.7),
+                    (true, false) => Rgba::hexa(look::DANGER, 0.5),
+                    (false, true) => white(0.2),
+                    (false, false) => white(0.10),
+                })
+                .frames(fid)
                 .child(textarea(fid, "Output Schema", "{\n  \"type\": \"object\",\n  \"properties\": { \"verdict\": { \"type\": \"string\" } },\n  \"required\": [\"verdict\"]\n}", TextStyle { line_height: 18.0, ..TextStyle::mono(12.0) }, c(look::WHITE)).w_full().h(6.0 * 18.0)),
         ];
         schema.push(match err {
@@ -3242,7 +3254,15 @@ fn http_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
                         .py(6.0)
                         .rounded(4.0)
                         .bg(white(0.03))
-                        .border(1.0, white(0.08))
+                        .border(
+                            1.0,
+                            if s.ui.focused(nid) {
+                                white(0.2)
+                            } else {
+                                white(0.08)
+                            },
+                        )
+                        .frames(nid)
                         .child(
                             field(
                                 nid,
@@ -3618,6 +3638,7 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                         white(0.08)
                     },
                 )
+                .frames(sid)
                 .child(
                     field(
                         sid,

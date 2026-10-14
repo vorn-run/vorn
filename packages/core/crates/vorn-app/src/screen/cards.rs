@@ -926,6 +926,7 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
         .pl(16.0)
         .pr(8.0)
         .pt(if compact { 4.0 } else { 6.0 })
+        .frames(id)
         .pb(4.0)
         .child(glyph)
         .child(input);

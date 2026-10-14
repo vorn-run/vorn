@@ -299,6 +299,7 @@ pub fn composer(
         .rounded(6.0)
         .bg(white(0.03))
         .border(1.0, white(0.2))
+        .frames(id)
         .child(field_el);
     let from = config
         .and_then(|c| c.pointer("/feedback/from"))
@@ -396,6 +397,7 @@ pub fn editor(s: &Screen<'_>, key: &str, e: &Editor, large: bool, approve: bool)
         .py(8.0)
         .rounded(6.0)
         .bg(white(0.03))
+        .frames(edit_id(key))
         .border(1.0, white(0.2))
         .child(
             textarea(
@@ -851,6 +853,7 @@ fn cell(s: &Screen<'_>, key: &str, row: usize, r: &gates::Row, col: &str) -> El 
                         white(0.0).mix(white(0.2), hot)
                     },
                 )
+                .frames(id)
                 .child(
                     field(
                         id,

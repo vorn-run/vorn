@@ -1105,6 +1105,30 @@ pub const AGENTS: [Agent; 5] = [
     },
 ];
 
+/// `path` with a macOS or Linux home directory written as `~`.
+pub fn home_relative(path: &str) -> String {
+    for root in ["/Users/", "/home/"] {
+        if let Some(rest) = path.strip_prefix(root) {
+            if let Some(at) = rest.find('/') {
+                return format!("~{}", &rest[at..]);
+            }
+        }
+    }
+    path.to_owned()
+}
+
+/// `agent:locate`'s answer: the agents found, and where each one's program is.
+pub fn located(answer: &Value) -> Option<(Vec<String>, HashMap<String, String>)> {
+    let agents = answer.get("agents")?.as_object()?;
+    let paths: HashMap<String, String> = agents
+        .iter()
+        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+        .collect();
+    let mut found: Vec<String> = paths.keys().cloned().collect();
+    found.sort();
+    Some((found, paths))
+}
+
 pub fn agent(key: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|a| a.key == key)
 }
@@ -1252,6 +1276,28 @@ pub fn server_stays_up(config: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn reads_where_each_agent_was_found() {
+        let answer = serde_json::json!({
+            "agents": { "claude": "/h/.local/bin/claude", "codex": null, "gemini": "/opt/homebrew/bin/gemini" },
+            "shellResolved": true,
+        });
+        let (found, paths) = located(&answer).expect("answer");
+        assert_eq!(found, ["claude", "gemini"]);
+        assert_eq!(paths["claude"], "/h/.local/bin/claude");
+        assert!(!paths.contains_key("codex"));
+        assert_eq!(located(&serde_json::json!({ "claude": true })), None);
+        assert_eq!(
+            home_relative("/Users/me/.local/bin/claude"),
+            "~/.local/bin/claude"
+        );
+        assert_eq!(
+            home_relative("/opt/homebrew/bin/codex"),
+            "/opt/homebrew/bin/codex"
+        );
+    }
+
     use super::*;
     use serde_json::json;
 

@@ -8,9 +8,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use tracing::debug;
 use vorn_agents::history::{self, Homes, ProjectScope};
 use vorn_agents::models::{check_model_command, DiscoveryError, ModelRequest};
@@ -23,7 +23,8 @@ use super::{bad_params, env, Answer, Native};
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
-        "agent:detectInstalled" => detect_installed(native),
+        "agent:detectInstalled" => detect_installed(native, params),
+        "agent:locate" => locate(native, params),
         "agent:listModels" => list_models(native, params),
         "sessions:getRecent" => recent_sessions(native, params),
         _ => Answer::Unanswered,
@@ -86,31 +87,69 @@ pub(super) fn command_of(settings: &AgentSettings, agent: Agent) -> Option<Agent
     })
 }
 
-fn detect_installed(native: &Native) -> Answer {
-    let Some(settings) = settings(native) else {
-        return no_settings();
-    };
+/// How long detection waits for the login shell: the first answer after vornd starts should already be right.
+const DETECT_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a refresh waits for the shell asked again.
+const REFRESH_WAIT: Duration = Duration::from_secs(15);
+
+/// Where each agent's command is on the environment agents get, once the
+/// shell has answered or the wait ran out; `{ refresh: true }` asks the shell again first.
+fn found(native: &Native, params: &Value) -> Result<Vec<(Agent, Option<PathBuf>)>, Answer> {
+    let settings = settings(native).ok_or_else(no_settings)?;
     let mut commands = HashMap::with_capacity(Agent::ALL.len());
     for agent in Agent::ALL {
-        match command_of(&settings, agent) {
-            Some(command) => commands.insert(agent, command),
-            None => return unreadable_command(agent),
-        };
+        let command = command_of(&settings, agent).ok_or_else(|| unreadable_command(agent))?;
+        commands.insert(agent, command);
     }
+    let wait = if truthy(params.get("refresh")) {
+        native.env.refresh();
+        REFRESH_WAIT
+    } else {
+        native.env.prime();
+        DETECT_WAIT
+    };
+    native.env.settle(wait);
     let env = native.env.get();
-    let found = detect::installed(
+    Ok(detect::locate(
         |agent| {
             commands
                 .remove(&agent)
                 .unwrap_or_else(|| agent.default_command())
         },
         path_of(&env),
-    );
-    let mut out = Map::new();
-    for (agent, installed) in found {
-        out.insert(agent.id().to_owned(), Value::Bool(installed));
+    ))
+}
+
+fn detect_installed(native: &Native, params: &Value) -> Answer {
+    match found(native, params) {
+        Ok(found) => Answer::Result(Value::Object(
+            found
+                .into_iter()
+                .map(|(agent, at)| (agent.id().to_owned(), Value::Bool(at.is_some())))
+                .collect(),
+        )),
+        Err(answer) => answer,
     }
-    Answer::Result(Value::Object(out))
+}
+
+/// Each agent's resolved program, or null, and whether the login shell has answered.
+fn locate(native: &Native, params: &Value) -> Answer {
+    match found(native, params) {
+        Ok(found) => {
+            let agents: Map<String, Value> = found
+                .into_iter()
+                .map(|(agent, at)| {
+                    let at = at.map_or(Value::Null, |p| {
+                        Value::String(p.to_string_lossy().into_owned())
+                    });
+                    (agent.id().to_owned(), at)
+                })
+                .collect();
+            Answer::Result(json!({ "agents": agents, "shellResolved": native.env.resolved() }))
+        }
+        Err(answer) => answer,
+    }
 }
 
 /// `env.PATH ?? env.Path`.

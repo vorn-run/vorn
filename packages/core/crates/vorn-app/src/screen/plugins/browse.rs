@@ -76,6 +76,7 @@ fn search(s: &Screen<'_>) -> El {
         .rounded(R)
         .bg(white(0.05))
         .border(1.0, white(0.1).mix(white(0.2), focus))
+        .frames(id)
         .child(ico("search", 12.0, 2.0, k::GRAY_600))
         .child(
             field(

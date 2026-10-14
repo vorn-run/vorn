@@ -157,7 +157,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
         .gap(6.0)
         .child(ico("git-branch", 11.0, 2.0, faint()))
         .child(
-            div().grow().min_w0().py(2.0).child(
+            div().grow().min_w0().py(2.0).frames(branch_id()).child(
                 field(
                     branch_id(),
                     "Branch",
@@ -312,6 +312,7 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
                 .rounded(6.0)
                 .bg(white(0.03))
                 .border(1.0, white(0.10))
+                .frames(image_id(form))
                 .child(
                     field(
                         image_id(form),
@@ -641,6 +642,7 @@ pub(super) fn panel(s: &Screen<'_>) -> Option<El> {
             .py(2.0)
             .rounded(4.0)
             .bg(white(if title_focus { 0.02 } else { 0.0 }))
+            .frames(title_id(Form::Detail))
             .child(
                 field(
                     title_id(Form::Detail),
