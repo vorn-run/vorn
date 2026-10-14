@@ -1698,6 +1698,9 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
                 Ok(Event::Effect(fx, Effect::Status(code))) => {
                     registry.screen_status(&fx.session, code, Stamp::from(&fx));
                 }
+                Ok(Event::Effect(fx, Effect::Program(p))) => {
+                    registry.program_status(&fx.session, &p, Stamp::from(&fx));
+                }
                 Ok(Event::Effect(fx, Effect::Exit { code, signal })) => {
                     registry.headless_exit(&fx.session, ended_with(code, signal), Stamp::from(&fx));
                 }
@@ -1715,6 +1718,9 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
                     for h in held {
                         if let Some(s) = h.status {
                             registry.screen_status(&h.session, s.value, Stamp::from(&s.id));
+                        }
+                        if let Some(p) = h.program {
+                            registry.program_status(&h.session, &p.value, Stamp::from(&p.id));
                         }
                         if let Some(e) = h.exit {
                             let (code, signal) = e.value;

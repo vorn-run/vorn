@@ -256,6 +256,10 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             None => bad_params(method),
         },
         "sessions:clear" => clear(native),
+        "terminal:seen" => match params.get("id").and_then(Value::as_str) {
+            Some(id) => seen(native, id),
+            None => bad_params(method),
+        },
         "shell:create" => match params {
             Value::Null => shell_create(native, None),
             Value::String(cwd) if cwd.is_empty() => shell_create(native, None),
@@ -1188,6 +1192,7 @@ fn skeleton(id: &str, agent: &str, project_name: &str, project_path: &str) -> Te
         head_commit: None,
         shell_exit_code: None,
         saved_at: None,
+        program_status: None,
         rev: None,
         status_at: None,
         exit_at: None,
@@ -1713,6 +1718,18 @@ fn set_fields(native: &Native, id: &str, fields: Map<String, Value>) -> Answer {
             Answer::Void
         }
         Some(Err(e)) => Answer::Error(e.to_string()),
+        None => not_ready(),
+    }
+}
+
+/// `terminal:seen`: a person looked at the terminal, so what its program
+/// finished is no longer new.
+fn seen(native: &Native, id: &str) -> Answer {
+    match native.registry.get() {
+        Some(registry) => {
+            registry.seen(id);
+            Answer::Void
+        }
         None => not_ready(),
     }
 }

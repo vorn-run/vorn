@@ -66,7 +66,9 @@ use tokio::time::Instant;
 use vorn_term_proto::Cursor;
 
 mod moves;
+mod program;
 pub use moves::WorktreeMove;
+pub use program::{EntryState, ProgramEntry, ProgramStatus, WaitKind};
 
 /// Notes kept for a subscriber that is behind; one further behind sees a gap
 /// in the revisions and asks for the whole registry.
@@ -269,6 +271,9 @@ pub struct TerminalSession {
     pub shell_exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved_at: Option<i64>,
+    /// What the program reports of itself (OSC 7501).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_status: Option<ProgramStatus>,
     /// The registry revision of this record. Set only on what the registry
     /// tells subscribers: the server's own records do not carry one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,6 +408,7 @@ impl Record for TerminalSession {
         self.status = held.status;
         self.status_source = held.status_source;
         self.hook_session_id.clone_from(&held.hook_session_id);
+        self.program_status.clone_from(&held.program_status);
     }
     fn keep_patched(&mut self, held: &Self) {
         self.display_name.clone_from(&held.display_name);
@@ -881,6 +887,9 @@ struct Statuses {
     /// said so, kept while the engine holds the session as `screens` are:
     /// a record put in later starts from it.
     exits: HashMap<String, (i32, Stamp)>,
+    /// Each session's program status records, with the effect that set
+    /// them, kept as `screens` are.
+    programs: HashMap<String, (vorn_engine::Programs, Stamp)>,
 }
 
 /// The registry: every record the server holds, as it last told them.
@@ -1156,6 +1165,9 @@ impl Registry {
     /// A new terminal's record starts from what its screen last showed, as
     /// [`Registry::screen_status`] would have set it.
     fn seed(&mut self, id: &str) {
+        if let Some((p, at)) = self.statuses.as_ref().and_then(|st| st.programs.get(id)).cloned() {
+            self.take_program(id, &p, at);
+        }
         let Some(&(status, at)) = self.statuses.as_ref().and_then(|st| st.screens.get(id)) else {
             return;
         };
@@ -1246,7 +1258,7 @@ impl Registry {
         let row = self
             .terminals
             .get(id)
-            .filter(|r| !r.ended && !is_shell(r))?;
+            .filter(|r| !r.ended && !is_shell(r) && !reports_itself(r))?;
         let hooks = row.record.status_source == Some(StatusSource::Hooks);
         let wake = row.record.status == AgentStatus::Idle
             && !hooks
@@ -1271,6 +1283,7 @@ impl Registry {
             return Ok(None);
         };
         let woken = row.record.status_source != Some(StatusSource::Hooks)
+            && !reports_itself(row)
             && matches!(row.record.status, AgentStatus::Idle | AgentStatus::Waiting);
         let at = receipt(head, row.status_at);
         Ok(if woken {
@@ -1294,8 +1307,9 @@ impl Registry {
             return Ok(Vec::new());
         };
         let at = receipt(head, row.status_at);
+        let reports = reports_itself(row);
         let mut notes = Vec::new();
-        if let Some(status) = call.status {
+        if let Some(status) = call.status.filter(|_| !reports) {
             notes.extend(self.set_status(id, status, at));
         }
         if call.promote {
@@ -1310,6 +1324,67 @@ impl Registry {
             }
         }
         Ok(notes)
+    }
+
+    /// A program status effect of session `id` (OSC 7501), kept for a
+    /// record put in later as screen statuses are. While the program
+    /// reports, its records decide the terminal's status; when it stops
+    /// (a prompt or its exit), the screen's last status does again.
+    pub fn program_status(&mut self, id: &str, p: &vorn_engine::Programs, at: Stamp) -> Option<Value> {
+        let st = self.statuses.as_mut()?;
+        match st.programs.get(id) {
+            Some(&(_, held)) if at < held => return None,
+            _ => {}
+        }
+        st.programs.insert(id.to_owned(), (p.clone(), at));
+        self.take_program(id, p, at)
+    }
+
+    fn take_program(&mut self, id: &str, p: &vorn_engine::Programs, at: Stamp) -> Option<Value> {
+        let screen = self
+            .statuses
+            .as_ref()
+            .and_then(|st| st.screens.get(id))
+            .map(|&(s, _)| s);
+        let row = self.terminals.get_mut(id).filter(|r| !r.ended)?;
+        let was = row.record.program_status.take();
+        let next = ProgramStatus::read(p, was.as_ref());
+        let stopped = was.as_ref().is_some_and(|w| w.native) && !p.native;
+        let status = match next.as_ref().and_then(ProgramStatus::status) {
+            Some(s) => Some(s),
+            None if stopped => Some(if follows_screen(row) {
+                screen.unwrap_or(AgentStatus::Idle)
+            } else {
+                AgentStatus::Idle
+            }),
+            None => None,
+        };
+        let mut changed = was != next;
+        row.record.program_status = next;
+        if let Some(status) = status {
+            if row.record.status != status && !stale(Some(at), row.status_at) {
+                row.record.status = status;
+                row.status_at = Some(at);
+                changed = true;
+            }
+        }
+        if p.native {
+            self.quiet(id);
+        }
+        if changed {
+            self.decided(id)
+        } else {
+            None
+        }
+    }
+
+    /// A person looked at terminal `id`: a finished report is seen.
+    pub fn seen(&mut self, id: &str) -> Option<Value> {
+        let p = self.terminals.get_mut(id)?.record.program_status.as_mut()?;
+        if !std::mem::take(&mut p.unseen) {
+            return None;
+        }
+        self.decided(id)
     }
 
     /// Sets fields of [`PATCHABLE`] on a terminal's record.
@@ -1372,6 +1447,7 @@ impl Registry {
         if let Some(st) = &mut self.statuses {
             st.screens.remove(id);
             st.exits.remove(id);
+            st.programs.remove(id);
         }
     }
 
@@ -1417,7 +1493,7 @@ impl Registry {
         due.iter()
             .filter_map(|id| {
                 let row = self.terminals.get(id)?;
-                if row.record.status != AgentStatus::Running {
+                if row.record.status != AgentStatus::Running || reports_itself(row) {
                     return None;
                 }
                 let at = receipt(head(id), row.status_at);
@@ -1903,7 +1979,9 @@ impl Registry {
         let mut aged = 0;
         let mut offered: Vec<Restored> = Vec::with_capacity(c.terminals.len() + c.restored.len());
         let fresh = |ended_at: i64| now - ended_at <= MAX_RESTORED_AGE_MS;
-        for t in c.terminals {
+        for mut t in c.terminals {
+            // The session holder tells what its program reports again.
+            t.program_status = None;
             let ended_at = t.saved_at.unwrap_or(t.created_at);
             if !fresh(ended_at) {
                 aged += 1;
@@ -2155,7 +2233,18 @@ fn is_shell(row: &Row<TerminalSession>) -> bool {
 /// Whether a terminal's status follows its screen: an agent still running
 /// whose hooks do not report its status.
 fn takes_screen(row: &Row<TerminalSession>) -> bool {
+    follows_screen(row) && !reports_itself(row)
+}
+
+/// Whether a terminal's screen decides its status when its program does not report it.
+fn follows_screen(row: &Row<TerminalSession>) -> bool {
     !row.ended && !is_shell(row) && row.record.status_source != Some(StatusSource::Hooks)
+}
+
+/// Whether a terminal's program reports its own status (OSC 7501): then
+/// neither its hooks nor its screen decide it.
+fn reports_itself(row: &Row<TerminalSession>) -> bool {
+    row.record.program_status.as_ref().is_some_and(|p| p.native)
 }
 
 /// The registry as vornd shares it, with each change told to subscribers.
@@ -2347,6 +2436,20 @@ impl SessionRegistry {
     pub fn screen_status(&self, id: &str, code: u32, at: Stamp) {
         let mut fed = self.lock();
         let note = fed.registry.screen_status(id, code, at);
+        self.tell(note);
+    }
+
+    /// [`Registry::program_status`].
+    pub fn program_status(&self, id: &str, p: &vorn_engine::Programs, at: Stamp) {
+        let mut fed = self.lock();
+        let note = fed.registry.program_status(id, p, at);
+        self.tell(note);
+    }
+
+    /// [`Registry::seen`].
+    pub fn seen(&self, id: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.seen(id);
         self.tell(note);
     }
 
@@ -3078,6 +3181,93 @@ mod tests {
         assert!(r
             .activity("a", None, t1 + Duration::from_secs(41))
             .is_none());
+    }
+
+    fn programs(native: bool, records: &[(&str, vorn_engine::ProgramState)]) -> vorn_engine::Programs {
+        vorn_engine::Programs {
+            native,
+            records: records
+                .iter()
+                .map(|&(id, state)| vorn_engine::ProgramRecord {
+                    id: id.into(),
+                    state,
+                    kind: (state == vorn_engine::ProgramState::Blocked)
+                        .then_some(vorn_engine::BlockedKind::Auth),
+                    progress: Some(60),
+                    app: "deploy".into(),
+                    title: String::new(),
+                    msg: format!("{id} step"),
+                    from_progress: false,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_program_reporting_its_status_decides_it_over_hooks_and_the_screen() {
+        use vorn_engine::ProgramState::{Blocked, Done, Working};
+        let mut r = deciding();
+        let t0 = Instant::now();
+        r.screen_status("a", IDLE, at(1, 1, 0));
+        let note = r.program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0)).unwrap();
+        assert_eq!(note["record"]["status"], "running");
+        assert_eq!(note["record"]["programStatus"]["native"], true);
+        assert_eq!(note["record"]["programStatus"]["records"][0]["progress"], 60);
+        let note = r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 3, 0)).unwrap();
+        assert_eq!(note["record"]["status"], "waiting");
+        assert_eq!(note["record"]["programStatus"]["records"][0]["kind"], "auth");
+        // Neither the screen, nor a hook, nor input, nor going quiet moves it.
+        assert!(r.screen_status("a", RUNNING, at(1, 4, 0)).is_none());
+        assert!(r.hook_status(&hook("a", Some("idle"), true), None, t0).unwrap().iter().all(|n| n["record"]["status"] == "waiting"));
+        assert!(r.input("a", None).unwrap().is_none());
+        assert!(r.activity("a", None, t0).is_none());
+        assert!(r.tick(t0 + Duration::from_secs(60), |_| None).is_empty());
+        assert_eq!(status(&r, "a"), AgentStatus::Waiting);
+        // A child record is a sub-row; the root still decides.
+        let note = r
+            .program_status("a", &programs(true, &[("", Working), ("build", Blocked)]), at(1, 5, 0))
+            .unwrap();
+        assert_eq!(note["record"]["status"], "running");
+        assert_eq!(note["record"]["programStatus"]["records"][1]["id"], "build");
+        assert_eq!(note["record"]["programStatus"]["records"][1]["app"], "deploy");
+        // A stale replay changes nothing.
+        assert!(r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 4, 9)).is_none());
+        let note = r.program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0)).unwrap();
+        assert_eq!(note["record"]["status"], "idle");
+        assert_eq!(note["record"]["programStatus"]["unseen"], true);
+        let note = r.seen("a").unwrap();
+        assert!(note["record"]["programStatus"].get("unseen").is_none());
+        assert!(r.seen("a").is_none());
+    }
+
+    #[test]
+    fn a_program_that_stops_reporting_hands_its_status_back() {
+        use vorn_engine::ProgramState::{Blocked, Done};
+        let mut r = deciding();
+        r.screen_status("a", RUNNING, at(1, 1, 0));
+        r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 2, 0)).unwrap();
+        r.screen_status("a", IDLE, at(1, 3, 0));
+        // Killed: the engine drops what was working or blocked.
+        let note = r.program_status("a", &programs(false, &[]), at(1, 4, 0)).unwrap();
+        assert_eq!(note["record"]["status"], "idle");
+        assert!(note["record"].get("programStatus").is_none());
+        assert_eq!(r.screen_status("a", WAITING, at(1, 5, 0)).unwrap()["record"]["status"], "waiting");
+        // What finished stays shown, but no longer decides.
+        r.program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0)).unwrap();
+        let note = r.program_status("a", &programs(false, &[("", Done)]), at(1, 7, 0)).unwrap();
+        assert_eq!(note["record"]["programStatus"]["native"], false);
+        assert_eq!(note["record"]["programStatus"]["unseen"], true);
+        assert!(r.screen_status("a", RUNNING, at(1, 8, 0)).is_some());
+    }
+
+    #[test]
+    fn a_record_put_in_later_starts_from_what_its_program_reported() {
+        let mut r = deciding();
+        r.program_status("b", &programs(true, &[("", vorn_engine::ProgramState::Blocked)]), at(1, 2, 0));
+        let note = r.apply(upsert(agent("b"))).unwrap();
+        assert_eq!(note["record"]["status"], "waiting");
+        assert_eq!(note["record"]["programStatus"]["records"][0]["state"], "blocked");
+        r.session_closed("b");
     }
 
     #[test]
