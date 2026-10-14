@@ -36,6 +36,7 @@ members = [
   "crates/logfile",
   "crates/spawn",
   "bench/scale",
+  "bench/workflows",
 ]
 exclude = ["vendor"]
 
