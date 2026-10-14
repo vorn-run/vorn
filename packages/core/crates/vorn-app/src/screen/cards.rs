@@ -582,7 +582,7 @@ pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
 
 /// TerminalPane's split: the finished commands (BlockLog), the running
 /// one (RunningCommand), then the live rows, all held to the bottom.
-fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
+pub(super) fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
     let sid = s.store.sessions[i].info.id.as_str();
     let cell_h = s.ui.text.cell_logical().1;
     let mut col = div().col().grow().min_h(0.0).justify_end();

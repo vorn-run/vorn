@@ -77,6 +77,9 @@ pub trait App: 'static {
     fn background(&self) -> Rgba {
         crate::theme::color::SURFACE_BASE
     }
+    /// A press landed on the window's own surface, not on a native child view:
+    /// the time to take the keyboard back from such a view (WebView2 keeps it).
+    fn pressed(&mut self) {}
     /// The window exists, before it is first shown: for an app that seats
     /// native views (a web view) in it.
     fn opened(&mut self, _window: &Arc<Window>) {}

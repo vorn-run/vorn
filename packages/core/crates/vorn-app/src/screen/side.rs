@@ -1253,6 +1253,12 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
     if let Some((i, session)) = shell {
         let sid = session.info.id.as_str();
         let id = cards::term_id(sid);
+        // A shell showing blocks shows them here too: its live rows alone would hide every finished command.
+        let blocks = cards::split(s, session);
+        let body = match blocks {
+            Some(sh) => cards::split_body(s, i, sh),
+            None => custom(cards::CARD_ID_BASE + i as u64).grow(),
+        };
         let surface = div()
             .row()
             .grow()
@@ -1260,7 +1266,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
             .pt(2.0)
             .bg(c(look::SURFACE_SUNKEN))
             .child(div().w(8.0).shrink0())
-            .child(custom(cards::CARD_ID_BASE + i as u64).grow());
+            .child(body);
         s.acts
             .bind(id, pane(SideAct::FocusTerminal(sid.to_owned())));
         let surface = s
@@ -1270,8 +1276,12 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
                 id,
                 Act::Open(crate::state::MenuKind::Terminal(sid.to_owned())),
             )
-            .on(Action::Click)
-            .sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE);
+            .on(Action::Click);
+        let surface = if blocks.is_some() {
+            surface
+        } else {
+            surface.sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE)
+        };
         col = col
             .child(surface)
             .child_if(cards::composer(s, session, true));

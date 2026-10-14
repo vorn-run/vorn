@@ -16,6 +16,9 @@ pub struct Host {
 }
 
 impl Host {
+    /// Nothing holds the keyboard here.
+    pub fn release_keys(&self) {}
+
     pub fn new(_wake: Wake) -> Host {
         Host {
             frames: Frames::default(),

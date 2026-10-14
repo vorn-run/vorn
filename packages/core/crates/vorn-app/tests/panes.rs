@@ -63,6 +63,38 @@ fn tabs(app: &App, sid: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The page's view sits in its pane, under the address bar, in physical
+/// pixels at the window's scale: never scaled twice off the pane.
+fn page_under_its_address_bar(shot: &mut Shot, app: &mut App, address: Id) {
+    for scale in [1.0, 2.0] {
+        let mut at = Shot::at(shot.size, scale);
+        at.frame(app);
+        let bar = at.ui.rect_of(address).expect("address bar");
+        let placed: Vec<_> = app.placed_pages().values().copied().collect();
+        assert_eq!(placed.len(), 1, "one page shown");
+        let page = placed[0];
+        let (x, y) = (page.x / scale, page.y / scale);
+        let (right, bottom) = ((page.x + page.w) / scale, (page.y + page.h) / scale);
+        assert!(
+            y >= bar.y + bar.h - 1.0,
+            "below the bar at {scale}x: {page:?} {bar:?}"
+        );
+        assert!(
+            x <= bar.x && right >= bar.x + bar.w,
+            "as wide as the pane at {scale}x"
+        );
+        assert!(
+            right <= at.size.0 + 0.5 && bottom <= at.size.1 + 0.5,
+            "inside the window at {scale}x"
+        );
+        assert!(
+            y - (bar.y + bar.h) < 40.0,
+            "right under the bar at {scale}x"
+        );
+    }
+    shot.frame(app);
+}
+
 #[test]
 fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     let Some(v) = TestVornd::start() else {
@@ -85,6 +117,7 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     shot.type_line(&mut app, "localhost:3000");
     assert_eq!(tabs(&app, &sid), ["http://localhost:3000/"]);
     shot.save(&mut app, "browser");
+    page_under_its_address_bar(&mut shot, &mut app, address);
 
     // Escape puts the address back to the page actually loaded.
     shot.click(&mut app, address);

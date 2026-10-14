@@ -395,7 +395,10 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 ..
             } => {
                 match state {
-                    ElementState::Pressed => l.ui.pointer_down(),
+                    ElementState::Pressed => {
+                        l.app.pressed();
+                        l.ui.pointer_down();
+                    }
                     ElementState::Released => l.ui.pointer_up(),
                 }
                 l.dispatch();
@@ -405,6 +408,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 button: MouseButton::Right,
                 ..
             } => {
+                l.app.pressed();
                 l.ui.pointer_down_secondary();
                 l.dispatch();
             }

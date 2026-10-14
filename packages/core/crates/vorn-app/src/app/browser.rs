@@ -138,6 +138,8 @@ pub struct Web {
     asked: HashSet<String>,
     /// Each view's size as last shown, in logical pixels.
     areas: HashMap<String, (f32, f32)>,
+    /// Where each view was last put, physical pixels.
+    placed: HashMap<String, Rect>,
     wake: Wake,
 }
 
@@ -155,6 +157,7 @@ impl Web {
             painted: HashMap::new(),
             asked: HashSet::new(),
             areas: HashMap::new(),
+            placed: HashMap::new(),
             wake,
         }
     }
@@ -249,6 +252,11 @@ impl App {
         if !cfg!(target_arch = "wasm32") {
             self.answer_agents();
         }
+    }
+
+    /// A press on the app's own surface: the keyboard leaves the pages for it.
+    pub fn pressed(&mut self) {
+        self.web.host.release_keys();
     }
 
     /// Claims vornd's bridge: the agents' browser and device calls come here.
@@ -2186,25 +2194,36 @@ impl App {
                 continue;
             };
             let session = session_of(&slot.key);
-            let mut rect = *r;
-            if slot.key.contains("#board:") {
-                if let Some(area) = ui.rect_of(canvas_id(session)) {
-                    rect = clip(rect, area);
-                }
-            }
+            let board = slot
+                .key
+                .contains("#board:")
+                .then(|| ui.rect_of(canvas_id(session)))
+                .flatten();
+            let rect = page_rect(*r, board, k);
             if rect.w < 1.0 || rect.h < 1.0 {
                 continue;
             }
-            self.web.areas.insert(slot.key.clone(), (rect.w, rect.h));
+            self.web
+                .areas
+                .insert(slot.key.clone(), (rect.w / k, rect.h / k));
+            self.web.placed.insert(slot.key.clone(), rect);
             shown.push(web::Slot {
                 key: slot.key.clone(),
                 url: slot.url.clone(),
-                rect: rect.scaled(k),
+                rect,
                 zoom: slot.zoom,
                 profile: slot.profile.clone(),
             });
         }
+        self.web
+            .placed
+            .retain(|key, _| shown.iter().any(|s| &s.key == key));
         self.web.host.show(&shown);
+    }
+
+    /// Where each shown page's view was last put, physical pixels, by its key.
+    pub fn placed_pages(&self) -> &HashMap<String, Rect> {
+        &self.web.placed
     }
 }
 
@@ -2212,6 +2231,15 @@ impl Web {
     /// The page's size as last shown, for placing the popover in it.
     fn host_area(&self, key: &str) -> (f32, f32) {
         self.areas.get(key).copied().unwrap_or((800.0, 600.0))
+    }
+}
+
+/// Where a page's view goes, physical pixels: its laid-out box (already
+/// physical) inside the board's canvas (logical) when it sits on one.
+fn page_rect(laid: Rect, board: Option<Rect>, k: f32) -> Rect {
+    match board {
+        Some(area) => clip(laid, area.scaled(k)),
+        None => laid,
     }
 }
 
@@ -2231,6 +2259,33 @@ fn clip(r: Rect, to: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_view_takes_its_box_as_laid_out_not_scaled_again() {
+        let laid = Rect {
+            x: 1698.0,
+            y: 206.0,
+            w: 1180.0,
+            h: 1494.0,
+        };
+        assert_eq!(page_rect(laid, None, 2.0), laid);
+        let canvas = Rect {
+            x: 900.0,
+            y: 150.0,
+            w: 400.0,
+            h: 300.0,
+        };
+        let on_board = page_rect(laid, Some(canvas), 2.0);
+        assert_eq!(
+            on_board,
+            Rect {
+                x: 1800.0,
+                y: 300.0,
+                w: 800.0,
+                h: 600.0
+            }
+        );
+    }
 
     #[test]
     fn page_answers_unwrap_once_or_twice() {
