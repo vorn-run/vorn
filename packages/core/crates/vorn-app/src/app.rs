@@ -204,6 +204,8 @@ enum Picked {
 
 /// A call whose answer changes the screen.
 enum Call {
+    /// `terminal:listActive` as the app starts.
+    Sessions,
     /// The composer's `terminal:create`.
     Launch,
     /// A session or shell that should be selected once it exists.
@@ -385,14 +387,50 @@ pub struct App {
     cli_prompt: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
 }
 
+/// Everything connecting to vornd waits on (the RPC socket, the models, the
+/// grid), gathered on any thread; the window's thread makes the app of it.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct Connected {
+    ep: Endpoint,
+    rpc: Rpc,
+    events: Receiver<Event>,
+    store: Store,
+    grid: std::io::Result<Arc<Grid>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Connected {
+    /// Connects to the vornd at `ep`, loads the models and opens the grid;
+    /// `wake` runs whenever either has news for the next frame.
+    pub fn open(ep: &Endpoint, wake: Wake) -> Result<Connected, RpcError> {
+        let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
+        let store = Store::load(&rpc)?;
+        let grid = Grid::connect(&ep.grid, &ep.token, wake);
+        Ok(Connected {
+            ep: ep.clone(),
+            rpc,
+            events,
+            store,
+            grid,
+        })
+    }
+}
+
 impl App {
     /// Connects to the vornd at `ep`, loads the models and opens the grid;
     /// `wake` runs whenever either has news for the next frame.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
-        let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
-        let store = Store::load(&rpc)?;
-        Ok(App::with(ep, wake, rpc, events, store))
+        Ok(App::from_connected(
+            Connected::open(ep, Arc::clone(&wake))?,
+            wake,
+        ))
+    }
+
+    /// The app over a connection made elsewhere: cheap, nothing here waits on vornd.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_connected(c: Connected, wake: Wake) -> App {
+        App::with(&c.ep, wake, c.rpc, c.events, c.store, c.grid)
     }
 
     /// [`App::connect`] without holding the page's one thread.
@@ -400,17 +438,25 @@ impl App {
     pub async fn connect_async(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
         let store = Store::load_async(&rpc).await?;
-        let mut app = App::with(ep, wake, rpc, events, store);
+        let grid = Grid::connect(&ep.grid, &ep.token, Arc::clone(&wake));
+        let mut app = App::with(ep, wake, rpc, events, store, grid);
         app.chrome = false;
         app.traffic = false;
         Ok(app)
     }
 
-    fn with(ep: &Endpoint, wake: Wake, rpc: Rpc, events: Receiver<Event>, store: Store) -> App {
+    fn with(
+        ep: &Endpoint,
+        wake: Wake,
+        rpc: Rpc,
+        events: Receiver<Event>,
+        store: Store,
+        grid: std::io::Result<Arc<Grid>>,
+    ) -> App {
         let app_wake = Arc::clone(&wake);
         let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
-        let (grid, grid_error) = match Grid::connect(&ep.grid, &ep.token, wake) {
+        let (grid, grid_error) = match grid {
             Ok(g) => (Some(g), None),
             Err(e) => (None, Some(format!("grid {}: {e}", ep.grid))),
         };
@@ -479,6 +525,8 @@ impl App {
             cli_prompt: None,
         };
         app.see_projects();
+        // Asked, not waited on: vornd holds it back while its session holder catches up.
+        app.call(Call::Sessions, "terminal:listActive", Value::Null);
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:locate", Value::Null);
@@ -929,6 +977,14 @@ impl App {
                 }
             }
             Call::Restored => self.restored(list(answer)),
+            Call::Sessions => match answer {
+                Ok(v) => self.store.take_sessions(v),
+                Err(e) => {
+                    self.store.sessions_known = true;
+                    self.st
+                        .toast(format!("Could not list the sessions: {e}"), true);
+                }
+            },
             Call::Installed => {
                 if let Some((found, paths)) =
                     answer.ok().as_ref().and_then(crate::settings::located)

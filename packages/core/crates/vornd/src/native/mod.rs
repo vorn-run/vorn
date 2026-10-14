@@ -647,6 +647,18 @@ impl Native {
         if sessions::starts(&method) {
             self.await_holder().await;
         }
+        // Waits on vornd's own start (the holder's sessions, the login shell) hold no slot,
+        // so the calls a client makes as it opens are not queued behind them.
+        if reads_what_runs(&method) {
+            if let Some(registry) = self.registry.get().cloned() {
+                let _ = tokio::task::spawn_blocking(move || registry.settle(SETTLE_LIMIT)).await;
+            }
+        }
+        if agent::waits_for_shell(&method) {
+            let native = Arc::clone(self);
+            let p = params.clone();
+            let _ = tokio::task::spawn_blocking(move || agent::prepare(&native, &p)).await;
+        }
         let Ok(_slot) = self.slots.acquire().await else {
             return Answer::Error(format!("{method} failed in vornd: it is stopping"));
         };

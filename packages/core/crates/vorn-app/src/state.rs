@@ -581,7 +581,8 @@ impl State {
     /// blame, so the composer stands in for the grid (`PromptLauncher`
     /// inline).
     pub fn composer_inline(&self, store: &Store) -> bool {
-        self.view == MainView::Sessions
+        store.sessions_known
+            && self.view == MainView::Sessions
             && self.focused.is_none()
             && (store.scoped_sessions().next().is_none()
                 || (self.layout == LayoutMode::Grid
