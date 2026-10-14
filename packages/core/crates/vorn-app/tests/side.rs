@@ -614,13 +614,6 @@ fn a_ready_update_is_offered_in_the_sidebar_until_dismissed() {
     );
 }
 
-/// What `id`'s screen shows, line by line.
-fn lines(app: &App, id: &str) -> Vec<String> {
-    app.pane(id)
-        .map(|p| p.text().lines().map(str::to_owned).collect())
-        .unwrap_or_default()
-}
-
 #[test]
 fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
     let Some(v) = TestVornd::start() else {
