@@ -72,7 +72,14 @@ for (let i = 0; i < 22; i++) {
         name: `Workflow ${i}`,
         icon: 'Zap',
         iconColor: '#6366f1',
-        nodes: [{ id: 'trigger', type: 'trigger', position: { x: 0, y: 0 }, data: { triggerType: 'manual' } }],
+        nodes: [
+          {
+            id: 'trigger',
+            type: 'trigger',
+            position: { x: 0, y: 0 },
+            data: { triggerType: 'manual' }
+          }
+        ],
         edges: []
       }
     })
