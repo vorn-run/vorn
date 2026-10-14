@@ -646,24 +646,12 @@ fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
             .get(&sid)
             .and_then(|p| p.terminals.first().cloned())
     });
-    let prompt = (0..300).any(|_| {
-        shot.frame(&mut app);
-        app.pump();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        lines(&app, &held).iter().any(|l| !l.trim().is_empty())
+    shot.until(&mut app, "its first prompt", |a, _| {
+        a.st.shells
+            .get(&held)
+            .is_some_and(|sh| sh.integrated())
+            .then_some(())
     });
-    assert!(
-        prompt,
-        "no prompt: split={} pane={} vornd log:\n{}",
-        app.is_split(&held),
-        app.pane(&held).is_some(),
-        v.log()
-            .lines()
-            .rev()
-            .take(40)
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
     shot.click(&mut app, vorn_app::screen::term_id(&held));
     shot.until(&mut app, "the marked prompt", |a, _| {
         a.is_split(&held).then_some(())
@@ -675,9 +663,10 @@ fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
     shot.until(&mut app, "the panel's log of finished commands", |_, ui| {
         ui.rect_of(log).filter(|r| r.h > 1.0).map(|_| ())
     });
-    shot.until(&mut app, "both answers", |a, _| {
-        let text = lines(a, &held).join("\n");
-        (text.contains("first-2") && text.contains("second-3")).then_some(())
+    shot.until(&mut app, "both commands as blocks", |a, _| {
+        let blocks = &a.st.shells.get(&held)?.blocks;
+        let done = |c: &str| blocks.iter().any(|b| b.command.as_deref() == Some(c));
+        (done("echo first-$((1+1))") && done("echo second-$((1+2))")).then_some(())
     });
     for _ in 0..30 {
         shot.frame(&mut app);
