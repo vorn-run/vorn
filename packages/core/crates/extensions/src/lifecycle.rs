@@ -515,8 +515,12 @@ mod tests {
             .unwrap()
             .child()
             .pid();
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(l.running().is_empty(), "idle past its time");
+        // The reaper stops it once idle; the bound only keeps a hang from running on.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while !l.running().is_empty() {
+            assert!(tokio::time::Instant::now() < deadline, "idle past its time");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let again = l
             .get_or_start(&key, || async { sleeper("a") })
             .await
@@ -539,11 +543,15 @@ mod tests {
                 .get_or_start(&key, || async { sleeper("a") })
                 .await
                 .unwrap();
-            let pid = lease.child().pid().unwrap();
+            let service = lease.shared();
+            let pid = service.child().pid().unwrap();
             drop(lease);
             // SAFETY: kill(2) on a child this test started and still holds.
             unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // The crash counts once its exit is seen; the bound only keeps a hang from running on.
+            tokio::time::timeout(Duration::from_secs(30), service.child().wait())
+                .await
+                .expect("the killed child is seen to end");
         }
         assert!(l.get::<Sleeper>(&key).is_none());
         let err = l

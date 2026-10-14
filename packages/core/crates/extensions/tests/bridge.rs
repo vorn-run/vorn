@@ -19,6 +19,10 @@ use vorn_extensions::router::{Router, RouterSettings};
 
 const PROGRAM: &str = include_str!("fixtures/program.mjs");
 
+/// How long a wait for something that should happen may run before the test fails:
+/// a safety net for a loaded machine, never the expected time.
+const SAFETY: Duration = Duration::from_secs(30);
+
 fn node() -> bool {
     let found = std::process::Command::new("node")
         .arg("--version")
@@ -211,7 +215,8 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 let reached = b.router.emit("test.ping", json!({ "n": 1 })).await;
                 assert_eq!(reached, 1);
                 let mut events = Value::Null;
-                for _ in 0..50 {
+                let deadline = Instant::now() + SAFETY;
+                while Instant::now() < deadline {
                     events = b.call("a", "events", json!({})).await.unwrap();
                     if events.as_array().is_some_and(|e| !e.is_empty()) {
                         break;
@@ -244,7 +249,8 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 );
                 let row = sample["ops"][0]["upsert"].clone();
                 let mut rows = Vec::new();
-                for _ in 0..50 {
+                let deadline = Instant::now() + SAFETY;
+                while Instant::now() < deadline {
                     rows = b.router.rows("a", sample["collection"].as_str().unwrap());
                     if !rows.is_empty() {
                         break;
@@ -373,13 +379,14 @@ fn alive(pid: u64) -> bool {
 }
 
 async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    for _ in 0..300 {
+    let deadline = Instant::now() + SAFETY;
+    while Instant::now() < deadline {
         if done() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("{what} did not happen");
+    panic!("{what} did not happen within {SAFETY:?}");
 }
 
 /// With 20 Node services installed and used once, none is running after the idle time.

@@ -329,10 +329,9 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
         .await
         .unwrap()["pid"]
         .clone();
-    for _ in 0..100 {
-        if lifecycle.running().is_empty() {
-            break;
-        }
+    // Idle stops it; thirty seconds is a safety net for a loaded machine, not the expected time.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !lifecycle.running().is_empty() && std::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(lifecycle.running().is_empty(), "it stops once idle");
