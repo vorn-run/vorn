@@ -7,7 +7,8 @@ if (process.argv.includes('--check')) {
   process.exit(0)
 }
 
-const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
+const send = (message) =>
+  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const { id, method, params = {} } = JSON.parse(line)

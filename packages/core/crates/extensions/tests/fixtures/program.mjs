@@ -3,7 +3,8 @@
 import process from 'node:process'
 import readline from 'node:readline'
 
-const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
+const send = (message) =>
+  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 const waiting = new Map()
 const events = []
 let inited = null
