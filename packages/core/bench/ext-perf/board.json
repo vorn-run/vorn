@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "view": {
+    "c": "board",
+    "group": "status",
+    "cardHeight": 92,
+    "columns": [
+      { "key": "todo", "label": "Todo", "icon": "circle", "tone": "slate" },
+      { "key": "in_progress", "label": "In Progress", "icon": "clock", "tone": "blue" },
+      { "key": "in_review", "label": "In Review", "icon": "eye", "tone": "bronze" },
+      { "key": "done", "label": "Done", "icon": "circle-check", "tone": "sage" },
+      { "key": "cancelled", "label": "Cancelled", "icon": "circle-x", "tone": "faint" }
+    ],
+    "card": {
+      "c": "card",
+      "on": { "drop": { "call": "task:setStatus", "args": { "id": "{row.id}", "status": "{column}" } } },
+      "children": [
+        {
+          "c": "row",
+          "justify": "between",
+          "pad_bottom": 6,
+          "children": [
+            { "c": "text", "role": "meta", "value": "{row.id|short}" },
+            { "c": "menu", "icon": "ellipsis" }
+          ]
+        },
+        {
+          "c": "row",
+          "gap": 6,
+          "children": [
+            { "c": "icon", "name": "{row.status|icon}", "tone": "{row.status}" },
+            { "c": "text", "role": "title", "value": "{row.title}", "grow": true }
+          ]
+        },
+        {
+          "c": "row",
+          "justify": "between",
+          "pad_top": 10,
+          "children": [
+            { "c": "icon", "name": "bot", "when": "row.assignedAgent", "size": 13 },
+            { "c": "text", "role": "secondary", "value": "Created {row.createdAt|date}" }
+          ]
+        }
+      ]
+    }
+  }
+}

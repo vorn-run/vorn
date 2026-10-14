@@ -133,6 +133,10 @@ impl Work {
         let polls = vorn_work::model::Workflow::from_json(&workflow)
             .is_some_and(|w| w.trigger_type() == Some("connectorPoll"));
         if !polls {
+            #[cfg(feature = "ext-spike")]
+            if self.spike_start(workflow.clone()) {
+                return;
+            }
             self.engine.run_scheduled(workflow_id, inputs).await;
             return;
         }

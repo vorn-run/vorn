@@ -1,0 +1,20 @@
+[package]
+name = "vorn-ext-perf-guest"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Tasks and the workflow step loop as built-in extensions run them, natively or inside a component, on vorn-work's own code"
+
+[dependencies]
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+vorn-protocol = { path = "../../../crates/protocol" }
+# Tasks' code names the store `vorn_store`; here that is the bridge.
+vorn_store = { package = "vorn-ext-perf-store-shim", path = "store-shim" }
+
+[dev-dependencies]
+vorn_store = { package = "vorn-ext-perf-store-shim", path = "store-shim", features = ["real"] }

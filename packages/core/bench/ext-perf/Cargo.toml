@@ -1,0 +1,29 @@
+[package]
+name = "vorn-ext-perf-bench"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Measures Tasks and Workflows built in against the same work as components: calls, runs, gates, schedules, board frames and memory"
+
+[[bin]]
+name = "vorn-ext-perf"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "macros", "time"] }
+tokio-tungstenite = "0.28"
+vorn-app = { path = "../../crates/vorn-app" }
+vorn-ext-perf-guest = { path = "guest" }
+vorn-ext-perf-host = { path = "host", features = ["compile"] }
+vorn-protocol = { path = "../../crates/protocol" }
+vorn-spawn = { path = "../../crates/spawn" }
+vorn-store = { path = "../../crates/store" }
+vorn-work = { path = "../../crates/work" }
+vornui = { path = "../../crates/vornui" }
+vorn_store_shim = { package = "vorn-ext-perf-store-shim", path = "guest/store-shim" }

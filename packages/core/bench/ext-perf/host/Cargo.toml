@@ -1,0 +1,16 @@
+[package]
+name = "vorn-ext-perf-host"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Runtime-only Wasmtime for built-in extensions: loads precompiled components, caps each call's memory and time, and answers their bridge"
+
+[features]
+# The compiler, for the bench that precompiles components; vornd links the runtime only.
+compile = ["wasmtime/cranelift"]
+
+[dependencies]
+wasmtime = { version = "49", default-features = false, features = ["runtime", "component-model", "std"] }
+wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }

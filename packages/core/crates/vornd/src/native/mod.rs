@@ -16,6 +16,8 @@ pub mod connectors;
 pub mod credential;
 pub mod desktop;
 pub mod env;
+#[cfg(feature = "ext-spike")]
+pub mod ext_spike;
 pub mod extensions;
 pub mod file;
 pub mod git;
@@ -532,6 +534,10 @@ impl Native {
         }
         if config::METHODS.contains(&method.as_str()) {
             return config::answer(self, &method, params, viewer).await;
+        }
+        #[cfg(feature = "ext-spike")]
+        if let Some(answer) = ext_spike::task(self, &method, &params).await {
+            return answer;
         }
         if tasks::METHODS.contains(&method.as_str()) {
             return tasks::answer(self, &method, params).await;

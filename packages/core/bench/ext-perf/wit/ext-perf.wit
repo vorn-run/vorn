@@ -1,0 +1,32 @@
+package vorn:ext-perf@0.1.0;
+
+/// What vornd lends a built-in extension: its storage, run fan-out and log.
+interface bridge {
+  /// One named storage operation, JSON arguments in and the JSON answer out.
+  db: func(op: string, args: string) -> result<string, string>;
+  /// A run changed: vornd tells viewers and writes it, in order.
+  run-changed: func(run: string);
+  /// One line in vornd's log at info level.
+  log: func(message: string);
+}
+
+/// Tasks as an extension: the board's store and methods.
+world tasks {
+  import bridge;
+  /// One `task:*` call: its answer (none for void) and whether the board changed.
+  export call: func(method: string, params: string, now: string, id: string) -> result<tuple<option<string>, bool>, string>;
+}
+
+/// The workflow step loop as an extension; vornd keeps the runs it parks.
+world workflows {
+  import bridge;
+  /// How a walk ended: `success`, `error`, or `parked` at a gate.
+  record outcome {
+    status: string,
+    steps: u32,
+  }
+  /// Starts a run of the workflow (stored JSON) and walks it until it ends or parks.
+  export start: func(workflow: string, run-id: string) -> result<outcome, string>;
+  /// Answers a parked gate on a stored run and walks on.
+  export resume: func(workflow: string, run: string, node-id: string, approve: bool) -> result<outcome, string>;
+}

@@ -1,0 +1,15 @@
+[package]
+name = "ext-perf-workflows"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+vorn-ext-perf-guest = { path = "../../guest" }
+vorn_store = { package = "vorn-ext-perf-store-shim", path = "../../guest/store-shim" }
+wit-bindgen = "0.62"
