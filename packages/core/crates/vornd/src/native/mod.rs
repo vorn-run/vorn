@@ -92,6 +92,7 @@ pub const METHODS: &[&str] = &[
     "pairing:deny",
     "pairing:cancel",
     "agent:detectInstalled",
+    "agent:locate",
     "agent:listModels",
     "sessions:getRecent",
     "sessions:restored",

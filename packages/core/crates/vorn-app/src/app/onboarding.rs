@@ -1,6 +1,6 @@
 //! What the welcome guide's controls and keys do.
 
-use serde_json::Value;
+use serde_json::json;
 
 use super::{App, Call, Src};
 use crate::act::Act;
@@ -34,7 +34,7 @@ impl App {
                 if let Some(found) = self.st.installed.take() {
                     self.st.onboard.detected = Some(found);
                 }
-                self.call(Call::Installed, "agent:detectInstalled", Value::Null);
+                self.call(Call::Installed, "agent:locate", json!({ "refresh": true }));
             }
             OnbAct::Then(then) => {
                 self.close_onboard(ui);

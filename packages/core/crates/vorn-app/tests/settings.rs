@@ -222,6 +222,23 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     open(&mut shot, &mut app, Category::Agents);
     shot.save(&mut app, "set-agents");
     let first = app.st.installed.clone().unwrap_or_default();
+    for k in &first {
+        let at = app.st.agent_paths.get(k).map(std::path::Path::new);
+        assert!(
+            at.is_some_and(|p| p.is_absolute() && p.ends_with(p.file_name().unwrap())),
+            "{k} at {at:?}"
+        );
+    }
+    // Re-detect asks the login shell again and answers where each agent is.
+    shot.click(
+        &mut app,
+        control("agents-redetect", Act::Set(SetAct::Redetect)),
+    );
+    assert!(app.st.settings.detecting);
+    shot.until(&mut app, "the re-detection", |app, _| {
+        (!app.st.settings.detecting).then_some(())
+    });
+    assert_eq!(app.st.installed.clone().unwrap_or_default(), first);
     if let Some(agent) = vorn_app::settings::AGENTS
         .iter()
         .find(|a| first.iter().any(|k| k == a.key))

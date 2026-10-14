@@ -180,13 +180,11 @@ impl App {
             }
             SetCall::Detected => {
                 st.detecting = false;
-                if let Ok(Value::Object(m)) = answer {
-                    self.st.installed = Some(
-                        m.into_iter()
-                            .filter(|(_, v)| v.as_bool() == Some(true))
-                            .map(|(k, _)| k)
-                            .collect(),
-                    );
+                if let Some((found, paths)) =
+                    answer.ok().as_ref().and_then(crate::settings::located)
+                {
+                    self.st.installed = Some(found);
+                    self.st.agent_paths = paths;
                 }
             }
         }
@@ -539,8 +537,8 @@ impl App {
                 self.st.settings.detecting = true;
                 self.call(
                     Call::Set(SetCall::Detected),
-                    "agent:detectInstalled",
-                    Value::Null,
+                    "agent:locate",
+                    json!({ "refresh": true }),
                 );
             }
             SetAct::ResetAgent(k) => {

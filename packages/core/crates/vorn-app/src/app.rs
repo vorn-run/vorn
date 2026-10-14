@@ -471,7 +471,7 @@ impl App {
         app.see_projects();
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
-        app.call(Call::Installed, "agent:detectInstalled", Value::Null);
+        app.call(Call::Installed, "agent:locate", Value::Null);
         app
     }
 
@@ -919,13 +919,11 @@ impl App {
             }
             Call::Restored => self.restored(list(answer)),
             Call::Installed => {
-                if let Ok(Value::Object(m)) = answer {
-                    let found = m
-                        .into_iter()
-                        .filter(|(_, v)| v.as_bool() == Some(true))
-                        .map(|(k, _)| k)
-                        .collect();
+                if let Some((found, paths)) =
+                    answer.ok().as_ref().and_then(crate::settings::located)
+                {
                     self.st.installed = Some(found);
+                    self.st.agent_paths = paths;
                 }
             }
             Call::Worktrees(path) => {

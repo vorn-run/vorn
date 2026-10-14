@@ -6,56 +6,71 @@
 //! configuration is saved. This looks on PATH itself, which costs a few
 //! `stat`s, and keeps nothing: an agent installed meanwhile is found.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{Agent, AgentCommand};
 
 /// Whether each agent is installed, in [`Agent::ALL`]'s order. `command_of`
 /// gives the agent's configured command; `path_env` is the PATH to search.
 pub fn installed(
-    mut command_of: impl FnMut(Agent) -> AgentCommand,
+    command_of: impl FnMut(Agent) -> AgentCommand,
     path_env: Option<&str>,
 ) -> Vec<(Agent, bool)> {
+    locate(command_of, path_env)
+        .into_iter()
+        .map(|(agent, at)| (agent, at.is_some()))
+        .collect()
+}
+
+/// Where each agent's command, or else its fallback, is, in [`Agent::ALL`]'s order.
+pub fn locate(
+    mut command_of: impl FnMut(Agent) -> AgentCommand,
+    path_env: Option<&str>,
+) -> Vec<(Agent, Option<PathBuf>)> {
     Agent::ALL
         .into_iter()
         .map(|agent| {
             let config = command_of(agent);
-            let found = command_exists(&config.command, path_env)
-                || config
+            let at = command_path(&config.command, path_env).or_else(|| {
+                config
                     .fallback_command
                     .as_deref()
-                    .is_some_and(|fallback| command_exists(fallback, path_env));
-            (agent, found)
+                    .and_then(|fallback| command_path(fallback, path_env))
+            });
+            (agent, at)
         })
         .collect()
 }
 
-/// Whether `which name` succeeds: a name with a separator is a path to a
-/// program, any other is looked for in each directory of `path_env`.
+/// Whether `which name` succeeds.
 pub fn command_exists(name: &str, path_env: Option<&str>) -> bool {
+    command_path(name, path_env).is_some()
+}
+
+/// What `which name` prints: a name with a separator is a path to a
+/// program, any other is looked for in each directory of `path_env`.
+pub fn command_path(name: &str, path_env: Option<&str>) -> Option<PathBuf> {
     if name.is_empty() {
-        return false;
+        return None;
     }
     if name.contains('/') || (cfg!(windows) && name.contains('\\')) {
-        return program(Path::new(name));
+        return program(Path::new(name)).then(|| PathBuf::from(name));
     }
-    let Some(path_env) = path_env else {
-        return false;
-    };
     let sep = if cfg!(windows) { ';' } else { ':' };
     let suffixes: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat", ".com", ""]
     } else {
         &[""]
     };
-    path_env
+    path_env?
         .split(sep)
         .filter(|dir| !dir.is_empty())
-        .any(|dir| {
+        .flat_map(|dir| {
             suffixes
                 .iter()
-                .any(|s| program(&Path::new(dir).join(format!("{name}{s}"))))
+                .map(move |s| Path::new(dir).join(format!("{name}{s}")))
         })
+        .find(|p| program(p))
 }
 
 /// A regular file that can be run.
@@ -121,5 +136,16 @@ mod tests {
         assert!(command_exists(full.to_str().unwrap(), None));
         assert!(!command_exists("npx claude", Some("/usr/bin")));
         assert!(!command_exists("", Some("/usr/bin")));
+    }
+
+    #[test]
+    fn locates_the_first_directory_holding_the_command() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        tool(a.path(), "claude", 0o644);
+        tool(b.path(), "claude", 0o755);
+        let path = format!("{}:{}", a.path().display(), b.path().display());
+        let found = locate(|agent| agent.default_command(), Some(&path));
+        assert_eq!(found[0], (Agent::Claude, Some(b.path().join("claude"))));
+        assert!(found[1..].iter().all(|(_, at)| at.is_none()));
     }
 }
