@@ -96,7 +96,7 @@ pub fn quoted_paths<P: AsRef<Path>>(paths: &[P]) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_image(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write;
-    std::fs::create_dir_all(dir)?;
+    own_dir(dir)?;
     let ext = Path::new(name)
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -122,6 +122,38 @@ pub fn save_image(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<std::
         }
     }
     unreachable!("a free name exists below u32::MAX")
+}
+
+/// Makes `dir` private to this user, refusing a link or someone else's folder.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        match std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+        {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        let meta = std::fs::symlink_metadata(dir)?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("{} is not this user's folder", dir.display()),
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)
 }
 
 impl App {
@@ -455,5 +487,23 @@ mod tests {
             .to_string_lossy()
             .starts_with("image-"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn images_are_only_saved_in_a_private_folder_of_this_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("vorn-app-private-{}", std::process::id()));
+        let open = base.join("open");
+        std::fs::create_dir_all(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        save_image(&open, "image.png", b"x").expect("saved");
+        let mode = std::fs::metadata(&open).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&open, &link).unwrap();
+        let err = save_image(&link, "image.png", b"x").expect_err("a link is refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

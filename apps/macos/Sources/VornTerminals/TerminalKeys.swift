@@ -93,7 +93,8 @@ enum TerminalKeys {
 
     /// Writes `png` to a new file in `dir`, named for the time.
     static func saveImage(_ png: Data, in dir: URL, now: Date = Date()) throws -> URL {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
         let stamp = Int(now.timeIntervalSince1970 * 1000)
         for n in 0... {
             let url = dir.appendingPathComponent(n == 0 ? "image-\(stamp).png" : "image-\(stamp)-\(n).png")
