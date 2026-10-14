@@ -176,8 +176,12 @@ What they say:
 - `mixed` at 16 and 32 panes has a wide input p99 (34 to 75 ms over the
   rounds) where `mixed` at 8 holds at 24-25 ms. Five interleaved pairs at 16
   panes put the #769 build at 23-24 ms p99 and 70% vornd CPU, and this build at
-  25-72 ms and 82%: something since #769 costs vornd more on the build log and
-  redraw feeds. Not yet traced.
+  25-72 ms and 82%. The cause was the megabyte of history each terminal keeps
+  since #777: every checkpoint hashed its fingerprint, history included, with a
+  byte-wise FNV-1a twice, about 40 ms a cut on the engine thread. Cuts now hash
+  with CRC-32 alone; ten interleaved runs put `mixed` at 16 panes at 24.5 ms
+  p99 and 59% vornd CPU, against 56.0 ms and 71% before and 24.5 ms and 56% at
+  #769.
 
 No Electron row: this bench links the native app's code and draws it offscreen,
 so it cannot drive the Electron client, and the renderer suite that measured

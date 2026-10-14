@@ -106,11 +106,11 @@ impl Emulator {
             digest: (0, 0),
         };
         let rebuilt = Emulator::restore(&cp).map_err(|_| "rebuild failed")?;
-        let fp = rebuilt.digests();
-        if fp != self.digests() {
+        let fp = rebuilt.check();
+        if fp != self.check() {
             return Err("restore check");
         }
-        cp.digest = fp.check();
+        cp.digest = fp;
         Ok((cp, rebuilt))
     }
 
@@ -136,12 +136,11 @@ impl Emulator {
         fp
     }
 
-    /// The fingerprint's three digests, hashed as it is written rather than held: on deep
-    /// history it runs to hundreds of bytes a cell.
-    fn digests(&self) -> Digests {
-        let mut d = Digests::default();
-        self.write_fingerprint(&mut d);
-        d
+    /// CRC-32 and length of the fingerprint, hashed as written: it runs to hundreds of bytes a cell.
+    fn check(&self) -> (u32, u32) {
+        let mut c = Check::default();
+        self.write_fingerprint(&mut c);
+        c.finish()
     }
 
     /// Writes [`Emulator::fingerprint`] to `fp`.
@@ -244,14 +243,16 @@ impl Emulator {
 
     /// FNV-1a of [`Emulator::fingerprint`], stable across runs and platforms for one Ghostty build.
     pub fn state_digest(&self) -> u64 {
-        self.digests().fnv
+        let mut f = Fnv(FNV_OFFSET);
+        self.write_fingerprint(&mut f);
+        f.0
     }
 }
 
 impl Checkpoint {
     /// The restore check: whether `rebuilt` is the terminal this was cut from.
     pub fn matches(&self, rebuilt: &Emulator) -> bool {
-        rebuilt.digests().check() == self.digest
+        rebuilt.check() == self.digest
     }
 
     /// Bytes for storage. [`Checkpoint::decode`] reads them back.
@@ -323,43 +324,34 @@ fn fnv1a64_from(h: u64, bytes: &[u8]) -> u64 {
         .fold(h, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// CRC-32, length and FNV-1a of a fingerprint, taken as it is written.
-#[derive(Clone)]
-struct Digests {
+/// CRC-32 and length of a fingerprint, taken as it is written: what a checkpoint keeps.
+#[derive(Default)]
+struct Check {
     crc: crc32fast::Hasher,
     len: usize,
-    fnv: u64,
 }
 
-impl Default for Digests {
-    fn default() -> Self {
-        Digests {
-            crc: crc32fast::Hasher::new(),
-            len: 0,
-            fnv: FNV_OFFSET,
-        }
-    }
-}
-
-impl PartialEq for Digests {
-    fn eq(&self, other: &Self) -> bool {
-        (self.check(), self.fnv) == (other.check(), other.fnv)
-    }
-}
-
-impl Digests {
-    /// What a checkpoint keeps: CRC-32 and length.
-    fn check(&self) -> (u32, u32) {
+impl Check {
+    fn finish(self) -> (u32, u32) {
         let len = u32::try_from(self.len).unwrap_or(u32::MAX);
-        (self.crc.clone().finalize(), len)
+        (self.crc.finalize(), len)
     }
 }
 
-impl Write for Digests {
+impl Write for Check {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         self.crc.update(s.as_bytes());
         self.len += s.len();
-        self.fnv = fnv1a64_from(self.fnv, s.as_bytes());
+        Ok(())
+    }
+}
+
+/// FNV-1a of a fingerprint, taken as it is written.
+struct Fnv(u64);
+
+impl Write for Fnv {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0 = fnv1a64_from(self.0, s.as_bytes());
         Ok(())
     }
 }
@@ -473,6 +465,8 @@ fn cursor_shape(t: &Term) -> Option<(CursorVisualStyle, bool)> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
 
     /// The fingerprint as it was first written, one `String` a cell: what the stored digests hash.
@@ -668,10 +662,41 @@ mod tests {
             assert!(want.contains(kind), "covers {kind}");
         }
         assert_eq!(em.fingerprint(), want);
-        let d = em.digests();
         let len = u32::try_from(want.len()).unwrap();
-        assert_eq!(d.check(), (crc32fast::hash(want.as_bytes()), len));
+        assert_eq!(em.check(), (crc32fast::hash(want.as_bytes()), len));
         assert_eq!(em.state_digest(), fnv1a64(want.as_bytes()));
+    }
+
+    /// A cut costs about two walks of its fingerprint, however deep the history.
+    #[test]
+    fn a_cut_over_deep_history_costs_about_two_fingerprint_walks() {
+        struct Sink(usize);
+        impl Write for Sink {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0 += s.len();
+                Ok(())
+            }
+        }
+        let mut em = Emulator::with_scrollback(120, 30, 1 << 20).unwrap();
+        let mut fx = Vec::new();
+        for i in 0..2_000 {
+            let line = format!(
+                "  compiling \x1b[1msrc/m{i}.rs\x1b[m {}\r\n",
+                ".".repeat(i % 60)
+            );
+            em.feed(line.as_bytes(), &mut fx);
+        }
+        assert!(em.term.scrollback_rows().unwrap() > 300, "deep history");
+        let (mut walk, mut cut) = (Duration::MAX, Duration::MAX);
+        for _ in 0..3 {
+            let t = Instant::now();
+            em.write_fingerprint(&mut Sink(0));
+            walk = walk.min(t.elapsed());
+            let t = Instant::now();
+            std::hint::black_box(em.cut().unwrap());
+            cut = cut.min(t.elapsed());
+        }
+        assert!(cut < walk * 4, "a cut took {cut:?}, a walk {walk:?}");
     }
 
     #[test]
