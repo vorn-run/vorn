@@ -13,17 +13,20 @@
 //!   each session's grid render clock.
 //! - the checkpoint blob, [`FORMAT`]: the terminal, the analyzer and the
 //!   state between them.
+//! - [`program`]: a session's OSC 7501 program status records.
 //! - [`snapshot`]: the VT snapshot a bytes client starts from.
 //!
 //! Plain Rust with no sockets in it: vornd's driver carries [`Input`] from
 //! sessiond and [`Out`] back.
 
 pub mod pool;
+pub mod program;
 pub mod session;
 pub mod snapshot;
 mod term;
 
 pub use pool::{Pool, Sink};
+pub use program::{ProgramRecord, Programs};
 pub use session::{
     Agents, Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State,
     Summary, Viewed, PIPED_SIZE,
@@ -31,4 +34,4 @@ pub use session::{
 pub use snapshot::VtSnapshot;
 pub use term::{Fidelity, Rejected, FORMAT};
 pub use vorn_grid::{GridIn, HubConfig, HubOut, Peer};
-pub use vorn_screen::{ghostty_build, Mark, ProgressState, Theme};
+pub use vorn_screen::{ghostty_build, BlockedKind, Mark, ProgramState, ProgressState, Theme};

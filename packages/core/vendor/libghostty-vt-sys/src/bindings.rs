@@ -2570,6 +2570,53 @@ pub type TerminalWritePtyFn = ::std::option::Option<
 pub type TerminalXtversionFn = ::std::option::Option<
     unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void) -> String,
 >;
+pub mod ProgramStatusState {
+    pub type Type = ::std::os::raw::c_int;
+    pub const IDLE: Type = 0;
+    pub const WORKING: Type = 1;
+    pub const DONE: Type = 2;
+    pub const BLOCKED: Type = 3;
+    pub const ERROR: Type = 4;
+    pub const CLEAR: Type = 5;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod ProgramStatusKind {
+    pub type Type = ::std::os::raw::c_int;
+    pub const NONE: Type = 0;
+    pub const PERMISSION: Type = 1;
+    pub const QUESTION: Type = 2;
+    pub const AUTH: Type = 3;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TerminalProgramStatus {
+    pub size: usize,
+    pub state: ProgramStatusState::Type,
+    pub kind: ProgramStatusKind::Type,
+    pub progress: i8,
+    pub id: String,
+    pub app: String,
+    pub title: String,
+    pub message: String,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 88usize];
+    ["Offset of field: TerminalProgramStatus::progress"]
+        [::std::mem::offset_of!(TerminalProgramStatus, progress) - 16usize];
+    ["Offset of field: TerminalProgramStatus::id"]
+        [::std::mem::offset_of!(TerminalProgramStatus, id) - 24usize];
+    ["Offset of field: TerminalProgramStatus::message"]
+        [::std::mem::offset_of!(TerminalProgramStatus, message) - 72usize];
+};
+pub type TerminalProgramStatusFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: Terminal,
+        userdata: *mut ::std::os::raw::c_void,
+        report: *const TerminalProgramStatus,
+    ),
+>;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct TerminalModeConfig {
@@ -2631,6 +2678,9 @@ pub mod TerminalOption {
     pub const RENDER_HOLD: Type = 41;
     pub const SEMANTIC_PROMPT: Type = 42;
     pub const RESET: Type = 43;
+    pub const XT_CHECKSUM_REPORT: Type = 44;
+    pub const XT_CHECKSUM_EXTENSION: Type = 45;
+    pub const PROGRAM_STATUS: Type = 46;
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {

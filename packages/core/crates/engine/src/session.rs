@@ -44,8 +44,9 @@ use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
 use vorn_analysis::rules::Rules;
 
+use crate::program::Programs;
 use crate::snapshot::VtSnapshot;
-use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT};
+use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT, FORMAT_NO_PROGRAMS};
 
 /// The size a piped agent's output is parsed at. It has no terminal, so
 /// nothing ever resizes it.
@@ -292,6 +293,8 @@ pub enum Effect {
     },
     /// At most once, like the bell: a shell's prompt or command mark.
     Command(Mark),
+    /// A state: the program's OSC 7501 records from here on.
+    Program(Programs),
     /// A state: the program ended.
     Exit {
         code: Option<i32>,
@@ -1328,6 +1331,10 @@ impl Run {
             }
             Record::Gap { .. } => self.lost_output(reason, "output lost"),
             &Record::Exit { code, signal } => {
+                self.term.programs.ended();
+                if let Some(p) = self.term.programs.take_changed() {
+                    self.emit(ctx, &e.hdr, &mut index, Effect::Program(p), out);
+                }
                 self.emit(ctx, &e.hdr, &mut index, Effect::Exit { code, signal }, out);
             }
         }
@@ -1348,11 +1355,24 @@ impl Run {
                 vorn_screen::Effect::Notify { title, body } => Effect::Notify { title, body },
                 vorn_screen::Effect::Cwd(c) => Effect::Cwd(c),
                 vorn_screen::Effect::Progress { state, percent } => {
+                    self.term.programs.progress(state, percent);
                     Effect::Progress { state, percent }
                 }
-                vorn_screen::Effect::Command(mark) => Effect::Command(mark),
+                vorn_screen::Effect::Command(mark) => {
+                    if mark == Mark::Prompt {
+                        self.term.programs.ended();
+                    }
+                    Effect::Command(mark)
+                }
+                vorn_screen::Effect::ProgramStatus(report) => {
+                    self.term.programs.report(report);
+                    continue;
+                }
             };
             self.emit(ctx, &e.hdr, &mut index, effect, out);
+        }
+        if let Some(p) = self.term.programs.take_changed() {
+            self.emit(ctx, &e.hdr, &mut index, Effect::Program(p), out);
         }
         if let Some(s) = status {
             self.emit(ctx, &e.hdr, &mut index, Effect::Status(s), out);
@@ -1506,8 +1526,10 @@ fn event_kind(effect: &Effect) -> Option<EventKind> {
             code: *code,
             signal: *signal,
         },
-        // The grid protocol has no progress or command event yet.
-        Effect::Cwd(_) | Effect::Progress { .. } | Effect::Command(_) => return None,
+        // The grid protocol has no progress, command or program event yet.
+        Effect::Cwd(_) | Effect::Progress { .. } | Effect::Command(_) | Effect::Program(_) => {
+            return None
+        }
     })
 }
 
@@ -1560,13 +1582,13 @@ fn effects_precede_checkpoints(out: &[Out]) -> bool {
 
 /// The restore check, in the order the cheap tests come.
 fn check(cp: &Checkpoint) -> Result<Term, (Rejected, Option<Box<Term>>)> {
-    if cp.format != FORMAT {
+    if cp.format != FORMAT && cp.format != FORMAT_NO_PROGRAMS {
         return Err((Rejected::Format, None));
     }
     if !cp.crc_ok() {
         return Err((Rejected::Crc, None));
     }
-    Term::load(&cp.blob)
+    Term::load(&cp.blob, cp.format)
 }
 
 /// The screen as plain text, rows joined by newlines.

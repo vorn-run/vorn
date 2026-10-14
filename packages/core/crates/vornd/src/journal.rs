@@ -15,7 +15,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use vorn_engine::{Effect, EffectId};
+use vorn_engine::{Effect, EffectId, Programs};
 
 /// Notifications kept for an app that reconnects.
 pub const NOTICES_KEPT: usize = 256;
@@ -59,6 +59,8 @@ pub struct Held {
     pub status: Option<Stamped<u32>>,
     pub cwd: Option<Stamped<String>>,
     pub exit: Option<Stamped<(Option<i32>, Option<i32>)>>,
+    /// The program's own status reports (OSC 7501).
+    pub program: Option<Stamped<Programs>>,
 }
 
 /// The latest state of every session and the last notifications.
@@ -92,6 +94,7 @@ impl Journal {
                 status: None,
                 cwd: None,
                 exit: None,
+                program: None,
             });
     }
 
@@ -123,7 +126,12 @@ impl Journal {
                     set(&mut h.exit, (*code, *signal), id);
                 }
             }
-            // No client shows progress yet, so none is held for one.
+            Effect::Program(p) => {
+                if let Some(h) = self.held.get_mut(&id.session) {
+                    set(&mut h.program, p.clone(), id);
+                }
+            }
+            // Progress reaches clients as the program records it stands in for.
             Effect::Bell
             | Effect::Clipboard { .. }
             | Effect::Progress { .. }
@@ -224,6 +232,20 @@ mod tests {
         let h = &j.held()[0];
         assert_eq!(h.status.as_ref().map(|s| s.value), Some(2));
         assert_eq!(h.pid, 7);
+    }
+
+    #[test]
+    fn the_latest_program_records_are_held() {
+        let mut j = Journal::default();
+        j.opened("a", Kind::Pty, 7);
+        let p = Programs {
+            native: true,
+            records: Vec::new(),
+        };
+        j.record(&fx("a", 9, 1), &Effect::Program(p.clone()));
+        j.record(&fx("a", 3, 0), &Effect::Program(Programs::default()));
+        let h = &j.held()[0];
+        assert_eq!(h.program.as_ref().map(|s| &s.value), Some(&p));
     }
 
     #[test]

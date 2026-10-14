@@ -631,6 +631,8 @@ export interface RequestMethods {
   'terminal:listActive': { params: void; result: TerminalSession[] }
   'terminal:rename': { params: { id: string; displayName: string }; result: void }
   'terminal:reorder': { params: string[]; result: void }
+  /** A person looked at the terminal: what its program finished is no longer new. */
+  'terminal:seen': { params: { id: string }; result: void }
   'terminal:setGroup': { params: { id: string; groupId: string | null }; result: void }
   'terminal:readOutput': { params: { id: string; lines?: number }; result: string[] }
   /**

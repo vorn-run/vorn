@@ -283,7 +283,7 @@ pub(super) fn nav_item(
 
 /// SessionItem, its branch under the name where the list asks for it.
 fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
-    use crate::components::sidebar::{session_row, SessionRow, SessionRowIds};
+    use crate::components::sidebar::{session_row, Detail, SessionRow, SessionRowIds, StepRow};
     use crate::components::Status;
     let sid = session.info.id.as_str();
     let tabs = s.st.layout == crate::state::LayoutMode::Tabs;
@@ -308,6 +308,17 @@ fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
             .on("sidebar-session", Act::CloseSession(sid.to_owned())),
     };
     let title = session.title();
+    let report = session.report();
+    let steps: Vec<StepRow<'_>> = report
+        .iter()
+        .flat_map(|r| &r.steps)
+        .map(|st| StepRow {
+            depth: st.depth,
+            line: &st.line,
+            status: Status::parse(st.status),
+            progress: st.progress,
+        })
+        .collect();
     session_row(
         s.ui,
         s.agents,
@@ -322,6 +333,15 @@ fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
             agent: &session.info.agent_type,
             status: Status::parse(session.status()),
             active,
+            detail: report
+                .as_ref()
+                .filter(|r| !r.line.is_empty())
+                .map(|r| Detail {
+                    line: &r.line,
+                    progress: r.progress,
+                    unseen: r.unseen,
+                }),
+            steps: &steps,
         },
     )
 }

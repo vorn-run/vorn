@@ -26,6 +26,7 @@ pub mod paths;
 pub mod rpc;
 pub mod server;
 pub mod session;
+pub mod status;
 pub mod time;
 pub mod workflow;
 

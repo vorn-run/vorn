@@ -115,6 +115,7 @@ pub const METHODS: &[&str] = &[
     "terminal:rename",
     "terminal:setGroup",
     "terminal:reorder",
+    "terminal:seen",
     "shell:create",
     "headless:list",
     "headless:create",

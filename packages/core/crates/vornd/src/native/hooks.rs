@@ -50,6 +50,8 @@ const PREFERRED_PORT: u16 = 56432;
 const MAX_BODY: usize = 1024 * 1024;
 /// How often a Vorn that found the registration held looks again.
 const OWNER_POLL: Duration = Duration::from_secs(1);
+/// How long the Claude probe waits for the login shell's PATH.
+const CLAUDE_PROBE_WAIT: Duration = Duration::from_secs(30);
 /// When an agent's own database is read for its conversation, after the last read.
 const CAPTURE_LADDER: [u64; 4] = [5, 5, 10, 20];
 
@@ -58,6 +60,7 @@ const CAPTURE_LADDER: [u64; 4] = [5, 5, 10, 20];
 struct Pending {
     id: String,
     session: String,
+    terminal: String,
     reply: oneshot::Sender<String>,
 }
 
@@ -102,6 +105,9 @@ pub struct Hooks {
     owner: AtomicBool,
     /// Whether it wrote Copilot's hooks file.
     copilot: AtomicBool,
+    /// Whether the Claude Code on PATH reports its own status (OSC 7501):
+    /// then only the hooks it needs answered are installed.
+    claude_reports: AtomicBool,
     /// Set once vornd stops: a registration that comes free then is not taken.
     stopped: AtomicBool,
     pending: Mutex<Vec<Pending>>,
@@ -140,12 +146,14 @@ impl Hooks {
             port: listener.local_addr()?.port(),
             owner: AtomicBool::new(false),
             copilot: AtomicBool::new(false),
+            claude_reports: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             pending: Mutex::default(),
             mapper: Mutex::default(),
             last_activity: Mutex::new(Instant::now()),
         });
         tokio::spawn(serve(Arc::downgrade(&hooks), listener));
+        hooks.probe_claude(native);
         if !hooks.try_claim() {
             let owner = Owner::read(&hooks.owner_file());
             info!(
@@ -221,7 +229,7 @@ impl Hooks {
             )?;
             std::fs::write(self.homes.vorn.join("port"), self.port.to_string())?;
             write_private(&self.homes.vorn.join("token"), &self.token)?;
-            claude::install_file(&self.homes.claude_settings, self.port, &self.token)
+            self.install_claude()
         })();
         if let Err(err) = written {
             warn!(%err, "could not register the hook endpoint");
@@ -229,6 +237,44 @@ impl Hooks {
         }
         self.owner.store(true, Ordering::SeqCst);
         true
+    }
+
+    fn install_claude(&self) -> std::io::Result<()> {
+        let events = claude::events(self.claude_reports.load(Ordering::SeqCst));
+        claude::install_file(&self.homes.claude_settings, self.port, &self.token, events)
+    }
+
+    /// Asks the Claude Code on PATH its version once the login shell's PATH
+    /// is known; one that reports its own status gets only the hooks it needs.
+    fn probe_claude(self: &Arc<Self>, native: &Arc<Native>) {
+        let (weak, env) = (Arc::downgrade(self), Arc::clone(&native.env));
+        // A thread of its own, so a slow probe never holds vornd's shutdown.
+        let spawned = std::thread::Builder::new()
+            .name("claude-probe".into())
+            .spawn(move || {
+                env.prime();
+                let deadline = Instant::now() + CLAUDE_PROBE_WAIT;
+                while !env.resolved() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                let version = env
+                    .find("claude")
+                    .and_then(|bin| super::shell::version_of(&bin, Duration::from_secs(5)));
+                let Some(hooks) = weak.upgrade() else { return };
+                let reports = version.as_deref().is_some_and(claude::reports_status);
+                info!(?version, reports, "the Claude Code on PATH");
+                if !reports || hooks.claude_reports.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                if hooks.owns_registration() && !hooks.stopped.load(Ordering::SeqCst) {
+                    if let Err(err) = hooks.install_claude() {
+                        warn!(%err, "could not trim the hooks in Claude's settings");
+                    }
+                }
+            });
+        if let Err(err) = spawned {
+            warn!(%err, "could not probe Claude's version");
+        }
     }
 
     /// Denies what is pending and gives the registration up, when it is still this vornd's.
@@ -344,8 +390,12 @@ impl Hooks {
         lock(&self.pending).push(Pending {
             id: id.clone(),
             session: event.session().to_owned(),
+            terminal: resolved.terminal.clone(),
             reply: tx,
         });
+        if let Some(registry) = native.registry.get() {
+            registry.asking(&resolved.terminal, true);
+        }
         hook_status(&native, &resolved.terminal, None, true);
         let about = about(&native, &resolved.terminal);
         info!(request = %id, tool = event.tool_name(), terminal = %resolved.terminal, "a permission request");
@@ -363,24 +413,41 @@ impl Hooks {
         let Some(at) = pending.iter().position(|p| p.id == id) else {
             return;
         };
-        pending.remove(at);
+        let p = pending.remove(at);
         drop(pending);
         if let Some(native) = self.native.upgrade() {
             native.broadcast("widget:permission-cancelled", json!(id));
+            self.answered(&native, &p.terminal);
+        }
+    }
+
+    /// A request of `terminal` closed: with none left open, it stops waiting on Vorn.
+    fn answered(&self, native: &Native, terminal: &str) {
+        if lock(&self.pending).iter().any(|p| p.terminal == terminal) {
+            return;
+        }
+        if let Some(registry) = native.registry.get() {
+            registry.asking(terminal, false);
         }
     }
 
     fn cancel_session(&self, native: &Native, session: &str) {
+        self.cancel(native, |p| p.session == session);
+    }
+
+    /// The requests `which` picks, answered with no decision as their agent moved past them.
+    fn cancel(&self, native: &Native, which: impl Fn(&Pending) -> bool) {
         let gone: Vec<Pending> = {
             let mut pending = lock(&self.pending);
-            let (gone, kept) = pending.drain(..).partition(|p| p.session == session);
+            let (gone, kept) = pending.drain(..).partition(|p| which(p));
             *pending = kept;
             gone
         };
         for p in gone {
-            info!(request = %p.id, session, "a permission request the agent moved past");
+            info!(request = %p.id, session = %p.session, "a permission request the agent moved past");
             let _ = p.reply.send("{}".to_owned());
             native.broadcast("widget:permission-cancelled", json!(p.id));
+            self.answered(native, &p.terminal);
         }
     }
 
@@ -406,6 +473,9 @@ impl Hooks {
         };
         let p = pending.remove(at);
         drop(pending);
+        if let Some(native) = self.native.upgrade() {
+            self.answered(&native, &p.terminal);
+        }
         let body = if top {
             permission::decision(allow, None, None)
         } else {
@@ -488,6 +558,23 @@ fn about(native: &Native, id: &str) -> permission::About {
         agent_type: record.as_ref().map(|r| r.0.clone()),
         project_name: record.map(|r| r.1),
     }
+}
+
+/// Whether a terminal record's program reports it waits for a permission.
+fn asks_permission(record: &Value) -> bool {
+    let Some(p) = record.get("programStatus").filter(|p| p["native"] == true) else {
+        return false;
+    };
+    p["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(blocked_on_permission)
+}
+
+fn blocked_on_permission(r: &Value) -> bool {
+    let kind = r.get("kind");
+    r["state"] == "blocked" && kind.is_none_or(|k| k == "permission")
 }
 
 fn hook_status(native: &Native, id: &str, status: Option<Status>, promote: bool) {
@@ -668,6 +755,8 @@ async fn handle(hooks: Weak<Hooks>, req: Request<Incoming>) -> Result<Response<B
 async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<Value>) {
     use tokio::sync::broadcast::error::RecvError;
     let mut seen: HashSet<String> = HashSet::new();
+    // Terminals whose program reports it waits for permission.
+    let mut blocked: HashSet<String> = HashSet::new();
     loop {
         let note = match notes.recv().await {
             Ok(note) => note,
@@ -706,6 +795,11 @@ async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<
                     .filter(|v| !v.is_empty())
             };
             let Some(id) = text("id") else { continue };
+            if asks_permission(record) {
+                blocked.insert(id.to_owned());
+            } else if blocked.remove(id) {
+                hooks.cancel(&native, |p| p.terminal == id);
+            }
             let agent = text("agentType").unwrap_or_default();
             if agent == "copilot" && text("hookSessionId").is_none() {
                 hooks.copilot_terminal(&native, id);

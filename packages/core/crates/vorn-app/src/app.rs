@@ -318,6 +318,8 @@ pub struct App {
     /// vornd hung up.
     pub closed: bool,
     notifier: crate::notify::Notifier,
+    /// The session `terminal:seen` was last asked for, until it is seen.
+    seen_asked: Option<String>,
     /// Where admitted notices are shown: the OS, unless a test swaps it.
     notice_sink: Arc<dyn crate::notify::Sink>,
     /// Notifications heard since the last frame, for the frame to admit.
@@ -440,6 +442,7 @@ impl App {
             agents: Default::default(),
             closed: false,
             notifier: Default::default(),
+            seen_asked: None,
             notice_sink: Arc::new(crate::notify::Os),
             notices: Vec::new(),
             chrome: !cfg!(target_os = "macos"),
@@ -1103,6 +1106,29 @@ impl App {
     pub fn focus_session(&mut self, id: &str) {
         self.st.focused = Some(id.to_owned());
         self.go_to(id.to_owned());
+    }
+
+    /// The card in front of a focused window: what its program finished is seen.
+    fn seen_tick(&mut self, ui: &Ui) {
+        if !ui.window_focused() || !matches!(self.st.view, MainView::Sessions) {
+            return;
+        }
+        let Some(id) = self.st.focused.clone().or_else(|| self.st.selected.clone()) else {
+            return;
+        };
+        let unseen = self.store.sessions.iter().any(|s| {
+            s.info.id == id
+                && s.info
+                    .program_status
+                    .as_ref()
+                    .is_some_and(|p| p.unseen == Some(true))
+        });
+        if !unseen {
+            self.seen_asked = None;
+        } else if self.seen_asked.as_deref() != Some(id.as_str()) {
+            self.call(Call::Quiet, "terminal:seen", json!({ "id": id }));
+            self.seen_asked = Some(id);
+        }
     }
 
     /// Moves to the card `id`: onto the stage when one is focused.
@@ -2886,6 +2912,7 @@ impl App {
                 self.notice_sink.show(notice);
             }
         }
+        self.seen_tick(ui);
         self.git_tick();
         self.panes_tick(ui);
         self.tasks_tick(ui);

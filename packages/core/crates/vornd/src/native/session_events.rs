@@ -12,7 +12,7 @@
 //! (`headless:exit`), whose record goes a while later. Each terminal's HEAD is
 //! read again every thirty seconds.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -24,12 +24,14 @@ use vorn_engine::Effect;
 
 use super::Native;
 use crate::engine::{Engine, Event};
-use crate::registry::{SessionRegistry, Stamp};
+use crate::registry::{EntryState, ProgramStatus, SessionRegistry, Stamp, WaitKind};
 
 /// How long an ended headless agent's record is kept, as the server kept it.
 const HEADLESS_KEPT: Duration = Duration::from_secs(30);
 /// How often each terminal's HEAD is read again (`HEAD_REFRESH_MS`).
 const HEAD_EVERY: Duration = Duration::from_secs(30);
+/// At most one notification a session's program status raises in this long.
+const REPORT_COOLDOWN: Duration = Duration::from_secs(10);
 
 /// Follows the engine and the registry until either goes.
 pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
@@ -37,6 +39,7 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
     let mut events = engine.subscribe();
     let mut notes = registry.subscribe();
     let mut told = Told::default();
+    let mut reports = Reports::default();
     if let Some(snapshot) = registry.read(|r| {
         r.terminals()
             .iter()
@@ -51,6 +54,9 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
         let Some(n) = native.upgrade() else { return };
         tokio::select! {
             ev = events.recv() => match ev {
+                Ok(Event::Effect(fx, Effect::Program(p))) => {
+                    reports.heard(&n, &registry, &fx, &p, std::time::Instant::now());
+                }
                 Ok(Event::Effect(fx, effect)) => effected(&n, &registry, &fx, effect),
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => return,
@@ -99,6 +105,79 @@ fn effected(
             }
         }
         _ => {}
+    }
+}
+
+/// What each terminal's program last reported of itself, so that it
+/// becoming blocked or finished is told once, at most once a cooldown.
+#[derive(Debug, Default)]
+struct Reports {
+    states: HashMap<String, EntryState>,
+    told: HashMap<String, std::time::Instant>,
+}
+
+impl Reports {
+    fn heard(
+        &mut self,
+        native: &Native,
+        registry: &SessionRegistry,
+        fx: &vorn_engine::EffectId,
+        p: &vorn_engine::Programs,
+        now: std::time::Instant,
+    ) {
+        let id = fx.session.as_str();
+        let terminal = registry.read(|r| r.terminal(id).is_some()).unwrap_or(false);
+        let Some(body) = self.notice(id, p, now).filter(|_| terminal) else {
+            return;
+        };
+        let key = crate::journal::effect_key(fx);
+        if first_notice(native, &key) {
+            let note = json!({ "id": id, "title": "", "body": body, "effectId": key });
+            native.broadcast_to("terminal:notify", note, Some(id));
+        }
+    }
+
+    /// The body of the notification `p` raises for session `id`, if any.
+    fn notice(
+        &mut self,
+        id: &str,
+        p: &vorn_engine::Programs,
+        now: std::time::Instant,
+    ) -> Option<String> {
+        let status = ProgramStatus::read(p, None).filter(|s| s.native);
+        let Some(state) = status.as_ref().and_then(ProgramStatus::state) else {
+            self.states.remove(id);
+            return None;
+        };
+        if self.states.insert(id.to_owned(), state) == Some(state) {
+            return None;
+        }
+        let status = status.as_ref()?;
+        let msg = status.message().map(str::to_owned);
+        let body = match state {
+            EntryState::Blocked => {
+                let wants = match status.waiting_for() {
+                    Some(WaitKind::Permission) => "Needs permission",
+                    Some(WaitKind::Question) => "Has a question",
+                    Some(WaitKind::Auth) => "Needs you to sign in",
+                    None => "Needs your input",
+                };
+                msg.map_or_else(|| wants.to_owned(), |m| format!("{wants}: {m}"))
+            }
+            EntryState::Done => {
+                msg.map_or_else(|| "Finished".to_owned(), |m| format!("Finished: {m}"))
+            }
+            _ => return None,
+        };
+        if self
+            .told
+            .get(id)
+            .is_some_and(|&at| now.saturating_duration_since(at) < REPORT_COOLDOWN)
+        {
+            return None;
+        }
+        self.told.insert(id.to_owned(), now);
+        Some(body)
     }
 }
 
@@ -365,6 +444,77 @@ mod tests {
             .unwrap();
         assert_eq!(sh.shell_cwd.as_deref(), Some("/tmp"));
         assert!(told(&mut rx).is_empty());
+    }
+
+    fn report(
+        state: vorn_engine::ProgramState,
+        kind: Option<vorn_engine::BlockedKind>,
+        msg: &str,
+    ) -> vorn_engine::Programs {
+        vorn_engine::Programs {
+            native: true,
+            records: vec![vorn_engine::ProgramRecord {
+                id: String::new(),
+                state,
+                kind,
+                progress: None,
+                app: String::new(),
+                title: String::new(),
+                msg: msg.into(),
+                from_progress: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn blocked_and_done_reports_notify_once_each_within_a_cooldown() {
+        use vorn_engine::{BlockedKind, ProgramState};
+        let mut r = Reports::default();
+        let t0 = std::time::Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        let blocked = report(
+            ProgramState::Blocked,
+            Some(BlockedKind::Auth),
+            "Sign in to deploy",
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Working, None, ""), at(0)),
+            None
+        );
+        assert_eq!(
+            r.notice("a", &blocked, at(1)).as_deref(),
+            Some("Needs you to sign in: Sign in to deploy")
+        );
+        // Told again, the same state: nothing new.
+        assert_eq!(r.notice("a", &blocked, at(2)), None);
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Working, None, ""), at(3)),
+            None
+        );
+        // Finished within the cooldown: not told.
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Done, None, "Built"), at(4)),
+            None
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Working, None, ""), at(20)),
+            None
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Done, None, "Built"), at(21))
+                .as_deref(),
+            Some("Finished: Built")
+        );
+        // Another session counts on its own.
+        assert_eq!(
+            r.notice(
+                "b",
+                &report(ProgramState::Blocked, Some(BlockedKind::Permission), ""),
+                at(21)
+            )
+            .as_deref(),
+            Some("Needs permission")
+        );
     }
 
     #[test]

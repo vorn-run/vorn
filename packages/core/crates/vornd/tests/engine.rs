@@ -349,3 +349,153 @@ async fn a_name_is_free_again_once_its_exit_is_told() {
         assert!(matches!(read, Ok(Some(_))), "run {run}'s tap: {read:?}");
     }
 }
+
+/// What session `id` reported of itself (OSC 7501), up to the report `done` holds for.
+async fn reports_until(
+    events: &mut broadcast::Receiver<Event>,
+    id: &str,
+    done: impl Fn(&vorn_engine::Programs) -> bool,
+) -> Vec<vorn_engine::Programs> {
+    let (t, mut seen) = (Instant::now(), Vec::new());
+    loop {
+        let left = PATIENCE.saturating_sub(t.elapsed());
+        match tokio::time::timeout(left, events.recv()).await {
+            Ok(Ok(Event::Effect(e, Effect::Program(p)))) if e.session == id => {
+                let last = done(&p);
+                seen.push(p);
+                if last {
+                    return seen;
+                }
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!("events: {e}"),
+            Err(_) => panic!("{id} never reported what was waited for: {seen:#?}"),
+        }
+    }
+}
+
+fn b64(s: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in s.as_bytes().chunks(3) {
+        let n = c
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= c.len() {
+                T[(n >> (18 - 6 * i) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+/// A program reporting itself through a real pty: working, blocked on a
+/// sign-in, a child step, done; its query answered once, and not again when
+/// a new vornd replays it; working dropped when it is killed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_program_reports_its_status_through_a_pty() {
+    use vorn_engine::ProgramState::{Blocked, Done, Working};
+    let rig = Rig::start().await;
+    let mut first = rig.vornd();
+    let st = |fields: String| format!("printf '\\033]7501;{fields}\\033\\\\'; sleep 0.1; ");
+    let script = [
+        "stty raw -echo; printf '\\033]7501;?\\033\\\\'; ".to_owned(),
+        "printf 'reply:'; dd bs=1 count=8 2>/dev/null | od -An -c | tr -d ' \\n'; echo; "
+            .to_owned(),
+        "stty min 0 time 5; cat >/dev/null; stty min 1 time 0; ".to_owned(),
+        st(format!(
+            "state=working:progress=20:app=deploy:msg={}",
+            b64("Planning")
+        )),
+        st(format!(
+            "state=blocked:kind=auth:msg={}",
+            b64("Sign in to the registry")
+        )),
+        st(format!("state=working:progress=60:msg={}", b64("Pushing"))),
+        st(format!(
+            "state=working:id=build:progress=50:msg={}",
+            b64("Building")
+        )),
+        st("state=clear:id=build".to_owned()),
+        st(format!("state=done:progress=100:msg={}", b64("Shipped"))),
+        "printf 'ready:'; dd bs=1 count=2 2>/dev/null | od -An -c | tr -d ' \\n'; echo; "
+            .to_owned(),
+        st(format!("state=working:msg={}", b64("Again"))),
+        "sleep 30".to_owned(),
+    ]
+    .concat();
+    let id = spawn(
+        &first.engine,
+        &["sh", "-c", &script],
+        Io::Pty { cols: 80, rows: 24 },
+    )
+    .await;
+    let root = |p: &vorn_engine::Programs| p.records.iter().find(|r| r.id.is_empty()).cloned();
+    let seen = reports_until(&mut first.events, &id, |p| {
+        root(p).is_some_and(|r| r.state == Done)
+    })
+    .await;
+    let roots: Vec<_> = seen.iter().filter_map(root).collect();
+    let states: Vec<_> = roots.iter().map(|r| r.state).collect();
+    assert_eq!(states.first(), Some(&Working));
+    assert!(
+        states.windows(2).any(|w| w == [Working, Blocked]),
+        "{states:?}"
+    );
+    assert!(
+        states.windows(2).any(|w| w == [Blocked, Working]),
+        "{states:?}"
+    );
+    let blocked = roots.iter().find(|r| r.state == Blocked).unwrap();
+    assert_eq!(blocked.kind, Some(vorn_engine::BlockedKind::Auth));
+    assert_eq!(blocked.msg, "Sign in to the registry");
+    assert_eq!(roots[0].app, "deploy");
+    let done = roots.last().unwrap();
+    assert_eq!(done.msg, "Shipped");
+    assert!(roots.iter().any(|r| r.progress == Some(60)), "{roots:?}");
+    let child = seen
+        .iter()
+        .flat_map(|p| &p.records)
+        .find(|r| r.id == "build")
+        .unwrap();
+    assert_eq!((child.state, child.progress), (Working, Some(50)));
+    assert!(seen.iter().all(|p| p.native));
+    wait(&first.engine, &id, "the reply", |s| {
+        s.screen.contains("reply:033]7501;?")
+    })
+    .await;
+    wait(&first.engine, &id, "ready", |s| s.screen.contains("ready:")).await;
+
+    // A new vornd replays the session: the query is not answered again.
+    first.kill().await;
+    let mut second = rig.vornd();
+    wait(&second.engine, &id, "recovered", |s| {
+        s.brief.state == State::Live
+    })
+    .await;
+    second.engine.write(&id, b"go".to_vec()).unwrap();
+    wait(&second.engine, &id, "go", |s| s.screen.contains("ready:go")).await;
+    reports_until(&mut second.events, &id, |p| {
+        root(p).is_some_and(|r| r.state == Working && r.msg == "Again")
+    })
+    .await;
+
+    second
+        .engine
+        .signal(&id, vorn_sessiond_wire::Sig::Kill)
+        .unwrap();
+    let last = reports_until(&mut second.events, &id, |p| !p.native).await;
+    let last = last.last().unwrap();
+    assert!(
+        last.records
+            .iter()
+            .all(|r| !matches!(r.state, Working | Blocked)),
+        "{last:?}"
+    );
+    second.closed(&id).await;
+    second.kill().await;
+}

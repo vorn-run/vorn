@@ -9,15 +9,18 @@ use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
 use crate::js::{self, field, present, truthy};
 use crate::output::{paint_status, short_id, table, time_ago};
+use crate::status;
 
 pub const WORKFLOW_USAGE: &str = "Usage
   vorn workflow list [--json]
-  vorn workflow run <name or id> [--input key=value] [--json]
+  vorn workflow run <name or id> [--input key=value] [--wait] [--json]
   vorn workflow stop <run>
   vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]
 
 A run happens in the server, so it keeps going when nothing is watching. The
-command answers with the run rather than waiting for it to finish.
+command answers with the run rather than waiting for it to finish; with
+--wait it stays until the run ends, shows its progress to the terminal, and
+fails when the run does.
 ";
 
 fn items(value: Value) -> Vec<Value> {
@@ -187,7 +190,11 @@ async fn start_run(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comma
 
     if ctx.args.json {
         ctx.io.write(&js::as_json(&execution));
-        return Ok(ExitCode::Ok);
+        return if ctx.args.wait {
+            wait_run(ctx, &text(field(&execution, "runId")), workflow).await
+        } else {
+            Ok(ExitCode::Ok)
+        };
     }
     let pending = field(&execution, "nodeStates")
         .and_then(Value::as_array)
@@ -202,11 +209,65 @@ async fn start_run(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comma
         text(field(&execution, "runId")),
         name_of(workflow)
     ));
+    if ctx.args.wait {
+        return wait_run(ctx, &text(field(&execution, "runId")), workflow).await;
+    }
     ctx.io.write_err(&format!(
         "Follow it with: vorn workflow runs --workflow {}\n",
         short_id(&id_of(workflow))
     ));
     Ok(ExitCode::Ok)
+}
+
+/// Waits for run `run_id` of `workflow` to end, reporting it to a terminal
+/// (OSC 7501) as it goes; fails when the run does.
+async fn wait_run(
+    ctx: &mut Context<'_>,
+    run_id: &str,
+    workflow: &Value,
+) -> Result<ExitCode, CommandError> {
+    let labels: HashMap<String, String> = field(workflow, "nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|n| (text(field(n, "id")), text(field(n, "label"))))
+        .filter(|(_, label)| !label.is_empty())
+        .collect();
+    let name = name_of(workflow);
+    let report = ctx.io.is_tty() && !ctx.args.json;
+    let mut reporter = status::Reporter::default();
+    loop {
+        let run = find_run(ctx, run_id).await?;
+        if report {
+            let out = reporter.changes(status::run_records(&run, &labels, &name));
+            if !out.is_empty() {
+                ctx.io.write(&out);
+            }
+        }
+        match field(&run, "status").and_then(Value::as_str) {
+            Some("success") => return Ok(ExitCode::Ok),
+            Some("error" | "cancelled") => return Ok(ExitCode::Failure),
+            _ => tokio::time::sleep(status::POLL).await,
+        }
+    }
+}
+
+/// Run `run_id` as it is now: among those in flight, else the recent ones.
+async fn find_run(ctx: &Context<'_>, run_id: &str) -> Result<Value, CommandError> {
+    let is_it = |r: &Value| field(r, "runId").and_then(Value::as_str) == Some(run_id);
+    let (running, waiting) = ctx
+        .call_both("workflowRun:listRunning", "workflowRun:listWaiting")
+        .await?;
+    if let Some(run) = items(running).into_iter().chain(items(waiting)).find(is_it) {
+        return Ok(run);
+    }
+    let all = ctx
+        .call("workflowRun:listAll", Some(json!({ "limit": 50 })))
+        .await?;
+    items(all)
+        .into_iter()
+        .find(is_it)
+        .ok_or_else(|| CommandError::Refused(format!("run {} is gone", short_id(run_id))))
 }
 
 /// A run by id, or by any prefix that names one.

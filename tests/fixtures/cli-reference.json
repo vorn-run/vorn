@@ -46,23 +46,23 @@
   },
   "no server [\"session\",\"--help\"]": {
     "code": 0,
-    "out": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n",
+    "out": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n",
     "err": ""
   },
   "no server [\"session\"]": {
     "code": 2,
     "out": "",
-    "err": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "no server [\"workflow\",\"-h\"]": {
     "code": 0,
-    "out": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n",
+    "out": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--wait] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish; with\n--wait it stays until the run ends, shows its progress to the terminal, and\nfails when the run does.\n",
     "err": ""
   },
   "no server [\"workflow\"]": {
     "code": 2,
     "out": "",
-    "err": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+    "err": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--wait] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish; with\n--wait it stays until the run ends, shows its progress to the terminal, and\nfails when the run does.\n"
   },
   "no server [\"bogus\"]": {
     "code": 2,
@@ -87,12 +87,12 @@
   "no server [\"session\",\"dance\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: unknown session command \"dance\"\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: unknown session command \"dance\"\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "no server [\"workflow\",\"dance\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: unknown workflow command \"dance\"\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+    "err": "vorn: unknown workflow command \"dance\"\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--wait] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish; with\n--wait it stays until the run ends, shows its progress to the terminal, and\nfails when the run does.\n"
   },
   "no server [\"session\",\"list\",\"--nope\"]": {
     "code": 2,
@@ -354,7 +354,7 @@
   "scripted [\"session\",\"logs\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: session logs needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: session logs needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "scripted calls [\"session\",\"logs\"]": [],
   "scripted [\"session\",\"send\",\"c3f1\",\"hello\",\"there\\n\",\"--data-dir\",\"<data-dir>\"]": {
@@ -389,7 +389,7 @@
   "scripted [\"session\",\"send\",\"c3f1\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: session send needs a session id and text\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: session send needs a session id and text\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "scripted calls [\"session\",\"send\",\"c3f1\"]": [],
   "scripted [\"session\",\"kill\",\"9b4d\",\"--data-dir\",\"<data-dir>\"]": {
@@ -415,19 +415,19 @@
   "scripted [\"session\",\"kill\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: session kill needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: session kill needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "scripted calls [\"session\",\"kill\"]": [],
   "scripted [\"session\",\"start\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: session start needs --agent\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: session start needs --agent\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "scripted calls [\"session\",\"start\"]": [],
   "scripted [\"session\",\"start\",\"--agent\",\"hal\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: unknown agent \"hal\". Try: claude, copilot, codex, opencode, gemini\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+    "err": "vorn: unknown agent \"hal\". Try: claude, copilot, codex, opencode, gemini\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"hal\"]": [],
   "scripted [\"session\",\"start\",\"--agent\",\"claude\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
@@ -538,7 +538,7 @@
   "scripted [\"workflow\",\"run\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: workflow run needs a workflow\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+    "err": "vorn: workflow run needs a workflow\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--wait] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish; with\n--wait it stays until the run ends, shows its progress to the terminal, and\nfails when the run does.\n"
   },
   "scripted calls [\"workflow\",\"run\"]": [],
   "scripted [\"workflow\",\"stop\",\"5a5\",\"--data-dir\",\"<data-dir>\"]": {
@@ -572,7 +572,7 @@
   "scripted [\"workflow\",\"stop\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 2,
     "out": "",
-    "err": "vorn: workflow stop needs a run\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+    "err": "vorn: workflow stop needs a run\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--wait] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish; with\n--wait it stays until the run ends, shows its progress to the terminal, and\nfails when the run does.\n"
   },
   "scripted calls [\"workflow\",\"stop\"]": [],
   "scripted [\"workflow\",\"runs\",\"--data-dir\",\"<data-dir>\"]": {

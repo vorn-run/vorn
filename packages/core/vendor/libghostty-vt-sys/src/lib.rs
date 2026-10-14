@@ -10,6 +10,35 @@ use std::ops::Deref;
 
 pub use bindings::*;
 
+thread_local! {
+    static USERDATA_TERMINAL: std::cell::Cell<bindings::Terminal> =
+        const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+/// `bindings::ghostty_terminal_set` that also remembers, per thread, the last
+/// terminal given userdata, so callers of a wrapper that hides the raw handle
+/// can still set options the wrapper doesn't know about.
+///
+/// # Safety
+///
+/// Same contract as `bindings::ghostty_terminal_set`.
+pub unsafe fn ghostty_terminal_set(
+    terminal: bindings::Terminal,
+    option: bindings::TerminalOption::Type,
+    value: *const ::std::os::raw::c_void,
+) -> bindings::Result::Type {
+    if option == bindings::TerminalOption::USERDATA {
+        USERDATA_TERMINAL.with(|t| t.set(terminal));
+    }
+    // SAFETY: Upheld by the caller.
+    unsafe { bindings::ghostty_terminal_set(terminal, option, value) }
+}
+
+/// The terminal handle most recently given userdata on this thread, or null.
+pub fn last_userdata_terminal() -> bindings::Terminal {
+    USERDATA_TERMINAL.with(|t| t.get())
+}
+
 /// Initialize a "sized" FFI object.
 #[macro_export]
 macro_rules! sized {
