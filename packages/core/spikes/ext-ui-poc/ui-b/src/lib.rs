@@ -312,6 +312,9 @@ impl Guest for Component {
             st.ui.begin_at(color::SURFACE_BASE, now);
             let root = st.screen.view(&st.ui);
             st.ui.layout(root, size);
+            if !st.ui.is_cells() && std::env::var_os("VORN_POC_LAYOUT_ONLY").is_some() {
+                return Frame::Pixels(Vec::new());
+            }
             if st.ui.is_cells() {
                 let mut buf = Buffer::new(w as u16, h as u16);
                 buf.draw(st.ui.paint_list().unwrap_or(&PaintList::default()));
