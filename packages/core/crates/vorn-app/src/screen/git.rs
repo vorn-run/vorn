@@ -186,11 +186,6 @@ pub(super) fn open_in_panel(s: &Screen<'_>, session: &str) -> El {
     col
 }
 
-/// The `Open in` menu's height, to open it above its chip.
-pub fn open_in_height(n: usize) -> f32 {
-    8.0 + 28.0 + n as f32 * 30.0
-}
-
 /// `BranchPicker`: the filter, the fetch, and the branches.
 pub(super) fn branch_panel(s: &Screen<'_>) -> El {
     let Some(b) = &s.st.git.branches else {

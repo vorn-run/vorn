@@ -964,6 +964,28 @@ impl Ui {
         self.st.hit(id).map(|h| h.rect)
     }
 
+    /// `id`'s box in the logical pixels an app writes positions in (an
+    /// [`El::absolute`](crate::El::absolute) inset): [`Ui::rect_of`] on a pixel surface; on
+    /// cells, the pixels that lay out back to the same columns and rows.
+    pub fn authored_rect(&self, id: Id) -> Option<Rect> {
+        self.rect_of(id).map(|r| {
+            let (x, y) = self.authored_point((r.x, r.y));
+            let (w, h) = self.authored_point((r.w, r.h));
+            Rect::new(x, y, w, h)
+        })
+    }
+
+    /// A point in layout units (a pointer, a laid-out edge) as the logical
+    /// pixels an app positions things in; the same point off cells.
+    pub fn authored_point(&self, (x, y): (f32, f32)) -> (f32, f32) {
+        if self.is_cells() {
+            use crate::cells::units::{COL, ROW_GAP};
+            (x * COL, y * ROW_GAP)
+        } else {
+            (x, y)
+        }
+    }
+
     /// Asks the window for something; a window applies it after the event.
     pub fn request(&mut self, r: WindowRequest) {
         self.st.requests.push(r);

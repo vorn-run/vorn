@@ -1260,8 +1260,10 @@ impl App {
             MenuKind::GroupIcon(g) => Some(Acts::id("sidebar-group", &Act::Group(Some(g.clone())))),
             _ => src.id,
         };
-        let rect = trigger.and_then(|id| ui.rect_of(id));
-        let mut at = match (src.at, rect) {
+        // In the units the anchor is written in, which on cells are not the layout's.
+        let rect = trigger.and_then(|id| ui.authored_rect(id));
+        let src_at = src.at.map(|p| ui.authored_point(p));
+        let mut at = match (src_at, rect) {
             // `right-0 top-full mt-1` of an empty box at the row's end, so
             // from the row's middle; the row ends 8 px past its More.
             (None, Some(r)) if matches!(kind, MenuKind::Group(_) | MenuKind::Project(_)) => {
@@ -1283,12 +1285,8 @@ impl App {
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
             }
-            // `OpenInButton` opens upwards, its right edge on the chip's.
-            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => {
-                let n = self.st.git.ides.as_ref().map_or(0, Vec::len);
-                let h = crate::screen::git::open_in_height(n);
-                (r.x + r.w - w, (r.y - h - 4.0).max(8.0))
-            }
+            // `OpenInButton` opens upwards from the chip's top, its right edge on the chip's.
+            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => (r.x + r.w - w, r.y - 4.0),
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
