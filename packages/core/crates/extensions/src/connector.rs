@@ -14,6 +14,7 @@ use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 
 use crate::child::{CallError, Child, ErrorData, Launch, CONNECTOR_ERROR};
+use crate::lifecycle::Running;
 use crate::manifest::{self, Manifest};
 
 /// Every protocol this build speaks, offered in `vorn/hello`.
@@ -215,6 +216,12 @@ pub async fn open(
     })
 }
 
+impl Running for SdkClient {
+    fn child(&self) -> &Child {
+        &self.child
+    }
+}
+
 impl SdkClient {
     /// What the child said in its hello.
     pub fn hello(&self) -> &Value {
@@ -229,10 +236,6 @@ impl SdkClient {
         self.child.close().await;
     }
 
-    /// The process it runs in.
-    pub fn child(&self) -> &Child {
-        &self.child
-    }
 
     async fn call(
         &self,

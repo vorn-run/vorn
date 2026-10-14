@@ -6,7 +6,7 @@
 //! ([`super::secrets`]), and a row holds [`IN_VAULT`] where a secret was. A
 //! connection runs as a child: an MCP server spoken to through the MCP SDK
 //! ([`super::mcp`]), or a package spoken to in the connector protocol
-//! ([`vorn_connectors::sdk`]). The packs, the catalog and the HTTP connector
+//! ([`vorn_extensions::connector`]). The packs, the catalog and the HTTP connector
 //! are [`vorn_connectors`]'s; this module wires them to the store, the vault,
 //! the desktop ([`crate::bridge`]) and the clients.
 
@@ -19,13 +19,14 @@ use serde_json::{json, Map, Value};
 use tracing::{info, warn};
 use vorn_connectors::auth::{self, Runner};
 use vorn_connectors::catalog::Catalog;
-use vorn_connectors::child::Launch;
+use vorn_extensions::child::Launch;
 use vorn_connectors::connections::{self as conns, filter, Item, IN_VAULT, MCP, SDK};
 use vorn_connectors::fetch::Http;
 use vorn_connectors::install::{Installer, Source as PackSource};
-use vorn_connectors::pack::PackStore;
+use vorn_extensions::pack::PackStore;
 use vorn_connectors::poll::{self, McpPoll, Page};
-use vorn_connectors::sdk::{self, Children, SdkClient, SdkLaunch, Source as LaunchSource};
+use vorn_extensions::connector::{self as sdk, SdkClient, SdkLaunch, Source as LaunchSource};
+use vorn_extensions::lifecycle::{Lease, Lifecycle, ServiceKey};
 use vorn_store::Store;
 use vorn_vault::Secret;
 
@@ -93,7 +94,8 @@ pub struct Connectors {
     native: Weak<Native>,
     installer: Installer,
     catalog: Catalog,
-    children: Children,
+    /// The bridge's lifecycle, which every connection's child runs under.
+    lifecycle: Arc<Lifecycle>,
     grants: Mutex<HashMap<String, Arc<Grant>>>,
     /// How a checkout signs in, read once by probing it; `None` when it would not start.
     checkout_auth: Mutex<HashMap<String, Option<auth::Source>>>,
@@ -274,6 +276,7 @@ impl Connectors {
         data_dir: &Path,
         origin: String,
         bridge: Arc<dyn Bridge>,
+        lifecycle: Arc<Lifecycle>,
     ) -> Arc<Connectors> {
         let home = PathBuf::from(super::shell::home_dir());
         Arc::new(Connectors {
@@ -283,7 +286,7 @@ impl Connectors {
                 home.join(".vorn").join("connector-catalog.json"),
                 std::env::var_os("VORN_CONNECTORS_ROOT").map(PathBuf::from),
             ),
-            children: Children::default(),
+            lifecycle,
             grants: Mutex::default(),
             checkout_auth: Mutex::default(),
             bridge,
@@ -558,7 +561,8 @@ impl Connectors {
     }
 
     async fn stop_children(&self, id: &str) {
-        self.children.stop(id).await;
+        let scope = connection_scope(id);
+        self.lifecycle.stop_where(|k| k.scope == scope).await;
         self.grants
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -729,10 +733,11 @@ impl Connectors {
             let pack = self.installer.store().describe(sdk_id)?;
             return Some(auth::Source {
                 auth: pack
+                    .manifest
                     .auth
                     .as_ref()
                     .and_then(|a| serde_json::to_value(a).ok()),
-                declared: pack.env.iter().map(|e| e.name.clone()).collect(),
+                declared: pack.manifest.env.iter().map(|e| e.name.clone()).collect(),
                 trusted: false,
             });
         };
@@ -795,6 +800,7 @@ impl Connectors {
         let mut source = LaunchSource::Command;
         let mut protocol = None;
         let mut name = String::new();
+        let mut cwd = std::env::temp_dir();
         let mut program_args: Option<(String, Vec<String>)> = None;
         if !sdk_id.is_empty() {
             if let Some(local) =
@@ -804,19 +810,20 @@ impl Connectors {
                 program_args = Some(local);
             } else if let Some(pack) = self.installer.store().describe(&sdk_id) {
                 source = LaunchSource::Pack;
-                protocol = pack.protocol;
-                name = pack.name.clone();
-                program_args = Some((
-                    "node".into(),
-                    vec![pack.entry().to_string_lossy().into_owned()],
-                ));
+                protocol = pack.manifest.protocol;
+                name = pack.name().to_owned();
+                // A package's program runs in its own folder.
+                cwd = pack.path.clone();
+                program_args = pack
+                    .service_command()
+                    .map(|(program, args)| (program.to_string_lossy().into_owned(), args));
             }
         }
         let (command, args) = match program_args {
             Some(found) => found,
             None => {
                 let command = filters.get("command").map_or(String::new(), |c| {
-                    vorn_connectors::js::trim(&vorn_connectors::js::to_string(c)).to_owned()
+                    vorn_extensions::js::trim(&vorn_extensions::js::to_string(c)).to_owned()
                 });
                 if command.is_empty() {
                     return Err("MCP connection is missing a command".into());
@@ -827,7 +834,7 @@ impl Connectors {
                     .and_then(|a| serde_json::from_str::<Value>(a).ok())
                 {
                     Some(Value::Array(items)) => {
-                        items.iter().map(vorn_connectors::js::to_string).collect()
+                        items.iter().map(vorn_extensions::js::to_string).collect()
                     }
                     _ => Vec::new(),
                 };
@@ -874,7 +881,7 @@ impl Connectors {
             launch: Launch {
                 program,
                 args,
-                cwd: std::env::temp_dir(),
+                cwd,
                 env,
             },
             own_env: own,
@@ -885,12 +892,19 @@ impl Connectors {
         })
     }
 
-    /// A package connection's child, started on first use.
-    async fn sdk_client(&self, conn: &Value) -> Result<Arc<SdkClient>, String> {
+    /// A package connection's child, started on first use under the bridge's lifecycle.
+    async fn sdk_client(&self, conn: &Value) -> Result<Lease<SdkClient>, String> {
         let id = text(conn, "id").to_owned();
+        let sdk_id = conns::sdk_id_of(conn);
+        let owner = if sdk_id.is_empty() {
+            text(conn, "name").to_owned()
+        } else {
+            sdk_id
+        };
+        let key = ServiceKey::new(owner, connection_scope(&id));
         let conn = conn.clone();
-        self.children
-            .get_or_start(&id, || async {
+        self.lifecycle
+            .get_or_start(&key, || async {
                 let mut spawn = self.spawn_spec(&conn).await?;
                 if let Some(browser) = spawn.browser.clone() {
                     let token = random_token(32);
@@ -929,6 +943,50 @@ impl Connectors {
                     .map_err(|e| e.to_string())
             })
             .await
+    }
+
+    /// Runs `action` in a process of its own when the connection's package
+    /// gives it a command: started, greeted, asked once and stopped.
+    async fn one_shot(
+        &self,
+        conn: &Value,
+        action: &str,
+        args: &Map<String, Value>,
+    ) -> Option<Result<Value, sdk::SdkError>> {
+        let sdk_id = conns::sdk_id_of(conn);
+        let pack = self.installer.store().describe(&sdk_id)?;
+        let run = pack.manifest.run(action)?;
+        let (program, run_args) = pack.resolve(&run.command)?;
+        let mut spawn = match self.spawn_spec(conn).await {
+            Ok(spawn) => spawn,
+            Err(message) => {
+                return Some(Err(sdk::SdkError {
+                    message,
+                    data: Default::default(),
+                }))
+            }
+        };
+        spawn.launch.program = program;
+        spawn.launch.args = run_args;
+        let launch = SdkLaunch {
+            launch: spawn.launch,
+            source: spawn.source,
+            protocol: spawn.protocol,
+        };
+        let name = pack.name().to_owned();
+        let client = match sdk::open(&launch, &name, &self.version, sdk::Timeouts::default()).await
+        {
+            Ok(client) => client,
+            Err(err) => {
+                return Some(Err(sdk::SdkError {
+                    message: err.to_string(),
+                    data: Default::default(),
+                }))
+            }
+        };
+        let answered = client.action(action, args, None).await.map(Value::Object);
+        tokio::spawn(async move { client.close().await });
+        Some(answered)
     }
 
     /// What a package connection declares: its installed pack, or what its child says.
@@ -977,6 +1035,12 @@ impl Connectors {
         match text(conn, "connectorId") {
             MCP => self.invoke_mcp(conn, action, args).await,
             SDK => {
+                if let Some(answered) = self.one_shot(conn, action, args).await {
+                    return match answered {
+                        Ok(output) => json!({ "success": true, "output": output }),
+                        Err(err) => failure(err.message),
+                    };
+                }
                 let mut params = args.clone();
                 params.retain(|_, v| !v.is_null() || true);
                 self.through_window(conn, |client, call| {
@@ -1038,10 +1102,11 @@ impl Connectors {
         Fut: std::future::Future<Output = Result<Value, sdk::SdkError>>,
     {
         let id = text(conn, "id").to_owned();
-        let client = match self.sdk_client(conn).await {
-            Ok(client) => client,
+        let lease = match self.sdk_client(conn).await {
+            Ok(lease) => lease,
             Err(error) => return Err(failure(error)),
         };
+        let client = lease.shared();
         let grant = self
             .grants
             .lock()
@@ -1057,6 +1122,7 @@ impl Connectors {
             key
         });
         let answered = run(client, key.clone()).await;
+        drop(lease);
         let calls = match (&grant, &key) {
             (Some(g), Some(k)) => g
                 .calls
@@ -1179,7 +1245,7 @@ impl Connectors {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
-        if !vorn_connectors::manifest::within_origins(&origins, &url) {
+        if !vorn_extensions::manifest::within_origins(&origins, &url) {
             return refuse(
                 403,
                 &format!("{url} is not on one of this connection's origins"),
@@ -1441,13 +1507,13 @@ impl Connectors {
         };
         let project = params
             .get("project")
-            .filter(|p| vorn_connectors::js::truthy(p))
+            .filter(|p| vorn_extensions::js::truthy(p))
             .or_else(|| {
                 conn.get("executionProject")
-                    .filter(|p| vorn_connectors::js::truthy(p))
+                    .filter(|p| vorn_extensions::js::truthy(p))
             })
             .or_else(|| conn.get("name"))
-            .map(vorn_connectors::js::to_string)
+            .map(vorn_extensions::js::to_string)
             .unwrap_or_default();
         let status = params.get("initialStatus").cloned().unwrap_or(Value::Null);
         let result = self
@@ -1478,9 +1544,9 @@ impl Connectors {
         let now = now_iso();
         let project = conn
             .get("executionProject")
-            .filter(|p| vorn_connectors::js::truthy(p))
+            .filter(|p| vorn_extensions::js::truthy(p))
             .or_else(|| conn.get("name"))
-            .map(vorn_connectors::js::to_string)
+            .map(vorn_extensions::js::to_string)
             .unwrap_or_default();
         let mapping = conn.get("statusMapping").cloned().unwrap_or(Value::Null);
         let c = conn.clone();
@@ -1490,7 +1556,7 @@ impl Connectors {
                 for item in &items {
                     let status = mapping
                         .get(&item.status_raw)
-                        .filter(|v| vorn_connectors::js::truthy(v))
+                        .filter(|v| vorn_extensions::js::truthy(v))
                         .cloned()
                         .unwrap_or_else(|| json!("todo"));
                     let r = conns::upsert_item(s, &c, item, &project, &status, &now, uuid)?;
@@ -1792,7 +1858,7 @@ impl Connectors {
                 env.push((k.clone(), v.to_owned()));
             }
         }
-        let program = super::mcp::resolve(vorn_connectors::js::trim(command), &env);
+        let program = super::mcp::resolve(vorn_extensions::js::trim(command), &env);
         let shown = if program.as_os_str().is_empty() {
             command.to_owned()
         } else {
@@ -1909,6 +1975,19 @@ impl Connectors {
             .collect()
     }
 
+    /// The package connection `id` belongs to, if it is one.
+    pub(crate) async fn owner_of(&self, id: &str) -> Option<String> {
+        let conn = self.connection(id).await.ok()??;
+        let sdk_id = conns::sdk_id_of(&conn);
+        (!sdk_id.is_empty()).then_some(sdk_id)
+    }
+
+    /// A package installed, linked or removed through the extension bridge.
+    pub(crate) async fn package_changed(&self, id: &str) {
+        self.pack_changed(id).await;
+        self.changed();
+    }
+
     /// After a pack changed, no child runs its old files, and the connection
     /// a pack brings with it comes or goes with it.
     async fn pack_changed(&self, id: &str) {
@@ -1919,7 +1998,8 @@ impl Connectors {
         let pack = self.installer.store().describe(id);
         let wants_implicit = pack.as_ref().is_some_and(|p| {
             !p.is_extension()
-                && p.auth
+                && p.manifest
+                    .auth
                     .as_ref()
                     .and_then(|a| serde_json::to_value(a).ok())
                     .is_some_and(|a| a["rung"] == "none")
@@ -1944,7 +2024,7 @@ impl Connectors {
         filters.insert(filter::IMPLICIT.into(), json!(true));
         let params = json!({
             "connectorId": SDK,
-            "name": pack.name,
+            "name": pack.name(),
             "filters": filters,
             "syncIntervalMinutes": 0,
             "statusMapping": {},
@@ -2100,7 +2180,7 @@ impl Connectors {
             .and_then(Value::as_object)
             .into_iter()
             .flatten()
-            .map(|(k, v)| (k.clone(), vorn_connectors::js::to_string(v)))
+            .map(|(k, v)| (k.clone(), vorn_extensions::js::to_string(v)))
             .collect();
         let body = params
             .get("body")
@@ -2116,8 +2196,17 @@ impl Connectors {
 
     /// Stops every child, as vornd stops.
     pub async fn stop(&self) {
-        self.children.stop_all().await;
+        self.lifecycle
+            .stop_where(|k| k.scope.starts_with(CONNECTION_SCOPE))
+            .await;
     }
+}
+
+/// Where a connection's child sits in the lifecycle's keys.
+const CONNECTION_SCOPE: &str = "connection:";
+
+fn connection_scope(id: &str) -> String {
+    format!("{CONNECTION_SCOPE}{id}")
 }
 
 /// What a connection's child starts with.

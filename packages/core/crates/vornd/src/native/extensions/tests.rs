@@ -7,8 +7,11 @@ use http_body_util::{BodyExt, Full};
 use hyper::{Request, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use vorn_extensions::bridge::Route;
+use vorn_extensions::gate::{Answer as WorldAnswer, Caller, World as GateWorld};
 use vorn_extensions::host::HostSettings;
+use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
+use vorn_extensions::router::RouterSettings;
 
 use super::*;
 
@@ -183,12 +186,28 @@ impl World {
     }
 
     async fn token(&self, id: &str) -> String {
-        self.ext
-            .supervisor
-            .get_or_start(&self.key(id))
-            .await
-            .unwrap();
-        self.ext.supervisor.token_for(&self.key(id)).unwrap()
+        drop(self.ext.hosts.get_or_start(&self.key(id)).await.unwrap());
+        self.ext.hosts.token_for(&self.key(id)).unwrap()
+    }
+}
+
+/// Programs get nothing from this world; the card extensions here do not ask it.
+struct NoWorld;
+
+impl GateWorld for NoWorld {
+    fn call(&self, _: &Caller, method: &str, _: Value) -> WorldAnswer<Value> {
+        let err = ExtError::new("unknown-method", format!("no {method} here"));
+        Box::pin(async move { Err(err) })
+    }
+    fn fetch(
+        &self,
+        _: &Caller,
+        _: vorn_extensions::api::types::Request,
+    ) -> WorldAnswer<vorn_extensions::api::types::Response> {
+        Box::pin(async { Err(ExtError::new("network", "no network here")) })
+    }
+    fn secret(&self, _: &Caller, _: &str, _: &str) -> WorldAnswer<Option<String>> {
+        Box::pin(async { Ok(None) })
     }
 }
 
@@ -203,17 +222,27 @@ fn world() -> World {
         .status();
     assert!(git.is_ok_and(|s| s.success()));
     let settings = HostSettings {
-        program: "node".into(),
         base_env: std::env::vars()
             .filter(|(k, _)| k == "PATH" || k == "SYSTEMROOT")
             .collect(),
         bridge_origin: "http://127.0.0.1:9".into(),
         version: "test".into(),
     };
-    let supervisor = Supervisor::new(PackStore::new(packs.path()), settings);
+    let store = PackStore::new(packs.path());
+    let lifecycle = Lifecycle::new(Policy::default());
+    let hosts = Hosts::new(Arc::clone(&lifecycle), store.clone(), settings);
+    let router = Router::new(
+        store.clone(),
+        lifecycle,
+        Arc::new(NoWorld),
+        RouterSettings::new(Vec::new(), "test"),
+    );
+    let installs = Arc::new(Installs::new(store, "git", Vec::new()));
     let fake = Arc::new(Fake::default());
     let ext = Extensions::new(
-        supervisor,
+        hosts,
+        router,
+        installs,
         Arc::clone(&fake) as Arc<dyn Around>,
         "http://127.0.0.1:9".into(),
         vec!["http://127.0.0.1:9".into()],
@@ -374,7 +403,7 @@ async fn a_program_pane_runs_in_a_terminal_holding_the_extensions_token() {
     let env: HashMap<_, _> = spec.env.into_iter().collect();
     assert_eq!(
         env.get("VORN_EXTENSION_TOKEN"),
-        w.ext.supervisor.token_for(&w.key("x")).as_ref()
+        w.ext.hosts.token_for(&w.key("x")).as_ref()
     );
     assert_eq!(
         env["VORN_EXTENSION_HOST"],
