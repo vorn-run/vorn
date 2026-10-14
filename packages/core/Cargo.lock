@@ -6526,6 +6526,7 @@ dependencies = [
  "ureq",
  "url",
  "vorn-agents",
+ "vorn-extensions",
  "vorn-spawn",
  "vorn-store",
 ]
@@ -6563,8 +6564,9 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
  "tracing",
- "vorn-connectors",
+ "vorn-spawn",
 ]
 
 [[package]]

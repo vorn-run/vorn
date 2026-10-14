@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Map};
-use vorn_connectors::child::Launch;
-use vorn_connectors::sdk::{self, OpenError, SdkLaunch, Source, Timeouts};
+use vorn_extensions::child::Launch;
+use vorn_extensions::connector::{self as sdk, OpenError, SdkLaunch, Source, Timeouts};
 
 fn node() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;

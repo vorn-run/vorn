@@ -1,22 +1,24 @@
-//! The extension hosts: one child per extension and project, started when
-//! first needed, each with a token of its own, started again when it
-//! crashes and stopped when its project has no session left.
+//! The extensions of 0.8, which add to a session's card: one child per
+//! extension and project in the connector protocol, each with a token of its
+//! own, kept by the shared [`Lifecycle`]: started when first needed, started
+//! again on the next use after a crash, and stopped when its project has no
+//! session left or it sits idle.
 //!
 //! A child's token is how the bridge knows who calls it: it is minted at
 //! each start, handed to the child in its environment and to nobody else,
 //! and forgotten when the child ends.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{json, Value};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::child::{Child, Launch};
 use crate::footer::{read_items, Item};
 use crate::js;
+use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
 use crate::links::MAX_CLICKED_TEXT;
 use crate::pack::{InstalledPack, PackStore};
 use crate::token;
@@ -26,10 +28,6 @@ pub const SUPPORTED_PROTOCOLS: [u64; 1] = [1];
 const UNSUPPORTED_PROTOCOL: i64 = -32001;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(15);
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Crashes within [`CRASH_WINDOW`] after which a host waits to be asked again.
-const MAX_CRASHES: usize = 5;
-const CRASH_WINDOW: Duration = Duration::from_secs(60);
-const FIRST_RESTART_DELAY: Duration = Duration::from_secs(1);
 
 /// What a pack that names no protocol is told.
 pub fn outdated_message(name: &str) -> String {
@@ -139,11 +137,15 @@ impl Host {
     }
 }
 
+impl Running for Host {
+    fn child(&self) -> &Child {
+        &self.child
+    }
+}
+
 /// What every host is started with.
 #[derive(Debug, Clone)]
 pub struct HostSettings {
-    /// The program that runs a pack's entry: `node`.
-    pub program: PathBuf,
     /// The environment every child starts from.
     pub base_env: Vec<(String, String)>,
     /// Where the bridge is served, e.g. `http://127.0.0.1:50090`.
@@ -152,33 +154,36 @@ pub struct HostSettings {
     pub version: String,
 }
 
-#[derive(Default)]
-struct Slot {
-    /// Held while starting, so callers that arrive meanwhile share one start.
-    gate: tokio::sync::Mutex<()>,
-    running: Mutex<Option<Arc<Host>>>,
-    crashes: Mutex<Vec<Instant>>,
+/// The services of this kind are scoped by project in the lifecycle.
+fn service_key(key: &HostKey) -> ServiceKey {
+    ServiceKey::new(key.extension_id.clone(), project_scope(&key.project_path))
 }
 
-/// Every host, by extension and project.
-pub struct Supervisor {
+fn project_scope(project: &str) -> String {
+    format!("project:{project}")
+}
+
+/// The extension hosts, by extension and project, on the shared lifecycle.
+pub struct Hosts {
+    lifecycle: Arc<Lifecycle>,
     store: PackStore,
     settings: HostSettings,
-    slots: Mutex<HashMap<HostKey, Arc<Slot>>>,
-    me: Weak<Supervisor>,
 }
 
-fn guard<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
+impl std::fmt::Debug for Hosts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hosts")
+            .field("root", &self.store.root())
+            .finish_non_exhaustive()
+    }
 }
 
-impl Supervisor {
-    pub fn new(store: PackStore, settings: HostSettings) -> Arc<Supervisor> {
-        Arc::new_cyclic(|me| Supervisor {
+impl Hosts {
+    pub fn new(lifecycle: Arc<Lifecycle>, store: PackStore, settings: HostSettings) -> Arc<Hosts> {
+        Arc::new(Hosts {
+            lifecycle,
             store,
             settings,
-            slots: Mutex::new(HashMap::new()),
-            me: me.clone(),
         })
     }
 
@@ -187,24 +192,10 @@ impl Supervisor {
     }
 
     /// The running host for `key`, started if it is not.
-    pub async fn get_or_start(&self, key: &HostKey) -> Result<Arc<Host>, String> {
-        let slot = Arc::clone(guard(&self.slots).entry(key.clone()).or_default());
-        let _starting = slot.gate.lock().await;
-        if let Some(host) = guard(&slot.running).as_ref().filter(|h| !h.exited()) {
-            return Ok(Arc::clone(host));
-        }
-        let host = Arc::new(self.start(key).await?);
-        let current = guard(&self.slots)
-            .get(key)
-            .is_some_and(|s| Arc::ptr_eq(s, &slot));
-        if !current {
-            // Stopped while it started.
-            host.child.close().await;
-            return Err(format!("{} was stopped before it started", host.name));
-        }
-        *guard(&slot.running) = Some(Arc::clone(&host));
-        self.watch(Arc::clone(&host), &slot);
-        Ok(host)
+    pub async fn get_or_start(&self, key: &HostKey) -> Result<Lease<Host>, String> {
+        self.lifecycle
+            .get_or_start(&service_key(key), || self.start(key))
+            .await
     }
 
     async fn start(&self, key: &HostKey) -> Result<Host, String> {
@@ -214,14 +205,14 @@ impl Supervisor {
             .describe(id)
             .filter(InstalledPack::is_extension)
             .ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
-        if !pack.entry().is_file() {
-            return Err(format!("The extension \"{id}\" has no files to run"));
-        }
+        let (program, args) = pack
+            .service_command()
+            .ok_or_else(|| format!("The extension \"{id}\" has no files to run"))?;
         if self.settings.bridge_origin.is_empty() {
             return Err("The extension bridge has no address yet".into());
         }
-        let name = pack.name.clone();
-        match pack.protocol {
+        let name = pack.name().to_owned();
+        match pack.manifest.protocol {
             None => return Err(outdated_message(&name)),
             Some(p) if !SUPPORTED_PROTOCOLS.contains(&p) => {
                 return Err(needs_newer_vorn(&name, Some(p)))
@@ -237,8 +228,8 @@ impl Supervisor {
         );
         set(&mut env, "VORN_EXTENSION_TOKEN", token.clone());
         let launch = Launch {
-            program: self.settings.program.clone(),
-            args: vec![pack.entry().to_string_lossy().into_owned()],
+            program,
+            args,
             cwd: PathBuf::from(&key.project_path),
             env,
         };
@@ -285,62 +276,13 @@ impl Supervisor {
         })
     }
 
-    /// Starts `host` again when it ends without being stopped, unless it
-    /// has crashed [`MAX_CRASHES`] times within [`CRASH_WINDOW`].
-    fn watch(&self, host: Arc<Host>, slot: &Arc<Slot>) {
-        let me = self.me.clone();
-        let slot = Arc::downgrade(slot);
-        tokio::spawn(async move {
-            let exit = host.child.wait().await;
-            let (Some(me), Some(slot)) = (me.upgrade(), slot.upgrade()) else {
-                return;
-            };
-            {
-                let mut running = guard(&slot.running);
-                if !running.as_ref().is_some_and(|h| Arc::ptr_eq(h, &host)) {
-                    return;
-                }
-                *running = None;
-            }
-            let still_wanted = guard(&me.slots)
-                .get(&host.key)
-                .is_some_and(|s| Arc::ptr_eq(s, &slot));
-            if !still_wanted {
-                return;
-            }
-            let crashes = {
-                let mut crashes = guard(&slot.crashes);
-                let now = Instant::now();
-                crashes.retain(|at| now.duration_since(*at) < CRASH_WINDOW);
-                crashes.push(now);
-                crashes.len()
-            };
-            if crashes > MAX_CRASHES {
-                warn!(
-                    "{} crashed {crashes} times in a minute; it starts again when next needed",
-                    host.name
-                );
-                return;
-            }
-            let delay = FIRST_RESTART_DELAY * (1 << (crashes - 1));
-            warn!(
-                "{} ended ({exit}); starting it again in {} s",
-                host.name,
-                delay.as_secs()
-            );
-            tokio::time::sleep(delay).await;
-            let still_wanted = guard(&me.slots)
-                .get(&host.key)
-                .is_some_and(|s| Arc::ptr_eq(s, &slot));
-            if still_wanted {
-                if let Err(err) = me.get_or_start(&host.key).await {
-                    warn!(
-                        "[extensions] {} did not start again: {err}",
-                        host.key.extension_id
-                    );
-                }
-            }
-        });
+    /// Every running host.
+    pub fn running(&self) -> Vec<Arc<Host>> {
+        self.lifecycle
+            .running_as::<Host>()
+            .into_iter()
+            .map(|(_, host)| host)
+            .collect()
     }
 
     /// Who holds `offered` among `extension_id`'s running hosts. Every one
@@ -363,48 +305,21 @@ impl Supervisor {
             .map(|h| h.token.clone())
     }
 
-    /// Every running host.
-    pub fn running(&self) -> Vec<Arc<Host>> {
-        guard(&self.slots)
-            .values()
-            .filter_map(|slot| guard(&slot.running).clone())
-            .filter(|h| !h.exited())
-            .collect()
-    }
-
-    /// Stops every host `matches` picks.
-    pub async fn stop_where(&self, matches: impl Fn(&HostKey) -> bool) {
-        let removed: Vec<Arc<Slot>> = {
-            let mut slots = guard(&self.slots);
-            let keys: Vec<HostKey> = slots.keys().filter(|k| matches(k)).cloned().collect();
-            keys.iter().filter_map(|k| slots.remove(k)).collect()
-        };
-        let closing = removed
-            .iter()
-            .filter_map(|slot| guard(&slot.running).take());
-        futures_join(closing.map(|host| async move { host.child.close().await })).await;
-    }
-
     pub async fn stop_extension(&self, extension_id: &str) {
-        self.stop_where(|k| k.extension_id == extension_id).await;
+        self.lifecycle
+            .stop_where(|k| k.extension == extension_id && k.scope.starts_with("project:"))
+            .await;
     }
 
     pub async fn stop_project(&self, project_path: &str) {
-        self.stop_where(|k| k.project_path == project_path).await;
+        let scope = project_scope(project_path);
+        self.lifecycle.stop_where(|k| k.scope == scope).await;
     }
 
     pub async fn stop_all(&self) {
-        self.stop_where(|_| true).await;
-    }
-}
-
-/// Runs every future to its end at once.
-async fn futures_join<F: std::future::Future<Output = ()> + Send + 'static>(
-    all: impl Iterator<Item = F>,
-) {
-    let handles: Vec<_> = all.map(tokio::spawn).collect();
-    for handle in handles {
-        let _ = handle.await;
+        self.lifecycle
+            .stop_where(|k| k.scope.starts_with("project:"))
+            .await;
     }
 }
 

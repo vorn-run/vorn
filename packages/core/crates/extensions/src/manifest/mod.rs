@@ -1,9 +1,16 @@
-//! A pack's `manifest.json`, read into the shape the app draws.
+//! The one manifest every package carries, whatever it adds: a connector's
+//! triggers and actions, an extension's contributions, the program it runs
+//! and what it declares it will reach.
 //!
-//! The file comes from a package anyone can publish, so every field the app
-//! reads is checked here rather than trusted downstream: a bad contribution,
-//! icon or sign-in costs only itself, never the pack. These are the SDK's own
-//! rules, applied again, so they follow its wording and its limits.
+//! A package writes it as `vorn-extension.toml` ([`file`]); packs built for
+//! 0.8 carry `manifest.json`, read here by [`read`] into the same type, and
+//! [`file::to_toml`] converts one to the other. The JSON comes from a package
+//! anyone can publish, so every field the app reads is checked rather than
+//! trusted downstream: a bad contribution, icon or sign-in costs only itself,
+//! never the pack. These are the SDK's own rules, applied again, so they
+//! follow its wording and its limits.
+
+pub mod file;
 
 use std::sync::OnceLock;
 
@@ -12,13 +19,19 @@ use serde_json::{Map, Value};
 
 use crate::js;
 
-/// What the manifest of a pack says it is.
+/// The extension API this build speaks over stdio, generated from the WIT.
+pub const API: &str = crate::api::API;
+/// What `api` says for a program in the connector protocol, before its version.
+pub const CONNECTOR_API: &str = "vorn:connector@";
+
+/// What a package says it is, does, runs and reaches.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// Derived from what it adds, never declared: clients of 0.8 draw by it.
     pub kind: Kind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -26,6 +39,7 @@ pub struct Manifest {
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<Auth>,
+    /// The connector protocol its program speaks; `None` with the extension API.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<u64>,
     pub triggers: Vec<Trigger>,
@@ -37,6 +51,43 @@ pub struct Manifest {
     pub permissions: Option<Vec<Permission>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activates: Option<Activation>,
+    /// `vorn:extension@0.9` or `vorn:connector@1`; `None` for a pack too old to say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api: Option<String>,
+    /// The Vorn releases it runs on, as `>=0.9`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vorn: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// Run once at install, after the confirmation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build: Option<Vec<String>>,
+    /// The long-running program: polls, events, calls and rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<Service>,
+    /// One-shot programs, a process per call, by action id.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<Run>,
+    #[serde(skip_serializing_if = "Declares::is_empty")]
+    pub declares: Declares,
+    /// The credential vornd adds to `net.fetch`; the program never sees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential: Option<Credential>,
+    /// The recorded checks `vorn ext pack` runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checks: Option<Vec<String>>,
+}
+
+impl Manifest {
+    /// Whether its program speaks the extension API rather than the connector protocol.
+    pub fn speaks_api(&self) -> bool {
+        self.api.as_deref() == Some(API)
+    }
+
+    /// The one-shot program for `action`, if it declares one.
+    pub fn run(&self, action: &str) -> Option<&Run> {
+        self.runs.iter().find(|r| r.id == action)
+    }
 }
 
 /// A connector feeds tasks in; an extension adds to a session's card.
@@ -45,6 +96,59 @@ pub struct Manifest {
 pub enum Kind {
     Connector,
     Extension,
+}
+
+impl Kind {
+    /// An extension adds something to a card; anything else reads as a connector.
+    pub fn of(contributes: Option<&Contributions>) -> Kind {
+        if contributes.is_some() {
+            Kind::Extension
+        } else {
+            Kind::Connector
+        }
+    }
+}
+
+/// The program a service runs, and the events it is woken for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Service {
+    pub command: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
+}
+
+/// An action answered by a process of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Run {
+    pub id: String,
+    pub title: String,
+    pub command: Vec<String>,
+}
+
+/// What a package says it will reach, shown at install.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Declares {
+    /// Hosts `net.fetch` may reach, enforced at the bridge.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub network: Vec<String>,
+    /// Permissions as written, `auth.borrow:gh` keeping its argument.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<String>,
+}
+
+impl Declares {
+    pub fn is_empty(&self) -> bool {
+        self.network.is_empty() && self.uses.is_empty()
+    }
+}
+
+/// Where vornd finds the credential it adds to `net.fetch`: a field of the
+/// connection's secrets, written into a header.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Credential {
+    pub field: String,
+    /// `Authorization: Bearer {token}`: the header, `{token}` where the secret goes.
+    pub header: String,
 }
 
 /// A glyph drawn from SVG path data.
@@ -283,8 +387,8 @@ pub struct Activation {
     pub platform: Vec<String>,
 }
 
-/// What an extension may ask the bridge for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// What a package may ask the bridge for. The first six are 0.8's and keep their names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Permission {
     #[serde(rename = "git.read")]
     GitRead,
@@ -298,16 +402,52 @@ pub enum Permission {
     CardRename,
     #[serde(rename = "agent.usage")]
     AgentUsage,
+    #[serde(rename = "sessions.read")]
+    SessionsRead,
+    #[serde(rename = "sessions.launch")]
+    SessionsLaunch,
+    #[serde(rename = "git.write")]
+    GitWrite,
+    #[serde(rename = "files.read")]
+    FilesRead,
+    #[serde(rename = "files.write")]
+    FilesWrite,
+    #[serde(rename = "storage")]
+    Storage,
+    #[serde(rename = "network.tcp")]
+    NetworkTcp,
+    #[serde(rename = "secrets.read")]
+    SecretsRead,
+    #[serde(rename = "auth.borrow")]
+    AuthBorrow,
+    #[serde(rename = "http.routes")]
+    HttpRoutes,
+    #[serde(rename = "browser.session")]
+    BrowserSession,
+    #[serde(rename = "process.run")]
+    ProcessRun,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 6] = [
+    pub const ALL: [Permission; 18] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
         Permission::TerminalSend,
         Permission::CardRename,
         Permission::AgentUsage,
+        Permission::SessionsRead,
+        Permission::SessionsLaunch,
+        Permission::GitWrite,
+        Permission::FilesRead,
+        Permission::FilesWrite,
+        Permission::Storage,
+        Permission::NetworkTcp,
+        Permission::SecretsRead,
+        Permission::AuthBorrow,
+        Permission::HttpRoutes,
+        Permission::BrowserSession,
+        Permission::ProcessRun,
     ];
 
     pub fn name(self) -> &'static str {
@@ -318,10 +458,24 @@ impl Permission {
             Permission::TerminalSend => "terminal.send",
             Permission::CardRename => "card.rename",
             Permission::AgentUsage => "agent.usage",
+            Permission::SessionsRead => "sessions.read",
+            Permission::SessionsLaunch => "sessions.launch",
+            Permission::GitWrite => "git.write",
+            Permission::FilesRead => "files.read",
+            Permission::FilesWrite => "files.write",
+            Permission::Storage => "storage",
+            Permission::NetworkTcp => "network.tcp",
+            Permission::SecretsRead => "secrets.read",
+            Permission::AuthBorrow => "auth.borrow",
+            Permission::HttpRoutes => "http.routes",
+            Permission::BrowserSession => "browser.session",
+            Permission::ProcessRun => "process.run",
         }
     }
 
-    fn named(name: &str) -> Option<Permission> {
+    /// The permission a declared use names, its argument (`auth.borrow:gh`) aside.
+    pub fn named(name: &str) -> Option<Permission> {
+        let name = name.split_once(':').map_or(name, |(n, _)| n);
         Permission::ALL.into_iter().find(|p| p.name() == name)
     }
 }
@@ -469,6 +623,26 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         }
     }
 
+    // `vorn-extension.toml` lists the connector-wide config once, beside the triggers.
+    for entry in payload
+        .get("env")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+    {
+        let var = js::trim(js::str_of(entry.get("name")));
+        if var.is_empty() || env.iter().any(|e| e.name == var) {
+            continue;
+        }
+        env.push(EnvVar {
+            name: var.to_owned(),
+            required: entry.get("required") == Some(&Value::Bool(true)),
+            secret: entry.get("secret") == Some(&Value::Bool(true)),
+            description: description(entry),
+        });
+    }
+
     let actions: Vec<Action> = payload
         .get("actions")
         .and_then(Value::as_array)
@@ -488,45 +662,61 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         .filter(|action| !action.kind.is_empty())
         .collect();
 
-    let kind = if payload.get("kind").and_then(Value::as_str) == Some("extension") {
-        Kind::Extension
+    let declared_extension = payload.get("kind").and_then(Value::as_str) == Some("extension");
+    let contributes = if declared_extension {
+        contributes(payload.get("contributes"))
     } else {
-        Kind::Connector
+        None
     };
-    let contributes = match kind {
-        Kind::Extension => contributes(payload.get("contributes")),
-        Kind::Connector => None,
-    };
-    if kind == Kind::Extension && contributes.is_none() {
+    if declared_extension && contributes.is_none() {
         return Err(ManifestError::NothingContributed { name });
     }
-    if kind == Kind::Connector && triggers.is_empty() && actions.is_empty() {
+    if !declared_extension && triggers.is_empty() && actions.is_empty() {
         return Err(ManifestError::NoTriggersOrActions { name });
     }
 
     let protocol = payload.get("protocol").and_then(protocol);
+    let permissions = if declared_extension {
+        permissions(payload.get("permissions"))
+    } else {
+        None
+    };
 
     Ok(Manifest {
         version: js::str_or(payload.get("version"), "0.0.0").to_owned(),
         description: description(payload),
         icon: icon(payload.get("icon")),
         auth: auth(payload.get("auth")),
+        api: protocol.map(|p| format!("{CONNECTOR_API}{p}")),
         protocol,
         triggers,
         actions,
         env,
-        permissions: match kind {
-            Kind::Extension => permissions(payload.get("permissions")),
-            Kind::Connector => None,
+        declares: Declares {
+            network: Vec::new(),
+            uses: permissions
+                .iter()
+                .flatten()
+                .map(|p| p.name().to_owned())
+                .collect(),
         },
-        activates: match kind {
-            Kind::Extension => activation(payload.get("activates")),
-            Kind::Connector => None,
+        permissions,
+        activates: if declared_extension {
+            activation(payload.get("activates"))
+        } else {
+            None
         },
+        kind: Kind::of(contributes.as_ref()),
         contributes,
-        kind,
         id,
         name,
+        vorn: None,
+        publisher: None,
+        build: None,
+        service: None,
+        runs: Vec::new(),
+        credential: None,
+        checks: None,
     })
 }
 

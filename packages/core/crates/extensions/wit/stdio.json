@@ -1,0 +1,128 @@
+{
+  "package": "vorn:extension@0.9.0",
+  "api": "vorn:extension@0.9",
+  "types": {
+    "json": { "inline": "any JSON value" },
+    "ext-error": {
+      "record": [
+        ["code", "string"],
+        ["message", "string"]
+      ]
+    },
+    "header": {
+      "record": [
+        ["name", "string"],
+        ["value", "string"]
+      ]
+    },
+    "request": {
+      "record": [
+        ["method", "string"],
+        ["url", "string"],
+        ["headers", "list<header>"],
+        ["body", "option<string>"]
+      ]
+    },
+    "response": {
+      "record": [
+        ["status", "u16"],
+        ["headers", "list<header>"],
+        ["body", "string"]
+      ]
+    },
+    "call-ctx": {
+      "record": [
+        ["caller", "string"],
+        ["project", "option<string>"]
+      ]
+    },
+    "init-ctx": {
+      "record": [
+        ["id", "string"],
+        ["version", "string"],
+        ["vorn", "string"]
+      ]
+    },
+    "row-op": {
+      "variant": [
+        ["upsert", "json"],
+        ["delete", "string"],
+        ["clear", null]
+      ]
+    },
+    "event": {
+      "record": [
+        ["name", "string"],
+        ["data", "json"]
+      ]
+    },
+    "level": { "enum": ["debug", "info", "warn", "error"] }
+  },
+  "methods": [
+    {
+      "method": "host.call",
+      "answers": "host",
+      "params": [
+        ["method", "string"],
+        ["args", "json"]
+      ],
+      "result": "json",
+      "error": "ext-error"
+    },
+    {
+      "method": "host.publish",
+      "answers": "host",
+      "params": [
+        ["collection", "string"],
+        ["ops", "list<row-op>"]
+      ],
+      "result": null,
+      "error": null
+    },
+    {
+      "method": "host.log",
+      "answers": "host",
+      "params": [
+        ["level", "level"],
+        ["message", "string"]
+      ],
+      "result": null,
+      "error": null
+    },
+    {
+      "method": "net.fetch",
+      "answers": "host",
+      "params": [
+        ["req", "request"],
+        ["connection", "option<string>"]
+      ],
+      "result": "response",
+      "error": "ext-error"
+    },
+    {
+      "method": "guest.init",
+      "answers": "guest",
+      "params": [["ctx", "init-ctx"]],
+      "result": "_",
+      "error": "ext-error"
+    },
+    {
+      "method": "guest.handle",
+      "answers": "guest",
+      "params": [
+        ["method", "string"],
+        ["args", "json"],
+        ["ctx", "call-ctx"]
+      ],
+      "result": "json",
+      "error": "ext-error"
+    },
+    {
+      "method": "guest.on-event",
+      "answers": "guest",
+      "params": [["batch", "list<event>"]],
+      "result": null,
+      "error": null
+    }
+  ]
+}

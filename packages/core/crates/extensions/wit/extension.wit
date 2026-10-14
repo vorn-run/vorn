@@ -1,0 +1,115 @@
+// The extension API: what vornd offers an extension and what an extension
+// answers. This file is the only definition. vorn-extensions generates its
+// method names, parameters, errors and types from it at build time, and
+// `stdio.json` beside it is the same mapping for authors in other languages.
+//
+// Over stdio each function `f` of interface `i` is the JSON-RPC 2.0 method
+// `i.f`, one message per line. Its params are an object keyed by the
+// parameter names. A function with a result is a request and is answered:
+// `result<T, ext-error>` answers with T as the result, or with the error as
+// `{"code": -32000, "message": .., "data": {"code": ..}}`. A function with no
+// result is a notification and is not answered. `json` travels inline as a
+// JSON value; a record is an object keyed by its field names; an option is
+// the value or null; a variant is `{"case": payload}`, or `"case"` when the
+// case carries nothing; an enum is its case's name.
+//
+// A one-shot program gets one `guest.handle` request, always with id 1, and
+// exits after answering. A service is sent `guest.init` first, then calls and
+// events until its stdin closes.
+
+package vorn:extension@0.9.0;
+
+interface types {
+  /// Any JSON value.
+  type json = string;
+
+  /// A failed call: a stable code a caller can match, and words a person reads.
+  record ext-error {
+    code: string,
+    message: string,
+  }
+
+  record header {
+    name: string,
+    value: string,
+  }
+
+  record request {
+    method: string,
+    url: string,
+    headers: list<header>,
+    body: option<string>,
+  }
+
+  record response {
+    status: u16,
+    headers: list<header>,
+    body: string,
+  }
+
+  /// Who is calling, and about which project.
+  record call-ctx {
+    caller: string,
+    project: option<string>,
+  }
+
+  /// What a service is started with.
+  record init-ctx {
+    id: string,
+    version: string,
+    vorn: string,
+  }
+
+  /// One change to a collection of keyed rows; a row's key is its `id`.
+  variant row-op {
+    upsert(json),
+    delete(string),
+    clear,
+  }
+
+  record event {
+    name: string,
+    data: json,
+  }
+
+  enum level {
+    debug,
+    info,
+    warn,
+    error,
+  }
+}
+
+/// What vornd answers, checked against the manifest's declared uses.
+interface host {
+  use types.{json, ext-error, level, row-op};
+
+  /// A core method, such as `sessions.list`, if the manifest declares the permission it needs.
+  call: func(method: string, args: json) -> result<json, ext-error>;
+  /// Changes the rows of a collection the extension's templates draw.
+  publish: func(collection: string, ops: list<row-op>);
+  log: func(level: level, message: string);
+}
+
+/// HTTP made by vornd: only to the manifest's declared hosts, with the
+/// connection's credential added there and never shown to the extension.
+interface net {
+  use types.{request, response, ext-error};
+
+  fetch: func(req: request, connection: option<string>) -> result<response, ext-error>;
+}
+
+/// What the extension answers.
+interface guest {
+  use types.{json, ext-error, call-ctx, init-ctx, event};
+
+  init: func(ctx: init-ctx) -> result<_, ext-error>;
+  handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
+  on-event: func(batch: list<event>);
+}
+
+world extension {
+  import host;
+  import net;
+  export guest;
+}

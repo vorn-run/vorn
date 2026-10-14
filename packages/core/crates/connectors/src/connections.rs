@@ -83,7 +83,7 @@ pub fn connector_id_of(conn: &Value) -> String {
 pub fn sdk_id_of(conn: &Value) -> String {
     match conn.pointer(&format!("/filters/{}", filter::CONNECTOR_ID)) {
         None | Some(Value::Null) => String::new(),
-        Some(v) => crate::js::trim(&crate::js::to_string(v)).to_owned(),
+        Some(v) => vorn_extensions::js::trim(&vorn_extensions::js::to_string(v)).to_owned(),
     }
 }
 
@@ -91,7 +91,7 @@ pub fn sdk_id_of(conn: &Value) -> String {
 pub fn sdk_trigger_of(conn: &Value) -> String {
     match conn.pointer(&format!("/filters/{}", filter::TRIGGER)) {
         None | Some(Value::Null) => String::new(),
-        Some(v) => crate::js::trim(&crate::js::to_string(v)).to_owned(),
+        Some(v) => vorn_extensions::js::trim(&vorn_extensions::js::to_string(v)).to_owned(),
     }
 }
 
@@ -111,7 +111,7 @@ pub fn sdk_connection_filters(pack: &Value, trigger: Option<&str>) -> Map<String
         filter::VERSION.into(),
         pack.get("version").cloned().unwrap_or(Value::Null),
     );
-    if let Some(icon) = pack.get("icon").filter(|i| crate::js::truthy(i)) {
+    if let Some(icon) = pack.get("icon").filter(|i| vorn_extensions::js::truthy(i)) {
         out.insert(filter::ICON.into(), json!(icon.to_string()));
     }
     if let Some(t) = trigger.filter(|t| !t.is_empty()) {
@@ -138,7 +138,7 @@ pub fn cron_every_minutes(minutes: f64) -> String {
     if minutes < 60.0 {
         return format!(
             "*/{} * * * *",
-            crate::js::to_string(&crate::js::json_number(minutes))
+            vorn_extensions::js::to_string(&vorn_extensions::js::json_number(minutes))
         );
     }
     let hours = (minutes / 60.0 + 0.5).floor();
@@ -227,7 +227,7 @@ pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<V
     ] {
         conn.insert(key.into(), p.get(key).cloned().unwrap_or(Value::Null));
     }
-    if let Some(project) = p.get("executionProject").filter(|v| crate::js::truthy(v)) {
+    if let Some(project) = p.get("executionProject").filter(|v| vorn_extensions::js::truthy(v)) {
         conn.insert("executionProject".into(), project.clone());
     }
     conn.insert("createdAt".into(), json!(new.now));
@@ -380,7 +380,7 @@ pub fn upsert_item(
         "title": item.title,
         "description": item.description,
         "status": initial_status,
-        "order": crate::js::json_number(max + 1.0),
+        "order": vorn_extensions::js::json_number(max + 1.0),
         "createdAt": now,
         "updatedAt": now,
         "sourceConnectorId": connector_id_of(conn),
@@ -460,7 +460,7 @@ pub fn sdk_action_def(action: &Value) -> Value {
         "label".into(),
         action.get("label").cloned().unwrap_or(Value::Null),
     );
-    if let Some(d) = action.get("description").filter(|d| crate::js::truthy(d)) {
+    if let Some(d) = action.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
         out.insert("description".into(), d.clone());
     }
     let fields: Vec<Value> = action
@@ -482,10 +482,10 @@ pub fn sdk_action_def(action: &Value) -> Value {
             .iter()
             .map(|o| {
                 let mut p = Map::new();
-                if let Some(t) = o.get("type").filter(|t| crate::js::truthy(t)) {
+                if let Some(t) = o.get("type").filter(|t| vorn_extensions::js::truthy(t)) {
                     p.insert("type".into(), t.clone());
                 }
-                if let Some(d) = o.get("description").filter(|d| crate::js::truthy(d)) {
+                if let Some(d) = o.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
                     p.insert("description".into(), d.clone());
                 }
                 (text(o, "key").to_owned(), Value::Object(p))
@@ -515,7 +515,7 @@ fn action_input_field(input: &Value) -> Value {
         input.get("required").cloned().unwrap_or(json!(false)),
     );
     out.insert("supportsTemplates".into(), json!(true));
-    if let Some(d) = input.get("description").filter(|d| crate::js::truthy(d)) {
+    if let Some(d) = input.get("description").filter(|d| vorn_extensions::js::truthy(d)) {
         out.insert("description".into(), d.clone());
     }
     let options = input
@@ -571,7 +571,7 @@ pub fn mask_secret(value: &str) -> String {
     if value.is_empty() {
         return String::new();
     }
-    if crate::js::len16(value) < 12 {
+    if vorn_extensions::js::len16(value) < 12 {
         return "••••".to_owned();
     }
     let marker = VENDOR_MARKERS
@@ -579,7 +579,7 @@ pub fn mask_secret(value: &str) -> String {
         .find(|m| value.starts_with(*m))
         .copied()
         .unwrap_or("");
-    format!("{marker}••••{}", crate::js::tail16(value, 4))
+    format!("{marker}••••{}", vorn_extensions::js::tail16(value, 4))
 }
 
 /// A name a shell accepts that cannot reach the prototype (`isEnvName`).
@@ -638,7 +638,7 @@ pub fn usage_counts(workflows: &[Value]) -> HashMap<String, u64> {
             };
             let id = match config.get(key) {
                 None | Some(Value::Null) => String::new(),
-                Some(v) => crate::js::to_string(v),
+                Some(v) => vorn_extensions::js::to_string(v),
             };
             if !id.is_empty() {
                 *counts.entry(id).or_default() += 1;
@@ -693,7 +693,7 @@ pub fn list_keys(
             "usageCount": counts.get(id).copied().unwrap_or(0),
         }));
     }
-    keys.sort_by(|a, b| crate::js::locale_compare(text(a, "name"), text(b, "name")));
+    keys.sort_by(|a, b| vorn_extensions::js::locale_compare(text(a, "name"), text(b, "name")));
     keys
 }
 

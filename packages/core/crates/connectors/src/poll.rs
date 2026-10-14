@@ -5,7 +5,7 @@
 use serde_json::{json, Map, Value};
 
 use crate::connections::{Item, POLL_EVENT};
-use crate::js;
+use vorn_extensions::js;
 
 /// Most pages read in one poll, so a connector cannot hold a tick forever.
 pub const MAX_PAGES_PER_POLL: usize = 20;

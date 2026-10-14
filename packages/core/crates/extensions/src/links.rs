@@ -46,7 +46,7 @@ pub fn match_links(packs: &[InstalledPack], subject: &Subject<'_>, text: &str) -
             if js::test(&pattern, clicked) {
                 found.push(LinkMatch {
                     extension_id: pack.id.clone(),
-                    extension_name: pack.name.clone(),
+                    extension_name: pack.name().to_owned(),
                     handler_id: handler.base.id.clone(),
                     title: handler.base.title.clone(),
                 });
