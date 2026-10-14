@@ -56,29 +56,6 @@ impl Spread {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn percentiles_take_the_nearest_rank() {
-        let v: Vec<f64> = (1..=100).map(f64::from).collect();
-        assert_eq!(pct(&v, 50.0), 50.0);
-        assert_eq!(pct(&v, 99.0), 99.0);
-        assert_eq!(pct(&v, 100.0), 100.0);
-        assert_eq!(pct(&[], 50.0), 0.0);
-        assert_eq!(pct(&[3.0], 99.0), 3.0);
-    }
-
-    #[test]
-    fn a_spread_is_the_median_and_its_ends() {
-        let s = Spread::of(&[5.0, 1.0, 3.0, 9.0]).unwrap();
-        assert_eq!((s.median, s.low, s.high), (4.0, 1.0, 9.0));
-        assert_eq!(Spread::of(&[2.0, 7.0, 4.0]).unwrap().median, 4.0);
-        assert!(Spread::of(&[]).is_none());
-    }
-}
-
 /// Unix milliseconds of a `toISOString` time (`2026-10-14T09:30:00.123Z`).
 pub fn iso_ms(t: &str) -> Option<f64> {
     let num = |r: std::ops::Range<usize>| t.get(r)?.parse::<i64>().ok();
@@ -103,13 +80,33 @@ pub fn iso_ms(t: &str) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn percentiles_take_the_nearest_rank() {
+        let v: Vec<f64> = (1..=100).map(f64::from).collect();
+        assert_eq!(pct(&v, 50.0), 50.0);
+        assert_eq!(pct(&v, 99.0), 99.0);
+        assert_eq!(pct(&v, 100.0), 100.0);
+        assert_eq!(pct(&[], 50.0), 0.0);
+        assert_eq!(pct(&[3.0], 99.0), 3.0);
+    }
+
+    #[test]
+    fn a_spread_is_the_median_and_its_ends() {
+        let s = Spread::of(&[5.0, 1.0, 3.0, 9.0]).unwrap();
+        assert_eq!((s.median, s.low, s.high), (4.0, 1.0, 9.0));
+        assert_eq!(Spread::of(&[2.0, 7.0, 4.0]).unwrap().median, 4.0);
+        assert!(Spread::of(&[]).is_none());
+    }
+
     #[test]
     fn iso_ms_reads_iso_strings() {
-        assert_eq!(super::iso_ms("1970-01-01T00:00:00.000Z"), Some(0.0));
+        assert_eq!(iso_ms("1970-01-01T00:00:00.000Z"), Some(0.0));
         assert_eq!(
-            super::iso_ms("2026-10-14T09:30:00.123Z"),
+            iso_ms("2026-10-14T09:30:00.123Z"),
             Some(1_791_970_200_123.0)
         );
-        assert_eq!(super::iso_ms("garbage"), None);
+        assert_eq!(iso_ms("garbage"), None);
     }
 }
