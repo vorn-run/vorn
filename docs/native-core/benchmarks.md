@@ -69,11 +69,12 @@ an agent TUI at 32 KB/s (the `spinner` transcript, byte for byte the one the
 renderer suite above feeds each terminal), a build log at 256 KB/s (`bulk`), and
 a full-screen redraw at 60 Hz. One pane on screen echoes keys, for latency.
 
-| Case     | Panes stream                                                          |
-| -------- | --------------------------------------------------------------------- |
-| `mixed`  | agent TUI, build log and full-screen redraw, in turn                  |
-| `agent`  | every pane the agent TUI                                              |
-| `hidden` | as `agent`, with the probe's card expanded, so the rest are not drawn |
+| Case     | Panes stream                                                             |
+| -------- | ------------------------------------------------------------------------ |
+| `mixed`  | agent TUI, build log and full-screen redraw, in turn                     |
+| `agent`  | every pane the agent TUI                                                 |
+| `hidden` | as `agent`, with the probe's card expanded, so the rest are not drawn    |
+| `resize` | as `agent`, while the window is dragged to 60% by 70% and back every 2 s |
 
 - **Frame**: one frame's build, layout, paint and GPU submit, including folding in
   what the terminals sent since the last. The budget is 16.7 ms.
@@ -83,6 +84,11 @@ a full-screen redraw at 60 Hz. One pane on screen echoes keys, for latency.
 - **CPU**: the app process, and vornd with its session holders, over the run,
   in per cent of one core; per pane is their sum over N. The programs in the
   panes are the workload and are not counted.
+- **RSS**: the resident memory of the app process, and of vornd with its session
+  holders, at the end of the run.
+- **Resize**: in the `resize` case every frame has a new window size and a new
+  target to draw into, which stands in for the window's surface being
+  reconfigured; the terminals are resized to fit their cards as they go.
 
 The grid shows at most 16 cards (4 by 4, once the grid area is at least 1280
 by 1120) and pages past what fits; every pane is attached, as if the person had
@@ -126,6 +132,62 @@ What they say:
 - One run under heavier load put a 117 ms p99 on `mixed` at 16 panes; two
   reruns did not repeat it. Rerun before reading a single outlier as a
   regression.
+
+### 8, 16 and 32 panes, with resize and memory
+
+The same M2 Pro on 2026-10-14 at `ff04c06d`, 1600x1000, Metal, `nice -n 10`,
+10 s per case after the 2 s warm-up. Eight rounds over an hour, each tier in its
+own process; the table is the median of the eight. The machine was idle but
+not quiet: the installed app and endpoint security kept the load average at 1.5
+to 5. Results: `packages/core/bench/many-panes/darwin-arm64-2026-10-14.json`
+(every round, with a `run` field).
+
+| Case   | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 |      p99 | CPU app | CPU vornd | CPU per pane | RSS app | RSS vornd |
+| ------ | ----: | ----: | --------: | --------: | -----------: | -----------------: | -------: | ------: | --------: | -----------: | ------: | --------: |
+| mixed  |     8 |     8 |   4.61 ms |   6.96 ms |           0% |           14.20 ms | 24.80 ms |   34.8% |     48.8% |        10.4% |   56 MB |     70 MB |
+| agent  |     8 |     8 |   5.18 ms |   7.26 ms |           0% |           14.79 ms | 25.09 ms |   37.8% |     41.4% |         9.9% |   65 MB |     69 MB |
+| hidden |     8 |     1 |   3.86 ms |   6.55 ms |           0% |           14.00 ms | 23.78 ms |   33.1% |     50.6% |        10.5% |   55 MB |     70 MB |
+| resize |     8 |     8 |   4.55 ms |   7.04 ms |           0% |           14.09 ms | 23.98 ms |   36.9% |     41.5% |         9.8% |   71 MB |     68 MB |
+| mixed  |    16 |    12 |   4.78 ms |   6.32 ms |           0% |           14.49 ms | 60.57 ms |   36.9% |     81.3% |         7.4% |   61 MB |    116 MB |
+| agent  |    16 |    12 |   5.12 ms |   6.55 ms |           0% |           14.41 ms | 25.43 ms |   38.8% |     65.6% |         6.5% |   72 MB |    108 MB |
+| hidden |    16 |     1 |   3.62 ms |   5.84 ms |           0% |           13.49 ms | 24.38 ms |   32.6% |     74.3% |         6.7% |   65 MB |    110 MB |
+| resize |    16 |    12 |   4.28 ms |   6.58 ms |           0% |           13.93 ms | 24.31 ms |   37.7% |     71.8% |         6.8% |   81 MB |    107 MB |
+| mixed  |    32 |    12 |   3.98 ms |   7.87 ms |           0% |           14.20 ms | 50.62 ms |   39.0% |    134.5% |         5.4% |   66 MB |    210 MB |
+| agent  |    32 |    12 |   4.83 ms |   5.94 ms |           0% |           14.43 ms | 24.04 ms |   38.4% |     97.0% |         4.2% |   78 MB |    182 MB |
+| hidden |    32 |     1 |   3.42 ms |   5.68 ms |           0% |           13.44 ms | 23.38 ms |   34.7% |    131.2% |         5.2% |   68 MB |    183 MB |
+| resize |    32 |    12 |   4.16 ms |   5.88 ms |           0% |           13.93 ms | 24.12 ms |   37.9% |    109.9% |         4.6% |   83 MB |    184 MB |
+
+What they say:
+
+- Every case holds 60 Hz: no frame of the 96 runs went over 16.7 ms more than
+  0.2% of the time, the worst single frame was 21 ms, and no probe key timed
+  out. Frame time does not grow from 16 to 32 panes, since the grid draws 12
+  cards either way.
+- Resizing costs nothing extra: a new size and target every frame, with the
+  terminals refitted as they go, sits at or below the still `agent` case.
+- vornd's CPU follows the bytes: about 41% at 8 panes, 66% at 16 and 97% at 32
+  for the agent feed, so CPU per pane falls as panes are added (9.9%, 6.5%,
+  4.2%). Its memory grows by about 4.7 MB a pane (69, 108, 182 MB); the app's
+  stays at 55 to 85 MB.
+- Frame times are about twice the October 13 baseline. The #769 build, rerun
+  between these rounds, gives the same numbers, so this is the machine, not
+  the code: one quiet round (16 panes) matched the baseline, with `hidden` at
+  1.01 ms and `agent` at 2.67 ms.
+- `mixed` at 16 and 32 panes has a wide input p99 (34 to 75 ms over the
+  rounds) where `mixed` at 8 holds at 24-25 ms. Five interleaved pairs at 16
+  panes put the #769 build at 23-24 ms p99 and 70% vornd CPU, and this build at
+  25-72 ms and 82%: something since #769 costs vornd more on the build log and
+  redraw feeds. Not yet traced.
+
+No Electron row: this bench links the native app's code and draws it offscreen,
+so it cannot drive the Electron client, and the renderer suite that measured
+Chromium left the repo with it. A comparable baseline needs the beta.8 app run
+from a copy, on its own HOME, `--user-data-dir` and `VORN_DATA_DIR` (so its
+vornd is a test one), with `--remote-debugging-port`; the same `many_panes feed`
+programs started in N shells over its vornd; frame cost from a DevTools
+timeline trace rather than the frame interval; keys sent through the debugging
+protocol with the echo read back from the terminal; and CPU and RSS summed
+over the Electron processes and vornd.
 
 ### Comparing with the Electron client
 
