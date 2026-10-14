@@ -9,6 +9,12 @@ import {
   windowsVersion
 } from '../packages/core/scripts/package-native.mjs'
 import { electronFeed, feeds, nativeFeed } from '../packages/core/scripts/release-feeds.mjs'
+import {
+  compareVersions,
+  nextPatch,
+  previousRelease,
+  servedFeed
+} from '../packages/core/scripts/update-path.mjs'
 
 const version = '0.8.0-beta.9'
 
@@ -134,5 +140,54 @@ releaseDate: '2026-10-20T10:00:00.000Z'
     const mac = feeds({ ...base, files: fakeFiles() })['latest-mac.yml']
     expect(mac).toContain('path: Vorn-0.8.0-beta.9-arm64-mac.zip')
     expect(mac).toContain('  - url: Vorn-0.8.0-beta.9-mac.zip')
+  })
+})
+
+describe('update path', () => {
+  it('orders versions as semver does', () => {
+    const sorted = ['0.7.4', '0.8.0-beta.2', '0.8.0-beta.10', '0.8.0-rc.1', '0.8.0', '0.8.1']
+    for (let i = 1; i < sorted.length; i++) {
+      expect(compareVersions(sorted[i - 1], sorted[i])).toBeLessThan(0)
+      expect(compareVersions(sorted[i], sorted[i - 1])).toBeGreaterThan(0)
+    }
+    expect(compareVersions('v0.8.0-beta.9', '0.8.0-beta.9')).toBe(0)
+    expect(() => compareVersions('junk', '0.8.0')).toThrow()
+  })
+
+  it('rehearses under a version above any prerelease of the build', () => {
+    expect(nextPatch('0.8.0-beta.9')).toBe('0.8.1')
+    expect(compareVersions(nextPatch('0.8.0-beta.9'), '0.8.0')).toBeGreaterThan(0)
+    expect(nextPatch('1.2.3')).toBe('1.2.4')
+  })
+
+  it('starts from the newest published release before the build', () => {
+    const releases = [
+      { tag_name: 'v0.8.0-beta.11', draft: true },
+      { tag_name: 'v0.8.0-beta.10', draft: false },
+      { tag_name: 'v0.8.0-beta.9', draft: false },
+      { tag_name: 'v0.7.4', draft: false },
+      { tag_name: 'nightly', draft: false }
+    ]
+    expect(previousRelease(releases, '0.8.0-beta.11')?.tag_name).toBe('v0.8.0-beta.10')
+    expect(previousRelease(releases, '0.8.0-beta.10')?.tag_name).toBe('v0.8.0-beta.9')
+    expect(previousRelease(releases, '0.7.4')).toBeNull()
+  })
+
+  it('serves every asset locally under the version asked for', () => {
+    const feed = nativeFeed({
+      version,
+      tag: `v${version}`,
+      repo: 'vorn-run/vorn',
+      releaseDate: '2026-01-01T00:00:00.000Z',
+      files: fakeFiles()
+    })
+    const served = servedFeed(feed, 'http://127.0.0.1:9', '0.8.1')
+    expect(served.version).toBe('0.8.1')
+    expect(served.assets.map((a: { url: string }) => a.url)).toContain(
+      'http://127.0.0.1:9/Vorn-0.8.0-beta.9-arm64-mac.zip'
+    )
+    expect(served.assets.map((a: { sha256: string }) => a.sha256)).toEqual(
+      feed.assets.map((a: { sha256: string }) => a.sha256)
+    )
   })
 })

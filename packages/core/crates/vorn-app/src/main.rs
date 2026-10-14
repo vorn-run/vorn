@@ -2,6 +2,8 @@
 //!
 //! ```text
 //! vorn-app [window] [--data-dir D]
+//! vorn-app update [--channel stable|beta] [--data-dir D]
+//! vorn-app --version | --help
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
 //!               [--keys K1,K2] [--clipboard TEXT] [--chrome off] [--layout tabs]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
@@ -15,6 +17,9 @@
 //! HTML, with the plain text beside it (`a.txt`) and, with `--png`, as the
 //! pane painter draws a terminal screen. `term` attaches to one
 //! session at `COLSxROWS`, takes that size, and draws its screen alone.
+//!
+//! `update` installs a newer release now, without a window, and starts it
+//! (`HELP` has the details).
 //!
 //! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
 //! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
@@ -42,6 +47,30 @@ use vorn_app::ui::{
 use vorn_app::update::Updater;
 use vorn_app::{look, ui_config, App};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const HELP: &str = "\
+Usage: Vorn [window] [--data-dir DIR]
+       Vorn update [--channel stable|beta] [--data-dir DIR]
+       Vorn install-cli [--data-dir DIR]
+       Vorn widget [--data-dir DIR]
+       Vorn --version
+       Vorn --help
+
+  window       Open Vorn (the default).
+  update       Check for a newer release and install it now: download it,
+               check its checksum and signature, install it, and start the
+               new Vorn on DIR. Quit Vorn's window first. The channel is beta
+               for a beta build, else stable; VORN_UPDATE_FEED names a feed
+               to read instead.
+  install-cli  Put the vorn command on PATH and say where.
+  widget       Open the floating widget.
+
+  --data-dir DIR  The data directory (default: VORN_DATA_DIR, else ~/.vorn).
+
+shot, cells and term draw a frame offscreen, for tests and docs.
+";
+
 struct Args {
     mode: String,
     flags: Vec<(String, String)>,
@@ -56,10 +85,18 @@ impl Args {
             // A vorn:// link opens the window.
             .filter(|a| !a.starts_with("vorn:"))
             .peekable();
-        let mode = match it.peek() {
+        let mode = match it.peek().map(String::as_str) {
+            Some("--help" | "-h") => "help".to_owned(),
+            Some("--version" | "-V") => "version".to_owned(),
             Some(m) if !m.starts_with("--") => it.next().unwrap_or_default(),
             _ => "window".to_owned(),
         };
+        if matches!(mode.as_str(), "help" | "version") {
+            return Ok(Args {
+                mode,
+                flags: Vec::new(),
+            });
+        }
         let mut flags = Vec::new();
         while let Some(k) = it.next() {
             let key = k.strip_prefix("--").ok_or(format!("unexpected {k:?}"))?;
@@ -681,6 +718,28 @@ fn install_cli(args: &Args) -> Result<(), String> {
     }
 }
 
+/// Checks for an update and installs it now; the new app starts once this
+/// process exits.
+fn update(args: &Args) -> Result<(), String> {
+    use vorn_app::update::{self, Outcome};
+    let channel = args
+        .get("channel")
+        .unwrap_or_else(|| update::default_channel(VERSION));
+    if !matches!(channel, "stable" | "beta") {
+        return Err(format!("--channel is stable or beta, not {channel:?}"));
+    }
+    let dir = args.data_dir()?;
+    match update::update_now(channel, Some(&dir), &|step| println!("{step}"))? {
+        Outcome::UpToDate => println!("Vorn {VERSION} is up to date"),
+        Outcome::Manual { version } => println!(
+            "Vorn {version} is out; install its package from {}",
+            update::RELEASES
+        ),
+        Outcome::Installed { version } => println!("Installed Vorn {version}; starting it"),
+    }
+    Ok(())
+}
+
 /// The floating widget, a window of its own over other apps.
 fn widget(args: &Args) -> Result<(), String> {
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
@@ -716,6 +775,15 @@ fn main() {
         "window" => window(&args),
         "widget" => widget(&args),
         "install-cli" => install_cli(&args),
+        "update" => update(&args),
+        "help" => {
+            print!("Vorn {VERSION}\n\n{HELP}");
+            Ok(())
+        }
+        "version" => {
+            println!("Vorn {VERSION}");
+            Ok(())
+        }
         other => Err(format!("unknown mode {other:?}")),
     });
     if let Err(e) = result {

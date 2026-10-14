@@ -35,12 +35,14 @@ pub fn host(network_access: bool) -> IpAddr {
     }
 }
 
-/// Binds `host:wanted`, or any port on `host` when that one is taken.
-/// Answers the listener and whether it fell back.
+/// Binds `host:wanted`, or any port on `host` when that one is taken or
+/// the system keeps it from us. Answers the listener and whether it fell back.
 pub async fn bind(host: IpAddr, wanted: u16) -> std::io::Result<(TcpListener, bool)> {
+    use std::io::ErrorKind::{AddrInUse, PermissionDenied};
     match TcpListener::bind(SocketAddr::new(host, wanted)).await {
         Ok(listener) => Ok((listener, false)),
-        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && wanted != 0 => {
+        // Windows refuses a port in a range it reserved (WSAEACCES) as if it were forbidden.
+        Err(err) if matches!(err.kind(), AddrInUse | PermissionDenied) && wanted != 0 => {
             let listener = TcpListener::bind(SocketAddr::new(host, 0)).await?;
             Ok((listener, true))
         }
@@ -82,5 +84,12 @@ mod tests {
         let (other, fell) = bind(host(false), port).await.unwrap();
         assert!(fell);
         assert_ne!(other.local_addr().unwrap().port(), port);
+    }
+
+    #[tokio::test]
+    async fn takes_another_port_when_the_wanted_one_is_forbidden() {
+        // Port 1 needs privileges on Linux, so this exercises the fallback there; elsewhere it may bind as asked.
+        let (listener, fell) = bind(host(false), 1).await.unwrap();
+        assert_eq!(listener.local_addr().unwrap().port() == 1, !fell);
     }
 }

@@ -19,6 +19,8 @@
 //! Stable reads the latest release's feed; beta the newest release that
 //! has one, prerelease or not. `VORN_UPDATE_FEED` names a feed to read
 //! instead, for a test.
+//!
+//! `Vorn update` runs the same steps without a window ([`update_now`]).
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -553,32 +555,97 @@ fn after_exit(then: &str, args: &[&Path]) -> Command {
     command
 }
 
-/// Installs `staged` and starts the new app once this one exits; the
-/// caller exits next. vornd is left running.
-pub fn install(staged: &Staged) -> Result<(), String> {
+/// Installs `staged` and starts the new app once this one exits, on
+/// `data_dir` when given; the caller exits next. vornd is left running.
+pub fn install(staged: &Staged, data_dir: Option<&Path>) -> Result<(), String> {
     match &staged.install {
         #[cfg(unix)]
         Install::Mac(app) => {
             swap(&staged.path, app)?;
             // The old app is now at the staged path, in the staging folder.
             let staging = staged.path.parent().unwrap_or(&staged.path);
-            spawn_detached(&mut after_exit(
-                "rm -rf \"$1\"; open \"$2\"",
-                &[staging, app.as_path()],
-            ))
+            // `open` drops the environment, so the data directory goes as an argument.
+            let mut command = match data_dir {
+                Some(dir) => after_exit(
+                    "rm -rf \"$1\"; open \"$2\" --args --data-dir \"$3\"",
+                    &[staging, app.as_path(), dir],
+                ),
+                None => after_exit("rm -rf \"$1\"; open \"$2\"", &[staging, app.as_path()]),
+            };
+            spawn_detached(&mut command)
         }
         Install::Windows => {
             let mut command = vorn_spawn::command(&staged.path);
             command.args(["/S", "--updated", "--force-run"]);
+            // The installer starts the app with its own environment, so the data directory goes there.
+            if let Some(dir) = data_dir {
+                command.env(crate::client::endpoint::DATA_DIR_ENV, dir);
+            }
             spawn_detached(&mut command)
         }
         #[cfg(unix)]
         Install::AppImage(image) => {
             swap(&staged.path, image)?;
-            spawn_detached(&mut after_exit("exec \"$1\"", &[image.as_path()]))
+            let mut command = match data_dir {
+                Some(dir) => after_exit("exec \"$1\" --data-dir \"$2\"", &[image.as_path(), dir]),
+                None => after_exit("exec \"$1\"", &[image.as_path()]),
+            };
+            spawn_detached(&mut command)
         }
         _ => Err("This install does not update itself".into()),
     }
+}
+
+/// The channel `Vorn update` reads when none is named: a prerelease build
+/// follows betas, as the person who installed one chose.
+pub fn default_channel(current: &str) -> &'static str {
+    match semver::Version::parse(current.trim_start_matches('v')) {
+        Ok(v) if !v.pre.is_empty() => "beta",
+        _ => "stable",
+    }
+}
+
+/// What `Vorn update` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// Nothing newer on the channel.
+    UpToDate,
+    /// A newer release this install cannot apply itself (a .deb).
+    Manual { version: String },
+    /// Installed; the new app starts once this process exits.
+    Installed { version: String },
+}
+
+/// Checks `channel` now and, when a newer release is there, downloads,
+/// checks, stages and installs it as a restart from the window would, then
+/// returns so the caller exits. `say` hears each step.
+pub fn update_now(
+    channel: &str,
+    data_dir: Option<&Path>,
+    say: &dyn Fn(&str),
+) -> Result<Outcome, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let this = Install::current();
+    let key = this
+        .key()
+        .ok_or("This copy of Vorn is not an installed app, so it does not update itself")?;
+    say(&format!("Vorn {current}: checking the {channel} channel"));
+    let feed = fetch_feed(channel)?;
+    let Some(asset) = pick(&feed, key, current) else {
+        return Ok(Outcome::UpToDate);
+    };
+    let version = feed.version;
+    if this == Install::Deb {
+        return Ok(Outcome::Manual { version });
+    }
+    let dir = cache_dir().ok_or("No cache folder to download into")?;
+    say(&format!("Downloading {}", asset.name));
+    let file = download(&asset, &dir, &|_| {})?;
+    say(&format!("Checking Vorn {version}"));
+    let staged = stage(&this, &file, &version)?;
+    say(&format!("Installing Vorn {version}"));
+    install(&staged, data_dir)?;
+    Ok(Outcome::Installed { version })
 }
 
 /// What the person last chose, read from the config each frame.
@@ -714,10 +781,11 @@ impl Updater {
         self.signal.notify_all();
     }
 
-    /// Installs the ready update; the caller exits once this returns Ok.
-    pub fn install(&self) -> Result<(), String> {
+    /// Installs the ready update, to restart on `data_dir`; the caller
+    /// exits once this returns Ok.
+    pub fn install(&self, data_dir: Option<&Path>) -> Result<(), String> {
         let staged = self.lock().staged.clone().ok_or("No update is ready")?;
-        install(&staged).inspect_err(|e| {
+        install(&staged, data_dir).inspect_err(|e| {
             self.set(UpdateStatus::Error { message: e.clone() });
         })
     }
@@ -877,6 +945,13 @@ mod tests {
         );
         assert_eq!(pick(&feed, "linux-x64", "0.8.0-beta.8"), None);
         assert_eq!(pick(&feed, "win-x64", "0.8.0-beta.9"), None);
+    }
+
+    #[test]
+    fn a_prerelease_build_follows_betas() {
+        assert_eq!(default_channel("0.8.0-beta.9"), "beta");
+        assert_eq!(default_channel("0.8.0"), "stable");
+        assert_eq!(default_channel("junk"), "stable");
     }
 
     #[test]

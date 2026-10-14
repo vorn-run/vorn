@@ -550,7 +550,7 @@ impl App {
         };
         match updater.status() {
             crate::settings::UpdateStatus::Ready { .. } => {
-                if updater.install().is_ok() {
+                if updater.install(self.data_dir.as_deref()).is_ok() {
                     std::process::exit(0);
                 }
             }
