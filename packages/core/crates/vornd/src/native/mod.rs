@@ -182,13 +182,11 @@ pub fn route(method: &str) -> Option<Route> {
     if method == IDENTIFY {
         return Some(Route::Identify);
     }
-    if work::is_work(method) {
-        return Some(Route::Work);
-    }
     ROUTES
         .iter()
         .find(|(methods, _)| methods.contains(&method))
         .map(|(_, route)| *route)
+        .or_else(|| work::is_work(method).then_some(Route::Work))
 }
 
 /// The group a method belongs to: everything before the first colon.
