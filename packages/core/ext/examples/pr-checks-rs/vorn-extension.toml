@@ -1,0 +1,27 @@
+id = "local.pr-checks"
+name = "PR checks"
+version = "0.1.0"
+api = "vorn:extension@0.9"
+
+# The sandbox allows only these: GitHub's API, the project's branch and remote,
+# and a token vornd adds to each request (the vault's, then $GH_TOKEN, then gh's login).
+network = ["api.github.com"]
+permissions = ["git.read", "env:GH_TOKEN"]
+auth = [
+    { rung = "vault", field = "token", header = "Authorization: Bearer {token}" },
+    { rung = "env", env = "GH_TOKEN", header = "Authorization: Bearer {token}" },
+    { rung = "cli", borrow = ["gh", "auth", "token"], header = "Authorization: Bearer {token}" },
+]
+
+[runtime]
+# Natively over stdio while you port; the component once `vorn ext pack` built it.
+command = ["cargo", "run", "--quiet"]
+service = true
+component = "pr-checks.cwasm"
+
+[[contributes.sidebar]]
+id = "checks"
+title = "PR checks"
+view = "views/checks.kdl"
+rows = "rows"
+every = "30s"

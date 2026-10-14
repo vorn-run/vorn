@@ -1,0 +1,17 @@
+[package]
+name = "vorn-extension"
+version = "0.9.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Write a Vorn extension in Rust: the same handler runs natively over stdio while you work and as a sandboxed component once packed"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The component transport; a native build speaks the same calls over stdio instead.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = "0.62"
+
+[workspace]

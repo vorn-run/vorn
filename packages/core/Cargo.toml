@@ -15,6 +15,8 @@ members = [
   "crates/recovery",
   "crates/engine",
   "crates/extensions",
+  "crates/ext",
+  "crates/extc",
   "crates/grid",
   "crates/grid-client",
   "crates/size",
@@ -37,7 +39,8 @@ members = [
   "crates/spawn",
   "bench/scale",
 ]
-exclude = ["vendor"]
+# The extension SDK and examples build for WebAssembly, each its own workspace.
+exclude = ["vendor", "ext"]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]

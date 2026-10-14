@@ -1,0 +1,21 @@
+[package]
+name = "vorn-extc"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The extension compiler: turns a guest's WebAssembly into a component, precompiles it for vornd, and runs an extension's recorded checks against every tier"
+
+[[bin]]
+name = "vorn-extc"
+path = "src/main.rs"
+
+[dependencies]
+vorn-ext = { path = "../ext", features = ["wasm", "live"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+vorn-spawn = { path = "../spawn" }
+# Cranelift lives here and never in vornd; the version must match vorn-ext's exactly.
+wasmtime = { version = "=49.0.2", default-features = false, features = ["runtime", "component-model", "std", "cranelift"] }
+# Turns the guest's core module into a component; no WASI adapter, as the guest imports none.
+wit-component = { version = "0.244", default-features = false }

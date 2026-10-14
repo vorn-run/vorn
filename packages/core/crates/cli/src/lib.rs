@@ -17,6 +17,7 @@ pub mod args;
 pub mod attach;
 pub mod client;
 pub mod exit;
+pub mod ext;
 pub mod js;
 pub mod launch;
 pub mod mcp;
@@ -79,8 +80,8 @@ pub fn find_command(argv: &[String]) -> Option<&str> {
     None
 }
 
-const COMMANDS: [&str; 8] = [
-    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach",
+const COMMANDS: [&str; 9] = [
+    "session", "workflow", "server", "serve", "token", "help", "mcp", "attach", "ext",
 ];
 
 /// An option that swallowed the command because its own value was missing:
@@ -191,6 +192,7 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
         "serve" | "token" => server::run(argv, io),
         "session" | "workflow" => client_command(argv, io, false).await,
         "mcp" => client_command(&without_command(argv, command), io, true).await,
+        "ext" => ext::run(&without_command(argv, command), io).await,
         _ => {
             if let Some(code) = eaten(io, argv) {
                 return code;

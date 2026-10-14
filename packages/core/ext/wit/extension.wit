@@ -1,0 +1,65 @@
+package vorn:extension@0.9.0;
+
+/// The types every interface shares. `json` is JSON text, so a call is debuggable
+/// and the stdio mapping of the quick tier carries the same values unchanged.
+interface types {
+  type json = string;
+
+  /// A failed call: a stable code a caller can match, and words a person reads.
+  record ext-error {
+    code: string,
+    message: string,
+  }
+
+  record header {
+    name: string,
+    value: string,
+  }
+
+  record request {
+    method: string,
+    url: string,
+    headers: list<header>,
+    body: option<string>,
+  }
+
+  record response {
+    status: u16,
+    headers: list<header>,
+    body: string,
+  }
+
+  /// Who called and for which project.
+  record call-ctx {
+    project: string,
+    caller: string,
+  }
+
+  enum level { debug, info, warn, error }
+}
+
+/// Core and other extensions' methods, checked against the manifest's permissions.
+interface host {
+  use types.{json, ext-error, level};
+  call: func(method: string, args: json) -> result<json, ext-error>;
+  log: func(level: level, message: string);
+}
+
+/// HTTP made by vornd: the host is checked against the manifest's `network` list
+/// and the connection's credential is added there, never seen by the guest.
+interface net {
+  use types.{request, response, ext-error};
+  fetch: func(req: request, connection: option<string>) -> result<response, ext-error>;
+}
+
+interface guest {
+  use types.{json, ext-error, call-ctx};
+  handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
+}
+
+/// No WASI: a guest reaches nothing but these imports.
+world extension {
+  import host;
+  import net;
+  export guest;
+}

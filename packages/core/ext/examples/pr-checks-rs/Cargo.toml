@@ -1,0 +1,19 @@
+[package]
+name = "pr-checks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vorn-extension = { path = "../../sdk" }
+serde = { version = "1", features = ["derive"] }
+
+# What `vorn ext pack` builds the component with.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]
