@@ -9,9 +9,7 @@ description = "Vorn's thin UI layer: winit windows, wgpu or CPU drawing, cosmic-
 
 [dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
-winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 accesskit = "0.25"
-accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
 taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 etagere = "0.2"
@@ -19,13 +17,17 @@ resvg = { version = "0.48", default-features = false }
 png = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
-arboard = { version = "3", default-features = false }
 unicode-segmentation = "1"
-softbuffer = { version = "0.4", default-features = false }
 rayon = "1"
 unicode-width = "0.2"
-# The Cells backend's terminal: raw mode, diffed writes and input.
+
+# A window, a clipboard and a terminal exist only off WASI: a UI component drawn by a host links the rest.
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+arboard = { version = "3", default-features = false }
 crossterm = "0.29"
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
+softbuffer = { version = "0.4", default-features = false }
 
 # Linux has no single window system: X11 and Wayland are both loaded at run
 # time, and the screen reader is reached over D-Bus.

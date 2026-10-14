@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::scene::{Rect, Rgba};
 
+#[cfg(not(target_os = "wasi"))]
 pub mod term;
 
 /// How a layout length becomes cells. Spacing collapses to 0 or 1 cell,

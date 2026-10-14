@@ -33,9 +33,12 @@ pub mod text;
 pub mod theme;
 mod ui;
 pub mod widgets;
+#[cfg(not(target_os = "wasi"))]
 pub mod window;
 
-pub use {accesskit, wgpu, winit};
+#[cfg(not(target_os = "wasi"))]
+pub use winit;
+pub use {accesskit, wgpu};
 
 pub use edit::{Clipboard, MemoryClipboard, TextEdit};
 pub use element::{
@@ -56,4 +59,5 @@ pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
     ROOT_NODE,
 };
+#[cfg(not(target_os = "wasi"))]
 pub use window::{run, run_with, App, UserEvent, Waker, WindowOptions};

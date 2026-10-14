@@ -36,6 +36,7 @@ impl Backend for Pixels {
 /// written to the terminal as a diff.
 pub struct Cells {
     pub buffer: Buffer,
+    #[cfg(not(target_os = "wasi"))]
     pub terminal: Option<crate::cells::term::Terminal>,
 }
 
@@ -44,10 +45,12 @@ impl Cells {
     pub fn offscreen(cols: u16, rows: u16) -> Cells {
         Cells {
             buffer: Buffer::new(cols, rows),
+            #[cfg(not(target_os = "wasi"))]
             terminal: None,
         }
     }
 
+    #[cfg(not(target_os = "wasi"))]
     /// A cells backend drawing to the controlling terminal, sized to it.
     pub fn terminal(terminal: crate::cells::term::Terminal) -> Cells {
         let (cols, rows) = crate::cells::term::Terminal::size().unwrap_or((80, 24));
@@ -61,6 +64,7 @@ impl Cells {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         if (cols, rows) != (self.buffer.cols, self.buffer.rows) {
             self.buffer = Buffer::new(cols, rows);
+            #[cfg(not(target_os = "wasi"))]
             if let Some(t) = &mut self.terminal {
                 t.invalidate();
             }
@@ -74,6 +78,7 @@ impl Backend for Cells {
             return Err("a cells backend needs a cells Ui (Ui::cells)".into());
         };
         self.buffer.draw(list);
+        #[cfg(not(target_os = "wasi"))]
         if let Some(t) = &mut self.terminal {
             t.draw(&self.buffer).map_err(|e| e.to_string())?;
         }
