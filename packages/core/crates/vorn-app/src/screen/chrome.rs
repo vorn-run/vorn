@@ -12,7 +12,6 @@ use crate::ui::widgets::{self, Pill, ToastKind};
 use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
 use crate::workflows::WfAct;
 use serde_json::Value;
-use std::collections::HashSet;
 
 /// The toolbar's drag region; a double press maximizes.
 pub const TITLE_BAR: Id = Id(0x7469_746c_6562_6172);
@@ -253,19 +252,7 @@ fn dock(s: &Screen<'_>) -> Option<El> {
 
 /// `useFilteredHeadless`: the sessions the badge counts and lists.
 fn headless_visible<'a>(s: &Screen<'a>) -> Vec<&'a Headless> {
-    let show = s
-        .store
-        .config
-        .pointer("/defaults/showHeadlessAgents")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let workspace: HashSet<&str> = s
-        .store
-        .workspace_projects()
-        .map(|p| p.name.as_str())
-        .collect();
-    s.st.headless
-        .visible(show, s.st.project.as_deref(), Some(&workspace), s.st.filter)
+    crate::headless::shown(s.store, s.st)
 }
 
 /// HeadlessBadge: hidden without headless sessions; a zap and the count,

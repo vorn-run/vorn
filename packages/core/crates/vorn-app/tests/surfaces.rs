@@ -479,6 +479,9 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
         control("headless", Act::HideHeadless(hid.clone())),
     );
     assert!(app2.st.headless.iter().all(|x| x.id != hid));
+    // With its last pill hidden, the badge and its popover go.
+    shot.frame(&mut app2);
+    assert_eq!(menu(&app2), None);
 
     // Dismiss declines what is offered; with reopen on, panes come back.
     drop(app);

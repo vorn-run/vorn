@@ -16,6 +16,21 @@ pub const PRUNE: std::time::Duration = std::time::Duration::from_secs(30);
 const LOG_CAP: usize = 100_000;
 const LOG_KEEP: usize = 80_000;
 
+/// `useFilteredHeadless` over the app's settings, project and workspace.
+pub fn shown<'a>(store: &crate::client::Store, st: &'a crate::state::State) -> Vec<&'a Headless> {
+    let show = store
+        .config
+        .pointer("/defaults/showHeadlessAgents")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let workspace: HashSet<&str> = store
+        .workspace_projects()
+        .map(|p| p.name.as_str())
+        .collect();
+    st.headless
+        .visible(show, st.project.as_deref(), Some(&workspace), st.filter)
+}
+
 /// An expanded pill's log, which scrolls.
 pub fn log_id(id: &str) -> crate::ui::Id {
     crate::ui::Id::new("headless-log").child(id)

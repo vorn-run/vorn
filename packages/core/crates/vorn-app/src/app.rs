@@ -532,6 +532,10 @@ impl App {
             .is_some_and(|m| m.kind == MenuKind::Headless)
         {
             self.st.headless.collapse_all();
+        } else if crate::headless::shown(&self.store, &self.st).is_empty() {
+            // The badge, and the popover under it, go with the last pill.
+            self.st.menu = None;
+            self.st.headless.collapse_all();
         }
         for id in self.st.headless.take_grew() {
             ui.scroll_to_end(crate::headless::log_id(&id));
