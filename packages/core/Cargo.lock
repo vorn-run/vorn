@@ -6927,6 +6927,7 @@ dependencies = [
  "taffy",
  "unicode-segmentation",
  "unicode-width",
+ "vorn-spawn",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

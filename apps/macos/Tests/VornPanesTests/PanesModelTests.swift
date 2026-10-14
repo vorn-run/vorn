@@ -123,6 +123,8 @@ struct PanesModelTests {
     }
 
     @Test func highlighterColoursWithTheBundledTheme() async {
+        // The first line also compiles the grammar, which can outlast Shiki's 500 ms line limit on a busy runner.
+        _ = await SyntaxHighlighter.shared.tokens("const x = 1", language: "typescript")
         let lines = await SyntaxHighlighter.shared.tokens("const x = 1", language: "typescript")
         #expect(lines?.first?.first?.content == "const ")
         #expect(lines?.first?.first?.color == 0xCB7676)

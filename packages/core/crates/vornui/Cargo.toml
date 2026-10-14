@@ -34,6 +34,7 @@ arboard = { version = "3", default-features = false }
 softbuffer = { version = "0.4", default-features = false }
 # The Cells backend's terminal: raw mode, diffed writes and input.
 crossterm = "0.29"
+vorn-spawn = { path = "../spawn" }
 
 # In a browser wgpu draws through WebGPU, or WebGL2 where there is none (web.rs).
 [target.'cfg(target_arch = "wasm32")'.dependencies]

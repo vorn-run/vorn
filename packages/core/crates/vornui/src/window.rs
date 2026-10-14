@@ -75,11 +75,11 @@ fn clipboard_has_image() -> bool {
 #[cfg(not(any(target_os = "macos", windows)))]
 fn clipboard_has_image() -> bool {
     let mut cmd = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        let mut c = std::process::Command::new("wl-paste");
+        let mut c = vorn_spawn::command("wl-paste");
         c.arg("--list-types");
         c
     } else {
-        let mut c = std::process::Command::new("xclip");
+        let mut c = vorn_spawn::command("xclip");
         c.args(["-selection", "clipboard", "-t", "TARGETS", "-o"]);
         c
     };
