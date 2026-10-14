@@ -295,6 +295,8 @@ impl Child {
             let _ = stdout_done.await;
             let _ = stderr_done.await;
             let ended = status.map_or(Exit::Code(None), Exit::from);
+            // Seen as ended before any waiting caller hears of it, so its next call starts a fresh one.
+            let _ = exit_tx.send(Some(ended.clone()));
             let mut st = lock(&waiter_state);
             if st.closing {
                 st.reject_all(|m| format!("{waiter_name} was stopped before it answered {m}"));
@@ -312,7 +314,6 @@ impl Child {
                 info!("{waiter_name} exited ({ended})");
             }
             drop(st);
-            let _ = exit_tx.send(Some(ended));
         });
 
         let stdin = Writer {
