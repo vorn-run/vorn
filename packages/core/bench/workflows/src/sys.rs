@@ -135,6 +135,13 @@ impl BuildWatch {
 }
 
 /// The load average over the last minute.
+#[cfg(not(unix))]
+pub fn load() -> f64 {
+    0.0
+}
+
+/// The load average over the last minute.
+#[cfg(unix)]
 pub fn load() -> f64 {
     let mut avg = [0f64; 3];
     // SAFETY: getloadavg writes at most the three entries it is given.

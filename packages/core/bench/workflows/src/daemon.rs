@@ -150,11 +150,18 @@ impl Drop for TestVornd {
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        #[cfg(unix)]
         for pid in holders {
             // SAFETY: kill(2) takes any pid; a stale one fails with ESRCH.
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
             }
+        }
+        #[cfg(not(unix))]
+        for pid in holders {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output();
         }
         let _ = std::fs::remove_dir_all(&self.home);
     }

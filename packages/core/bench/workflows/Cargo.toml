@@ -13,8 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "sync", "macros", "time"] }
 tokio-tungstenite = "0.28"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
