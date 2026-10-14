@@ -1115,7 +1115,10 @@ impl App {
         };
         let unseen = self.store.sessions.iter().any(|s| {
             s.info.id == id
-                && s.info.program_status.as_ref().is_some_and(|p| p.unseen == Some(true))
+                && s.info
+                    .program_status
+                    .as_ref()
+                    .is_some_and(|p| p.unseen == Some(true))
         });
         if !unseen {
             self.seen_asked = None;

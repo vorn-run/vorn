@@ -138,7 +138,12 @@ impl Reports {
     }
 
     /// The body of the notification `p` raises for session `id`, if any.
-    fn notice(&mut self, id: &str, p: &vorn_engine::Programs, now: std::time::Instant) -> Option<String> {
+    fn notice(
+        &mut self,
+        id: &str,
+        p: &vorn_engine::Programs,
+        now: std::time::Instant,
+    ) -> Option<String> {
         let status = ProgramStatus::read(p, None).filter(|s| s.native);
         let Some(state) = status.as_ref().and_then(ProgramStatus::state) else {
             self.states.remove(id);
@@ -159,7 +164,9 @@ impl Reports {
                 };
                 msg.map_or_else(|| wants.to_owned(), |m| format!("{wants}: {m}"))
             }
-            EntryState::Done => msg.map_or_else(|| "Finished".to_owned(), |m| format!("Finished: {m}")),
+            EntryState::Done => {
+                msg.map_or_else(|| "Finished".to_owned(), |m| format!("Finished: {m}"))
+            }
             _ => return None,
         };
         if self
@@ -439,7 +446,11 @@ mod tests {
         assert!(told(&mut rx).is_empty());
     }
 
-    fn report(state: vorn_engine::ProgramState, kind: Option<vorn_engine::BlockedKind>, msg: &str) -> vorn_engine::Programs {
+    fn report(
+        state: vorn_engine::ProgramState,
+        kind: Option<vorn_engine::BlockedKind>,
+        msg: &str,
+    ) -> vorn_engine::Programs {
         vorn_engine::Programs {
             native: true,
             records: vec![vorn_engine::ProgramRecord {
@@ -461,25 +472,47 @@ mod tests {
         let mut r = Reports::default();
         let t0 = std::time::Instant::now();
         let at = |s: u64| t0 + Duration::from_secs(s);
-        let blocked = report(ProgramState::Blocked, Some(BlockedKind::Auth), "Sign in to deploy");
-        assert_eq!(r.notice("a", &report(ProgramState::Working, None, ""), at(0)), None);
+        let blocked = report(
+            ProgramState::Blocked,
+            Some(BlockedKind::Auth),
+            "Sign in to deploy",
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Working, None, ""), at(0)),
+            None
+        );
         assert_eq!(
             r.notice("a", &blocked, at(1)).as_deref(),
             Some("Needs you to sign in: Sign in to deploy")
         );
         // Told again, the same state: nothing new.
         assert_eq!(r.notice("a", &blocked, at(2)), None);
-        assert_eq!(r.notice("a", &report(ProgramState::Working, None, ""), at(3)), None);
-        // Finished within the cooldown: not told.
-        assert_eq!(r.notice("a", &report(ProgramState::Done, None, "Built"), at(4)), None);
-        assert_eq!(r.notice("a", &report(ProgramState::Working, None, ""), at(20)), None);
         assert_eq!(
-            r.notice("a", &report(ProgramState::Done, None, "Built"), at(21)).as_deref(),
+            r.notice("a", &report(ProgramState::Working, None, ""), at(3)),
+            None
+        );
+        // Finished within the cooldown: not told.
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Done, None, "Built"), at(4)),
+            None
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Working, None, ""), at(20)),
+            None
+        );
+        assert_eq!(
+            r.notice("a", &report(ProgramState::Done, None, "Built"), at(21))
+                .as_deref(),
             Some("Finished: Built")
         );
         // Another session counts on its own.
         assert_eq!(
-            r.notice("b", &report(ProgramState::Blocked, Some(BlockedKind::Permission), ""), at(21)).as_deref(),
+            r.notice(
+                "b",
+                &report(ProgramState::Blocked, Some(BlockedKind::Permission), ""),
+                at(21)
+            )
+            .as_deref(),
             Some("Needs permission")
         );
     }

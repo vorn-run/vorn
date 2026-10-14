@@ -164,8 +164,8 @@ pub fn install_file(file: &Path, port: u16, token: &str, events: &[&str]) -> io:
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let text =
-        serde_json::to_string_pretty(&install(settings, port, token, events)).map_err(io::Error::other)?;
+    let text = serde_json::to_string_pretty(&install(settings, port, token, events))
+        .map_err(io::Error::other)?;
     std::fs::write(file, text)
 }
 
@@ -230,7 +230,12 @@ mod tests {
         assert!(!reports_status("1.9.999"));
         assert!(!reports_status(""));
 
-        let full = install(json!({ "hooks": { "Stop": [{ "hooks": [mine()] }] } }), 1, "t", &EVENTS);
+        let full = install(
+            json!({ "hooks": { "Stop": [{ "hooks": [mine()] }] } }),
+            1,
+            "t",
+            &EVENTS,
+        );
         let trimmed = install(full, 1, "t", events(true));
         let hooks = trimmed["hooks"].as_object().unwrap();
         let mut names: Vec<&str> = hooks.keys().map(String::as_str).collect();

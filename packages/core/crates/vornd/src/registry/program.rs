@@ -80,13 +80,16 @@ impl ProgramStatus {
         if let Some(root) = self.records.iter().find(|r| r.id.is_empty()) {
             return Some(root.state);
         }
-        self.records.iter().map(|r| r.state).max_by_key(|s| match s {
-            EntryState::Idle => 0,
-            EntryState::Done => 1,
-            EntryState::Working => 2,
-            EntryState::Error => 3,
-            EntryState::Blocked => 4,
-        })
+        self.records
+            .iter()
+            .map(|r| r.state)
+            .max_by_key(|s| match s {
+                EntryState::Idle => 0,
+                EntryState::Done => 1,
+                EntryState::Working => 2,
+                EntryState::Error => 3,
+                EntryState::Blocked => 4,
+            })
     }
 
     /// The status the records decide, while the program reports its own.
@@ -180,10 +183,22 @@ mod tests {
 
     #[test]
     fn the_root_decides_and_children_only_without_one() {
-        let p = programs(true, vec![rec("", ProgramState::Working), rec("a", ProgramState::Blocked)]);
+        let p = programs(
+            true,
+            vec![
+                rec("", ProgramState::Working),
+                rec("a", ProgramState::Blocked),
+            ],
+        );
         let s = ProgramStatus::read(&p, None).unwrap();
         assert_eq!(s.status(), Some(AgentStatus::Running));
-        let p = programs(true, vec![rec("a", ProgramState::Working), rec("b", ProgramState::Blocked)]);
+        let p = programs(
+            true,
+            vec![
+                rec("a", ProgramState::Working),
+                rec("b", ProgramState::Blocked),
+            ],
+        );
         let s = ProgramStatus::read(&p, None).unwrap();
         assert_eq!(s.status(), Some(AgentStatus::Waiting));
         let p = programs(false, vec![rec("", ProgramState::Working)]);

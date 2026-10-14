@@ -1168,7 +1168,12 @@ impl Registry {
     /// A new terminal's record starts from what its screen last showed, as
     /// [`Registry::screen_status`] would have set it.
     fn seed(&mut self, id: &str) {
-        if let Some((p, at)) = self.statuses.as_ref().and_then(|st| st.programs.get(id)).cloned() {
+        if let Some((p, at)) = self
+            .statuses
+            .as_ref()
+            .and_then(|st| st.programs.get(id))
+            .cloned()
+        {
             self.take_program(id, &p, at);
         }
         let Some(&(status, at)) = self.statuses.as_ref().and_then(|st| st.screens.get(id)) else {
@@ -1333,7 +1338,12 @@ impl Registry {
     /// record put in later as screen statuses are. While the program
     /// reports, its records decide the terminal's status; when it stops
     /// (a prompt or its exit), the screen's last status does again.
-    pub fn program_status(&mut self, id: &str, p: &vorn_engine::Programs, at: Stamp) -> Option<Value> {
+    pub fn program_status(
+        &mut self,
+        id: &str,
+        p: &vorn_engine::Programs,
+        at: Stamp,
+    ) -> Option<Value> {
         let st = self.statuses.as_mut()?;
         match st.programs.get(id) {
             Some(&(_, held)) if at < held => return None,
@@ -3212,7 +3222,10 @@ mod tests {
             .is_none());
     }
 
-    fn programs(native: bool, records: &[(&str, vorn_engine::ProgramState)]) -> vorn_engine::Programs {
+    fn programs(
+        native: bool,
+        records: &[(&str, vorn_engine::ProgramState)],
+    ) -> vorn_engine::Programs {
         vorn_engine::Programs {
             native,
             records: records
@@ -3238,30 +3251,55 @@ mod tests {
         let mut r = deciding();
         let t0 = Instant::now();
         r.screen_status("a", IDLE, at(1, 1, 0));
-        let note = r.program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0)).unwrap();
+        let note = r
+            .program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0))
+            .unwrap();
         assert_eq!(note["record"]["status"], "running");
         assert_eq!(note["record"]["programStatus"]["native"], true);
-        assert_eq!(note["record"]["programStatus"]["records"][0]["progress"], 60);
-        let note = r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 3, 0)).unwrap();
+        assert_eq!(
+            note["record"]["programStatus"]["records"][0]["progress"],
+            60
+        );
+        let note = r
+            .program_status("a", &programs(true, &[("", Blocked)]), at(1, 3, 0))
+            .unwrap();
         assert_eq!(note["record"]["status"], "waiting");
-        assert_eq!(note["record"]["programStatus"]["records"][0]["kind"], "auth");
+        assert_eq!(
+            note["record"]["programStatus"]["records"][0]["kind"],
+            "auth"
+        );
         // Neither the screen, nor a hook, nor input, nor going quiet moves it.
         assert!(r.screen_status("a", RUNNING, at(1, 4, 0)).is_none());
-        assert!(r.hook_status(&hook("a", Some("idle"), true), None, t0).unwrap().iter().all(|n| n["record"]["status"] == "waiting"));
+        assert!(r
+            .hook_status(&hook("a", Some("idle"), true), None, t0)
+            .unwrap()
+            .iter()
+            .all(|n| n["record"]["status"] == "waiting"));
         assert!(r.input("a", None).unwrap().is_none());
         assert!(r.activity("a", None, t0).is_none());
         assert!(r.tick(t0 + Duration::from_secs(60), |_| None).is_empty());
         assert_eq!(status(&r, "a"), AgentStatus::Waiting);
         // A child record is a sub-row; the root still decides.
         let note = r
-            .program_status("a", &programs(true, &[("", Working), ("build", Blocked)]), at(1, 5, 0))
+            .program_status(
+                "a",
+                &programs(true, &[("", Working), ("build", Blocked)]),
+                at(1, 5, 0),
+            )
             .unwrap();
         assert_eq!(note["record"]["status"], "running");
         assert_eq!(note["record"]["programStatus"]["records"][1]["id"], "build");
-        assert_eq!(note["record"]["programStatus"]["records"][1]["app"], "deploy");
+        assert_eq!(
+            note["record"]["programStatus"]["records"][1]["app"],
+            "deploy"
+        );
         // A stale replay changes nothing.
-        assert!(r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 4, 9)).is_none());
-        let note = r.program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0)).unwrap();
+        assert!(r
+            .program_status("a", &programs(true, &[("", Blocked)]), at(1, 4, 9))
+            .is_none());
+        let note = r
+            .program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0))
+            .unwrap();
         assert_eq!(note["record"]["status"], "idle");
         assert_eq!(note["record"]["programStatus"]["unseen"], true);
         let note = r.seen("a").unwrap();
@@ -3274,16 +3312,25 @@ mod tests {
         use vorn_engine::ProgramState::{Blocked, Done};
         let mut r = deciding();
         r.screen_status("a", RUNNING, at(1, 1, 0));
-        r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 2, 0)).unwrap();
+        r.program_status("a", &programs(true, &[("", Blocked)]), at(1, 2, 0))
+            .unwrap();
         r.screen_status("a", IDLE, at(1, 3, 0));
         // Killed: the engine drops what was working or blocked.
-        let note = r.program_status("a", &programs(false, &[]), at(1, 4, 0)).unwrap();
+        let note = r
+            .program_status("a", &programs(false, &[]), at(1, 4, 0))
+            .unwrap();
         assert_eq!(note["record"]["status"], "idle");
         assert!(note["record"].get("programStatus").is_none());
-        assert_eq!(r.screen_status("a", WAITING, at(1, 5, 0)).unwrap()["record"]["status"], "waiting");
+        assert_eq!(
+            r.screen_status("a", WAITING, at(1, 5, 0)).unwrap()["record"]["status"],
+            "waiting"
+        );
         // What finished stays shown, but no longer decides.
-        r.program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0)).unwrap();
-        let note = r.program_status("a", &programs(false, &[("", Done)]), at(1, 7, 0)).unwrap();
+        r.program_status("a", &programs(true, &[("", Done)]), at(1, 6, 0))
+            .unwrap();
+        let note = r
+            .program_status("a", &programs(false, &[("", Done)]), at(1, 7, 0))
+            .unwrap();
         assert_eq!(note["record"]["programStatus"]["native"], false);
         assert_eq!(note["record"]["programStatus"]["unseen"], true);
         assert!(r.screen_status("a", RUNNING, at(1, 8, 0)).is_some());
@@ -3292,10 +3339,17 @@ mod tests {
     #[test]
     fn a_record_put_in_later_starts_from_what_its_program_reported() {
         let mut r = deciding();
-        r.program_status("b", &programs(true, &[("", vorn_engine::ProgramState::Blocked)]), at(1, 2, 0));
+        r.program_status(
+            "b",
+            &programs(true, &[("", vorn_engine::ProgramState::Blocked)]),
+            at(1, 2, 0),
+        );
         let note = r.apply(upsert(agent("b"))).unwrap();
         assert_eq!(note["record"]["status"], "waiting");
-        assert_eq!(note["record"]["programStatus"]["records"][0]["state"], "blocked");
+        assert_eq!(
+            note["record"]["programStatus"]["records"][0]["state"],
+            "blocked"
+        );
         r.session_closed("b");
     }
 
@@ -3303,10 +3357,13 @@ mod tests {
     fn a_permission_request_open_in_vorn_keeps_a_reporting_program_waiting() {
         use vorn_engine::ProgramState::Working;
         let mut r = deciding();
-        r.program_status("a", &programs(true, &[("", Working)]), at(1, 1, 0)).unwrap();
+        r.program_status("a", &programs(true, &[("", Working)]), at(1, 1, 0))
+            .unwrap();
         assert_eq!(r.asking("a", true).unwrap()["record"]["status"], "waiting");
         assert!(r.asking("a", true).is_none());
-        assert!(r.program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0)).is_none());
+        assert!(r
+            .program_status("a", &programs(true, &[("", Working)]), at(1, 2, 0))
+            .is_none());
         assert_eq!(status(&r, "a"), AgentStatus::Waiting);
         assert_eq!(r.asking("a", false).unwrap()["record"]["status"], "running");
     }

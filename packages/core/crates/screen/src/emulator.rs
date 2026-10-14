@@ -641,7 +641,10 @@ mod program {
         static SINKS: RefCell<HashMap<usize, Sink>> = RefCell::new(HashMap::new());
     }
 
-    pub(super) fn listen(raw: ffi::Terminal, effects: &Rc<RefCell<Vec<Effect>>>) -> crate::Result<()> {
+    pub(super) fn listen(
+        raw: ffi::Terminal,
+        effects: &Rc<RefCell<Vec<Effect>>>,
+    ) -> crate::Result<()> {
         if raw.is_null() {
             return Err(crate::Error::Ghostty(libghostty_vt::Error::InvalidValue));
         }
@@ -797,7 +800,10 @@ mod tests {
             (ProgramState::Working, Some(40), "build/test")
         );
         assert_eq!(got[1].title, "tests");
-        assert_eq!((got[2].state, got[2].id.as_str()), (ProgramState::Clear, "build"));
+        assert_eq!(
+            (got[2].state, got[2].id.as_str()),
+            (ProgramState::Clear, "build")
+        );
     }
 
     #[test]
@@ -972,4 +978,3 @@ mod tests {
         assert_eq!(replies(fx), ["\x1b[?997;1n", "\x1b[?997;2n"]);
     }
 }
-

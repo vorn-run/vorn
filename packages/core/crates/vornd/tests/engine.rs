@@ -404,15 +404,26 @@ async fn a_program_reports_its_status_through_a_pty() {
     let st = |fields: String| format!("printf '\\033]7501;{fields}\\033\\\\'; sleep 0.1; ");
     let script = [
         "stty raw -echo; printf '\\033]7501;?\\033\\\\'; ".to_owned(),
-        "printf 'reply:'; dd bs=1 count=8 2>/dev/null | od -An -c | tr -d ' \\n'; echo; ".to_owned(),
+        "printf 'reply:'; dd bs=1 count=8 2>/dev/null | od -An -c | tr -d ' \\n'; echo; "
+            .to_owned(),
         "stty min 0 time 5; cat >/dev/null; stty min 1 time 0; ".to_owned(),
-        st(format!("state=working:progress=20:app=deploy:msg={}", b64("Planning"))),
-        st(format!("state=blocked:kind=auth:msg={}", b64("Sign in to the registry"))),
+        st(format!(
+            "state=working:progress=20:app=deploy:msg={}",
+            b64("Planning")
+        )),
+        st(format!(
+            "state=blocked:kind=auth:msg={}",
+            b64("Sign in to the registry")
+        )),
         st(format!("state=working:progress=60:msg={}", b64("Pushing"))),
-        st(format!("state=working:id=build:progress=50:msg={}", b64("Building"))),
+        st(format!(
+            "state=working:id=build:progress=50:msg={}",
+            b64("Building")
+        )),
         st("state=clear:id=build".to_owned()),
         st(format!("state=done:progress=100:msg={}", b64("Shipped"))),
-        "printf 'ready:'; dd bs=1 count=2 2>/dev/null | od -An -c | tr -d ' \\n'; echo; ".to_owned(),
+        "printf 'ready:'; dd bs=1 count=2 2>/dev/null | od -An -c | tr -d ' \\n'; echo; "
+            .to_owned(),
         st(format!("state=working:msg={}", b64("Again"))),
         "sleep 30".to_owned(),
     ]
@@ -431,8 +442,14 @@ async fn a_program_reports_its_status_through_a_pty() {
     let roots: Vec<_> = seen.iter().filter_map(root).collect();
     let states: Vec<_> = roots.iter().map(|r| r.state).collect();
     assert_eq!(states.first(), Some(&Working));
-    assert!(states.windows(2).any(|w| w == [Working, Blocked]), "{states:?}");
-    assert!(states.windows(2).any(|w| w == [Blocked, Working]), "{states:?}");
+    assert!(
+        states.windows(2).any(|w| w == [Working, Blocked]),
+        "{states:?}"
+    );
+    assert!(
+        states.windows(2).any(|w| w == [Blocked, Working]),
+        "{states:?}"
+    );
     let blocked = roots.iter().find(|r| r.state == Blocked).unwrap();
     assert_eq!(blocked.kind, Some(vorn_engine::BlockedKind::Auth));
     assert_eq!(blocked.msg, "Sign in to the registry");

@@ -168,8 +168,7 @@ impl Store {
             return;
         }
         if self.records.len() >= MAX_RECORDS {
-            if let Some(oldest) = (0..self.records.len()).min_by_key(|&i| self.records[i].updated)
-            {
+            if let Some(oldest) = (0..self.records.len()).min_by_key(|&i| self.records[i].updated) {
                 self.records.swap_remove(oldest);
             }
         }

@@ -157,7 +157,12 @@ mod tests {
         assert_eq!(
             r.steps,
             [
-                Step { depth: 0, line: "Build".into(), status: "running", progress: Some(60) },
+                Step {
+                    depth: 0,
+                    line: "Build".into(),
+                    status: "running",
+                    progress: Some(60)
+                },
                 Step {
                     depth: 1,
                     line: "test \u{b7} Waiting for an answer".into(),
@@ -175,8 +180,12 @@ mod tests {
         ]}));
         let r = s.report().unwrap();
         assert_eq!((r.line.as_str(), r.unseen), ("Finished \u{b7} Built", true));
-        assert_eq!(session(json!({ "native": true, "records": [] })).report(), None);
-        let quiet = session(json!({ "native": true, "records": [{ "id": "", "state": "working" }] }));
+        assert_eq!(
+            session(json!({ "native": true, "records": [] })).report(),
+            None
+        );
+        let quiet =
+            session(json!({ "native": true, "records": [{ "id": "", "state": "working" }] }));
         assert_eq!(quiet.report(), None);
     }
 }

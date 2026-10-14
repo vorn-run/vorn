@@ -44,8 +44,8 @@ use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
 use vorn_analysis::rules::Rules;
 
-use crate::snapshot::VtSnapshot;
 use crate::program::Programs;
+use crate::snapshot::VtSnapshot;
 use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT, FORMAT_NO_PROGRAMS};
 
 /// The size a piped agent's output is parsed at. It has no terminal, so

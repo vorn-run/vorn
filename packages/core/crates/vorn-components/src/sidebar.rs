@@ -85,13 +85,17 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
         );
     }
     if let Some(d) = r.detail {
-        let ink = if d.unseen { color::GRAY_200 } else { color::GRAY_500 };
-        let mut line = div()
-            .row()
-            .items_center()
-            .gap(4.0)
-            .min_w0()
-            .child(text(d.line, 10.0, ink).line_height(15.0).truncate().silent());
+        let ink = if d.unseen {
+            color::GRAY_200
+        } else {
+            color::GRAY_500
+        };
+        let mut line = div().row().items_center().gap(4.0).min_w0().child(
+            text(d.line, 10.0, ink)
+                .line_height(15.0)
+                .truncate()
+                .silent(),
+        );
         if let Some(p) = d.progress {
             line = line.child(percent(p, color::GRAY_600));
         }
@@ -121,7 +125,8 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
         .child(names);
     if r.active {
         // `top-1 bottom-1` of a row one, two or three lines tall.
-        let h = 18.0 + 15.0 * f32::from(u8::from(r.branch.is_some()) + u8::from(r.detail.is_some()));
+        let h =
+            18.0 + 15.0 * f32::from(u8::from(r.branch.is_some()) + u8::from(r.detail.is_some()));
         row = row.child(
             div()
                 .absolute(0.0, 4.0)
@@ -153,7 +158,12 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
             .pl(8.0 * step.depth as f32)
             .min_w0()
             .child(status_dot(ui, step.status))
-            .child(text(step.line, 10.0, color::GRAY_500).line_height(15.0).truncate().silent());
+            .child(
+                text(step.line, 10.0, color::GRAY_500)
+                    .line_height(15.0)
+                    .truncate()
+                    .silent(),
+            );
         if let Some(p) = step.progress {
             line = line.child(percent(p, color::GRAY_600));
         }

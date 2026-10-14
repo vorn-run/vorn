@@ -488,7 +488,11 @@ fn report(session: &Session, dim: f32) -> Option<El> {
     if !r.steps.is_empty() {
         let n = r.steps.len();
         let steps = format!("{n} step{}", if n == 1 { "" } else { "s" });
-        line = if line.is_empty() { steps } else { format!("{line} \u{b7} {steps}") };
+        line = if line.is_empty() {
+            steps
+        } else {
+            format!("{line} \u{b7} {steps}")
+        };
     }
     let mut el = div()
         .row()
@@ -497,7 +501,12 @@ fn report(session: &Session, dim: f32) -> Option<El> {
         .grow()
         .min_w0()
         .role(Role::Status, line.as_str())
-        .child(text(line.as_str(), 10.0, ink).line_height(12.0).truncate().silent());
+        .child(
+            text(line.as_str(), 10.0, ink)
+                .line_height(12.0)
+                .truncate()
+                .silent(),
+        );
     if let Some(p) = r.progress {
         const TRACK: f32 = 40.0;
         el = el
@@ -508,7 +517,13 @@ fn report(session: &Session, dim: f32) -> Option<El> {
                     .shrink0()
                     .rounded(1.0)
                     .bg(fade(look::WHITE, 0.08, dim))
-                    .child(div().w(TRACK * f32::from(p) / 100.0).h(2.0).rounded(1.0).bg(ink)),
+                    .child(
+                        div()
+                            .w(TRACK * f32::from(p) / 100.0)
+                            .h(2.0)
+                            .rounded(1.0)
+                            .bg(ink),
+                    ),
             )
             .child(
                 text(format!("{p}%"), 10.0, fade(look::GRAY_500, 1.0, dim))

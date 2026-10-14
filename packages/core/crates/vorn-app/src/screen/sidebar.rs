@@ -333,11 +333,14 @@ fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
             agent: &session.info.agent_type,
             status: Status::parse(session.status()),
             active,
-            detail: report.as_ref().filter(|r| !r.line.is_empty()).map(|r| Detail {
-                line: &r.line,
-                progress: r.progress,
-                unseen: r.unseen,
-            }),
+            detail: report
+                .as_ref()
+                .filter(|r| !r.line.is_empty())
+                .map(|r| Detail {
+                    line: &r.line,
+                    progress: r.progress,
+                    unseen: r.unseen,
+                }),
             steps: &steps,
         },
     )

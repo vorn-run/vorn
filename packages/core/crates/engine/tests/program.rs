@@ -8,9 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use common::{config, writes_in_replay, Sessiond};
-use vorn_engine::{
-    BlockedKind, Effect, Input, Open, Out, ProgramState, Programs, Session, FORMAT,
-};
+use vorn_engine::{BlockedKind, Effect, Input, Open, Out, ProgramState, Programs, Session, FORMAT};
 use vorn_recovery::{LogBuilder, Size};
 use vorn_term_proto::{Cursor, Entry, Record};
 
@@ -20,7 +18,10 @@ fn b64(s: &str) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for c in s.as_bytes().chunks(3) {
-        let n = c.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        let n = c
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
         for i in 0..4 {
             if i <= c.len() {
                 out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -77,7 +78,10 @@ fn scripted(b: &mut LogBuilder) {
         "state=working:id=build/test:progress=50:title={}",
         b64("tests")
     )))
-    .data(osc(&format!("state=done:app=deploy:msg={}", b64("Deployed"))));
+    .data(osc(&format!(
+        "state=done:app=deploy:msg={}",
+        b64("Deployed")
+    )));
 }
 
 #[test]

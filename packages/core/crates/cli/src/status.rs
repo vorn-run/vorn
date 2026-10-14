@@ -98,7 +98,12 @@ pub fn run_records(run: &Value, labels: &HashMap<String, String>, name: &str) ->
     let states: &[Value] = field(run, "nodeStates")
         .and_then(Value::as_array)
         .map_or(&[], Vec::as_slice);
-    let node = |s: &Value| field(s, "nodeId").and_then(Value::as_str).unwrap_or("").to_owned();
+    let node = |s: &Value| {
+        field(s, "nodeId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
     let label = |s: &Value| {
         let id = node(s);
         labels.get(&id).cloned().unwrap_or(id)
@@ -221,7 +226,10 @@ mod tests {
 
     #[test]
     fn a_run_reports_itself_and_its_steps_and_only_what_changed() {
-        let labels = HashMap::from([("a".to_owned(), "Build".to_owned()), ("b".to_owned(), "Approve".to_owned())]);
+        let labels = HashMap::from([
+            ("a".to_owned(), "Build".to_owned()),
+            ("b".to_owned(), "Approve".to_owned()),
+        ]);
         let mut rep = Reporter::default();
         let run = json!({ "status": "running", "nodeStates": [
             { "nodeId": "a", "status": "running" },
@@ -229,7 +237,10 @@ mod tests {
             { "nodeId": "c", "status": "skipped" },
         ]});
         let out = rep.changes(run_records(&run, &labels, "Ship"));
-        assert!(out.starts_with("\x1b]7501;state=working:progress=0:app=vorn:msg="), "{out:?}");
+        assert!(
+            out.starts_with("\x1b]7501;state=working:progress=0:app=vorn:msg="),
+            "{out:?}"
+        );
         assert!(out.contains("state=working:id=a:app=vorn"));
         assert!(!out.contains("id=b") && !out.contains("id=c"));
         assert_eq!(rep.changes(run_records(&run, &labels, "Ship")), "");
@@ -239,7 +250,10 @@ mod tests {
             { "nodeId": "b", "status": "waiting", "waitingFor": "signIn" },
         ]});
         let out = rep.changes(run_records(&run, &labels, "Ship"));
-        assert!(out.contains("state=blocked:kind=auth:progress=50:app=vorn"), "{out:?}");
+        assert!(
+            out.contains("state=blocked:kind=auth:progress=50:app=vorn"),
+            "{out:?}"
+        );
         assert!(out.contains("state=clear:id=a:app=vorn"));
         assert!(out.contains("state=blocked:kind=auth:id=b"));
 
@@ -254,9 +268,18 @@ mod tests {
 
     #[test]
     fn a_headless_session_reports_how_it_ended() {
-        assert_eq!(headless_record(&json!({ "status": "running" }), "fix").state, "working");
-        assert_eq!(headless_record(&json!({ "status": "exited", "exitCode": 0 }), "fix").state, "done");
+        assert_eq!(
+            headless_record(&json!({ "status": "running" }), "fix").state,
+            "working"
+        );
+        assert_eq!(
+            headless_record(&json!({ "status": "exited", "exitCode": 0 }), "fix").state,
+            "done"
+        );
         let failed = headless_record(&json!({ "status": "exited", "exitCode": 2 }), "fix");
-        assert_eq!((failed.state, failed.msg.as_str()), ("error", "fix: exited with 2"));
+        assert_eq!(
+            (failed.state, failed.msg.as_str()),
+            ("error", "fix: exited with 2")
+        );
     }
 }
