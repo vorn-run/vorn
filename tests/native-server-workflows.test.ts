@@ -305,7 +305,7 @@ describe.runIf(runnable)('the work model in vornd', () => {
     await viaVornd.result('terminal:kill', shell.id)
   })
 
-  it('starts the workflow watching a task move once, from a save on the server', async () => {
+  it('starts the workflow watching a task move once, from the task call that moved it', async () => {
     const wf = workflow(
       'wf-task',
       { triggerType: 'taskStatusChanged', toStatus: 'in_progress' },
@@ -313,37 +313,35 @@ describe.runIf(runnable)('the work model in vornd', () => {
       [['t', 'pick']]
     )
     await viaVornd.result('workflow:create', { workflow: wf })
-    // A save carries the whole configuration: it is read once the server has seen the new workflow.
-    let config!: { tasks: unknown[]; projects: unknown[]; workflows: WorkflowDefinition[] }
-    await until('the server to read the new workflow', async () => {
-      config = await direct.result('config:load')
-      return config.workflows.some((w) => w.id === 'wf-task')
+    const config = await direct.result<Record<string, unknown>>('config:load')
+    // The configuration carries no tasks or workflows now: a save of one moves no task.
+    expect(config).not.toHaveProperty('tasks')
+    expect(config).not.toHaveProperty('workflows')
+    await direct.result('config:save', {
+      ...config,
+      projects: [{ name: 'p', path: server.dirs.work, preferredAgents: [] }]
     })
-    const task = {
+    const made = await direct.result<{ ok: boolean }>('task:create', {
       id: 'task-move',
       projectName: 'p',
       title: 'Moved',
-      description: '',
-      status: 'todo',
-      order: 0,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z'
-    }
-    await direct.result('config:save', {
-      ...config,
-      projects: [{ name: 'p', path: server.dirs.work, preferredAgents: [] }],
-      tasks: [task]
+      status: 'todo'
     })
-    const before = await direct.result<Record<string, unknown>>('config:load')
-    await direct.result('config:save', {
-      ...before,
-      tasks: [{ ...task, status: 'in_progress', updatedAt: '2026-01-01T00:01:00.000Z' }]
+    expect(made.ok).toBe(true)
+    const moved = await direct.result<{ ok: boolean }>('task:setStatus', {
+      id: 'task-move',
+      status: 'in_progress'
     })
+    expect(moved.ok).toBe(true)
     const [run] = await settled('wf-task')
     expect(run.triggerTaskId).toBe('task-move')
     expect(run.nodeStates.find((n) => n.nodeId === 'pick')?.output).toContain('picked Moved')
-    await new Promise((r) => setTimeout(r, 1_500))
-    expect(await runsOf('wf-task')).toHaveLength(1)
+    // Setting the status it already has is no move; a real one after it is. Triggers fire in
+    // the order the tasks moved, so once the second run is there a first one would be too.
+    await direct.result('task:setStatus', { id: 'task-move', status: 'in_progress' })
+    await direct.result('task:setStatus', { id: 'task-move', status: 'todo' })
+    await direct.result('task:setStatus', { id: 'task-move', status: 'in_progress' })
+    expect(await settled('wf-task', 2)).toHaveLength(2)
   })
 
   it('fires a schedule that fell due while vornd was down once it is back, and once only', async () => {

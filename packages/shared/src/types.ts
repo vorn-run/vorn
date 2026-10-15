@@ -1608,9 +1608,7 @@ export interface AppConfig {
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>
-  workflows?: WorkflowDefinition[]
   remoteHosts?: RemoteHost[]
-  tasks?: TaskConfig[]
   workspaces?: WorkspaceConfig[]
   sessionGroups?: SessionGroupConfig[]
 }
@@ -1646,11 +1644,17 @@ export interface CreateTerminalPayload {
   initialPrompt?: string
   promptDelayMs?: number
   headless?: boolean
-  /** Workflow metadata — for tagging headless sessions launched by workflows */
-  workflowId?: string
-  workflowName?: string
+  /** What asked for the session, when not a person: a workflow, an extension */
+  origin?: SessionOrigin
   /** Per-invocation arg overrides (replaces settings-level args when set) */
   args?: string[]
+}
+
+/** What started a session other than a person: the extension, its id for the thing, the words shown. */
+export interface SessionOrigin {
+  extension: string
+  id: string
+  label: string
 }
 
 export interface HeadlessSession {
@@ -1668,9 +1672,8 @@ export interface HeadlessSession {
   exitCode?: number
   startedAt: number
   endedAt?: number
-  /** Workflow that launched this session */
-  workflowId?: string
-  workflowName?: string
+  /** What launched this session, when not a person: a workflow, an extension */
+  origin?: SessionOrigin
   /** The agent's own session id (pinned via --session-id for claude/copilot),
    *  enabling later --resume. Only set for agents that support pinning. */
   agentSessionId?: string

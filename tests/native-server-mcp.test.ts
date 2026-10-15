@@ -328,19 +328,47 @@ const credentials = (): Record<string, string> => ({
   'Vorn-Cwd': encodeURIComponent(process.cwd())
 })
 
-/** Writes the starting configuration back, for the next call to start from. */
+type Row = Record<string, unknown> & { id: string }
+
+/** The fields `task:create` does not take, set on a fixture task after it. */
+const SET_AFTER_CREATE = ['order', 'completedAt', 'archivedAt']
+
+/**
+ * Writes the starting configuration back, and its tasks and workflows through
+ * their own calls, which the configuration no longer carries, for the next
+ * call to start from.
+ */
 async function reset(): Promise<void> {
   const { rpcCall } = await import('../packages/mcp/src/rpc-client')
-  await rpcCall('config:save', structuredClone(start))
+  const { tasks, workflows, ...config } = structuredClone(start) as AppConfig & {
+    tasks: Row[]
+    workflows: Row[]
+  }
+  await rpcCall('config:save', config)
+  for (const t of await rpcCall<Row[]>('task:list', {})) await rpcCall('task:delete', { id: t.id })
+  for (const w of await rpcCall<Row[]>('workflow:list')) {
+    await rpcCall('workflow:delete', { id: w.id })
+  }
+  for (const t of tasks) {
+    await rpcCall('task:create', t)
+    const set = Object.fromEntries(SET_AFTER_CREATE.filter((k) => k in t).map((k) => [k, t[k]]))
+    await rpcCall('task:patch', { id: t.id, set })
+  }
+  for (const w of workflows) await rpcCall('workflow:create', { workflow: w })
 }
 
-/** The configuration as the database holds it now, but for how many times it was saved. */
+/**
+ * The configuration as the database holds it now, its tasks and workflows
+ * beside it, but for how many times it was saved.
+ */
 async function stored(): Promise<unknown> {
   const { rpcCall } = await import('../packages/mcp/src/rpc-client')
   const { revision: _revision, ...config } = (await rpcCall('config:load')) as AppConfig & {
     revision?: number
   }
-  return config
+  const tasks = await rpcCall('task:list', { includeDescription: true })
+  const workflows = await rpcCall('workflow:list')
+  return { ...config, tasks, workflows }
 }
 
 /** One tool call on each side, each from the starting configuration. */

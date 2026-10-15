@@ -11,18 +11,54 @@ import type { AppConfig } from '../packages/shared/src/types'
  * knowing which one that is.
  */
 
+type Row = Record<string, unknown> & { id: string }
+
 const calls: Array<{ method: string; params?: unknown }> = []
 let stored: AppConfig
+/** The server's tasks, which the configuration does not carry. */
+let rows: Row[]
+
+/** A fake server: the configuration over `config:*`, the tasks over `task:*`. */
+function answer(method: string, params: Record<string, unknown> = {}): unknown {
+  const found = rows.find((t) => t.id === params.id)
+  switch (method) {
+    case 'config:load':
+      return stored
+    case 'config:save':
+      stored = params as unknown as AppConfig
+      return undefined
+    case 'task:list':
+      return rows.filter(
+        (t) =>
+          (params.projectName === undefined || t.projectName === params.projectName) &&
+          (params.status === undefined || t.status === params.status)
+      )
+    case 'task:get':
+      return found ?? null
+    case 'task:create':
+      if (found) return { ok: false }
+      rows.push(params as Row)
+      return { ok: true, task: params }
+    case 'task:patch': {
+      if (!found) return { ok: false }
+      for (const [k, v] of Object.entries(params.set as Record<string, unknown>)) {
+        if (v === null) delete found[k]
+        else found[k] = v
+      }
+      return { ok: true, task: found }
+    }
+    case 'task:delete':
+      rows = rows.filter((t) => t.id !== params.id)
+      return { ok: found !== undefined }
+    default:
+      return []
+  }
+}
 
 vi.mock('../packages/mcp/src/rpc-client', () => ({
   rpcCall: async (method: string, params?: unknown) => {
     calls.push({ method, params })
-    if (method === 'config:load') return stored
-    if (method === 'config:save') {
-      stored = params as AppConfig
-      return undefined
-    }
-    return []
+    return answer(method, params as Record<string, unknown>)
   }
 }))
 
@@ -60,17 +96,19 @@ beforeEach(() => {
     revision: 7,
     defaults: { shell: '/bin/zsh', fontSize: 13, theme: 'dark' },
     projects: [{ name: 'vorn', path: '/repo', preferredAgents: [] }],
-    tasks: [task('a'), task('b', { status: 'done' })],
-    workspaces: [{ id: 'personal', name: 'Personal', order: 0 }],
-    workflows: []
+    workspaces: [{ id: 'personal', name: 'Personal', order: 0 }]
   } as unknown as AppConfig
+  rows = [task('a'), task('b', { status: 'done' })]
 })
 
 describe('reading', () => {
   it('goes over the socket rather than opening a database', async () => {
     await dbListTasks()
 
-    expect(calls[0].method).toBe('config:load')
+    expect(calls[0]).toEqual({
+      method: 'task:list',
+      params: { projectName: undefined, status: undefined, includeDescription: true }
+    })
   })
 
   it('filters tasks by project and status the way the query did', async () => {
@@ -85,7 +123,7 @@ describe('reading', () => {
   })
 
   it('reports the highest order in a project', async () => {
-    stored.tasks = [task('a', { order: 3 }), task('b', { order: 9 })] as never
+    rows = [task('a', { order: 3 }), task('b', { order: 9 })]
 
     expect(await dbGetMaxTaskOrder('vorn')).toBe(9)
   })
@@ -102,32 +140,35 @@ describe('reading', () => {
 })
 
 describe('writing', () => {
-  it('adds without disturbing what is already there', async () => {
-    await dbInsertTask(task('c') as never)
+  it('creates a task through its own call, under its own id', async () => {
+    await dbInsertTask(task('c', { assignedSessionId: 's1' }) as never)
 
-    expect(stored.tasks?.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+    expect(rows.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+    expect(rows[2].assignedSessionId).toBe('s1')
+    expect(calls.map((c) => c.method)).toEqual(['task:create', 'task:patch'])
   })
 
-  it('updates in place', async () => {
-    await dbUpdateTask('a', { title: 'renamed' })
+  it('updates only the fields it names, and clears one set to undefined', async () => {
+    rows[0].archivedAt = '2026-08-18T00:00:00.000Z'
+    await dbUpdateTask('a', { title: 'renamed', archivedAt: undefined })
 
-    expect(stored.tasks?.find((t) => t.id === 'a')?.title).toBe('renamed')
-    expect(stored.tasks).toHaveLength(2)
+    expect(rows.find((t) => t.id === 'a')?.title).toBe('renamed')
+    expect(rows.find((t) => t.id === 'a')).not.toHaveProperty('archivedAt')
+    expect(rows).toHaveLength(2)
+    await expect(dbUpdateTask('missing', { title: 'x' })).rejects.toThrow('not found')
   })
 
   it('deletes only what was asked for', async () => {
     await dbDeleteTask('a')
 
-    expect(stored.tasks?.map((t) => t.id)).toEqual(['b'])
+    expect(rows.map((t) => t.id)).toEqual(['b'])
   })
 
-  it('carries the revision back, so the server can spot a stale save', async () => {
-    // The reason read-modify-write is safe here at all: the server keeps rows
-    // added by anyone else since this snapshot rather than pruning them.
+  it('never writes a task through the configuration', async () => {
     await dbInsertTask(task('c') as never)
+    await dbUpdateTask('c', { status: 'done' })
 
-    const save = calls.find((c) => c.method === 'config:save')
-    expect((save?.params as AppConfig).revision).toBe(7)
+    expect(calls.some((c) => c.method === 'config:save')).toBe(false)
   })
 
   it('leaves other collections untouched when writing one', async () => {
@@ -135,14 +176,17 @@ describe('writing', () => {
 
     expect(stored.workspaces).toEqual([])
     expect(stored.projects).toHaveLength(1)
-    expect(stored.tasks).toHaveLength(2)
+    expect(rows).toHaveLength(2)
   })
 
-  it('inserts a project without dropping the tasks', async () => {
+  it('carries the revision back, so the server can spot a stale save', async () => {
+    // The reason read-modify-write is safe here at all: the server keeps rows
+    // added by anyone else since this snapshot rather than pruning them.
     await dbInsertProject({ name: 'other', path: '/other', preferredAgents: [] } as never)
 
+    const save = calls.find((c) => c.method === 'config:save')
+    expect((save?.params as AppConfig).revision).toBe(7)
     expect(stored.projects?.map((p) => p.name)).toEqual(['vorn', 'other'])
-    expect(stored.tasks).toHaveLength(2)
   })
 })
 

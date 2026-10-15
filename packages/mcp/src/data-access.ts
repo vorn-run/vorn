@@ -17,9 +17,10 @@ import { rpcCall } from './rpc-client'
  * serving. Answering from it is worse than failing, because an agent reads the
  * wrong backlog and reports confidently on it.
  *
- * Everything here lives in the config blob, which `config:load` and `config:save`
- * carry, except workflow writes, which have their own methods. Either way it goes
- * to whichever server this MCP is talking to, local or remote, without knowing which.
+ * Projects and workspaces live in the config blob, which `config:load` and
+ * `config:save` carry; tasks and workflows do not, and have methods of their own.
+ * Either way it goes to whichever server this MCP is talking to, local or remote,
+ * without knowing which.
  *
  * Read-modify-write per call is safe now that a save carries the revision it was
  * based on: the server keeps rows added by anyone else since, rather than pruning
@@ -101,7 +102,7 @@ export async function dbDeleteWorkspace(id: string): Promise<void> {
 // ─── Workflows ───────────────────────────────────────────────────
 
 export async function dbListWorkflows(): Promise<WorkflowDefinition[]> {
-  return (await loadConfig()).workflows ?? []
+  return (await rpcCall<WorkflowDefinition[] | null>('workflow:list')) ?? []
 }
 
 /**
@@ -128,34 +129,40 @@ export async function dbDeleteWorkflow(id: string): Promise<void> {
 // ─── Tasks ───────────────────────────────────────────────────────
 
 export async function dbListTasks(projectName?: string, status?: string): Promise<TaskConfig[]> {
-  const tasks = (await loadConfig()).tasks ?? []
-  return tasks.filter(
-    (t) =>
-      (projectName === undefined || t.projectName === projectName) &&
-      (status === undefined || t.status === status)
-  )
+  const params = { projectName, status, includeDescription: true }
+  return (await rpcCall<TaskConfig[] | null>('task:list', params)) ?? []
 }
 
 export async function dbGetTask(id: string): Promise<TaskConfig | null> {
-  return ((await loadConfig()).tasks ?? []).find((t) => t.id === id) ?? null
+  return (await rpcCall<TaskConfig | null>('task:get', { id })) ?? null
 }
+
+/** The fields `task:create` does not take, set on the new task after. */
+const SET_AFTER_CREATE = [
+  'assignedSessionId',
+  'agentSessionId',
+  'completedAt',
+  'archivedAt'
+] as const
 
 export async function dbInsertTask(task: TaskConfig): Promise<void> {
-  await mutate((config) => ({ ...config, tasks: [...(config.tasks ?? []), task] }))
+  const { ok } = await rpcCall<{ ok: boolean }>('task:create', task)
+  if (!ok) throw new Error(`task "${task.id}" was not created`)
+  const set = Object.fromEntries(
+    SET_AFTER_CREATE.filter((k) => task[k] != null).map((k) => [k, task[k]])
+  )
+  if (Object.keys(set).length > 0) await rpcCall('task:patch', { id: task.id, set })
 }
 
+/** A field set to `undefined` is cleared, as spreading it over the task did. */
 export async function dbUpdateTask(id: string, updates: Partial<TaskConfig>): Promise<void> {
-  await mutate((config) => ({
-    ...config,
-    tasks: (config.tasks ?? []).map((t) => (t.id === id ? { ...t, ...updates } : t))
-  }))
+  const set = Object.fromEntries(Object.entries(updates).map(([k, v]) => [k, v ?? null]))
+  const { ok } = await rpcCall<{ ok: boolean }>('task:patch', { id, set })
+  if (!ok) throw new Error(`task "${id}" not found`)
 }
 
 export async function dbDeleteTask(id: string): Promise<void> {
-  await mutate((config) => ({
-    ...config,
-    tasks: (config.tasks ?? []).filter((t) => t.id !== id)
-  }))
+  await rpcCall('task:delete', { id })
 }
 
 export async function dbGetMaxTaskOrder(projectName: string): Promise<number> {
