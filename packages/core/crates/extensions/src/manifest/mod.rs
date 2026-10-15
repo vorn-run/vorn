@@ -26,7 +26,8 @@ pub const API: &str = crate::api::API;
 pub const RETIRED_CONNECTOR_API: &str = "vorn:connector@";
 /// The kind sections a manifest may carry beside its contributions, each
 /// naming the child protocol its service speaks within [`API`]. A package
-/// with none speaks the extension API itself.
+/// with none speaks the extension API itself. An `[agent]` section is data
+/// and names no protocol.
 pub const KIND_SECTIONS: &[&str] = &["connector"];
 /// The connector child protocol [`API`] includes, spoken by a `[connector]` service.
 pub const CONNECTOR_PROTOCOL: u64 = 1;
@@ -89,6 +90,11 @@ pub struct Manifest {
     /// Tools it adds to Vorn's MCP server, answered by its service.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mcp: Vec<McpTool>,
+    /// Its `[agent]` section, as written: the agent CLI it adapts, already
+    /// checked against `vorn_agents::AgentSpec`. Data, not a protocol: an
+    /// adapter needs no service.
+    #[serde(skip)]
+    pub agent: Option<toml::Value>,
 }
 
 /// Where a package keeps the migrations that make its tables.
@@ -779,7 +785,6 @@ const MAX_PATTERN_LENGTH: usize = 256;
 const MAX_ICON_PATHS: usize = 24;
 const MAX_PATH_LENGTH: usize = 8_000;
 const AUTH_RUNGS: [&str; 5] = ["none", "cli", "key", "browser", "oauth"];
-const AGENTS: [&str; 6] = ["claude", "copilot", "codex", "opencode", "gemini", "shell"];
 const PLATFORMS: [&str; 3] = ["darwin", "linux", "win32"];
 const LOCAL_STATUSES: [&str; 5] = ["todo", "in_progress", "in_review", "done", "cancelled"];
 
@@ -984,6 +989,7 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         checks: None,
         storage: None,
         mcp: Vec::new(),
+        agent: None,
     })
 }
 
@@ -1318,7 +1324,7 @@ pub fn activation(value: Option<&Value>) -> Option<Activation> {
         remote_host: bounded_names(value.get("remoteHost")),
         agent: bounded_names(value.get("agent"))
             .into_iter()
-            .filter(|a| AGENTS.contains(&a.as_str()))
+            .filter(|a| a == "shell" || vorn_agents::spec::valid_id(a))
             .collect(),
         platform: bounded_names(value.get("platform"))
             .into_iter()
@@ -1821,7 +1827,7 @@ mod tests {
         let m = manifest(json!({
             "id": "x", "name": "X", "kind": "extension", "version": "1.2.0",
             "permissions": ["git.read", "git.read", "root", "agent.usage"],
-            "activates": { "agent": ["claude", "vim"], "workspaceContains": ["/etc", "a/../b", "package.json"] },
+            "activates": { "agent": ["alpha", "Not an id"], "workspaceContains": ["/etc", "a/../b", "package.json"] },
             "contributes": {
                 "panes": [
                     { "id": "page", "web": "web/index.html", "command": ["x"] },
@@ -1843,7 +1849,7 @@ mod tests {
         assert_eq!(out["permissions"], json!(["git.read", "agent.usage"]));
         assert_eq!(
             out["activates"],
-            json!({ "workspaceContains": ["package.json"], "agent": ["claude"] })
+            json!({ "workspaceContains": ["package.json"], "agent": ["alpha"] })
         );
         assert_eq!(
             out["contributes"],

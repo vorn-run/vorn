@@ -138,6 +138,8 @@ struct Raw {
     storage: Option<RawStorage>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     mcp: BTreeMap<String, RawMcp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -626,6 +628,10 @@ pub fn is_range(range: &str) -> bool {
 
 impl Raw {
     fn check(&self, at: &At<'_>, builtin: bool) -> Result<(), FileError> {
+        if let Some(agent) = &self.agent {
+            vorn_agents::AgentSpec::from_toml(agent.clone())
+                .map_err(|e| at(&e.field, e.message))?;
+        }
         if !is_id(&self.id) {
             return Err(at(
                 "id",
@@ -820,7 +826,8 @@ impl Raw {
                 .as_ref()
                 .is_some_and(|c| !c.triggers.is_empty() || !c.actions.is_empty())
             || self.contributes.is_some()
-            || !self.mcp.is_empty();
+            || !self.mcp.is_empty()
+            || self.agent.is_some();
         if !does_something {
             return Err(at(
                 "",
@@ -899,6 +906,10 @@ impl Raw {
         let mut manifest = super::read(&payload).map_err(|e| at("", e.to_string()))?;
         if !has_connector_work {
             manifest.actions.clear();
+            if self.agent.is_some() {
+                // An agent adapter adds to Vorn, as an extension does.
+                manifest.kind = super::Kind::Extension;
+            }
         } else {
             // It feeds tasks in, whatever else it draws.
             manifest.kind = super::Kind::Connector;
@@ -949,6 +960,7 @@ impl Raw {
         manifest.storage = self.storage.map(|s| Storage {
             migrations: s.migrations,
         });
+        manifest.agent = self.agent;
         manifest.mcp = self
             .mcp
             .into_iter()
@@ -1604,6 +1616,7 @@ impl From<&Manifest> for Raw {
             storage: m.storage.as_ref().map(|s| RawStorage {
                 migrations: s.migrations.clone(),
             }),
+            agent: m.agent.clone(),
             mcp: m
                 .mcp
                 .iter()
