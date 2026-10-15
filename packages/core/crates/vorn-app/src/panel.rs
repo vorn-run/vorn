@@ -74,12 +74,14 @@ impl Panel {
             .unwrap_or_default();
         self.points.listed(&list);
         for (ext, coll) in self.points.to_ask() {
-            if let Ok(Value::Array(rows)) = self
+            let answer = self
                 .rpc
-                .call("extension:rows", json!({ "id": ext, "collection": coll }))
-            {
-                self.points.fill(&ext, &coll, &rows);
-            }
+                .call("extension:rows", json!({ "id": ext, "collection": coll }));
+            let rows = match &answer {
+                Ok(Value::Array(rows)) => Some(rows.as_slice()),
+                _ => None,
+            };
+            self.points.fill(&ext, &coll, rows);
         }
     }
 

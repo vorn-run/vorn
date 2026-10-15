@@ -161,9 +161,11 @@ impl App {
                 Err(_) => self.st.points.listed(&[]),
             },
             PointCall::Rows(ext, coll) => {
-                if let Ok(Value::Array(rows)) = answer {
-                    self.st.points.fill(&ext, &coll, &rows);
-                }
+                let rows = match &answer {
+                    Ok(Value::Array(rows)) => Some(rows.as_slice()),
+                    _ => None,
+                };
+                self.st.points.fill(&ext, &coll, rows);
             }
             PointCall::Called => match answer {
                 Ok(v) => {

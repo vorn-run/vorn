@@ -240,6 +240,13 @@ fn every_template_kind_draws_on_every_surface() {
             &Act::Point(vorn_app::points::PointAct::Settings(page.clone())),
         ),
     );
+    shot.until(&mut app, "the prefs", |a, _| {
+        a.st.points
+            .rows_of(ID)
+            .get("prefs")
+            .is_some_and(|p| !p.is_empty())
+            .then_some(())
+    });
     every_surface(
         &mut shot,
         &mut app,

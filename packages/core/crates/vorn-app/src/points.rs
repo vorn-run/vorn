@@ -206,6 +206,8 @@ pub struct Points {
     pub stale: bool,
     /// Collections asked for since the list was fetched.
     pub asked: BTreeSet<(String, String)>,
+    /// Collections asked for and not yet answered, and whether a change came meanwhile.
+    pub pending: BTreeMap<(String, String), bool>,
     /// The dialog showing, by point key.
     pub dialog: Option<String>,
     /// Windows open, by point key.
@@ -268,6 +270,7 @@ impl Points {
                 let k = (p.extension.clone(), c);
                 if !self.asked.contains(&k) {
                     self.asked.insert(k.clone());
+                    self.pending.insert(k.clone(), false);
                     out.push(k);
                 }
             }
@@ -275,8 +278,15 @@ impl Points {
         out
     }
 
-    /// `extension:rows`' answer for one collection.
-    pub fn fill(&mut self, extension: &str, collection: &str, rows: &[Value]) {
+    /// `extension:rows`' answer, `None` if it failed; asked again if a change came meanwhile.
+    pub fn fill(&mut self, extension: &str, collection: &str, rows: Option<&[Value]>) {
+        let k = (extension.to_owned(), collection.to_owned());
+        if self.pending.remove(&k) == Some(true) {
+            self.asked.remove(&k);
+        }
+        let Some(rows) = rows else {
+            return;
+        };
         let kept = rows.iter().filter_map(Row::from_value).collect();
         self.rows
             .entry(extension.to_owned())
@@ -286,6 +296,12 @@ impl Points {
 
     /// `extension:rowsChanged`: answers the window points whose raise collection gained a row.
     pub fn changed(&mut self, extension: &str, collection: &str, ops: &[Value]) -> Vec<String> {
+        if let Some(late) = self
+            .pending
+            .get_mut(&(extension.to_owned(), collection.to_owned()))
+        {
+            *late = true;
+        }
         let rows = self
             .rows
             .entry(extension.to_owned())
@@ -426,7 +442,7 @@ mod tests {
         assert!(pts.all[0].template.as_ref().is_ok_and(Option::is_some));
         assert_eq!(pts.to_ask(), [("x".to_owned(), "items".to_owned())]);
         assert!(pts.to_ask().is_empty());
-        pts.fill("x", "items", &[json!({ "id": "a", "name": "A" })]);
+        pts.fill("x", "items", Some(&[json!({ "id": "a", "name": "A" })]));
         let raised = pts.changed(
             "x",
             "items",
@@ -446,6 +462,20 @@ mod tests {
             .is_empty());
         pts.changed("x", "items", &[json!({ "op": "clear" })]);
         assert!(pts.rows_of("x")["items"].is_empty());
+    }
+
+    #[test]
+    fn an_answer_older_than_a_change_is_asked_again() {
+        let mut pts = Points::default();
+        pts.listed(&[point(kind::SIDEBAR, template())]);
+        assert_eq!(pts.to_ask().len(), 1);
+        let row = json!({ "op": "upsert", "row": { "id": "a", "name": "A" } });
+        pts.changed("x", "items", &[row]);
+        pts.fill("x", "items", Some(&[]));
+        assert_eq!(pts.to_ask(), [("x".to_owned(), "items".to_owned())]);
+        pts.fill("x", "items", Some(&[json!({ "id": "a", "name": "A" })]));
+        assert!(pts.to_ask().is_empty());
+        assert_eq!(pts.rows_of("x")["items"].len(), 1);
     }
 
     #[test]
