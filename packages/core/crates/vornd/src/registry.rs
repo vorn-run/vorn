@@ -288,6 +288,58 @@ pub struct TerminalSession {
     pub other: Map<String, Value>,
 }
 
+/// What started a session other than a person: the extension, its own id
+/// for the thing (a workflow, a run), and the words a client shows for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Origin {
+    pub extension: String,
+    pub id: String,
+    pub label: String,
+}
+
+/// The extension a workflow's sessions name as their origin.
+pub const WORKFLOWS: &str = "vorn.workflows";
+
+/// A record's [`Origin`], read from `origin`, or from the `workflowId` and
+/// `workflowName` a record written before origins carried, which it replaces.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionOrigin(pub Option<Origin>);
+
+impl Serialize for SessionOrigin {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = s.serialize_map(None)?;
+        if let Some(origin) = &self.0 {
+            map.serialize_entry("origin", origin)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionOrigin {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            #[serde(default)]
+            origin: Option<Origin>,
+            #[serde(default)]
+            workflow_id: Option<String>,
+            #[serde(default)]
+            workflow_name: Option<String>,
+        }
+        let w = Wire::deserialize(d)?;
+        Ok(SessionOrigin(w.origin.or_else(|| {
+            let id = w.workflow_id?;
+            Some(Origin {
+                extension: WORKFLOWS.to_owned(),
+                label: w.workflow_name.unwrap_or_else(|| id.clone()),
+                id,
+            })
+        })))
+    }
+}
+
 /// `HeadlessSession` in packages/shared.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -313,10 +365,9 @@ pub struct HeadlessSession {
     pub started_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_name: Option<String>,
+    /// What started it, when not a person: a workflow run, an extension.
+    #[serde(flatten)]
+    pub origin: SessionOrigin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2733,6 +2784,28 @@ mod tests {
 
     fn change(v: Value) -> Change {
         Change::try_from(&v).unwrap()
+    }
+
+    #[test]
+    fn a_record_from_before_origins_reads_its_workflow_as_its_origin() {
+        let mut old = headless("h");
+        old["workflowId"] = json!("wf");
+        old["workflowName"] = json!("Ship");
+        let record = HeadlessSession::deserialize(&old).unwrap();
+        let wanted = Origin {
+            extension: WORKFLOWS.to_owned(),
+            id: "wf".to_owned(),
+            label: "Ship".to_owned(),
+        };
+        assert_eq!(record.origin.0.as_ref(), Some(&wanted));
+        let written = serde_json::to_value(&record).unwrap();
+        assert!(written.get("workflowId").is_none() && written.get("workflowName").is_none());
+        assert_eq!(written["origin"], json!({ "extension": "vorn.workflows", "id": "wf", "label": "Ship" }));
+        // Read back, it is the same record: the change happens once.
+        assert_eq!(HeadlessSession::deserialize(&written).unwrap(), record);
+        let plain = HeadlessSession::deserialize(&headless("p")).unwrap();
+        assert_eq!(plain.origin, SessionOrigin(None));
+        assert!(serde_json::to_value(&plain).unwrap().get("origin").is_none());
     }
 
     fn upsert(record: Value) -> Change {

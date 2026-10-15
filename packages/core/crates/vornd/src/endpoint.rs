@@ -146,6 +146,7 @@ impl Daemon {
         let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
         let work = Work::new(native, db, loopback);
         native.set_work(Arc::clone(&work));
+        work.follow_tasks(native.events());
         work.start();
     }
 

@@ -31,6 +31,10 @@ pub const SESSION_PROGRAM: &str = "session.program";
 pub const AGENT_HOOK: &str = "agent.hook";
 /// A terminal's agent started a conversation: `{sessionId, conversationId}`.
 pub const AGENT_CONVERSATION: &str = "agent.conversation";
+/// A task was created: the trigger it fires, `{effectId, kind, task}`.
+pub const TASK_CREATED: &str = "task.created";
+/// A task's status moved: the trigger it fires, `{effectId, kind, task, from, to}`.
+pub const TASK_STATUS_CHANGED: &str = "task.statusChanged";
 /// A worktree's HEAD moved or vornd committed in it: `{worktreePath, projectPath?, head?}`; only the latest per worktree in a batch.
 pub const GIT_CHANGED: &str = "git.changed";
 
@@ -44,10 +48,12 @@ pub const CORE_EVENTS: &[&str] = &[
     AGENT_HOOK,
     AGENT_CONVERSATION,
     GIT_CHANGED,
+    TASK_CREATED,
+    TASK_STATUS_CHANGED,
 ];
 
 /// The namespaces the core's events live in; another extension's events live in its own.
-pub const CORE_NAMESPACES: &[&str] = &["session.", "agent.", "git."];
+pub const CORE_NAMESPACES: &[&str] = &["session.", "agent.", "git.", "task."];
 
 /// Whether `name` is in a core namespace without being a core event: a typo a manifest should hear about.
 pub fn unknown_core_event(name: &str) -> bool {
@@ -397,5 +403,7 @@ mod tests {
         assert!(unknown_core_event("session.exit"));
         assert!(!unknown_core_event("session.exited"));
         assert!(!unknown_core_event("task.statusChanged"));
+        assert!(unknown_core_event("task.moved"));
+        assert!(!unknown_core_event("issues.opened"));
     }
 }

@@ -1090,8 +1090,10 @@ impl<H: Host> Engine<H> {
         }
 
         payload.insert("headless".into(), Value::Bool(true));
-        payload.insert("workflowId".into(), Value::String(workflow.id.clone()));
-        payload.insert("workflowName".into(), Value::String(workflow.name.clone()));
+        payload.insert(
+            "origin".into(),
+            json!({ "extension": "vorn.workflows", "id": workflow.id, "label": workflow.name }),
+        );
         put(
             &mut payload,
             "args",

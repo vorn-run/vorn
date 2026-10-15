@@ -1,5 +1,9 @@
 //! The whole-config snapshot: `loadConfig` and `saveConfig`.
 //!
+//! Tasks and workflows are not part of it: they are read and written
+//! through their own calls, and a snapshot that carries them is read
+//! without them.
+//!
 //! A save rewrites the collections it carries from the snapshot, but a row
 //! the snapshot leaves out is deleted only if the saving client could have
 //! seen it: every revisioned row records the save that wrote it, and a row
@@ -13,17 +17,14 @@ use rusqlite::{params, Connection, Row, Transaction};
 use serde::Deserialize;
 use serde_json::{Map, Number, Value};
 use vorn_protocol::{
-    AgentCommandConfig, AuthMethod, ProjectConfig, RemoteHost, SessionGroupConfig, TaskConfig,
-    WorkflowDefinition, WorkspaceConfig,
+    AgentCommandConfig, AuthMethod, ProjectConfig, RemoteHost, SessionGroupConfig, WorkspaceConfig,
 };
 
-use crate::catalog::{row_to_project, row_to_session_group, row_to_workflow, row_to_workspace};
+use crate::catalog::{row_to_project, row_to_session_group, row_to_workspace};
 use crate::schema::CONFIG_REVISION_KEY;
 use crate::sql::{
-    format_js_number, get_f64, get_opt_text, get_text, json_if_truthy, json_text, num, opt_num,
-    parse_json,
+    format_js_number, get_f64, get_opt_text, get_text, json_if_truthy, json_text, num, parse_json,
 };
-use crate::tasks::row_to_task;
 use crate::{Result, Store};
 
 /// `Number.MAX_SAFE_INTEGER`: the base revision of a caller that does not
@@ -40,26 +41,23 @@ struct SavedConfig {
     revision: Option<f64>,
     defaults: Map<String, Value>,
     projects: Vec<ProjectConfig>,
-    workflows: Option<Vec<WorkflowDefinition>>,
     /// Values stay JSON: an entry whose value is falsy is kept from pruning
     /// but not written, as `if (cmd)` skips it.
     agent_commands: Option<Map<String, Value>>,
     remote_hosts: Option<Vec<RemoteHost>>,
-    tasks: Option<Vec<TaskConfig>>,
     workspaces: Option<Vec<WorkspaceConfig>>,
     session_groups: Option<Vec<SessionGroupConfig>>,
 }
 
 impl Store {
     /// The `AppConfig` object, keys in the order `loadConfig` writes them.
+    /// Tasks and workflows are not in it: they have their own calls.
     pub fn load_config(&self) -> Result<Value> {
         let conn = self.conn();
         let defaults = self.load_defaults()?;
         let projects = collect(conn, "SELECT * FROM projects", row_to_project)?;
         let mut agent_commands = load_agent_commands(conn)?;
-        let workflows = collect(conn, "SELECT * FROM workflows", row_to_workflow)?;
         let remote_hosts = collect(conn, "SELECT * FROM remote_hosts", row_to_remote_host)?;
-        let tasks = collect(conn, r#"SELECT * FROM tasks ORDER BY "order""#, row_to_task)?;
         let workspaces = collect(
             conn,
             r#"SELECT * FROM workspaces ORDER BY "order""#,
@@ -83,9 +81,7 @@ impl Store {
         config.insert("defaults".into(), Value::Object(defaults));
         config.insert("projects".into(), serde_json::to_value(projects)?);
         config.insert("agentCommands".into(), Value::Object(agent_commands));
-        config.insert("workflows".into(), serde_json::to_value(workflows)?);
         config.insert("remoteHosts".into(), serde_json::to_value(remote_hosts)?);
-        config.insert("tasks".into(), serde_json::to_value(tasks)?);
         config.insert("workspaces".into(), serde_json::to_value(workspaces)?);
         config.insert(
             "sessionGroups".into(),
@@ -261,47 +257,6 @@ impl Store {
             )?;
         }
 
-        // Workflows: deleted when absent, with no revision check, but never
-        // rewritten wholesale, so connector inbox rows and poll cursors that
-        // cascade off them survive an ordinary save.
-        let workflows = config.workflows.unwrap_or_default();
-        let ids: HashSet<&str> = workflows.iter().map(|w| w.id.as_str()).collect();
-        for existing in keys(&tx, "SELECT id FROM workflows")? {
-            if !matches!(&existing, SqlValue::Text(id) if ids.contains(id.as_str())) {
-                tx.execute("DELETE FROM workflows WHERE id = ?", [existing])?;
-            }
-        }
-        for w in &workflows {
-            tx.execute(
-                "INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         icon = excluded.icon,
-         icon_color = excluded.icon_color,
-         nodes = excluded.nodes,
-         edges = excluded.edges,
-         enabled = excluded.enabled,
-         last_run_at = excluded.last_run_at,
-         last_run_status = excluded.last_run_status,
-         stagger_delay_ms = excluded.stagger_delay_ms,
-         workspace_id = excluded.workspace_id",
-                params![
-                    w.id,
-                    w.name,
-                    w.icon,
-                    w.icon_color,
-                    json_text(&w.nodes)?,
-                    json_text(&w.edges)?,
-                    i64::from(w.enabled),
-                    w.last_run_at,
-                    w.last_run_status,
-                    opt_num(w.stagger_delay_ms),
-                    w.workspace_id.as_deref().unwrap_or("personal"),
-                ],
-            )?;
-        }
-
         let agent_commands = config.agent_commands.unwrap_or_default();
         let agent_types: Vec<&str> = agent_commands.keys().map(String::as_str).collect();
         prune_missing(&tx, "agent_commands", "agent_type", &agent_types, base)?;
@@ -361,58 +316,6 @@ impl Store {
                     h.credential_id,
                     h.encrypted_password,
                     h.ssh_options,
-                    rev,
-                ],
-            )?;
-        }
-
-        // Tasks: task_source_links cascade off them, so a wipe would orphan
-        // the link to the issue a task came from.
-        let tasks = config.tasks.unwrap_or_default();
-        let task_ids: Vec<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
-        prune_missing(&tx, "tasks", "id", &task_ids, base)?;
-        for t in &tasks {
-            tx.execute(
-                r#"INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         project_name = excluded.project_name,
-         title = excluded.title,
-         description = excluded.description,
-         status = excluded.status,
-         "order" = excluded."order",
-         assigned_session_id = excluded.assigned_session_id,
-         assigned_agent = excluded.assigned_agent,
-         agent_session_id = excluded.agent_session_id,
-         branch = excluded.branch,
-         use_worktree = excluded.use_worktree,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at,
-         completed_at = excluded.completed_at,
-         archived_at = excluded.archived_at,
-         source_connector_id = excluded.source_connector_id,
-         source_external_url = excluded.source_external_url,
-         source_external_id = excluded.source_external_id"#,
-                params![
-                    t.id,
-                    t.project_name,
-                    t.title,
-                    t.description,
-                    t.status.0,
-                    num(t.order),
-                    t.assigned_session_id,
-                    t.assigned_agent.as_ref().map(|a| a.0.as_str()),
-                    t.agent_session_id,
-                    t.branch,
-                    i64::from(t.use_worktree == Some(true)),
-                    t.created_at,
-                    t.updated_at,
-                    t.completed_at,
-                    t.archived_at,
-                    t.source_connector_id,
-                    t.source_external_url,
-                    t.source_external_id,
                     rev,
                 ],
             )?;
@@ -507,17 +410,6 @@ fn prune_missing(
         tx.prepare_cached(&delete)?.execute([key])?;
     }
     Ok(())
-}
-
-/// The first column of every row `sql` returns, as stored.
-fn keys(conn: &Connection, sql: &str) -> Result<Vec<SqlValue>> {
-    let mut stmt = conn.prepare(sql)?;
-    let mut rows = stmt.query([])?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next()? {
-        out.push(row.get::<_, SqlValue>(0)?);
-    }
-    Ok(out)
 }
 
 fn collect<T>(conn: &Connection, sql: &str, map: impl Fn(&Row<'_>) -> Result<T>) -> Result<Vec<T>> {
@@ -763,12 +655,13 @@ mod tests {
         config
     }
 
-    fn task_ids(store: &Store) -> Vec<String> {
-        store
-            .db_list_tasks(None, None)
+    fn project_names(store: &Store) -> Vec<String> {
+        let loaded = store.load_config().unwrap();
+        loaded["projects"]
+            .as_array()
             .unwrap()
-            .into_iter()
-            .map(|t| t.id)
+            .iter()
+            .map(|p| p["name"].as_str().unwrap().to_owned())
             .collect()
     }
 
@@ -785,9 +678,7 @@ mod tests {
                 "defaults",
                 "projects",
                 "agentCommands",
-                "workflows",
                 "remoteHosts",
-                "tasks",
                 "workspaces",
                 "sessionGroups"
             ]
@@ -828,18 +719,9 @@ mod tests {
         );
         assert_eq!(loaded["agentCommands"], saved["agentCommands"]);
         assert_eq!(
-            loaded["workflows"],
-            json!([{
-                "id": "w", "name": "W", "icon": "Zap", "iconColor": "#fff",
-                "nodes": [], "edges": [], "enabled": false, "staggerDelayMs": 250.0,
-                "workspaceId": "personal"
-            }])
-        );
-        assert_eq!(
             loaded["remoteHosts"],
             json!([{ "id": "h", "label": "H", "hostname": "h.local", "user": "me", "port": 22.0, "authMethod": "agent" }])
         );
-        assert_eq!(loaded["tasks"][0]["useWorktree"], json!(true));
         assert_eq!(
             loaded["workspaces"],
             json!([
@@ -853,8 +735,9 @@ mod tests {
         store.save_config(&loaded, &[]).unwrap();
         let again = store.load_config().unwrap();
         assert_eq!(again["revision"], json!(2));
-        assert_eq!(again["tasks"], loaded["tasks"]);
-        assert_eq!(again["projects"], loaded["projects"]);
+        let mut same = again.clone();
+        same["revision"] = loaded["revision"].clone();
+        assert_eq!(same, loaded);
     }
 
     #[test]
@@ -862,37 +745,60 @@ mod tests {
         let mut store = test_support::store();
         store.save_config(&snapshot(Some(0)), &[]).unwrap(); // revision 1
 
-        // Another client, based on revision 1, adds a task: revision 2.
+        // Another client, based on revision 1, adds a project: revision 2.
         let mut other = snapshot(Some(1));
-        other["tasks"].as_array_mut().unwrap().push(json!({
-            "id": "t2", "projectName": "p", "title": "T2", "description": "",
-            "status": "todo", "order": 2, "createdAt": "c", "updatedAt": "u"
+        other["projects"].as_array_mut().unwrap().push(json!({
+            "name": "p2", "path": "/p2", "preferredAgents": []
         }));
         store.save_config(&other, &[]).unwrap();
 
-        // The first client, still at revision 1, saves without t2: kept.
+        // The first client, still at revision 1, saves without p2: kept.
         store.save_config(&snapshot(Some(1)), &[]).unwrap();
-        assert_eq!(task_ids(&store), ["t", "t2"]);
+        assert_eq!(project_names(&store), ["p", "p2"]);
 
-        // A client that has seen t2's revision and leaves it out deleted it.
+        // A client that has seen p2's revision and leaves it out deleted it.
         store.save_config(&snapshot(Some(2)), &[]).unwrap();
-        assert_eq!(task_ids(&store), ["t"]);
-
-        // No base revision prunes everything the snapshot omits.
-        let mut bare = snapshot(None);
-        bare["tasks"] = json!([]);
-        store.save_config(&bare, &[]).unwrap();
-        assert!(task_ids(&store).is_empty());
+        assert_eq!(project_names(&store), ["p"]);
     }
 
+    /// A database from before tasks and workflows left the document: its rows
+    /// are neither loaded into it nor touched by a save, whatever it carries.
     #[test]
-    fn workflows_are_pruned_without_a_revision_check() {
+    fn a_save_leaves_tasks_and_workflows_alone() {
         let mut store = test_support::store();
-        store.save_config(&snapshot(Some(0)), &[]).unwrap();
-        let mut without = snapshot(Some(0));
-        without["workflows"] = Value::Null;
-        store.save_config(&without, &[]).unwrap();
-        assert!(store.db_list_workflows().unwrap().is_empty());
+        store.save_config(&snapshot(None), &[]).unwrap();
+        store
+            .call(
+                "dbInsertTask",
+                json!([{ "id": "kept", "projectName": "p", "title": "K", "description": "",
+                    "status": "todo", "order": 0, "createdAt": "c", "updatedAt": "u" }]),
+            )
+            .unwrap();
+        store
+            .call(
+                "dbInsertWorkflow",
+                json!([{ "id": "wf", "name": "Wf", "icon": "Zap", "iconColor": "#fff",
+                    "nodes": [], "edges": [], "enabled": true }]),
+            )
+            .unwrap();
+        let loaded = store.load_config().unwrap();
+        assert!(loaded.get("tasks").is_none() && loaded.get("workflows").is_none());
+
+        // An old client's snapshot: no tasks, then other tasks, then none at all.
+        for tasks in [json!([]), snapshot(None)["tasks"].clone(), Value::Null] {
+            let mut old = snapshot(None);
+            old["tasks"] = tasks;
+            old["workflows"] = json!([]);
+            store.save_config(&old, &[]).unwrap();
+            let ids: Vec<String> = store
+                .db_list_tasks(None, None)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect();
+            assert_eq!(ids, ["kept"]);
+            assert_eq!(store.db_list_workflows().unwrap().len(), 1);
+        }
     }
 
     #[test]

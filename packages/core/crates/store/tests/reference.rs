@@ -716,6 +716,19 @@ fn scenario(store: Store) -> Vec<(String, Value)> {
     s.out
 }
 
+/// The one accepted difference: tasks and workflows left the configuration
+/// document for their own calls, so a recorded `loadConfig` answer is read
+/// without them. Their rows are compared where those calls are recorded.
+fn without_tasks_and_workflows(label: &str, mut value: Value) -> Value {
+    if label.starts_with("loadConfig") {
+        if let Some(map) = value.as_object_mut() {
+            map.remove("tasks");
+            map.remove("workflows");
+        }
+    }
+    value
+}
+
 #[test]
 fn every_call_is_answered_as_the_typescript_store_answered_it() {
     let store = Store::open_in_memory(options_with("<default shell>", "<owner name>"))
@@ -725,8 +738,14 @@ fn every_call_is_answered_as_the_typescript_store_answered_it() {
         .into_iter()
         .map(|(label, value)| (label, normalize(&value, now)))
         .collect();
-    let reference: Vec<(String, Value)> =
-        serde_json::from_str(REFERENCE).expect("the reference parses");
+    let reference: Vec<(String, Value)> = serde_json::from_str::<Vec<(String, Value)>>(REFERENCE)
+        .expect("the reference parses")
+        .into_iter()
+        .map(|(label, value)| {
+            let value = without_tasks_and_workflows(&label, value);
+            (label, value)
+        })
+        .collect();
 
     let labels = |steps: &[(String, Value)]| -> Vec<String> {
         steps.iter().map(|(label, _)| label.clone()).collect()

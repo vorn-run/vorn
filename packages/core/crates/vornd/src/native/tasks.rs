@@ -3,14 +3,16 @@
 //! that changes the board tells every client the configuration changed, as
 //! the board reads it from there.
 //!
-//! The board also follows the public events ([`follow`]): the conversation
-//! an agent starts is kept on the in-progress task its terminal was assigned.
+//! A task created or moved is a public event (`task.created`,
+//! `task.statusChanged`), which the workflows' triggers fire from. The board
+//! also follows the public events ([`follow`]): the conversation an agent
+//! starts is kept on the in-progress task its terminal was assigned.
 
 use std::sync::{Arc, Weak};
 
 use serde_json::{json, Value};
 use tracing::{info, warn};
-use vorn_extensions::events::AGENT_CONVERSATION;
+use vorn_extensions::events::{AGENT_CONVERSATION, TASK_CREATED, TASK_STATUS_CHANGED};
 use vorn_store::Store;
 use vorn_work::task_images::TaskImages;
 use vorn_work::tasks;
@@ -25,6 +27,7 @@ pub const METHODS: &[&str] = &[
     "task:setStatus",
     "task:create",
     "task:update",
+    "task:patch",
     "task:delete",
     "task:reorder",
     "task:archive",
@@ -72,11 +75,38 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer
     let n = Arc::clone(native);
     let m = method.to_owned();
     let done = blocking(method, move || {
-        with_store(&n, |store| call(store, &m, &params))
+        with_store(&n, |store| {
+            // A task being created was not there before, whatever id it is given.
+            let before = (written(&m) && m != "task:create")
+                .then(|| store.call("dbGetTask", json!([params.get("id")])))
+                .transpose()?
+                .filter(|t| !t.is_null());
+            let (value, changed) = call(store, &m, &params)?;
+            let trigger = if changed && written(&m) {
+                let id = params
+                    .get("id")
+                    .cloned()
+                    .or_else(|| value.as_ref().and_then(|v| v.pointer("/task/id")).cloned());
+                let after = store.call("dbGetTask", json!([id]))?;
+                (!after.is_null())
+                    .then(|| vorn_work::task_triggers::for_task(before.as_ref(), &after))
+                    .flatten()
+            } else {
+                None
+            };
+            Ok((value, changed, trigger))
+        })
     })
     .await;
     match done {
-        Ok((value, changed)) => {
+        Ok((value, changed, trigger)) => {
+            if let Some(trigger) = trigger {
+                let name = match trigger.get("kind").and_then(Value::as_str) {
+                    Some("taskCreated") => TASK_CREATED,
+                    _ => TASK_STATUS_CHANGED,
+                };
+                native.events().emit(name, || trigger);
+            }
             if changed {
                 announce(native).await;
             }
@@ -87,6 +117,14 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer
         }
         Err(message) => Answer::Error(message),
     }
+}
+
+/// Whether `method` writes one task, whose change may fire a trigger.
+fn written(method: &str) -> bool {
+    matches!(
+        method,
+        "task:create" | "task:setStatus" | "task:update" | "task:patch"
+    )
 }
 
 /// The store's part of a call: its answer, and whether the board changed.
@@ -108,6 +146,7 @@ fn call(
             &now,
         )?),
         "task:update" => answered(tasks::update(store, params, &now)?),
+        "task:patch" => answered(tasks::patch(store, params, &now)?),
         "task:delete" => answered(tasks::delete(store, params)?),
         "task:reorder" => answered(tasks::reorder(store, params, &now)?),
         "task:archive" => answered(tasks::archive(store, params, &now)?),
@@ -261,6 +300,51 @@ mod tests {
             "assignedSessionId": session, "createdAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
         })
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn creating_or_moving_a_task_is_an_event_the_triggers_fire_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vorn.db");
+        let mut store = super::super::work::test_store(&db);
+        store
+            .call(
+                "dbInsertProject",
+                json!([{ "name": "app", "path": "/app", "preferredAgents": [] }]),
+            )
+            .unwrap();
+        let native = Native::new();
+        native.set_database(db);
+        let mut events = native
+            .events()
+            .subscribe("test", &[TASK_CREATED, TASK_STATUS_CHANGED]);
+        let made = answer(
+            &native,
+            "task:create",
+            json!({ "id": "t1", "projectName": "app", "title": "T" }),
+        )
+        .await;
+        assert!(matches!(made, Answer::Result(_)), "{made:?}");
+        for set in [
+            json!({ "title": "Renamed" }),
+            json!({ "status": "in_progress" }),
+            json!({ "status": "in_progress" }),
+        ] {
+            answer(&native, "task:patch", json!({ "id": "t1", "set": set })).await;
+        }
+        let mut seen = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            seen.push((e.name.clone(), e.data.clone()));
+        }
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0].0, TASK_CREATED);
+        assert_eq!(seen[0].1["effectId"], "task-created/t1");
+        assert_eq!(seen[1].0, TASK_STATUS_CHANGED);
+        assert_eq!(
+            (seen[1].1["from"].as_str(), seen[1].1["to"].as_str()),
+            (Some("todo"), Some("in_progress"))
+        );
+        assert_eq!(seen[1].1["task"]["title"], "Renamed");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

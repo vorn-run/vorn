@@ -73,11 +73,25 @@ impl FakeRpc {
         let params = params.unwrap_or(Value::Null);
         let mut config = self.config.lock().unwrap();
         match method {
-            "config:load" => Ok(config.clone()),
+            // As vornd: tasks and workflows have calls of their own, not the configuration.
+            "config:load" => {
+                let mut loaded = config.clone();
+                if let Some(map) = loaded.as_object_mut() {
+                    map.remove("tasks");
+                    map.remove("workflows");
+                }
+                Ok(loaded)
+            }
             "config:save" => {
-                *config = params;
+                let mut saved = params;
+                for key in ["tasks", "workflows"] {
+                    saved[key] = config.get(key).cloned().unwrap_or(json!([]));
+                }
+                *config = saved;
                 Ok(Value::Null)
             }
+            "task:list" => Ok(config.get("tasks").cloned().unwrap_or(json!([]))),
+            "workflow:list" => Ok(config.get("workflows").cloned().unwrap_or(json!([]))),
             "workflow:create" => {
                 let workflow = params["workflow"].clone();
                 workflows(&mut config).push(workflow.clone());

@@ -54,6 +54,7 @@ fn writes(rpc: &FakeRpc) -> Vec<String> {
         .into_iter()
         .map(|(method, _)| method)
         .filter(|m| m == "config:save" || m.starts_with("task:") || m.starts_with("workflow:"))
+        .filter(|m| m != "task:list" && m != "workflow:list")
         .collect()
 }
 

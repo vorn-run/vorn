@@ -299,15 +299,15 @@ fn acknowledgements_from_an_expired_lease_owner_are_ignored() {
 }
 
 #[test]
-fn saving_an_existing_workflow_keeps_its_inbox_rows_and_cursor() {
+fn renaming_a_workflow_and_saving_the_config_keep_its_inbox_rows_and_cursor() {
     let mut store = store();
     record(&mut store, "wf-issues", "cursor-1", &["1"]);
-    let mut config = load_config(&mut store);
-    for entry in config["workflows"].as_array_mut().expect("workflows") {
-        if entry["id"] == "wf-issues" {
-            entry["name"] = json!("Renamed");
-        }
-    }
+    call(
+        &mut store,
+        "dbUpdateWorkflow",
+        json!(["wf-issues", { "name": "Renamed" }]),
+    );
+    let config = load_config(&mut store);
     save_config(&mut store, config, &[]);
 
     assert_eq!(cursor(&mut store, "wf-issues", CONNECTION), "cursor-1");
