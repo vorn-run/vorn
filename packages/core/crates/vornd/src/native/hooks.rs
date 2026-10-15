@@ -34,7 +34,9 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
-use vorn_extensions::events::{AGENT_CONVERSATION, AGENT_HOOK};
+use vorn_extensions::events::{
+    AGENT_CONVERSATION, AGENT_HOOK, AGENT_PERMISSION, AGENT_PERMISSION_CLOSED,
+};
 use vorn_hooks::mapper::{normalize, Status};
 use vorn_hooks::owner::{may_claim, may_release, Owner};
 use vorn_hooks::{claude, copilot, permission, Event, Mapper, Terminal};
@@ -403,10 +405,9 @@ impl Hooks {
         hook_status(&native, &resolved.terminal, None, true);
         let about = about(&native, &resolved.terminal);
         info!(request = %id, tool = event.tool_name(), terminal = %resolved.terminal, "a permission request");
-        native.broadcast(
-            "widget:permission-request",
-            permission::info(&id, &event, &about),
-        );
+        native
+            .events()
+            .emit(AGENT_PERMISSION, || permission::info(&id, &event, &about));
         hook_status(&native, &resolved.terminal, Some(Status::Waiting), false);
         (Some(id), rx)
     }
@@ -420,7 +421,7 @@ impl Hooks {
         let p = pending.remove(at);
         drop(pending);
         if let Some(native) = self.native.upgrade() {
-            native.broadcast("widget:permission-cancelled", json!(id));
+            closed(&native, id, &p.terminal);
             self.answered(&native, &p.terminal);
         }
     }
@@ -450,7 +451,7 @@ impl Hooks {
         for p in gone {
             info!(request = %p.id, session = %p.session, "a permission request the agent moved past");
             let _ = p.reply.send("{}".to_owned());
-            native.broadcast("widget:permission-cancelled", json!(p.id));
+            closed(native, &p.id, &p.terminal);
             self.answered(native, &p.terminal);
         }
     }
@@ -478,6 +479,7 @@ impl Hooks {
         let p = pending.remove(at);
         drop(pending);
         if let Some(native) = self.native.upgrade() {
+            closed(&native, &p.id, &p.terminal);
             self.answered(&native, &p.terminal);
         }
         let body = if top {
@@ -507,6 +509,14 @@ impl Hooks {
         lock(&self.mapper).force_link(&session, id);
         patch(native, id, json!({ "hookSessionId": session }));
     }
+}
+
+/// Tells subscribers request `id` of `terminal` is no longer open.
+fn closed(native: &Native, id: &str, terminal: &str) {
+    native.events().emit(
+        AGENT_PERMISSION_CLOSED,
+        || json!({ "requestId": id, "terminalId": terminal }),
+    );
 }
 
 /// Answers `permission:resolve` and `permission:resolve-top`.

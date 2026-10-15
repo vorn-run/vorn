@@ -9,6 +9,7 @@
 //! vornd has around it ([`Around`]): the session records, the session host,
 //! its own endpoint and the clients the server holds.
 
+pub mod builtin;
 pub mod routes;
 pub mod world;
 
@@ -35,11 +36,12 @@ use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::router::Router;
-use vorn_extensions::{links, token};
+use vorn_extensions::{links, token, views};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
 
 use super::Answer;
+use builtin::Builtins;
 
 /// Every call clients make that is answered here.
 pub const METHODS: &[&str] = &[
@@ -61,7 +63,14 @@ pub const METHODS: &[&str] = &[
     "extension:mcpTools",
     "extension:mcpCall",
     "extension:setSandbox",
+    "extension:contributions",
+    "extension:builtins",
+    "extension:setBuiltin",
 ];
+
+/// Told to every client when what extensions contribute changed: a package
+/// came or went, a built-in was switched, or a linked package's template was saved.
+pub const CONTRIBUTIONS_CHANGED: &str = "extension:contributionsChanged";
 
 /// The longest tool name MCP clients take.
 const MCP_NAME_MAX: usize = 64;
@@ -111,6 +120,8 @@ const SELECTION_REQUEST: &str = "extension:selectionRequest";
 const SELECTION_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often the installed packs are looked at for a change.
 const PACK_CHECK: Duration = Duration::from_secs(2);
+/// How often a linked package's templates are looked at: a saved one redraws within 100 ms.
+const VIEW_CHECK: Duration = Duration::from_millis(40);
 /// How long a pane's program has to start.
 const TERMINAL_START: Duration = Duration::from_secs(30);
 
@@ -205,6 +216,7 @@ struct Bands {
 pub struct Extensions {
     hosts: Arc<Hosts>,
     router: Arc<Router>,
+    builtins: Builtins,
     installs: Arc<Installs>,
     around: Arc<dyn Around>,
     /// Where an extension's process and programs reach the bridge.
@@ -272,8 +284,14 @@ impl Extensions {
         ancestors: Vec<String>,
         home: PathBuf,
     ) -> Arc<Extensions> {
+        let kept = router.store().root().parent().map_or_else(
+            || PathBuf::from("builtins.json"),
+            |d| d.join("builtins.json"),
+        );
+        let builtins = Builtins::new(Arc::clone(&router), kept);
         Arc::new_cyclic(|me| Extensions {
             hosts,
+            builtins,
             router,
             installs,
             around,
@@ -316,8 +334,46 @@ impl Extensions {
     /// and the installed packs, until vornd stops.
     pub fn start(self: &Arc<Self>) {
         self.router.reindex();
+        self.builtins.start();
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
+        tokio::spawn(watch_views(Arc::downgrade(self)));
+    }
+
+    /// The extensions Vorn ships with.
+    pub fn builtins(&self) -> &Builtins {
+        &self.builtins
+    }
+
+    /// Every contribution drawn from a template, of the installed packages
+    /// and the built-ins that are on, each with its template or its errors.
+    fn contributions(&self) -> Vec<Value> {
+        let store = self.router.store();
+        let mut out = Vec::new();
+        for id in store.ids() {
+            let Ok(pack) = store.inspect_unmeasured(&id) else {
+                continue;
+            };
+            if !pack.is_extension() {
+                continue;
+            }
+            let load = |path: &str, place| views::load(&pack.path, path, place);
+            for mut c in views::listed(&pack.manifest, &load) {
+                c["extensionName"] = json!(pack.manifest.name);
+                c["builtin"] = json!(false);
+                out.push(c);
+            }
+        }
+        out.extend(self.builtins.contributions());
+        out
+    }
+
+    fn contributions_changed(&self, extension: &str) {
+        self.around.broadcast(
+            CONTRIBUTIONS_CHANGED,
+            json!({ "extensionId": extension }),
+            "",
+        );
     }
 
     /// Stops every process and terminal the extensions started.
@@ -325,6 +381,7 @@ impl Extensions {
         let closed = guard(&self.grants).close_where(|_| true);
         self.kill_terminals(&closed);
         self.hosts.stop_all().await;
+        self.builtins.stop_all();
         self.router.lifecycle().stop_all().await;
     }
 
@@ -379,10 +436,33 @@ impl Extensions {
                         .map(str::to_owned),
                 };
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
-                self.router
-                    .call(text(params, "id"), text(params, "action"), args, ctx)
-                    .await
-                    .map_err(|e| e.message)
+                let (id, action) = (text(params, "id"), text(params, "action"));
+                match self.builtins.call(id, action, args.clone()).await {
+                    Some(answered) => answered.map_err(|e| e.message),
+                    None => self
+                        .router
+                        .call(id, action, args, ctx)
+                        .await
+                        .map_err(|e| e.message),
+                }
+            }
+            "extension:contributions" => match self.me.upgrade() {
+                Some(me) => blocking(move || Ok(Value::Array(me.contributions()))).await,
+                None => Err("vornd is stopping".to_owned()),
+            },
+            "extension:builtins" => Ok(self.builtins.list()),
+            "extension:setBuiltin" => {
+                let (id, on) = (
+                    text(params, "id"),
+                    params.get("on").and_then(Value::as_bool),
+                );
+                match on {
+                    Some(on) => self.builtins.set(id, on).map(|()| {
+                        self.contributions_changed(id);
+                        json!({ "id": id, "on": on })
+                    }),
+                    None => Err("extension:setBuiltin takes on: true or false".to_owned()),
+                }
             }
             "extension:mcpTools" => self
                 .listed_tools()
@@ -563,6 +643,7 @@ impl Extensions {
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
         self.around.pack_removed(id).await;
+        self.contributions_changed(id);
         Ok(json!({ "removed": id }))
     }
 
@@ -571,6 +652,7 @@ impl Extensions {
         self.pack_changed(id).await;
         self.router.lifecycle().stop_extension(id).await;
         self.around.pack_changed(id).await;
+        self.contributions_changed(id);
     }
 
     /// Whether `method` is `<id>:<action>` for an installed program extension.
@@ -578,7 +660,9 @@ impl Extensions {
         let Some((id, action)) = method.split_once(':') else {
             return false;
         };
-        !RESERVED.contains(&id) && !action.is_empty() && self.router.program(id).is_some()
+        !RESERVED.contains(&id)
+            && !action.is_empty()
+            && (self.builtins.has(id) || self.router.program(id).is_some())
     }
 
     /// A client's call to `<id>:<action>`, routed to the extension.
@@ -593,7 +677,11 @@ impl Extensions {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
-        match self.router.call(id, action, params, ctx).await {
+        let answered = match self.builtins.call(id, action, params.clone()).await {
+            Some(answered) => answered,
+            None => self.router.call(id, action, params, ctx).await,
+        };
+        match answered {
             Ok(value) => Answer::Result(value),
             Err(ExtError { message, .. }) => Answer::Error(message),
         }
@@ -808,6 +896,11 @@ impl Extensions {
             PaneDraws::Command(argv) => {
                 let terminal = self.start_program(ext, &key, argv, session).await?;
                 grant.terminal_id = Some(terminal);
+            }
+            PaneDraws::View(_) => {
+                return Err(format!(
+                    "The pane \"{pane_id}\" draws a template, which the client draws"
+                ));
             }
             PaneDraws::Web(_) => {
                 let origin = self.page_origin.get().ok_or_else(|| {
@@ -1053,6 +1146,75 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
             extensions.pack_changed(id).await;
         }
         reconcile(&extensions, &mut known, !moved.is_empty());
+    }
+}
+
+/// When each linked package's manifest and templates were last written.
+fn view_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<SystemTime>, u64)> {
+    let mut out = HashMap::new();
+    let mut note = |p: PathBuf| {
+        if let Ok(meta) = std::fs::metadata(&p) {
+            out.insert(p, (meta.modified().ok(), meta.len()));
+        }
+    };
+    for (_, dir) in linked {
+        note(dir.join(vorn_extensions::manifest::file::FILE));
+        if let Ok(entries) = std::fs::read_dir(dir.join("views")) {
+            for entry in entries.flatten() {
+                note(entry.path());
+            }
+        }
+    }
+    out
+}
+
+/// Tells clients when a linked package's manifest or a template of it is
+/// saved, so a template being written redraws as it is saved.
+async fn watch_views(me: Weak<Extensions>) {
+    let mut linked: Vec<(String, PathBuf)> = Vec::new();
+    let mut stamps = HashMap::new();
+    let mut since_list = PACK_CHECK;
+    let mut tick = tokio::time::interval(VIEW_CHECK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        let Some(extensions) = me.upgrade() else {
+            return;
+        };
+        since_list += VIEW_CHECK;
+        if since_list >= PACK_CHECK {
+            since_list = Duration::ZERO;
+            let store = extensions.router.store().clone();
+            linked = store
+                .ids()
+                .into_iter()
+                .filter_map(|id| store.inspect_unmeasured(&id).ok())
+                .filter(|p| p.linked)
+                .map(|p| (p.id, p.path))
+                .collect();
+        }
+        if linked.is_empty() {
+            stamps.clear();
+            continue;
+        }
+        let now = view_stamps(&linked);
+        let moved: Vec<&String> = linked
+            .iter()
+            .filter(|(_, dir)| {
+                let mine = |m: &HashMap<PathBuf, _>| -> Vec<_> {
+                    let mut v: Vec<_> = m.iter().filter(|(p, _)| p.starts_with(dir)).collect();
+                    v.sort_by(|a, b| a.0.cmp(b.0));
+                    v.into_iter().map(|(p, s)| (p.clone(), *s)).collect()
+                };
+                !stamps.is_empty() && mine(&stamps) != mine(&now)
+            })
+            .map(|(id, _)| id)
+            .collect();
+        for id in moved {
+            debug!("[extensions] {id}'s templates changed");
+            extensions.contributions_changed(id);
+        }
+        stamps = now;
     }
 }
 

@@ -598,6 +598,8 @@ pub enum Permission {
     CardRename,
     #[serde(rename = "agent.usage")]
     AgentUsage,
+    #[serde(rename = "agent.permissions")]
+    AgentPermissions,
     #[serde(rename = "sessions.read")]
     SessionsRead,
     #[serde(rename = "sessions.launch")]
@@ -625,13 +627,14 @@ pub enum Permission {
 }
 
 impl Permission {
-    pub const ALL: [Permission; 18] = [
+    pub const ALL: [Permission; 19] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
         Permission::TerminalSend,
         Permission::CardRename,
         Permission::AgentUsage,
+        Permission::AgentPermissions,
         Permission::SessionsRead,
         Permission::SessionsLaunch,
         Permission::GitWrite,
@@ -654,6 +657,7 @@ impl Permission {
             Permission::TerminalSend => "terminal.send",
             Permission::CardRename => "card.rename",
             Permission::AgentUsage => "agent.usage",
+            Permission::AgentPermissions => "agent.permissions",
             Permission::SessionsRead => "sessions.read",
             Permission::SessionsLaunch => "sessions.launch",
             Permission::GitWrite => "git.write",

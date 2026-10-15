@@ -687,6 +687,7 @@ pub fn permission(name: &str) -> Option<(&'static str, &'static str)> {
         "terminal.read" => ("Reads", "the session's recent terminal output"),
         "terminal.selection" => ("Reads", "the text selected in the terminal"),
         "agent.usage" => ("Reads", "the agent's context and provider allowance"),
+        "agent.permissions" => ("Answers", "the agents' requests to use a tool"),
         "terminal.send" => ("Sends", "text into the session's terminal"),
         "card.rename" => ("Renames", "the session card"),
         _ => return None,

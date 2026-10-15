@@ -5,16 +5,16 @@
 use std::fs;
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use vorn_view::{file, Options, TemplateError};
 
-use crate::manifest::{Manifest, Place};
+use crate::manifest::{Manifest, PaneDraws, Place};
 
 /// Template files are small; past this one is a mistake.
 const MAX_TEMPLATE_BYTES: u64 = 256 * 1024;
 
 /// Reads and checks template `path` (as `views/checks.kdl`) of the package in `dir`.
-pub fn load(dir: &Path, path: &str, place: Place) -> Result<Value, Vec<TemplateError>> {
+pub fn load(dir: &Path, path: &str, place: Place) -> Loaded {
     let one = |message: String| {
         vec![TemplateError {
             file: Some(path.to_owned()),
@@ -33,10 +33,53 @@ pub fn load(dir: &Path, path: &str, place: Place) -> Result<Value, Vec<TemplateE
         )));
     }
     let text = fs::read_to_string(&full).map_err(|e| one(format!("cannot read it: {e}")))?;
+    read(path, &text, place)
+}
+
+/// A checked template, or every error found in it.
+pub type Loaded = Result<Value, Vec<TemplateError>>;
+
+/// Checks template text `text`, read from `path`, for `place`.
+pub fn read(path: &str, text: &str, place: Place) -> Loaded {
     let opts = Options {
         session_row: place.per_session(),
     };
-    file::to_json(path, &text, opts)
+    file::to_json(path, text, opts)
+}
+
+/// Every contribution of `manifest` that a client draws or lists from a
+/// template, flat and in place order: `{extension, kind, id, title, ..., view, errors}`,
+/// `view` the checked template or null with its `errors`. `load` reads one template.
+pub fn listed(manifest: &Manifest, load: &dyn Fn(&str, Place) -> Loaded) -> Vec<Value> {
+    let Some(c) = &manifest.contributes else {
+        return Vec::new();
+    };
+    let entry = |place: Place, mut v: Value, view: Option<&str>| {
+        let (template, errors) = match view.map(|p| load(p, place)) {
+            None => (Value::Null, Vec::new()),
+            Some(Ok(t)) => (t, Vec::new()),
+            Some(Err(e)) => (Value::Null, e.iter().map(ToString::to_string).collect()),
+        };
+        v["extension"] = json!(manifest.id);
+        v["kind"] = json!(place.key());
+        v["view"] = template;
+        v["errors"] = json!(errors);
+        v
+    };
+    let mut out = Vec::new();
+    for pane in c.panes() {
+        if let PaneDraws::View(path) = &pane.draws {
+            let v = json!({ "id": pane.base.id, "title": pane.base.title });
+            out.push(entry(Place::Panes, v, Some(path)));
+        }
+    }
+    for place in Place::POINTS {
+        for point in c.points(place) {
+            let v = serde_json::to_value(point).unwrap_or_else(|_| json!({}));
+            out.push(entry(place, v, point.view.as_deref()));
+        }
+    }
+    out
 }
 
 /// Every template's errors, each as `views/x.kdl:3:5: what is wrong`.
@@ -94,6 +137,32 @@ view = "views/checks.kdl"
 id = "branch"
 view = "views/footer.kdl"
 "#;
+
+    #[test]
+    fn lists_each_contribution_with_its_template_or_its_errors() {
+        let m = parse(MANIFEST).unwrap();
+        let listed = listed(&m, &|path, place| {
+            if path.ends_with("footer.kdl") {
+                read(
+                    path,
+                    "schema \"vorn:view@1\"\nrows { branch string; }\ntext \"{row.branch}\"\n",
+                    place,
+                )
+            } else {
+                read(path, "schema \"vorn:view@1\"\nbuton Go\n", place)
+            }
+        });
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0]["kind"], "sidebar");
+        assert_eq!(listed[0]["view"], Value::Null);
+        assert_eq!(
+            listed[0]["errors"],
+            json!(["views/checks.kdl:2:1: unknown node 'buton'; did you mean 'button'?"])
+        );
+        assert_eq!(listed[1]["kind"], "cardFooters");
+        assert_eq!(listed[1]["extension"], "checks");
+        assert_eq!(listed[1]["view"]["view"]["text"]["value"], "{row.branch}");
+    }
 
     #[test]
     fn checks_every_template_a_package_draws() {

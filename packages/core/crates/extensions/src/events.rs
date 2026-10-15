@@ -35,6 +35,12 @@ pub const AGENT_CONVERSATION: &str = "agent.conversation";
 pub const TASK_CREATED: &str = "task.created";
 /// A task's status moved: the trigger it fires, `{effectId, kind, task, from, to}`.
 pub const TASK_STATUS_CHANGED: &str = "task.statusChanged";
+/// An agent asks to use a tool: `{requestId, sessionId, tool, input, description?}`.
+pub const AGENT_PERMISSION: &str = "agent.permission";
+/// A permission request was answered or withdrawn: `{requestId, sessionId}`.
+pub const AGENT_PERMISSION_CLOSED: &str = "agent.permissionClosed";
+/// The last session in a worktree ended: `{projectPath, worktreePath, sessionId}`.
+pub const WORKTREE_IDLE: &str = "worktree.idle";
 /// A worktree's HEAD moved or vornd committed in it: `{worktreePath, projectPath?, head?}`; only the latest per worktree in a batch.
 pub const GIT_CHANGED: &str = "git.changed";
 
@@ -47,13 +53,16 @@ pub const CORE_EVENTS: &[&str] = &[
     SESSION_PROGRAM,
     AGENT_HOOK,
     AGENT_CONVERSATION,
+    AGENT_PERMISSION,
+    AGENT_PERMISSION_CLOSED,
+    WORKTREE_IDLE,
     GIT_CHANGED,
     TASK_CREATED,
     TASK_STATUS_CHANGED,
 ];
 
 /// The namespaces the core's events live in; another extension's events live in its own.
-pub const CORE_NAMESPACES: &[&str] = &["session.", "agent.", "git.", "task."];
+pub const CORE_NAMESPACES: &[&str] = &["session.", "agent.", "git.", "task.", "worktree."];
 
 /// Whether `name` is in a core namespace without being a core event: a typo a manifest should hear about.
 pub fn unknown_core_event(name: &str) -> bool {
@@ -195,6 +204,11 @@ impl Bus {
     pub fn subscribe_with(&self, owner: Owner, names: &[String], queue: Queue) {
         let sink = Sink { owner, queue };
         self.write(|i| i.add(names, &sink));
+    }
+
+    /// Drops every queue `owner` holds.
+    pub fn unsubscribe(&self, owner: &Owner) {
+        self.write(|i| i.remove_where(|o| o == owner));
     }
 
     /// Replaces every extension's subscriptions with `subscribed`: each id's

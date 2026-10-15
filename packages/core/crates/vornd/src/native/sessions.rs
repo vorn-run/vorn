@@ -1681,7 +1681,7 @@ fn kill(native: &Native, id: &str) -> Answer {
         claims.release_for(id);
     }
     if let Some(offer) = offer {
-        native.broadcast_to("worktree:confirmCleanup", offer, Some(id));
+        super::session_events::worktree_idle(native, &offer);
     }
     if !live {
         // No program to hang up: clients are told it ended, so a closing card finishes.
@@ -1988,7 +1988,11 @@ pub(super) mod tests {
     #[test]
     fn closes_a_terminal_hangs_it_up_and_offers_the_worktree_once_none_is_at_work() {
         let fed = fed();
-        let mut asks = fed.notes();
+        let mut asks = fed
+            .native
+            .events()
+            .subscribe("test", &[vorn_extensions::events::WORKTREE_IDLE]);
+        let mut notes = fed.notes();
         assert_eq!(
             call(&fed.native, "terminal:kill", &json!("a")),
             Answer::Void
@@ -1997,11 +2001,8 @@ pub(super) mod tests {
         assert_eq!(fed.host.signalled(), ["a"]);
         // `b` is idle, so nothing is at work in the worktree any more.
         assert_eq!(
-            asks.try_recv().unwrap(),
-            json!({
-                "method": "worktree:confirmCleanup",
-                "params": { "id": "a", "projectPath": "/p", "worktreePath": "/w" },
-            })
+            asks.try_recv().unwrap().data,
+            json!({ "sessionId": "a", "projectPath": "/p", "worktreePath": "/w" })
         );
         assert!(asks.try_recv().is_err());
         // One no record names: clients are told it ended, so a closing card finishes.
@@ -2009,9 +2010,13 @@ pub(super) mod tests {
             call(&fed.native, "terminal:kill", &json!("a")),
             Answer::Void
         );
+        assert!(asks.try_recv().is_err());
+        let exits: Vec<Value> = std::iter::from_fn(|| notes.try_recv().ok())
+            .filter(|n| n["method"] == "terminal:exit")
+            .collect();
         assert_eq!(
-            asks.try_recv().unwrap(),
-            json!({ "method": "terminal:exit", "params": { "id": "a", "exitCode": 0 } })
+            exits.last(),
+            Some(&json!({ "method": "terminal:exit", "params": { "id": "a", "exitCode": 0 } }))
         );
         assert_eq!(
             call(&fed.native, "terminal:kill", &json!(5)),

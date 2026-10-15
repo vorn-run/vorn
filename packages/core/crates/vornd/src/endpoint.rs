@@ -171,11 +171,6 @@ impl Daemon {
         }
     }
 
-    /// Tells the status widget's list as the sessions change ([`crate::native::widget`]).
-    pub fn start_widget(&self) {
-        self.native.start_widget();
-    }
-
     /// Starts connections and connectors ([`crate::native::connectors`]) once
     /// vornd has a database and its own address, which a browser connector's
     /// child reaches its window through.
