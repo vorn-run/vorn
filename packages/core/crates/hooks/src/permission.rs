@@ -90,7 +90,7 @@ mod tests {
         let event = Event::parse(body.to_string().as_bytes(), None).unwrap();
         let about = About {
             terminal: "t".into(),
-            agent_type: Some("claude".into()),
+            agent_type: Some("agent".into()),
             project_name: None,
         };
         let shown = info("r", &event, &about);

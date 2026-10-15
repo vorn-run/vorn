@@ -89,7 +89,7 @@ impl Mapper {
         self.links.get(session).map(String::as_str)
     }
 
-    /// Links a conversation Vorn made up itself, as for a Copilot terminal.
+    /// Links a conversation Vorn made up itself, as for a hooks file's terminal.
     pub fn force_link(&mut self, session: &str, terminal: &str) {
         self.links.insert(session.to_owned(), terminal.to_owned());
     }
@@ -265,10 +265,10 @@ mod tests {
     #[test]
     fn maps_each_event_to_a_status_and_forgets_an_ended_session() {
         let mut m = Mapper::default();
-        m.force_link("copilot-t", "t");
+        m.force_link("agent-t", "t");
         let terminals = vec![terminal("t", "/q", 1.0)];
         let status = |m: &mut Mapper, name| {
-            m.map(&event(name, "copilot-t", "", None), &terminals)
+            m.map(&event(name, "agent-t", "", None), &terminals)
                 .map(|(_, s)| s)
         };
         assert_eq!(status(&mut m, "SessionStart"), Some(Status::Running));
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(status(&mut m, "PermissionRequest"), Some(Status::Waiting));
         assert_eq!(status(&mut m, "Whatever"), None);
         assert_eq!(status(&mut m, "SessionEnd"), Some(Status::Idle));
-        assert_eq!(m.linked("copilot-t"), None);
+        assert_eq!(m.linked("agent-t"), None);
         assert_eq!(Status::Waiting.as_str(), "waiting");
     }
 }
