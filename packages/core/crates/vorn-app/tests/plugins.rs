@@ -67,8 +67,6 @@ fn plugins_page_lists_adds_and_connects() {
 
     shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Installed)));
     shot.save(&mut app, "pl-installed");
-    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Connections)));
-    shot.save(&mut app, "pl-connections");
 
     // A listing's detail, from Browse.
     shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Browse)));
@@ -112,7 +110,7 @@ fn plugins_page_lists_adds_and_connects() {
     shot.click(&mut app, plug("plug-save", PlugAct::Save));
     shot.until(&mut app, "the connection made", |app, _| {
         (app.st.plugins.adding.is_none()
-            && app.st.plugins.tab == Tab::Connections
+            && app.st.plugins.tab == Tab::Installed
             && !app.st.plugins.connections.is_empty())
         .then_some(())
     });

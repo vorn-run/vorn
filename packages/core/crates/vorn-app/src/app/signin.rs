@@ -341,6 +341,14 @@ impl App {
         self.web.host.close(|k| k == key);
         match w.from {
             From::Plugins => self.plug_signed_in(&w.connection, outcome),
+            From::Page => {
+                // The page that asked reads its rows again, as when it shows.
+                self.st.points.shown.clear();
+                match outcome {
+                    Ok(_) => self.st.toast(format!("Signed in to {}", w.name), false),
+                    Err(e) => self.st.toast(e, true),
+                }
+            }
             From::Run => match outcome {
                 Ok(_) => self.st.toast(format!("Signed in to {}", w.name), false),
                 Err(e) => self.st.toast(e, true),

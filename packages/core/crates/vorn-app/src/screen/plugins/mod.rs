@@ -3,7 +3,6 @@
 //! `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
 
 mod browse;
-mod connections;
 mod detail;
 mod forms;
 mod installed;
@@ -45,11 +44,10 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         Tab::Installed if !adding && selected.is_none() => col
             .child_if(super::points::builtins(s))
             .child(installed::view(s)),
-        Tab::Connections if !adding => col.child(connections::view(s)),
         Tab::Browse if !adding && selected.is_none() => col.child(browse::view(s)),
         _ => col,
     };
-    if let (false, Some(l), false) = (p.tab == Tab::Connections, selected, adding) {
+    if let (Some(l), false) = (selected, adding) {
         col = col.child(detail::view(s, l));
     }
     if let Some(a) = &p.adding {

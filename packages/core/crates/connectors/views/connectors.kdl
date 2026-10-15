@@ -1,85 +1,90 @@
-// Connectors: the connections and what they last did, the connectors
-// installed, and the catalog to install from, each saying what it reaches.
+// Connections: every connection with what it triggers and when it last
+// synced, and adding one from an installed connector.
 schema "vorn:view@1"
 
 rows "connections" {
     name string
-    connector string
-    state enum ok failing idle
-    detail string
-}
-
-rows "installed" {
-    name string
-    version string
-    reaches string
+    line string
+    state enum ok failing idle signin
+    needs_signin bool
     can_roll_back bool
     previous string
 }
 
-rows "catalog" {
+rows "form" {
+    picked bool
+    can_save bool
+    none_installed bool
+    error string
+}
+
+rows "connectors" {
     name string
-    description string
-    reaches string
-    borrows string
-    verified bool
-    installed bool
-    installable bool
+    selected bool
+}
+
+rows "triggers" {
+    name string
+    selected bool
+}
+
+rows "projects" {
+    name string
+    selected bool
+}
+
+rows "settings" {
+    label string
+    hint string
+    secret bool
+    value string
+    kept bool
 }
 
 column {
-    section "Connections" {
+    row {
+        text "Services your workflows watch and act on. From the Connectors extension." role=secondary grow=#true
+        button "Add connection" call="add" style=primary icon="plus" when="!{form.count}"
+    }
+    column when="{form.count}" {
+        text "Add a connection" role=title
+        text "No connector is installed yet." role=secondary when="{form.none_installed}"
+        choice "connectors" label="{row.name}" selected="{row.selected}" call="pick"
+        text "Connectors for other services are in Settings › Extensions › Browse." role=secondary
+        column when="{form.picked}" {
+            text "Trigger" role=secondary
+            choice "triggers" label="{row.name}" selected="{row.selected}" call="trigger"
+            list "settings" {
+                column {
+                    row {
+                        text "{row.label}" grow=#true
+                        badge "kept" when="{row.kept}" kept=good
+                    }
+                    field value="{row.value}" placeholder="{row.hint}" call="set" when="!{row.secret}"
+                    field placeholder="{row.hint}" call="set" secret=#true when="{row.secret}"
+                }
+            }
+            text "Tasks go to" role=secondary
+            choice "projects" label="{row.name}" selected="{row.selected}" call="project"
+        }
+        text "{form.error}" role=secondary when="{form.error}"
         row {
-            text "{connections.count} connections" role=secondary grow=#true
-            button Refresh call="refresh" icon="refresh-cw"
-        }
-        list "connections" empty="No connections yet. Add one under Plugins › Connections." {
-            column {
-                row {
-                    status "{row.state}" ok=good failing=bad idle=muted
-                    text "{row.name}" grow=#true
-                    text "{row.connector}" role=secondary
-                }
-                row {
-                    text "{row.detail}" role=secondary grow=#true
-                    button Test call="test"
-                    button "Import now" call="backfill"
-                    button Delete call="delete" style=danger confirm="Delete {row.name}? Its tasks stay on the board."
-                }
-            }
+            button Save call="save" style=primary when="{form.can_save}"
+            button Cancel call="cancel"
         }
     }
-
-    section "Installed" {
-        list "installed" empty="No connector is installed." {
+    list "connections" empty="No connections yet. Add one with Add connection." {
+        row {
+            status "{row.state}" ok=good failing=bad idle=muted signin=warn
             column {
-                row {
-                    text "{row.name}" grow=#true
-                    text "v{row.version}" role=mono
-                }
-                row {
-                    text "Reaches {row.reaches}" role=secondary grow=#true
-                    button "Roll back to v{row.previous}" call="rollback" when="{row.can_roll_back}"
-                    button Remove call="remove" style=danger confirm="Remove {row.name}? Its connections stay, and run again once it is back."
-                }
+                text "{row.name}" grow=#true
+                text "{row.line}" role=secondary
             }
-        }
-    }
-
-    section "Catalog" {
-        list "catalog" empty="The catalog is empty." {
-            column {
-                row {
-                    text "{row.name}" grow=#true
-                    badge "verified" when="{row.verified}" verified=good
-                    badge "installed" when="{row.installed}" installed=muted
-                }
-                text "{row.description}" role=secondary
-                row {
-                    text "Reaches {row.reaches}" role=secondary grow=#true
-                    button Install call="install" style=primary confirm="Install {row.name}? It reaches {row.reaches}. {row.borrows} It runs as you." when="{row.installable}"
-                }
-            }
+            button "Sign in" signin="{row.id}" style=primary when="{row.needs_signin}"
+            button Test call="test"
+            button "Import now" call="backfill"
+            button "Roll back to v{row.previous}" call="rollback" when="{row.can_roll_back}"
+            button Remove call="remove" style=danger confirm="Remove {row.name}? Its tasks stay on the board."
         }
     }
 }

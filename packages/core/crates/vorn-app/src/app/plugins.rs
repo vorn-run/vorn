@@ -503,7 +503,8 @@ impl App {
         self.call(Call::Plug(call), method, params);
     }
 
-    /// A form finished: back to the connections, re-read.
+    /// A form finished: back to what is installed, re-read; the connection
+    /// shows on Settings › Connections.
     fn plug_done(&mut self) {
         if self.st.plugins.from_editor {
             self.plug_leave();
@@ -512,7 +513,7 @@ impl App {
         let p = &mut self.st.plugins;
         p.adding = None;
         p.selected = None;
-        p.tab = Tab::Connections;
+        p.tab = Tab::Installed;
         self.plug_load(false);
     }
 

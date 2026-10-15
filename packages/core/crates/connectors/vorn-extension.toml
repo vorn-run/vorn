@@ -16,8 +16,8 @@ uses = [
 ]
 
 [[contributes.settings]]
-id = "connectors"
-title = "Connectors"
+id = "connections"
+title = "Connections"
 icon = "plug"
 view = "views/connectors.kdl"
 call = "refresh"

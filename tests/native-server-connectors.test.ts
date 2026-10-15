@@ -374,7 +374,7 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
     expect(refused).toEqual({
       ok: false,
       error:
-        'Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings → Connectors.'
+        'Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.'
     })
   })
 

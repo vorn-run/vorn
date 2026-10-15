@@ -251,9 +251,28 @@ fn every_template_kind_draws_on_every_surface() {
         &mut shot,
         &mut app,
         "t-settings",
-        &["Count shells too", "the latest first"],
-        &["Count shells too"],
+        &[
+            "Count shells too",
+            "Free plan",
+            "Team plan",
+            "Paste a key",
+            "Sign in",
+            "the latest first",
+        ],
+        &["Count shells too", "Team plan", "Sign in"],
     );
+    let team = shot
+        .labelled(&mut app, "RadioButton", "Team plan")
+        .expect("the plan choice");
+    shot.click(&mut app, team);
+    shot.until(&mut app, "the plan picked", |a, _| {
+        a.st.points
+            .rows_of(ID)
+            .get("plans")?
+            .iter()
+            .any(|r| r.id == "team" && r.fields.get("selected") == Some(&json!(true)))
+            .then_some(())
+    });
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
     assert!(!app.st.settings.open);

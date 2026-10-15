@@ -123,6 +123,8 @@ interface guest {
   use types.{json, ext-error, call-ctx, init-ctx, event};
 
   init: func(ctx: init-ctx) -> result<_, ext-error>;
+  /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
+  /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
   handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
   on-event: func(batch: list<event>);
 }

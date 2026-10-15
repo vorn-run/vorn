@@ -23,7 +23,7 @@ pub const MANIFEST_FILE: &str = "manifest.json";
 /// What a person reads about a 0.8 pack, named by `name`: the command that installs it again.
 pub fn legacy_message(name: &str) -> String {
     format!(
-        "{name} is a 0.8 pack (manifest.json), which this Vorn no longer loads. Install it again from its git repository: vorn ext install <git url>, or from Settings → Connectors."
+        "{name} is a 0.8 pack (manifest.json), which this Vorn no longer loads. Install it again from its git repository: vorn ext install <git url>, or from Settings › Extensions."
     )
 }
 

@@ -111,6 +111,8 @@ pub struct Connectors {
     /// How a checkout signs in, read once by probing it; `None` when it would not start.
     checkout_auth: Mutex<HashMap<String, Option<auth::Source>>>,
     http: Http,
+    /// The connection the Connections page is adding, while it adds one.
+    pub(crate) draft: Mutex<Option<crate::page::Draft>>,
 }
 
 impl std::fmt::Debug for Connectors {
@@ -287,6 +289,7 @@ impl Connectors {
             proxied: Mutex::default(),
             checkout_auth: Mutex::default(),
             http: Http,
+            draft: Mutex::default(),
         })
     }
 
@@ -2217,6 +2220,16 @@ impl Connectors {
         .unwrap_or_else(|e| failure(e.to_string()))
     }
 
+    /// The installed package `id`, unmeasured, as its JSON describes it.
+    pub(crate) fn installed(&self, id: &str) -> Option<Value> {
+        self.packs().inspect_unmeasured(id).ok().map(|p| json!(p))
+    }
+
+    /// What a host the built-in runs on answers to a core method.
+    pub(crate) async fn core(&self, method: &str, args: Value) -> Result<Value, String> {
+        self.api(method, args).await
+    }
+
     /// Stops every child, as vornd stops.
     pub async fn stop(&self) {
         self.services
@@ -2227,7 +2240,7 @@ impl Connectors {
 }
 
 /// What 0.8's `.vorn.tgz` packs are told.
-pub const PACK_FORMAT_GONE: &str = "Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings → Connectors.";
+pub const PACK_FORMAT_GONE: &str = "Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.";
 
 /// A connector's repository, as a client names it to install from.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -333,6 +333,9 @@ impl World for Wired {
                         text(&args, "taskId").ok_or_else(|| needs(m, "the taskId to read"))?;
                     on_store(&native, m, move |s| vorn_work::sources::link(s, &task)).await
                 }
+                "project.list" => {
+                    on_store(&native, m, |s| s.call("dbListProjects", json!([]))).await
+                }
                 "workflow.get" => {
                     let id = text(&args, "workflowId")
                         .ok_or_else(|| needs(m, "the workflowId to read"))?;

@@ -247,9 +247,9 @@ section "Items {summary.total}" {
         errs,
         [
             "views/checks.kdl:7:20: a toggle shows one bool field, as \"{row.on}\"",
-            "views/checks.kdl:8:13: a button does one of call, open and focus",
+            "views/checks.kdl:8:13: a button does one of call, open, focus and signin",
             "views/checks.kdl:8:87: unknown style 'dangr'; did you mean 'danger'?",
-            "views/checks.kdl:12:5: a button needs an action: call, open, focus, show, close or window",
+            "views/checks.kdl:12:5: a button needs an action: call, open, focus, show, close, window or signin",
         ]
     );
 }
@@ -314,4 +314,41 @@ fn suggests_a_near_name() {
 fn reports_braces_that_do_not_pair() {
     let broken = CHECKS.replace("text \"{row.name}\"", "text \"{row.name\"");
     assert!(errors(&broken)[0].ends_with("a '{' with no '}'"));
+}
+
+#[test]
+fn checks_choices_secret_fields_and_signin() {
+    let t = r#"schema "vorn:view@1"
+rows "plans" { name string; selected bool }
+rows "accounts" { name string }
+column {
+    choice "plans" label="{row.name}" selected="{row.selected}" call="plan"
+    field placeholder="Key" call="key" secret=#true
+    list "accounts" {
+        button "Sign in" signin="{row.id}"
+    }
+}
+"#;
+    let parsed = file::parse("views/t.kdl", t, Options::default()).unwrap();
+    let Kind::Column(children) = &parsed.view.kind else {
+        panic!("a column");
+    };
+    assert!(
+        matches!(&children[0].kind, Kind::Choice { rows, call, .. } if rows == "plans" && call == "plan")
+    );
+    assert!(matches!(
+        &children[1].kind,
+        Kind::Field { secret: true, .. }
+    ));
+    let bad = t
+        .replace("choice \"plans\"", "choice \"plan\"")
+        .replace(
+            "label=\"{row.name}\" selected",
+            "label=\"{row.nme}\" selected",
+        )
+        .replace("signin=\"{row.id}\"", "signin=\"{row.id}\" call=\"x\"");
+    let errs = errors(&bad);
+    assert_eq!(errs.len(), 2, "{errs:?}");
+    assert!(errs[0].contains("'plan'"), "{errs:?}");
+    assert!(errs[1].contains("a button does one of"), "{errs:?}");
 }

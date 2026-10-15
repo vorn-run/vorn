@@ -388,7 +388,7 @@ export function registerConnectorTools(server: McpServer): void {
           `${manifest.name} uses the secret ${plural(secrets.length, 'value')} ` +
             `${secrets.map((e) => e.name).join(', ')}, which this tool cannot accept: it runs ` +
             'outside the desktop process, where encryption lives, so it could only store them ' +
-            'unprotected. They must be entered by a person in Settings > Connectors to reach ' +
+            'unprotected. They must be entered by a person in Settings › Connections to reach ' +
             'the OS keychain. Everything else about the connector is ready to install.'
         )
       }

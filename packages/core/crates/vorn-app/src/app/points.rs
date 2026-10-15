@@ -27,6 +27,8 @@ pub(super) enum PointCall {
     /// A press or a choice; `holder` closes when the press asked it to.
     Called,
     Builtins,
+    /// A sign-in action's window target, asked of the extension; the key it opens for.
+    SignIn(String),
 }
 
 /// A window point's process and the lines it writes.
@@ -143,6 +145,14 @@ impl App {
         if let Some(w) = &press.window {
             self.open_window(&format!("{extension}/{}/{w}", kind::WINDOWS));
         }
+        // The extension says where the window signs in; the client holds the window.
+        if let Some(key) = press.signin.as_deref().filter(|k| !k.is_empty()) {
+            self.call(
+                Call::Point(PointCall::SignIn(key.to_owned())),
+                "extension:call",
+                json!({ "id": extension, "action": "signin", "args": { "id": key } }),
+            );
+        }
     }
 
     /// A one-line field's Return, with what it holds.
@@ -192,6 +202,15 @@ impl App {
                 }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
+            PointCall::SignIn(key) => {
+                let failed = match answer {
+                    Ok(target) => self.open_signin(&key, &target, crate::signin::From::Page),
+                    Err(e) => Some(e.to_string()),
+                };
+                if let Some(e) = failed {
+                    self.st.toast(e, true);
+                }
+            }
             PointCall::Builtins => match answer {
                 Ok(Value::Array(list)) => {
                     self.st.points.builtins = list;

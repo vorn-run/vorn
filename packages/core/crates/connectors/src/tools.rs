@@ -577,7 +577,7 @@ pub async fn install_connector<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
         .collect();
     if !secrets.is_empty() {
         return Ok(failure(format!(
-            "{manifest_name} uses the secret {} {}, which this tool cannot accept: it runs outside the desktop process, where encryption lives, so it could only store them unprotected. They must be entered by a person in Settings > Connectors to reach the OS keychain. Everything else about the connector is ready to install.",
+            "{manifest_name} uses the secret {} {}, which this tool cannot accept: it runs outside the desktop process, where encryption lives, so it could only store them unprotected. They must be entered by a person in Settings › Connections to reach the OS keychain. Everything else about the connector is ready to install.",
             if secrets.len() == 1 { "value" } else { "values" },
             json::join(
                 &secrets.iter().map(|e| e.get("name").cloned().unwrap_or(Value::Null)).collect::<Vec<_>>(),

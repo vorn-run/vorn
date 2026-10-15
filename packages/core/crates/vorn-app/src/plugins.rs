@@ -67,17 +67,15 @@ pub fn field_id(field: &Field) -> crate::ui::Id {
 pub enum Tab {
     #[default]
     Installed,
-    Connections,
     Browse,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 3] = [Tab::Installed, Tab::Connections, Tab::Browse];
+    pub const ALL: [Tab; 2] = [Tab::Installed, Tab::Browse];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Installed => "Installed",
-            Tab::Connections => "Connections",
             Tab::Browse => "Browse",
         }
     }

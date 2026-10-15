@@ -7,3 +7,5 @@ vorn ext link examples/extensions/turns
 ```
 
 A linked extension reloads its views as you save them; a template with a mistake shows each error with its file, line and column in the place it would draw. The program (`program.mjs`) needs Node.
+
+Its settings page shows the inputs a template has: a `toggle`, a `choice` over a collection's rows, a `field` with `secret=#true` that draws its text as bullets, and a button with `signin="{row.id}"` that opens Vorn's sign-in window on the target the program's `signin` method answers.

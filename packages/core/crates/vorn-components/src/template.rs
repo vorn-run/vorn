@@ -28,6 +28,8 @@ pub struct Press {
     pub close: bool,
     /// Open another of the extension's window points, by id.
     pub window: Option<String>,
+    /// Open the client's sign-in window for this key.
+    pub signin: Option<String>,
     /// The row the control sits in.
     pub row: Option<String>,
     /// A toggle's new value.
@@ -115,6 +117,11 @@ pub fn slots(t: &Template) -> Vec<u64> {
                 }
             }
             Kind::List { item, .. } => walk(item, child_slot(slot, 0), out),
+            Kind::Choice { .. } => {
+                for i in 0..vorn_view::MAX_LIST {
+                    out.push(child_slot(slot, i));
+                }
+            }
             _ => {}
         }
     }
@@ -225,16 +232,28 @@ impl Cx<'_> {
                 value,
                 placeholder,
                 call,
+                secret,
             } => {
                 let held = value.as_ref().map(fill).unwrap_or_default();
                 let hint = placeholder.as_ref().map(fill).unwrap_or_default();
                 let id = self
                     .bind
                     .field(slot, row.map(|r| r.id.as_str()), call, &held);
-                widgets::text_input(self.ui, id, &hint, &hint)
+                let input = widgets::text_input(self.ui, id, &hint, &hint)
                     .grow()
-                    .min_w0()
+                    .min_w0();
+                if *secret {
+                    input.secure()
+                } else {
+                    input
+                }
             }
+            Kind::Choice {
+                rows,
+                label,
+                selected,
+                call,
+            } => self.choice(slot, rows, label, selected.as_ref(), call),
             Kind::List {
                 rows,
                 item,
@@ -263,6 +282,67 @@ impl Cx<'_> {
             }
             Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
         })
+    }
+
+    /// Each option of a choice as a chip, the chosen ones filled: on cells
+    /// as on pixels, one press per option.
+    fn choice(
+        &self,
+        slot: u64,
+        rows: &str,
+        label: &vorn_view::Text,
+        selected: Option<&Cond>,
+        call: &str,
+    ) -> El {
+        let mut line = div().row().wrap_children().gap(4.0).min_w0();
+        for (i, r) in self
+            .src
+            .rows(rows)
+            .iter()
+            .take(vorn_view::MAX_LIST)
+            .enumerate()
+        {
+            let name = label.fill(Some(r), self.src);
+            let on = selected.is_some_and(|c| c.holds(Some(r), self.src));
+            let id = self.bind.press(
+                child_slot(slot, i),
+                Press {
+                    call: Some(call.to_owned()),
+                    row: Some(r.id.clone()),
+                    ..Press::default()
+                },
+            );
+            let hot = self.ui.hover(id);
+            let ink = if on {
+                color::WHITE
+            } else {
+                color::GRAY_400.mix(color::WHITE, hot)
+            };
+            let fill = if on {
+                Rgba::white(0.14)
+            } else {
+                Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot)
+            };
+            line = line.child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .px(8.0)
+                    .py(3.0)
+                    .rounded(radius::SM)
+                    .border(1.0, Rgba::white(if on { 0.25 } else { 0.10 }))
+                    .bg(fill)
+                    .ring(radius::SM)
+                    .role(Role::RadioButton, name.as_str())
+                    .toggled(on)
+                    .child(
+                        text(&name, size::XS.0, ink)
+                            .line_height(size::XS.1)
+                            .silent(),
+                    ),
+            );
+        }
+        line
     }
 
     fn status(&self, value: &str, tones: &BTreeMap<String, Tone>) -> El {
@@ -347,6 +427,7 @@ fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) 
         show: a.show,
         close: a.close,
         window: a.window.clone(),
+        signin: a.signin.as_ref().map(|t| t.fill(row, src)),
         row: row.map(|r| r.id.clone()),
         value: None,
         confirm,
