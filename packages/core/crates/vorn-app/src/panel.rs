@@ -9,43 +9,14 @@ use serde_json::{json, Value};
 
 use crate::act::{Act, Acts};
 use crate::client::rpc::{Event as RpcEvent, Rpc};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::client::Endpoint;
-use crate::points::{self, Holder, PointAct, Points, Press};
+use crate::points::{self, line, Holder, PointAct, Points, Press, Request};
 use crate::runs::s;
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, El, Event, Id, Rgba, Role, Sense, Ui, WindowRequest};
 
 /// A window's size when its point names none.
 pub const SIZE: (f32, f32) = (280.0, 400.0);
-
-/// What the panel tells the app on stdout.
-pub fn line(request: &Request) -> String {
-    match request {
-        Request::Focus(id) => format!("focus {id}"),
-        Request::Show => "show".to_owned(),
-        Request::Hide => "hide".to_owned(),
-    }
-}
-
-/// A line from the panel, as the app reads it.
-pub fn parse(line: &str) -> Option<Request> {
-    match line.trim().split_once(' ') {
-        Some(("focus", id)) if !id.is_empty() => Some(Request::Focus(id.to_owned())),
-        None if line.trim() == "show" => Some(Request::Show),
-        None if line.trim() == "hide" => Some(Request::Hide),
-        _ => None,
-    }
-}
-
-/// What the panel asks of the app.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Request {
-    /// Bring the app forward on this terminal.
-    Focus(String),
-    Show,
-    Hide,
-}
 
 /// The panel's window: its connection, the point it draws and that point's rows.
 pub struct Panel {
@@ -60,7 +31,6 @@ pub struct Panel {
 
 impl Panel {
     /// Connects to vornd at `ep` and loads point `key` with its rows.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn connect(ep: &Endpoint, key: &str, wake: crate::client::rpc::Wake) -> Result<Panel, String> {
         let (rpc, events) = Rpc::connect(ep, wake).map_err(|e| e.to_string())?;
         rpc.call(
@@ -284,17 +254,4 @@ fn flush(p: &mut Panel, ui: &mut Ui) {
         }
     }
     let _ = out.flush();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lines_to_the_app_round_trip() {
-        for r in [Request::Focus("t 1".into()), Request::Show, Request::Hide] {
-            assert_eq!(parse(&line(&r)), Some(r));
-        }
-        assert_eq!(parse("nonsense"), None);
-    }
 }

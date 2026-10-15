@@ -15,8 +15,7 @@ use serde_json::{json, Value};
 
 use super::{App, Call};
 use crate::client::RpcError;
-use crate::panel::Request;
-use crate::points::{self, kind, Holder, PointAct, Press};
+use crate::points::{self, kind, Holder, PointAct, Press, Request};
 use crate::runs::s;
 use crate::ui::{Ui, WindowRequest};
 
@@ -344,7 +343,7 @@ impl App {
             let wake = Arc::clone(&self.wake);
             std::thread::spawn(move || {
                 for line in BufReader::new(out).lines().map_while(Result::ok) {
-                    if let Some(r) = crate::panel::parse(&line) {
+                    if let Some(r) = points::parse(&line) {
                         if tx.send(r).is_err() {
                             return;
                         }

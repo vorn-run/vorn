@@ -358,6 +358,34 @@ pub fn answered(answer: &Value) -> (Option<String>, Option<String>) {
     )
 }
 
+/// What a window point's process tells the app, one line on stdout.
+pub fn line(request: &Request) -> String {
+    match request {
+        Request::Focus(id) => format!("focus {id}"),
+        Request::Show => "show".to_owned(),
+        Request::Hide => "hide".to_owned(),
+    }
+}
+
+/// A line from a window point's process, as the app reads it.
+pub fn parse(line: &str) -> Option<Request> {
+    match line.trim().split_once(' ') {
+        Some(("focus", id)) if !id.is_empty() => Some(Request::Focus(id.to_owned())),
+        None if line.trim() == "show" => Some(Request::Show),
+        None if line.trim() == "hide" => Some(Request::Hide),
+        _ => None,
+    }
+}
+
+/// What a window point's process asks of the app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    /// Bring the app forward on this terminal.
+    Focus(String),
+    Show,
+    Hide,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +468,13 @@ mod tests {
             answered(&json!({ "open": "confirm", "toast": "Done" })),
             (Some("confirm".into()), Some("Done".into()))
         );
+    }
+
+    #[test]
+    fn panel_lines_round_trip() {
+        for r in [Request::Focus("t 1".into()), Request::Show, Request::Hide] {
+            assert_eq!(parse(&line(&r)), Some(r));
+        }
+        assert_eq!(parse("nonsense"), None);
     }
 }

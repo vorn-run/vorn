@@ -285,11 +285,7 @@
   },
   "told": {
     "cleanup": [
-      {
-        "id": "<minted 21>",
-        "projectPath": "<work>/repo",
-        "worktreePath": "<work>/.vorn-worktrees/repo/wt-two-<id>"
-      }
+      "wt-two"
     ],
     "created": [
       {

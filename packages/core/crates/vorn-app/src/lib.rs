@@ -46,6 +46,7 @@ pub mod onboarding;
 pub mod page;
 pub mod paint;
 pub mod palette;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod panel;
 pub mod panes;
 pub mod plugins;

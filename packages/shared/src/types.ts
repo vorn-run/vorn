@@ -1516,7 +1516,6 @@ export interface AppConfig {
     reopenSessions?: boolean
     // Open Vorn at sign-in. Off until asked; a no-op on Linux.
     startAtLogin?: boolean
-    widgetEnabled?: boolean
     taskViewMode?: TaskViewMode
     layoutMode?: 'grid' | 'tabs'
     minimizedPlacement?: MinimizedPlacement
@@ -1987,7 +1986,6 @@ export const IPC = {
   GIT_LIST_WORKTREES: 'git:listWorktrees',
   GIT_CHECKOUT_BRANCH: 'git:checkoutBranch',
   GIT_GET_WORKTREE_BRANCH: 'git:getWorktreeBranch',
-  WORKTREE_CONFIRM_CLEANUP: 'worktree:confirmCleanup',
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
@@ -2036,15 +2034,6 @@ export const IPC = {
   WINDOW_CLOSE: 'window:close',
   WINDOW_IS_MAXIMIZED: 'window:isMaximized',
   WINDOW_MAXIMIZED_CHANGED: 'window:maximizedChanged',
-  WIDGET_STATUS_UPDATE: 'widget:status-update',
-  WIDGET_FOCUS_TERMINAL: 'widget:focus-terminal',
-  WIDGET_HIDE: 'widget:hide',
-  WIDGET_TOGGLE: 'widget:toggle',
-  WIDGET_RENDERER_STATUS: 'widget:renderer-status',
-  WIDGET_SET_ENABLED: 'widget:set-enabled',
-  WIDGET_PERMISSION_REQUEST: 'widget:permission-request',
-  WIDGET_PERMISSION_RESPONSE: 'widget:permission-response',
-  WIDGET_PERMISSION_CANCELLED: 'widget:permission-cancelled',
   SHELL_CREATE: 'shell:create',
   /** Renderer reports a browser guest's webContentsId once it attaches, which
    *  is the only thread tying a `<webview>` back to the session that owns it. */
@@ -2752,13 +2741,6 @@ export interface PermissionSuggestion {
   [key: string]: unknown
 }
 
-export interface AskUserQuestion {
-  question: string
-  header?: string
-  multiSelect?: boolean
-  options?: Array<{ label: string; description?: string }>
-}
-
 export interface HookEvent {
   session_id: string
   hook_event_name: string
@@ -2777,28 +2759,6 @@ export interface HookEvent {
    * started outside Vorn.
    */
   vorn_terminal_id?: string
-}
-
-export interface PermissionRequestInfo {
-  requestId: string
-  sessionId: string
-  terminalId?: string
-  toolName: string
-  toolInput: Record<string, unknown>
-  description?: string
-  agentType?: AgentType
-  projectName?: string
-  permissionSuggestions?: PermissionSuggestion[]
-  /** Populated when toolName === "AskUserQuestion" */
-  questions?: AskUserQuestion[]
-}
-
-export interface WidgetAgentInfo {
-  id: string
-  agentType: AgentType
-  displayName?: string
-  projectName: string
-  status: AgentStatus
 }
 
 export interface ScheduleLogEntry {
