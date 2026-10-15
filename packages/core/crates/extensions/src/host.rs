@@ -202,7 +202,8 @@ impl Hosts {
         let id = &key.extension_id;
         let pack = self
             .store
-            .describe(id)
+            .inspect_unmeasured(id)
+            .map(Some)?
             .filter(InstalledPack::is_extension)
             .ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
         let (program, args) = pack

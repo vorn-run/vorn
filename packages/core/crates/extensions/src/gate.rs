@@ -84,8 +84,13 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 
 /// The core methods a program may call, and the permission each needs. A
 /// permission none of these needs (`network.tcp`, `auth.borrow`,
-/// `http.routes`, `browser.session`, `process.run`) is declared and shown,
-/// not enforced: `storage` is held at `storage.*`, the network at `net.fetch`.
+/// `http.routes`, `process.run`) is declared and shown, not enforced:
+/// `storage` is held at `storage.*`, the network at `net.fetch`.
+///
+/// The board, the workflows, their inbox and the sign-in windows are what a
+/// connector feeds: items become tasks through `task.importItems`, polled
+/// pages go to the inbox with their cursor, and a window signed in again
+/// wakes the steps waiting on it.
 pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
     ("sessions.get", Permission::SessionsRead),
@@ -107,6 +112,36 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("files.read", Permission::FilesRead),
     ("files.write", Permission::FilesWrite),
     ("secrets.get", Permission::SecretsRead),
+    ("task.importItems", Permission::TasksWrite),
+    ("task.sourceLink", Permission::TasksRead),
+    ("workflow.get", Permission::WorkflowsRead),
+    ("workflow.list", Permission::WorkflowsRead),
+    ("workflow.seed", Permission::WorkflowsWrite),
+    ("workflow.unseed", Permission::WorkflowsWrite),
+    ("inbox.cursor", Permission::InboxWrite),
+    ("inbox.recordPage", Permission::InboxWrite),
+    ("inbox.recordError", Permission::InboxWrite),
+    ("signin.check", Permission::BrowserSession),
+    ("signin.forget", Permission::BrowserSession),
+    ("signin.completed", Permission::BrowserSession),
+];
+
+/// The core methods open only to the extensions Vorn ships: they write the
+/// board, the workflows, their inbox and the sign-in windows of every
+/// connection, which no one installed extension owns.
+pub const BUILTIN_ONLY: &[&str] = &[
+    "task.importItems",
+    "task.sourceLink",
+    "workflow.get",
+    "workflow.list",
+    "workflow.seed",
+    "workflow.unseed",
+    "inbox.cursor",
+    "inbox.recordPage",
+    "inbox.recordError",
+    "signin.check",
+    "signin.forget",
+    "signin.completed",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.

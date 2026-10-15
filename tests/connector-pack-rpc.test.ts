@@ -37,7 +37,7 @@ describe('connector pack RPC wiring', () => {
   })
 
   it('answers each request in vornd, which tells clients the progress itself', () => {
-    const methods = read('packages/core/crates/vornd/src/native/connectors.rs')
+    const methods = read('packages/core/crates/connectors/src/builtin.rs')
     for (const channel of Object.values(channels)) {
       if (channel === channels.CONNECTOR_INSTALL_PROGRESS) continue
       expect(methods).toContain(`"${channel}"`)

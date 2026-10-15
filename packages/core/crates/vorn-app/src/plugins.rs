@@ -23,8 +23,10 @@ pub enum PlugAct {
     CloseForm,
     /// Install, update or retry a listing's pack.
     Install(String),
-    /// Pick a `.vorn.tgz` on this disk, then check it.
+    /// Pick a connector's git repository on this disk, then check it.
     InstallFile,
+    /// Switch an extension Vorn ships with on or off.
+    SetShipped(String, bool),
     ConfirmInstall,
     CancelInstall,
     Remove(String),
@@ -289,13 +291,61 @@ pub struct PackStatus {
     pub busy: bool,
 }
 
+/// The hosts an install sheet says a connector reaches: those it declares,
+/// then the settings whose addresses it may reach too. `None` when it names none.
+pub fn reaches(preview: &Value) -> Option<String> {
+    let list = |key: &str| -> Vec<&str> {
+        preview
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect()
+    };
+    let mut said: Vec<String> = list("hosts").into_iter().map(str::to_owned).collect();
+    said.extend(
+        list("hostsFrom")
+            .into_iter()
+            .map(|s| format!("the hosts in {s}")),
+    );
+    (!said.is_empty()).then(|| said.join(", "))
+}
+
+/// The Connectors built-in's id.
+pub const CONNECTORS: &str = "vorn.connectors";
+
+impl Plugins {
+    /// Whether Connectors is on; on until vornd says otherwise.
+    pub fn connectors_on(&self) -> bool {
+        self.shipped
+            .iter()
+            .find(|b| s(b, "id") == Some(CONNECTORS))
+            .is_none_or(|b| b.get("on") != Some(&Value::Bool(false)))
+    }
+
+    /// The tabs to show: with Connectors off, only what is installed.
+    pub fn tabs(&self) -> Vec<Tab> {
+        if self.connectors_on() {
+            Tab::ALL.to_vec()
+        } else {
+            vec![Tab::Installed]
+        }
+    }
+}
+
+/// Whether a catalog entry can be installed: it names the repository it installs from.
+pub fn installable(entry: &Value) -> bool {
+    s(entry, "git").is_some_and(|u| !u.is_empty())
+}
+
 /// `packStateFor`.
 pub fn pack_state(
     pack: Option<&Value>,
     catalog: Option<&Value>,
     progress: Option<&Progress>,
 ) -> PackState {
-    let released = catalog.is_none_or(|c| s(c, "packUrl").is_some_and(|u| !u.is_empty()));
+    let released = catalog.is_none_or(installable);
     if let Some(p) = progress {
         if !p.terminal() {
             return PackState::Installing {
@@ -1502,6 +1552,8 @@ pub fn manifest_fields<'a>(manifest: Option<&'a Value>, key: &str) -> Vec<&'a Va
 /// The page's whole state.
 #[derive(Debug, Default)]
 pub struct Plugins {
+    /// The extensions Vorn ships with (`extension:builtins`): `{id, name, description, on}`.
+    pub shipped: Vec<Value>,
     pub builtins: Vec<Value>,
     pub catalog: Vec<Value>,
     pub mcp: Vec<Value>,
@@ -1697,7 +1749,7 @@ mod tests {
                 "category": "Work tracking", "authRung": "cli", "capabilities": ["triggers"],
                 "keywords": ["boards"]}),
             json!({"id": "kusto", "name": "Azure Data Explorer", "packageName": "@v/kusto",
-                "version": "0.3.0", "packUrl": "https://x/kusto.tgz", "authRung": "key",
+                "version": "0.3.0", "git": "https://x.example/c.git", "path": "extensions/kusto", "authRung": "key",
                 "verified": {"version": "0.3.0"}, "capabilities": ["actions"]}),
         ]
     }
@@ -1763,7 +1815,7 @@ mod tests {
 
     #[test]
     fn pack_state_order() {
-        let cat = json!({"version": "2.0.0", "packUrl": "u"});
+        let cat = json!({"version": "2.0.0", "git": "https://u.example/c.git"});
         let pack = json!({"version": "1.0.0", "previousVersion": "0.9.0"});
         let failed = Progress {
             phase: "failed".into(),

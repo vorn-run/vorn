@@ -432,6 +432,8 @@ impl Parsed {
 pub struct Registry {
     defs: HashMap<String, Schema>,
     tools: BTreeMap<String, Option<Schema>>,
+    /// Every tool's name in the order the TypeScript lists them.
+    order: Vec<String>,
 }
 
 static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
@@ -457,6 +459,7 @@ impl Registry {
             defs.insert(name.clone(), read(def)?);
         }
         let mut tools = BTreeMap::new();
+        let mut order = Vec::new();
         for (name, schema) in value
             .get("tools")
             .and_then(Value::as_object)
@@ -467,8 +470,9 @@ impl Registry {
                 other => Some(read(other)?),
             };
             tools.insert(name.clone(), schema);
+            order.push(name.clone());
         }
-        let registry = Registry { defs, tools };
+        let registry = Registry { defs, tools, order };
         registry.check_refs()?;
         Ok(registry)
     }
@@ -498,6 +502,11 @@ impl Registry {
 
     /// A tool's argument schema: `None` for a tool nothing knows,
     /// `Some(None)` for one the SDK calls without looking at its arguments.
+    /// Where tool `name` stands in the TypeScript's list.
+    pub fn position(&self, name: &str) -> Option<usize> {
+        self.order.iter().position(|n| n == name)
+    }
+
     pub fn tool(&self, name: &str) -> Option<Option<&Schema>> {
         self.tools.get(name).map(Option::as_ref)
     }

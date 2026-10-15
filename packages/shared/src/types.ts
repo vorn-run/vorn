@@ -2339,10 +2339,12 @@ export interface ConnectorCatalogEntry {
   packageName: string
   /** Published version, so a listing can say what would be installed. */
   version?: string
-  /** Where the installable pack is published, when one is. */
-  packUrl?: string
-  /** Checksum the download must match, when the catalog publishes one. */
-  sha256?: string
+  /** The git repository it installs from, when it names one. */
+  git?: string
+  /** Its folder of that repository, when the repository holds several. */
+  path?: string
+  /** The branch or tag to install, when not the default. */
+  branch?: string
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
@@ -2609,6 +2611,8 @@ export interface InstalledConnectorPack {
   protocol?: number
   /** Directory holding the running version's files. */
   path: string
+  /** The program its folder runs, as `vorn-extension.toml` names it. */
+  service?: { command: string[] }
   /** The one version kept behind the current one, when a rollback is possible. */
   previousVersion?: string
   installedAt: number
@@ -2673,11 +2677,17 @@ export interface ExtensionLinkMatch {
   title: string
 }
 
-/** Where a pack is read from; `staged` is one an inspection already verified. */
+/**
+ * Where a connector is installed from: its git repository, and its folder when
+ * the repository holds several; `staged` is one an inspection already
+ * described. A `.vorn.tgz` pack of 0.8 (`file`, `url`) is refused, naming the
+ * command that installs it from git.
+ */
 export type ConnectorPackSource =
+  | { kind: 'git'; url: string; path?: string; branch?: string }
+  | { kind: 'staged'; token: string }
   | { kind: 'file'; path: string }
   | { kind: 'url'; url: string; sha256?: string }
-  | { kind: 'staged'; token: string }
 
 export type ConnectorPackResult =
   | { ok: true; pack: InstalledConnectorPack }

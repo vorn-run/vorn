@@ -98,3 +98,52 @@ fn a_misspelt_field_is_reported_by_name_and_line() {
     }
     assert!(checked > 200, "only {checked} fields were tried");
 }
+
+/// What the SDK writes for a connector's folder (`tests/connector-extension-manifest.test.ts`
+/// keeps these in step with it) reads here, every key kept.
+#[test]
+fn reads_every_manifest_the_sdk_writes() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sdk-manifests");
+    let read = |name: &str| {
+        let text = std::fs::read_to_string(dir.join(format!("{name}.toml"))).unwrap();
+        file::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"))
+    };
+    let browser = read("browser");
+    assert_eq!(browser.name, "Sample \"quoted\"");
+    assert_eq!(browser.protocol, Some(1));
+    assert_eq!(
+        browser.declares.network,
+        ["sample.example", "*.sample.example"]
+    );
+    let sign_in = browser.auth.as_ref().unwrap().browser.as_ref().unwrap();
+    assert_eq!(sign_in.origins.len(), 2);
+    assert_eq!(
+        browser.triggers[0].status_mapping.as_ref().unwrap()[0].suggested_local,
+        "todo"
+    );
+    assert_eq!(browser.triggers[1].label, "same");
+    let inputs = browser.actions[0].inputs.as_ref().unwrap();
+    assert_eq!(inputs[0].kind, "string");
+    assert!(inputs[0].required);
+    assert_eq!(inputs[1].options.as_ref().unwrap().len(), 2);
+    assert_eq!(inputs[2].load_options.as_deref(), Some("boards"));
+    assert_eq!(
+        browser.checks.as_deref(),
+        Some(
+            &[
+                "node".to_owned(),
+                "index.js".to_owned(),
+                "--check".to_owned()
+            ][..]
+        )
+    );
+
+    let cli = read("cli");
+    let borrow = cli.auth.as_ref().unwrap().borrow.as_ref().unwrap();
+    assert_eq!(borrow.token_env.as_deref(), Some("GH_TOKEN"));
+    assert_eq!(cli.declares.network_from, ["GH_HOSTS"]);
+
+    let card = read("card");
+    assert!(card.contributes.is_some());
+    assert_eq!(card.declares.uses, ["git.read", "terminal.read"]);
+}

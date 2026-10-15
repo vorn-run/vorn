@@ -189,6 +189,14 @@ pub trait Around: Send + Sync + 'static {
     /// The git to read a worktree with.
     fn git(&self) -> Git;
     /// A package was installed or linked: the connector it brings comes with it.
+    /// The MCP tools the built-ins that are on add.
+    fn builtin_tools(&self) -> Vec<Value> {
+        Vec::new()
+    }
+    /// A built-in's answer to its MCP tool `name`, `None` when none adds it.
+    fn builtin_tool(&self, _name: &str, _arguments: Value) -> BoxFuture<'static, Option<Value>> {
+        Box::pin(async { None })
+    }
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
@@ -467,10 +475,11 @@ impl Extensions {
                     None => Err("extension:setBuiltin takes on: true or false".to_owned()),
                 }
             }
-            "extension:mcpTools" => self
-                .listed_tools()
-                .await
-                .map(|tools| Value::Array(tools.into_iter().map(|t| t.listed).collect())),
+            "extension:mcpTools" => self.listed_tools().await.map(|tools| {
+                let mut listed = self.around.builtin_tools();
+                listed.extend(tools.into_iter().map(|t| t.listed));
+                Value::Array(listed)
+            }),
             "extension:mcpCall" => self.mcp_call(params).await,
             "extension:setSandbox" => {
                 let (id, on) = (
@@ -580,6 +589,13 @@ impl Extensions {
     /// An agent called an extension's MCP tool: `guest.handle("mcp.<tool>")` on its service.
     async fn mcp_call(&self, params: &Value) -> Result<Value, String> {
         let name = text(params, "name");
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        if let Some(answered) = self.around.builtin_tool(name, arguments).await {
+            return Ok(answered);
+        }
         let found = self
             .listed_tools()
             .await?
@@ -1375,12 +1391,26 @@ impl Around for Wired {
         })
     }
 
+    fn builtin_tools(&self) -> Vec<Value> {
+        self.native
+            .upgrade()
+            .map(|n| crate::native::builtins::mcp_tools(&n))
+            .unwrap_or_default()
+    }
+
+    fn builtin_tool(&self, name: &str, arguments: Value) -> BoxFuture<'static, Option<Value>> {
+        let (native, name) = (self.native.upgrade(), name.to_owned());
+        Box::pin(async move {
+            crate::native::builtins::mcp_call(native.as_deref()?, &name, arguments).await
+        })
+    }
+
     fn pack_changed(&self, id: &str) -> BoxFuture<'static, ()> {
         let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
-                connectors.package_changed(&id).await;
+                connectors.inner().package_changed(&id).await;
             }
         })
     }
@@ -1392,7 +1422,7 @@ impl Around for Wired {
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
-                connectors.package_removed(&id).await;
+                connectors.inner().package_removed(&id).await;
             }
             let Some(db) = db else { return };
             let owned = id.clone();

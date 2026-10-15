@@ -27,7 +27,7 @@ command = ["node", "program.mjs"]
 
 [declares]
 network = ["api.example.com"]
-uses = ["sessions.read", "storage"]
+uses = ["sessions.read", "storage", "workflows.read"]
 
 [storage]
 migrations = "migrations"
@@ -160,6 +160,18 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
     assert_eq!(
         refused["error"]["message"],
         "test.rules does not declare the host evil.example"
+    );
+
+    // The board's and the workflows' own calls are the built-ins' alone.
+    let refused = c
+        .relay(
+            "host.call",
+            json!({ "method": "workflow.list", "args": {} }),
+        )
+        .await;
+    assert_eq!(
+        refused["error"]["message"],
+        "workflow.list is open only to the extensions Vorn ships"
     );
 
     // Its own tables, made by its migration, and nobody else's.

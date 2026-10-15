@@ -244,9 +244,7 @@ fn row(key: String, label: String, pick: Pick, icon: Option<&'static str>) -> En
 /// `packStateFor`'s word for a catalog connector not connected here.
 fn catalog_detail(entry: &Value, packs: &[Value]) -> &'static str {
     let installed = packs.iter().any(|p| s(p, "id") == s(entry, "id"));
-    let released = entry
-        .get("packUrl")
-        .is_some_and(|u| u.as_str().is_some_and(|u| !u.is_empty()));
+    let released = crate::plugins::installable(entry);
     if installed {
         "add connection"
     } else if !released {
@@ -665,7 +663,7 @@ mod tests {
             vec![json!({ "type": "createIssue", "label": "Create issue" })],
         )]);
         let catalog = [
-            json!({ "id": "mysql", "name": "MySQL", "actions": [{ "type": "describe", "label": "Describe a table" }], "packUrl": "x", "verified": true }),
+            json!({ "id": "mysql", "name": "MySQL", "actions": [{ "type": "describe", "label": "Describe a table" }], "git": "https://x.example/c.git", "verified": true }),
         ];
         let src = Sources {
             connections: &connections,

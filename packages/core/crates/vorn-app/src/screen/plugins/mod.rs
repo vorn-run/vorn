@@ -71,7 +71,7 @@ fn tabs(s: &Screen<'_>, current: Tab) -> El {
         .mb(16.0)
         .rounded(R)
         .bg(white(0.04));
-    for tab in Tab::ALL {
+    for tab in s.st.plugins.tabs() {
         let id = s.acts.on("plug-tab", act(PlugAct::Tab(tab)));
         let on = tab == current;
         let fg = if on {
@@ -444,6 +444,12 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
             "Borrows".into(),
             format!("{} from {probe}", borrows.join(", ")),
         ));
+    }
+    if let Some(reaches) = crate::plugins::reaches(pv) {
+        rows.push(("Reaches".into(), reaches));
+    }
+    if let Some(credential) = sv(pv, "credential").filter(|c| !c.is_empty()) {
+        rows.push(("Credential".into(), credential.to_owned()));
     }
     if !adds.is_empty() {
         rows.push(("Adds".into(), adds.join(", ")));

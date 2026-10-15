@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 use crate::fetch::Fetch;
+use vorn_extensions::install::usable_git_url;
 use vorn_extensions::manifest;
 
 /// Where the published catalog lives.
@@ -98,6 +99,9 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
         return None;
     }
     let dropped = [
+        "git",
+        "path",
+        "branch",
         "packUrl",
         "sha256",
         "authRung",
@@ -132,6 +136,17 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
         }
         if let Some(shows) = manifest::activation(entry.get("activates")) {
             out.insert("activates".into(), json!(shows));
+        }
+    }
+    // Where it installs from: a repository, and its folder when the repository holds several.
+    if let Some(git) = non_empty(entry, "git").filter(|g| usable_git_url(g).is_ok()) {
+        out.insert("git".into(), json!(git));
+        for key in ["path", "branch"] {
+            if let Some(v) =
+                non_empty(entry, key).filter(|v| !v.contains("..") && !v.starts_with('-'))
+            {
+                out.insert(key.into(), json!(v));
+            }
         }
     }
     if let Some(url) = non_empty(entry, "packUrl") {
@@ -595,6 +610,23 @@ mod tests {
         assert_eq!(cached["items"][0]["id"], "x");
         let older = Catalog::new(dir.path().join("catalog.json"), None);
         assert!(older.snapshot(41 + MAX_AGE_MS).1);
+    }
+
+    #[test]
+    fn keeps_where_an_entry_installs_from_and_drops_a_source_git_refuses() {
+        let doc = json!({ "version": 1, "connectors": [
+            { "id": "rss", "name": "RSS", "packageName": "@v/connector-rss",
+              "git": "https://github.com/vorn-run/connectors.git", "path": "extensions/rss" },
+            { "id": "bad", "name": "Bad", "packageName": "@v/connector-bad",
+              "git": "ext::sh -c x", "path": "../up" },
+        ] });
+        let entries = parse_catalog(&doc).unwrap();
+        assert_eq!(
+            entries[0]["git"],
+            "https://github.com/vorn-run/connectors.git"
+        );
+        assert_eq!(entries[0]["path"], "extensions/rss");
+        assert!(entries[1].get("git").is_none() && entries[1].get("path").is_none());
     }
 
     #[test]

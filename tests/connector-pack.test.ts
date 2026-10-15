@@ -1,19 +1,27 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  type Dirent
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { extract, list } from 'tar'
+import { join, relative, resolve } from 'node:path'
 import {
   bundleDependencyFindings,
   defineConnector,
   defineExtension,
   lifecycleScriptFindings,
   packConnector,
-  packFileName,
   readNearestPackageJson,
-  MAX_PACK_BYTES
+  MANIFEST_FILE
 } from '../packages/connector-sdk/src/index'
 import type { BundleOutput } from '../packages/connector-sdk/src/pack'
+import { extrasOf } from '../packages/connector-sdk/src/pack'
 import type { CheckFinding } from '../packages/connector-sdk/src/check'
 import { runCli } from '../packages/connector-sdk/src/cli'
 import type { Connector } from '../packages/connector-sdk/src/types'
@@ -39,6 +47,14 @@ function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'vorn-pack-test-'))
   temps.push(dir)
   return dir
+}
+
+/** Every file under `dir`, relative to it, in order. */
+function files(dir: string): string[] {
+  return (readdirSync(dir, { recursive: true, withFileTypes: true }) as Dirent[])
+    .filter((e) => e.isFile())
+    .map((e) => relative(dir, join(e.parentPath, e.name)))
+    .sort()
 }
 
 afterEach(() => {
@@ -91,34 +107,74 @@ describe('pack gates', () => {
 })
 
 describe('packConnector', () => {
-  it('writes a gzipped tar holding the manifest and one bundled entry', async () => {
+  it('writes a folder holding the manifest and one bundled entry', async () => {
     const out = tempDir()
     const result = await packConnector(connector, {
       entry: './connector.js',
       resolveDir: tempDir(),
       outDir: out,
       bundle: cleanBundle,
-      launch: starts
+      launch: starts,
+      extras: { hosts: ['api.acme.example'], publisher: 'Acme' }
     })
 
-    expect(result.file).toBe(join(out, 'acme-1.2.3.vorn.tgz'))
-    expect(packFileName(connector)).toBe('acme-1.2.3.vorn.tgz')
+    expect(result.dir).toBe(join(out, 'acme'))
     expect(result.bytes).toBeGreaterThan(0)
     expect(result.findings.some((item) => item.level === 'error')).toBe(false)
+    expect(files(result.dir as string)).toEqual(['index.js', MANIFEST_FILE])
 
-    const entries: string[] = []
-    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
-    expect(entries.sort()).toEqual(['index.js', 'manifest.json'])
+    const manifest = readFileSync(join(result.dir as string, MANIFEST_FILE), 'utf8')
+    expect(manifest).toContain(
+      'id = "acme"\nname = "Acme"\nversion = "1.2.3"\napi = "vorn:connector@1"'
+    )
+    expect(manifest).toContain('publisher = "Acme"')
+    expect(manifest).toContain('[service]\ncommand = ["node", "index.js"]')
+    expect(manifest).toContain('[checks]\ncommand = ["node", "index.js", "--check"]')
+    expect(manifest).toContain('[declares]\nnetwork = ["api.acme.example"]')
+    expect(manifest).toContain('[[connector.triggers]]\ntype = "newTicket"\nlabel = "New ticket"')
+    expect(readFileSync(join(result.dir as string, 'index.js'), 'utf8')).toContain(
+      'node:fs/promises'
+    )
+  })
 
-    const unpacked = tempDir()
-    await extract({ file: result.file as string, cwd: unpacked })
-    const manifest = JSON.parse(readFileSync(join(unpacked, 'manifest.json'), 'utf8'))
-    expect(manifest.id).toBe('acme')
-    expect(manifest.version).toBe('1.2.3')
-    // Vorn refuses a pack that does not name the protocol it speaks.
-    expect(manifest.protocol).toBe(1)
-    expect(manifest.triggers[0].setup.triggerType).toBe('newTicket')
-    expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('node:fs/promises')
+  it('carries the receipt of its checks and keeps what else the folder holds', async () => {
+    const source = tempDir()
+    writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'acme' }))
+    writeFileSync(
+      join(source, 'verified.json'),
+      JSON.stringify({ schema: 1, version: '1.2.3', checks: ['manifest'] })
+    )
+    const out = tempDir()
+    mkdirSync(join(out, 'acme'), { recursive: true })
+    writeFileSync(join(out, 'acme', 'README.md'), 'kept')
+    const result = await packConnector(connector, {
+      entry: './connector.js',
+      resolveDir: source,
+      outDir: out,
+      bundle: cleanBundle,
+      launch: starts
+    })
+    expect(files(result.dir as string)).toEqual([
+      'README.md',
+      'index.js',
+      'verified.json',
+      MANIFEST_FILE
+    ])
+    expect(readFileSync(join(out, 'acme', 'README.md'), 'utf8')).toBe('kept')
+  })
+
+  it('reads the hosts and the publisher from vorn in package.json', () => {
+    expect(
+      extrasOf({
+        author: 'Ada Lovelace <ada@example.com>',
+        vorn: { hosts: ['api.example.com', 3], hostsFrom: ['FEEDS'] }
+      })
+    ).toEqual({ hosts: ['api.example.com'], hostsFrom: ['FEEDS'], publisher: 'Ada Lovelace' })
+    expect(extrasOf(undefined)).toEqual({
+      hosts: undefined,
+      hostsFrom: undefined,
+      publisher: undefined
+    })
   })
 
   it('bundles the connector through a generated stdio entry', async () => {
@@ -134,6 +190,7 @@ describe('packConnector', () => {
       launch: starts
     })
     expect(seen).toContain('serveConnector')
+    expect(seen).toContain('--check')
     expect(seen).toContain('"acme-connector"')
     expect(seen).toContain('"@vornrun/connector-sdk"')
   })
@@ -151,7 +208,7 @@ describe('packConnector', () => {
       outDir: out,
       bundle: cleanBundle
     })
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('lifecycle-scripts')
   })
 
@@ -162,7 +219,7 @@ describe('packConnector', () => {
       outDir: tempDir(),
       bundle: async () => ({ code: 'import fetch from "undici"\n', external: ['undici'] })
     })
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('runtime-dependencies')
   })
 
@@ -176,7 +233,7 @@ describe('packConnector', () => {
         external: []
       })
     })
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     const deps = result.findings.find((item) => item.code === 'runtime-dependencies')
     expect(deps?.message).toContain('../package.json')
   })
@@ -193,29 +250,28 @@ describe('packConnector', () => {
         external: []
       })
     })
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     const launch = result.findings.find((item) => item.code === 'pack-launch')
     expect(launch?.message).toContain("Cannot find module '../package.json'")
-    expect(() => readFileSync(join(out, 'acme-1.2.3.vorn.tgz'))).toThrow()
+    expect(existsSync(join(out, 'acme'))).toBe(false)
   }, 30_000)
 
-  it('refuses a pack larger than the size ceiling and leaves no file behind', async () => {
+  it('refuses a package larger than the size ceiling and leaves no folder behind', async () => {
     const out = tempDir()
     const result = await packConnector(connector, {
       entry: './index.js',
       resolveDir: tempDir(),
       outDir: out,
-      maxBytes: 64,
+      maxUnpackedBytes: 64,
       bundle: async () => ({
         code: `const filler = ${JSON.stringify('x'.repeat(4096))}\n`,
         external: []
       }),
       launch: starts
     })
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('pack-too-large')
-    expect(() => readFileSync(join(out, 'acme-1.2.3.vorn.tgz'))).toThrow()
-    expect(MAX_PACK_BYTES).toBe(8 * 1024 * 1024)
+    expect(existsSync(join(out, 'acme'))).toBe(false)
   })
 
   it('inlines every dependency when it really bundles', async () => {
@@ -246,10 +302,8 @@ describe('packConnector', () => {
     })
 
     expect(result.findings.filter((item) => item.level === 'error')).toEqual([])
-    expect(result.file).toBe(join(out, 'acme-1.2.3.vorn.tgz'))
-    const unpacked = tempDir()
-    await extract({ file: result.file as string, cwd: unpacked })
-    expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('vorn/hello')
+    expect(result.dir).toBe(join(out, 'acme'))
+    expect(readFileSync(join(out, 'acme', 'index.js'), 'utf8')).toContain('vorn/hello')
   }, 60_000)
 })
 
@@ -283,23 +337,18 @@ describe('packing an extension', () => {
     })
 
     expect(result.findings.some((item) => item.level === 'error')).toBe(false)
-    const entries: string[] = []
-    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
-    expect(entries.sort()).toEqual([
+    expect(files(result.dir as string)).toEqual([
       'index.js',
-      'manifest.json',
-      'web/',
-      'web/report/',
+      MANIFEST_FILE,
       'web/report/index.html',
       'web/report/x.css'
     ])
-
-    const unpacked = tempDir()
-    await extract({ file: result.file as string, cwd: unpacked })
-    const manifest = JSON.parse(readFileSync(join(unpacked, 'manifest.json'), 'utf8'))
-    // The manifest's path resolves inside the pack, because the directory was carried as it stood.
-    expect(manifest.kind).toBe('extension')
-    expect(readFileSync(join(unpacked, manifest.contributes.panes[0].web), 'utf8')).toContain(
+    const manifest = readFileSync(join(result.dir as string, MANIFEST_FILE), 'utf8')
+    // The manifest's path resolves inside the folder, because the directory was carried as it stood.
+    expect(manifest).toContain(
+      '[[contributes.panes]]\nid = "report"\ntitle = "Report"\nweb = "web/report/index.html"'
+    )
+    expect(readFileSync(join(result.dir as string, 'web/report/index.html'), 'utf8')).toContain(
       'doctype'
     )
   })
@@ -319,9 +368,7 @@ describe('packing an extension', () => {
     })
 
     expect(result.findings.some((item) => item.level === 'error')).toBe(false)
-    const entries: string[] = []
-    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
-    expect(entries).toContain('web/report/index.html')
+    expect(files(result.dir as string)).toContain('web/report/index.html')
   })
 
   it('packs nothing when a pane names a page the package does not carry', async () => {
@@ -333,7 +380,7 @@ describe('packing an extension', () => {
       launch: starts
     })
 
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('web-entry-missing')
   })
 
@@ -352,14 +399,13 @@ describe('packing an extension', () => {
       launch: starts
     })
 
-    const entries: string[] = []
-    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    const entries = files(result.dir as string)
     expect(entries).not.toContain('web/scratch/index.html')
     expect(entries).not.toContain('web/notes.txt')
     expect(entries).toContain('web/report/index.html')
   })
 
-  it('refuses a pack that unpacks past what Vorn will write, however well it compresses', async () => {
+  it('refuses a package past what Vorn keeps on disk', async () => {
     const dir = packageWithPage()
     // Pages compress well, so the archive can sit under its own ceiling while
     // the tree it unpacks to does not.
@@ -374,9 +420,9 @@ describe('packing an extension', () => {
       maxUnpackedBytes: 1024 * 1024
     })
 
-    expect(result.file).toBeUndefined()
+    expect(result.dir).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('pack-too-large')
-    expect(result.findings.at(-1)?.message).toContain('unpacks to')
+    expect(result.findings.at(-1)?.message).toContain('Vorn keeps at most')
   })
 
   it('carries no web directory for a connector, which has no pages', async () => {
@@ -388,9 +434,7 @@ describe('packing an extension', () => {
       launch: starts
     })
 
-    const entries: string[] = []
-    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
-    expect(entries.sort()).toEqual(['index.js', 'manifest.json'])
+    expect(files(result.dir as string)).toEqual(['index.js', MANIFEST_FILE])
   })
 })
 
@@ -401,7 +445,7 @@ describe('vorn-connector pack command', () => {
   }
   const load = async (): Promise<unknown> => ({ default: connector })
 
-  it('writes the pack into the requested directory', async () => {
+  it('writes the folder into the requested directory', async () => {
     const out = tempDir()
     const written = capture()
     const code = await runCli(['pack', './connector.js', '--out', out], {
@@ -412,10 +456,9 @@ describe('vorn-connector pack command', () => {
       launch: starts
     })
     expect(code).toBe(0)
-    expect(written.lines.join('\n')).toContain(
-      `Packed acme 1.2.3 to ${join(out, 'acme-1.2.3.vorn.tgz')}`
-    )
-    expect(readFileSync(join(out, 'acme-1.2.3.vorn.tgz')).byteLength).toBeGreaterThan(0)
+    expect(written.lines.join('\n')).toContain(`Packed acme 1.2.3 to ${join(out, 'acme')}`)
+    expect(written.lines.join('\n')).toContain('vorn ext install <git url>')
+    expect(readFileSync(join(out, 'acme', MANIFEST_FILE)).byteLength).toBeGreaterThan(0)
   })
 
   it('fails with the findings when a gate rejects the connector', async () => {

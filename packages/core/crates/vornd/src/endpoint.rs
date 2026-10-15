@@ -171,7 +171,7 @@ impl Daemon {
         }
     }
 
-    /// Starts connections and connectors ([`crate::native::connectors`]) once
+    /// Starts the Connectors built-in ([`crate::native::builtins::connectors`]) once
     /// vornd has a database and its own address, which a browser connector's
     /// child reaches its window through.
     pub async fn start_connectors(&self) {
@@ -188,14 +188,10 @@ impl Daemon {
         if addr.ip().is_unspecified() {
             addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
         }
-        let bridge: Arc<dyn crate::bridge::Bridge> = Arc::clone(native.main_process()) as _;
-        let connectors = crate::native::connectors::Connectors::new(
-            native,
-            &dir,
-            format!("http://{addr}"),
-            bridge,
-            Arc::clone(native.lifecycle()),
-        );
+        use crate::native::builtins::{connectors, Switches};
+        let services = connectors::services(native, &dir, format!("http://{addr}")).await;
+        let switches = Switches::load(dir.join("builtins.json"));
+        let connectors = connectors::ConnectorsBuiltin::new(native, services, switches);
         native.set_connectors(Arc::clone(&connectors));
         tokio::spawn(async move { connectors.reconcile().await });
     }
@@ -206,7 +202,6 @@ impl Daemon {
     pub async fn start_extensions(self: &Arc<Self>) {
         use crate::native::extensions::{routes, Extensions, Wired};
         use vorn_extensions::host::{HostSettings, Hosts};
-        use vorn_extensions::install::Installs;
         use vorn_extensions::router::{Router, RouterSettings};
         use vorn_extensions::{pack::PackStore, page};
         let native = &self.native;
@@ -251,7 +246,7 @@ impl Daemon {
             RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION")),
             Arc::clone(native.events()),
         );
-        let installs = Arc::new(Installs::new(store, native.git_bin(), native.child_env()));
+        let installs = native.installs(&db_dir);
         let daemon = Arc::downgrade(self);
         let around = Wired {
             native: Arc::downgrade(native),
@@ -466,9 +461,7 @@ async fn handle(
         });
     }
     if let Some(id) = window_route(req.method(), path) {
-        if let Some(connectors) = daemon.native.connectors().cloned() {
-            return Ok(window_fetch(&connectors, &id, req, peer).await);
-        }
+        return Ok(window_fetch(&daemon.native, &id, req, peer).await);
     }
     if let Some(route) = crate::native::extensions::routes::bridge_route(req.method(), path) {
         if let Some(extensions) = daemon.native.extensions() {
@@ -585,9 +578,9 @@ fn window_route(method: &Method, path: &str) -> Option<String> {
     (*method == Method::POST && !rest.is_empty() && !rest.contains('/')).then(|| rest.to_owned())
 }
 
-/// A browser connector's child calling through its window, from this machine only.
+/// A program calling through its sign-in window, from this machine only.
 async fn window_fetch(
-    connectors: &Arc<crate::native::connectors::Connectors>,
+    native: &Arc<crate::native::Native>,
     id: &str,
     req: Request<Incoming>,
     peer: SocketAddr,
@@ -620,9 +613,9 @@ async fn window_fetch(
     let Ok(body) = limited.collect().await.map(|b| b.to_bytes()) else {
         return reply(413, json!({ "error": "That request is too large" }));
     };
-    let (status, answer) = connectors
-        .window_fetch(id, bearer.as_deref(), call.as_deref(), &body)
-        .await;
+    let (status, answer) =
+        crate::native::signin::window_fetch(native, id, bearer.as_deref(), call.as_deref(), &body)
+            .await;
     reply(status, answer)
 }
 

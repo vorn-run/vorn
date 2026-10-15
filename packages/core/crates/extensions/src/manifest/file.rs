@@ -49,6 +49,16 @@ impl std::error::Error for FileError {}
 
 /// Reads and checks a manifest's TOML text.
 pub fn parse(text: &str) -> Result<Manifest, FileError> {
+    parse_as(text, false)
+}
+
+/// Reads and checks the manifest of an extension Vorn ships compiled in,
+/// which answers its calls and tools itself rather than through a service.
+pub fn parse_builtin(text: &str) -> Result<Manifest, FileError> {
+    parse_as(text, true)
+}
+
+fn parse_as(text: &str, builtin: bool) -> Result<Manifest, FileError> {
     let lines = Lines::parse(text)?;
     let raw: Raw = toml::from_str(text).map_err(|e| FileError {
         line: e.span().map_or(1, |s| line_of(text, s.start)),
@@ -60,7 +70,7 @@ pub fn parse(text: &str) -> Result<Manifest, FileError> {
         field: field.to_owned(),
         message,
     };
-    raw.check(&at)?;
+    raw.check(&at, builtin)?;
     let manifest = raw.into_manifest(&at)?;
     Ok(manifest)
 }
@@ -172,12 +182,14 @@ struct RawDeclares {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     network: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    network_from: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     uses: Vec<String>,
 }
 
 impl RawDeclares {
     fn is_empty(&self) -> bool {
-        self.network.is_empty() && self.uses.is_empty()
+        self.network.is_empty() && self.network_from.is_empty() && self.uses.is_empty()
     }
 }
 
@@ -590,7 +602,7 @@ pub fn is_range(range: &str) -> bool {
 }
 
 impl Raw {
-    fn check(&self, at: &At<'_>) -> Result<(), FileError> {
+    fn check(&self, at: &At<'_>, builtin: bool) -> Result<(), FileError> {
         if !is_id(&self.id) {
             return Err(at(
                 "id",
@@ -676,7 +688,7 @@ impl Raw {
                     "a tool name starts with a letter and holds up to 40 letters, digits, `-` and `_`".into(),
                 ));
             }
-            if self.service.is_none() {
+            if self.service.is_none() && !builtin {
                 return Err(at(
                     &field,
                     "is answered by the service, and there is none".into(),
@@ -710,6 +722,18 @@ impl Raw {
                 return Err(at(
                     &format!("declares.network[{i}]"),
                     format!("`{host}` is not a host name like api.example.com"),
+                ));
+            }
+        }
+        for (i, name) in self.declares.network_from.iter().enumerate() {
+            let setting = !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+            if self.connector.is_none() || !setting {
+                return Err(at(
+                    &format!("declares.network_from[{i}]"),
+                    format!("`{name}` is not the name of a connector's setting, like RSS_FEEDS"),
                 ));
             }
         }
@@ -774,7 +798,8 @@ impl Raw {
                 .connector
                 .as_ref()
                 .is_some_and(|c| !c.triggers.is_empty() || !c.actions.is_empty())
-            || self.contributes.is_some();
+            || self.contributes.is_some()
+            || !self.mcp.is_empty();
         if !does_something {
             return Err(at(
                 "",
@@ -893,6 +918,7 @@ impl Raw {
         manifest.checks = self.checks.map(|c| c.command);
         manifest.declares = Declares {
             network: self.declares.network,
+            network_from: self.declares.network_from,
             uses: self.declares.uses,
         };
         manifest.credential = self.credential.map(|c| Credential {
@@ -1519,6 +1545,7 @@ impl From<&Manifest> for Raw {
             checks: m.checks.clone().map(|command| RawCommand { command }),
             declares: RawDeclares {
                 network: m.declares.network.clone(),
+                network_from: m.declares.network_from.clone(),
                 uses,
             },
             credential: m.credential.as_ref().map(|c| RawCredential {

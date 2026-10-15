@@ -13,6 +13,7 @@ import {
   type VornHelloParams
 } from './protocol'
 import { connectorManifest } from './setup'
+import { extensionToml, MANIFEST_FILE, type ExtensionExtras } from './extension'
 import type { Connector } from './types'
 
 /**
@@ -280,14 +281,27 @@ export function packageRootFor(fromDir: string): string {
  */
 export function packEntryContents(entry: string, sdkModule = '@vornrun/connector-sdk'): string {
   return [
-    `import { serveConnector } from ${JSON.stringify(sdkModule)}`,
+    `import { serveConnector, connectorManifest, selfCheck, RECORDED_CHECKS } from ${JSON.stringify(sdkModule)}`,
     `import * as entry from ${JSON.stringify(entry)}`,
+    "import { readFileSync } from 'node:fs'",
     'const exported = Object.values(entry).find((value) => value && Array.isArray(value.triggers))',
     `if (!exported) throw new Error(${JSON.stringify(`${entry} exports no connector`)})`,
+    "if (process.argv.includes('--check')) {",
+    '  const manifest = connectorManifest(exported)',
+    '  let receipt',
+    "  try { receipt = JSON.parse(readFileSync(new URL('./verified.json', import.meta.url), 'utf8')) } catch {}",
+    '  const problems = selfCheck(manifest, receipt, RECORDED_CHECKS)',
+    '  for (const problem of problems) console.error(problem)',
+    "  if (problems.length === 0) console.log(`${manifest.id} ${manifest.version}: ${receipt.checks.join(', ')}`)",
+    '  process.exit(problems.length === 0 ? 0 : 1)',
+    '}',
     'await serveConnector(exported)',
     ''
   ].join('\n')
 }
+
+/** The receipt of the checks a connector passed, beside its bundle. */
+export const RECEIPT_FILE = 'verified.json'
 
 /** The directory a pane's page is served from, carried verbatim so the manifest's path still resolves. */
 export const WEB_DIR = 'web'
@@ -322,15 +336,20 @@ function webDirectories(connector: Connector): string[] {
 export async function stagePack(
   connector: Connector,
   code: string,
-  packageRoot?: string
+  packageRoot?: string,
+  extras: ExtensionExtras = {}
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
   await writeFile(join(dir, 'index.js'), code, 'utf8')
   await writeFile(
-    join(dir, 'manifest.json'),
-    `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
+    join(dir, MANIFEST_FILE),
+    extensionToml(connectorManifest(connector), extras),
     'utf8'
   )
+  // The receipt `check` wrote travels with the bundle it vouches for.
+  if (packageRoot !== undefined && existsSync(join(packageRoot, RECEIPT_FILE))) {
+    await cp(join(packageRoot, RECEIPT_FILE), join(dir, RECEIPT_FILE))
+  }
   if (packageRoot !== undefined) {
     for (const relative of webDirectories(connector)) {
       const from = join(packageRoot, relative)

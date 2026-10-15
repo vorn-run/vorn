@@ -252,3 +252,43 @@ fn the_sign_in_sheet_opens_checks_and_closes() {
         Some("This connection does not sign in through a Vorn window.")
     );
 }
+
+#[test]
+fn connectors_switch_off_and_on_from_the_installed_tab() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    app.st.settings.open = true;
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    shot.until(&mut app, "the plugins page loaded", |app, _| {
+        loaded(app).then_some(())
+    });
+    assert!(app.st.plugins.connectors_on());
+    assert_eq!(app.st.plugins.tabs().len(), 3);
+    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Installed)));
+    shot.save(&mut app, "pl-shipped-on");
+
+    let off = PlugAct::SetShipped(vorn_app::plugins::CONNECTORS.into(), false);
+    shot.click(&mut app, plug("plug-shipped", off));
+    shot.until(&mut app, "Connectors switched off", |app, _| {
+        (!app.st.plugins.connectors_on() && loaded(app)).then_some(())
+    });
+    assert_eq!(app.st.plugins.tabs(), [Tab::Installed]);
+    assert_eq!(app.st.plugins.tab, Tab::Installed);
+    shot.save(&mut app, "pl-shipped-off");
+
+    let on = PlugAct::SetShipped(vorn_app::plugins::CONNECTORS.into(), true);
+    shot.click(&mut app, plug("plug-shipped", on));
+    shot.until(&mut app, "Connectors switched on", |app, _| {
+        (app.st.plugins.connectors_on() && loaded(app)).then_some(())
+    });
+    assert!(app.st.plugins.listing("http").is_some(), "HTTP is back");
+}

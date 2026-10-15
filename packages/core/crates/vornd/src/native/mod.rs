@@ -6,13 +6,14 @@
 //! than a thread, and run on the runtime instead. The work model's calls
 //! ([`work`]) are async too: they run workflows.
 //!
-//! Connections and connectors, their secrets included, are vornd's
-//! ([`connectors`]).
+//! Connections and connectors are the Connectors built-in's
+//! ([`builtins::connectors`]), on the public API; the sign-in windows its
+//! programs call through are a service of the bridge ([`signin`]).
 
 pub mod about;
 pub mod agent;
+pub mod builtins;
 pub mod config;
-pub mod connectors;
 pub mod credential;
 pub mod desktop;
 pub mod env;
@@ -22,7 +23,6 @@ pub mod git;
 pub mod headless;
 pub mod hooks;
 pub mod ide;
-pub mod mcp;
 pub mod reach;
 pub mod remote;
 pub mod script;
@@ -31,6 +31,7 @@ pub mod secrets;
 pub mod session_events;
 pub mod sessions;
 pub mod shell;
+pub mod signin;
 pub mod ssh;
 pub mod tasks;
 pub mod work;
@@ -149,6 +150,7 @@ pub enum Route {
     Extensions,
     Work,
     Connectors,
+    Builtins,
     /// The calls vornd answers on its blocking threads ([`METHODS`]).
     Native,
 }
@@ -167,7 +169,8 @@ const ROUTES: &[(&[&str], Route)] = &[
         &["connector:inboxComplete", "connector:inboxRenew"],
         Route::Work,
     ),
-    (connectors::METHODS, Route::Connectors),
+    (vorn_connectors::builtin::METHODS, Route::Connectors),
+    (builtins::METHODS, Route::Builtins),
     (METHODS, Route::Native),
 ];
 
@@ -267,7 +270,6 @@ pub struct Native {
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
     secrets: secrets::Secrets,
-    mcp: mcp::McpClients,
     /// The agents' model lists, kept as the server keeps them.
     catalog: vorn_agents::models::Catalog,
     shells: shell::Shells,
@@ -283,8 +285,14 @@ pub struct Native {
     sizes: vorn_worktrees::Sizes,
     /// The work model, once vornd has a database and its own address.
     work: OnceLock<Arc<work::Work>>,
-    /// Connections and connectors, once vornd has a database and its own address.
-    connectors: OnceLock<Arc<connectors::Connectors>>,
+    /// The Connectors built-in, once vornd has a database and its own address.
+    connectors: OnceLock<Arc<builtins::connectors::ConnectorsBuiltin>>,
+    /// Installing and removing packages, one store for every kind.
+    installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
+    /// The sign-in windows programs call through ([`signin`]).
+    windows: Arc<vorn_extensions::signin::Windows>,
+    /// Who answers polls, and the polls running.
+    polls: Arc<vorn_extensions::polls::Polls>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
     /// The desktop's main process, which answers the browser and device calls.
@@ -331,7 +339,6 @@ impl Native {
             config_changed: tokio::sync::Notify::new(),
             desktop: OnceLock::new(),
             secrets,
-            mcp: mcp::McpClients::default(),
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
@@ -341,6 +348,9 @@ impl Native {
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
             connectors: OnceLock::new(),
+            installs: OnceLock::new(),
+            windows: Arc::default(),
+            polls: Arc::default(),
             extensions: OnceLock::new(),
             main: Arc::default(),
             lifecycle: vorn_extensions::lifecycle::Lifecycle::new(Default::default()),
@@ -430,13 +440,38 @@ impl Native {
         self.work.get()
     }
 
-    /// Connections and connectors. Only the first one given is kept.
-    pub fn set_connectors(&self, connectors: Arc<connectors::Connectors>) {
+    /// The Connectors built-in. Only the first one given is kept.
+    pub fn set_connectors(&self, connectors: Arc<builtins::connectors::ConnectorsBuiltin>) {
         let _ = self.connectors.set(connectors);
     }
 
-    pub fn connectors(&self) -> Option<&Arc<connectors::Connectors>> {
+    pub fn connectors(&self) -> Option<&Arc<builtins::connectors::ConnectorsBuiltin>> {
         self.connectors.get()
+    }
+
+    /// The one installer of packages, kept in `<data_dir>/connectors`; the first call makes it.
+    pub fn installs(self: &Arc<Self>, data_dir: &Path) -> Arc<vorn_extensions::install::Installs> {
+        Arc::clone(self.installs.get_or_init(|| {
+            let me = Arc::downgrade(self);
+            Arc::new(vorn_extensions::install::Installs::reading(
+                vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
+                Box::new(move || {
+                    me.upgrade()
+                        .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
+                        .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+                }),
+            ))
+        }))
+    }
+
+    /// The sign-in windows programs call through.
+    pub fn windows(&self) -> &Arc<vorn_extensions::signin::Windows> {
+        &self.windows
+    }
+
+    /// Who answers polls.
+    pub fn polls(&self) -> &Arc<vorn_extensions::polls::Polls> {
+        &self.polls
     }
 
     /// The environment a script step's named connection gives it, from the vault.
@@ -592,7 +627,26 @@ impl Native {
             Some(Route::Hooks) => return hooks::answer(self, &method, &params),
             Some(Route::Extensions) => {
                 let Some(host) = self.extensions.get().cloned() else {
-                    return Answer::Error("vornd is not hosting extensions".to_owned());
+                    // The built-ins' tools need no extension host.
+                    return match method.as_str() {
+                        "extension:mcpTools" => {
+                            Answer::Result(Value::Array(builtins::mcp_tools(self)))
+                        }
+                        "extension:mcpCall" => {
+                            let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                            let arguments = params
+                                .get("arguments")
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            match builtins::mcp_call(self, name, arguments).await {
+                                Some(answered) => Answer::Result(answered),
+                                None => Answer::Error(format!(
+                                    "No extension offers the MCP tool {name}"
+                                )),
+                            }
+                        }
+                        _ => Answer::Error("vornd is not hosting extensions".to_owned()),
+                    };
                 };
                 let m = method.clone();
                 let running = tokio::spawn(async move { host.answer(&m, &params).await });
@@ -624,6 +678,7 @@ impl Native {
                     Answer::Error(format!("{method} failed in vornd"))
                 });
             }
+            Some(Route::Builtins) => return builtins::answer(self, &method, &params).await,
             Some(Route::Identify | Route::Native) => {}
             None => {
                 // `<id>:<action>`, an installed extension's own method.

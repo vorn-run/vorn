@@ -1,24 +1,87 @@
-//! `tools/connectors.ts`: discovering, installing and invoking connectors,
-//! each a thin call into the server methods the settings screen uses.
+//! The MCP tools Connectors adds to Vorn's server: discovering, installing
+//! and invoking connectors, each a thin call into the built-in's own
+//! methods, worded as `tools/connectors.ts` words them. Vorn's server checks
+//! their arguments against the TypeScript's schemas before they get here.
 
-use futures_util::future::try_join5;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
 use serde_json::{json, Map, Value};
+use vorn_mcp::json;
+use vorn_mcp::rpc::{Caller, Rpc, RpcError, PROBE_TIMEOUT};
+use vorn_mcp::toolkit::{destructure, items, object, pretty, Args, Cx, Outcome};
 
-use super::{items, object, pretty, Args, Cx, Outcome};
-use crate::json;
-use crate::rpc::{Rpc, PROBE_TIMEOUT};
+use crate::builtin::{Answer, Connectors};
 
 /// `SDK_CONNECTOR_ID`.
 const SDK_CONNECTOR_ID: &str = "sdk";
 
+static TOOLS: LazyLock<Vec<Value>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../generated/tools.json"))
+        .expect("generated/tools.json is JSON")
+});
+
+/// The tools as `tools/list` lists them, exactly as the TypeScript defines them.
+pub fn listed() -> &'static [Value] {
+    &TOOLS
+}
+
+/// The built-in, as its tools call it: its own methods, answered in process.
+struct Own<'a>(&'a Arc<Connectors>);
+
+impl Rpc for Own<'_> {
+    async fn call(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        _timeout: Duration,
+    ) -> Result<Value, RpcError> {
+        match self.0.answer(method, params.unwrap_or(Value::Null)).await {
+            Answer::Result(v) => Ok(v),
+            Answer::Void => Ok(Value::Null),
+            Answer::Error(message) => Err(RpcError::answered(&message)),
+            Answer::Unanswered => Err(RpcError::answered(&format!("Method not found: {method}"))),
+        }
+    }
+
+    async fn notify(&self, _method: &str, _params: Option<Value>) -> Result<(), RpcError> {
+        Ok(())
+    }
+}
+
+/// Runs tool `name` with arguments Vorn's server already checked: a
+/// `CallToolResult`, or `None` for a tool Connectors does not add.
+pub async fn call(connectors: &Arc<Connectors>, name: &str, arguments: Value) -> Option<Value> {
+    let rpc = Own(connectors);
+    let caller = Caller::default();
+    let cx = Cx {
+        rpc: &rpc,
+        caller: &caller,
+    };
+    let args = Args::new(Some(arguments));
+    let outcome = match name {
+        "list_connectors" => list_connectors(&cx, &args).await,
+        "list_connections" => list_connections(&cx, &args).await,
+        "list_connector_actions" => list_connector_actions(&cx, &args).await,
+        "inspect_connector_package" => inspect_connector_package(&cx, &args).await,
+        "install_connector" => install_connector(&cx, &args).await,
+        "run_connector_action" => run_connector_action(&cx, &args).await,
+        "backfill_connection" => backfill_connection(&cx, &args).await,
+        _ => return None,
+    };
+    Some(outcome.unwrap_or_else(
+        |message| json!({ "content": [{ "type": "text", "text": message }], "isError": true }),
+    ))
+}
+
 /// `failure(message)`.
 fn failure(message: impl Into<String>) -> Value {
-    super::failed(format!("Error: {}", message.into()))
+    vorn_mcp::toolkit::failed(format!("Error: {}", message.into()))
 }
 
 /// `connectionConnectorId(conn)`: the packaged connector's id when a
 /// connection runs one, else the connection's own.
-pub(crate) fn connection_connector_id(conn: &Value) -> Result<Option<Value>, String> {
+fn connection_connector_id(conn: &Value) -> Result<Option<Value>, String> {
     let filters = json::prop(Some(conn), "filters")?;
     match json::field(filters, "sdkConnectorId") {
         Some(Value::String(id)) if !id.is_empty() => Ok(Some(Value::from(id.as_str()))),
@@ -80,14 +143,11 @@ fn or<'a>(a: Option<&'a Value>, b: Option<&'a Value>) -> Option<&'a Value> {
 }
 
 pub async fn list_connectors<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let (built_ins, snapshot, connections, statuses, packs) = try_join5(
-        cx.call("connector:list", None),
-        cx.call("connector:catalog", None),
-        cx.call("connection:list", Some(json!({}))),
-        cx.call("connector:status", None),
-        cx.call("connector:listPacks", None),
-    )
-    .await?;
+    let built_ins = cx.call("connector:list", None).await?;
+    let snapshot = cx.call("connector:catalog", None).await?;
+    let connections = cx.call("connection:list", Some(json!({}))).await?;
+    let statuses = cx.call("connector:status", None).await?;
+    let packs = cx.call("connector:listPacks", None).await?;
     let connections = items(Some(&connections));
     let count_for = |id: Option<&Value>| -> Result<usize, String> {
         let mut n = 0;
@@ -355,7 +415,7 @@ async fn install_pack<R: Rpc>(
 
 pub async fn install_connector<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     let snapshot = cx.call("connector:catalog", None).await?;
-    let catalog = items(super::browser::destructure(&snapshot, "items")?);
+    let catalog = items(destructure(&snapshot, "items")?);
     let connector_id = args.nonempty("connector_id");
     let entry = connector_id.and_then(|id| {
         catalog
@@ -377,22 +437,26 @@ pub async fn install_connector<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
             Ok(pack) => installed = pack,
             Err(refused) => return Ok(refused),
         }
-    } else if let Some(entry) =
-        entry.filter(|e| e.get("kind").and_then(Value::as_str) == Some("extension"))
-    {
-        if !json::truthy(entry.get("packUrl")) {
+    } else if let Some(entry) = entry.filter(|e| {
+        json::truthy(e.get("git")) || e.get("kind").and_then(Value::as_str) == Some("extension")
+    }) {
+        if !json::truthy(entry.get("git")) {
             return Ok(failure(format!(
-                "{} is in the catalog but no release has published a pack for it yet.",
+                "{} is in the catalog but names no git repository to install it from yet.",
                 json::display(entry.get("name"))
             )));
         }
         let params = object([
-            ("kind", Some(json!("url"))),
-            ("url", entry.get("packUrl").cloned()),
+            ("kind", Some(json!("git"))),
+            ("url", entry.get("git").cloned()),
             (
-                "sha256",
+                "path",
+                entry.get("path").filter(|v| json::truthy(Some(v))).cloned(),
+            ),
+            (
+                "branch",
                 entry
-                    .get("sha256")
+                    .get("branch")
                     .filter(|v| json::truthy(Some(v)))
                     .cloned(),
             ),
@@ -455,10 +519,7 @@ pub async fn install_connector<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     }
 
     let launch = match &installed {
-        Some(pack) => json!({
-            "command": "node",
-            "args": [format!("{}/index.js", json::display(pack.get("path")))]
-        }),
+        Some(pack) => service_launch(pack),
         None => match or(entry.and_then(|e| e.get("launch")), args.get("package")) {
             Some(Value::String(spec)) if !spec.is_empty() => parse_launch(spec),
             Some(spec) if json::truthy(Some(spec)) => spec.clone(),
@@ -635,6 +696,30 @@ pub async fn install_connector<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     ));
     Ok(pretty(&object(answer)))
 }
+/// What an installed package's service runs, its files named by their full path.
+fn service_launch(pack: &Value) -> Value {
+    let dir = json::display(pack.get("path"));
+    let argv: Vec<String> = items(pack.pointer("/service/command"))
+        .iter()
+        .map(|a| json::display(Some(a)))
+        .collect();
+    let inside = |arg: &String| {
+        let file = std::path::Path::new(&dir).join(arg);
+        if !arg.starts_with('-') && std::path::Path::new(arg).is_relative() && file.is_file() {
+            file.to_string_lossy().into_owned()
+        } else {
+            arg.clone()
+        }
+    };
+    match argv.split_first() {
+        Some((program, rest)) => json!({
+            "command": inside(program),
+            "args": rest.iter().map(inside).collect::<Vec<_>>(),
+        }),
+        None => json!({ "command": "node", "args": [format!("{dir}/index.js")] }),
+    }
+}
+
 pub async fn run_connector_action<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     let result = cx
         .call(
@@ -677,6 +762,220 @@ pub async fn backfill_connection<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// A Vorn server in memory: answers from a table and records every call.
+    #[derive(Default)]
+    struct FakeRpc {
+        answers: Mutex<HashMap<String, Value>>,
+        calls: Mutex<Vec<(String, Option<Value>)>>,
+    }
+
+    impl FakeRpc {
+        fn answer(&self, method: &str, answer: Value) -> &FakeRpc {
+            self.answers.lock().unwrap().insert(method.into(), answer);
+            self
+        }
+
+        fn last(&self, method: &str) -> Option<Value> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|(m, _)| m == method)
+                .and_then(|(_, p)| p.clone())
+        }
+    }
+
+    impl Rpc for FakeRpc {
+        async fn call(
+            &self,
+            method: &str,
+            params: Option<Value>,
+            _: Duration,
+        ) -> Result<Value, RpcError> {
+            self.calls.lock().unwrap().push((method.into(), params));
+            Ok(self
+                .answers
+                .lock()
+                .unwrap()
+                .get(method)
+                .cloned()
+                .unwrap_or(Value::Null))
+        }
+
+        async fn notify(&self, _: &str, _: Option<Value>) -> Result<(), RpcError> {
+            Ok(())
+        }
+    }
+
+    fn run(rpc: &FakeRpc, tool: &str, args: Value) -> Value {
+        let caller = Caller::default();
+        let cx = Cx {
+            rpc,
+            caller: &caller,
+        };
+        let args = Args::new(Some(args));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let outcome = runtime.block_on(async {
+            match tool {
+                "install_connector" => install_connector(&cx, &args).await,
+                "list_connectors" => list_connectors(&cx, &args).await,
+                other => panic!("no test runs {other}"),
+            }
+        });
+        outcome.unwrap_or_else(|thrown| json!({ "thrown": thrown }))
+    }
+
+    fn text(result: &Value) -> &str {
+        result["content"][0]["text"].as_str().unwrap_or_default()
+    }
+
+    fn parsed(result: &Value) -> Value {
+        serde_json::from_str(text(result)).unwrap()
+    }
+
+    #[test]
+    fn lists_every_tool_its_manifest_declares_and_no_other() {
+        let manifest =
+            vorn_extensions::manifest::file::parse_builtin(crate::builtin::MANIFEST).unwrap();
+        let declared: Vec<&str> = manifest.mcp.iter().map(|t| t.name.as_str()).collect();
+        let names: Vec<&str> = listed()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(declared.len(), 7);
+        for name in &declared {
+            assert!(names.contains(name), "{name} is declared but not generated");
+        }
+        assert_eq!(declared.len(), names.len());
+        for tool in &manifest.mcp {
+            let generated = listed()
+                .iter()
+                .find(|t| t["name"] == tool.name.as_str())
+                .unwrap();
+            assert_eq!(
+                generated["description"],
+                tool.description.as_str(),
+                "{}",
+                tool.name
+            );
+        }
+    }
+
+    #[test]
+    fn installs_a_catalog_connector_from_its_repository() {
+        let rpc = FakeRpc::default();
+        rpc.answer(
+            "connector:catalog",
+            json!({ "items": [{ "id": "rss", "name": "RSS", "git": "https://example.com/c.git", "path": "extensions/rss" }] }),
+        );
+        rpc.answer(
+            "connector:installPack",
+            json!({ "ok": false, "error": "clone failed" }),
+        );
+        let refused = run(&rpc, "install_connector", json!({ "connector_id": "rss" }));
+        assert_eq!(text(&refused), "Error: The pack was refused: clone failed");
+        assert_eq!(
+            rpc.last("connector:installPack"),
+            Some(
+                json!({ "kind": "git", "url": "https://example.com/c.git", "path": "extensions/rss" })
+            )
+        );
+    }
+    #[test]
+    fn a_secret_is_never_installed_from_here() {
+        let rpc = FakeRpc::default();
+        rpc.answer("connector:catalog", json!({ "items": [] }));
+        rpc.answer(
+            "connector:probeSdk",
+            json!({ "ok": true, "manifest": {
+                "id": "acme", "name": "Acme", "version": "1.0.0",
+                "env": [{ "name": "TOKEN", "secret": true, "required": true }, { "name": "HOST", "required": true, "description": "where" }],
+                "triggers": [{ "type": "issues", "label": "Issues" }]
+            } }),
+        );
+        let refused = run(&rpc, "install_connector", json!({ "package": "@acme/c" }));
+        assert!(text(&refused)
+            .starts_with("Error: Acme uses the secret value TOKEN, which this tool cannot accept"));
+        assert_eq!(
+            rpc.last("connector:probeSdk"),
+            Some(json!({ "command": "npx", "args": ["-y", "@acme/c"] }))
+        );
+        let unknown = run(
+            &rpc,
+            "install_connector",
+            json!({ "package": "@acme/c", "env": { "NOPE": "1" } }),
+        );
+        assert_eq!(
+            text(&unknown),
+            "Error: Acme does not use NOPE. It accepts: TOKEN, HOST."
+        );
+    }
+
+    #[test]
+    fn installs_a_connection_with_its_filters() {
+        let rpc = FakeRpc::default();
+        rpc.answer("connector:catalog", json!({ "items": [] }));
+        rpc.answer(
+            "connector:probeSdk",
+            json!({ "ok": true, "manifest": { "id": "acme", "name": "Acme", "version": "1.0.0", "env": [], "triggers": [{ "type": "issues", "label": "Issues" }] } }),
+        );
+        rpc.answer("connection:create", json!({ "id": "c9" }));
+        let done = parsed(&run(
+            &rpc,
+            "install_connector",
+            json!({ "package": "node /x/index.js", "project": "app" }),
+        ));
+        assert_eq!(done["connectionId"], "c9");
+        assert_eq!(done["trigger"], "issues");
+        assert_eq!(
+            rpc.last("connection:create"),
+            Some(json!({
+                "connectorId": "sdk",
+                "name": "Acme: Issues",
+                "filters": { "command": "node", "args": "[\"/x/index.js\"]", "env": "{}", "sdkConnectorId": "acme", "sdkVersion": "1.0.0", "sdkTrigger": "issues" },
+                "syncIntervalMinutes": 5,
+                "statusMapping": {},
+                "executionProject": "app"
+            }))
+        );
+    }
+
+    #[test]
+    fn lists_connectors_with_their_connections() {
+        let rpc = FakeRpc::default();
+        rpc.answer("connector:list", json!([{ "id": "github", "name": "GitHub", "capabilities": ["poll"] }, { "id": "hidden", "addable": false }]));
+        rpc.answer("connector:catalog", json!({ "items": [{ "id": "lin", "name": "Linear", "packageName": "@x/lin", "capabilities": [], "env": [{ "name": "K" }] }] }));
+        rpc.answer(
+            "connection:list",
+            json!([{ "id": "a", "connectorId": "github", "filters": {} }]),
+        );
+        rpc.answer(
+            "connector:status",
+            json!([{ "connectorId": "github", "authed": true }]),
+        );
+        rpc.answer("connector:listPacks", json!([]));
+        let listed = parsed(&run(&rpc, "list_connectors", json!({})));
+        assert_eq!(
+            listed,
+            json!([
+                { "id": "github", "name": "GitHub", "source": "built-in", "kind": "connector", "capabilities": ["poll"], "connections": 1, "authenticated": true },
+                { "id": "lin", "name": "Linear", "source": "package", "kind": "connector", "package": "@x/lin", "capabilities": [], "connections": 0, "env": ["K"] }
+            ])
+        );
+        let open = parsed(&run(
+            &rpc,
+            "list_connectors",
+            json!({ "installable_only": true }),
+        ));
+        assert_eq!(open.as_array().unwrap().len(), 1);
+    }
 
     #[test]
     fn a_bare_name_runs_through_npx() {

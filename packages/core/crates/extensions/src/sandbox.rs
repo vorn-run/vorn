@@ -1,8 +1,10 @@
 //! The optional macOS sandbox profile for a program extension: a person
 //! turns it on per extension, and its programs then start under Seatbelt
 //! (`sandbox-exec`) with no network of their own, every request going
-//! through the bridge on stdio, and writes only inside the extension's own
-//! folder. Reading stays open, as the program and its runtime need it.
+//! through the bridge on stdio or through the network proxy
+//! ([`crate::netproxy`]) to the hosts it declares, and writes only inside the
+//! extension's own folder. Reading stays open, as the program and its
+//! runtime need it.
 //!
 //! The switch is a file beside the package's pointer, so removing the
 //! extension removes it too.
@@ -67,13 +69,17 @@ fn quoted(s: &str) -> String {
 }
 
 /// The profile for a program whose own folder is `dir`, already resolved
-/// through symlinks, as Seatbelt matches real paths.
-pub fn profile(dir: &Path) -> String {
+/// through symlinks, as Seatbelt matches real paths; `proxy` is the loopback
+/// port of the network proxy, the one place it may connect to.
+pub fn profile(dir: &Path, proxy: Option<u16>) -> String {
+    let through = proxy.map_or_else(String::new, |port| {
+        format!("(allow network-outbound (remote tcp \"localhost:{port}\"))\n")
+    });
     format!(
         "(version 1)
 (allow default)
 (deny network*)
-(deny file-write*)
+{through}(deny file-write*)
 (allow file-write*
   (subpath {dir})
   (literal \"/dev/null\")
@@ -86,12 +92,18 @@ pub fn profile(dir: &Path) -> String {
     )
 }
 
-/// `launch` started under the profile, writes held to `dir`.
+/// `launch` started under the profile, writes held to `dir`, no network.
 pub fn wrap(launch: Launch, dir: &Path) -> Launch {
+    wrap_through(launch, dir, None)
+}
+
+/// `launch` started under the profile, writes held to `dir`, reaching the
+/// network only through the proxy at `proxy`.
+pub fn wrap_through(launch: Launch, dir: &Path, proxy: Option<u16>) -> Launch {
     let real: PathBuf = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let mut args = Vec::with_capacity(launch.args.len() + 3);
     args.push("-p".to_owned());
-    args.push(profile(&real));
+    args.push(profile(&real, proxy));
     args.push(launch.program.to_string_lossy().into_owned());
     args.extend(launch.args);
     Launch {
@@ -107,8 +119,11 @@ mod tests {
 
     #[test]
     fn quotes_the_folder_and_holds_writes_to_it() {
-        let p = profile(Path::new("/a \"b\"/c"));
+        let p = profile(Path::new("/a \"b\"/c"), None);
         assert!(p.contains("(deny network*)"));
+        assert!(!p.contains("network-outbound"));
+        let through = profile(Path::new("/x"), Some(4242));
+        assert!(through.contains("(allow network-outbound (remote tcp \"localhost:4242\"))"));
         assert!(p.contains("(subpath \"/a \\\"b\\\"/c\")"), "{p}");
     }
 

@@ -2,7 +2,10 @@
 // read from the TypeScript itself:
 //
 // - tools.json           the `tools` of a `tools/list` answer, exactly as the
-//                        SDK's McpServer sends them over the wire
+//                        SDK's McpServer sends them over the wire, less those
+//                        a built-in extension adds, which go to its own
+//                        `generated/tools.json` (each built-in's manifest names
+//                        them under `[mcp.<name>]`)
 // - schemas.json         each tool's argument schema as the zod it is checked
 //                        with, so vornd can check arguments the same way and
 //                        word a refusal as zod does (JSON Schema keeps neither
@@ -22,6 +25,15 @@ import { register } from 'tsx/esm/api'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(root, 'packages/core/crates/mcp/generated')
+
+/** The built-ins that add tools: the crate each lives in, whose manifest names them. */
+const BUILTINS = ['packages/core/crates/connectors']
+
+/** The tool names a built-in's `vorn-extension.toml` declares under `[mcp.<name>]`. */
+function contributedBy(crate) {
+  const manifest = readFileSync(path.join(root, crate, 'vorn-extension.toml'), 'utf8')
+  return new Set([...manifest.matchAll(/^\[mcp\.([A-Za-z0-9_]+)\]\s*$/gm)].map((m) => m[1]))
+}
 
 // One loader for every import, so a schema reached through two modules is one object.
 register()
@@ -239,11 +251,21 @@ async function generate() {
       .sort()
       .map((k) => [k, defs[k]])
   )
-  return {
-    'tools.json': tools,
+  // Every tool's schema stays in schemas.json: vornd checks a built-in's arguments too.
+  const files = {
     'schemas.json': { tools: inputs, defs: sortedDefs },
     'workflow-nodes.json': WORKFLOW_NODES_REFERENCE
   }
+  let own = tools
+  for (const crate of BUILTINS) {
+    const names = contributedBy(crate)
+    files[path.join('..', '..', path.basename(crate), 'generated', 'tools.json')] = own.filter(
+      (t) => names.has(t.name)
+    )
+    own = own.filter((t) => !names.has(t.name))
+  }
+  files['tools.json'] = own
+  return files
 }
 
 const files = await generate()

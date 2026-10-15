@@ -532,7 +532,7 @@ yarn install
 yarn build
 yarn check      # verifies the connector against Vorn's contract
 yarn test
-yarn pack       # writes ${id}-${SCAFFOLD_VERSION}.vorn.tgz, installable in Vorn
+yarn pack       # writes ${id}/, the folder its git repository holds: vorn ext install <git url>
 \`\`\`
 
 ## Settings
@@ -564,7 +564,7 @@ yarn install
 yarn build
 yarn check      # verifies the extension against Vorn's contract
 yarn test
-yarn pack       # writes ${id}-${SCAFFOLD_VERSION}.vorn.tgz, installable in Vorn
+yarn pack       # writes ${id}/, the folder its git repository holds: vorn ext install <git url>
 \`\`\`
 
 ## What it contributes

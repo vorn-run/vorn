@@ -1,0 +1,34 @@
+id = "card-sample"
+name = "Card sample"
+version = "0.1.0"
+api = "vorn:connector@1"
+
+[service]
+command = ["node", "index.js"]
+
+[checks]
+command = ["node", "index.js", "--check"]
+
+[declares]
+uses = ["git.read", "terminal.read"]
+
+[[contributes.panes]]
+id = "report"
+title = "Report"
+when = { workspace_contains = ["package.json"] }
+icon = { view_box = "0 0 24 24", paths = ["M1 1h2"] }
+web = "web/report/index.html"
+
+[[contributes.footers]]
+id = "status"
+title = "Status"
+every = 5.0
+
+[[contributes.link_handlers]]
+id = "issue"
+title = "Open issue"
+pattern = "\\b[A-Z]+-\\d+\\b"
+example = "ABC-1"
+
+[activates]
+agent = ["claude"]

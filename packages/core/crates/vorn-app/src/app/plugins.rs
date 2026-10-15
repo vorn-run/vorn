@@ -17,6 +17,9 @@ use crate::workflows::WfAct;
 
 /// A Plugins call whose answer changes the screen.
 pub(super) enum PlugCall {
+    /// `extension:builtins`, the extensions Vorn ships with.
+    Shipped,
+    SetShipped,
     Builtins,
     Connections,
     Statuses,
@@ -87,6 +90,23 @@ impl App {
             PlugAct::CloseForm if p.from_editor => self.plug_leave(),
             PlugAct::CloseForm => p.adding = None,
             PlugAct::Install(key) => self.plug_inspect(&key, true),
+            PlugAct::SetShipped(id, on) => {
+                if let Some(b) = p
+                    .shipped
+                    .iter_mut()
+                    .find(|b| s(b, "id") == Some(id.as_str()))
+                {
+                    b["on"] = json!(on);
+                }
+                if !p.tabs().contains(&p.tab) {
+                    p.tab = Tab::Installed;
+                }
+                self.call(
+                    Call::Plug(PlugCall::SetShipped),
+                    "extension:setBuiltin",
+                    json!({ "id": id, "on": on }),
+                );
+            }
             #[cfg(target_arch = "wasm32")]
             PlugAct::InstallFile => {
                 let why = "Install a pack from a file in the desktop app; the catalog works here.";
@@ -98,7 +118,9 @@ impl App {
                 p.pending = None;
                 self.start_pick(
                     super::Picked::Pack,
-                    crate::system::Pick::Pack("Install a connector pack".to_owned()),
+                    crate::system::Pick::Pack(
+                        "Install a connector from its git repository".to_owned(),
+                    ),
                 );
             }
             PlugAct::ConfirmInstall => {
@@ -258,7 +280,12 @@ impl App {
     /// Re-read what the page shows; the catalog only when it opens.
     fn plug_load(&mut self, catalog: bool) {
         let p = &mut self.st.plugins;
-        p.loads += 4 + u8::from(catalog);
+        p.loads += 5 + u8::from(catalog);
+        self.call(
+            Call::Plug(PlugCall::Shipped),
+            "extension:builtins",
+            Value::Null,
+        );
         self.call(
             Call::Plug(PlugCall::Builtins),
             "connector:list",
@@ -378,18 +405,19 @@ impl App {
         p.pending = None;
         let Some(l) = p.listing(key) else { return };
         let id = l.id.clone();
-        let Some(url) = l
+        let Some(catalog) = l
             .catalog
             .as_ref()
-            .and_then(|c| s(c, "packUrl"))
-            .filter(|u| !u.is_empty())
+            .filter(|c| crate::plugins::installable(c))
         else {
             p.progress.remove(&id);
             return;
         };
-        let mut source = json!({ "kind": "url", "url": url });
-        if let Some(sha) = l.catalog.as_ref().and_then(|c| s(c, "sha256")) {
-            source["sha256"] = json!(sha);
+        let mut source = json!({ "kind": "git", "url": s(catalog, "git") });
+        for key in ["path", "branch"] {
+            if let Some(v) = s(catalog, key).filter(|v| !v.is_empty()) {
+                source[key] = json!(v);
+            }
         }
         p.progress.insert(id, Progress::phase("checking"));
         self.call(
@@ -579,6 +607,22 @@ impl App {
     pub(super) fn plug_answered(&mut self, call: PlugCall, answer: Result<Value, RpcError>) {
         let p = &mut self.st.plugins;
         match call {
+            PlugCall::Shipped => {
+                if let Ok(v) = &answer {
+                    p.shipped = arr(v);
+                }
+                if !p.tabs().contains(&p.tab) {
+                    p.tab = Tab::Installed;
+                }
+                self.plug_loaded();
+            }
+            PlugCall::SetShipped => match answer {
+                Ok(_) => self.plug_load(true),
+                Err(e) => {
+                    p.report = Some(e.to_string());
+                    self.plug_load(false);
+                }
+            },
             PlugCall::Builtins => {
                 p.builtins = answer.as_ref().map(arr).unwrap_or_default();
                 self.plug_loaded();
@@ -950,6 +994,17 @@ impl App {
                 }
             }
             "connector:catalogChanged" => self.plug_catalog(params),
+            "extension:builtinChanged" => {
+                let p = &mut self.st.plugins;
+                if let Some(id) = s(params, "id") {
+                    if let Some(b) = p.shipped.iter_mut().find(|b| s(b, "id") == Some(id)) {
+                        b["on"] = params.get("on").cloned().unwrap_or(Value::Null);
+                    }
+                }
+                if !p.tabs().contains(&p.tab) {
+                    p.tab = Tab::Installed;
+                }
+            }
             _ if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor => {}
             "config:changed" => {
                 self.call(
@@ -999,12 +1054,12 @@ impl App {
         }
     }
 
-    /// A pack picked from disk goes to vornd to be checked.
+    /// A connector's repository picked on disk goes to vornd to be checked.
     pub(super) fn plug_picked(&mut self, path: &str) {
         self.call(
             Call::Plug(PlugCall::InspectFile),
             "connector:inspectPack",
-            json!({ "kind": "file", "path": path }),
+            json!({ "kind": "git", "url": path }),
         );
     }
 

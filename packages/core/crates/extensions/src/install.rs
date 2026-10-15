@@ -64,12 +64,18 @@ pub struct Sheet {
     pub commands: Vec<SheetCommand>,
     /// Hosts `net.fetch` may reach for it.
     pub hosts: Vec<String>,
+    /// Connection settings whose addresses it may reach too, by name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts_from: Vec<String>,
     /// Its declared uses, each with the Vorn methods it opens.
     pub methods: Vec<String>,
     /// What it adds to Vorn, each by name.
     pub adds: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential: Option<String>,
+    /// The sign-in it borrows from a program of the person's, in words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub borrows: Option<String>,
     /// The version it replaces, when one is installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
@@ -91,14 +97,23 @@ struct Staged {
     expires: Instant,
 }
 
+/// The program git is and the environment git and builds run with, read at
+/// each use: a daemon's own environment can still be settling when it starts.
+pub type Setting = Box<dyn Fn() -> (PathBuf, Vec<(String, String)>) + Send + Sync>;
+
 /// Installs, links and removes, in one package store.
-#[derive(Debug)]
 pub struct Installs {
     store: PackStore,
-    git: PathBuf,
-    /// The environment git and builds run with.
-    env: Vec<(String, String)>,
+    setting: Setting,
     staged: Mutex<HashMap<String, Staged>>,
+}
+
+impl std::fmt::Debug for Installs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Installs")
+            .field("store", &self.store)
+            .finish_non_exhaustive()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -186,10 +201,15 @@ fn run(mut command: Command, timeout: Duration) -> Result<(ExitStatus, Vec<u8>),
 impl Installs {
     /// `git` is the program to clone with; `env` what it and builds run with.
     pub fn new(store: PackStore, git: impl Into<PathBuf>, env: Vec<(String, String)>) -> Installs {
+        let git = git.into();
+        Installs::reading(store, Box::new(move || (git.clone(), env.clone())))
+    }
+
+    /// As [`Installs::new`], git and its environment read at each use.
+    pub fn reading(store: PackStore, setting: Setting) -> Installs {
         Installs {
             store,
-            git: git.into(),
-            env,
+            setting,
             staged: Mutex::default(),
         }
     }
@@ -199,12 +219,17 @@ impl Installs {
     }
 
     fn command(&self, program: impl AsRef<std::ffi::OsStr>, cwd: &Path) -> Command {
+        let (_, env) = (self.setting)();
         let mut command = vorn_spawn::command(program);
         command
             .current_dir(cwd)
             .env_clear()
-            .envs(self.env.iter().map(|(k, v)| (k, v)));
+            .envs(env.iter().map(|(k, v)| (k, v)));
         command
+    }
+
+    fn git(&self) -> PathBuf {
+        (self.setting)().0
     }
 
     fn sweep(&self) {
@@ -220,20 +245,41 @@ impl Installs {
 
     /// Clones `url` and describes what it would install, running nothing of it.
     pub fn inspect_git(&self, url: &str, branch: Option<&str>) -> Result<Sheet, String> {
+        self.inspect_git_at(url, branch, None)
+    }
+
+    /// [`Installs::inspect_git`] for the package in folder `path` of the
+    /// repository, as a catalog names one of several kept together.
+    pub fn inspect_git_at(
+        &self,
+        url: &str,
+        branch: Option<&str>,
+        path: Option<&str>,
+    ) -> Result<Sheet, String> {
         self.sweep();
         let url = url.trim();
         usable_git_url(url)?;
         if branch.is_some_and(|b| b.starts_with('-') || b.trim().is_empty()) {
             return Err("That is not a branch or tag to install".into());
         }
+        let path = path.map(str::trim).filter(|p| !p.is_empty());
+        if let Some(p) = path {
+            usable_subfolder(p)?;
+        }
         let root = self.store.root();
         fs::create_dir_all(root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
         let dir = root.join(format!(".staging-{}", token()));
-        let staged = self.clone_into(url, branch, &dir).and_then(|rev| {
-            let manifest = read_staged_manifest(&dir)?;
-            crate::views::refuse(&manifest, &dir)?;
-            Ok((rev, manifest))
-        });
+        let staged = self
+            .clone_into(url, branch, &dir)
+            .and_then(|rev| match path {
+                Some(p) => keep_only(&dir, p).map(|()| rev),
+                None => Ok(rev),
+            })
+            .and_then(|rev| {
+                let manifest = read_staged_manifest(&dir)?;
+                crate::views::refuse(&manifest, &dir)?;
+                Ok((rev, manifest))
+            });
         let (rev, manifest) = match staged {
             Ok(found) => found,
             Err(err) => {
@@ -241,7 +287,10 @@ impl Installs {
                 return Err(err);
             }
         };
-        let source = json!({ "git": url, "rev": rev });
+        let mut source = json!({ "git": url, "rev": rev });
+        if let Some(p) = path {
+            source["path"] = json!(p);
+        }
         let token = token();
         let sheet = self.sheet(&token, &manifest, &source);
         lock(&self.staged).insert(
@@ -262,7 +311,7 @@ impl Installs {
         let parent = dir.parent().unwrap_or(dir);
         // A hooks directory that does not exist, so no template hook runs on checkout.
         let no_hooks = dir.with_extension("no-hooks");
-        let mut clone = self.command(&self.git, parent);
+        let mut clone = self.command(self.git(), parent);
         clone
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_LFS_SKIP_SMUDGE", "1")
@@ -285,7 +334,7 @@ impl Installs {
         if !status.success() {
             return Err(format!("git clone {url} failed: {}", tail(&output)));
         }
-        let mut head = self.command(&self.git, dir);
+        let mut head = self.command(self.git(), dir);
         head.args(["rev-parse", "HEAD"]);
         let (status, output) = run(head, CLONE_TIMEOUT)?;
         let rev = String::from_utf8_lossy(&output).trim().to_owned();
@@ -392,6 +441,7 @@ impl Installs {
             source: source.clone(),
             commands,
             hosts: m.declares.network.clone(),
+            hosts_from: m.declares.network_from.clone(),
             methods,
             adds,
             credential: m.credential.as_ref().map(|c| {
@@ -402,6 +452,7 @@ impl Installs {
                     m.name
                 )
             }),
+            borrows: borrowed(m),
             replaces: installed.map(|p| p.version),
             enforced: vec!["hosts", "methods", "credential"],
             declared: vec!["commands", "adds"],
@@ -411,6 +462,12 @@ impl Installs {
             ),
             confirm: m.id.clone(),
         }
+    }
+
+    /// The manifest sheet `token` describes, while it can still be confirmed.
+    pub fn staged_manifest(&self, token: &str) -> Option<Manifest> {
+        self.sweep();
+        lock(&self.staged).get(token).map(|s| s.manifest.clone())
     }
 
     /// Installs what sheet `token` described once `typed` is the extension's
@@ -482,6 +539,40 @@ impl Installs {
         self.store.inspect(&m.id)
     }
 
+    /// Puts back the version an install replaced, keeping the one it
+    /// replaces as the version to go back to.
+    pub fn rollback(&self, id: &str) -> Result<InstalledPack, String> {
+        if !is_safe_id(id) {
+            return Err(format!("\"{id}\" is not an extension id"));
+        }
+        let home = self.store.root().join(id);
+        let current =
+            read_current(&home).ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
+        let text = |k: &str| {
+            current
+                .get(k)
+                .and_then(Value::as_str)
+                .filter(|v| is_safe_version(v))
+        };
+        let (Some(version), Some(previous)) = (text("version"), text("previousVersion")) else {
+            return Err(format!("{id} has no earlier version to go back to"));
+        };
+        if !home.join(previous).is_dir() {
+            return Err(format!("{id} {previous} is no longer kept"));
+        }
+        write_current(
+            &home,
+            &json!({
+                "version": previous,
+                "previousVersion": version,
+                "installedAt": now_ms(),
+                "source": current.get("source").cloned().unwrap_or(Value::Null),
+            }),
+        )?;
+        info!("[extensions] rolled {id} back to {previous}");
+        self.store.inspect(id)
+    }
+
     /// Runs `folder` in place as its manifest's extension; edits are live.
     pub fn link(&self, folder: &Path) -> Result<InstalledPack, String> {
         let folder = folder
@@ -529,6 +620,66 @@ impl Installs {
         info!("[extensions] removed {id}");
         Ok(())
     }
+}
+
+/// What a connector borrows of the person's own sign-in, said plainly.
+pub fn borrowed(m: &Manifest) -> Option<String> {
+    let auth = m.auth.as_ref()?;
+    let borrow = auth.borrow.as_ref()?;
+    let program = auth.probe.as_ref().map(|p| p.command.as_str());
+    let mut said = Vec::new();
+    if let (Some(program), Some(args)) = (program, &borrow.token_args) {
+        let into = borrow
+            .token_env
+            .as_deref()
+            .map_or_else(String::new, |e| format!(" as {e}"));
+        said.push(format!(
+            "your {program} sign-in: Vorn runs `{program} {}` and hands it the token{into}",
+            args.join(" ")
+        ));
+    }
+    if let Some(env) = borrow.env.as_ref().filter(|e| !e.is_empty()) {
+        said.push(format!("{} from your environment", env.join(", ")));
+    }
+    (!said.is_empty()).then(|| format!("{} borrows {}", m.name, said.join(", and ")))
+}
+
+/// A folder inside a repository: relative, plain names, never climbing out.
+fn usable_subfolder(path: &str) -> Result<(), String> {
+    let plain = |part: &str| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-._".contains(&b))
+    };
+    if path.starts_with('/') || !path.split('/').all(plain) {
+        return Err(format!("{path} is not a folder of the repository"));
+    }
+    Ok(())
+}
+
+/// Leaves only `path` of the clone at `dir`, moved up to be all of it.
+fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
+    // A committed link could name a folder anywhere; each part must be a real folder of the clone.
+    let mut inner = dir.to_path_buf();
+    for part in path.split('/') {
+        inner.push(part);
+        match fs::symlink_metadata(&inner) {
+            Ok(meta) if meta.file_type().is_dir() => {}
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "{path} is a link in the repository, not a folder of it"
+                ))
+            }
+            _ => return Err(format!("The repository has no folder {path}")),
+        }
+    }
+    let kept = dir.with_extension("kept");
+    fs::rename(&inner, &kept).map_err(|e| e.to_string())?;
+    fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::rename(&kept, dir).map_err(|e| e.to_string())
 }
 
 /// A git install carries `vorn-extension.toml`; 0.8 packs install as archives.
@@ -878,5 +1029,127 @@ migrations = "migrations"
             folder.path().join("hello.sh").exists(),
             "a linked folder stays"
         );
+    }
+
+    #[test]
+    fn installs_one_folder_of_a_repository_and_rolls_back() {
+        let Some(git) = git() else { return };
+        let v = |version: &str| {
+            MANIFEST
+                .replace("1.0.0", version)
+                .replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "")
+        };
+        let source = repo(&[
+            ("connectors/marker/vorn-extension.toml", &v("1.0.0")),
+            ("connectors/marker/hello.sh", "cat >/dev/null\n"),
+            ("connectors/other/README.md", "not this one\n"),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), git, env());
+        let url = format!("file://{}", source.path().display());
+        for bad in ["../x", "/etc", "a/../b", "a b"] {
+            assert!(
+                installs.inspect_git_at(&url, None, Some(bad)).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            installs
+                .inspect_git_at(&url, None, Some("connectors/none"))
+                .unwrap_err(),
+            "The repository has no folder connectors/none"
+        );
+        let sheet = installs
+            .inspect_git_at(&url, None, Some("connectors/marker"))
+            .unwrap();
+        assert_eq!(sheet.source["path"], "connectors/marker");
+        let pack = installs.confirm(&sheet.token, "test.marker").unwrap();
+        assert!(pack.path.join("hello.sh").is_file());
+        assert!(!pack.path.join("connectors").exists());
+        assert_eq!(
+            installs.rollback("test.marker").unwrap_err(),
+            "test.marker has no earlier version to go back to"
+        );
+        fs::write(
+            source.path().join("connectors/marker/vorn-extension.toml"),
+            v("2.0.0"),
+        )
+        .unwrap();
+        let commit = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qam",
+                "two",
+            ])
+            .current_dir(source.path())
+            .status()
+            .unwrap();
+        assert!(commit.success());
+        let sheet = installs
+            .inspect_git_at(&url, None, Some("connectors/marker"))
+            .unwrap();
+        assert_eq!(sheet.replaces.as_deref(), Some("1.0.0"));
+        installs.confirm(&sheet.token, "test.marker").unwrap();
+        let back = installs.rollback("test.marker").unwrap();
+        assert_eq!(back.version, "1.0.0");
+        assert_eq!(back.previous_version.as_deref(), Some("2.0.0"));
+    }
+
+    #[test]
+    fn says_what_a_connector_borrows_and_where_its_hosts_come_from() {
+        let m = file::parse(
+            r#"id = "test.gh"
+name = "GitHub"
+version = "1.0.0"
+api = "vorn:connector@1"
+
+[service]
+command = ["node", "index.js"]
+
+[declares]
+network = ["api.github.com"]
+network_from = ["GH_HOSTS"]
+
+[connector.auth]
+rung = "cli"
+probe = { command = "gh", args = ["auth", "status"] }
+borrow = { token_args = ["auth", "token"], token_env = "GH_TOKEN", env = ["GH_TOKEN", "GH_HOST"] }
+
+[[connector.env]]
+name = "GH_HOSTS"
+
+[[connector.triggers]]
+type = "issue"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            borrowed(&m).as_deref(),
+            Some("GitHub borrows your gh sign-in: Vorn runs `gh auth token` and hands it the token as GH_TOKEN, and GH_TOKEN, GH_HOST from your environment")
+        );
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let sheet = installs.sheet("t", &m, &json!({}));
+        assert_eq!(sheet.hosts, ["api.github.com"]);
+        assert_eq!(sheet.hosts_from, ["GH_HOSTS"]);
+        let bad = file::parse(
+            r#"id = "test.x"
+name = "X"
+version = "1.0.0"
+api = "vorn:connector@1"
+[service]
+command = ["node", "index.js"]
+[declares]
+network_from = ["not a name"]
+[[connector.triggers]]
+type = "t"
+"#,
+        )
+        .unwrap_err();
+        assert_eq!(bad.field, "declares.network_from[0]");
     }
 }

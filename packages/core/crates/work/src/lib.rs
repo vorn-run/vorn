@@ -21,6 +21,7 @@ pub mod prompt;
 pub mod reads;
 pub mod receipts;
 pub mod schedule;
+pub mod sources;
 pub mod structured;
 pub mod task_images;
 pub mod task_triggers;

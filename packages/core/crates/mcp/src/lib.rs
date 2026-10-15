@@ -17,6 +17,7 @@ pub mod http;
 pub mod json;
 pub mod rpc;
 pub mod server;
+pub mod toolkit;
 mod tools;
 pub mod workflow;
 pub mod zod;

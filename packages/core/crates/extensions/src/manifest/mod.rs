@@ -155,6 +155,10 @@ pub struct Declares {
     /// Hosts `net.fetch` may reach, enforced at the bridge.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub network: Vec<String>,
+    /// Connection settings, by variable name, whose addresses name hosts it
+    /// may reach too: a feed reader reaches the feeds a person lists.
+    #[serde(rename = "networkFrom", skip_serializing_if = "Vec::is_empty")]
+    pub network_from: Vec<String>,
     /// Permissions as written, `auth.borrow:gh` keeping its argument.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
@@ -162,7 +166,7 @@ pub struct Declares {
 
 impl Declares {
     pub fn is_empty(&self) -> bool {
-        self.network.is_empty() && self.uses.is_empty()
+        self.network.is_empty() && self.network_from.is_empty() && self.uses.is_empty()
     }
 }
 
@@ -624,10 +628,20 @@ pub enum Permission {
     BrowserSession,
     #[serde(rename = "process.run")]
     ProcessRun,
+    #[serde(rename = "tasks.read")]
+    TasksRead,
+    #[serde(rename = "tasks.write")]
+    TasksWrite,
+    #[serde(rename = "workflows.read")]
+    WorkflowsRead,
+    #[serde(rename = "workflows.write")]
+    WorkflowsWrite,
+    #[serde(rename = "inbox.write")]
+    InboxWrite,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 19] = [
+    pub const ALL: [Permission; 24] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -647,6 +661,11 @@ impl Permission {
         Permission::HttpRoutes,
         Permission::BrowserSession,
         Permission::ProcessRun,
+        Permission::TasksRead,
+        Permission::TasksWrite,
+        Permission::WorkflowsRead,
+        Permission::WorkflowsWrite,
+        Permission::InboxWrite,
     ];
 
     pub fn name(self) -> &'static str {
@@ -670,6 +689,11 @@ impl Permission {
             Permission::HttpRoutes => "http.routes",
             Permission::BrowserSession => "browser.session",
             Permission::ProcessRun => "process.run",
+            Permission::TasksRead => "tasks.read",
+            Permission::TasksWrite => "tasks.write",
+            Permission::WorkflowsRead => "workflows.read",
+            Permission::WorkflowsWrite => "workflows.write",
+            Permission::InboxWrite => "inbox.write",
         }
     }
 
@@ -895,6 +919,7 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         env,
         declares: Declares {
             network: Vec::new(),
+            network_from: Vec::new(),
             uses: permissions
                 .iter()
                 .flatten()

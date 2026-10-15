@@ -9,6 +9,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use vorn_extensions::host::{Asked, HostKey, HostSettings, Hosts};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
+use vorn_extensions::manifest::file;
 use vorn_extensions::pack::PackStore;
 
 const FIXTURE: &str = include_str!("fixtures/extension.mjs");
@@ -18,7 +19,13 @@ fn install(root: &Path, id: &str, manifest: Value) {
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
     fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
-    fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+    // One that names no protocol was built for the MCP era and stays the 0.8 pack it was.
+    if manifest.get("protocol").is_some() {
+        let manifest = file::from_pack_json(manifest.as_object().unwrap()).unwrap();
+        fs::write(dir.join(file::FILE), file::to_toml(&manifest)).unwrap();
+    } else {
+        fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+    }
     fs::write(
         root.join(id).join("current.json"),
         json!({ "version": "1.0.0", "installedAt": 1 }).to_string(),
@@ -162,7 +169,8 @@ async fn says_why_a_host_does_not_start() {
         async move { hosts.get_or_start(&k).await.unwrap_err() }
     };
     assert_eq!(err("nope").await, "No extension \"nope\" is installed");
-    assert!(err("old")
-        .await
-        .starts_with("OLD was built for an older Vorn."));
+    assert_eq!(
+        err("old").await,
+        vorn_extensions::pack::legacy_message("OLD")
+    );
 }

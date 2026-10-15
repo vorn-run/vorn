@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 
+#[cfg(test)]
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
 use vorn_vault::{Keychain, Kind, Secret};
@@ -231,15 +232,6 @@ fn fields_of(map: &Map<String, Value>) -> Fields {
         .collect()
 }
 
-/// The values of a connection's `secretEnv` field: its plaintext, a JSON
-/// object, as `parseJsonObject` reads it.
-pub fn secret_env(fields: &Fields) -> Map<String, Value> {
-    let raw = fields
-        .get("secretEnv")
-        .map(|s| Value::String(s.expose().to_owned()));
-    super::mcp::parse_json_object(raw.as_ref())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,14 +289,6 @@ mod tests {
         );
         secrets.forget("c1");
         assert_eq!(secrets.lookup("c1"), Known::Unknown);
-    }
-
-    #[test]
-    fn reads_the_secret_env_as_the_server_parses_it() {
-        let env = secret_env(&fields(json!({ "secretEnv": "{\"A\":1,\"B\":\"x\"}" })));
-        assert_eq!(Value::Object(env), json!({ "A": "1", "B": "x" }));
-        assert!(secret_env(&fields(json!({ "secretEnv": "[1]" }))).is_empty());
-        assert!(secret_env(&fields(json!({}))).is_empty());
     }
 
     #[test]

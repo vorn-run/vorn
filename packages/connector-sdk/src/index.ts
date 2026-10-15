@@ -80,7 +80,17 @@ export { resilientFetch, retryAfterMs, backoffMs } from './resilience'
 export type { RetryPolicy, ResilientFetchOptions } from './resilience'
 export { connectionSetup, connectorManifest } from './setup'
 export type { ConnectionSetup, ConnectorManifest, ManifestContributions } from './setup'
-export { packConnector, packFileName } from './pack'
+export { packConnector } from './pack'
+export {
+  extensionToml,
+  selfCheck,
+  RECORDED_CHECKS,
+  CHECKS_COMMAND,
+  CONNECTOR_API,
+  MANIFEST_FILE,
+  SERVICE_COMMAND
+} from './extension'
+export type { ExtensionExtras } from './extension'
 export type { PackOptions, PackResult } from './pack'
 export {
   lifecycleScriptFindings,

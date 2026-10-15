@@ -1,0 +1,23 @@
+id = "cli-sample"
+name = "CLI sample"
+version = "1.0.0"
+api = "vorn:connector@1"
+
+[service]
+command = ["node", "index.js"]
+
+[checks]
+command = ["node", "index.js", "--check"]
+
+[declares]
+network = ["api.github.com"]
+network_from = ["GH_HOSTS"]
+
+[connector.auth]
+rung = "cli"
+probe = { command = "gh", args = ["auth", "status"] }
+borrow = { env = ["GH_TOKEN"], token_args = ["auth", "token"], token_env = "GH_TOKEN" }
+
+[[connector.triggers]]
+type = "issue"
+label = "Issue"

@@ -378,7 +378,8 @@ test('does not redeliver the same backlog forever', async () => {
 ## Install it in Vorn
 
 In **Settings → Connectors**, add a connection **From a package** and type the
-package name, or use **Install from file** for a pack.
+package name, or install the folder `pack` builds from its git repository:
+`vorn ext install <git url>`, or **Install from a repository** for one on disk.
 
 Vorn starts the connector, says `vorn/hello`, asks for `connector/manifest`,
 and fills in the connection settings from the answer. All that is left on
@@ -421,20 +422,32 @@ envNameFor('apiToken', 'GH_TOKEN') // GH_TOKEN — an explicit env always wins
 Anything computing these names on the host side should call this rather than
 re-implement it, or the two will disagree about a field named `oauth2Token`.
 
-## Pack it as a file
+## Pack it as a folder
 
-`vorn-connector pack` builds a single installable file: the manifest plus one
-bundled entry with every dependency inlined.
+`vorn-connector pack` builds the folder Vorn installs from git: its
+`vorn-extension.toml`, one bundled `index.js` with every dependency inlined,
+the receipt `check` wrote (`verified.json`) and the pages its panes name.
 
 ```bash
 npx vorn-connector pack ./dist/index.js --out ./release
-# → release/acme-1.2.3.vorn.tgz
+# → release/acme/
 ```
 
-Packing runs `check` first, then two gates a pack must pass: the source package
-declares no install-time scripts, and nothing was left outside the bundle. A
-pack installs by copying files, so it works with no registry reachable — drop
-it on **Settings → Connectors** and Vorn launches it from disk.
+Commit the folder to the connector's own git repository and install it with
+`vorn ext install <git url>`. The install sheet names the hosts the connector
+reaches and the sign-in it borrows; declare the hosts in `package.json`:
+
+```json
+{ "vorn": { "hosts": ["api.acme.example"], "hostsFrom": ["ACME_BASE_URL"] } }
+```
+
+`hostsFrom` names settings whose addresses are hosts too, such as a feed list.
+Under the sandbox profile those are the only hosts the connector reaches.
+
+Packing runs `check` first, then the gates a package must pass: the source
+package declares no install-time scripts, nothing was left outside the bundle,
+and the bundle starts and answers `vorn/hello`. `node index.js --check` holds
+the shipped bundle to its receipt; it is the `checks` command Vorn runs.
 
 ### Ship an icon
 
@@ -585,7 +598,7 @@ vorn-connector manifest <module>          Print the manifest as JSON
 vorn-connector setup <module> [trigger]   Print each trigger and the environment it reads
 vorn-connector poll <module> <trigger>    Run one poll against the environment
 vorn-connector check <module>             Verify the connector against the contract
-vorn-connector pack <module>              Build an installable .vorn.tgz pack
+vorn-connector pack <module>              Build the folder Vorn installs from git
 vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 ```
 

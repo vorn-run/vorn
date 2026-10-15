@@ -507,7 +507,8 @@ describe('extensions over the wire', () => {
     kind: 'extension',
     packageName: '@vornrun/extension-review',
     version: '0.1.0',
-    packUrl: 'https://packs.test/review-0.1.0.vorn.tgz',
+    git: 'https://git.test/review.git',
+    path: 'extensions/review',
     capabilities: [],
     contributes: {
       panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
@@ -578,7 +579,7 @@ describe('extensions over the wire', () => {
     expect(after.map((row: { id: string }) => row.id)).not.toContain('review')
   })
 
-  it('installs a catalog extension from its pack and makes no connection', async () => {
+  it('installs a catalog extension from its repository and makes no connection', async () => {
     withExtension({
       'connector:installPack': {
         ok: true,
@@ -598,8 +599,9 @@ describe('extensions over the wire', () => {
     const result = parsed(await tools.get('install_connector')!({ connector_id: 'review' }))
 
     expect(rpcCall).toHaveBeenCalledWith('connector:installPack', {
-      kind: 'url',
-      url: 'https://packs.test/review-0.1.0.vorn.tgz'
+      kind: 'git',
+      url: 'https://git.test/review.git',
+      path: 'extensions/review'
     })
     expect(rpcCall).not.toHaveBeenCalledWith('connection:create', expect.anything())
     expect(result.kind).toBe('extension')
@@ -657,15 +659,15 @@ describe('extensions over the wire', () => {
     expect(result.note).toContain('which only a connection uses')
   })
 
-  it('refuses an extension no release has published a pack for', async () => {
+  it('refuses an extension the catalog names no repository for', async () => {
     withExtension({
       'connector:catalog': {
         ...CATALOG,
-        items: [{ ...EXTENSION, packUrl: undefined }]
+        items: [{ ...EXTENSION, git: undefined }]
       }
     })
     const result = await tools.get('install_connector')!({ connector_id: 'review' })
     expect(result.isError).toBe(true)
-    expect(text(result)).toContain('no release has published a pack')
+    expect(text(result)).toContain('names no git repository to install it from yet')
   })
 })

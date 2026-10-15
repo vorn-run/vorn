@@ -222,7 +222,7 @@ pub fn fix(need: &Need, l: Listings<'_>) -> Fix {
         }
     }
     if let Some(entry) = l.catalog.iter().find(|c| s(c, "id") == Some(id)) {
-        let released = s(entry, "packUrl").is_some_and(|u| !u.is_empty());
+        let released = crate::plugins::installable(entry);
         if pack.is_none() && !released {
             return Fix::None;
         }
@@ -289,7 +289,7 @@ mod tests {
     fn a_requirement_offers_the_fix_its_connector_allows() {
         let builtins = [json!({ "id": "github", "name": "GitHub" })];
         let catalog = [
-            json!({ "id": "jira", "name": "Jira", "packUrl": "https://x" }),
+            json!({ "id": "jira", "name": "Jira", "git": "https://x.example/c.git" }),
             json!({ "id": "soon", "name": "Soon" }),
         ];
         let packs = [json!({ "id": "jira", "version": "1.0.0" })];

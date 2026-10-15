@@ -8,7 +8,6 @@
 
 mod artifacts;
 mod browser;
-mod connectors;
 mod data;
 mod device;
 mod projects;
@@ -24,13 +23,11 @@ use serde_json::{json, Map, Value};
 use crate::json;
 use crate::rpc::{Caller, Rpc, RpcError, DEFAULT_TIMEOUT};
 
-pub(crate) use connectors::connection_connector_id;
-
 /// A tool's answer, or the message of what it threw.
-pub(crate) type Outcome = Result<Value, String>;
+pub type Outcome = Result<Value, String>;
 
 /// What a tool runs with: the server to call, and who is calling.
-pub(crate) struct Cx<'a, R> {
+pub struct Cx<'a, R> {
     pub rpc: &'a R,
     pub caller: &'a Caller,
 }
@@ -58,7 +55,7 @@ impl<R: Rpc> Cx<'_, R> {
 }
 
 /// A tool's parsed arguments: an object, or nothing for a tool without a schema.
-pub(crate) struct Args(Map<String, Value>);
+pub struct Args(Map<String, Value>);
 
 impl Args {
     pub fn new(value: Option<Value>) -> Args {
@@ -94,7 +91,7 @@ impl Args {
 
 /// An object of the entries that are set, in order: the way a JavaScript
 /// object literal with `undefined` values reads once it is JSON.
-pub(crate) fn object<'k>(entries: impl IntoIterator<Item = (&'k str, Option<Value>)>) -> Value {
+pub fn object<'k>(entries: impl IntoIterator<Item = (&'k str, Option<Value>)>) -> Value {
     Value::Object(
         entries
             .into_iter()
@@ -104,33 +101,34 @@ pub(crate) fn object<'k>(entries: impl IntoIterator<Item = (&'k str, Option<Valu
 }
 
 /// A result of one text block.
-pub(crate) fn text(text: impl Into<String>) -> Value {
+pub fn text(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }] })
 }
 
 /// A result of one text block, marked as an error.
-pub(crate) fn failed(text: impl Into<String>) -> Value {
+pub fn failed(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }], "isError": true })
 }
 
 /// `{ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }`.
-pub(crate) fn pretty(value: &Value) -> Value {
+pub fn pretty(value: &Value) -> Value {
     text(json::pretty(value))
 }
 
 /// `Error: ${err instanceof Error ? err.message : err}`.
-pub(crate) fn error_of(err: impl Into<String>) -> Value {
+pub fn error_of(err: impl Into<String>) -> Value {
     failed(format!("Error: {}", err.into()))
 }
 
 /// `value ?? []` as an array to walk: anything that is not one walks as empty.
-pub(crate) fn items(value: Option<&Value>) -> &[Value] {
+pub fn items(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
-/// Runs the tool `name` with arguments its schema has already parsed.
-pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Outcome {
-    match name {
+/// Runs the tool `name` with arguments its schema has already parsed;
+/// `None` for a tool these do not implement.
+pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Option<Outcome> {
+    Some(match name {
         "get_config" => data::get_config(cx).await,
 
         "list_sessions" => sessions::list_sessions(cx, &args).await,
@@ -142,14 +140,6 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Outc
         "write_to_terminal" => sessions::write_to_terminal(cx, &args).await,
         "send_key" => sessions::send_key(cx, &args).await,
         "list_session_events" => sessions::list_session_events(cx, &args).await,
-
-        "list_connectors" => connectors::list_connectors(cx, &args).await,
-        "list_connections" => connectors::list_connections(cx, &args).await,
-        "list_connector_actions" => connectors::list_connector_actions(cx, &args).await,
-        "inspect_connector_package" => connectors::inspect_connector_package(cx, &args).await,
-        "install_connector" => connectors::install_connector(cx, &args).await,
-        "run_connector_action" => connectors::run_connector_action(cx, &args).await,
-        "backfill_connection" => connectors::backfill_connection(cx, &args).await,
 
         "read_page" => browser::read_page(cx, &args).await,
         "get_page_text" => browser::get_page_text(cx, &args).await,
@@ -214,9 +204,20 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Outc
         "update_workspace" => workspaces::update_workspace(cx, &args).await,
         "delete_workspace" => workspaces::delete_workspace(cx, &args).await,
 
-        // The protocol answers an unknown tool before it gets here; this is
-        // a tool in the generated list that nothing here implements.
-        other => Err(format!("MCP error -32602: Tool {other} not found")),
+        // A tool whose schema the TypeScript defines and a built-in extension contributes.
+        _ => return None,
+    })
+}
+
+/// `connectionConnectorId(conn)`: the packaged connector's id when a
+/// connection runs one, else the connection's own.
+pub(crate) use browser::destructure;
+
+pub(crate) fn connection_connector_id(conn: &Value) -> Result<Option<Value>, String> {
+    let filters = json::prop(Some(conn), "filters")?;
+    match json::field(filters, "sdkConnectorId") {
+        Some(Value::String(id)) if !id.is_empty() => Ok(Some(Value::from(id.as_str()))),
+        _ => Ok(conn.get("connectorId").cloned()),
     }
 }
 

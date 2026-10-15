@@ -10,7 +10,56 @@ use crate::screen::{white, Screen};
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Role};
 
+/// The extensions Vorn ships with, each with its switch: off, it runs
+/// nothing and shows nothing, and what it keeps stays for when it is on again.
+fn shipped(s: &Screen<'_>) -> Option<El> {
+    let p = &s.st.plugins;
+    if p.shipped.is_empty() {
+        return None;
+    }
+    let mut col = div().col().mb(16.0).child(heading("Built in"));
+    for b in &p.shipped {
+        let id = b.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let name = b.get("name").and_then(|v| v.as_str()).unwrap_or(id);
+        let on = b.get("on") == Some(&serde_json::Value::Bool(true));
+        let what = b.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let switch = crate::screen::settings::toggle(
+            s,
+            "plug-shipped",
+            on,
+            act(PlugAct::SetShipped(id.to_owned(), !on)),
+            false,
+            name,
+        );
+        col = col.child(
+            div()
+                .row()
+                .items_center()
+                .gap(12.0)
+                .p(12.0)
+                .rounded(R)
+                .border(1.0, white(0.1))
+                .bg(white(0.02))
+                .child(
+                    div()
+                        .col()
+                        .grow()
+                        .min_w0()
+                        .child(text(name, 13.0, k::GRAY_200).weight(500).line_height(18.0))
+                        .child(text(what, 11.0, k::GRAY_500).line_height(16.0).wrapping()),
+                )
+                .child(switch),
+        );
+    }
+    Some(col)
+}
+
 pub(super) fn view(s: &Screen<'_>) -> El {
+    let shipped = shipped(s);
+    div().col().child_if(shipped).child(packs(s))
+}
+
+fn packs(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
     let groups: Vec<(Kind, Vec<&Listing>)> = [Kind::Extension, Kind::Connector]
         .into_iter()
