@@ -284,9 +284,7 @@
     "opencode": "ARGV:--prompt write the parity test"
   },
   "told": {
-    "cleanup": [
-      "wt-two"
-    ],
+    "cleanup": ["wt-two"],
     "created": [
       {
         "agentSessionId": "<minted 10>",
