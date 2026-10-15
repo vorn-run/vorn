@@ -3,7 +3,7 @@ out/
 dist/
 dist-native/
 coverage/
-.vitest-reports/
+.vitest/
 .DS_Store
 *.log
 *.tsbuildinfo
