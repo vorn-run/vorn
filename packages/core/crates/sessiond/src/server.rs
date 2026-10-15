@@ -304,10 +304,16 @@ impl Sessiond {
     /// Whether sessiond has nothing to hold and nobody to serve, for long
     /// enough to exit.
     pub fn idle_for(&self, d: Duration) -> bool {
-        if !self.sessions().is_empty() {
+        let draining = self.draining.load(Ordering::SeqCst);
+        // Draining, no vornd will release a session that ended here: only the running ones keep it.
+        let holding = self
+            .sessions()
+            .values()
+            .any(|s| !draining || s.with_log(|l| l.exited().is_none()));
+        if holding {
             return false;
         }
-        self.draining.load(Ordering::SeqCst)
+        draining
             || self
                 .idle_since
                 .lock()

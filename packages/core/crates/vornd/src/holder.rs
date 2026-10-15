@@ -35,7 +35,7 @@ use vorn_sessiond::os;
 #[cfg(unix)]
 use vorn_sessiond_wire::Adopt;
 use vorn_sessiond_wire::{
-    Drain, FrameReader, Hello, Message, Nonce, ToSessiond, ToVornd, Welcome, PROTO,
+    Drain, FrameReader, Hello, Message, Nonce, SessionRef, ToSessiond, ToVornd, Welcome, PROTO,
 };
 
 /// The sessiond protocols this vornd speaks.
@@ -420,6 +420,12 @@ async fn drain(i: &Instance, mut seen: HolderInstance) -> HolderInstance {
             if conn.send(&ToSessiond::Drain(Drain)).await.is_ok() {
                 info!(pid = i.pid, build = %i.build, sessions = live(&welcome), "draining an older session holder");
             }
+            // Nobody else releases what ended there; until each is, it never exits.
+            for s in ended(&welcome) {
+                let _ = conn
+                    .send(&ToSessiond::Release(SessionRef { session: s }))
+                    .await;
+            }
         }
         Err(err) => warn!(pid = i.pid, %err, "could not reach an older session holder"),
     }
@@ -428,6 +434,15 @@ async fn drain(i: &Instance, mut seen: HolderInstance) -> HolderInstance {
 
 fn live(w: &Welcome) -> usize {
     w.sessions.iter().filter(|s| s.exited.is_none()).count()
+}
+
+/// The sessions whose programs ended: a draining holder is waiting on their release.
+fn ended(w: &Welcome) -> Vec<vorn_sessiond_wire::SessionId> {
+    w.sessions
+        .iter()
+        .filter(|s| s.exited.is_some())
+        .map(|s| s.session.clone())
+        .collect()
 }
 
 /// What `bundled --version` prints.

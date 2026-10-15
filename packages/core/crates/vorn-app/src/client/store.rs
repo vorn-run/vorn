@@ -120,6 +120,9 @@ pub struct Store {
     /// Whether `tasks` were read from `config` (not `task:list`), so a
     /// change to it rereads only the tasks that changed.
     tasks_of_config: bool,
+    /// Whether vornd has said which sessions run: asked after connecting, since
+    /// it waits for the session holder while vornd starts.
+    pub sessions_known: bool,
 }
 
 fn subscription() -> Value {
@@ -127,11 +130,10 @@ fn subscription() -> Value {
 }
 
 /// The loads [`Store::load`] waits on, sent together.
-fn load_calls(rpc: &Rpc) -> [Pending; 6] {
+fn load_calls(rpc: &Rpc) -> [Pending; 5] {
     [
         rpc.request("config:load", Value::Null),
         rpc.request("project:list", Value::Null),
-        rpc.request("terminal:listActive", Value::Null),
         rpc.request("task:list", json!({})),
         rpc.request("workflow:list", Value::Null),
         rpc.request("workflowRun:listWaiting", Value::Null),
@@ -157,14 +159,14 @@ impl Store {
         for p in load_calls(rpc) {
             answers.push(p.answer(CALL_TIMEOUT).await);
         }
-        let answers: [Result<Value, RpcError>; 6] = answers
+        let answers: [Result<Value, RpcError>; 5] = answers
             .try_into()
             .map_err(|_| RpcError::Decode("missing answers".into()))?;
         Store::from_answers(answers)
     }
 
-    fn from_answers(answers: [Result<Value, RpcError>; 6]) -> Result<Store, RpcError> {
-        let [config, projects, sessions, tasks, workflows, waiting] = answers;
+    fn from_answers(answers: [Result<Value, RpcError>; 5]) -> Result<Store, RpcError> {
+        let [config, projects, tasks, workflows, waiting] = answers;
         let (config, tasks) = (config?, tasks?);
         // The configuration's tasks, as every change after brings them.
         let tasks_of_config = config.get("tasks").is_some_and(Value::is_array);
@@ -181,9 +183,6 @@ impl Store {
             ..Store::default()
         };
         store.groups = groups(&store.config);
-        for info in records::<TerminalSession>(sessions?) {
-            store.upsert(info);
-        }
         // Runs are optional to the screen: a vornd without them still shows it.
         if let Ok(Value::Array(runs)) = waiting {
             for run in runs {
@@ -191,6 +190,14 @@ impl Store {
             }
         }
         Ok(store)
+    }
+
+    /// `terminal:listActive`'s answer: every session that runs.
+    pub fn take_sessions(&mut self, list: Value) {
+        for info in records::<TerminalSession>(list) {
+            self.upsert(info);
+        }
+        self.sessions_known = true;
     }
 
     /// The agent the composer starts: `defaults.defaultAgent`, as the

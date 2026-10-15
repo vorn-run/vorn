@@ -447,64 +447,59 @@ fn key(spec: &str) -> Input {
     }
 }
 
-/// Before vornd answers: a quiet screen that starts the bundled vornd once
-/// and keeps trying until one answers.
+/// Before vornd answers: a quiet screen while a thread of its own retires an
+/// older vornd, starts the bundled one once, and keeps connecting until one
+/// answers. Nothing here waits on vornd, so the window shows at once.
 struct Waiting {
     dir: PathBuf,
     wake: Wake,
     status: String,
     detail: Option<String>,
-    started: Option<Instant>,
+    heard: std::sync::mpsc::Receiver<Heard>,
     next: Instant,
+}
+
+/// What the connecting thread reports.
+enum Heard {
+    Status(String, Option<String>),
+    Connected(Box<vorn_app::app::Connected>),
 }
 
 /// How long a started vornd has before the screen says it has not answered.
 const START_WAIT: Duration = Duration::from_secs(30);
 const RETRY: Duration = Duration::from_millis(500);
 
+/// The waiting screen's close button, off macOS where it draws its own frame.
+const WAITING_CLOSE: vorn_app::ui::Id = vorn_app::ui::Id(0x7761_6974_636c_6f73);
+
 impl Waiting {
     fn new(dir: PathBuf, wake: Wake) -> Waiting {
+        let (tx, heard) = std::sync::mpsc::channel();
+        let (d, w) = (dir.clone(), Arc::clone(&wake));
+        std::thread::spawn(move || connecting(&d, &w, &tx));
         Waiting {
             dir,
             wake,
             status: String::new(),
             detail: None,
-            started: None,
-            next: Instant::now(),
+            heard,
+            next: Instant::now() + RETRY,
         }
     }
 
-    /// One attempt, when one is due: the app once vornd answers. Starts the
-    /// bundled vornd after the first miss.
+    /// The app, once the connecting thread has one; what it says until then.
     fn poll(&mut self) -> Option<App> {
-        let now = Instant::now();
-        if now < self.next {
-            return None;
-        }
-        self.next = now + RETRY;
-        let missed = match connect(&self.dir, Arc::clone(&self.wake)) {
-            Ok(app) => return Some(app),
-            Err(e) => e,
-        };
-        match self.started {
-            None => {
-                self.started = Some(now);
-                (self.status, self.detail) = match Server::locate() {
-                    Some(server) => match server.start(&self.dir) {
-                        Ok(()) => ("Starting vornd.".into(), None),
-                        Err(e) => ("Could not start vornd. Retrying.".into(), Some(e)),
-                    },
-                    None => ("Could not reach vornd. Retrying.".into(), Some(missed)),
-                };
+        self.next = Instant::now() + RETRY;
+        while let Ok(h) = self.heard.try_recv() {
+            match h {
+                Heard::Status(status, detail) => (self.status, self.detail) = (status, detail),
+                Heard::Connected(c) => {
+                    let mut app = App::from_connected(*c, Arc::clone(&self.wake));
+                    app.load_panes(&self.dir);
+                    app.set_data_dir(self.dir.clone());
+                    return Some(app);
+                }
             }
-            Some(at) if now - at > START_WAIT && self.detail.is_none() => {
-                self.status = "vornd has not answered. Retrying.".into();
-                self.detail = Some(format!(
-                    "Its log is {}.",
-                    self.dir.join(launch::LOG_FILE).display()
-                ));
-            }
-            Some(_) => {}
         }
         None
     }
@@ -512,18 +507,106 @@ impl Waiting {
     fn view(&self, ui: &Ui) -> El {
         let (w, h) = ui.viewport();
         let ink = |a| Rgba::hexa(look::INK, a);
-        div()
-            .size(w, h)
+        let body = div()
             .col()
             .center()
             .gap(8.0)
-            .bg(Rgba::hex(look::SURFACE_BASE))
+            .grow()
             .child(text(&self.status, 13.0, ink(look::INK_SECONDARY)))
             .child_if(
                 self.detail
                     .as_deref()
                     .map(|d| text(d, 12.0, ink(look::INK_FAINT))),
-            )
+            );
+        // Off macOS the window has no system frame: a strip to move it by, and a way to close it.
+        let bar = (!cfg!(target_os = "macos")).then(|| {
+            let hot = ui.hover(WAITING_CLOSE);
+            div()
+                .row()
+                .justify_end()
+                .h(32.0)
+                .w_full()
+                .id(vorn_app::ui::Id(0x7761_6974_6261_7221))
+                .sense(vorn_app::ui::Sense::WINDOW_DRAG)
+                .child(
+                    div()
+                        .id(WAITING_CLOSE)
+                        .on(vorn_app::ui::Action::Click)
+                        .size(46.0, 32.0)
+                        .center()
+                        .bg(Rgba::hexa(0xe81123, hot))
+                        .role(vorn_app::ui::Role::Button, "Close")
+                        .child(vorn_app::ui::icon(
+                            vorn_app::ui::icons::X,
+                            12.0,
+                            ink(look::INK_SECONDARY),
+                        )),
+                )
+        });
+        div()
+            .size(w, h)
+            .col()
+            .bg(Rgba::hex(look::SURFACE_BASE))
+            .child_if(bar)
+            .child(body)
+    }
+}
+
+/// The connecting thread: retires an older vornd, then tries until one
+/// answers, starting the bundled vornd after the first miss.
+fn connecting(dir: &Path, wake: &Wake, tx: &std::sync::mpsc::Sender<Heard>) {
+    // After an update the running vornd is the last build's: this build's
+    // takes over, and the session holder keeps the terminals.
+    if let Some(server) = Server::locate() {
+        launch::retire_older(dir, &server);
+    }
+    let mut started: Option<Instant> = None;
+    let mut said = false;
+    loop {
+        let tried = Endpoint::find(dir)
+            .map_err(|e| e.to_string())
+            .and_then(|ep| {
+                vorn_app::app::Connected::open(&ep, Arc::clone(wake)).map_err(|e| e.to_string())
+            });
+        let missed = match tried {
+            Ok(c) => {
+                let _ = tx.send(Heard::Connected(Box::new(c)));
+                wake();
+                return;
+            }
+            Err(e) => e,
+        };
+        let now = Instant::now();
+        let status = match started {
+            None => {
+                started = Some(now);
+                Some(match Server::locate() {
+                    Some(server) => match server.start(dir) {
+                        Ok(()) => ("Starting vornd.".to_owned(), None),
+                        Err(e) => ("Could not start vornd. Retrying.".to_owned(), Some(e)),
+                    },
+                    None => ("Could not reach vornd. Retrying.".to_owned(), Some(missed)),
+                })
+            }
+            Some(at) if now - at > START_WAIT && !said => {
+                said = true;
+                Some((
+                    "vornd has not answered. Retrying.".to_owned(),
+                    Some(format!(
+                        "Its log is {}.",
+                        dir.join(launch::LOG_FILE).display()
+                    )),
+                ))
+            }
+            Some(_) => None,
+        };
+        if let Some((s, d)) = status {
+            if tx.send(Heard::Status(s, d)).is_err() {
+                return;
+            }
+            wake();
+        }
+        std::thread::sleep(RETRY);
     }
 }
 
@@ -574,6 +657,12 @@ impl WindowApp for Win {
     }
 
     fn event(&mut self, ui: &mut Ui, event: Event) {
+        if self.waiting.is_some() {
+            if event == Event::Click(WAITING_CLOSE) {
+                ui.request(vorn_app::ui::WindowRequest::Close);
+            }
+            return;
+        }
         if let Some(error) = &self.error {
             if crash::event(ui, &event, error) == Some(CrashAct::Reload) {
                 match (self.reconnect)() {
@@ -647,10 +736,6 @@ impl WindowApp for Win {
         }
         if let Some(window) = &self.window {
             app.opened(window);
-            // The app draws its own frame outside macOS.
-            if !cfg!(target_os = "macos") {
-                window.set_decorations(false);
-            }
             window.request_redraw();
         }
         self.app = Some(app);
@@ -669,24 +754,10 @@ fn window(args: &Args) -> Result<(), String> {
         }
     });
     let dir = args.data_dir()?;
-    // After an update the running vornd is the last build's: this build's
-    // takes over, and the session holder keeps the terminals.
-    if let Some(server) = Server::locate() {
-        launch::retire_older(&dir, &server);
-    }
     let updater = Updater::start(Arc::clone(&wake));
-    let mut cli = Some(vorn_app::cli_link::start(dir.clone(), Arc::clone(&wake)));
-    let mut waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
-    // Connected before the window opens when vornd runs, so it never shows
-    // the waiting screen; otherwise this starts the bundled one.
-    let mut app = waiting.poll();
-    if let Some(app) = &mut app {
-        app.set_updater(Arc::clone(&updater));
-        if let Some(rx) = cli.take() {
-            app.set_cli_launch(rx);
-        }
-    }
-    let ready = app.is_some();
+    let cli = Some(vorn_app::cli_link::start(dir.clone(), Arc::clone(&wake)));
+    // The window opens at once; connecting, and starting vornd, happen on a thread.
+    let waiting = Waiting::new(dir.clone(), Arc::clone(&wake));
     let reconnect = Box::new(move || {
         let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
         let mut app = App::connect(&ep, Arc::clone(&wake)).map_err(|e| e.to_string())?;
@@ -697,9 +768,8 @@ fn window(args: &Args) -> Result<(), String> {
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
         // macOS keeps its traffic lights over the app's top bar, with no
-        // title drawn; elsewhere the app draws its own controls, and the
-        // waiting screen has the system's until it connects.
-        decorations: cfg!(target_os = "macos") || !ready,
+        // title drawn; elsewhere the app, and the waiting screen, draw their own.
+        decorations: cfg!(target_os = "macos"),
         inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
         ..WindowOptions::sized(look::WINDOW)
     };
@@ -708,8 +778,8 @@ fn window(args: &Args) -> Result<(), String> {
             *slot = Some(wake);
         }
         Win {
-            waiting: (!ready).then_some(waiting),
-            app,
+            waiting: Some(waiting),
+            app: None,
             error: None,
             reconnect,
             window: None,

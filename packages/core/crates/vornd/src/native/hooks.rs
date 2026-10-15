@@ -331,7 +331,8 @@ impl Hooks {
         let Some(native) = self.native.upgrade() else {
             return;
         };
-        info!(
+        // One per agent tool call: debug, or a busy agent fills the log.
+        debug!(
             event = event.name(),
             session = event.session(),
             terminal = event.terminal(),

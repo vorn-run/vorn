@@ -219,6 +219,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let access =
             accesskit_winit::Adapter::with_event_loop_proxy(el, &window, self.proxy.clone());
+        // On macOS the window shows now, in the base surface colour, while the GPU and the fonts
+        // load; elsewhere a window shown before its first frame flashes the system's white.
+        #[cfg(target_os = "macos")]
+        if !o.transparent {
+            let [r, g, b, _] = crate::theme::color::SURFACE_BASE.0;
+            crate::macos::set_background(&window, (f64::from(r), f64::from(g), f64::from(b)));
+            window.set_visible(true);
+            crate::macos::flush();
+        }
         let mut cfg = self.cfg;
         cfg.scale = window.scale_factor() as f32;
         let instance = wgpu::Instance::new(instance_desc());

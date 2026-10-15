@@ -231,3 +231,34 @@ pub(crate) fn clipboard_has_image() -> bool {
             .is_some()
     }
 }
+
+/// Paints the window's own background `rgb` (0 to 1), so a window shown
+/// before its first frame is the app's colour rather than the system's.
+pub(crate) fn set_background(window: &Window, (r, g, b): (f64, f64, f64)) {
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::AppKit(h) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: winit's handle is its live content view, on the main thread that owns it.
+    let view: &NSView = unsafe { h.ns_view.cast::<NSView>().as_ref() };
+    if let Some(win) = view.window() {
+        // SAFETY: an sRGB colour from plain numbers, set on the main thread.
+        unsafe {
+            let color = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+            win.setBackgroundColor(Some(&color));
+        }
+    }
+}
+
+/// Puts what the window shows on screen now rather than when the run loop
+/// next turns: a window shown before slow setup appears before it.
+pub(crate) fn flush() {
+    if let Some(cls) = objc2::runtime::AnyClass::get("CATransaction") {
+        // SAFETY: `+[CATransaction flush]` takes nothing and returns nothing, on the main thread.
+        unsafe {
+            let _: () = objc2::msg_send![cls, flush];
+        }
+    }
+}

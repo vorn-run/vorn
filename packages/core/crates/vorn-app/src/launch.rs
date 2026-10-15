@@ -30,8 +30,10 @@ use crate::client::{
 pub const VORND_PATH_ENV: &str = "VORN_VORND_PATH";
 /// Lets a debug build start vornd on the default data directory.
 pub const ALLOW_DEFAULT_ENV: &str = "VORN_ALLOW_DEFAULT_DATA_DIR";
-/// Where a started vornd's output goes, in the data directory.
+/// Where a started vornd logs, in the data directory; it rotates the file itself.
 pub const LOG_FILE: &str = "server.log";
+/// What a started vornd prints outside its log (a panic), from its last start only.
+pub const STDERR_FILE: &str = "server.stderr";
 
 /// A vornd to start, and the session holder beside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,15 +136,17 @@ impl Server {
     pub fn start(&self, data_dir: &Path) -> Result<(), String> {
         refuse_default(data_dir)?;
         create_private_dir(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
+        // vornd writes and rotates its own log; a redirect into it would grow past every rotation.
         let log = data_dir.join(LOG_FILE);
-        let out = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log)
-            .map_err(|e| format!("{}: {e}", log.display()))?;
-        let err = out.try_clone().map_err(|e| e.to_string())?;
+        let crash = data_dir.join(STDERR_FILE);
+        let err = std::fs::File::create(&crash).map_err(|e| format!("{}: {e}", crash.display()))?;
         let mut command = self.command(data_dir);
-        command.stdin(Stdio::null()).stdout(out).stderr(err);
+        command
+            .arg("--log-file")
+            .arg(&log)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(err);
         detach(&mut command);
         // Not waited for: it keeps running after this app quits.
         command

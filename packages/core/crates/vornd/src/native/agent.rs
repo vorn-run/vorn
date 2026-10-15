@@ -93,15 +93,14 @@ const DETECT_WAIT: Duration = Duration::from_secs(5);
 /// How long a refresh waits for the shell asked again.
 const REFRESH_WAIT: Duration = Duration::from_secs(15);
 
-/// Where each agent's command is on the environment agents get, once the
-/// shell has answered or the wait ran out; `{ refresh: true }` asks the shell again first.
-fn found(native: &Native, params: &Value) -> Result<Vec<(Agent, Option<PathBuf>)>, Answer> {
-    let settings = settings(native).ok_or_else(no_settings)?;
-    let mut commands = HashMap::with_capacity(Agent::ALL.len());
-    for agent in Agent::ALL {
-        let command = command_of(&settings, agent).ok_or_else(|| unreadable_command(agent))?;
-        commands.insert(agent, command);
-    }
+/// Whether `method` waits for the login shell first, which [`prepare`] does.
+pub(super) fn waits_for_shell(method: &str) -> bool {
+    matches!(method, "agent:locate" | "agent:detectInstalled")
+}
+
+/// Waits for the login shell to answer, or the wait to run out, before a
+/// detection; `{ refresh: true }` asks the shell again first.
+pub(super) fn prepare(native: &Native, params: &Value) {
     let wait = if truthy(params.get("refresh")) {
         native.env.refresh();
         REFRESH_WAIT
@@ -110,6 +109,16 @@ fn found(native: &Native, params: &Value) -> Result<Vec<(Agent, Option<PathBuf>)
         DETECT_WAIT
     };
     native.env.settle(wait);
+}
+
+/// Where each agent's command is on the environment agents get.
+fn found(native: &Native, _params: &Value) -> Result<Vec<(Agent, Option<PathBuf>)>, Answer> {
+    let settings = settings(native).ok_or_else(no_settings)?;
+    let mut commands = HashMap::with_capacity(Agent::ALL.len());
+    for agent in Agent::ALL {
+        let command = command_of(&settings, agent).ok_or_else(|| unreadable_command(agent))?;
+        commands.insert(agent, command);
+    }
     let env = native.env.get();
     Ok(detect::locate(
         |agent| {
