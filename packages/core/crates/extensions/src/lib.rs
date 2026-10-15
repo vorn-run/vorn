@@ -30,5 +30,6 @@ pub mod manifest;
 pub mod pack;
 pub mod page;
 pub mod router;
+pub mod sandbox;
 pub mod token;
 pub mod usage;

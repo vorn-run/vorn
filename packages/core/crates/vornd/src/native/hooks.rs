@@ -34,9 +34,9 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
+use vorn_extensions::events::{AGENT_CONVERSATION, AGENT_HOOK};
 use vorn_hooks::mapper::{normalize, Status};
 use vorn_hooks::owner::{may_claim, may_release, Owner};
-use vorn_extensions::events::{AGENT_CONVERSATION, AGENT_HOOK};
 use vorn_hooks::{claude, copilot, permission, Event, Mapper, Terminal};
 
 use super::{Answer, Native};
@@ -355,9 +355,10 @@ impl Hooks {
                 json!({ "sessionId": terminal, "event": event.name(), "tool": event.tool_name() })
             });
             if event.name() == "SessionStart" {
-                native.events().emit(AGENT_CONVERSATION, || {
-                    json!({ "sessionId": terminal, "conversationId": event.session() })
-                });
+                native.events().emit(
+                    AGENT_CONVERSATION,
+                    || json!({ "sessionId": terminal, "conversationId": event.session() }),
+                );
             }
         }
         if event.dismisses_permissions() {

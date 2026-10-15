@@ -76,7 +76,9 @@ fn in_main(ctx: &AuthContext<'_>) -> bool {
 
 /// What the authorizer decides for `ctx`, and why when it refuses.
 fn decide(prefix: &str, ctx: &AuthContext<'_>) -> std::result::Result<(), String> {
-    let schema = |t: &str| t.eq_ignore_ascii_case("sqlite_master") || t.eq_ignore_ascii_case("sqlite_schema");
+    let schema = |t: &str| {
+        t.eq_ignore_ascii_case("sqlite_master") || t.eq_ignore_ascii_case("sqlite_schema")
+    };
     let mine = |t: &str| owns(prefix, t) && in_main(ctx);
     // A change to its own table writes the schema, which SQLite allows no statement to write directly.
     let internal = |t: &str| schema(t);
@@ -240,7 +242,11 @@ impl ExtensionTables {
     /// The rows `sql` answers, each an object keyed by column.
     pub fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Value>> {
         let mut stmt = self.conn.prepare(sql).map_err(|e| self.named(e))?;
-        let names: Vec<String> = stmt.column_names().iter().map(|n| (*n).to_owned()).collect();
+        let names: Vec<String> = stmt
+            .column_names()
+            .iter()
+            .map(|n| (*n).to_owned())
+            .collect();
         let mut rows = stmt
             .query(params_from_iter(params.iter().map(to_sql)))
             .map_err(|e| self.named(e))?;
@@ -329,7 +335,10 @@ impl ExtensionTables {
         let text: rusqlite::Result<Option<String>> = self
             .conn
             .query_row(
-                &format!("SELECT value FROM \"{}\" WHERE key = ?", kv_table(&self.prefix)),
+                &format!(
+                    "SELECT value FROM \"{}\" WHERE key = ?",
+                    kv_table(&self.prefix)
+                ),
                 [key],
                 |r| r.get(0),
             )
@@ -370,7 +379,10 @@ impl ExtensionTables {
             .collect();
         drop(stmt);
         for t in &tables {
-            conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{}\"", t.replace('"', "\"\"")))?;
+            conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS \"{}\"",
+                t.replace('"', "\"\"")
+            ))?;
         }
         Ok(tables.len())
     }
@@ -413,42 +425,81 @@ mod tests {
         let (_dir, path) = db();
         let t = ExtensionTables::open(&path, "test.x").unwrap();
         let rows = format!("{}rows", t.prefix());
-        t.exec(&format!("CREATE TABLE {rows} (id INTEGER PRIMARY KEY, name TEXT, n REAL)"), &[])
-            .unwrap();
+        t.exec(
+            &format!("CREATE TABLE {rows} (id INTEGER PRIMARY KEY, name TEXT, n REAL)"),
+            &[],
+        )
+        .unwrap();
         t.exec(&format!("CREATE INDEX {rows}_name ON {rows} (name)"), &[])
             .unwrap();
         assert_eq!(
-            t.exec(&format!("INSERT INTO {rows} (name, n) VALUES (?, ?)"), &[json!("a"), json!(1.5)])
-                .unwrap(),
+            t.exec(
+                &format!("INSERT INTO {rows} (name, n) VALUES (?, ?)"),
+                &[json!("a"), json!(1.5)]
+            )
+            .unwrap(),
             1
         );
         t.exec(&format!("ALTER TABLE {rows} ADD COLUMN extra TEXT"), &[])
             .unwrap();
         assert_eq!(
-            t.query(&format!("SELECT name, n, extra FROM {rows} WHERE name = ?"), &[json!("a")])
-                .unwrap(),
+            t.query(
+                &format!("SELECT name, n, extra FROM {rows} WHERE name = ?"),
+                &[json!("a")]
+            )
+            .unwrap(),
             [json!({ "name": "a", "n": 1.5, "extra": null })]
         );
         for (sql, why) in [
-            ("SELECT title FROM tasks", "test.x may not read the table tasks"),
-            ("INSERT INTO tasks VALUES ('t2', 'x')", "test.x may not write the table tasks"),
+            (
+                "SELECT title FROM tasks",
+                "test.x may not read the table tasks",
+            ),
+            (
+                "INSERT INTO tasks VALUES ('t2', 'x')",
+                "test.x may not write the table tasks",
+            ),
             ("DELETE FROM tasks", "test.x may not write the table tasks"),
-            ("DROP TABLE tasks", "test.x may not change the schema of tasks"),
-            ("PRAGMA table_info(tasks)", "test.x may not run PRAGMA table_info"),
-            ("ATTACH DATABASE ':memory:' AS other", "test.x may not attach a database"),
-            ("BEGIN", "test.x may not open a transaction; each call is one"),
-            ("CREATE TABLE notmine (a)", "test.x may not change the schema of notmine"),
+            (
+                "DROP TABLE tasks",
+                "test.x may not change the schema of tasks",
+            ),
+            (
+                "PRAGMA table_info(tasks)",
+                "test.x may not run PRAGMA table_info",
+            ),
+            (
+                "ATTACH DATABASE ':memory:' AS other",
+                "test.x may not attach a database",
+            ),
+            (
+                "BEGIN",
+                "test.x may not open a transaction; each call is one",
+            ),
+            (
+                "CREATE TABLE notmine (a)",
+                "test.x may not change the schema of notmine",
+            ),
         ] {
             let err = t.exec(sql, &[]).unwrap_err().to_string();
             assert!(err.starts_with(why), "{sql}: {err}");
         }
         let err = t
-            .exec(&format!("CREATE VIEW {}v AS SELECT * FROM tasks", t.prefix()), &[])
+            .exec(
+                &format!("CREATE VIEW {}v AS SELECT * FROM tasks", t.prefix()),
+                &[],
+            )
             .unwrap_err();
         assert!(err.to_string().contains("may not"), "{err}");
         let other = ExtensionTables::open(&path, "test.y").unwrap();
-        let err = other.query(&format!("SELECT * FROM {rows}"), &[]).unwrap_err();
-        assert!(err.to_string().starts_with(&format!("test.y may not read the table {rows}")), "{err}");
+        let err = other
+            .query(&format!("SELECT * FROM {rows}"), &[])
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with(&format!("test.y may not read the table {rows}")),
+            "{err}"
+        );
     }
 
     #[test]
@@ -462,21 +513,39 @@ mod tests {
 
         let migrations = dir.path().join("migrations");
         std::fs::create_dir(&migrations).unwrap();
-        std::fs::write(migrations.join("001_rows.sql"), "CREATE TABLE x_test_0x_rows (a); INSERT INTO x_test_0x_rows VALUES (1);").unwrap();
+        std::fs::write(
+            migrations.join("001_rows.sql"),
+            "CREATE TABLE x_test_0x_rows (a); INSERT INTO x_test_0x_rows VALUES (1);",
+        )
+        .unwrap();
         assert_eq!(t.migrate(&migrations).unwrap(), ["001_rows.sql"]);
         assert!(t.migrate(&migrations).unwrap().is_empty());
-        std::fs::write(migrations.join("002_bad.sql"), "CREATE TABLE x_test_0x_more (a); DELETE FROM tasks;").unwrap();
+        std::fs::write(
+            migrations.join("002_bad.sql"),
+            "CREATE TABLE x_test_0x_more (a); DELETE FROM tasks;",
+        )
+        .unwrap();
         let err = t.migrate(&migrations).unwrap_err().to_string();
-        assert_eq!(err, "002_bad.sql: test.x may not write the table tasks: its tables are named x_test_0x_…");
+        assert_eq!(
+            err,
+            "002_bad.sql: test.x may not write the table tasks: its tables are named x_test_0x_…"
+        );
         // The failed migration left nothing behind.
         assert!(t.query("SELECT * FROM x_test_0x_more", &[]).is_err());
-        assert_eq!(t.query("SELECT a FROM x_test_0x_rows", &[]).unwrap(), [json!({ "a": 1 })]);
+        assert_eq!(
+            t.query("SELECT a FROM x_test_0x_rows", &[]).unwrap(),
+            [json!({ "a": 1 })]
+        );
 
         drop(t);
         assert_eq!(ExtensionTables::forget(&path, "test.x").unwrap(), 3);
         let conn = Connection::open(&path).unwrap();
         let left: i64 = conn
-            .query_row("SELECT count(*) FROM sqlite_master WHERE name LIKE 'x_%'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'x_%'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(left, 0);
         let title: String = conn

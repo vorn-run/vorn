@@ -335,7 +335,10 @@ mod tests {
                 "session.exited:\"x\""
             ]
         );
-        assert_eq!(names(&next_batch(&mut b, 100).await.unwrap().0), ["session.exited:\"x\""]);
+        assert_eq!(
+            names(&next_batch(&mut b, 100).await.unwrap().0),
+            ["session.exited:\"x\""]
+        );
         assert!(a.try_recv().is_err());
     }
 
@@ -361,10 +364,19 @@ mod tests {
             })
         };
         let mut batch = vec![
-            ev(SESSION_STATUS, json!({ "sessionId": "a", "status": "working" })),
+            ev(
+                SESSION_STATUS,
+                json!({ "sessionId": "a", "status": "working" }),
+            ),
             ev(SESSION_MARK, json!({ "sessionId": "a" })),
-            ev(SESSION_STATUS, json!({ "sessionId": "b", "status": "idle" })),
-            ev(SESSION_STATUS, json!({ "sessionId": "a", "status": "idle" })),
+            ev(
+                SESSION_STATUS,
+                json!({ "sessionId": "b", "status": "idle" }),
+            ),
+            ev(
+                SESSION_STATUS,
+                json!({ "sessionId": "a", "status": "idle" }),
+            ),
             ev(GIT_CHANGED, json!({ "worktreePath": "/w" })),
             ev(GIT_CHANGED, json!({ "worktreePath": "/w" })),
         ];

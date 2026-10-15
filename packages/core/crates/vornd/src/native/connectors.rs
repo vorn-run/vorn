@@ -934,7 +934,7 @@ impl Connectors {
                     spawn.name.clone()
                 };
                 let launch = SdkLaunch {
-                    launch: spawn.launch,
+                    launch: self.held(spawn.launch, &conns::sdk_id_of(&conn)),
                     source: spawn.source,
                     protocol: spawn.protocol,
                 };
@@ -943,6 +943,21 @@ impl Connectors {
                     .map_err(|e| e.to_string())
             })
             .await
+    }
+
+    /// `launch` under the macOS sandbox profile when the person turned it on for package `sdk_id`.
+    fn held(&self, launch: Launch, sdk_id: &str) -> Launch {
+        let store = self.installer.store();
+        if !vorn_extensions::pack::is_safe_id(sdk_id)
+            || !vorn_extensions::sandbox::available()
+            || !vorn_extensions::sandbox::is_on(&store.root().join(sdk_id))
+        {
+            return launch;
+        }
+        match store.inspect_unmeasured(sdk_id) {
+            Ok(pack) => vorn_extensions::sandbox::wrap(launch, &pack.path),
+            Err(_) => launch,
+        }
     }
 
     /// Runs `action` in a process of its own when the connection's package
@@ -969,7 +984,7 @@ impl Connectors {
         spawn.launch.program = program;
         spawn.launch.args = run_args;
         let launch = SdkLaunch {
-            launch: spawn.launch,
+            launch: self.held(spawn.launch, &sdk_id),
             source: spawn.source,
             protocol: spawn.protocol,
         };

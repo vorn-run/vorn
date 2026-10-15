@@ -178,10 +178,8 @@ async fn a_subscribed_extension_hears_each_session_mark_and_agent_event_once_in_
             "cwd": cwd.path(), "vorn_terminal_id": id,
         }),
     );
-    c.events_until(&id, &v, |e| {
-        names(e).contains(&"agent.conversation".into())
-    })
-    .await;
+    c.events_until(&id, &v, |e| names(e).contains(&"agent.conversation".into()))
+        .await;
     c.call_ok("terminal:kill", json!(id), &v).await;
     let seen = c
         .events_until(&id, &v, |e| names(e).contains(&"session.exited".into()))

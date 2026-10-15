@@ -268,15 +268,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("vorn.db");
         let mut store = super::super::work::test_store(&db);
-        for t in [task("doing", "t1", "in_progress"), task("done", "t1", "done")] {
+        for t in [
+            task("doing", "t1", "in_progress"),
+            task("done", "t1", "done"),
+        ] {
             store.call("dbInsertTask", json!([t])).unwrap();
         }
         let native = Native::new();
         native.set_database(db);
         follow(&native);
-        let reached = native.events().emit(AGENT_CONVERSATION, || {
-            json!({ "sessionId": "t1", "conversationId": "c1" })
-        });
+        let reached = native.events().emit(
+            AGENT_CONVERSATION,
+            || json!({ "sessionId": "t1", "conversationId": "c1" }),
+        );
         assert_eq!(reached, 1);
         let mut read = |id: &str| store.call("dbGetTask", json!([id])).unwrap();
         // The follower writes on its own task: wait for the row, with a safety net for a loaded machine.

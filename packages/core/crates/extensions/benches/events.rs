@@ -9,7 +9,12 @@ fn emit(c: &mut Criterion) {
     let bus = Bus::new();
     let mut rx = bus.subscribe("bench", &[SESSION_EXITED]);
     c.bench_function("emit with no subscriber", |b| {
-        b.iter(|| bus.emit(black_box(SESSION_MARK), || json!({ "sessionId": "s", "phase": "prompt" })))
+        b.iter(|| {
+            bus.emit(
+                black_box(SESSION_MARK),
+                || json!({ "sessionId": "s", "phase": "prompt" }),
+            )
+        })
     });
     c.bench_function("emit to one subscriber", |b| {
         b.iter(|| {

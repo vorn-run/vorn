@@ -313,9 +313,10 @@ impl Told {
             return;
         }
         self.statuses.insert(id.to_owned(), status.to_owned());
-        native
-            .events()
-            .emit(SESSION_STATUS, || json!({ "sessionId": id, "status": status }));
+        native.events().emit(
+            SESSION_STATUS,
+            || json!({ "sessionId": id, "status": status }),
+        );
     }
 }
 
@@ -452,9 +453,10 @@ async fn refresh_heads(native: &Arc<Native>, registry: &Arc<SessionRegistry>) {
                 continue;
             };
             if r.set_head_commit(&id, &head) {
-                n.events().emit(GIT_CHANGED, || {
-                    json!({ "projectPath": project, "worktreePath": dir, "head": head })
-                });
+                n.events().emit(
+                    GIT_CHANGED,
+                    || json!({ "projectPath": project, "worktreePath": dir, "head": head }),
+                );
             }
         }
     });
@@ -526,13 +528,17 @@ mod tests {
         let fed = fed();
         let mut events = fed.native.events().subscribe(
             "test",
-            &[SESSION_CREATED, SESSION_STATUS, SESSION_EXITED, SESSION_MARK],
+            &[
+                SESSION_CREATED,
+                SESSION_STATUS,
+                SESSION_EXITED,
+                SESSION_MARK,
+            ],
         );
         let mut t = Told::default();
-        let record = |status: &str| {
-            json!({ "id": "t", "status": status, "projectPath": "/p", "agentType": "claude" })
-        };
-        let upsert = |status: &str| json!({ "op": "upsert", "kind": "terminal", "record": record(status) });
+        let record = |status: &str| json!({ "id": "t", "status": status, "projectPath": "/p", "agentType": "claude" });
+        let upsert =
+            |status: &str| json!({ "op": "upsert", "kind": "terminal", "record": record(status) });
         t.note(&fed.native, &fed.registry, &upsert("running"));
         t.note(&fed.native, &fed.registry, &upsert("running"));
         t.note(&fed.native, &fed.registry, &upsert("waiting"));

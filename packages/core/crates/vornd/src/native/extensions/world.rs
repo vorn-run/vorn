@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{Header, Request, Response};
 use vorn_extensions::api::ExtError;
-use tracing::info;
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_store::extension::ExtensionTables;
 
@@ -64,7 +64,10 @@ async fn secret_of(
 
 /// A client's call answered inside vornd, for a core method the gate allowed.
 async fn ask(native: &Arc<Native>, method: &str, params: Value) -> Result<Value, ExtError> {
-    match native.answer(method.to_owned(), params, &Viewer::Local).await {
+    match native
+        .answer(method.to_owned(), params, &Viewer::Local)
+        .await
+    {
         NativeAnswer::Result(v) => Ok(v),
         NativeAnswer::Void => Ok(Value::Null),
         NativeAnswer::Error(message) => Err(ExtError::new("failed", message)),
@@ -109,18 +112,25 @@ impl World for Wired {
                     let sessions = native
                         .registry
                         .get()
-                        .and_then(|r| r.read(|r| r.live_terminals().map(session_json).collect::<Vec<_>>()))
+                        .and_then(|r| {
+                            r.read(|r| r.live_terminals().map(session_json).collect::<Vec<_>>())
+                        })
                         .unwrap_or_default();
                     Ok(Value::Array(sessions))
                 }
                 "sessions.get" => {
-                    let id = text(&args, "sessionId").ok_or_else(|| needs(m, "the sessionId to read"))?;
+                    let id = text(&args, "sessionId")
+                        .ok_or_else(|| needs(m, "the sessionId to read"))?;
                     native
                         .registry
                         .get()
-                        .and_then(|r| r.read(|r| r.live_terminals().find(|t| t.id == id).map(session_json)))
+                        .and_then(|r| {
+                            r.read(|r| r.live_terminals().find(|t| t.id == id).map(session_json))
+                        })
                         .flatten()
-                        .ok_or_else(|| ExtError::new("not-found", format!("Session not found: {id}")))
+                        .ok_or_else(|| {
+                            ExtError::new("not-found", format!("Session not found: {id}"))
+                        })
                 }
                 "sessions.launch" => {
                     let project = project.ok_or_else(|| needs(m, "the project to start it in"))?;
@@ -137,11 +147,11 @@ impl World for Wired {
                     };
                     Ok(json!({ "sessionId": started.get("id").cloned().unwrap_or(Value::Null) }))
                 }
-                "terminal.read" | "terminal.send" | "terminal.selection" | "card.rename" | "agent.usage" => {
-                    let host = native
-                        .extensions()
-                        .cloned()
-                        .ok_or_else(|| ExtError::new("unsupported", "vornd is not hosting extensions"))?;
+                "terminal.read" | "terminal.send" | "terminal.selection" | "card.rename"
+                | "agent.usage" => {
+                    let host = native.extensions().cloned().ok_or_else(|| {
+                        ExtError::new("unsupported", "vornd is not hosting extensions")
+                    })?;
                     super::routes::session_call(&host, &extension, m, &args)
                         .await
                         .map_err(|e| ExtError::new("failed", e))
@@ -161,18 +171,28 @@ impl World for Wired {
                     .map_err(|e| ExtError::new("failed", e.to_string()))
                 }
                 "git.diff" => {
-                    let dir = text(&args, "worktree").or(project).ok_or_else(|| needs(m, "the worktree to read"))?;
+                    let dir = text(&args, "worktree")
+                        .or(project)
+                        .ok_or_else(|| needs(m, "the worktree to read"))?;
                     ask(&native, "git:diffFull", json!(dir)).await
                 }
                 "git.commit" => {
-                    let dir = text(&args, "worktree").or(project).ok_or_else(|| needs(m, "the worktree to commit in"))?;
-                    let message = text(&args, "message").ok_or_else(|| needs(m, "the commit message"))?;
-                    let unstaged = args.get("includeUnstaged").and_then(Value::as_bool).unwrap_or(false);
-                    let params = json!({ "cwd": dir, "message": message, "includeUnstaged": unstaged });
+                    let dir = text(&args, "worktree")
+                        .or(project)
+                        .ok_or_else(|| needs(m, "the worktree to commit in"))?;
+                    let message =
+                        text(&args, "message").ok_or_else(|| needs(m, "the commit message"))?;
+                    let unstaged = args
+                        .get("includeUnstaged")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let params =
+                        json!({ "cwd": dir, "message": message, "includeUnstaged": unstaged });
                     ask(&native, "git:commit", params).await
                 }
                 "files.read" => {
-                    let path = text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
+                    let path =
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
                     let mut params = json!({ "filePath": path });
                     if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
                         params["maxBytes"] = max.clone();
@@ -180,13 +200,24 @@ impl World for Wired {
                     ask(&native, "file:readContent", params).await
                 }
                 "files.write" => {
-                    let path = text(&args, "path").ok_or_else(|| needs(m, "the absolute path to write"))?;
-                    let content = args.get("content").and_then(Value::as_str).ok_or_else(|| needs(m, "the content to write"))?;
-                    ask(&native, "file:writeContent", json!({ "filePath": path, "content": content })).await
+                    let path = text(&args, "path")
+                        .ok_or_else(|| needs(m, "the absolute path to write"))?;
+                    let content = args
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| needs(m, "the content to write"))?;
+                    ask(
+                        &native,
+                        "file:writeContent",
+                        json!({ "filePath": path, "content": content }),
+                    )
+                    .await
                 }
                 "secrets.get" => {
-                    let connection = text(&args, "connection").ok_or_else(|| needs(m, "the connection to read"))?;
-                    let field = text(&args, "field").ok_or_else(|| needs(m, "the field to read"))?;
+                    let connection = text(&args, "connection")
+                        .ok_or_else(|| needs(m, "the connection to read"))?;
+                    let field =
+                        text(&args, "field").ok_or_else(|| needs(m, "the field to read"))?;
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
                 }
@@ -266,7 +297,9 @@ impl World for Wired {
                 }
                 Ok::<_, vorn_store::Error>(match call {
                     StorageCall::Prefix => json!(tables.prefix()),
-                    StorageCall::Query { sql, params } => Value::Array(tables.query(&sql, &params)?),
+                    StorageCall::Query { sql, params } => {
+                        Value::Array(tables.query(&sql, &params)?)
+                    }
                     StorageCall::Exec { sql, params } => json!(tables.exec(&sql, &params)?),
                     StorageCall::Get { key } => tables.get(&key)?.unwrap_or(Value::Null),
                     StorageCall::Set { key, value } => {

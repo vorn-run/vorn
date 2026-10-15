@@ -231,7 +231,9 @@ pub(super) async fn session_call(
         renamed_by_person: session.renamed_by_person,
     };
     let asked = bridge::request(&caller, short, Some(view), &body).map_err(|r| r.message)?;
-    Ok(run(extensions, asked, &session).await?.unwrap_or(Value::Null))
+    Ok(run(extensions, asked, &session)
+        .await?
+        .unwrap_or(Value::Null))
 }
 
 /// The extension's own reads, once the caller and the session are settled.

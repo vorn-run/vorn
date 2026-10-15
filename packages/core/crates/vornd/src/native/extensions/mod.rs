@@ -60,6 +60,7 @@ pub const METHODS: &[&str] = &[
     "extension:running",
     "extension:mcpTools",
     "extension:mcpCall",
+    "extension:setSandbox",
 ];
 
 /// The longest tool name MCP clients take.
@@ -388,6 +389,20 @@ impl Extensions {
                 .await
                 .map(|tools| Value::Array(tools.into_iter().map(|t| t.listed).collect())),
             "extension:mcpCall" => self.mcp_call(params).await,
+            "extension:setSandbox" => {
+                let (id, on) = (
+                    text(params, "id"),
+                    params.get("on").and_then(Value::as_bool),
+                );
+                match on {
+                    Some(on) => self
+                        .router
+                        .set_sandboxed(id, on)
+                        .await
+                        .map(|()| json!({ "id": id, "sandboxed": on })),
+                    None => Err("extension:setSandbox takes on: true or false".to_owned()),
+                }
+            }
             "extension:rows" => Ok(Value::Array(
                 self.router
                     .rows(text(params, "id"), text(params, "collection")),
@@ -482,11 +497,18 @@ impl Extensions {
     /// An agent called an extension's MCP tool: `guest.handle("mcp.<tool>")` on its service.
     async fn mcp_call(&self, params: &Value) -> Result<Value, String> {
         let name = text(params, "name");
-        let found = self.listed_tools().await?.into_iter().find(|t| t.name == name);
+        let found = self
+            .listed_tools()
+            .await?
+            .into_iter()
+            .find(|t| t.name == name);
         let Some(tool) = found else {
             return Err(format!("No extension offers the MCP tool {name}"));
         };
-        let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        let args = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
         let ctx = CallCtx {
             caller: "mcp".to_owned(),
             project: None,
@@ -501,7 +523,9 @@ impl Extensions {
                 let text = serde_json::to_string_pretty(&other).unwrap_or_default();
                 json!({ "content": [{ "type": "text", "text": text }] })
             }
-            Err(err) => json!({ "content": [{ "type": "text", "text": err.message }], "isError": true }),
+            Err(err) => {
+                json!({ "content": [{ "type": "text", "text": err.message }], "isError": true })
+            }
         })
     }
 
@@ -516,6 +540,8 @@ impl Extensions {
             .map(|pack| {
                 let mut value = json!(pack);
                 value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
+                value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
+                value["sandboxAvailable"] = json!(vorn_extensions::sandbox::available());
                 value
             })
             .collect();

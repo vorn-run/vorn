@@ -198,7 +198,11 @@ async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
     let Some(schema) = zod::registry().tool(name) else {
         let asked = json!({ "name": name, "arguments": params.get("arguments").cloned().unwrap_or(json!({})) });
         return match rpc
-            .call("extension:mcpCall", Some(asked), crate::rpc::DEFAULT_TIMEOUT * 6)
+            .call(
+                "extension:mcpCall",
+                Some(asked),
+                crate::rpc::DEFAULT_TIMEOUT * 6,
+            )
             .await
         {
             Ok(result) => normalize_result(result),

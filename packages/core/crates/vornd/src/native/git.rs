@@ -207,9 +207,10 @@ fn commit(native: &Native, params: &Value) -> Option<Value> {
         git.commit(Path::new(cwd), message, include_unstaged)
     });
     if done == Done::Ok {
-        native
-            .events()
-            .emit(vorn_extensions::events::GIT_CHANGED, || json!({ "worktreePath": cwd }));
+        native.events().emit(
+            vorn_extensions::events::GIT_CHANGED,
+            || json!({ "worktreePath": cwd }),
+        );
     }
     Some(done_json(done))
 }

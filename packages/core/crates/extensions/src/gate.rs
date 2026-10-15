@@ -44,7 +44,12 @@ pub trait World: Send + Sync + 'static {
         _migrations: Option<PathBuf>,
         _call: StorageCall,
     ) -> Answer<Value> {
-        Box::pin(async { Err(ExtError::new("unsupported", "this Vorn keeps no extension tables")) })
+        Box::pin(async {
+            Err(ExtError::new(
+                "unsupported",
+                "this Vorn keeps no extension tables",
+            ))
+        })
     }
 }
 
@@ -70,7 +75,10 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
     }
     Err(ExtError::new(
         "denied",
-        format!("{} does not declare storage, which storage.* needs", manifest.id),
+        format!(
+            "{} does not declare storage, which storage.* needs",
+            manifest.id
+        ),
     ))
 }
 
@@ -379,7 +387,10 @@ header = "Authorization: Bearer {token}"
         let err = admit_storage(&manifest()).unwrap_err();
         assert_eq!(
             (err.code.as_str(), err.message.as_str()),
-            ("denied", "x does not declare storage, which storage.* needs")
+            (
+                "denied",
+                "x does not declare storage, which storage.* needs"
+            )
         );
         let mut m = manifest();
         m.permissions = Some(vec![Permission::Storage]);

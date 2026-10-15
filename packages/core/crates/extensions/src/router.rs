@@ -24,6 +24,7 @@ use crate::gate::{self, Caller, StorageCall, World};
 use crate::lifecycle::{Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
+use crate::sandbox;
 
 /// What every program is started with.
 #[derive(Debug, Clone)]
@@ -167,12 +168,7 @@ impl Router {
                 .or_insert_with(|| {
                     let (tx, rx) = mpsc::channel(events::QUEUE);
                     let tally = Arc::new(Tally::default());
-                    tokio::spawn(deliver(
-                        self.me.clone(),
-                        id.clone(),
-                        rx,
-                        Arc::clone(&tally),
-                    ));
+                    tokio::spawn(deliver(self.me.clone(), id.clone(), rx, Arc::clone(&tally)));
                     Queue {
                         tx,
                         tally: Some(tally),
@@ -187,9 +183,7 @@ impl Router {
     /// Resolves once every event queued for extension `id` so far has been
     /// handed to it, or dropped because it could not start.
     pub async fn settled(&self, id: &str) {
-        let tally = guard(&self.queues)
-            .get(id)
-            .and_then(|q| q.tally.clone());
+        let tally = guard(&self.queues).get(id).and_then(|q| q.tally.clone());
         if let Some(tally) = tally {
             tally.settled().await;
         }
@@ -217,6 +211,23 @@ impl Router {
             guard(&self.packs).insert(id.to_owned(), (stamp, Arc::clone(&pack)));
         }
         Ok(pack)
+    }
+
+    /// Whether extension `id`'s programs start under the macOS sandbox profile.
+    pub fn sandboxed(&self, id: &str) -> bool {
+        sandbox::available() && sandbox::is_on(&self.store.root().join(id))
+    }
+
+    /// Turns the sandbox profile on or off for extension `id`; its running
+    /// programs stop, so the next start is under the new setting.
+    pub async fn set_sandboxed(&self, id: &str, on: bool) -> Result<(), String> {
+        let pack = self.pack(id)?;
+        if pack.manifest.service.is_none() && pack.manifest.runs.is_empty() {
+            return Err(format!("{} runs no program to hold", pack.name()));
+        }
+        sandbox::set(&self.store.root().join(id), on)?;
+        self.lifecycle.stop_extension(id).await;
+        Ok(())
     }
 
     /// Package `id`, if it is a program in the extension API.
@@ -320,12 +331,16 @@ impl Router {
         let mut env = self.settings.base_env.clone();
         env.retain(|(k, _)| k != "VORN_EXTENSION_ID");
         env.push(("VORN_EXTENSION_ID".into(), pack.id.clone()));
-        Ok(Launch {
+        let launch = Launch {
             program,
             args,
             cwd: PathBuf::from(&pack.path),
             env,
-        })
+        };
+        if self.sandboxed(&pack.id) {
+            return Ok(sandbox::wrap(launch, &pack.path));
+        }
+        Ok(launch)
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.

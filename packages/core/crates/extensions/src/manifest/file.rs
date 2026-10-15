@@ -433,9 +433,12 @@ fn is_relative_path(path: &str) -> bool {
     let p = std::path::Path::new(path);
     !path.is_empty()
         && p.is_relative()
-        && p
-            .components()
-            .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+        && p.components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
 }
 
 fn is_word(id: &str) -> bool {
@@ -584,13 +587,22 @@ impl Raw {
                 ));
             }
             if self.service.is_none() {
-                return Err(at(&field, "is answered by the service, and there is none".into()));
+                return Err(at(
+                    &field,
+                    "is answered by the service, and there is none".into(),
+                ));
             }
             if tool.description.trim().is_empty() {
-                return Err(at(&format!("{field}.description"), "is empty; an agent reads it to pick the tool".into()));
+                return Err(at(
+                    &format!("{field}.description"),
+                    "is empty; an agent reads it to pick the tool".into(),
+                ));
             }
             if tool.input.as_deref().is_some_and(|p| !is_relative_path(p)) {
-                return Err(at(&format!("{field}.input"), "names a file inside the package".into()));
+                return Err(at(
+                    &format!("{field}.input"),
+                    "names a file inside the package".into(),
+                ));
             }
         }
         for (id, run) in &self.actions {
@@ -1493,7 +1505,11 @@ header = "Authorization: Bearer {token}"
         assert_eq!((err.line, err.field.as_str()), (9, "service.events[0]"));
         let err = parse(&SERVICE.replace("session.exited", "session.exit")).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (9, "service.events[0]"));
-        assert!(err.message.starts_with("Vorn has no event `session.exit`; it has session.created"), "{err}");
+        assert!(
+            err.message
+                .starts_with("Vorn has no event `session.exit`; it has session.created"),
+            "{err}"
+        );
         let err = parse("id = \"x\"\nname = = 1\n").unwrap_err();
         assert_eq!(err.line, 2);
     }

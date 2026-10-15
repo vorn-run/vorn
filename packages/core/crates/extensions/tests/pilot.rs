@@ -359,3 +359,96 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
     assert_ne!(first, second);
     lifecycle.stop_all().await;
 }
+
+/// The macOS sandbox profile: the pilot connector polls, acts and recovers
+/// under it unchanged, and a program under it writes only inside its own
+/// folder and opens no socket of its own.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn under_the_sandbox_profile_the_pilot_runs_and_writes_stay_in_its_folder() {
+    use vorn_extensions::sandbox;
+    if !sandbox::available() || !has("git") || !has("node") || !has("bash") {
+        return;
+    }
+    let source = repository();
+    let root = tempfile::tempdir().unwrap();
+    let installs = Installs::new(PackStore::new(root.path()), "git", env());
+    let url = format!("file://{}", source.path().display());
+    let sheet = installs.inspect_git(&url, None).unwrap();
+    let pack = installs.confirm(&sheet.token, "test.feeds").unwrap();
+    sandbox::set(&root.path().join("test.feeds"), true).unwrap();
+    let held = |argv: &[String]| {
+        let mut l = launch(&pack, argv);
+        l.launch = sandbox::wrap(l.launch, &pack.path);
+        l
+    };
+    let service_argv = pack.manifest.service.clone().unwrap().command;
+    let lifecycle = Lifecycle::new(Policy::default());
+    let key = ServiceKey::new(pack.id.clone(), "connection:c1");
+    let started = Instant::now();
+    let polled = lifecycle
+        .get_or_start(&key, || async {
+            connector::open(&held(&service_argv), "Feeds", "test", timeouts())
+                .await
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .unwrap()
+        .poll("new-item", None, None)
+        .await
+        .unwrap();
+    eprintln!("sandboxed start and poll: {:?}", started.elapsed());
+    assert_eq!(polled["items"][0]["title"], "First post");
+    let run = pack.manifest.run("read").unwrap();
+    let client = connector::open(&held(&run.command), "Feeds", "test", timeouts())
+        .await
+        .unwrap();
+    let mut args = Map::new();
+    args.insert("url".into(), json!("https://feeds.example.com/rss"));
+    let read = client.action("read", &args, None).await.unwrap();
+    client.close().await;
+    assert_eq!(read["read"], "https://feeds.example.com/rss");
+    lifecycle.stop_all().await;
+
+    // A program extension under the profile, through the router.
+    let folder = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(
+        folder.path().join("vorn-extension.toml"),
+        "id = \"test.held\"\nname = \"Held\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[actions.try]\ncommand = [\"bash\", \"try.sh\"]\n",
+    )
+    .unwrap();
+    let script = format!(
+        r#"read -r _
+inside=denied; echo x > ./inside.txt && inside=ok
+outside=denied; echo x > '{}/outside.txt' 2>/dev/null && outside=ok
+socket=$( {{ exec 3<>/dev/tcp/127.0.0.1/9; }} 2>&1 )
+case "$socket" in *"not permitted"*) socket=denied ;; *) socket=allowed ;; esac
+printf '{{"jsonrpc":"2.0","id":1,"result":{{"inside":"%s","outside":"%s","socket":"%s"}}}}\n' $inside $outside $socket
+"#,
+        outside.path().display()
+    );
+    fs::write(folder.path().join("try.sh"), script).unwrap();
+    let packs = tempfile::tempdir().unwrap();
+    let store = PackStore::new(packs.path());
+    Installs::new(store.clone(), "git", env())
+        .link(folder.path())
+        .unwrap();
+    let r = router(store, Lifecycle::new(Policy::default()));
+    let free = r.call("test.held", "try", json!({}), ctx()).await.unwrap();
+    assert_eq!(
+        free,
+        json!({ "inside": "ok", "outside": "ok", "socket": "allowed" })
+    );
+    fs::remove_file(outside.path().join("outside.txt")).unwrap();
+    r.set_sandboxed("test.held", true).await.unwrap();
+    assert!(r.sandboxed("test.held"));
+    let started = Instant::now();
+    let held = r.call("test.held", "try", json!({}), ctx()).await.unwrap();
+    eprintln!("sandboxed bash one-shot: {:?}", started.elapsed());
+    assert_eq!(
+        held,
+        json!({ "inside": "ok", "outside": "denied", "socket": "denied" })
+    );
+    assert!(!outside.path().join("outside.txt").exists());
+}

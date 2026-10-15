@@ -565,6 +565,9 @@ async fn the_token_never_reaches_the_program() {
     let lines = record["received"].as_array().unwrap();
     assert!(lines.len() >= 3, "{record}");
     let seen = record.to_string();
-    assert!(!seen.contains("t0ken"), "the program was given the token: {seen}");
+    assert!(
+        !seen.contains("t0ken"),
+        "the program was given the token: {seen}"
+    );
     b.lifecycle.stop_all().await;
 }

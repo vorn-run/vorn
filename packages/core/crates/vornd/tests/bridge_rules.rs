@@ -98,13 +98,18 @@ async fn mcp(addr: SocketAddr, session: Option<&str>, body: Value) -> (Option<St
         .get("mcp-session-id")
         .map(|v| v.to_str().unwrap().to_owned());
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (session, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        session,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn tables(db: &std::path::Path) -> Vec<String> {
     let conn = rusqlite::Connection::open(db).unwrap();
     let mut stmt = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'x\\_%' ESCAPE '\\'")
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'x\\_%' ESCAPE '\\'",
+        )
         .unwrap();
     let names = stmt
         .query_map([], |r| r.get::<_, String>(0))
@@ -147,7 +152,8 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
         refused["error"]["message"],
         "test.rules does not declare git.read, which git.status needs"
     );
-    let req = json!({ "method": "GET", "url": "https://evil.example/x", "headers": [], "body": null });
+    let req =
+        json!({ "method": "GET", "url": "https://evil.example/x", "headers": [], "body": null });
     let refused = c
         .relay("net.fetch", json!({ "req": req, "connection": null }))
         .await;
@@ -157,7 +163,8 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
     );
 
     // Its own tables, made by its migration, and nobody else's.
-    let insert = json!({ "sql": "INSERT INTO x_test_0rules_notes (body) VALUES (?)", "params": ["hi"] });
+    let insert =
+        json!({ "sql": "INSERT INTO x_test_0rules_notes (body) VALUES (?)", "params": ["hi"] });
     assert_eq!(c.relay("storage.exec", insert).await["result"], 1);
     let read = json!({ "sql": "SELECT body FROM x_test_0rules_notes", "params": [] });
     assert_eq!(
@@ -213,7 +220,9 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
     assert_eq!(echoed, json!({ "echoed": { "n": 7 } }), "{called}");
 
     // Removed, it leaves no table behind.
-    let removed = c.call("extension:remove", json!({ "id": "test.rules" })).await;
+    let removed = c
+        .call("extension:remove", json!({ "id": "test.rules" }))
+        .await;
     assert!(removed.get("error").is_none(), "{removed}");
     assert!(tables(&db).is_empty(), "{:?}", tables(&db));
 }

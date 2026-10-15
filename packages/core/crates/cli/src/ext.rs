@@ -21,11 +21,14 @@ pub const EXT_USAGE: &str = "Usage
   vorn ext link <folder> [--json]
   vorn ext remove <id>
   vorn ext list [--json]
+  vorn ext sandbox <id> on|off
   vorn ext pack [<folder>] [--out <file>] [--json]
 
 An extension runs as you. install shows what it runs, the hosts it reaches,
 the Vorn methods it uses and what it adds, and runs nothing of it until you
 type its id. --confirm <id> types it for a script that has read the sheet.
+On macOS, sandbox on starts its programs with no network of their own and
+writes only inside its folder.
 ";
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -205,6 +208,32 @@ async fn remove(ctx: &mut Context<'_>, id: Option<&str>) -> Result<ExitCode, Com
     Ok(ExitCode::Ok)
 }
 
+async fn sandbox(
+    ctx: &mut Context<'_>,
+    id: Option<&str>,
+    switch: Option<&str>,
+) -> Result<ExitCode, CommandError> {
+    let (Some(id), Some(on)) = (
+        id.filter(|i| !i.is_empty()),
+        switch.and_then(|s| match s {
+            "on" => Some(true),
+            "off" => Some(false),
+            _ => None,
+        }),
+    ) else {
+        return Ok(ctx.usage("ext sandbox needs an extension id and on or off", EXT_USAGE));
+    };
+    ctx.call("extension:setSandbox", Some(json!({ "id": id, "on": on })))
+        .await?;
+    let said = if on {
+        "starts under the sandbox profile from now on"
+    } else {
+        "starts without the sandbox profile from now on"
+    };
+    ctx.io.write(&format!("{id} {said}\n"));
+    Ok(ExitCode::Ok)
+}
+
 async fn list(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> {
     let packs = ctx.call("extension:installed", None).await?;
     if ctx.args.json {
@@ -226,15 +255,19 @@ async fn list(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> {
             } else {
                 "pack".to_owned()
             };
-            let state = if p["running"] == true {
+            let mut state = if p["running"] == true {
                 "running"
             } else {
                 "stopped"
-            };
+            }
+            .to_owned();
+            if p["sandboxed"] == true {
+                state.push_str(", sandboxed");
+            }
             vec![
                 text(p, "id").to_owned(),
                 text(p, "version").to_owned(),
-                state.to_owned(),
+                state,
                 from,
             ]
         })
@@ -290,7 +323,7 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
     if verb == "pack" {
         return pack(ctx, first);
     }
-    if !["install", "link", "remove", "list"].contains(&verb) {
+    if !["install", "link", "remove", "list", "sandbox"].contains(&verb) {
         return ctx.usage(&format!("unknown ext command \"{verb}\""), EXT_USAGE);
     }
     if !ctx.server().await {
@@ -300,6 +333,10 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
         "install" => install(ctx, first).await,
         "link" => link(ctx, first).await,
         "remove" => remove(ctx, first).await,
+        "sandbox" => {
+            let switch = positionals.get(3).map(String::as_str);
+            sandbox(ctx, first, switch).await
+        }
         _ => list(ctx).await,
     };
     match done {
@@ -328,9 +365,14 @@ mod tests {
             text.contains("  build      npm ci\n  action go  sh go.sh\n"),
             "{text}"
         );
-        assert!(text.contains("It runs (declared, not enforced)\n"), "{text}");
+        assert!(
+            text.contains("It runs (declared, not enforced)\n"),
+            "{text}"
+        );
         assert!(text.contains("It reaches, through Vorn (enforced by Vorn)\n  api.example.com\n"));
-        assert!(text.contains("It asks Vorn for (enforced by Vorn)\n  sessions.read (sessions.list)\n"));
+        assert!(
+            text.contains("It asks Vorn for (enforced by Vorn)\n  sessions.read (sessions.list)\n")
+        );
         assert!(text.contains("It adds (declared, not enforced)\n  nothing\n"));
         assert!(text.ends_with("\nY runs as you.\n"));
     }
