@@ -389,7 +389,7 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
     any.then(|| div().absolute_right(16.0, 16.0).layered().child(col))
 }
 
-/// Built-in extensions' switches, for Settings › Extensions.
+/// Built-in extensions' switches, for Settings › Plugins.
 pub(super) fn builtins(s: &Screen<'_>) -> Option<El> {
     if s.st.points.builtins.is_empty() {
         return None;

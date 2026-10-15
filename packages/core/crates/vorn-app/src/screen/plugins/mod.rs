@@ -31,7 +31,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         .col()
         .child(header(
             "Plugins",
-            "Connectors watch a service and start workflows. Extensions add footers and panes to a card. Both install as packs from the same directory.",
+            "Connectors watch a service and start workflows. Extensions add sections, badges, panes, commands and pages. Both install as packs from the same directory.",
             None,
         ))
         .child(tabs(s, p.tab));

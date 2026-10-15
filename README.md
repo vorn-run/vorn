@@ -184,7 +184,7 @@ Agents running inside Vorn can access tasks, projects, workflows, sessions, and 
 
 ### Floating Widget
 
-A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, get notified on permission requests, and jump back into any session with one click.
+A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance and jump back into any session with one click. It is a built-in extension, off until you turn it on in Settings › Plugins; Cmd+Alt+W shows or hides it.
 
 <p align="center">
   <img src="docs/screenshots/floating-widget.png" alt="Floating widget" width="400" />
@@ -193,6 +193,7 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 ### More
 
 - **Web Client** — the same app in a browser or on your phone, compiled to WebAssembly and served by vornd (`vornd --web`); pair a phone or another computer with a code from the desktop app
+- **Extensions** — add sidebar sections, card badges and footers, panes, windows, palette commands, settings pages and more, drawn from KDL templates on the desktop, in the browser and in the terminal alike; see [`examples/extensions/turns`](examples/extensions/turns)
 - **Remote Hosts** — launch terminals on remote machines via SSH
 - **Terminal Panel** — lightweight shell tabs for quick operations
 - **Project Management** — organize sessions by project with custom icons, colors, and preferred agents

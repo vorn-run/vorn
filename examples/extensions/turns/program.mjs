@@ -127,7 +127,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     if (result === undefined) {
       return send({
         id,
-        error: { code: -32000, message: `Turns has no action ${params.method}`, data: { code: 'unknown-action' } }
+        error: {
+          code: -32000,
+          message: `Turns has no action ${params.method}`,
+          data: { code: 'unknown-action' }
+        }
       })
     }
     return send({ id, result })
