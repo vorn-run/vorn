@@ -71,9 +71,18 @@ impl App {
                     return;
                 };
                 if let Some(w) = &p.window {
-                    let wkey = format!("{}/{}/{w}", p.extension, kind::WINDOWS);
-                    let open = !self.st.points.windows.contains(&wkey);
-                    self.run_point(ui, PointAct::Window { key: wkey, open });
+                    // Whichever of its extension's windows is open hides.
+                    let mine = format!("{}/{}/", p.extension, kind::WINDOWS);
+                    let open: Vec<String> = (self.st.points.windows.iter())
+                        .filter(|k| k.starts_with(&mine))
+                        .cloned()
+                        .collect();
+                    if open.is_empty() {
+                        self.open_window(&format!("{mine}{w}"));
+                    }
+                    for key in open {
+                        self.close_window(&key);
+                    }
                 } else if let Some(params) = points::choose_params(&p, &args) {
                     self.call(Call::Point(PointCall::Called), "extension:call", params);
                 }
@@ -130,6 +139,9 @@ impl App {
         }
         if press.show || press.focus.is_some() {
             ui.request(WindowRequest::Focus);
+        }
+        if let Some(w) = &press.window {
+            self.open_window(&format!("{extension}/{}/{w}", kind::WINDOWS));
         }
     }
 
@@ -308,8 +320,17 @@ impl App {
     }
 
     fn open_window(&mut self, key: &str) {
-        if self.st.points.get(key).is_none() {
+        let Some(p) = self.st.points.get(key) else {
             return;
+        };
+        // An extension shows one window at a time: one opens in place of another.
+        let mine = format!("{}/{}/", p.extension, kind::WINDOWS);
+        let others: Vec<String> = (self.st.points.windows.iter())
+            .filter(|k| k.starts_with(&mine) && *k != key)
+            .cloned()
+            .collect();
+        for k in others {
+            self.close_window(&k);
         }
         self.st.points.windows.insert(key.to_owned());
         if self.own_windows() && !self.panels.contains_key(key) {
@@ -370,6 +391,9 @@ impl App {
         for (key, r) in &mut self.panels {
             asked.extend(r.lines.try_iter());
             if matches!(r.child.try_wait(), Ok(Some(_))) {
+                // Its last lines (an `open` before it hid) may still be in the pipe.
+                let late = std::time::Duration::from_millis(50);
+                asked.extend(std::iter::from_fn(|| r.lines.recv_timeout(late).ok()));
                 gone.push(key.clone());
             }
         }
@@ -387,6 +411,7 @@ impl App {
                 }
                 Request::Show => ui.request(WindowRequest::Focus),
                 Request::Hide => {}
+                Request::Open(key) => self.open_window(&key),
             }
         }
     }

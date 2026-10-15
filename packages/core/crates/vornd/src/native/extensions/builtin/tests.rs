@@ -117,6 +117,7 @@ async fn every_shipped_template_reads_without_an_error() {
             ("vorn.worktrees", "dialogs"),
             ("vorn.widget", "commands"),
             ("vorn.widget", "windows"),
+            ("vorn.widget", "windows"),
         ]
     );
     for c in &listed {
@@ -264,4 +265,64 @@ async fn the_widget_is_off_until_switched_on_and_kept_so() {
         .emit(AGENT_PERMISSION, || json!({ "requestId": "r3" }));
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert!(s.router.rows("vorn.widget", "permissions").is_empty());
+}
+
+#[tokio::test]
+async fn the_widget_keeps_an_offered_rule_and_answers_questions() {
+    let s = setup();
+    s.builtins.start();
+    s.builtins.set("vorn.widget", true).unwrap();
+    until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
+    let rows = |c: &str| s.router.rows("vorn.widget", c);
+    s.router.bus().emit(AGENT_PERMISSION, || {
+        json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
+                "toolInput": { "command": "npm test" },
+                "permissionSuggestions": [
+                    { "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm test" }] },
+                    { "type": "setMode", "mode": "acceptEdits" }
+                ] })
+    });
+    until(|| rows("suggestions").len() == 2).await;
+    assert_eq!(rows("suggestions")[1]["label"], "Auto-accept edits");
+    s.builtins
+        .call("vorn.widget", "suggest", json!({ "id": "r1:0" }))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        s.core.asked("permissions.resolve"),
+        [json!({ "requestId": "r1", "allow": true, "suggestion": 0 })]
+    );
+    assert!(rows("permissions").is_empty() && rows("suggestions").is_empty());
+
+    s.router.bus().emit(AGENT_PERMISSION, || {
+        json!({ "requestId": "r2", "terminalId": "t1", "toolName": "AskUserQuestion",
+                "questions": [
+                    { "header": "Theme", "question": "Which?", "options": [{ "label": "Dark" }, { "label": "Light" }] },
+                    { "question": "Tabs?", "options": [{ "label": "Yes" }] }
+                ] })
+    });
+    until(|| rows("options").len() == 3).await;
+    assert_eq!(rows("permissions")[0]["question"], json!(true));
+    assert_eq!(rows("options")[0]["ask"], "THEME: Which?");
+    let call = |action: &'static str, id: &'static str| {
+        s.builtins.call("vorn.widget", action, json!({ "id": id }))
+    };
+    call("pick", "r2:0:0").await.unwrap().unwrap();
+    call("pick", "r2:0:1").await.unwrap().unwrap();
+    assert!(call("submit", "r2").await.unwrap().is_err());
+    assert_eq!(rows("permissions")[0]["ready"], json!(false));
+    call("pick", "r2:1:0").await.unwrap().unwrap();
+    assert_eq!(rows("permissions")[0]["ready"], json!(true));
+    let picked: Vec<Value> = rows("options")
+        .iter()
+        .map(|o| o["picked"].clone())
+        .collect();
+    assert_eq!(picked, [json!(false), json!(true), json!(true)]);
+    call("submit", "r2").await.unwrap().unwrap();
+    assert_eq!(
+        s.core.asked("permissions.resolve")[1],
+        json!({ "requestId": "r2", "allow": true, "answers": { "0": "Light", "1": "Yes" } })
+    );
+    assert!(rows("permissions").is_empty() && rows("options").is_empty());
 }

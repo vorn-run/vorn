@@ -1508,13 +1508,13 @@ fn read_point(
                     .collect()
             });
             match wh.as_deref() {
-                Some([w, h]) if (160..=2000).contains(w) && (120..=2000).contains(h) => {
+                Some([w, h]) if (160..=2000).contains(w) && (80..=2000).contains(h) => {
                     Some([*w, *h])
                 }
                 _ => {
                     return Err((
                         "size",
-                        "is a width of 160 to 2000 and a height of 120 to 2000".into(),
+                        "is a width of 160 to 2000 and a height of 80 to 2000".into(),
                     ))
                 }
             }

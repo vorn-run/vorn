@@ -221,7 +221,7 @@ impl Reader<'_> {
             let (key, into) = match (kind, k) {
                 (_, "when") => (format!("{path}.when"), &mut o),
                 ("status" | "badge", _) => (format!("{path}.tones.{k}"), &mut tones),
-                ("button", "open" | "call" | "focus" | "show" | "close") => {
+                ("button", "open" | "call" | "focus" | "show" | "close" | "window") => {
                     (format!("{path}.action.{k}"), &mut action)
                 }
                 _ => (format!("{path}.{k}"), &mut o),

@@ -14,6 +14,12 @@ view = "views/widget.kdl"
 size = [280, 400]
 raise = "permissions"
 
+[[contributes.windows]]
+id = "compact"
+title = "Vorn"
+view = "views/compact.kdl"
+size = [240, 84]
+
 [[contributes.commands]]
 id = "toggle"
 title = "Toggle Widget"

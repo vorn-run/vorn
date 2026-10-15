@@ -122,6 +122,10 @@ impl Panel {
         } else if press.show {
             self.out.push(Request::Show);
         }
+        if let Some(w) = &press.window {
+            let key = format!("{extension}/{}/{w}", points::kind::WINDOWS);
+            self.out.push(Request::Open(key));
+        }
         if press.close {
             self.out.push(Request::Hide);
         }

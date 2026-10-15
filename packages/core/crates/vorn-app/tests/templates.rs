@@ -1,7 +1,7 @@
 //! A real extension (examples/extensions/turns) with a template for every
 //! place that takes one, drawn by the one renderer on each surface: the
 //! window (Pixels) and the terminal (Cells) at 120x36 and 80x24. Its views
-//! also redraw live as their files change.
+//! also redraw live as their files change. The Widget built-in draws the same way.
 //! `VORN_APP_SHOT=<prefix>` saves each state: a PNG, and the terminal's
 //! cells as HTML and text.
 
@@ -369,4 +369,106 @@ fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
 
     fs::write(&view, &was).expect("fix");
     redraw(shot, app, "Counting", "the fixed view");
+}
+
+/// The Widget built-in: a request's suggestions and an agent's questions in its
+/// window, which folds to a line of counts and back, on every surface.
+#[test]
+fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    const W: &str = "vorn.widget";
+    let mut app = connect(&v);
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": W, "on": true }))
+        .expect("the widget on");
+    let (full, compact) = (
+        format!("{W}/windows/widget"),
+        format!("{W}/windows/compact"),
+    );
+    let mut shot = Shot::new();
+    shot.until(&mut app, "the widget's windows", |a, _| {
+        let drawn = [&full, &compact]
+            .iter()
+            .all(|k| a.st.points.get(k).is_some_and(|p| p.template.is_ok()));
+        let read = ["agents", "permissions", "suggestions", "options"]
+            .iter()
+            .all(|c| a.st.points.rows_of(W).contains_key(*c));
+        (drawn && read).then_some(())
+    });
+    let up = |row: serde_json::Value| json!({ "op": "upsert", "row": row });
+    let rows = [
+        (
+            "permissions",
+            vec![
+                up(
+                    json!({ "id": "p1", "tool": "Bash", "agent": "api", "description": "npm test", "question": false, "ready": false }),
+                ),
+                up(
+                    json!({ "id": "p2", "tool": "AskUserQuestion", "agent": "web", "description": "", "question": true, "ready": false }),
+                ),
+            ],
+        ),
+        (
+            "suggestions",
+            vec![
+                up(json!({ "id": "p1:0", "request": "p1", "label": "Always allow `npm test`" })),
+                up(json!({ "id": "p1:1", "request": "p1", "label": "Allow Bash in src/" })),
+            ],
+        ),
+        (
+            "options",
+            vec![
+                up(
+                    json!({ "id": "p2:0:0", "request": "p2", "ask": "COLOUR: Which theme?", "label": "Dark", "picked": true }),
+                ),
+                up(
+                    json!({ "id": "p2:0:1", "request": "p2", "ask": "", "label": "Light", "picked": false }),
+                ),
+            ],
+        ),
+    ];
+    for (collection, ops) in rows {
+        app.st.points.changed(W, collection, &ops);
+    }
+
+    shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
+    shot.until(&mut app, "the widget", |a, _| {
+        a.st.points.windows.contains(&full).then_some(())
+    });
+    let asks = [
+        "npm test",
+        "Always allow `npm test`",
+        "Allow Bash in src/",
+        "COLOUR: Which theme?",
+        "Dark",
+        "Light",
+        "Skip",
+    ];
+    every_surface(&mut shot, &mut app, "w-widget", &asks, &asks[..3]);
+
+    let collapse = shot.button(&mut app, "Collapse").expect("Collapse");
+    shot.click(&mut app, collapse);
+    shot.until(&mut app, "the line", |a, _| {
+        let w = &a.st.points.windows;
+        (w.contains(&compact) && !w.contains(&full)).then_some(())
+    });
+    every_surface(
+        &mut shot,
+        &mut app,
+        "w-compact",
+        &["No active agents", "Expand"],
+        &["No active agents", "Expand"],
+    );
+
+    let expand = shot.button(&mut app, "Expand").expect("Expand");
+    shot.click(&mut app, expand);
+    shot.until(&mut app, "the widget again", |a, _| {
+        let w = &a.st.points.windows;
+        (w.contains(&full) && !w.contains(&compact)).then_some(())
+    });
+    shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
+    shot.frame(&mut app);
+    assert!(!app.st.points.windows.iter().any(|k| k.starts_with(W)));
 }

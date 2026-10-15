@@ -159,6 +159,8 @@ pub enum Kind {
         rows: String,
         item: Box<Node>,
         empty: Option<Text>,
+        /// Only the rows whose field equals the text, read in the enclosing item: a list inside one.
+        only: Option<(String, Text)>,
     },
     Divider,
 }
@@ -189,8 +191,8 @@ pub enum Style {
     Danger,
 }
 
-/// What a button does. At most one of `call`, `open` and `focus`; `show`
-/// and `close` may join any of them.
+/// What a button does. At most one of `call`, `open` and `focus`; `show`,
+/// `close` and `window` may join any of them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Action {
     /// One of the extension's methods, with the row's id.
@@ -203,6 +205,8 @@ pub struct Action {
     pub show: bool,
     /// Closes the dialog or window the template is in.
     pub close: bool,
+    /// Opens another of the extension's window points, by id.
+    pub window: Option<String>,
 }
 
 /// A node's condition: its text is filled and read as true unless empty, `false` or `0`.
@@ -390,6 +394,8 @@ struct Parser {
 struct Scope<'a> {
     row: Option<&'a str>,
     in_item: bool,
+    /// Inside the item of a list that is itself in an item.
+    nested: bool,
 }
 
 /// `'a', 'b' and 'c'`, for an error listing names.
@@ -415,7 +421,7 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
         "button" => &["label", "action", "confirm", "style", "icon", "when"],
         "toggle" => &["value", "label", "call", "when"],
         "field" => &["value", "placeholder", "call", "when"],
-        "list" => &["rows", "item", "empty", "when"],
+        "list" => &["rows", "item", "empty", "where", "is", "when"],
         _ => &["when"],
     }
 }
@@ -477,6 +483,7 @@ impl Parser {
         let scope = Scope {
             row: opts.session_row.then_some(first.as_deref()).flatten(),
             in_item: false,
+            nested: false,
         };
         if opts.session_row && first.is_none() {
             self.err(
@@ -733,8 +740,13 @@ impl Parser {
                 }
             }
             "list" => {
-                if scope.in_item {
-                    self.err(&path, "a list cannot sit inside a list's item");
+                let only = self.only(body, &path, scope);
+                let filtered = body.contains_key("where") || body.contains_key("is");
+                if scope.nested || (scope.in_item && !filtered) {
+                    self.err(
+                        &path,
+                        "a list inside a list's item draws the rows of its row, as where=\"parent\" is=\"{row.id}\"",
+                    );
                 }
                 let rows = match body.get("rows") {
                     None => match self.collections.first() {
@@ -765,13 +777,25 @@ impl Parser {
                     Scope {
                         row: Some(&rows),
                         in_item: true,
+                        nested: scope.in_item,
                     },
                 )?;
                 let empty = text(self, "empty");
+                let only = only.and_then(|(field, is)| {
+                    let known = field == "id" || self.field_type(Some(&rows), &field).is_some();
+                    if !known {
+                        self.err(
+                            &format!("{path}.where"),
+                            format!("'{rows}' has no field '{field}'"),
+                        );
+                    }
+                    known.then_some((field, is))
+                });
                 Kind::List {
                     rows,
                     item: Box::new(item),
                     empty,
+                    only,
                 }
             }
             _ => Kind::Divider,
@@ -793,6 +817,33 @@ impl Parser {
                     format!("expected a list of nodes, found {}", kind(other)),
                 );
                 Vec::new()
+            }
+        }
+    }
+
+    /// A list's `where` field and `is` text, which go together.
+    fn only(
+        &mut self,
+        body: &Map<String, Value>,
+        path: &str,
+        scope: Scope<'_>,
+    ) -> Option<(String, Text)> {
+        match (body.get("where"), body.get("is")) {
+            (None, None) => None,
+            (Some(Value::String(f)), Some(is)) => {
+                let is = self.text(is, &format!("{path}.is"), scope)?;
+                Some((f.clone(), is))
+            }
+            (Some(_), Some(_)) => {
+                self.err(&format!("{path}.where"), "expected a field's name");
+                None
+            }
+            _ => {
+                self.err(
+                    path,
+                    "where and is go together: where=\"parent\" is=\"{row.id}\"",
+                );
+                None
             }
         }
     }
@@ -915,10 +966,13 @@ impl Parser {
 
     fn action(&mut self, v: &Value, path: &str, scope: Scope<'_>) -> Option<Action> {
         let Some(o) = v.as_object() else {
-            self.err(path, "expected an action: call, open, focus, show or close");
+            self.err(
+                path,
+                "expected an action: call, open, focus, show, close or window",
+            );
             return None;
         };
-        let names = ["call", "open", "focus", "show", "close"];
+        let names = ["call", "open", "focus", "show", "close", "window"];
         let mut a = Action::default();
         for (k, val) in o {
             let p = format!("{path}.{k}");
@@ -945,9 +999,10 @@ impl Parser {
                 "focus" => a.focus = self.text(val, &p, scope),
                 "show" => a.show = self.boolean(Some(val), &p),
                 "close" => a.close = self.boolean(Some(val), &p),
+                "window" => a.window = self.method(val, &p),
                 other => {
                     let h = hint(other, &names, || {
-                        "an action is call, open, focus, show or close".into()
+                        "an action is call, open, focus, show, close or window".into()
                     });
                     self.err(&p, format!("unknown action '{other}'{h}"));
                 }
@@ -960,10 +1015,10 @@ impl Parser {
         if goes > 1 {
             self.err(path, "a button does one of call, open and focus");
         }
-        if goes == 0 && !a.show && !a.close {
+        if goes == 0 && !a.show && !a.close && a.window.is_none() {
             self.err(
                 path,
-                "a button needs an action: call, open, focus, show or close",
+                "a button needs an action: call, open, focus, show, close or window",
             );
         }
         Some(a)

@@ -233,12 +233,15 @@ impl World for Wired {
                     let id = text(&args, "requestId")
                         .ok_or_else(|| needs(m, "the requestId to answer"))?;
                     let allow = args.get("allow").and_then(Value::as_bool).unwrap_or(false);
-                    ask(
-                        &native,
-                        "permission:resolve",
-                        json!({ "requestId": id, "allow": allow }),
-                    )
-                    .await
+                    // A rule is picked among those the agent offered, never written.
+                    let mut answer = json!({ "requestId": id, "allow": allow });
+                    if let Some(i) = args.get("suggestion").and_then(Value::as_u64) {
+                        answer["suggestion"] = json!(i);
+                    }
+                    if let Some(a) = args.get("answers").filter(|a| a.is_object()) {
+                        answer["answers"] = a.clone();
+                    }
+                    ask(&native, "permission:resolve", answer).await
                 }
                 "git.diff" => {
                     let dir = text(&args, "worktree")

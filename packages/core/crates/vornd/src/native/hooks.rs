@@ -64,6 +64,10 @@ struct Pending {
     id: String,
     session: String,
     terminal: String,
+    /// The rules the agent offered to keep, which an answer may pick one of by index.
+    suggestions: Vec<Value>,
+    /// The tool's input, which answers to its questions are added to.
+    input: Value,
     reply: oneshot::Sender<String>,
 }
 
@@ -397,6 +401,14 @@ impl Hooks {
             id: id.clone(),
             session: event.session().to_owned(),
             terminal: resolved.terminal.clone(),
+            suggestions: (event
+                .get("permission_suggestions")
+                .and_then(Value::as_array))
+            .cloned()
+            .unwrap_or_default(),
+            input: (event.get("tool_input").filter(|v| v.is_object()))
+                .cloned()
+                .unwrap_or_else(|| json!({})),
             reply: tx,
         });
         if let Some(registry) = native.registry.get() {
@@ -485,10 +497,11 @@ impl Hooks {
         let body = if top {
             permission::decision(allow, None, None)
         } else {
+            let (rules, input) = picked(&p, params);
             permission::decision(
                 allow,
-                params.get("updatedPermissions"),
-                params.get("updatedInput"),
+                rules.as_ref().or(params.get("updatedPermissions")),
+                input.as_ref().or(params.get("updatedInput")),
             )
         };
         let _ = p.reply.send(body);
@@ -863,5 +876,44 @@ async fn capture(
             info!(%id, %conversation, "captured the agent's conversation");
             return;
         }
+    }
+}
+
+/// What an answer picked by name rather than spelt out: `suggestion`, the index of a
+/// rule the agent offered, and `answers`, added to the tool's input under `answers`.
+fn picked(p: &Pending, params: &Value) -> (Option<Value>, Option<Value>) {
+    let rules = (params.get("suggestion").and_then(Value::as_u64))
+        .and_then(|i| p.suggestions.get(usize::try_from(i).ok()?))
+        .map(|sg| json!([sg]));
+    let input = params.get("answers").filter(|a| a.is_object()).map(|a| {
+        let mut input = p.input.clone();
+        input["answers"] = a.clone();
+        input
+    });
+    (rules, input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_picks_an_offered_rule_and_adds_answers_to_the_input() {
+        let (reply, _) = oneshot::channel();
+        let p = Pending {
+            id: "r".into(),
+            session: String::new(),
+            terminal: String::new(),
+            suggestions: vec![json!({ "type": "setMode", "mode": "plan" })],
+            input: json!({ "questions": [] }),
+            reply,
+        };
+        let (rules, input) = picked(&p, &json!({ "suggestion": 0, "answers": { "0": "Dark" } }));
+        assert_eq!(rules, Some(json!([{ "type": "setMode", "mode": "plan" }])));
+        assert_eq!(
+            input,
+            Some(json!({ "questions": [], "answers": { "0": "Dark" } }))
+        );
+        assert_eq!(picked(&p, &json!({ "suggestion": 3 })), (None, None));
     }
 }

@@ -26,6 +26,8 @@ pub struct Press {
     pub show: bool,
     /// Close the dialog or window the template is in.
     pub close: bool,
+    /// Open another of the extension's window points, by id.
+    pub window: Option<String>,
     /// The row the control sits in.
     pub row: Option<String>,
     /// A toggle's new value.
@@ -233,8 +235,19 @@ impl Cx<'_> {
                     .grow()
                     .min_w0()
             }
-            Kind::List { rows, item, empty } => {
-                let all = self.src.rows(rows);
+            Kind::List {
+                rows,
+                item,
+                empty,
+                only,
+            } => {
+                let only = only.as_ref().map(|(f, is)| (f.as_str(), fill(is)));
+                let all: Vec<&Row> = self
+                    .src
+                    .rows(rows)
+                    .iter()
+                    .filter(|r| only.as_ref().is_none_or(|(f, is)| r.text(f) == *is))
+                    .collect();
                 if all.is_empty() {
                     let e = empty.as_ref().map(fill).unwrap_or_default();
                     if e.is_empty() {
@@ -243,7 +256,7 @@ impl Cx<'_> {
                     return Some(words(&e, TextRole::Secondary));
                 }
                 div().col().gap(4.0).min_w0().children(
-                    all.iter()
+                    all.into_iter()
                         .take(vorn_view::MAX_LIST)
                         .filter_map(|r| self.node(item, Some(r), child_slot(slot, 0))),
                 )
@@ -333,6 +346,7 @@ fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) 
         focus: a.focus.as_ref().map(|t| t.fill(row, src)),
         show: a.show,
         close: a.close,
+        window: a.window.clone(),
         row: row.map(|r| r.id.clone()),
         value: None,
         confirm,

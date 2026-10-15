@@ -160,6 +160,57 @@ fn a_leaf_holds_no_children_and_a_list_one_item() {
 }
 
 #[test]
+fn a_list_in_an_item_draws_the_rows_of_its_row() {
+    let t = r#"schema "vorn:view@1"
+rows "asks" { tool string }
+rows "picks" { ask string; label string }
+list "asks" {
+    column {
+        text "{row.tool}"
+        list "picks" where="ask" is="{row.id}" {
+            button "{row.label}" call="pick" window="small"
+        }
+    }
+}
+"#;
+    let parsed = file::parse(FILE, t, Options::default()).unwrap();
+    let Kind::List { item, .. } = &parsed.view.kind else {
+        panic!("{:?}", parsed.view.kind);
+    };
+    let Kind::Column(c) = &item.kind else {
+        panic!()
+    };
+    let Kind::List {
+        only: Some((field, is)),
+        item,
+        ..
+    } = &c[1].kind
+    else {
+        panic!("{:?}", c[1].kind);
+    };
+    assert_eq!(field, "ask");
+    let outer = Row::from_value(&json!({ "id": "a1", "tool": "Bash" })).unwrap();
+    assert_eq!(is.fill(Some(&outer), &BTreeMap::new()), "a1");
+    let Kind::Button { action, .. } = &item.kind else {
+        panic!()
+    };
+    assert_eq!(action.window.as_deref(), Some("small"));
+    let unfiltered = t.replace(" where=\"ask\" is=\"{row.id}\"", "");
+    assert_eq!(
+        errors(&unfiltered),
+        ["views/checks.kdl:7:9: a list inside a list's item draws the rows of its row, as where=\"parent\" is=\"{row.id}\""]
+    );
+    assert_eq!(
+        errors(&t.replace("where=\"ask\"", "where=\"asc\"")),
+        ["views/checks.kdl:7:22: 'picks' has no field 'asc'"]
+    );
+    assert_eq!(
+        errors(&t.replace(" is=\"{row.id}\"", "")),
+        ["views/checks.kdl:7:9: where and is go together: where=\"parent\" is=\"{row.id}\""]
+    );
+}
+
+#[test]
 fn a_template_has_one_view() {
     let two = format!("{CHECKS}divider\n");
     assert_eq!(
@@ -198,7 +249,7 @@ section "Items {summary.total}" {
             "views/checks.kdl:7:20: a toggle shows one bool field, as \"{row.on}\"",
             "views/checks.kdl:8:13: a button does one of call, open and focus",
             "views/checks.kdl:8:87: unknown style 'dangr'; did you mean 'danger'?",
-            "views/checks.kdl:12:5: a button needs an action: call, open, focus, show or close",
+            "views/checks.kdl:12:5: a button needs an action: call, open, focus, show, close or window",
         ]
     );
 }

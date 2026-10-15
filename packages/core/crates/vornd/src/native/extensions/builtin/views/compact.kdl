@@ -1,0 +1,27 @@
+// The Widget folded to a line: how many agents run, wait and failed.
+schema "vorn:view@1"
+
+rows "agents" {
+    name string
+    agent string
+    status enum running waiting idle error
+}
+
+row {
+    row when="{agents.status.running}" {
+        status running running=good
+        text "{agents.status.running}" role=secondary
+    }
+    row when="{agents.status.waiting}" {
+        status waiting waiting=warn
+        text "{agents.status.waiting}" role=secondary
+    }
+    row when="{agents.status.error}" {
+        status error error=bad
+        text "{agents.status.error}" role=secondary
+    }
+    text "No active agents" role=secondary when="!{agents.count}"
+    text "" grow=#true
+    button Expand window="widget"
+    button Vorn show=#true
+}

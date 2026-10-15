@@ -55,7 +55,8 @@ pub fn listed(manifest: &Manifest, load: &dyn Fn(&str, Place) -> Loaded) -> Vec<
         return Vec::new();
     };
     let entry = |place: Place, mut v: Value, view: Option<&str>| {
-        let (template, errors) = match view.map(|p| load(p, place)) {
+        let loaded = view.map(|p| load(p, place).and_then(|t| windows_known(manifest, p, t)));
+        let (template, errors) = match loaded {
             None => (Value::Null, Vec::new()),
             Some(Ok(t)) => (t, Vec::new()),
             Some(Err(e)) => (Value::Null, e.iter().map(ToString::to_string).collect()),
@@ -95,11 +96,64 @@ pub fn check(manifest: &Manifest, dir: &Path) -> Vec<String> {
             continue;
         }
         seen.push((path, place.per_session()));
-        if let Err(e) = load(dir, path, place) {
+        if let Err(e) = load(dir, path, place).and_then(|t| windows_known(manifest, path, t)) {
             errors.extend(e.iter().map(ToString::to_string));
         }
     }
     errors
+}
+
+/// Template `t` of `path`, if every window its buttons open is one the manifest declares.
+fn windows_known(manifest: &Manifest, path: &str, t: Value) -> Loaded {
+    fn opened<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+        match v {
+            Value::Object(o) => {
+                if let Some(w) = o
+                    .get("action")
+                    .and_then(|a| a.get("window"))
+                    .and_then(Value::as_str)
+                {
+                    out.push(w);
+                }
+                o.values().for_each(|c| opened(c, out));
+            }
+            Value::Array(a) => a.iter().for_each(|c| opened(c, out)),
+            _ => {}
+        }
+    }
+    let declared: Vec<&str> = manifest
+        .contributes
+        .as_ref()
+        .map(|c| {
+            c.points(Place::Windows)
+                .iter()
+                .map(|p| p.base.id.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut used = Vec::new();
+    opened(&t["view"], &mut used);
+    let errors: Vec<TemplateError> = used
+        .into_iter()
+        .filter(|w| !declared.contains(w))
+        .map(|w| {
+            let h = vorn_view::suggest(w, &declared)
+                .map_or_else(String::new, |s| format!("; did you mean '{s}'?"));
+            TemplateError {
+                file: Some(path.to_owned()),
+                at: None,
+                path: "view".into(),
+                message: format!(
+                    "a button opens window '{w}', which the manifest does not declare{h}"
+                ),
+            }
+        })
+        .collect();
+    if errors.is_empty() {
+        Ok(t)
+    } else {
+        Err(errors)
+    }
 }
 
 /// [`check`] as one refusal, for install and pack.
@@ -196,5 +250,35 @@ view = "views/footer.kdl"
         )
         .unwrap();
         assert_eq!(refuse(&m, dir.path()), Ok(()));
+    }
+
+    #[test]
+    fn a_button_opens_only_a_window_the_manifest_declares() {
+        let m = parse(&format!(
+            "{MANIFEST}\n[[contributes.windows]]\nid = \"small\"\ntitle = \"Small\"\nview = \"views/checks.kdl\"\nsize = [200, 80]\n"
+        ))
+        .unwrap();
+        let listed = listed(&m, &|path, place| {
+            read(
+                path,
+                "schema \"vorn:view@1\"\nbutton Fold window=smal\n",
+                place,
+            )
+        });
+        assert_eq!(
+            listed[0]["errors"],
+            json!(["views/checks.kdl: view: a button opens window 'smal', which the manifest does not declare; did you mean 'small'?"])
+        );
+        let fine = listed_with(&m, "small");
+        assert!(
+            fine.iter()
+                .all(|v| !v["errors"].to_string().contains("opens window")),
+            "{fine:?}"
+        );
+    }
+
+    fn listed_with(m: &Manifest, window: &str) -> Vec<Value> {
+        let t = format!("schema \"vorn:view@1\"\nbutton Fold window={window}\n");
+        listed(m, &|path, place| read(path, &t, place))
     }
 }

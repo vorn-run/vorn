@@ -396,6 +396,7 @@ pub fn line(request: &Request) -> String {
         Request::Focus(id) => format!("focus {id}"),
         Request::Show => "show".to_owned(),
         Request::Hide => "hide".to_owned(),
+        Request::Open(key) => format!("open {key}"),
     }
 }
 
@@ -403,6 +404,7 @@ pub fn line(request: &Request) -> String {
 pub fn parse(line: &str) -> Option<Request> {
     match line.trim().split_once(' ') {
         Some(("focus", id)) if !id.is_empty() => Some(Request::Focus(id.to_owned())),
+        Some(("open", key)) if !key.is_empty() => Some(Request::Open(key.to_owned())),
         None if line.trim() == "show" => Some(Request::Show),
         None if line.trim() == "hide" => Some(Request::Hide),
         _ => None,
@@ -416,6 +418,8 @@ pub enum Request {
     Focus(String),
     Show,
     Hide,
+    /// Open another window point, by key.
+    Open(String),
 }
 
 #[cfg(test)]
@@ -523,7 +527,12 @@ mod tests {
 
     #[test]
     fn panel_lines_round_trip() {
-        for r in [Request::Focus("t 1".into()), Request::Show, Request::Hide] {
+        for r in [
+            Request::Focus("t 1".into()),
+            Request::Show,
+            Request::Hide,
+            Request::Open("x/windows/small".into()),
+        ] {
             assert_eq!(parse(&line(&r)), Some(r));
         }
         assert_eq!(parse("nonsense"), None);
