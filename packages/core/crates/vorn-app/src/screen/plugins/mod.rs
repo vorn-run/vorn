@@ -34,14 +34,14 @@ pub(super) fn page(s: &Screen<'_>) -> El {
             "Connectors watch a service and start workflows. Extensions add sections, badges, panes, commands and pages. Both install as packs from the same directory.",
             None,
         ))
-        .child(tabs(s, p.tab));
+        .child(tabs(s, shown_tab(s)));
     // Nothing to say until the first answers land; an empty list would read as "none".
     if !p.loaded {
         return col;
     }
     let selected = p.selected.as_deref().and_then(|key| p.listing(key));
     let adding = p.adding.is_some();
-    col = match p.tab {
+    col = match shown_tab(s) {
         Tab::Installed if !adding && selected.is_none() => col
             .child_if(super::points::builtins(s))
             .child(installed::view(s)),
@@ -62,6 +62,17 @@ pub(super) fn act(a: PlugAct) -> Act {
     Act::Plug(a)
 }
 
+/// The tab drawn: the one chosen, unless Connectors is off and it is one of Connectors'.
+fn shown_tab(s: &Screen<'_>) -> Tab {
+    let tab = s.st.plugins.tab;
+    let shown = crate::plugins::tabs(crate::plugins::connectors_on(&s.st.points.builtins));
+    if shown.contains(&tab) {
+        tab
+    } else {
+        Tab::Installed
+    }
+}
+
 /// The `inline-flex` segmented tabs over the page.
 fn tabs(s: &Screen<'_>, current: Tab) -> El {
     let mut row = div()
@@ -71,7 +82,7 @@ fn tabs(s: &Screen<'_>, current: Tab) -> El {
         .mb(16.0)
         .rounded(R)
         .bg(white(0.04));
-    for tab in s.st.plugins.tabs() {
+    for tab in crate::plugins::tabs(crate::plugins::connectors_on(&s.st.points.builtins)) {
         let id = s.acts.on("plug-tab", act(PlugAct::Tab(tab)));
         let on = tab == current;
         let fg = if on {

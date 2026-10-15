@@ -171,7 +171,7 @@ impl Daemon {
         }
     }
 
-    /// Starts the Connectors built-in ([`crate::native::builtins::connectors`]) once
+    /// Starts the Connectors built-in ([`crate::native::extensions::builtin::connectors`]) once
     /// vornd has a database and its own address, which a browser connector's
     /// child reaches its window through.
     pub async fn start_connectors(&self) {
@@ -188,10 +188,15 @@ impl Daemon {
         if addr.ip().is_unspecified() {
             addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
         }
-        use crate::native::builtins::{connectors, Switches};
+        use crate::native::extensions::builtin::{connectors, switched_on};
         let services = connectors::services(native, &dir, format!("http://{addr}")).await;
-        let switches = Switches::load(dir.join("builtins.json"));
-        let connectors = connectors::ConnectorsBuiltin::new(native, services, switches);
+        // The extension host's registry keeps the switch; until it starts, the file says.
+        let on = switched_on(
+            &dir.join("builtins.json"),
+            vorn_connectors::builtin::ID,
+            true,
+        );
+        let connectors = connectors::ConnectorsBuiltin::new(native, services, on);
         native.set_connectors(Arc::clone(&connectors));
         tokio::spawn(async move { connectors.reconcile().await });
     }

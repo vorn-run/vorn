@@ -7,12 +7,11 @@
 //! ([`work`]) are async too: they run workflows.
 //!
 //! Connections and connectors are the Connectors built-in's
-//! ([`builtins::connectors`]), on the public API; the sign-in windows its
+//! ([`extensions::builtin::connectors`]), on the public API; the sign-in windows its
 //! programs call through are a service of the bridge ([`signin`]).
 
 pub mod about;
 pub mod agent;
-pub mod builtins;
 pub mod config;
 pub mod credential;
 pub mod desktop;
@@ -150,7 +149,6 @@ pub enum Route {
     Extensions,
     Work,
     Connectors,
-    Builtins,
     /// The calls vornd answers on its blocking threads ([`METHODS`]).
     Native,
 }
@@ -170,7 +168,6 @@ const ROUTES: &[(&[&str], Route)] = &[
         Route::Work,
     ),
     (vorn_connectors::builtin::METHODS, Route::Connectors),
-    (builtins::METHODS, Route::Builtins),
     (METHODS, Route::Native),
 ];
 
@@ -286,7 +283,7 @@ pub struct Native {
     /// The work model, once vornd has a database and its own address.
     work: OnceLock<Arc<work::Work>>,
     /// The Connectors built-in, once vornd has a database and its own address.
-    connectors: OnceLock<Arc<builtins::connectors::ConnectorsBuiltin>>,
+    connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
     /// Installing and removing packages, one store for every kind.
     installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
     /// The sign-in windows programs call through ([`signin`]).
@@ -441,11 +438,14 @@ impl Native {
     }
 
     /// The Connectors built-in. Only the first one given is kept.
-    pub fn set_connectors(&self, connectors: Arc<builtins::connectors::ConnectorsBuiltin>) {
+    pub fn set_connectors(
+        &self,
+        connectors: Arc<extensions::builtin::connectors::ConnectorsBuiltin>,
+    ) {
         let _ = self.connectors.set(connectors);
     }
 
-    pub fn connectors(&self) -> Option<&Arc<builtins::connectors::ConnectorsBuiltin>> {
+    pub fn connectors(&self) -> Option<&Arc<extensions::builtin::connectors::ConnectorsBuiltin>> {
         self.connectors.get()
     }
 
@@ -629,16 +629,18 @@ impl Native {
                 let Some(host) = self.extensions.get().cloned() else {
                     // The built-ins' tools need no extension host.
                     return match method.as_str() {
-                        "extension:mcpTools" => {
-                            Answer::Result(Value::Array(builtins::mcp_tools(self)))
-                        }
+                        "extension:mcpTools" => Answer::Result(Value::Array(
+                            extensions::builtin::connectors::mcp_tools(self),
+                        )),
                         "extension:mcpCall" => {
                             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
                             let arguments = params
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| json!({}));
-                            match builtins::mcp_call(self, name, arguments).await {
+                            match extensions::builtin::connectors::mcp_call(self, name, arguments)
+                                .await
+                            {
                                 Some(answered) => Answer::Result(answered),
                                 None => Answer::Error(format!(
                                     "No extension offers the MCP tool {name}"
@@ -678,7 +680,6 @@ impl Native {
                     Answer::Error(format!("{method} failed in vornd"))
                 });
             }
-            Some(Route::Builtins) => return builtins::answer(self, &method, &params).await,
             Some(Route::Identify | Route::Native) => {}
             None => {
                 // `<id>:<action>`, an installed extension's own method.

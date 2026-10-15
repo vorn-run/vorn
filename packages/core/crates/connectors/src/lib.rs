@@ -15,5 +15,6 @@ pub mod fetch;
 pub mod host;
 pub mod http;
 pub mod mcp;
+pub mod page;
 pub mod poll;
 pub mod tools;

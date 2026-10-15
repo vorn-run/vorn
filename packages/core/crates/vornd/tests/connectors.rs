@@ -385,11 +385,10 @@ async fn the_rss_connector_reads_its_feeds_under_the_sandbox() {
         next_id: 0,
     };
     let folder = tempfile::tempdir().unwrap();
-    for entry in std::fs::read_dir(root.join("extensions/rss"))
-        .unwrap()
-        .flatten()
-    {
-        std::fs::copy(entry.path(), folder.path().join(entry.file_name())).unwrap();
+    for entry in std::fs::read_dir(root.join("rss")).unwrap().flatten() {
+        if entry.file_type().unwrap().is_file() {
+            std::fs::copy(entry.path(), folder.path().join(entry.file_name())).unwrap();
+        }
     }
     for args in [
         &["init", "--quiet", "--initial-branch=main"][..],

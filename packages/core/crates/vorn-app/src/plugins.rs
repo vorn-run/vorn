@@ -25,8 +25,6 @@ pub enum PlugAct {
     Install(String),
     /// Pick a connector's git repository on this disk, then check it.
     InstallFile,
-    /// Switch an extension Vorn ships with on or off.
-    SetShipped(String, bool),
     ConfirmInstall,
     CancelInstall,
     Remove(String),
@@ -315,22 +313,21 @@ pub fn reaches(preview: &Value) -> Option<String> {
 /// The Connectors built-in's id.
 pub const CONNECTORS: &str = "vorn.connectors";
 
-impl Plugins {
-    /// Whether Connectors is on; on until vornd says otherwise.
-    pub fn connectors_on(&self) -> bool {
-        self.shipped
-            .iter()
-            .find(|b| s(b, "id") == Some(CONNECTORS))
-            .is_none_or(|b| b.get("on") != Some(&Value::Bool(false)))
-    }
+/// Whether Connectors is on, as the built-ins' list (`extension:builtins`)
+/// says; on until it says otherwise.
+pub fn connectors_on(builtins: &[Value]) -> bool {
+    builtins
+        .iter()
+        .find(|b| s(b, "id") == Some(CONNECTORS))
+        .is_none_or(|b| b.get("on") != Some(&Value::Bool(false)))
+}
 
-    /// The tabs to show: with Connectors off, only what is installed.
-    pub fn tabs(&self) -> Vec<Tab> {
-        if self.connectors_on() {
-            Tab::ALL.to_vec()
-        } else {
-            vec![Tab::Installed]
-        }
+/// The tabs to show: with Connectors off, only what is installed.
+pub fn tabs(connectors_on: bool) -> Vec<Tab> {
+    if connectors_on {
+        Tab::ALL.to_vec()
+    } else {
+        vec![Tab::Installed]
     }
 }
 
@@ -1552,8 +1549,6 @@ pub fn manifest_fields<'a>(manifest: Option<&'a Value>, key: &str) -> Vec<&'a Va
 /// The page's whole state.
 #[derive(Debug, Default)]
 pub struct Plugins {
-    /// The extensions Vorn ships with (`extension:builtins`): `{id, name, description, on}`.
-    pub shipped: Vec<Value>,
     pub builtins: Vec<Value>,
     pub catalog: Vec<Value>,
     pub mcp: Vec<Value>,

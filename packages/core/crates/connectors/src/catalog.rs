@@ -19,7 +19,7 @@ use vorn_extensions::manifest;
 
 /// Where the published catalog lives.
 pub const CATALOG_URL: &str =
-    "https://raw.githubusercontent.com/vorn-run/connectors/main/catalog.json";
+    "https://raw.githubusercontent.com/vorn-run/extensions/main/catalog.json";
 /// Long enough that opening settings twice does not fetch twice.
 pub const MAX_AGE_MS: u64 = 6 * 60 * 60 * 1000;
 /// A slow network must not hold up the connector list.
@@ -384,11 +384,7 @@ pub fn local_launch_spec(
     dir_name: &str,
     repo_root: Option<&Path>,
 ) -> Option<(String, Vec<String>)> {
-    let local = repo_root?
-        .join("packages")
-        .join(dir_name)
-        .join("dist")
-        .join("index.js");
+    let local = repo_root?.join(dir_name).join("dist").join("index.js");
     local.exists().then(|| {
         (
             "node".to_owned(),
@@ -397,7 +393,7 @@ pub fn local_launch_spec(
     })
 }
 
-/// `@vornrun/connector-kusto` lives in `packages/kusto`.
+/// `@vornrun/connector-kusto` lives in `kusto`.
 fn local_package_dir(package: &str) -> String {
     let rest = match package.strip_prefix('@').and_then(|p| p.split_once('/')) {
         Some((_, rest)) => rest,
@@ -616,16 +612,16 @@ mod tests {
     fn keeps_where_an_entry_installs_from_and_drops_a_source_git_refuses() {
         let doc = json!({ "version": 1, "connectors": [
             { "id": "rss", "name": "RSS", "packageName": "@v/connector-rss",
-              "git": "https://github.com/vorn-run/connectors.git", "path": "extensions/rss" },
+              "git": "https://github.com/vorn-run/extensions.git", "path": "rss" },
             { "id": "bad", "name": "Bad", "packageName": "@v/connector-bad",
               "git": "ext::sh -c x", "path": "../up" },
         ] });
         let entries = parse_catalog(&doc).unwrap();
         assert_eq!(
             entries[0]["git"],
-            "https://github.com/vorn-run/connectors.git"
+            "https://github.com/vorn-run/extensions.git"
         );
-        assert_eq!(entries[0]["path"], "extensions/rss");
+        assert_eq!(entries[0]["path"], "rss");
         assert!(entries[1].get("git").is_none() && entries[1].get("path").is_none());
     }
 
@@ -639,7 +635,7 @@ mod tests {
     #[test]
     fn finds_a_checkout_build() {
         let dir = tempfile::tempdir().unwrap();
-        let built = dir.path().join("packages/kusto/dist");
+        let built = dir.path().join("kusto/dist");
         std::fs::create_dir_all(&built).unwrap();
         std::fs::write(built.join("index.js"), "").unwrap();
         let entry = json!({ "packageName": "@vornrun/connector-kusto" });

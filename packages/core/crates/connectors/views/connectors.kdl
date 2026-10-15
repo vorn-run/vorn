@@ -1,0 +1,85 @@
+// Connectors: the connections and what they last did, the connectors
+// installed, and the catalog to install from, each saying what it reaches.
+schema "vorn:view@1"
+
+rows "connections" {
+    name string
+    connector string
+    state enum ok failing idle
+    detail string
+}
+
+rows "installed" {
+    name string
+    version string
+    reaches string
+    can_roll_back bool
+    previous string
+}
+
+rows "catalog" {
+    name string
+    description string
+    reaches string
+    borrows string
+    verified bool
+    installed bool
+    installable bool
+}
+
+column {
+    section "Connections" {
+        row {
+            text "{connections.count} connections" role=secondary grow=#true
+            button Refresh call="refresh" icon="refresh-cw"
+        }
+        list "connections" empty="No connections yet. Add one under Plugins › Connections." {
+            column {
+                row {
+                    status "{row.state}" ok=good failing=bad idle=muted
+                    text "{row.name}" grow=#true
+                    text "{row.connector}" role=secondary
+                }
+                row {
+                    text "{row.detail}" role=secondary grow=#true
+                    button Test call="test"
+                    button "Import now" call="backfill"
+                    button Delete call="delete" style=danger confirm="Delete {row.name}? Its tasks stay on the board."
+                }
+            }
+        }
+    }
+
+    section "Installed" {
+        list "installed" empty="No connector is installed." {
+            column {
+                row {
+                    text "{row.name}" grow=#true
+                    text "v{row.version}" role=mono
+                }
+                row {
+                    text "Reaches {row.reaches}" role=secondary grow=#true
+                    button "Roll back to v{row.previous}" call="rollback" when="{row.can_roll_back}"
+                    button Remove call="remove" style=danger confirm="Remove {row.name}? Its connections stay, and run again once it is back."
+                }
+            }
+        }
+    }
+
+    section "Catalog" {
+        list "catalog" empty="The catalog is empty." {
+            column {
+                row {
+                    text "{row.name}" grow=#true
+                    badge "verified" when="{row.verified}" verified=good
+                    badge "installed" when="{row.installed}" installed=muted
+                }
+                text "{row.description}" role=secondary
+                row {
+                    text "Reaches {row.reaches}" role=secondary grow=#true
+                    button Install call="install" style=primary confirm="Install {row.name}? It reaches {row.reaches}. {row.borrows} It runs as you." when="{row.installable}"
+                }
+            }
+        }
+    }
+}

@@ -15,6 +15,13 @@ uses = [
     "browser.session",
 ]
 
+[[contributes.settings]]
+id = "connectors"
+title = "Connectors"
+icon = "plug"
+view = "views/connectors.kdl"
+call = "refresh"
+
 [mcp.list_connectors]
 description = "List every connector and extension: the ones built into Vorn, the ones installable from a package, and how many connections each already has. A connector polls a service; an extension adds footers and panes to a session card and says what it may touch. Use this before creating a workflow that calls a connector action, or to find an id to install."
 

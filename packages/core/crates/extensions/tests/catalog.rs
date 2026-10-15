@@ -1,11 +1,11 @@
 //! Every connector of the catalog installs from git as an extension and
-//! passes its recorded checks: each folder of a connectors checkout
-//! (`extensions/<id>`) is made a repository of its own, as it will be
-//! published, installed after its sheet, checked as `vorn ext pack` checks
-//! it, started and asked for its manifest. One is installed from its folder
-//! of the checkout itself, as the catalog names it today.
+//! passes its recorded checks: each connector's folder of an extensions
+//! checkout (`<id>/`) is made a repository, installed after its sheet,
+//! checked as `vorn ext pack` checks it, started and asked for its
+//! manifest. One is installed as the catalog names it: a folder of a
+//! repository that holds several.
 //!
-//! Runs when `VORN_CONNECTORS_CHECKOUT` names a checkout of the connectors
+//! Runs when `VORN_CONNECTORS_CHECKOUT` names a checkout of the extensions
 //! repository with its folders built; skipped otherwise, and without git or node.
 
 use std::fs;
@@ -44,11 +44,18 @@ fn checkout() -> Option<PathBuf> {
     Some(root)
 }
 
+/// `from` as its repository holds it: no dependencies, links or build output a checkout made.
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap().flatten() {
         let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
+        let kind = entry.file_type().unwrap();
+        if kind.is_symlink()
+            || ["node_modules", "dist", ".git"].contains(&&*entry.file_name().to_string_lossy())
+        {
+            continue;
+        }
+        if kind.is_dir() {
             copy_dir(&entry.path(), &target);
         } else {
             fs::copy(entry.path(), target).unwrap();
@@ -84,8 +91,8 @@ fn repository_of(folder: &Path) -> tempfile::TempDir {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_connector_installs_from_git_and_passes_its_recorded_checks() {
     let Some(root) = checkout() else { return };
-    let folders: Vec<PathBuf> = fs::read_dir(root.join("extensions"))
-        .expect("the checkout has its extensions built")
+    let folders: Vec<PathBuf> = fs::read_dir(&root)
+        .expect("the checkout is readable")
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.join("vorn-extension.toml").is_file())
@@ -142,8 +149,10 @@ async fn every_connector_installs_from_git_and_passes_its_recorded_checks() {
     }
     assert_eq!(installs.store().list().len(), 22);
 
-    // As the catalog names one today: a folder of the connectors repository.
-    let whole = repository_of(&root.join("extensions"));
+    // As the catalog names one: a folder of a repository that holds several.
+    let several = tempfile::tempdir().unwrap();
+    copy_dir(&root.join("rss"), &several.path().join("rss"));
+    let whole = repository_of(several.path());
     let other = tempfile::tempdir().unwrap();
     let installs = Installs::new(PackStore::new(other.path()), "git", env());
     let url = format!("file://{}", whole.path().display());

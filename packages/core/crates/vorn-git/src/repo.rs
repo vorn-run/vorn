@@ -1543,8 +1543,8 @@ mod tests {
             gh("vorn-run", "vorn")
         );
         assert_eq!(
-            parse_github_remote("https://github.com/vorn-run/connectors.git"),
-            gh("vorn-run", "connectors")
+            parse_github_remote("https://github.com/vorn-run/extensions.git"),
+            gh("vorn-run", "extensions")
         );
         assert_eq!(
             parse_github_remote("ssh://git@github.com/vorn-run/vorn"),

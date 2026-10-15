@@ -17,9 +17,6 @@ use crate::workflows::WfAct;
 
 /// A Plugins call whose answer changes the screen.
 pub(super) enum PlugCall {
-    /// `extension:builtins`, the extensions Vorn ships with.
-    Shipped,
-    SetShipped,
     Builtins,
     Connections,
     Statuses,
@@ -90,23 +87,6 @@ impl App {
             PlugAct::CloseForm if p.from_editor => self.plug_leave(),
             PlugAct::CloseForm => p.adding = None,
             PlugAct::Install(key) => self.plug_inspect(&key, true),
-            PlugAct::SetShipped(id, on) => {
-                if let Some(b) = p
-                    .shipped
-                    .iter_mut()
-                    .find(|b| s(b, "id") == Some(id.as_str()))
-                {
-                    b["on"] = json!(on);
-                }
-                if !p.tabs().contains(&p.tab) {
-                    p.tab = Tab::Installed;
-                }
-                self.call(
-                    Call::Plug(PlugCall::SetShipped),
-                    "extension:setBuiltin",
-                    json!({ "id": id, "on": on }),
-                );
-            }
             #[cfg(target_arch = "wasm32")]
             PlugAct::InstallFile => {
                 let why = "Install a pack from a file in the desktop app; the catalog works here.";
@@ -280,12 +260,7 @@ impl App {
     /// Re-read what the page shows; the catalog only when it opens.
     fn plug_load(&mut self, catalog: bool) {
         let p = &mut self.st.plugins;
-        p.loads += 5 + u8::from(catalog);
-        self.call(
-            Call::Plug(PlugCall::Shipped),
-            "extension:builtins",
-            Value::Null,
-        );
+        p.loads += 4 + u8::from(catalog);
         self.call(
             Call::Plug(PlugCall::Builtins),
             "connector:list",
@@ -607,22 +582,6 @@ impl App {
     pub(super) fn plug_answered(&mut self, call: PlugCall, answer: Result<Value, RpcError>) {
         let p = &mut self.st.plugins;
         match call {
-            PlugCall::Shipped => {
-                if let Ok(v) = &answer {
-                    p.shipped = arr(v);
-                }
-                if !p.tabs().contains(&p.tab) {
-                    p.tab = Tab::Installed;
-                }
-                self.plug_loaded();
-            }
-            PlugCall::SetShipped => match answer {
-                Ok(_) => self.plug_load(true),
-                Err(e) => {
-                    p.report = Some(e.to_string());
-                    self.plug_load(false);
-                }
-            },
             PlugCall::Builtins => {
                 p.builtins = answer.as_ref().map(arr).unwrap_or_default();
                 self.plug_loaded();
@@ -994,17 +953,6 @@ impl App {
                 }
             }
             "connector:catalogChanged" => self.plug_catalog(params),
-            "extension:builtinChanged" => {
-                let p = &mut self.st.plugins;
-                if let Some(id) = s(params, "id") {
-                    if let Some(b) = p.shipped.iter_mut().find(|b| s(b, "id") == Some(id)) {
-                        b["on"] = params.get("on").cloned().unwrap_or(Value::Null);
-                    }
-                }
-                if !p.tabs().contains(&p.tab) {
-                    p.tab = Tab::Installed;
-                }
-            }
             _ if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor => {}
             "config:changed" => {
                 self.call(

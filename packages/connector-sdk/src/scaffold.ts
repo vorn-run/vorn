@@ -76,8 +76,8 @@ function packageJson(
     ...(inRepo && {
       repository: {
         type: 'git',
-        url: 'git+https://github.com/vorn-run/connectors.git',
-        directory: `packages/${id}`
+        url: 'git+https://github.com/vorn-run/extensions.git',
+        directory: id
       }
     }),
     scripts: {

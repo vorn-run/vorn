@@ -75,7 +75,11 @@ fn setup() -> Setup {
         RouterSettings::new(Vec::new(), "test"),
         vorn_extensions::events::Bus::new(),
     );
-    let builtins = Builtins::new(Arc::clone(&router), dir.path().join("builtins.json"));
+    let builtins = Builtins::new(
+        Arc::clone(&router),
+        dir.path().join("builtins.json"),
+        Vec::new(),
+    );
     Setup {
         dir,
         core,
@@ -256,7 +260,11 @@ async fn the_widget_is_off_until_switched_on_and_kept_so() {
         .emit(AGENT_PERMISSION_CLOSED, || json!({ "requestId": "r2" }));
     until(|| s.router.rows("vorn.widget", "permissions").is_empty()).await;
 
-    let again = Builtins::new(Arc::clone(&s.router), s.dir.path().join("builtins.json"));
+    let again = Builtins::new(
+        Arc::clone(&s.router),
+        s.dir.path().join("builtins.json"),
+        Vec::new(),
+    );
     assert!(again.is_on("vorn.widget"));
     s.builtins.set("vorn.widget", false).unwrap();
     assert!(s.router.rows("vorn.widget", "agents").is_empty());

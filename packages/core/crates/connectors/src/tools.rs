@@ -873,7 +873,7 @@ mod tests {
         let rpc = FakeRpc::default();
         rpc.answer(
             "connector:catalog",
-            json!({ "items": [{ "id": "rss", "name": "RSS", "git": "https://example.com/c.git", "path": "extensions/rss" }] }),
+            json!({ "items": [{ "id": "rss", "name": "RSS", "git": "https://example.com/c.git", "path": "rss" }] }),
         );
         rpc.answer(
             "connector:installPack",
@@ -883,9 +883,7 @@ mod tests {
         assert_eq!(text(&refused), "Error: The pack was refused: clone failed");
         assert_eq!(
             rpc.last("connector:installPack"),
-            Some(
-                json!({ "kind": "git", "url": "https://example.com/c.git", "path": "extensions/rss" })
-            )
+            Some(json!({ "kind": "git", "url": "https://example.com/c.git", "path": "rss" }))
         );
     }
     #[test]
