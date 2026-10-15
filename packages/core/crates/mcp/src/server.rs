@@ -212,12 +212,12 @@ async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
     let args = match schema {
         // No schema: the handler is called without looking at the arguments.
         None => None,
-        Some(schema) => match zod::registry().parse(schema, params.get("arguments")) {
+        Some(schema) => match zod::registry().parse_arguments(schema, params.get("arguments")) {
             Ok(parsed) => parsed,
             Err(issues) => {
                 return tool_error(format!(
                 "MCP error -32602: Input validation error: Invalid arguments for tool {name}: {}",
-                zod::error_message(&issues)
+                zod::tool_error_message(&issues)
             ))
             }
         },

@@ -31,7 +31,7 @@ fn checks_arguments_as_the_sdk_does() {
             other => Some(json::js_order(other.clone())),
         };
         let schema = registry().tool(tool).unwrap().unwrap();
-        match registry().parse(schema, args.as_ref()) {
+        match registry().parse_arguments(schema, args.as_ref()) {
             Ok(parsed) => {
                 let want = case.get("data").unwrap_or_else(|| {
                     panic!(
@@ -53,10 +53,10 @@ fn checks_arguments_as_the_sdk_does() {
                     .unwrap_or_else(|| {
                         panic!(
                             "{tool} {args:?} refused, the SDK parsed it: {}",
-                            error_message(&issues)
+                            tool_error_message(&issues)
                         )
                     });
-                assert_eq!(error_message(&issues), want, "{tool} {args:?}");
+                assert_eq!(tool_error_message(&issues), want, "{tool} {args:?}");
             }
         }
     }

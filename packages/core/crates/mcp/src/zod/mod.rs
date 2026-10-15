@@ -333,6 +333,35 @@ pub fn error_message(issues: &[Issue]) -> String {
     json::pretty(&Value::Array(issues.iter().map(Issue::to_json).collect()))
 }
 
+/// The SDK's `getParseErrorMessage` for refused tool arguments: a line per
+/// issue, its message and, when it has a path, ` at ` and the path.
+pub fn tool_error_message(issues: &[Issue]) -> String {
+    let lines: Vec<String> = issues
+        .iter()
+        .map(|issue| match issue.path.as_slice() {
+            [] => issue.message.clone(),
+            path => format!("{} at {}", issue.message, dot_path(path)),
+        })
+        .collect();
+    lines.join("\n")
+}
+
+/// The SDK's `getDotPath`: keys after the first joined by dots, indexes in brackets.
+fn dot_path(path: &[Seg]) -> String {
+    let mut out = String::new();
+    for (n, seg) in path.iter().enumerate() {
+        match seg {
+            _ if n == 0 => out.push_str(&seg.display()),
+            Seg::Index(i) => out.push_str(&format!("[{i}]")),
+            Seg::Key(k) => {
+                out.push('.');
+                out.push_str(k);
+            }
+        }
+    }
+    out
+}
+
 /// How zod names the type of what it was given.
 fn received(input: Option<&Value>) -> &'static str {
     match input {
@@ -489,6 +518,18 @@ impl Registry {
             Ok(parsed.value)
         } else {
             Err(parsed.issues)
+        }
+    }
+
+    /// A tool call's arguments as the SDK checks them, absent or `null` ones as `{}`.
+    pub fn parse_arguments(
+        &self,
+        schema: &Schema,
+        args: Option<&Value>,
+    ) -> Result<Option<Value>, Vec<Issue>> {
+        match args {
+            None | Some(Value::Null) => self.parse(schema, Some(&Value::Object(Map::new()))),
+            Some(args) => self.parse(schema, Some(args)),
         }
     }
 
