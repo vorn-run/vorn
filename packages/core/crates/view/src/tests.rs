@@ -150,7 +150,7 @@ fn a_leaf_holds_no_children_and_a_list_one_item() {
     );
     assert_eq!(
         errors(&leaf),
-        ["views/checks.kdl:17:44: 'text' holds no children; only column, row, section and list do"]
+        ["views/checks.kdl:17:44: 'text' holds no children; only column, row, section, more and list do"]
     );
     let two = CHECKS.replace("        row {", "        divider\n        row {");
     assert_eq!(
@@ -351,4 +351,41 @@ column {
     assert_eq!(errs.len(), 2, "{errs:?}");
     assert!(errs[0].contains("'plan'"), "{errs:?}");
     assert!(errs[1].contains("a button does one of"), "{errs:?}");
+}
+
+#[test]
+fn a_more_menu_holds_buttons_only() {
+    let t = r#"schema "vorn:view@1"
+rows "items" { name string }
+list "items" {
+    row {
+        text "{row.name}"
+        more {
+            button Rename call="rename"
+            button Remove call="remove" style=danger confirm="Remove {row.name}?"
+        }
+    }
+}
+"#;
+    let parsed = file::parse("views/t.kdl", t, Options::default()).unwrap();
+    let Kind::List { item, .. } = &parsed.view.kind else {
+        panic!("a list");
+    };
+    let Kind::Row(kids) = &item.kind else {
+        panic!("a row");
+    };
+    assert!(matches!(&kids[1].kind, Kind::More(b) if b.len() == 2));
+    let errs = errors(&t.replace("button Rename call=\"rename\"", "text \"Rename\""));
+    assert!(
+        errs[0].contains("a more menu holds one button or more"),
+        "{errs:?}"
+    );
+    let errs = errors(&t.replace(
+        "            button Rename call=\"rename\"\n            button Remove call=\"remove\" style=danger confirm=\"Remove {row.name}?\"\n",
+        "",
+    ));
+    assert!(
+        errs[0].contains("a more menu holds one button or more"),
+        "{errs:?}"
+    );
 }

@@ -36,6 +36,9 @@ column {
             row {
                 text "{row.name}" grow=#true
                 button "Sign in" signin="{row.id}" when="!{row.signed_in}"
+                more {
+                    button "Forget account" call="forget" style=danger confirm="Forget {row.name}?"
+                }
             }
         }
     }

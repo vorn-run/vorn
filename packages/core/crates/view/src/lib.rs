@@ -21,7 +21,7 @@ pub const SCHEMA: &str = "vorn:view@1";
 /// The node kinds, for the error that lists them.
 pub const NODES: &[&str] = &[
     "column", "row", "section", "text", "icon", "status", "badge", "button", "toggle", "field",
-    "choice", "list", "divider",
+    "choice", "list", "divider", "more",
 ];
 
 /// The name of a template's first row collection, whatever it is called.
@@ -110,6 +110,9 @@ pub struct Node {
 pub enum Kind {
     Column(Vec<Node>),
     Row(Vec<Node>),
+    /// A "more" button whose menu holds these buttons: actions a row offers
+    /// but does not show, each with its own action and confirm.
+    More(Vec<Node>),
     /// A titled group, as a settings page's.
     Section {
         title: Text,
@@ -427,7 +430,7 @@ fn hint(word: &str, known: &[&str], otherwise: impl FnOnce() -> String) -> Strin
 
 fn keys_of(kind: &str) -> &'static [&'static str] {
     match kind {
-        "column" | "row" => &["children", "when"],
+        "column" | "row" | "more" => &["children", "when"],
         "section" => &["title", "children", "when"],
         "text" => &["value", "role", "grow", "when"],
         "icon" => &["value", "tone", "when"],
@@ -617,7 +620,7 @@ impl Parser {
         for a in body.keys() {
             if !known.contains(&a.as_str()) {
                 let message = if a == "children" {
-                    format!("'{k}' holds no children; only column, row, section and list do")
+                    format!("'{k}' holds no children; only column, row, section, more and list do")
                 } else {
                     let h = hint(a, known, || format!("{k} takes {}", listed(known)));
                     format!("unknown attribute '{a}' on {k}{h}")
@@ -639,11 +642,22 @@ impl Parser {
                 .and_then(|v| p.text(v, &format!("{path}.{key}"), scope))
         };
         let kind = match k.as_str() {
-            "column" | "row" | "section" => {
+            "column" | "row" | "section" | "more" => {
                 let kids = self.children(body.get("children"), &path, scope);
                 match k.as_str() {
                     "column" => Kind::Column(kids),
                     "row" => Kind::Row(kids),
+                    "more" => {
+                        if kids.is_empty()
+                            || kids.iter().any(|n| !matches!(n.kind, Kind::Button { .. }))
+                        {
+                            self.err(
+                                &path,
+                                "a more menu holds one button or more, and nothing else",
+                            );
+                        }
+                        Kind::More(kids)
+                    }
                     _ => Kind::Section {
                         title: text(self, "title")?,
                         children: kids,

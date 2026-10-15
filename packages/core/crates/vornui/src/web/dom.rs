@@ -12,6 +12,7 @@ fn aria(role: Role) -> Option<&'static str> {
     Some(match role {
         Role::Button => "button",
         Role::CheckBox => "checkbox",
+        Role::RadioButton => "radio",
         Role::Image => "img",
         Role::Link => "link",
         Role::Terminal | Role::TextInput | Role::MultilineTextInput => "textbox",

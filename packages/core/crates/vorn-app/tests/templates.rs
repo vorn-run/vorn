@@ -273,6 +273,37 @@ fn every_template_kind_draws_on_every_surface() {
             .any(|r| r.id == "team" && r.fields.get("selected") == Some(&json!(true)))
             .then_some(())
     });
+    // A more menu holds the actions a row does not show; one asks before it runs.
+    let more = shot.button(&mut app, "More").expect("the more button");
+    shot.click(&mut app, more);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-settings-more",
+        &["Forget account"],
+        &["Forget account"],
+    );
+    let forget = shot
+        .labelled(&mut app, "MenuItem", "Forget account")
+        .expect("the menu's entry");
+    shot.click(&mut app, forget);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-settings-ask",
+        &["Forget Turns account?"],
+        &["Forget Turns account?"],
+    );
+    let ok = shot
+        .button(&mut app, "Forget account")
+        .expect("the confirm's button");
+    shot.click(&mut app, ok);
+    shot.until(&mut app, "the call's toast", |a, _| {
+        a.st.toasts
+            .iter()
+            .any(|t| t.text == "Forgot Turns account")
+            .then_some(())
+    });
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
     assert!(!app.st.settings.open);

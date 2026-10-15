@@ -17,7 +17,7 @@ use super::{App, Call};
 use crate::client::RpcError;
 use crate::points::{self, kind, Holder, PointAct, Press, Request};
 use crate::runs::s;
-use crate::ui::{Ui, WindowRequest};
+use crate::ui::{Id, Ui, WindowRequest};
 
 /// A contributions call on its way.
 #[derive(Debug)]
@@ -58,6 +58,9 @@ impl App {
                 holder,
             } => {
                 self.st.points.asking = None;
+                if self.st.points.more.take().is_some() {
+                    ui.close_menu();
+                }
                 self.press(ui, &extension, &press);
                 if press.close {
                     match holder {
@@ -67,7 +70,20 @@ impl App {
                     }
                 }
             }
-            PointAct::Ask(id) => self.st.points.asking = id,
+            PointAct::Ask(id) => {
+                if self.st.points.more.take().is_some() {
+                    ui.close_menu();
+                }
+                self.st.points.asking = id;
+            }
+            // The kit's menu state too, so a press outside or Escape closes it.
+            PointAct::More(id) => {
+                self.st.points.more = id;
+                match id {
+                    Some(m) => ui.open_menu(Id(m), Id(m)),
+                    None => ui.close_menu(),
+                }
+            }
             PointAct::Choose { key, args } => {
                 let Some(p) = self.st.points.get(&key).cloned() else {
                     return;

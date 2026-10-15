@@ -83,8 +83,10 @@ column {
             button "Sign in" signin="{row.id}" style=primary when="{row.needs_signin}"
             button Test call="test"
             button "Import now" call="backfill"
-            button "Roll back to v{row.previous}" call="rollback" when="{row.can_roll_back}"
-            button Remove call="remove" style=danger confirm="Remove {row.name}? Its tasks stay on the board."
+            more {
+                button "Roll back to v{row.previous}" call="rollback" icon="rotate-ccw" when="{row.can_roll_back}"
+                button Remove call="remove" style=danger icon="trash-2" confirm="Remove {row.name}? Its tasks stay on the board."
+            }
         }
     }
 }

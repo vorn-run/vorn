@@ -769,25 +769,34 @@ impl Raw {
                 ));
             }
         }
-        let legacy = self
-            .contributes
-            .as_ref()
-            .is_some_and(|c| !c.footers.is_empty() || c.panes.iter().any(|p| p.view.is_none()));
-        let templated = self.contributes.as_ref().is_some_and(|c| {
-            c.points().iter().any(|(_, p)| !p.is_empty())
-                || c.panes.iter().any(|p| p.view.is_some())
-        });
-        if templated && self.connector.is_some() {
-            return Err(at(
-                "contributes",
-                "draws templates its program fills over the extension API, and a [connector] service speaks the connector protocol; ship them as two packages".into(),
-            ));
-        }
-        if legacy && self.connector.is_none() {
-            return Err(at(
-                "contributes",
-                "footers and panes without a view are drawn through the connector protocol; add a [connector] section or give each a view".into(),
-            ));
+        if let Some(c) = &self.contributes {
+            // Where a package draws one place from a template, the protocol's older way to draw it is retired.
+            if !c.footers.is_empty() && !c.card_footers.is_empty() {
+                return Err(at(
+                    "contributes.footers",
+                    "are retired where card_footers draw from templates; draw each footer as a card_footers template".into(),
+                ));
+            }
+            let (viewed, unviewed) = c.panes.iter().fold((0, 0), |(v, u), p| {
+                if p.view.is_some() {
+                    (v + 1, u)
+                } else {
+                    (v, u + 1)
+                }
+            });
+            if viewed > 0 && unviewed > 0 {
+                return Err(at(
+                    "contributes.panes",
+                    "mix panes drawn from templates with panes the program serves; give every pane a view".into(),
+                ));
+            }
+            let legacy = !c.footers.is_empty() || unviewed > 0;
+            if legacy && self.connector.is_none() {
+                return Err(at(
+                    "contributes",
+                    "footers and panes without a view are drawn through the connector protocol; add a [connector] section or give each a view".into(),
+                ));
+            }
         }
         let does_something = self.service.is_some()
             || !self.actions.is_empty()
@@ -875,6 +884,9 @@ impl Raw {
         let mut manifest = super::read(&payload).map_err(|e| at("", e.to_string()))?;
         if !has_connector_work {
             manifest.actions.clear();
+        } else {
+            // It feeds tasks in, whatever else it draws.
+            manifest.kind = super::Kind::Connector;
         }
         if self.contributes.is_none() {
             // Only a package that adds to a card reads `permissions` in JSON.
@@ -1829,6 +1841,49 @@ every = 5
         let err = parse(&section.replace("every = 5", "every = 1")).unwrap_err();
         assert_eq!(err.field, "contributes.footers[0].every");
         assert_eq!(err.line, 8);
+    }
+
+    #[test]
+    fn one_package_holds_a_connector_and_template_points() {
+        let text = r#"id = "tickets"
+name = "Tickets"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+command = ["node", "index.js"]
+
+[[connector.triggers]]
+type = "items"
+
+[[contributes.sidebar]]
+id = "queue"
+title = "Queue"
+view = "views/queue.kdl"
+
+[[contributes.commands]]
+id = "refresh"
+title = "Refresh Tickets"
+call = "refresh"
+"#;
+        let m = parse(text).unwrap();
+        assert_eq!(m.kind, super::super::Kind::Connector);
+        assert_eq!(m.protocol, Some(CONNECTOR_PROTOCOL));
+        assert!(
+            m.speaks_api(),
+            "its templates are filled over the extension API"
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        // Where a place is drawn from a template, the protocol's older way is retired.
+        let footers = format!(
+            "{text}\n[[contributes.card_footers]]\nid = \"last\"\nview = \"views/f.kdl\"\n\n[[contributes.footers]]\nid = \"f\"\nevery = 5\n"
+        );
+        assert_eq!(parse(&footers).unwrap_err().field, "contributes.footers");
+        let panes = format!(
+            "{text}\n[[contributes.panes]]\nid = \"a\"\nview = \"views/a.kdl\"\n\n[[contributes.panes]]\nid = \"b\"\nweb = \"web/b.html\"\n"
+        );
+        assert_eq!(parse(&panes).unwrap_err().field, "contributes.panes");
     }
 
     #[test]

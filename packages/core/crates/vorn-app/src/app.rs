@@ -2531,6 +2531,9 @@ impl App {
             UiEvent::Select { group, index } if group == menus::MENU || group == menus::SUB => {
                 self.choose(ui, group, index);
             }
+            UiEvent::Dismiss(id) if self.st.points.more == Some(id.0) => {
+                self.st.points.more = None;
+            }
             UiEvent::Dismiss(id) if id == menus::MENU => {
                 self.st.menu = None;
                 self.st.confirm_delete = None;

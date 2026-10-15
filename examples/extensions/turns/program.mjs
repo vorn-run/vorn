@@ -110,6 +110,8 @@ function handle(method, args) {
       return null
     case 'key':
       return null
+    case 'forget':
+      return { toast: `Forgot ${account.name}` }
     case 'signin':
       // The window's target; Vorn opens it and tells the connection when it is signed in.
       return {

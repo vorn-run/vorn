@@ -47,6 +47,25 @@ label = "Create"
 
 [[connector.actions.inputs]]
 key = "title"
+
+[[contributes.sidebar]]
+id = "queue"
+title = "Queue"
+view = "views/queue.kdl"
+
+[[contributes.commands]]
+id = "refresh"
+title = "Refresh Tickets"
+call = "refresh"
+"#;
+
+const QUEUE: &str = r#"schema "vorn:view@1"
+rows "queue" {
+    title string
+}
+list "queue" {
+    text "{row.title}"
+}
 "#;
 
 fn has(program: &str) -> bool {
@@ -65,6 +84,8 @@ fn repository() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("vorn-extension.toml"), MANIFEST).unwrap();
     std::fs::write(dir.path().join("index.js"), FIXTURE).unwrap();
+    std::fs::create_dir(dir.path().join("views")).unwrap();
+    std::fs::write(dir.path().join("views/queue.kdl"), QUEUE).unwrap();
     std::fs::write(dir.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
     let git = |args: &[&str]| {
         let ok = Command::new("git")
@@ -255,6 +276,37 @@ async fn connectors_run_as_a_built_in_and_keep_their_data_when_off() {
         )
         .await;
     assert_eq!(acted["success"], true, "{acted}");
+
+    // The same package draws a sidebar from a template, and its command
+    // calls the program, started as an extension beside its connection.
+    let points = c.result("extension:contributions", json!({})).await;
+    let ours: Vec<&Value> = points
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["extension"] == "tickets")
+        .collect();
+    assert!(
+        ours.iter().any(|p| p["kind"] == "sidebar"
+            && p["id"] == "queue"
+            && p["errors"].as_array().is_none_or(Vec::is_empty)),
+        "{points}"
+    );
+    assert!(ours.iter().any(|p| p["kind"] == "commands"), "{points}");
+    let refreshed = c
+        .result(
+            "extension:call",
+            json!({ "id": "tickets", "action": "refresh", "args": {} }),
+        )
+        .await;
+    assert_eq!(refreshed["toast"], "Refreshed", "{refreshed}");
+    let queue = c
+        .result(
+            "extension:rows",
+            json!({ "id": "tickets", "collection": "queue" }),
+        )
+        .await;
+    assert_eq!(queue.as_array().map(Vec::len), Some(2), "{queue}");
 
     // A poll fills the workflow's inbox through the bridge.
     let workflow = json!({

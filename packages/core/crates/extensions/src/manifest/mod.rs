@@ -109,9 +109,19 @@ pub struct McpTool {
 }
 
 impl Manifest {
-    /// Whether its program speaks the extension API rather than a kind section's protocol.
+    /// Whether its service also runs as an extension: with no kind section,
+    /// or with points only the extension API fills (templates, MCP tools,
+    /// events). A package with both starts one program in either role, and
+    /// its first message, `guest.init` or `vorn/hello`, says which.
     pub fn speaks_api(&self) -> bool {
-        self.api.as_deref() == Some(API) && self.protocol.is_none()
+        self.api.as_deref() == Some(API)
+            && (self.protocol.is_none()
+                || self
+                    .contributes
+                    .as_ref()
+                    .is_some_and(Contributions::templated)
+                || !self.mcp.is_empty()
+                || self.service.as_ref().is_some_and(|s| !s.events.is_empty()))
     }
 
     /// The one-shot program for `action`, if it declares one.

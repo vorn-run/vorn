@@ -124,8 +124,9 @@ impl InstalledPack {
         &self.manifest.name
     }
 
+    /// Whether it adds anything to Vorn's surfaces; a connector may too.
     pub fn is_extension(&self) -> bool {
-        self.manifest.kind == Kind::Extension
+        self.manifest.contributes.is_some()
     }
 
     /// What it contributes, empty for a connector.

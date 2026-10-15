@@ -162,6 +162,8 @@ pub enum PointAct {
     },
     /// Asks before button `id` runs, or stops asking.
     Ask(Option<u64>),
+    /// Opens a template's more menu `id`, or closes it.
+    More(Option<u64>),
     /// A one-line field's Return calls `call` with what it holds.
     Field {
         extension: String,
@@ -214,6 +216,8 @@ pub struct Points {
     pub windows: BTreeSet<String>,
     /// The button asking before it runs.
     pub asking: Option<u64>,
+    /// The template more menu open.
+    pub more: Option<u64>,
     /// Built-in extensions: `{id, name, description, on}`.
     pub builtins: Vec<Value>,
     pub builtins_loaded: bool,

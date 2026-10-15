@@ -2031,7 +2031,7 @@ impl Connectors {
         }
         let pack = self.packs().describe(id);
         let wants_implicit = pack.as_ref().is_some_and(|p| {
-            !p.is_extension()
+            p.manifest.kind == vorn_extensions::manifest::Kind::Connector
                 && p.manifest
                     .auth
                     .as_ref()
