@@ -22,8 +22,6 @@ packages/core/crates/vorn-app/tests/fixtures/highlight/
 packages/core/target/
 packages/core/crates/vorn-web/dist/
 
-# Measurement output written by spikes/vornui/scripts/measure.sh.
-spikes/vornui/results/
 
 # Written by vorn-workflow-bench.
 packages/core/bench/workflows/results/
