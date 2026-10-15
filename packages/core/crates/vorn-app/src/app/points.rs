@@ -17,7 +17,7 @@ use super::{App, Call};
 use crate::client::RpcError;
 use crate::points::{self, kind, Holder, PointAct, Press, Request};
 use crate::runs::s;
-use crate::ui::{Ui, WindowRequest};
+use crate::ui::{Id, Ui, WindowRequest};
 
 /// A contributions call on its way.
 #[derive(Debug)]
@@ -27,6 +27,8 @@ pub(super) enum PointCall {
     /// A press or a choice; `holder` closes when the press asked it to.
     Called,
     Builtins,
+    /// A sign-in action's window target, asked of the extension; the key it opens for.
+    SignIn(String),
 }
 
 /// A window point's process and the lines it writes.
@@ -56,6 +58,9 @@ impl App {
                 holder,
             } => {
                 self.st.points.asking = None;
+                if self.st.points.more.take().is_some() {
+                    ui.close_menu();
+                }
                 self.press(ui, &extension, &press);
                 if press.close {
                     match holder {
@@ -65,7 +70,20 @@ impl App {
                     }
                 }
             }
-            PointAct::Ask(id) => self.st.points.asking = id,
+            PointAct::Ask(id) => {
+                if self.st.points.more.take().is_some() {
+                    ui.close_menu();
+                }
+                self.st.points.asking = id;
+            }
+            // The kit's menu state too, so a press outside or Escape closes it.
+            PointAct::More(id) => {
+                self.st.points.more = id;
+                match id {
+                    Some(m) => ui.open_menu(Id(m), Id(m)),
+                    None => ui.close_menu(),
+                }
+            }
             PointAct::Choose { key, args } => {
                 let Some(p) = self.st.points.get(&key).cloned() else {
                     return;
@@ -143,6 +161,14 @@ impl App {
         if let Some(w) = &press.window {
             self.open_window(&format!("{extension}/{}/{w}", kind::WINDOWS));
         }
+        // The extension says where the window signs in; the client holds the window.
+        if let Some(key) = press.signin.as_deref().filter(|k| !k.is_empty()) {
+            self.call(
+                Call::Point(PointCall::SignIn(key.to_owned())),
+                "extension:call",
+                json!({ "id": extension, "action": "signin", "args": { "id": key } }),
+            );
+        }
     }
 
     /// A one-line field's Return, with what it holds.
@@ -192,6 +218,15 @@ impl App {
                 }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
+            PointCall::SignIn(key) => {
+                let failed = match answer {
+                    Ok(target) => self.open_signin(&key, &target, crate::signin::From::Page),
+                    Err(e) => Some(e.to_string()),
+                };
+                if let Some(e) = failed {
+                    self.st.toast(e, true);
+                }
+            }
             PointCall::Builtins => match answer {
                 Ok(Value::Array(list)) => {
                     self.st.points.builtins = list;

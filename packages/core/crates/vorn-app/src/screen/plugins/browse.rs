@@ -156,8 +156,13 @@ fn filters(s: &Screen<'_>) -> El {
         .role(Role::Button, label)
         .child(ico("folder-open", 11.0, 2.0, fg))
         .child(text(label, 12.0, fg).line_height(16.0).silent());
-    let file =
-        crate::ui::widgets::tooltip(s.ui, file, id, "Install a .vorn.tgz you already have", None);
+    let file = crate::ui::widgets::tooltip(
+        s.ui,
+        file,
+        id,
+        "Install a connector from a git repository on this disk",
+        None,
+    );
     let row = div()
         .row()
         .wrap_children()

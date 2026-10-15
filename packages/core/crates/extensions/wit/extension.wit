@@ -16,6 +16,17 @@
 // A one-shot program gets one `guest.handle` request, always with id 1, and
 // exits after answering. A service is sent `guest.init` first, then calls and
 // events until its stdin closes.
+//
+// Every package names this one API, `api = "vorn:extension@0.9"`; what kind
+// of package it is beyond an extension is a section of its manifest, not
+// another api id. A `[connector]` section (auth, triggers, actions) means its
+// service speaks the connector protocol instead of these interfaces: the
+// JSON-RPC child protocol 1 (`vorn/hello`, `poll`, `action`, ...) that this
+// API version includes and versions with it. A package may add template
+// points, MCP tools or events beside its kind section; its service then also
+// runs as an extension, and the first message it is sent, `guest.init` or
+// `vorn/hello`, says which role a process plays. Templates are files in their
+// own format, `vorn:view@1`, not an API.
 
 package vorn:extension@0.9.0;
 
@@ -123,6 +134,8 @@ interface guest {
   use types.{json, ext-error, call-ctx, init-ctx, event};
 
   init: func(ctx: init-ctx) -> result<_, ext-error>;
+  /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
+  /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
   handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
   on-event: func(batch: list<event>);
 }

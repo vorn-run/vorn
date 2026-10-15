@@ -13,8 +13,9 @@ fn run_as(rpc: &FakeRpc, who: &Caller, tool: &str, args: Value) -> Value {
     };
     let cx = Cx { rpc, caller: who };
     match block_on(call(&cx, tool, Args::new(args))) {
-        Ok(result) => result,
-        Err(thrown) => json!({ "thrown": thrown }),
+        Some(Ok(result)) => result,
+        Some(Err(thrown)) => json!({ "thrown": thrown }),
+        None => json!({ "thrown": format!("Tool {tool} not found") }),
     }
 }
 
@@ -45,7 +46,7 @@ fn every_listed_tool_is_implemented() {
             "{name} is not implemented: {said}"
         );
     }
-    assert_eq!(crate::tool_count(), 73);
+    assert_eq!(crate::tool_count(), 66);
 }
 
 /// The task, workflow and config methods the calls so far wrote through.
@@ -311,95 +312,6 @@ fn page_reads_are_fenced_and_failures_reported() {
         text(&run(&rpc, "device_claim", json!({ "udid": "u" }))),
         "Error: held by s2"
     );
-}
-
-#[test]
-fn a_secret_is_never_installed_from_here() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("connector:catalog", json!({ "items": [] }));
-    rpc.answer(
-        "connector:probeSdk",
-        json!({ "ok": true, "manifest": {
-            "id": "acme", "name": "Acme", "version": "1.0.0",
-            "env": [{ "name": "TOKEN", "secret": true, "required": true }, { "name": "HOST", "required": true, "description": "where" }],
-            "triggers": [{ "type": "issues", "label": "Issues" }]
-        } }),
-    );
-    let refused = run(&rpc, "install_connector", json!({ "package": "@acme/c" }));
-    assert!(text(&refused)
-        .starts_with("Error: Acme uses the secret value TOKEN, which this tool cannot accept"));
-    assert_eq!(
-        rpc.last("connector:probeSdk"),
-        Some(json!({ "command": "npx", "args": ["-y", "@acme/c"] }))
-    );
-    let unknown = run(
-        &rpc,
-        "install_connector",
-        json!({ "package": "@acme/c", "env": { "NOPE": "1" } }),
-    );
-    assert_eq!(
-        text(&unknown),
-        "Error: Acme does not use NOPE. It accepts: TOKEN, HOST."
-    );
-}
-
-#[test]
-fn installs_a_connection_with_its_filters() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("connector:catalog", json!({ "items": [] }));
-    rpc.answer(
-        "connector:probeSdk",
-        json!({ "ok": true, "manifest": { "id": "acme", "name": "Acme", "version": "1.0.0", "env": [], "triggers": [{ "type": "issues", "label": "Issues" }] } }),
-    );
-    rpc.answer("connection:create", json!({ "id": "c9" }));
-    let done = parsed(&run(
-        &rpc,
-        "install_connector",
-        json!({ "package": "node /x/index.js", "project": "app" }),
-    ));
-    assert_eq!(done["connectionId"], "c9");
-    assert_eq!(done["trigger"], "issues");
-    assert_eq!(
-        rpc.last("connection:create"),
-        Some(json!({
-            "connectorId": "sdk",
-            "name": "Acme: Issues",
-            "filters": { "command": "node", "args": "[\"/x/index.js\"]", "env": "{}", "sdkConnectorId": "acme", "sdkVersion": "1.0.0", "sdkTrigger": "issues" },
-            "syncIntervalMinutes": 5,
-            "statusMapping": {},
-            "executionProject": "app"
-        }))
-    );
-}
-
-#[test]
-fn lists_connectors_with_their_connections() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("connector:list", json!([{ "id": "github", "name": "GitHub", "capabilities": ["poll"] }, { "id": "hidden", "addable": false }]));
-    rpc.answer("connector:catalog", json!({ "items": [{ "id": "lin", "name": "Linear", "packageName": "@x/lin", "capabilities": [], "env": [{ "name": "K" }] }] }));
-    rpc.answer(
-        "connection:list",
-        json!([{ "id": "a", "connectorId": "github", "filters": {} }]),
-    );
-    rpc.answer(
-        "connector:status",
-        json!([{ "connectorId": "github", "authed": true }]),
-    );
-    rpc.answer("connector:listPacks", json!([]));
-    let listed = parsed(&run(&rpc, "list_connectors", json!({})));
-    assert_eq!(
-        listed,
-        json!([
-            { "id": "github", "name": "GitHub", "source": "built-in", "kind": "connector", "capabilities": ["poll"], "connections": 1, "authenticated": true },
-            { "id": "lin", "name": "Linear", "source": "package", "kind": "connector", "package": "@x/lin", "capabilities": [], "connections": 0, "env": ["K"] }
-        ])
-    );
-    let open = parsed(&run(
-        &rpc,
-        "list_connectors",
-        json!({ "installable_only": true }),
-    ));
-    assert_eq!(open.as_array().unwrap().len(), 1);
 }
 
 #[test]

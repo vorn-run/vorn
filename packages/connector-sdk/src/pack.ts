@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
+import type { ExtensionExtras } from './extension'
 import {
   bundleDependencyFindings,
   bundledRequireFindings,
@@ -16,7 +16,6 @@ import {
   directoryBytes,
   MAX_PACK_BYTES,
   MAX_UNPACKED_BYTES,
-  WEB_DIR,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
@@ -30,19 +29,20 @@ export {
   MAX_PACK_BYTES,
   MAX_UNPACKED_BYTES
 }
+export { extrasOf }
 export type { BundleOutput, BundleRequest }
 
 export interface PackOptions {
   /** Module specifier the connector was loaded from, bundled as the pack entry. */
   entry: string
-  /** Directory the `.vorn.tgz` is written to; defaults to the working directory. */
+  /** Directory the package's folder is written into, as `<outDir>/<id>`; defaults to the working directory. */
   outDir?: string
+  /** What the manifest declares beyond the code: hosts, the settings naming hosts, the publisher. Read from `vorn` in package.json when absent. */
+  extras?: ExtensionExtras
   /** Directory module specifiers resolve from; defaults to the working directory. */
   resolveDir?: string
   /** SDK specifier the generated stdio entry imports; overridden in tests. */
   sdkModule?: string
-  /** Size ceiling for the written archive; defaults to `MAX_PACK_BYTES`. */
-  maxBytes?: number
   /** Size ceiling for what the archive unpacks to; defaults to `MAX_UNPACKED_BYTES`. */
   maxUnpackedBytes?: number
   /** Replaced in tests so packing does not shell out to a bundler. */
@@ -53,8 +53,8 @@ export interface PackOptions {
 
 export interface PackResult {
   findings: CheckFinding[]
-  /** Absolute path of the written pack; absent when a gate failed. */
-  file?: string
+  /** Absolute path of the written folder, ready to be a git repository; absent when a gate failed. */
+  dir?: string
   bytes?: number
 }
 
@@ -63,12 +63,27 @@ function finding(code: CheckCode, target: string, message: string): CheckFinding
   return { level: 'error', code, target, message }
 }
 
-/** File name Vorn recognizes as a connector pack. */
-export function packFileName(connector: Connector): string {
-  return `${connector.id}-${connector.version}.vorn.tgz`
+/** The manifest extras a package declares under `vorn` in its package.json. */
+function extrasOf(pkg: Record<string, unknown> | undefined): ExtensionExtras {
+  const vorn = (pkg?.vorn ?? {}) as Record<string, unknown>
+  const strings = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined
+  const author = pkg?.author
+  const publisher =
+    typeof vorn.publisher === 'string'
+      ? vorn.publisher
+      : typeof author === 'string'
+        ? author.replace(/\s*<[^>]*>\s*$/, '')
+        : undefined
+  return { hosts: strings(vorn.hosts), hostsFrom: strings(vorn.hostsFrom), publisher }
 }
 
-/** The entry is generated, not the author's bin, so every pack launches alike. */
+/**
+ * Builds the connector as a folder Vorn installs from git: its
+ * `vorn-extension.toml`, one bundled `index.js` from a generated entry (so
+ * every package launches alike), the receipt of its checks and the pages its
+ * panes name. The folder is what its repository holds.
+ */
 export async function packConnector(
   connector: Connector,
   options: PackOptions
@@ -89,55 +104,37 @@ export async function packConnector(
   if (findings.some((item) => item.level === 'error')) return { findings }
 
   const outDir = resolve(options.outDir ?? process.cwd())
-  await mkdir(outDir, { recursive: true })
-  const file = join(outDir, packFileName(connector))
-  const staging = await stagePack(connector, built.code, packageRoot)
+  const extras = options.extras ?? extrasOf(readNearestPackageJson(entryDir))
+  const staging = await stagePack(connector, built.code, packageRoot, extras)
   try {
     // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
     findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
 
-    // Pages compress well, so a small archive can still unpack past what Vorn writes.
-    const unpacked = await directoryBytes(staging)
+    // What Vorn keeps of it on disk, which is what the host's ceiling measures.
+    const bytes = await directoryBytes(staging)
     const maxUnpacked = options.maxUnpackedBytes ?? MAX_UNPACKED_BYTES
-    if (unpacked > maxUnpacked) {
+    if (bytes > maxUnpacked) {
       return {
         findings: [
           ...findings,
           finding(
             'pack-too-large',
             'bundle',
-            `The pack unpacks to ${Math.round(unpacked / 1024)} KB; Vorn unpacks at most ${Math.round(maxUnpacked / 1024)} KB`
+            `The package is ${Math.round(bytes / 1024)} KB; Vorn keeps at most ${Math.round(maxUnpacked / 1024)} KB`
           )
         ]
       }
     }
-
-    const { create } = await import('tar')
-    // What was staged, not what was declared; tarring a missing name fails with a path.
-    await create({ gzip: true, file, cwd: staging }, [
-      'manifest.json',
-      'index.js',
-      ...(existsSync(join(staging, WEB_DIR)) ? [WEB_DIR] : [])
-    ])
+    const dir = join(outDir, connector.id)
+    await mkdir(outDir, { recursive: true })
+    // Only what the build makes is replaced; a repository's own files beside it stay.
+    for (const made of ['index.js', 'vorn-extension.toml', 'verified.json', 'web']) {
+      await rm(join(dir, made), { recursive: true, force: true })
+    }
+    await cp(staging, dir, { recursive: true })
+    return { findings, dir, bytes }
   } finally {
     await rm(staging, { recursive: true, force: true })
   }
-
-  const bytes = (await stat(file)).size
-  const maxBytes = options.maxBytes ?? MAX_PACK_BYTES
-  if (bytes > maxBytes) {
-    await rm(file, { force: true })
-    return {
-      findings: [
-        ...findings,
-        finding(
-          'pack-too-large',
-          'bundle',
-          `The pack is ${Math.round(bytes / 1024)} KB; Vorn installs at most ${Math.round(maxBytes / 1024)} KB`
-        )
-      ]
-    }
-  }
-  return { findings, file, bytes }
 }

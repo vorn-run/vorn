@@ -1,0 +1,44 @@
+id = "vorn.connectors"
+name = "Connectors"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "Connections to the services your workflows read from and act on: polls into the workflows' inbox, actions from a step, backfill onto the board, and sign-in windows."
+
+[declares]
+uses = [
+    "tasks.read",
+    "tasks.write",
+    "workflows.read",
+    "workflows.write",
+    "inbox.write",
+    "browser.session",
+]
+
+[[contributes.settings]]
+id = "connections"
+title = "Connections"
+icon = "plug"
+view = "views/connectors.kdl"
+call = "refresh"
+
+[mcp.list_connectors]
+description = "List every connector and extension: the ones built into Vorn, the ones installable from a package, and how many connections each already has. A connector polls a service; an extension adds footers and panes to a session card and says what it may touch. Use this before creating a workflow that calls a connector action, or to find an id to install."
+
+[mcp.list_connections]
+description = "List configured connector connections, including when each last synced and the error from its last failure. Use this to diagnose a connector that is not producing tasks."
+
+[mcp.list_connector_actions]
+description = "List the actions a connection can execute, with their input schemas. Call this before run_connector_action or before adding a callConnectorAction node to a workflow."
+
+[mcp.inspect_connector_package]
+description = "Start a connector package and read what it offers — its triggers, actions and required environment variables, or for an extension what it contributes to a card and what it asks to touch — without installing it. Use this to review one before install_connector, or to check a local build."
+
+[mcp.install_connector]
+description = "Install a connector from a pack file, from the catalog, or by a launch command, creating a connection ready to poll. Installing an extension is the whole of setting it up: it takes no trigger and makes no connection, and shows on the cards its activation names. Call list_connectors for catalog ids and inspect_connector_package to see which environment variables are needed. Secrets cannot be set this way — see the error it returns if the connector requires one."
+
+[mcp.run_connector_action]
+description = "Execute one action on a connection — create an issue, run a query, close a work item. Call list_connector_actions first for the action name and its arguments."
+
+[mcp.backfill_connection]
+description = "Pull items from a connection now and turn them into tasks, without waiting for its poll interval. Use this to verify a connection works after installing it."

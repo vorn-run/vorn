@@ -98,7 +98,9 @@ impl App {
                 p.pending = None;
                 self.start_pick(
                     super::Picked::Pack,
-                    crate::system::Pick::Pack("Install a connector pack".to_owned()),
+                    crate::system::Pick::Pack(
+                        "Install a connector from its git repository".to_owned(),
+                    ),
                 );
             }
             PlugAct::ConfirmInstall => {
@@ -378,18 +380,19 @@ impl App {
         p.pending = None;
         let Some(l) = p.listing(key) else { return };
         let id = l.id.clone();
-        let Some(url) = l
+        let Some(catalog) = l
             .catalog
             .as_ref()
-            .and_then(|c| s(c, "packUrl"))
-            .filter(|u| !u.is_empty())
+            .filter(|c| crate::plugins::installable(c))
         else {
             p.progress.remove(&id);
             return;
         };
-        let mut source = json!({ "kind": "url", "url": url });
-        if let Some(sha) = l.catalog.as_ref().and_then(|c| s(c, "sha256")) {
-            source["sha256"] = json!(sha);
+        let mut source = json!({ "kind": "git", "url": s(catalog, "git") });
+        for key in ["path", "branch"] {
+            if let Some(v) = s(catalog, key).filter(|v| !v.is_empty()) {
+                source[key] = json!(v);
+            }
         }
         p.progress.insert(id, Progress::phase("checking"));
         self.call(
@@ -500,7 +503,8 @@ impl App {
         self.call(Call::Plug(call), method, params);
     }
 
-    /// A form finished: back to the connections, re-read.
+    /// A form finished: back to what is installed, re-read; the connection
+    /// shows on Settings › Connections.
     fn plug_done(&mut self) {
         if self.st.plugins.from_editor {
             self.plug_leave();
@@ -509,7 +513,7 @@ impl App {
         let p = &mut self.st.plugins;
         p.adding = None;
         p.selected = None;
-        p.tab = Tab::Connections;
+        p.tab = Tab::Installed;
         self.plug_load(false);
     }
 
@@ -999,12 +1003,12 @@ impl App {
         }
     }
 
-    /// A pack picked from disk goes to vornd to be checked.
+    /// A connector's repository picked on disk goes to vornd to be checked.
     pub(super) fn plug_picked(&mut self, path: &str) {
         self.call(
             Call::Plug(PlugCall::InspectFile),
             "connector:inspectPack",
-            json!({ "kind": "file", "path": path }),
+            json!({ "kind": "git", "url": path }),
         );
     }
 

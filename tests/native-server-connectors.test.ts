@@ -3,18 +3,19 @@
  * the vornd it keeps.
  *
  * An MCP connection runs the fixture MCP server with secrets vornd keeps in
- * its vault; a pack is inspected, installed and rolled back, and its
- * connection runs the native connector fixture; a connector poll fills a
+ * its vault; a connector is inspected, installed and rolled back, and its
+ * connection runs the native connector fixture installed from a git
+ * repository; a connector poll fills a
  * workflow's inbox and the workflow runs once per item however often it is
  * polled; secrets the desktop sealed are imported once; an HTTP profile signs
  * a request to a local server. None of these calls reaches the server.
  *
  * Runs where vornd and its session holder have been built.
  */
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { queryDb } from './helpers/database'
 import {
@@ -41,44 +42,52 @@ interface Connection {
   lastSyncError?: string
 }
 
-/** A tar archive of `files`, gzipped: what a `.vorn.tgz` pack is. */
-function tgz(files: Record<string, string>): Buffer {
-  const blocks: Buffer[] = []
-  for (const [name, text] of Object.entries(files)) {
-    const body = Buffer.from(text)
-    const header = Buffer.alloc(512)
-    header.write(name, 0, 100)
-    header.write('0000644\0', 100)
-    header.write('0000000\0', 108)
-    header.write('0000000\0', 116)
-    header.write(body.length.toString(8).padStart(11, '0') + '\0', 124)
-    header.write('00000000000\0', 136)
-    header.write('        ', 148)
-    header.write('0', 156)
-    header.write('ustar\0', 257)
-    header.write('00', 263)
-    let sum = 0
-    for (const byte of header) sum += byte
-    header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148)
-    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512))
+/** The connector's repository at `version`, committed: what `git clone` installs. */
+function release(dir: string, version: string): void {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'vorn-extension.toml'),
+    [
+      'id = "tickets"',
+      'name = "Tickets"',
+      `version = "${version}"`,
+      'api = "vorn:extension@0.9"',
+      '',
+      '[service]',
+      'command = ["node", "index.js"]',
+      '',
+      '[declares]',
+      'network = ["tickets.example.com"]',
+      '',
+      '[[connector.triggers]]',
+      'type = "items"',
+      'label = "Items"',
+      '',
+      '[[connector.actions]]',
+      'type = "create"',
+      'label = "Create"',
+      '',
+      '[[connector.actions.inputs]]',
+      'key = "title"',
+      'label = "Title"',
+      ''
+    ].join('\n')
+  )
+  fs.writeFileSync(path.join(dir, 'index.js'), fs.readFileSync(NATIVE_FIXTURE, 'utf-8'))
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ type: 'module' }))
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Vorn',
+    GIT_AUTHOR_EMAIL: 'vorn@example.invalid',
+    GIT_COMMITTER_NAME: 'Vorn',
+    GIT_COMMITTER_EMAIL: 'vorn@example.invalid'
   }
-  blocks.push(Buffer.alloc(1024))
-  return gzipSync(Buffer.concat(blocks))
-}
-
-function pack(version: string): Buffer {
-  return tgz({
-    'manifest.json': JSON.stringify({
-      protocol: 1,
-      id: 'tickets',
-      name: 'Tickets',
-      version,
-      triggers: [{ type: 'items', label: 'Items' }],
-      actions: [{ type: 'create', label: 'Create', inputs: [{ key: 'title', label: 'Title' }] }]
-    }),
-    'index.js': fs.readFileSync(NATIVE_FIXTURE, 'utf-8'),
-    'package.json': JSON.stringify({ type: 'module' })
-  })
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' })
+  }
+  if (!fs.existsSync(path.join(dir, '.git'))) git('init', '-q', '-b', 'main')
+  git('add', '-A')
+  git('commit', '-q', '-m', version)
 }
 
 describe.runIf(runnable)('connections and connectors in vornd', () => {
@@ -235,21 +244,24 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
     expect(elsewhere.error).toMatch(/only signs requests to/)
   })
 
-  it('installs a pack, runs its connection, and polls it into a workflow once per item', async () => {
-    const file = path.join(server.dirs.work, 'tickets-1.vorn.tgz')
-    fs.writeFileSync(file, pack('1.0.0'))
+  it('installs a connector from git, runs its connection, and polls it into a workflow once per item', async () => {
+    const repo = path.join(server.dirs.work, 'tickets')
+    release(repo, '1.0.0')
     const preview = await client.result<{ ok: boolean; preview: { id: string; token: string } }>(
       'connector:inspectPack',
-      { kind: 'file', path: file }
+      { kind: 'git', url: repo }
     )
-    expect(preview).toMatchObject({ ok: true, preview: { id: 'tickets' } })
+    expect(preview).toMatchObject({
+      ok: true,
+      preview: { id: 'tickets', hosts: ['tickets.example.com'] }
+    })
     const installed = await client.result('connector:installPack', {
       kind: 'staged',
       token: preview.preview.token
     })
     expect(installed).toMatchObject({ ok: true, pack: { id: 'tickets', version: '1.0.0' } })
-    fs.writeFileSync(file, pack('2.0.0'))
-    await client.result('connector:installPack', { kind: 'file', path: file })
+    release(repo, '2.0.0')
+    await client.result('connector:installPack', { kind: 'git', url: repo })
     expect(await client.result('connector:rollbackPack', 'tickets')).toMatchObject({
       ok: true,
       pack: { version: '1.0.0', previousVersion: '2.0.0' }
@@ -357,11 +369,12 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
     })
     const refused = await client.result('connector:inspectPack', {
       kind: 'url',
-      url: 'http://example.com/p.tgz'
+      url: 'https://example.com/p.vorn.tgz'
     })
     expect(refused).toEqual({
       ok: false,
-      error: 'A pack is fetched over https, or from this machine'
+      error:
+        'Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.'
     })
   })
 

@@ -188,6 +188,14 @@ async fn tools_with_extensions<R: Rpc>(rpc: &R) -> Value {
     {
         tools.extend(added);
     }
+    // A built-in's tools stand where the TypeScript lists them; an installed extension's come last.
+    let at = |t: &Value| {
+        t.get("name")
+            .and_then(Value::as_str)
+            .and_then(|n| zod::registry().position(n))
+            .unwrap_or(usize::MAX)
+    };
+    tools.sort_by_key(at);
     Value::Array(tools)
 }
 
@@ -196,18 +204,8 @@ async fn tools_with_extensions<R: Rpc>(rpc: &R) -> Value {
 async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or_default();
     let Some(schema) = zod::registry().tool(name) else {
-        let asked = json!({ "name": name, "arguments": params.get("arguments").cloned().unwrap_or(json!({})) });
-        return match rpc
-            .call(
-                "extension:mcpCall",
-                Some(asked),
-                crate::rpc::DEFAULT_TIMEOUT * 6,
-            )
-            .await
-        {
-            Ok(result) => normalize_result(result),
-            Err(_) => tool_error(format!("MCP error -32602: Tool {name} not found")),
-        };
+        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+        return contributed(rpc, name, arguments).await;
     };
     let args = match schema {
         // No schema: the handler is called without looking at the arguments.
@@ -223,9 +221,28 @@ async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
         },
     };
     let cx = Cx { rpc, caller };
-    match tools::call(&cx, name, Args::new(args)).await {
+    match tools::call(&cx, name, Args::new(args.clone())).await {
+        Some(Ok(result)) => normalize_result(result),
+        Some(Err(message)) => tool_error(message),
+        // Checked here as the TypeScript checks it, then answered by the built-in that adds it.
+        None => contributed(rpc, name, args.unwrap_or_else(|| json!({}))).await,
+    }
+}
+
+/// A tool an extension adds, called through the extension host; one no
+/// extension offers now is a tool not found.
+async fn contributed<R: Rpc>(rpc: &R, name: &str, arguments: Value) -> Value {
+    let asked = json!({ "name": name, "arguments": arguments });
+    match rpc
+        .call(
+            "extension:mcpCall",
+            Some(asked),
+            crate::rpc::DEFAULT_TIMEOUT * 6,
+        )
+        .await
+    {
         Ok(result) => normalize_result(result),
-        Err(message) => tool_error(message),
+        Err(_) => tool_error(format!("MCP error -32602: Tool {name} not found")),
     }
 }
 

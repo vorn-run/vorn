@@ -20,7 +20,7 @@ Commands:
   manifest <module>             Print the connector manifest as JSON
   setup <module> [trigger]      Print each trigger and the environment it reads
   check <module>                Verify the connector against Vorn's contract
-  pack <module>                 Build an installable .vorn.tgz pack
+  pack <module>                 Build the folder Vorn installs from git: vorn-extension.toml, one bundled index.js
   poll <module> <trigger>       Run one poll against the current environment
   serve <module>                Serve the connector on stdio (what Vorn runs)
 
@@ -211,12 +211,12 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       })
       if (result.findings.length > 0) deps.write(formatFindings(result.findings))
       const errors = result.findings.filter((item) => item.level === 'error')
-      if (!result.file) {
+      if (!result.dir) {
         deps.write(`\n${errors.length} error(s) — nothing was packed`)
         return 1
       }
       deps.write(
-        `\nPacked ${connector.id} ${connector.version} to ${result.file} (${Math.max(1, Math.round((result.bytes ?? 0) / 1024))} KB)`
+        `\nPacked ${connector.id} ${connector.version} to ${result.dir} (${Math.max(1, Math.round((result.bytes ?? 0) / 1024))} KB). Commit it to a git repository and install it with vorn ext install <git url>.`
       )
       return 0
     }

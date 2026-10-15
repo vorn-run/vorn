@@ -113,7 +113,7 @@ describe('a scaffold shaped for the connectors repository', () => {
 
     expect(pkg.name).toBe('@vornrun/connector-acme-tickets')
     expect(pkg.files).toEqual(['dist', 'README.md', 'CHANGELOG.md'])
-    expect(pkg.repository.directory).toBe('packages/acme-tickets')
+    expect(pkg.repository.directory).toBe('acme-tickets')
     // The catalog prints this line; the scaffold leaves a prompt rather than a guess.
     expect(pkg.vorn.auth).toBeTruthy()
   })

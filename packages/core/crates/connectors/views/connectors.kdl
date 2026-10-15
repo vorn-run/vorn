@@ -1,0 +1,92 @@
+// Connections: every connection with what it triggers and when it last
+// synced, and adding one from an installed connector.
+schema "vorn:view@1"
+
+rows "connections" {
+    name string
+    line string
+    state enum ok failing idle signin
+    needs_signin bool
+    can_roll_back bool
+    previous string
+}
+
+rows "form" {
+    picked bool
+    can_save bool
+    none_installed bool
+    error string
+}
+
+rows "connectors" {
+    name string
+    selected bool
+}
+
+rows "triggers" {
+    name string
+    selected bool
+}
+
+rows "projects" {
+    name string
+    selected bool
+}
+
+rows "settings" {
+    label string
+    hint string
+    secret bool
+    value string
+    kept bool
+}
+
+column {
+    row {
+        text "Services your workflows watch and act on. From the Connectors extension." role=secondary grow=#true
+        button "Add connection" call="add" style=primary icon="plus" when="!{form.count}"
+    }
+    column when="{form.count}" {
+        text "Add a connection" role=title
+        text "No connector is installed yet." role=secondary when="{form.none_installed}"
+        choice "connectors" label="{row.name}" selected="{row.selected}" call="pick"
+        text "Connectors for other services are in Settings › Extensions › Browse." role=secondary
+        column when="{form.picked}" {
+            text "Trigger" role=secondary
+            choice "triggers" label="{row.name}" selected="{row.selected}" call="trigger"
+            list "settings" {
+                column {
+                    row {
+                        text "{row.label}" grow=#true
+                        badge "kept" when="{row.kept}" kept=good
+                    }
+                    field value="{row.value}" placeholder="{row.hint}" call="set" when="!{row.secret}"
+                    field placeholder="{row.hint}" call="set" secret=#true when="{row.secret}"
+                }
+            }
+            text "Tasks go to" role=secondary
+            choice "projects" label="{row.name}" selected="{row.selected}" call="project"
+        }
+        text "{form.error}" role=secondary when="{form.error}"
+        row {
+            button Save call="save" style=primary when="{form.can_save}"
+            button Cancel call="cancel"
+        }
+    }
+    list "connections" empty="No connections yet. Add one with Add connection." {
+        row {
+            status "{row.state}" ok=good failing=bad idle=muted signin=warn
+            column {
+                text "{row.name}" grow=#true
+                text "{row.line}" role=secondary
+            }
+            button "Sign in" signin="{row.id}" style=primary when="{row.needs_signin}"
+            button Test call="test"
+            button "Import now" call="backfill"
+            more {
+                button "Roll back to v{row.previous}" call="rollback" icon="rotate-ccw" when="{row.can_roll_back}"
+                button Remove call="remove" style=danger icon="trash-2" confirm="Remove {row.name}? Its tasks stay on the board."
+            }
+        }
+    }
+}

@@ -32,7 +32,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// What a pack that names no protocol is told.
 pub fn outdated_message(name: &str) -> String {
     format!(
-        "{name} was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later."
+        "{name} was built for an older Vorn. Update it in Settings › Extensions, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later."
     )
 }
 
@@ -202,7 +202,8 @@ impl Hosts {
         let id = &key.extension_id;
         let pack = self
             .store
-            .describe(id)
+            .inspect_unmeasured(id)
+            .map(Some)?
             .filter(InstalledPack::is_extension)
             .ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
         let (program, args) = pack

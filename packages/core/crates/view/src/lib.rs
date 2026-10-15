@@ -21,7 +21,7 @@ pub const SCHEMA: &str = "vorn:view@1";
 /// The node kinds, for the error that lists them.
 pub const NODES: &[&str] = &[
     "column", "row", "section", "text", "icon", "status", "badge", "button", "toggle", "field",
-    "list", "divider",
+    "choice", "list", "divider", "more",
 ];
 
 /// The name of a template's first row collection, whatever it is called.
@@ -110,6 +110,9 @@ pub struct Node {
 pub enum Kind {
     Column(Vec<Node>),
     Row(Vec<Node>),
+    /// A "more" button whose menu holds these buttons: actions a row offers
+    /// but does not show, each with its own action and confirm.
+    More(Vec<Node>),
     /// A titled group, as a settings page's.
     Section {
         title: Text,
@@ -148,10 +151,21 @@ pub enum Kind {
         label: Option<Text>,
         call: String,
     },
-    /// A one-line input; Return calls `call` with what it holds.
+    /// A one-line input; Return calls `call` with what it holds. A secret
+    /// field draws its text as bullets and never copies it or reads it aloud.
     Field {
         value: Option<Text>,
         placeholder: Option<Text>,
+        call: String,
+        secret: bool,
+    },
+    /// One option per row of `rows`, its `label` filled from the row, the
+    /// ones whose `selected` holds drawn chosen; picking one calls `call`
+    /// with that row's id.
+    Choice {
+        rows: String,
+        label: Text,
+        selected: Option<Cond>,
         call: String,
     },
     /// One `item` per row of `rows`, in the order published; `empty` when there are none.
@@ -191,7 +205,7 @@ pub enum Style {
     Danger,
 }
 
-/// What a button does. At most one of `call`, `open` and `focus`; `show`,
+/// What a button does. At most one of `call`, `open`, `focus` and `signin`; `show`,
 /// `close` and `window` may join any of them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Action {
@@ -207,6 +221,9 @@ pub struct Action {
     pub close: bool,
     /// Opens another of the extension's window points, by id.
     pub window: Option<String>,
+    /// A connection's id: the client asks the extension's `signin` method for
+    /// the window's target and opens its sign-in window on it.
+    pub signin: Option<Text>,
 }
 
 /// A node's condition: its text is filled and read as true unless empty, `false` or `0`.
@@ -413,14 +430,15 @@ fn hint(word: &str, known: &[&str], otherwise: impl FnOnce() -> String) -> Strin
 
 fn keys_of(kind: &str) -> &'static [&'static str] {
     match kind {
-        "column" | "row" => &["children", "when"],
+        "column" | "row" | "more" => &["children", "when"],
         "section" => &["title", "children", "when"],
         "text" => &["value", "role", "grow", "when"],
         "icon" => &["value", "tone", "when"],
         "status" | "badge" => &["value", "tones", "when"],
         "button" => &["label", "action", "confirm", "style", "icon", "when"],
         "toggle" => &["value", "label", "call", "when"],
-        "field" => &["value", "placeholder", "call", "when"],
+        "field" => &["value", "placeholder", "call", "secret", "when"],
+        "choice" => &["rows", "label", "selected", "call", "when"],
         "list" => &["rows", "item", "empty", "where", "is", "when"],
         _ => &["when"],
     }
@@ -433,6 +451,7 @@ fn required_of(kind: &str) -> &'static [&'static str] {
         "button" => &["label", "action"],
         "toggle" => &["value", "call"],
         "field" => &["call"],
+        "choice" => &["rows", "label", "call"],
         "list" => &["item"],
         _ => &[],
     }
@@ -601,7 +620,7 @@ impl Parser {
         for a in body.keys() {
             if !known.contains(&a.as_str()) {
                 let message = if a == "children" {
-                    format!("'{k}' holds no children; only column, row, section and list do")
+                    format!("'{k}' holds no children; only column, row, section, more and list do")
                 } else {
                     let h = hint(a, known, || format!("{k} takes {}", listed(known)));
                     format!("unknown attribute '{a}' on {k}{h}")
@@ -623,11 +642,22 @@ impl Parser {
                 .and_then(|v| p.text(v, &format!("{path}.{key}"), scope))
         };
         let kind = match k.as_str() {
-            "column" | "row" | "section" => {
+            "column" | "row" | "section" | "more" => {
                 let kids = self.children(body.get("children"), &path, scope);
                 match k.as_str() {
                     "column" => Kind::Column(kids),
                     "row" => Kind::Row(kids),
+                    "more" => {
+                        if kids.is_empty()
+                            || kids.iter().any(|n| !matches!(n.kind, Kind::Button { .. }))
+                        {
+                            self.err(
+                                &path,
+                                "a more menu holds one button or more, and nothing else",
+                            );
+                        }
+                        Kind::More(kids)
+                    }
                     _ => Kind::Section {
                         title: text(self, "title")?,
                         children: kids,
@@ -733,9 +763,49 @@ impl Parser {
                 let value = text(self, "value");
                 let placeholder = text(self, "placeholder");
                 let call = self.method(body.get("call")?, &format!("{path}.call"))?;
+                let secret = self.boolean(body.get("secret"), &format!("{path}.secret"));
                 Kind::Field {
                     value,
                     placeholder,
+                    call,
+                    secret,
+                }
+            }
+            "choice" => {
+                let rows = match body.get("rows").and_then(Value::as_str) {
+                    Some(r) if self.collections.iter().any(|(n, _)| n == r) => r.to_owned(),
+                    Some(r) => {
+                        let names: Vec<&str> =
+                            self.collections.iter().map(|(n, _)| n.as_str()).collect();
+                        let h = hint(r, &names, || {
+                            "a choice draws a collection the template declares under rows".into()
+                        });
+                        self.err(&format!("{path}.rows"), format!("no collection '{r}'{h}"));
+                        return None;
+                    }
+                    None => {
+                        self.err(
+                            &format!("{path}.rows"),
+                            "a choice names the collection its options are",
+                        );
+                        return None;
+                    }
+                };
+                let inner = Scope {
+                    row: Some(rows.as_str()),
+                    in_item: true,
+                    ..scope
+                };
+                let label = self.text(body.get("label")?, &format!("{path}.label"), inner)?;
+                let selected = match body.get("selected") {
+                    Some(v) => self.cond(v, &format!("{path}.selected"), inner),
+                    None => None,
+                };
+                let call = self.method(body.get("call")?, &format!("{path}.call"))?;
+                Kind::Choice {
+                    rows,
+                    label,
+                    selected,
                     call,
                 }
             }
@@ -968,11 +1038,11 @@ impl Parser {
         let Some(o) = v.as_object() else {
             self.err(
                 path,
-                "expected an action: call, open, focus, show, close or window",
+                "expected an action: call, open, focus, show, close, window or signin",
             );
             return None;
         };
-        let names = ["call", "open", "focus", "show", "close", "window"];
+        let names = ["call", "open", "focus", "show", "close", "window", "signin"];
         let mut a = Action::default();
         for (k, val) in o {
             let p = format!("{path}.{k}");
@@ -1000,25 +1070,31 @@ impl Parser {
                 "show" => a.show = self.boolean(Some(val), &p),
                 "close" => a.close = self.boolean(Some(val), &p),
                 "window" => a.window = self.method(val, &p),
+                "signin" => a.signin = self.text(val, &p, scope),
                 other => {
                     let h = hint(other, &names, || {
-                        "an action is call, open, focus, show, close or window".into()
+                        "an action is call, open, focus, show, close, window or signin".into()
                     });
                     self.err(&p, format!("unknown action '{other}'{h}"));
                 }
             }
         }
-        let goes = [a.call.is_some(), a.open.is_some(), a.focus.is_some()]
-            .iter()
-            .filter(|x| **x)
-            .count();
+        let goes = [
+            a.call.is_some(),
+            a.open.is_some(),
+            a.focus.is_some(),
+            a.signin.is_some(),
+        ]
+        .iter()
+        .filter(|x| **x)
+        .count();
         if goes > 1 {
-            self.err(path, "a button does one of call, open and focus");
+            self.err(path, "a button does one of call, open, focus and signin");
         }
         if goes == 0 && !a.show && !a.close && a.window.is_none() {
             self.err(
                 path,
-                "a button needs an action: call, open, focus, show, close or window",
+                "a button needs an action: call, open, focus, show, close, window or signin",
             );
         }
         Some(a)

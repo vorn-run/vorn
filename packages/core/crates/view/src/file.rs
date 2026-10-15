@@ -196,7 +196,7 @@ impl Reader<'_> {
         let first = match kind {
             "button" => "label",
             "section" => "title",
-            "list" => "rows",
+            "list" | "choice" => "rows",
             _ => "value",
         };
         for (i, e) in node
@@ -221,7 +221,7 @@ impl Reader<'_> {
             let (key, into) = match (kind, k) {
                 (_, "when") => (format!("{path}.when"), &mut o),
                 ("status" | "badge", _) => (format!("{path}.tones.{k}"), &mut tones),
-                ("button", "open" | "call" | "focus" | "show" | "close" | "window") => {
+                ("button", "open" | "call" | "focus" | "show" | "close" | "window" | "signin") => {
                     (format!("{path}.action.{k}"), &mut action)
                 }
                 _ => (format!("{path}.{k}"), &mut o),

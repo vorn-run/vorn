@@ -6565,24 +6565,21 @@ dependencies = [
 name = "vorn-connectors"
 version = "0.0.0"
 dependencies = [
- "data-encoding",
- "flate2",
- "getrandom 0.4.3",
- "libc",
- "regress",
- "serde",
+ "chrono",
+ "rmcp",
  "serde_json",
- "sha2 0.10.9",
- "tar",
  "tempfile",
  "tokio",
  "tracing",
  "ureq",
  "url",
+ "uuid",
  "vorn-agents",
  "vorn-extensions",
+ "vorn-mcp",
  "vorn-spawn",
  "vorn-store",
+ "vorn-vault",
 ]
 
 [[package]]
@@ -6944,7 +6941,6 @@ dependencies = [
  "jiff",
  "libc",
  "libghostty-vt",
- "rmcp",
  "rusqlite",
  "serde",
  "serde_json",

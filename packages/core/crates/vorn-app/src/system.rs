@@ -390,13 +390,13 @@ pub fn pick(
 fn run_picker(what: Pick) -> Option<PathBuf> {
     let attempts: Vec<std::process::Command> = if cfg!(target_os = "macos") {
         let script = match &what {
-            Pick::Folder(_) => "POSIX path of (choose folder with prompt (item 1 of argv))",
+            Pick::Folder(_) | Pick::Pack(_) => {
+                "POSIX path of (choose folder with prompt (item 1 of argv))"
+            }
             Pick::Save { .. } => {
                 "POSIX path of (choose file name with prompt (item 1 of argv) default name (item 2 of argv) default location (POSIX file (item 3 of argv)))"
             }
-            Pick::Pack(_) | Pick::Workflow(_) => {
-                "POSIX path of (choose file with prompt (item 1 of argv))"
-            }
+            Pick::Workflow(_) => "POSIX path of (choose file with prompt (item 1 of argv))",
         };
         let mut c = vorn_spawn::command("osascript");
         c.args(["-e", "on run argv", "-e", script, "-e", "end run"]);
@@ -404,13 +404,9 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
         vec![c]
     } else if cfg!(windows) {
         let (script, filter) = match &what {
-            Pick::Folder(_) => (WINDOWS_FOLDER, ""),
+            Pick::Folder(_) | Pick::Pack(_) => (WINDOWS_FOLDER, ""),
             Pick::Save { .. } => (WINDOWS_SAVE, WORKFLOW_FILTER),
             Pick::Workflow(_) => (WINDOWS_OPEN, WORKFLOW_FILTER),
-            Pick::Pack(_) => (
-                WINDOWS_OPEN,
-                "Vorn packs (*.vorn.tgz)|*.vorn.tgz|All files (*.*)|*.*",
-            ),
         };
         let args = pick_args(&what);
         let mut c = vorn_spawn::command("powershell");
@@ -427,7 +423,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
         z.args(["--file-selection", "--title", title]);
         let mut k = vorn_spawn::command("kdialog");
         match &what {
-            Pick::Folder(_) => {
+            Pick::Folder(_) | Pick::Pack(_) => {
                 z.arg("--directory");
                 k.args(["--getexistingdirectory", "."]);
             }
@@ -436,7 +432,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
                     .arg(at);
                 k.arg("--getsavefilename").arg(at);
             }
-            Pick::Pack(_) | Pick::Workflow(_) => {
+            Pick::Workflow(_) => {
                 k.args(["--getopenfilename", "."]);
             }
         }

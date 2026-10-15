@@ -8,9 +8,10 @@
 //! fires it missed while it was down are caught up, at most
 //! [`CATCH_UP_MS`] of them. A first start plans from now.
 //!
-//! A connector poll is fetched by the server, which holds the connectors
-//! ([`crate::native::connectors::Connectors::poll`]), and its items, like webhook requests, are run from
-//! the inbox here: leased, run, and settled by the run.
+//! A connector poll is asked of the bridge's poll service, which hands it to
+//! the extension that answers `connectorPoll` (the Connectors built-in), and
+//! its items, like webhook requests, are run from the inbox here: leased,
+//! run, and settled by the run.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +19,9 @@ use std::time::Duration;
 
 use jiff::tz::TimeZone;
 use serde_json::{json, Value};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
+use vorn_connectors::builtin::POLL_TRIGGER;
+use vorn_extensions::polls::Polled;
 use vorn_work::receipts::{deliver_due, CATCH_UP_MS};
 use vorn_work::schedule::Schedule;
 
@@ -135,37 +138,34 @@ impl Work {
         let Some(workflow) = vorn_work::model::Workflow::from_json(row) else {
             return;
         };
-        if workflow.trigger_type() != Some("connectorPoll") {
+        if workflow.trigger_type() != Some(POLL_TRIGGER) {
             self.engine.run_scheduled_workflow(workflow, inputs);
             return;
         }
-        let workflow_id = workflow.id.as_str();
-        if !self
-            .polls
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(workflow_id.to_owned())
-        {
-            info!(workflow = %workflow_id, "a poll is already in flight");
-            return;
-        }
         let work = Arc::clone(self);
-        let id = workflow_id.to_owned();
+        let id = workflow.id.clone();
         tokio::spawn(async move {
-            let connectors = work.native.upgrade().and_then(|n| n.connectors().cloned());
-            match connectors {
-                Some(connectors) => {
-                    let polled = tokio::time::timeout(POLL_LIMIT, connectors.poll(&id)).await;
-                    if polled.is_err() {
-                        warn!(workflow = %id, "a connector poll took too long");
-                    }
+            let Some(native) = work.native.upgrade() else {
+                return;
+            };
+            let polls = Arc::clone(native.polls());
+            let polled = polls
+                .run(POLL_TRIGGER, &id, POLL_LIMIT, |owner| {
+                    let (native, id) = (Arc::clone(&native), id.clone());
+                    async move { poll_with(&native, &owner, &id).await }
+                })
+                .await;
+            match polled {
+                Polled::Done(_) => {}
+                Polled::InFlight => {
+                    info!(workflow = %id, "a poll is already in flight");
+                    return;
                 }
-                None => warn!(workflow = %id, "no connectors to poll with"),
+                Polled::TimedOut => warn!(workflow = %id, "a connector poll took too long"),
+                Polled::NoProvider => {
+                    debug!(workflow = %id, "nothing answers connector polls; Connectors may be off")
+                }
             }
-            work.polls
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&id);
             work.drain.notify_one();
         });
     }
@@ -197,6 +197,19 @@ impl Work {
                         .await;
                 });
             }
+        }
+    }
+}
+
+/// One poll, by the extension that answers this trigger type's polls: the pages it read.
+async fn poll_with(native: &Arc<crate::native::Native>, owner: &str, workflow_id: &str) -> u64 {
+    match native.connectors() {
+        Some(connectors) if owner == vorn_connectors::builtin::ID => {
+            connectors.inner().poll(workflow_id).await
+        }
+        _ => {
+            warn!(workflow = %workflow_id, "{owner} answers polls, but vornd cannot reach it");
+            0
         }
     }
 }

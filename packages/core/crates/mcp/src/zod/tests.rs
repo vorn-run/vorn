@@ -18,7 +18,8 @@ fn every_tool_has_a_schema_entry_and_every_ref_resolves() {
             "{name} has no schema entry"
         );
     }
-    assert_eq!(registry().tools.len(), listed.len());
+    // The rest are the tools built-in extensions add, checked here before they get them.
+    assert_eq!(registry().tools.len(), listed.len() + 7);
 }
 
 #[test]

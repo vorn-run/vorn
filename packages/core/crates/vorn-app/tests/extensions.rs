@@ -29,15 +29,27 @@ fn install(home: &Path) {
     fs::write(dir.join("index.js"), FIXTURE).expect("index");
     fs::write(dir.join("package.json"), r#"{"type":"module"}"#).expect("package");
     fs::write(dir.join("web/index.html"), "<p>pane</p>").expect("page");
-    let manifest = json!({
-        "id": "rep", "name": "Reporter", "kind": "extension", "protocol": 1,
-        "permissions": [],
-        "contributes": { "panes": [
-            { "id": "page", "title": "Report", "web": "web/index.html" },
-            { "id": "prog", "title": "Tail", "command": ["sh", "-c", "printf 'from the program'; sleep 60"] }
-        ] }
-    });
-    fs::write(dir.join("manifest.json"), manifest.to_string()).expect("manifest");
+    let manifest = r#"id = "rep"
+name = "Reporter"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+command = ["node", "index.js"]
+
+[connector]
+
+[[contributes.panes]]
+id = "page"
+title = "Report"
+web = "web/index.html"
+
+[[contributes.panes]]
+id = "prog"
+title = "Tail"
+command = ["sh", "-c", "printf 'from the program'; sleep 60"]
+"#;
+    fs::write(dir.join("vorn-extension.toml"), manifest).expect("manifest");
     fs::write(
         home.join("connectors/rep/current.json"),
         json!({ "version": "1.0.0", "installedAt": 1 }).to_string(),

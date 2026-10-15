@@ -1,0 +1,58 @@
+id = "sample"
+name = "Sample \"quoted\""
+version = "0.2.0"
+api = "vorn:extension@0.9"
+publisher = "Tests"
+description = "Reads a site you sign in to\nand acts on it — both ways."
+
+[icon]
+view_box = "0 0 24 24"
+paths = ["M0 0h24v24H0z"]
+
+[service]
+command = ["node", "index.js"]
+
+[checks]
+command = ["node", "index.js", "--check"]
+
+[declares]
+network = ["sample.example", "*.sample.example"]
+
+[connector]
+
+[connector.auth]
+rung = "browser"
+browser = { sign_in_url = "https://sample.example/sign-in", origins = ["https://sample.example", "https://*.sample.example"], check = { url = "https://sample.example/api/me", identity = ["name"], headers = { X-Requested-With = "vorn" } } }
+
+[[connector.triggers]]
+type = "post"
+label = "New post"
+description = "A post appears."
+status_mapping = [{ upstream = "open", suggested_local = "todo" }]
+default_workflow = { name = "Posts to tasks", default_cron_from_minutes = 15 }
+
+[[connector.triggers]]
+type = "same"
+
+[[connector.actions]]
+type = "comment"
+label = "Comment"
+description = "Leaves a comment."
+outputs = [{ key = "id", type = "string", description = "The comment" }, { key = "url" }]
+
+[[connector.actions.inputs]]
+key = "body"
+label = "Body"
+required = true
+
+[[connector.actions.inputs]]
+key = "kind"
+label = "Kind"
+type = "select"
+options = [{ value = "a", label = "A" }, { value = "b" }]
+
+[[connector.actions.inputs]]
+key = "board"
+label = "Board"
+type = "select"
+load_options = "boards"

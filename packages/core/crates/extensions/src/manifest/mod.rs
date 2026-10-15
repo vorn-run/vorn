@@ -22,8 +22,14 @@ use crate::js;
 
 /// The extension API this build speaks over stdio, generated from the WIT.
 pub const API: &str = crate::api::API;
-/// What `api` says for a program in the connector protocol, before its version.
-pub const CONNECTOR_API: &str = "vorn:connector@";
+/// The api id connector packages said before there was one API, refused by name.
+pub const RETIRED_CONNECTOR_API: &str = "vorn:connector@";
+/// The kind sections a manifest may carry beside its contributions, each
+/// naming the child protocol its service speaks within [`API`]. A package
+/// with none speaks the extension API itself.
+pub const KIND_SECTIONS: &[&str] = &["connector"];
+/// The connector child protocol [`API`] includes, spoken by a `[connector]` service.
+pub const CONNECTOR_PROTOCOL: u64 = 1;
 
 /// What a package says it is, does, runs and reaches.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -40,7 +46,7 @@ pub struct Manifest {
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<Auth>,
-    /// The connector protocol its program speaks; `None` with the extension API.
+    /// The child protocol of its kind section; `None` when its program speaks the extension API.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<u64>,
     pub triggers: Vec<Trigger>,
@@ -52,7 +58,7 @@ pub struct Manifest {
     pub permissions: Option<Vec<Permission>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activates: Option<Activation>,
-    /// `vorn:extension@0.9` or `vorn:connector@1`; `None` for a pack too old to say.
+    /// `vorn:extension@0.9`; `None` for a pack too old to say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<String>,
     /// The Vorn releases it runs on, as `>=0.9`.
@@ -103,9 +109,19 @@ pub struct McpTool {
 }
 
 impl Manifest {
-    /// Whether its program speaks the extension API rather than the connector protocol.
+    /// Whether its service also runs as an extension: with no kind section,
+    /// or with points only the extension API fills (templates, MCP tools,
+    /// events). A package with both starts one program in either role, and
+    /// its first message, `guest.init` or `vorn/hello`, says which.
     pub fn speaks_api(&self) -> bool {
         self.api.as_deref() == Some(API)
+            && (self.protocol.is_none()
+                || self
+                    .contributes
+                    .as_ref()
+                    .is_some_and(Contributions::templated)
+                || !self.mcp.is_empty()
+                || self.service.as_ref().is_some_and(|s| !s.events.is_empty()))
     }
 
     /// The one-shot program for `action`, if it declares one.
@@ -155,6 +171,10 @@ pub struct Declares {
     /// Hosts `net.fetch` may reach, enforced at the bridge.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub network: Vec<String>,
+    /// Connection settings, by variable name, whose addresses name hosts it
+    /// may reach too: a feed reader reaches the feeds a person lists.
+    #[serde(rename = "networkFrom", skip_serializing_if = "Vec::is_empty")]
+    pub network_from: Vec<String>,
     /// Permissions as written, `auth.borrow:gh` keeping its argument.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
@@ -162,7 +182,7 @@ pub struct Declares {
 
 impl Declares {
     pub fn is_empty(&self) -> bool {
-        self.network.is_empty() && self.uses.is_empty()
+        self.network.is_empty() && self.network_from.is_empty() && self.uses.is_empty()
     }
 }
 
@@ -624,10 +644,20 @@ pub enum Permission {
     BrowserSession,
     #[serde(rename = "process.run")]
     ProcessRun,
+    #[serde(rename = "tasks.read")]
+    TasksRead,
+    #[serde(rename = "tasks.write")]
+    TasksWrite,
+    #[serde(rename = "workflows.read")]
+    WorkflowsRead,
+    #[serde(rename = "workflows.write")]
+    WorkflowsWrite,
+    #[serde(rename = "inbox.write")]
+    InboxWrite,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 19] = [
+    pub const ALL: [Permission; 24] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -647,6 +677,11 @@ impl Permission {
         Permission::HttpRoutes,
         Permission::BrowserSession,
         Permission::ProcessRun,
+        Permission::TasksRead,
+        Permission::TasksWrite,
+        Permission::WorkflowsRead,
+        Permission::WorkflowsWrite,
+        Permission::InboxWrite,
     ];
 
     pub fn name(self) -> &'static str {
@@ -670,6 +705,11 @@ impl Permission {
             Permission::HttpRoutes => "http.routes",
             Permission::BrowserSession => "browser.session",
             Permission::ProcessRun => "process.run",
+            Permission::TasksRead => "tasks.read",
+            Permission::TasksWrite => "tasks.write",
+            Permission::WorkflowsRead => "workflows.read",
+            Permission::WorkflowsWrite => "workflows.write",
+            Permission::InboxWrite => "inbox.write",
         }
     }
 
@@ -888,13 +928,14 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         description: description(payload),
         icon: icon(payload.get("icon")),
         auth: auth(payload.get("auth")),
-        api: protocol.map(|p| format!("{CONNECTOR_API}{p}")),
+        api: protocol.map(|_| API.to_owned()),
         protocol,
         triggers,
         actions,
         env,
         declares: Declares {
             network: Vec::new(),
+            network_from: Vec::new(),
             uses: permissions
                 .iter()
                 .flatten()

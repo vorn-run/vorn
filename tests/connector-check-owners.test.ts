@@ -373,7 +373,8 @@ async function everyCodeAnyRunEmits(): Promise<Set<string>> {
       entry: './index.js',
       resolveDir: dir,
       outDir: dir,
-      maxBytes: 16,
+      maxUnpackedBytes: 16,
+      launch: async () => [],
       bundle: async () => ({
         code: `const x = ${JSON.stringify('y'.repeat(4096))}\n`,
         external: []

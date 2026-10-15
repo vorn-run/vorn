@@ -122,7 +122,13 @@ fn install(root: &Path, id: &str, manifest: Value) {
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
     fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
     fs::write(dir.join("web/index.html"), "<p>pane</p>").unwrap();
-    fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+    let manifest = vorn_extensions::manifest::file::from_pack_json(manifest.as_object().unwrap())
+        .expect("a fixture manifest converts");
+    fs::write(
+        dir.join(vorn_extensions::manifest::file::FILE),
+        vorn_extensions::manifest::file::to_toml(&manifest),
+    )
+    .unwrap();
     fs::write(
         root.join(id).join("current.json"),
         json!({ "version": "1.0.0", "installedAt": 1 }).to_string(),

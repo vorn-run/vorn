@@ -140,9 +140,11 @@ impl Panel {
                 extension, press, ..
             } => {
                 self.points.asking = None;
+                self.points.more = None;
                 self.press(&extension, &press);
             }
             PointAct::Ask(id) => self.points.asking = id,
+            PointAct::More(id) => self.points.more = id,
             _ => {}
         }
     }

@@ -6,6 +6,14 @@ import readline from 'node:readline'
 const KEEP = 8
 const sessions = new Map()
 let finished = []
+let plan = 'free'
+const plans = () =>
+  ['free', 'team'].map((id) => ({
+    id,
+    name: id === 'free' ? 'Free plan' : 'Team plan',
+    selected: id === plan
+  }))
+const account = { id: 'turns-account', name: 'Turns account', signed_in: false }
 const prefs = new Map([['shells', { id: 'shells', label: 'Count shells too', on: true }]])
 let asked = 0
 const waiting = new Map()
@@ -96,6 +104,20 @@ function handle(method, args) {
       finished = []
       publish('finished', ['clear'])
       return null
+    case 'plan':
+      plan = args.id
+      upsert('plans', plans())
+      return null
+    case 'key':
+      return null
+    case 'forget':
+      return { toast: `Forgot ${account.name}` }
+    case 'signin':
+      // The window's target; Vorn opens it and tells the connection when it is signed in.
+      return {
+        name: account.name,
+        browser: { signInUrl: 'https://example.com/sign-in', origins: ['https://example.com'] }
+      }
     case 'pref': {
       const p = prefs.get(args.id)
       if (!p) return null
@@ -118,6 +140,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'guest.init') {
     upsert('prefs', [...prefs.values()])
+    upsert('plans', plans())
+    upsert('account', [account])
     publish('finished', ['clear'])
     return send({ id, result: null })
   }

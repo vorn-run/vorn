@@ -6,6 +6,16 @@ rows "prefs" {
     on bool
 }
 
+rows "plans" {
+    name string
+    selected bool
+}
+
+rows "account" {
+    name string
+    signed_in bool
+}
+
 rows "finished" {
     session string
     name string
@@ -17,6 +27,19 @@ column {
     section "Counting" {
         list "prefs" {
             toggle "{row.on}" label="{row.label}" call="pref"
+        }
+    }
+    section "Account" {
+        choice "plans" label="{row.name}" selected="{row.selected}" call="plan"
+        field placeholder="Paste a key" call="key" secret=#true
+        list "account" {
+            row {
+                text "{row.name}" grow=#true
+                button "Sign in" signin="{row.id}" when="!{row.signed_in}"
+                more {
+                    button "Forget account" call="forget" style=danger confirm="Forget {row.name}?"
+                }
+            }
         }
     }
     section "Finished turns" {

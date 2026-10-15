@@ -41,7 +41,7 @@ async fn secret_of(
         .connectors()
         .cloned()
         .ok_or_else(|| ExtError::new("signed-out", "vornd holds no connections"))?;
-    if connectors.owner_of(&connection).await.as_deref() != Some(owner.as_str()) {
+    if connectors.inner().owner_of(&connection).await.as_deref() != Some(owner.as_str()) {
         return Err(ExtError::new(
             "denied",
             format!("the connection {connection} is not {owner}'s"),
@@ -80,6 +80,19 @@ fn text(args: &Value, key: &str) -> Option<String> {
 
 fn needs(method: &str, what: &str) -> ExtError {
     ExtError::new("bad-request", format!("{method} takes {what}"))
+}
+
+/// Runs `f` on the store off the runtime, a failure the call's.
+async fn on_store(
+    native: &Arc<Native>,
+    method: &str,
+    f: impl FnOnce(&mut vorn_store::Store) -> vorn_store::Result<Value> + Send + 'static,
+) -> Result<Value, ExtError> {
+    let n = Arc::clone(native);
+    let answered = tokio::task::spawn_blocking(move || crate::native::config::with_store(&n, f))
+        .await
+        .map_err(|e| ExtError::new("failed", e.to_string()))?;
+    answered.map_err(|e| ExtError::new("failed", format!("{method}: {e}")))
 }
 
 /// A running session as `sessions.list` and `sessions.get` describe it.
@@ -137,6 +150,14 @@ impl World for Wired {
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
             let m = method.as_str();
+            if vorn_extensions::gate::BUILTIN_ONLY.contains(&m)
+                && extension != vorn_connectors::builtin::ID
+            {
+                return Err(ExtError::new(
+                    "denied",
+                    format!("{m} is open only to the extensions Vorn ships"),
+                ));
+            }
             match m {
                 "sessions.list" => {
                     let sessions = native
@@ -293,6 +314,118 @@ impl World for Wired {
                         text(&args, "field").ok_or_else(|| needs(m, "the field to read"))?;
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
+                }
+                "task.importItems" => {
+                    let import: vorn_work::sources::Import = serde_json::from_value(args)
+                        .map_err(|e| needs(m, &format!("a connection and its items ({e})")))?;
+                    let now =
+                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                    on_store(&native, m, move |s| {
+                        vorn_work::sources::import(s, &import, &now, || {
+                            uuid::Uuid::new_v4().to_string()
+                        })
+                        .map(Value::Array)
+                    })
+                    .await
+                }
+                "task.sourceLink" => {
+                    let task =
+                        text(&args, "taskId").ok_or_else(|| needs(m, "the taskId to read"))?;
+                    on_store(&native, m, move |s| vorn_work::sources::link(s, &task)).await
+                }
+                "project.list" => {
+                    on_store(&native, m, |s| s.call("dbListProjects", json!([]))).await
+                }
+                "workflow.get" => {
+                    let id = text(&args, "workflowId")
+                        .ok_or_else(|| needs(m, "the workflowId to read"))?;
+                    on_store(&native, m, move |s| s.call("dbGetWorkflow", json!([id]))).await
+                }
+                "workflow.list" => {
+                    on_store(&native, m, |s| s.call("dbListWorkflows", json!([]))).await
+                }
+                "workflow.seed" => {
+                    let workflows = args
+                        .get("workflows")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .ok_or_else(|| needs(m, "the workflows to seed"))?;
+                    on_store(&native, m, move |s| {
+                        let mut created = Vec::with_capacity(workflows.len());
+                        for wf in workflows {
+                            let id = wf.get("id").cloned().unwrap_or(Value::Null);
+                            let fresh = s.call("dbGetWorkflow", json!([id]))?.is_null();
+                            if fresh {
+                                s.call("dbInsertWorkflow", json!([wf]))?;
+                            }
+                            created.push(Value::Bool(fresh));
+                        }
+                        Ok(json!({ "created": created }))
+                    })
+                    .await
+                }
+                "workflow.unseed" => {
+                    let prefix = text(&args, "prefix")
+                        .filter(|p| p.ends_with(':'))
+                        .ok_or_else(|| {
+                            needs(m, "the prefix its workflows' ids start with, ending in :")
+                        })?;
+                    on_store(&native, m, move |s| {
+                        let workflows = s.call("dbListWorkflows", json!([]))?;
+                        let mut removed = 0u64;
+                        for wf in workflows.as_array().into_iter().flatten() {
+                            if let Some(id) = wf
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .filter(|i| i.starts_with(&prefix))
+                            {
+                                s.call("dbDeleteWorkflow", json!([id]))?;
+                                removed += 1;
+                            }
+                        }
+                        Ok(json!({ "removed": removed }))
+                    })
+                    .await
+                }
+                "inbox.cursor" => {
+                    let (wf, conn) = (
+                        text(&args, "workflowId").ok_or_else(|| needs(m, "the workflowId"))?,
+                        text(&args, "connectionId").ok_or_else(|| needs(m, "the connectionId"))?,
+                    );
+                    on_store(&native, m, move |s| {
+                        s.call("dbGetConnectorPollCursor", json!([wf, conn]))
+                    })
+                    .await
+                }
+                "inbox.recordPage" => {
+                    on_store(&native, m, move |s| {
+                        s.call("dbRecordConnectorPollPage", json!([args]))
+                    })
+                    .await
+                }
+                "inbox.recordError" => {
+                    on_store(&native, m, move |s| {
+                        s.call("dbRecordConnectorPollError", json!([args]))
+                    })
+                    .await
+                }
+                "signin.check" => {
+                    let key = text(&args, "key").ok_or_else(|| needs(m, "the window's key"))?;
+                    let browser = args.get("browser").cloned().unwrap_or(Value::Null);
+                    crate::native::signin::check(&native, &key, browser)
+                        .await
+                        .map_err(|e| ExtError::new("failed", e))
+                }
+                "signin.forget" => {
+                    let key = text(&args, "key").ok_or_else(|| needs(m, "the window's key"))?;
+                    crate::native::signin::forget(&native, &key)
+                        .await
+                        .map_err(|e| ExtError::new("failed", e))
+                }
+                "signin.completed" => {
+                    let key = text(&args, "key").ok_or_else(|| needs(m, "the window's key"))?;
+                    crate::native::signin::completed(&native, &key).await;
+                    Ok(Value::Null)
                 }
                 other => Err(ExtError::new(
                     "unknown-method",

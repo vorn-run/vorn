@@ -42,20 +42,35 @@ function install(dataDir: string, id: string): void {
   fs.writeFileSync(path.join(dir, 'index.js'), CHILD)
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"module"}')
   fs.writeFileSync(path.join(dir, 'web', 'index.html'), `<p>${id} pane</p>`)
-  const manifest = {
-    id,
-    name: id.toUpperCase(),
-    version: '1.0.0',
-    kind: 'extension',
-    protocol: 1,
-    permissions: ['git.read', 'terminal.selection'],
-    contributes: {
-      panes: [{ id: 'page', title: 'Page', web: 'web/index.html' }],
-      footers: [{ id: 'who', every: 5 }],
-      linkHandlers: [{ id: 'ticket', pattern: `${id.toUpperCase()}-\\d+` }]
-    }
-  }
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest))
+  const manifest = [
+    `id = "${id}"`,
+    `name = "${id.toUpperCase()}"`,
+    'version = "1.0.0"',
+    'api = "vorn:extension@0.9"',
+    '',
+    '[service]',
+    'command = ["node", "index.js"]',
+    '',
+    '[declares]',
+    'uses = ["git.read", "terminal.selection"]',
+    '',
+    '[connector]',
+    '',
+    '[[contributes.panes]]',
+    'id = "page"',
+    'title = "Page"',
+    'web = "web/index.html"',
+    '',
+    '[[contributes.footers]]',
+    'id = "who"',
+    'every = 5.0',
+    '',
+    '[[contributes.link_handlers]]',
+    'id = "ticket"',
+    `pattern = '${id.toUpperCase()}-\\d+'`,
+    ''
+  ].join('\n')
+  fs.writeFileSync(path.join(dir, 'vorn-extension.toml'), manifest)
   fs.writeFileSync(
     path.join(root, 'current.json'),
     JSON.stringify({ version: '1.0.0', installedAt: new Date().toISOString() })

@@ -85,6 +85,8 @@ pub enum From {
     Plugins,
     /// A run waiting on a signed-out connection.
     Run,
+    /// An extension's template, through its sign-in action.
+    Page,
 }
 
 /// The sign-in window of one connection, while it is open.

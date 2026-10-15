@@ -15,7 +15,6 @@ pub mod host;
 pub mod routes;
 pub mod schedule;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -116,8 +115,6 @@ pub struct Work {
     pub(crate) drain: Arc<Notify>,
     /// Woken when the workflows changed, so the scheduler reads them again.
     pub(crate) rearm: Notify,
-    /// Connector polls in flight, by workflow.
-    pub(crate) polls: Mutex<HashSet<String>>,
     /// Review batches waiting for their agent's prompt.
     queue: Mutex<Queue>,
 }
@@ -163,7 +160,6 @@ impl Work {
             native: Arc::downgrade(native),
             drain,
             rearm: Notify::new(),
-            polls: Mutex::default(),
             queue: Mutex::default(),
         })
     }

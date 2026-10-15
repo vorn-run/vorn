@@ -17,9 +17,8 @@ use toml::Spanned;
 
 use super::{
     Credential, Declares, Manifest, ManifestError, McpTool, Permission, Run, Service, Storage, API,
-    CONNECTOR_API,
+    CONNECTOR_PROTOCOL, KIND_SECTIONS, RETIRED_CONNECTOR_API,
 };
-use crate::connector::SUPPORTED_PROTOCOLS;
 
 /// The manifest's file name in a package's folder.
 pub const FILE: &str = "vorn-extension.toml";
@@ -49,6 +48,16 @@ impl std::error::Error for FileError {}
 
 /// Reads and checks a manifest's TOML text.
 pub fn parse(text: &str) -> Result<Manifest, FileError> {
+    parse_as(text, false)
+}
+
+/// Reads and checks the manifest of an extension Vorn ships compiled in,
+/// which answers its calls and tools itself rather than through a service.
+pub fn parse_builtin(text: &str) -> Result<Manifest, FileError> {
+    parse_as(text, true)
+}
+
+fn parse_as(text: &str, builtin: bool) -> Result<Manifest, FileError> {
     let lines = Lines::parse(text)?;
     let raw: Raw = toml::from_str(text).map_err(|e| FileError {
         line: e.span().map_or(1, |s| line_of(text, s.start)),
@@ -60,9 +69,18 @@ pub fn parse(text: &str) -> Result<Manifest, FileError> {
         field: field.to_owned(),
         message,
     };
-    raw.check(&at)?;
+    raw.check(&at, builtin)?;
     let manifest = raw.into_manifest(&at)?;
     Ok(manifest)
+}
+
+/// The one line a manifest still on a retired api id gets.
+pub fn retired_api(api: &str) -> String {
+    let kinds: Vec<String> = KIND_SECTIONS.iter().map(|k| format!("[{k}]")).collect();
+    format!(
+        "`{api}` is retired; set api = \"{API}\" and keep auth, triggers and actions under a {} section",
+        kinds.join(" or ")
+    )
 }
 
 /// A 0.8 pack's `manifest.json`, read as its folder runs it: `node index.js`.
@@ -172,12 +190,14 @@ struct RawDeclares {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     network: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    network_from: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     uses: Vec<String>,
 }
 
 impl RawDeclares {
     fn is_empty(&self) -> bool {
-        self.network.is_empty() && self.uses.is_empty()
+        self.network.is_empty() && self.network_from.is_empty() && self.uses.is_empty()
     }
 }
 
@@ -590,7 +610,7 @@ pub fn is_range(range: &str) -> bool {
 }
 
 impl Raw {
-    fn check(&self, at: &At<'_>) -> Result<(), FileError> {
+    fn check(&self, at: &At<'_>, builtin: bool) -> Result<(), FileError> {
         if !is_id(&self.id) {
             return Err(at(
                 "id",
@@ -609,18 +629,13 @@ impl Raw {
                 format!("`{}` is not a version like 1.2.0", self.version),
             ));
         }
-        let connector_protocol = self.api.strip_prefix(CONNECTOR_API);
-        let speaks = self.api == API
-            || connector_protocol
-                .and_then(|p| p.parse::<u64>().ok())
-                .is_some_and(|p| SUPPORTED_PROTOCOLS.contains(&p));
-        if !speaks {
+        if self.api.starts_with(RETIRED_CONNECTOR_API) {
+            return Err(at("api", retired_api(&self.api)));
+        }
+        if self.api != API {
             return Err(at(
                 "api",
-                format!(
-                    "this Vorn speaks {API} and {CONNECTOR_API}1; the package asks for {}",
-                    self.api
-                ),
+                format!("this Vorn speaks {API}; the package asks for {}", self.api),
             ));
         }
         if let Some(range) = &self.vorn {
@@ -676,7 +691,7 @@ impl Raw {
                     "a tool name starts with a letter and holds up to 40 letters, digits, `-` and `_`".into(),
                 ));
             }
-            if self.service.is_none() {
+            if self.service.is_none() && !builtin {
                 return Err(at(
                     &field,
                     "is answered by the service, and there is none".into(),
@@ -713,6 +728,18 @@ impl Raw {
                 ));
             }
         }
+        for (i, name) in self.declares.network_from.iter().enumerate() {
+            let setting = !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+            if self.connector.is_none() || !setting {
+                return Err(at(
+                    &format!("declares.network_from[{i}]"),
+                    format!("`{name}` is not the name of a connector's setting, like RSS_FEEDS"),
+                ));
+            }
+        }
         for (i, used) in self.declares.uses.iter().enumerate() {
             if Permission::named(used).is_none() {
                 return Err(at(
@@ -742,31 +769,34 @@ impl Raw {
                 ));
             }
         }
-        let legacy = self.connector.is_some()
-            || self
-                .contributes
-                .as_ref()
-                .is_some_and(|c| !c.footers.is_empty() || c.panes.iter().any(|p| p.view.is_none()));
-        let templated = self.contributes.as_ref().is_some_and(|c| {
-            c.points().iter().any(|(_, p)| !p.is_empty())
-                || c.panes.iter().any(|p| p.view.is_some())
-        });
-        if templated && self.api != API {
-            return Err(at(
-                "contributes",
-                format!("draws templates its program fills; set api = \"{API}\""),
-            ));
-        }
-        if legacy && connector_protocol.is_none() {
-            let table = if self.connector.is_some() {
-                "connector"
-            } else {
-                "contributes"
-            };
-            return Err(at(
-                table,
-                format!("is spoken to in the connector protocol; set api = \"{CONNECTOR_API}1\""),
-            ));
+        if let Some(c) = &self.contributes {
+            // Where a package draws one place from a template, the protocol's older way to draw it is retired.
+            if !c.footers.is_empty() && !c.card_footers.is_empty() {
+                return Err(at(
+                    "contributes.footers",
+                    "are retired where card_footers draw from templates; draw each footer as a card_footers template".into(),
+                ));
+            }
+            let (viewed, unviewed) = c.panes.iter().fold((0, 0), |(v, u), p| {
+                if p.view.is_some() {
+                    (v + 1, u)
+                } else {
+                    (v, u + 1)
+                }
+            });
+            if viewed > 0 && unviewed > 0 {
+                return Err(at(
+                    "contributes.panes",
+                    "mix panes drawn from templates with panes the program serves; give every pane a view".into(),
+                ));
+            }
+            let legacy = !c.footers.is_empty() || unviewed > 0;
+            if legacy && self.connector.is_none() {
+                return Err(at(
+                    "contributes",
+                    "footers and panes without a view are drawn through the connector protocol; add a [connector] section or give each a view".into(),
+                ));
+            }
         }
         let does_something = self.service.is_some()
             || !self.actions.is_empty()
@@ -774,7 +804,8 @@ impl Raw {
                 .connector
                 .as_ref()
                 .is_some_and(|c| !c.triggers.is_empty() || !c.actions.is_empty())
-            || self.contributes.is_some();
+            || self.contributes.is_some()
+            || !self.mcp.is_empty();
         if !does_something {
             return Err(at(
                 "",
@@ -785,10 +816,7 @@ impl Raw {
     }
 
     fn into_manifest(self, at: &At<'_>) -> Result<Manifest, FileError> {
-        let protocol = self
-            .api
-            .strip_prefix(CONNECTOR_API)
-            .and_then(|p| p.parse::<u64>().ok());
+        let protocol = self.connector.is_some().then_some(CONNECTOR_PROTOCOL);
         let mut payload = Map::new();
         payload.insert("id".into(), json!(self.id));
         payload.insert("name".into(), json!(self.name));
@@ -856,6 +884,9 @@ impl Raw {
         let mut manifest = super::read(&payload).map_err(|e| at("", e.to_string()))?;
         if !has_connector_work {
             manifest.actions.clear();
+        } else {
+            // It feeds tasks in, whatever else it draws.
+            manifest.kind = super::Kind::Connector;
         }
         if self.contributes.is_none() {
             // Only a package that adds to a card reads `permissions` in JSON.
@@ -893,6 +924,7 @@ impl Raw {
         manifest.checks = self.checks.map(|c| c.command);
         manifest.declares = Declares {
             network: self.declares.network,
+            network_from: self.declares.network_from,
             uses: self.declares.uses,
         };
         manifest.credential = self.credential.map(|c| Credential {
@@ -1312,7 +1344,10 @@ impl From<&Manifest> for Raw {
             agent: a.agent.clone(),
             platform: a.platform.clone(),
         };
-        let is_connector = !m.triggers.is_empty() || !m.actions.is_empty() || m.auth.is_some();
+        let is_connector = m.protocol.is_some()
+            || !m.triggers.is_empty()
+            || !m.actions.is_empty()
+            || m.auth.is_some();
         let connector = is_connector.then(|| RawConnector {
             auth: m.auth.as_ref().map(|a| RawAuth {
                 rung: a.rung.clone(),
@@ -1493,7 +1528,7 @@ impl From<&Manifest> for Raw {
             id: m.id.clone(),
             name: m.name.clone(),
             version: m.version.clone(),
-            api: m.api.clone().unwrap_or_default(),
+            api: API.to_owned(),
             vorn: m.vorn.clone(),
             publisher: m.publisher.clone(),
             description: m.description.clone(),
@@ -1519,6 +1554,7 @@ impl From<&Manifest> for Raw {
             checks: m.checks.clone().map(|command| RawCommand { command }),
             declares: RawDeclares {
                 network: m.declares.network.clone(),
+                network_from: m.declares.network_from.clone(),
                 uses,
             },
             credential: m.credential.as_ref().map(|c| RawCredential {
@@ -1779,7 +1815,7 @@ view = "views/pane.kdl"
         );
         assert_eq!(
             err("vorn:extension@0.9", "vorn:connector@1"),
-            "vorn-extension.toml:6: contributes: draws templates its program fills; set api = \"vorn:extension@0.9\""
+            "vorn-extension.toml:4: api: `vorn:connector@1` is retired; set api = \"vorn:extension@0.9\" and keep auth, triggers and actions under a [connector] section"
         );
     }
 
@@ -1796,17 +1832,58 @@ every = 5
 "#;
         let err = parse(text).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (6, "contributes"));
-        let ok = parse(&text.replace("vorn:extension@0.9", "vorn:connector@1")).unwrap();
+        let section = format!("{text}\n[connector]\n");
+        let ok = parse(&section).unwrap();
         assert_eq!(ok.kind, super::super::Kind::Extension);
-        assert_eq!(ok.protocol, Some(1));
-        let err = parse(
-            &text
-                .replace("vorn:extension@0.9", "vorn:connector@1")
-                .replace("every = 5", "every = 1"),
-        )
-        .unwrap_err();
+        assert_eq!(ok.protocol, Some(CONNECTOR_PROTOCOL));
+        assert!(!ok.speaks_api());
+        assert_eq!(parse(&to_toml(&ok)).unwrap(), ok);
+        let err = parse(&section.replace("every = 5", "every = 1")).unwrap_err();
         assert_eq!(err.field, "contributes.footers[0].every");
         assert_eq!(err.line, 8);
+    }
+
+    #[test]
+    fn one_package_holds_a_connector_and_template_points() {
+        let text = r#"id = "tickets"
+name = "Tickets"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+command = ["node", "index.js"]
+
+[[connector.triggers]]
+type = "items"
+
+[[contributes.sidebar]]
+id = "queue"
+title = "Queue"
+view = "views/queue.kdl"
+
+[[contributes.commands]]
+id = "refresh"
+title = "Refresh Tickets"
+call = "refresh"
+"#;
+        let m = parse(text).unwrap();
+        assert_eq!(m.kind, super::super::Kind::Connector);
+        assert_eq!(m.protocol, Some(CONNECTOR_PROTOCOL));
+        assert!(
+            m.speaks_api(),
+            "its templates are filled over the extension API"
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        // Where a place is drawn from a template, the protocol's older way is retired.
+        let footers = format!(
+            "{text}\n[[contributes.card_footers]]\nid = \"last\"\nview = \"views/f.kdl\"\n\n[[contributes.footers]]\nid = \"f\"\nevery = 5\n"
+        );
+        assert_eq!(parse(&footers).unwrap_err().field, "contributes.footers");
+        let panes = format!(
+            "{text}\n[[contributes.panes]]\nid = \"a\"\nview = \"views/a.kdl\"\n\n[[contributes.panes]]\nid = \"b\"\nweb = \"web/b.html\"\n"
+        );
+        assert_eq!(parse(&panes).unwrap_err().field, "contributes.panes");
     }
 
     #[test]
@@ -1820,7 +1897,8 @@ every = 5
         });
         let m = from_pack_json(pack.as_object().unwrap()).unwrap();
         let text = to_toml(&m);
-        assert!(text.contains("api = \"vorn:connector@1\""), "{text}");
+        assert!(text.contains("api = \"vorn:extension@0.9\""), "{text}");
+        assert!(text.contains("[connector"), "{text}");
         assert!(text.contains("\"index.js\""), "{text}");
         assert_eq!(parse(&text).unwrap(), m);
     }

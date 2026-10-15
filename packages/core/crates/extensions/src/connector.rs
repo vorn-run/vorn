@@ -105,7 +105,7 @@ impl std::error::Error for OpenError {}
 
 /// What a connector built on the MCP-era SDK is told, wherever it would have run.
 pub fn outdated_message(name: &str) -> String {
-    format!("{name} was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.")
+    format!("{name} was built for an older Vorn. Update it in Settings › Extensions, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.")
 }
 
 fn needs_newer_vorn(key: &str, protocol: Option<u64>) -> OpenError {

@@ -9,7 +9,7 @@ use vorn_view::{
 };
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
-use vornui::{div, text, Action, El, Id, Rgba, Ui};
+use vornui::{div, text, Action, El, Id, Place, Rgba, Ui};
 
 use vornui::accesskit::Role;
 
@@ -28,6 +28,8 @@ pub struct Press {
     pub close: bool,
     /// Open another of the extension's window points, by id.
     pub window: Option<String>,
+    /// Open the client's sign-in window for this key.
+    pub signin: Option<String>,
     /// The row the control sits in.
     pub row: Option<String>,
     /// A toggle's new value.
@@ -44,6 +46,10 @@ pub trait Bind {
     fn field(&self, slot: u64, row: Option<&str>, call: &str, value: &str) -> Id;
     /// The confirm's buttons when button `id` asks before it runs and is asking now.
     fn confirming(&self, id: Id) -> Option<(Id, Id)>;
+    /// The id of a `more` node's button, which opens and closes its menu.
+    fn menu(&self, slot: u64, row: Option<&str>) -> Id;
+    /// Whether the more menu of button `id` is open.
+    fn menu_open(&self, id: Id) -> bool;
 }
 
 /// The colour a tone draws in.
@@ -109,12 +115,20 @@ pub fn slots(t: &Template) -> Vec<u64> {
     fn walk(n: &Node, slot: u64, out: &mut Vec<u64>) {
         out.push(slot);
         match &n.kind {
-            Kind::Column(kids) | Kind::Row(kids) | Kind::Section { children: kids, .. } => {
+            Kind::Column(kids)
+            | Kind::Row(kids)
+            | Kind::More(kids)
+            | Kind::Section { children: kids, .. } => {
                 for (i, k) in kids.iter().enumerate() {
                     walk(k, child_slot(slot, i), out);
                 }
             }
             Kind::List { item, .. } => walk(item, child_slot(slot, 0), out),
+            Kind::Choice { .. } => {
+                for i in 0..vorn_view::MAX_LIST {
+                    out.push(child_slot(slot, i));
+                }
+            }
             _ => {}
         }
     }
@@ -152,6 +166,7 @@ impl Cx<'_> {
                 .gap(8.0)
                 .min_w0()
                 .children(self.kids(kids, row, slot)),
+            Kind::More(items) => return self.more(slot, items, row),
             Kind::Section { title, children } => div()
                 .col()
                 .gap(8.0)
@@ -225,16 +240,28 @@ impl Cx<'_> {
                 value,
                 placeholder,
                 call,
+                secret,
             } => {
                 let held = value.as_ref().map(fill).unwrap_or_default();
                 let hint = placeholder.as_ref().map(fill).unwrap_or_default();
                 let id = self
                     .bind
                     .field(slot, row.map(|r| r.id.as_str()), call, &held);
-                widgets::text_input(self.ui, id, &hint, &hint)
+                let input = widgets::text_input(self.ui, id, &hint, &hint)
                     .grow()
-                    .min_w0()
+                    .min_w0();
+                if *secret {
+                    input.secure()
+                } else {
+                    input
+                }
             }
+            Kind::Choice {
+                rows,
+                label,
+                selected,
+                call,
+            } => self.choice(slot, rows, label, selected.as_ref(), call),
             Kind::List {
                 rows,
                 item,
@@ -265,6 +292,67 @@ impl Cx<'_> {
         })
     }
 
+    /// Each option of a choice as a chip, the chosen ones filled: on cells
+    /// as on pixels, one press per option.
+    fn choice(
+        &self,
+        slot: u64,
+        rows: &str,
+        label: &vorn_view::Text,
+        selected: Option<&Cond>,
+        call: &str,
+    ) -> El {
+        let mut line = div().row().wrap_children().gap(4.0).min_w0();
+        for (i, r) in self
+            .src
+            .rows(rows)
+            .iter()
+            .take(vorn_view::MAX_LIST)
+            .enumerate()
+        {
+            let name = label.fill(Some(r), self.src);
+            let on = selected.is_some_and(|c| c.holds(Some(r), self.src));
+            let id = self.bind.press(
+                child_slot(slot, i),
+                Press {
+                    call: Some(call.to_owned()),
+                    row: Some(r.id.clone()),
+                    ..Press::default()
+                },
+            );
+            let hot = self.ui.hover(id);
+            let ink = if on {
+                color::WHITE
+            } else {
+                color::GRAY_400.mix(color::WHITE, hot)
+            };
+            let fill = if on {
+                Rgba::white(0.14)
+            } else {
+                Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot)
+            };
+            line = line.child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .px(8.0)
+                    .py(3.0)
+                    .rounded(radius::SM)
+                    .border(1.0, Rgba::white(if on { 0.25 } else { 0.10 }))
+                    .bg(fill)
+                    .ring(radius::SM)
+                    .role(Role::RadioButton, name.as_str())
+                    .toggled(on)
+                    .child(
+                        text(&name, size::XS.0, ink)
+                            .line_height(size::XS.1)
+                            .silent(),
+                    ),
+            );
+        }
+        line
+    }
+
     fn status(&self, value: &str, tones: &BTreeMap<String, Tone>) -> El {
         let ink = tone(Tone::of(tones, value));
         let dot = if self.ui.is_cells() {
@@ -273,6 +361,111 @@ impl Cx<'_> {
             div().size(6.0, 6.0).rounded(3.0).bg(ink)
         };
         dot.shrink0().role(Role::Status, value)
+    }
+
+    /// A "more" button and, while open, its menu of the buttons that hold;
+    /// nothing when none does. An entry that asks first asks under the
+    /// button, as its menu closes on the press.
+    fn more(&self, slot: u64, items: &[Node], row: Option<&Row>) -> Option<El> {
+        let menu = self.bind.menu(slot, row.map(|r| r.id.as_str()));
+        let mut entries = Vec::new();
+        let mut asking = None;
+        for (i, item) in items.iter().enumerate() {
+            let Kind::Button {
+                label,
+                action,
+                confirm,
+                style,
+                icon,
+            } = &item.kind
+            else {
+                continue;
+            };
+            if !self.holds(item.when.as_ref(), row) {
+                continue;
+            }
+            let label = label.fill(row, self.src);
+            let ask = confirm.as_ref().map(|c| c.fill(row, self.src));
+            let press = filled(action, row, self.src, ask.clone());
+            let id = self.bind.press(child_slot(slot, i), press);
+            if let (Some(message), Some(ids)) = (ask, self.bind.confirming(id)) {
+                asking = Some((message, label.clone(), *style, ids));
+            }
+            entries.push(self.entry(id, &label, *style, icon.as_deref()));
+        }
+        if entries.is_empty() {
+            return None;
+        }
+        let hot = self.ui.hover(menu);
+        let mut b = div()
+            .id(menu)
+            .on(Action::Click)
+            .px(6.0)
+            .py(4.0)
+            .shrink0()
+            .rounded(radius::SM)
+            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .ring(radius::SM)
+            .role(Role::Button, "More")
+            .child(crate::lucide(
+                "ellipsis",
+                12.0,
+                2.0,
+                color::GRAY_400.mix(color::WHITE, hot),
+            ));
+        if self.bind.menu_open(menu) {
+            let panel = div()
+                .col()
+                .min_w(160.0)
+                .py(4.0)
+                .bg(color::SURFACE_OVERLAY)
+                .border(1.0, Rgba::white(0.10))
+                .rounded(radius::LG)
+                .role(Role::Menu, "More")
+                .children(entries);
+            b = b.overlay(panel, Place::BelowEnd, 4.0);
+        }
+        Some(match asking {
+            Some((message, label, style, (ok, cancel))) => {
+                let t = if style == Style::Danger {
+                    ConfirmTone::Danger
+                } else {
+                    ConfirmTone::Neutral
+                };
+                widgets::confirm(self.ui, b, &message, (ok, &label), cancel, t)
+            }
+            None => b,
+        })
+    }
+
+    /// One entry of a `more` menu.
+    fn entry(&self, id: Id, label: &str, style: Style, icon: Option<&str>) -> El {
+        let hot = self.ui.hover(id);
+        let ink = match style {
+            Style::Danger => color::RED_400.mix(color::RED_300, hot),
+            _ => color::GRAY_300.mix(color::WHITE, hot),
+        };
+        let mut e = div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(8.0)
+            .mx(4.0)
+            .px(8.0)
+            .py(5.0)
+            .rounded(radius::SM)
+            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .role(Role::MenuItem, label);
+        if let Some(name) = icon {
+            e = e.child(crate::lucide(name, 12.0, 2.0, ink));
+        }
+        e.child(
+            text(label, size::XS.0, ink)
+                .line_height(size::XS.1)
+                .truncate()
+                .silent(),
+        )
     }
 
     fn button(&self, slot: u64, label: &str, press: Press, style: Style, icon: Option<&str>) -> El {
@@ -347,6 +540,7 @@ fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) 
         show: a.show,
         close: a.close,
         window: a.window.clone(),
+        signin: a.signin.as_ref().map(|t| t.fill(row, src)),
         row: row.map(|r| r.id.clone()),
         value: None,
         confirm,

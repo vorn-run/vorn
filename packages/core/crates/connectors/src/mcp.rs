@@ -1,5 +1,5 @@
 //! MCP connections: one child per connection, spoken to through the Rust MCP
-//! SDK, as the server's `connectors/mcp.ts` and `mcp-clients.ts` do.
+//! SDK, as the server's `connectors/mcp.ts` and `mcp-clients.ts` did.
 //!
 //! A connection's child starts on its first call and is kept until it exits.
 //! The server stops its child when the connection is edited; here each call
@@ -22,7 +22,8 @@ use rmcp::ServiceExt;
 use serde_json::{json, Map, Value};
 use tracing::info;
 
-use super::env::Env;
+/// A child's environment, as name and value.
+type Env = Vec<(String, String)>;
 
 /// The MCP SDK's default request timeout, which the server's calls use.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);

@@ -189,6 +189,10 @@ pub trait Around: Send + Sync + 'static {
     /// The git to read a worktree with.
     fn git(&self) -> Git;
     /// A package was installed or linked: the connector it brings comes with it.
+    /// The built-ins vornd started before its extension host, to join the registry.
+    fn started_builtins(&self) -> Vec<Arc<dyn builtin::Builtin>> {
+        Vec::new()
+    }
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
@@ -290,7 +294,7 @@ impl Extensions {
             || PathBuf::from("builtins.json"),
             |d| d.join("builtins.json"),
         );
-        let builtins = Builtins::new(Arc::clone(&router), kept);
+        let builtins = Builtins::new(Arc::clone(&router), kept, around.started_builtins());
         Arc::new_cyclic(|me| Extensions {
             hosts,
             builtins,
@@ -467,10 +471,11 @@ impl Extensions {
                     None => Err("extension:setBuiltin takes on: true or false".to_owned()),
                 }
             }
-            "extension:mcpTools" => self
-                .listed_tools()
-                .await
-                .map(|tools| Value::Array(tools.into_iter().map(|t| t.listed).collect())),
+            "extension:mcpTools" => self.listed_tools().await.map(|tools| {
+                let mut listed = self.builtins.mcp_tools();
+                listed.extend(tools.into_iter().map(|t| t.listed));
+                Value::Array(listed)
+            }),
             "extension:mcpCall" => self.mcp_call(params).await,
             "extension:setSandbox" => {
                 let (id, on) = (
@@ -580,6 +585,13 @@ impl Extensions {
     /// An agent called an extension's MCP tool: `guest.handle("mcp.<tool>")` on its service.
     async fn mcp_call(&self, params: &Value) -> Result<Value, String> {
         let name = text(params, "name");
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        if let Some(answered) = self.builtins.mcp_call(name, arguments).await {
+            return Ok(answered);
+        }
         let found = self
             .listed_tools()
             .await?
@@ -1375,12 +1387,20 @@ impl Around for Wired {
         })
     }
 
+    fn started_builtins(&self) -> Vec<Arc<dyn builtin::Builtin>> {
+        self.native
+            .upgrade()
+            .and_then(|n| n.connectors().map(builtin::connectors::entry))
+            .into_iter()
+            .collect()
+    }
+
     fn pack_changed(&self, id: &str) -> BoxFuture<'static, ()> {
         let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
-                connectors.package_changed(&id).await;
+                connectors.inner().package_changed(&id).await;
             }
         })
     }
@@ -1392,7 +1412,7 @@ impl Around for Wired {
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
-                connectors.package_removed(&id).await;
+                connectors.inner().package_removed(&id).await;
             }
             let Some(db) = db else { return };
             let owned = id.clone();

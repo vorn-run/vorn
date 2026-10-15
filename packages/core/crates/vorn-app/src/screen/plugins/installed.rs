@@ -10,9 +10,15 @@ use crate::screen::{white, Screen};
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Role};
 
+/// Installed connectors are on the Connectors page, a template of the
+/// Connectors built-in; this tab lists the extensions installed.
 pub(super) fn view(s: &Screen<'_>) -> El {
+    packs(s)
+}
+
+fn packs(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let groups: Vec<(Kind, Vec<&Listing>)> = [Kind::Extension, Kind::Connector]
+    let groups: Vec<(Kind, Vec<&Listing>)> = [Kind::Extension]
         .into_iter()
         .map(|kind| {
             let items = p

@@ -11,6 +11,8 @@
  * Every tool is a thin call into the same server methods the UI uses, so
  * behaviour cannot drift between what an agent does and what a person does.
  */
+import { existsSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { V } from '../validation'
@@ -313,18 +315,19 @@ export function registerConnectorTools(server: McpServer): void {
         })
         if (!outcome.ok) return failure(`The pack was refused: ${outcome.error}`)
         installed = outcome.pack
-      } else if (entry?.kind === 'extension') {
-        // An extension is its pack: there is no launch line to probe and no
-        // connection to make, so the catalog's own pack is what gets installed.
-        if (!entry.packUrl) {
+      } else if (entry && (entry.git || entry.kind === 'extension')) {
+        // A catalog entry installs from its repository before anything runs, so
+        // the manifest read is the one that will run; an extension is its folder.
+        if (!entry.git) {
           return failure(
-            `${entry.name} is in the catalog but no release has published a pack for it yet.`
+            `${entry.name} is in the catalog but names no git repository to install it from yet.`
           )
         }
         const outcome = await rpcCall<ConnectorPackResult>('connector:installPack', {
-          kind: 'url',
-          url: entry.packUrl,
-          ...(entry.sha256 && { sha256: entry.sha256 })
+          kind: 'git',
+          url: entry.git,
+          ...(entry.path && { path: entry.path }),
+          ...(entry.branch && { branch: entry.branch })
         })
         if (!outcome.ok) return failure(`The pack was refused: ${outcome.error}`)
         installed = outcome.pack
@@ -385,7 +388,7 @@ export function registerConnectorTools(server: McpServer): void {
           `${manifest.name} uses the secret ${plural(secrets.length, 'value')} ` +
             `${secrets.map((e) => e.name).join(', ')}, which this tool cannot accept: it runs ` +
             'outside the desktop process, where encryption lives, so it could only store them ' +
-            'unprotected. They must be entered by a person in Settings > Connectors to reach ' +
+            'unprotected. They must be entered by a person in Settings › Connections to reach ' +
             'the OS keychain. Everything else about the connector is ready to install.'
         )
       }
@@ -472,8 +475,15 @@ export function registerConnectorTools(server: McpServer): void {
 }
 
 /** An installed pack launches from its own files, with nothing to resolve. */
+/** What an installed package's service runs, its files named by their full path. */
 function packLaunch(pack: InstalledConnectorPack): { command: string; args: string[] } {
-  return { command: 'node', args: [`${pack.path}/index.js`] }
+  const [program, ...rest] = pack.service?.command ?? []
+  if (!program) return { command: 'node', args: [`${pack.path}/index.js`] }
+  const inside = (arg: string): string =>
+    !arg.startsWith('-') && !isAbsolute(arg) && existsSync(join(pack.path, arg))
+      ? join(pack.path, arg)
+      : arg
+  return { command: inside(program), args: rest.map(inside) }
 }
 
 /** Read a connector by starting it, given a package name, command, or spec. */

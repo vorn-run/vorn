@@ -213,8 +213,12 @@ pub struct NewConnection<'a> {
     pub now: String,
 }
 
-/// Inserts a connection and the workflows it is seeded with; the row as stored.
-pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<Value> {
+/// Inserts a connection; the row as stored, and the workflows it is seeded
+/// with, which the Workflows side adds where none has that id yet.
+pub fn create(
+    store: &mut Store,
+    new: NewConnection<'_>,
+) -> vorn_store::Result<(Value, Vec<Value>)> {
     let p = new.params;
     let mut conn = Map::new();
     conn.insert("id".into(), json!(new.id));
@@ -264,33 +268,18 @@ pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<V
             .map(|(upstream, local)| json!({ "upstream": upstream, "suggestedLocal": local }))
             .collect();
         manifest["statusMapping"] = Value::Array(mapping);
-        for event in &events {
-            let name = event.get("event").and_then(Value::as_str).unwrap_or("");
-            let wf_id = seeded_workflow_id(&new.id, name);
-            if !store.call("dbGetWorkflow", json!([wf_id]))?.is_null() {
-                continue;
-            }
-            let wf = seeded_workflow(&conn, &manifest, event);
-            store.call("dbInsertWorkflow", json!([wf]))?;
-        }
+        let seeded = events
+            .iter()
+            .map(|event| seeded_workflow(&conn, &manifest, event))
+            .collect();
+        return Ok((conn, seeded));
     }
-    Ok(conn)
+    Ok((conn, Vec::new()))
 }
 
-/// Deletes a connection and the workflows seeded for it; its task links go
-/// with it by foreign key.
+/// Deletes a connection; its task links go with it by foreign key, and the
+/// workflows seeded for it are the Workflows side's to remove.
 pub fn delete(store: &mut Store, id: &str) -> vorn_store::Result<()> {
-    let prefix = seeded_workflow_prefix(id);
-    let workflows = store.call("dbListWorkflows", json!([]))?;
-    for wf in workflows.as_array().into_iter().flatten() {
-        if let Some(wf_id) = wf
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|i| i.starts_with(&prefix))
-        {
-            store.call("dbDeleteWorkflow", json!([wf_id]))?;
-        }
-    }
     store.call("dbDeleteSourceConnection", json!([id]))?;
     Ok(())
 }
@@ -304,97 +293,6 @@ pub struct Item {
     pub external_url: String,
     pub status_raw: String,
     pub updated_at: String,
-}
-
-/// Puts an external item on the task board (`upsertExternalItem`): the task
-/// it is linked to, else one an earlier link left behind, else a new one.
-pub fn upsert_item(
-    store: &mut Store,
-    conn: &Value,
-    item: &Item,
-    project: &str,
-    initial_status: &Value,
-    now: &str,
-    new_task_id: impl FnOnce() -> String,
-) -> vorn_store::Result<Value> {
-    let conn_id = text(conn, "id");
-    let task_fields = json!({
-        "title": item.title,
-        "description": item.description,
-        "updatedAt": now,
-        "sourceExternalUrl": item.external_url,
-        "sourceExternalId": item.external_id,
-    });
-    let keys = json!([
-        "title",
-        "description",
-        "updatedAt",
-        "sourceExternalUrl",
-        "sourceExternalId"
-    ]);
-    let existing = store.call(
-        "dbGetTaskSourceLinkByExternalId",
-        json!([conn_id, item.external_id]),
-    )?;
-    if let Some(task_id) = existing.get("taskId").and_then(Value::as_str) {
-        let task_id = task_id.to_owned();
-        store.call("dbUpdateTask", json!([task_id, task_fields, keys]))?;
-        store.call(
-            "dbUpdateTaskSourceLink",
-            json!([task_id, {
-                "sourceStatusRaw": item.status_raw,
-                "sourceUpdatedAt": item.updated_at,
-                "lastSyncedAt": now,
-            }]),
-        )?;
-        return Ok(json!({ "taskId": task_id, "created": false }));
-    }
-    let link = |task_id: &str| {
-        json!({
-            "taskId": task_id,
-            "connectionId": conn_id,
-            "connectorId": conn.get("connectorId"),
-            "externalId": item.external_id,
-            "externalUrl": item.external_url,
-            "sourceStatusRaw": item.status_raw,
-            "sourceUpdatedAt": item.updated_at,
-            "lastSyncedAt": now,
-            "conflictState": "none",
-        })
-    };
-    let orphan = store.call(
-        "dbFindTaskByConnectorExternalId",
-        json!([connector_id_of(conn), item.external_id]),
-    )?;
-    if let Some(task_id) = orphan.get("id").and_then(Value::as_str) {
-        let task_id = task_id.to_owned();
-        store.call("dbUpdateTask", json!([task_id, task_fields, keys]))?;
-        store.call("dbInsertTaskSourceLink", json!([link(&task_id)]))?;
-        return Ok(json!({ "taskId": task_id, "created": false }));
-    }
-    let task_id = new_task_id();
-    let max = store
-        .call("dbGetMaxTaskOrder", json!([project]))?
-        .as_f64()
-        .unwrap_or(0.0);
-    let mut task = json!({
-        "id": task_id,
-        "projectName": project,
-        "title": item.title,
-        "description": item.description,
-        "status": initial_status,
-        "order": vorn_extensions::js::json_number(max + 1.0),
-        "createdAt": now,
-        "updatedAt": now,
-        "sourceConnectorId": connector_id_of(conn),
-        "sourceExternalId": item.external_id,
-    });
-    if !item.external_url.is_empty() {
-        task["sourceExternalUrl"] = json!(item.external_url);
-    }
-    store.call("dbInsertTask", json!([task]))?;
-    store.call("dbInsertTaskSourceLink", json!([link(&task_id)]))?;
-    Ok(json!({ "taskId": task_id, "created": true }))
 }
 
 /// Updates a connection's row; a key named in `cleared` and absent from

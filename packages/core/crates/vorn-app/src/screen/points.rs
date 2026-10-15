@@ -23,6 +23,7 @@ struct Binder<'a> {
     scope: Option<&'a str>,
     holder: Option<Holder>,
     asking: Option<u64>,
+    more: Option<u64>,
 }
 
 impl Binder<'_> {
@@ -72,6 +73,18 @@ impl Bind for Binder<'_> {
     fn confirming(&self, id: Id) -> Option<(Id, Id)> {
         (self.asking == Some(id.0)).then(|| (id.child("ok"), id.child("no")))
     }
+
+    fn menu(&self, slot: u64, row: Option<&str>) -> Id {
+        let id = self.base(slot, row).child("more");
+        let open = self.more == Some(id.0);
+        self.acts
+            .bind(id, Act::Point(PointAct::More((!open).then_some(id.0))));
+        id
+    }
+
+    fn menu_open(&self, id: Id) -> bool {
+        self.more == Some(id.0)
+    }
 }
 
 /// Point `p`'s template, with `row` in scope for a per-session place; its
@@ -92,6 +105,7 @@ pub fn draw(
                 scope: row.map(|r| r.id.as_str()),
                 holder,
                 asking: points.asking,
+                more: points.more,
             };
             let src = points.rows_of(&p.extension);
             Some(template::view(ui, t, row, src, &bind))

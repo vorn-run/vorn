@@ -1,0 +1,628 @@
+//! The Connections page, drawn from a template (`views/connectors.kdl`):
+//! every connection with what it triggers and when it last synced, Test,
+//! Import now, Sign in when its window is signed out, Roll back and Remove;
+//! and adding one, from picking an installed connector to its settings.
+//! The rows come from the built-in's own calls, so the page says what the
+//! rest of the app says.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use serde_json::{json, Map, Value};
+
+use crate::builtin::{Answer, Connectors};
+use crate::connections::{self as conns};
+
+/// The page's templates, by the path its manifest names them.
+pub const VIEWS: &[(&str, &str)] = &[(
+    "views/connectors.kdl",
+    include_str!("../views/connectors.kdl"),
+)];
+
+/// The collections the page draws.
+pub const CONNECTIONS: &str = "connections";
+pub const FORM: &str = "form";
+pub const CHOICES: &str = "connectors";
+pub const TRIGGERS: &str = "triggers";
+pub const PROJECTS: &str = "projects";
+pub const SETTINGS: &str = "settings";
+
+/// A connection being added: the connector picked, its manifest as it
+/// reports it, and what has been entered so far.
+#[derive(Debug, Clone, Default)]
+pub struct Draft {
+    connector: Option<String>,
+    /// What the connector's program reports: its triggers, settings and sign-in.
+    manifest: Option<Value>,
+    trigger: Option<String>,
+    project: Option<String>,
+    values: BTreeMap<String, String>,
+    error: Option<String>,
+}
+
+fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+    v.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+async fn ask(c: &Arc<Connectors>, method: &str, params: Value) -> Result<Value, String> {
+    match c.answer(method, params).await {
+        Answer::Result(v) => Ok(v),
+        Answer::Void | Answer::Unanswered => Ok(Value::Null),
+        Answer::Error(e) => Err(e),
+    }
+}
+
+fn list(v: Result<Value, String>) -> Vec<Value> {
+    v.ok()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// "4 min ago", from an ISO time and now in ms.
+pub fn ago(iso: &str, now_ms: i64) -> Option<String> {
+    let then = chrono::DateTime::parse_from_rfc3339(iso)
+        .ok()?
+        .timestamp_millis();
+    let mins = (now_ms - then).max(0) / 60_000;
+    Some(match mins {
+        0 => "just now".to_owned(),
+        1..=59 => format!("{mins} min ago"),
+        60..=1439 => format!("{} h ago", mins / 60),
+        _ => format!("{} d ago", mins / 1440),
+    })
+}
+
+fn draft(c: &Connectors) -> std::sync::MutexGuard<'_, Option<Draft>> {
+    c.draft.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The env a connection asks for: none when nothing is signed in to, and
+/// none a borrowed sign-in already covers, as the desktop's form asks.
+fn fields(manifest: &Value) -> Vec<Value> {
+    let rung = manifest.pointer("/auth/rung").and_then(Value::as_str);
+    if rung == Some("none") {
+        return Vec::new();
+    }
+    let borrowed: Vec<String> = if rung == Some("cli") {
+        manifest
+            .pointer("/auth/borrow/env")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_uppercase)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut seen: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    let every = manifest
+        .get("env")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            manifest
+                .get("triggers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|t| t.pointer("/setup/env").and_then(Value::as_array))
+                .flatten(),
+        );
+    for e in every {
+        let name = text(e, "name");
+        let secret = e.get("secret") == Some(&Value::Bool(true));
+        if name.is_empty() || seen.iter().any(|s| s == name) {
+            continue;
+        }
+        seen.push(name.to_owned());
+        if secret && borrowed.contains(&name.to_uppercase()) {
+            continue;
+        }
+        out.push(e.clone());
+    }
+    out
+}
+
+/// Every row the page shows, by collection.
+pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let packs: Vec<Value> = list(ask(c, "connector:listPacks", Value::Null).await)
+        .into_iter()
+        .filter(|p| text(p, "kind") != "extension")
+        .collect();
+    let builtins = list(ask(c, "connector:list", Value::Null).await);
+    let connections = list(ask(c, "connection:list", json!({})).await)
+        .iter()
+        .filter(|conn| !conns::is_implicit(conn))
+        .map(|conn| {
+            let id = conns::connector_id_of(conn);
+            let pack = packs.iter().find(|p| text(p, "id") == id);
+            let service = pack
+                .map(|p| text(p, "name"))
+                .or_else(|| {
+                    builtins
+                        .iter()
+                        .find(|b| text(b, "id") == id)
+                        .map(|b| text(b, "name"))
+                })
+                .filter(|n| !n.is_empty())
+                .unwrap_or(id.as_str())
+                .to_owned();
+            let trigger = conns::sdk_trigger_of(conn);
+            let triggers = pack
+                .and_then(|p| p.get("triggers").and_then(Value::as_array))
+                .into_iter()
+                .flatten()
+                .find(|t| text(t, "type") == trigger)
+                .map(|t| text(t, "label").to_owned())
+                .unwrap_or_default();
+            let browser = pack
+                .and_then(|p| p.pointer("/auth/rung"))
+                .and_then(Value::as_str)
+                == Some("browser");
+            let needs_signin = browser && text(conn, "signedInAs").is_empty();
+            let error = text(conn, "lastSyncError");
+            let (state, synced) = if needs_signin {
+                ("signin", "not signed in".to_owned())
+            } else if !error.is_empty() {
+                ("failing", error.to_owned())
+            } else {
+                match ago(text(conn, "lastSyncAt"), now) {
+                    Some(a) => ("ok", format!("synced {a}")),
+                    None => ("idle", "not synced yet".to_owned()),
+                }
+            };
+            let line: Vec<&str> = [service.as_str(), triggers.as_str(), synced.as_str()]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            let previous = pack.map_or("", |p| text(p, "previousVersion"));
+            json!({
+                "id": conn.get("id"),
+                "name": text(conn, "name"),
+                "line": line.join(" · "),
+                "state": state,
+                "needs_signin": needs_signin,
+                "can_roll_back": !previous.is_empty(),
+                "previous": previous,
+            })
+        })
+        .collect();
+    let held = draft(c).clone();
+    let Some(d) = held else {
+        return vec![
+            (CONNECTIONS, connections),
+            (FORM, Vec::new()),
+            (CHOICES, Vec::new()),
+            (TRIGGERS, Vec::new()),
+            (PROJECTS, Vec::new()),
+            (SETTINGS, Vec::new()),
+        ];
+    };
+    let choices = packs
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.get("id"),
+                "name": text(p, "name"),
+                "selected": d.connector.as_deref() == Some(text(p, "id")),
+            })
+        })
+        .collect();
+    let m = d.manifest.clone().unwrap_or(Value::Null);
+    let triggers = m
+        .get("triggers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|t| {
+            json!({
+                "id": text(t, "type"),
+                "name": text(t, "label"),
+                "selected": d.trigger.as_deref() == Some(text(t, "type")),
+            })
+        })
+        .collect();
+    let projects = if d.manifest.is_some() {
+        list(c.core("project.list", json!({})).await)
+            .iter()
+            .map(|p| {
+                let name = text(p, "name");
+                json!({ "id": name, "name": name, "selected": d.project.as_deref() == Some(name) })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let settings: Vec<Value> = fields(&m)
+        .iter()
+        .map(|e| {
+            let name = text(e, "name");
+            let required = e.get("required") == Some(&Value::Bool(true));
+            let secret = e.get("secret") == Some(&Value::Bool(true));
+            let label = if required {
+                format!("{name} (required)")
+            } else {
+                name.to_owned()
+            };
+            let kept = d.values.get(name).is_some_and(|v| !v.is_empty());
+            json!({
+                "id": name,
+                "label": label,
+                "hint": text(e, "description"),
+                "secret": secret,
+                "value": if secret { "" } else { d.values.get(name).map_or("", String::as_str) },
+                "kept": kept,
+            })
+        })
+        .collect();
+    let picked = d.manifest.is_some();
+    let form = vec![json!({
+        "id": "form",
+        "picked": picked,
+        "can_save": picked && missing(&d).is_none(),
+        "none_installed": packs.is_empty(),
+        "error": d.error.clone().unwrap_or_default(),
+    })];
+    vec![
+        (CONNECTIONS, connections),
+        (FORM, form),
+        (CHOICES, choices),
+        (TRIGGERS, triggers),
+        (PROJECTS, projects),
+        (SETTINGS, settings),
+    ]
+}
+
+/// The first required setting not yet entered.
+fn missing(d: &Draft) -> Option<String> {
+    let m = d.manifest.as_ref()?;
+    fields(m)
+        .iter()
+        .filter(|e| e.get("required") == Some(&Value::Bool(true)))
+        .map(|e| text(e, "name").to_owned())
+        .find(|n| d.values.get(n).is_none_or(|v| v.trim().is_empty()))
+}
+
+/// What the connector's program reports about itself, read by starting it.
+async fn probe(c: &Arc<Connectors>, id: &str) -> Result<Value, String> {
+    let pack = c
+        .installed(id)
+        .ok_or_else(|| format!("{id} is not installed"))?;
+    let argv: Vec<String> = pack
+        .pointer("/service/command")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    let dir = text(&pack, "path").to_owned();
+    let resolve = |a: &String| {
+        let p = std::path::Path::new(&dir).join(a);
+        if !a.starts_with('-') && std::path::Path::new(a).is_relative() && p.is_file() {
+            p.to_string_lossy().into_owned()
+        } else {
+            a.clone()
+        }
+    };
+    let (program, args) = argv
+        .split_first()
+        .ok_or_else(|| format!("{id} names no program to run"))?;
+    let launch = json!({
+        "command": resolve(program),
+        "args": args.iter().map(resolve).collect::<Vec<_>>(),
+    });
+    let probed = ask(c, "connector:probeSdk", launch).await?;
+    if probed["ok"] != true {
+        return Err(text(&probed, "error").to_owned());
+    }
+    let mut manifest = probed.get("manifest").cloned().unwrap_or(Value::Null);
+    // The installed manifest names the version that runs and how it signs in.
+    for key in ["version", "auth", "icon"] {
+        if let Some(v) = pack.get(key) {
+            manifest[key] = v.clone();
+        }
+    }
+    Ok(manifest)
+}
+
+/// The `connection:create` params a finished draft makes, as the desktop's form makes them.
+fn create_params(d: &Draft) -> Option<Value> {
+    let m = d.manifest.as_ref()?;
+    let mut plain = Map::new();
+    let mut secret = Map::new();
+    for e in fields(m) {
+        let name = text(&e, "name");
+        let Some(v) = d
+            .values
+            .get(name)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        else {
+            continue;
+        };
+        let into = if e.get("secret") == Some(&Value::Bool(true)) {
+            &mut secret
+        } else {
+            &mut plain
+        };
+        into.insert(name.to_owned(), json!(v));
+    }
+    let all = m.get("triggers").and_then(Value::as_array);
+    let trigger = all
+        .into_iter()
+        .flatten()
+        .find(|t| Some(text(t, "type")) == d.trigger.as_deref())
+        .or_else(|| all.and_then(|t| t.first()));
+    let mut filters = json!({
+        "env": Value::Object(plain).to_string(),
+        "sdkConnectorId": text(m, "id"),
+        "sdkVersion": text(m, "version"),
+    });
+    if let Some(icon) = m.get("icon").filter(|i| !i.is_null()) {
+        filters["sdkIcon"] = json!(icon.to_string());
+    }
+    if let Some(t) = trigger.map(|t| text(t, "type")).filter(|t| !t.is_empty()) {
+        filters["sdkTrigger"] = json!(t);
+    }
+    if !secret.is_empty() {
+        filters["secretEnv"] = json!(Value::Object(secret).to_string());
+    }
+    let name = text(m, "name");
+    let mapping: Map<String, Value> = trigger
+        .and_then(|t| t.get("statusMapping"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some((
+                text(e, "upstream").to_owned(),
+                e.get("suggestedLocal")?.clone(),
+            ))
+        })
+        .collect();
+    let label = trigger.map(|t| text(t, "label")).filter(|l| !l.is_empty());
+    let mut params = json!({
+        "connectorId": conns::SDK,
+        "name": label.map_or(name.to_owned(), |l| format!("{name}: {l}")),
+        "filters": filters,
+        "syncIntervalMinutes": 5,
+        "statusMapping": mapping,
+        "executionProject": d.project.clone().unwrap_or_default(),
+    });
+    if let Some(w) = trigger
+        .and_then(|t| t.get("defaultWorkflow"))
+        .filter(|w| !w.is_null())
+    {
+        params["seedWorkflow"] = w.clone();
+    }
+    Some(params)
+}
+
+/// What a control of the page asked: `refresh` reads the rows again; the
+/// others act on the row `args.id` names, and answer a toast or the sign-in
+/// a window opens on.
+pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Value, String> {
+    let id = text(args, "id").to_owned();
+    let toast = |t: String| Ok(json!({ "toast": t }));
+    match action {
+        "refresh" => Ok(Value::Null),
+        "test" => {
+            let r = ask(c, "connection:preflight", json!(id)).await?;
+            let said = text(&r, "message");
+            match r.get("ok") {
+                Some(Value::Bool(true)) => toast(format!("It answers. {said}").trim().to_owned()),
+                Some(Value::Bool(false)) => Err(said.to_owned()),
+                _ => toast("It has no test of its own".to_owned()),
+            }
+        }
+        "backfill" => {
+            let r = ask(c, "connection:backfill", json!({ "connectionId": id })).await?;
+            if let Some(e) = r.get("error").and_then(Value::as_str) {
+                return Err(e.to_owned());
+            }
+            toast(format!(
+                "Imported {} new and updated {}",
+                r["imported"].as_u64().unwrap_or(0),
+                r["updated"].as_u64().unwrap_or(0)
+            ))
+        }
+        // What a sign-in action asks: the window's target, `{name, browser}`, which the client opens.
+        "signin" => {
+            let target = ask(c, "connection:browserAuth", json!(id)).await?;
+            if target.is_null() {
+                return Err("This connection signs in without a window".to_owned());
+            }
+            Ok(target)
+        }
+        "remove" => {
+            ask(c, "connection:delete", json!(id)).await?;
+            toast("Removed".to_owned())
+        }
+        "rollback" => {
+            let all = ask(c, "connection:list", json!({})).await?;
+            let conn = all
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|x| text(x, "id") == id)
+                .cloned()
+                .ok_or("That connection is gone")?;
+            let pack = conns::connector_id_of(&conn);
+            let r = ask(c, "connector:rollbackPack", json!(pack)).await?;
+            if r["ok"] != true {
+                return Err(text(&r, "error").to_owned());
+            }
+            let v = r
+                .pointer("/pack/version")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            toast(format!("Back to v{v}"))
+        }
+        "add" => {
+            *draft(c) = Some(Draft::default());
+            Ok(Value::Null)
+        }
+        "cancel" => {
+            *draft(c) = None;
+            Ok(Value::Null)
+        }
+        "pick" => {
+            let manifest = probe(c, &id).await;
+            let mut held = draft(c);
+            let project = held.as_ref().and_then(|d| d.project.clone());
+            let mut d = Draft {
+                connector: Some(id),
+                project,
+                ..Draft::default()
+            };
+            match manifest {
+                Ok(m) => {
+                    d.trigger = m
+                        .pointer("/triggers/0/type")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    d.manifest = Some(m);
+                }
+                Err(e) => d.error = Some(e),
+            }
+            *held = Some(d);
+            Ok(Value::Null)
+        }
+        "trigger" | "project" => {
+            let mut held = draft(c);
+            let d = held.as_mut().ok_or("Nothing is being added")?;
+            if action == "trigger" {
+                d.trigger = Some(id);
+            } else {
+                d.project = Some(id);
+            }
+            Ok(Value::Null)
+        }
+        "set" => {
+            let value = text(args, "value").to_owned();
+            let mut held = draft(c);
+            let d = held.as_mut().ok_or("Nothing is being added")?;
+            d.values.insert(id, value);
+            d.error = None;
+            Ok(Value::Null)
+        }
+        "save" => {
+            let held = draft(c).clone().ok_or("Nothing is being added")?;
+            if let Some(name) = missing(&held) {
+                let e = format!("{name} is required; type it and press Return");
+                if let Some(d) = draft(c).as_mut() {
+                    d.error = Some(e.clone());
+                }
+                return Err(e);
+            }
+            let params = create_params(&held).ok_or("Pick a connector first")?;
+            match ask(c, "connection:create", params).await {
+                Ok(conn) => {
+                    *draft(c) = None;
+                    toast(format!("Added {}", text(&conn, "name")))
+                }
+                Err(e) => {
+                    if let Some(d) = draft(c).as_mut() {
+                        d.error = Some(e.clone());
+                    }
+                    Err(e)
+                }
+            }
+        }
+        other => Err(format!("Connectors has no action {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_page_template_reads_without_an_error() {
+        let manifest =
+            vorn_extensions::manifest::file::parse_builtin(crate::builtin::MANIFEST).unwrap();
+        let load = |path: &str, place| {
+            let text = VIEWS
+                .iter()
+                .find(|(p, _)| *p == path)
+                .map_or("", |(_, t)| *t);
+            vorn_extensions::views::read(path, text, place)
+        };
+        let listed = vorn_extensions::views::listed(&manifest, &load);
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        assert!(
+            listed[0]
+                .get("errors")
+                .is_none_or(|e| e.as_array().is_some_and(Vec::is_empty)),
+            "{}",
+            listed[0]
+        );
+        assert!(listed[0]["view"].is_object(), "{}", listed[0]);
+        assert_eq!(listed[0]["title"], "Connections");
+    }
+
+    #[test]
+    fn says_how_long_ago() {
+        let t = "2026-10-15T10:00:00.000Z";
+        let base = chrono::DateTime::parse_from_rfc3339(t)
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(ago(t, base + 4 * 60_000).as_deref(), Some("4 min ago"));
+        assert_eq!(ago(t, base + 3 * 3_600_000).as_deref(), Some("3 h ago"));
+        assert_eq!(ago(t, base).as_deref(), Some("just now"));
+        assert_eq!(ago("", base), None);
+    }
+
+    #[test]
+    fn asks_for_what_no_borrow_covers_once_each() {
+        let m = json!({ "auth": { "rung": "cli", "borrow": { "env": ["GH_TOKEN"] } },
+            "triggers": [
+                { "type": "a", "setup": { "env": [{ "name": "GH_TOKEN", "secret": true }, { "name": "OWNER", "required": true }] } },
+                { "type": "b", "setup": { "env": [{ "name": "OWNER", "required": true }] } },
+            ] });
+        let f = fields(&m);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0]["name"], "OWNER");
+        assert!(
+            fields(&json!({ "auth": { "rung": "none" }, "env": [{ "name": "X" }] })).is_empty()
+        );
+    }
+
+    #[test]
+    fn a_draft_makes_the_desktops_params() {
+        let d = Draft {
+            connector: Some("acme".into()),
+            manifest: Some(json!({ "id": "acme", "name": "Acme", "version": "1.0.0",
+                "auth": { "rung": "key" },
+                "triggers": [{ "type": "issues", "label": "Issues",
+                    "statusMapping": [{ "upstream": "open", "suggestedLocal": "todo" }],
+                    "setup": { "env": [{ "name": "TOKEN", "secret": true, "required": true }, { "name": "HOST" }] } }] })),
+            trigger: Some("issues".into()),
+            project: Some("app".into()),
+            values: [
+                ("TOKEN".to_owned(), "t".to_owned()),
+                ("HOST".to_owned(), "h".to_owned()),
+            ]
+            .into(),
+            error: None,
+        };
+        assert_eq!(missing(&d), None);
+        let p = create_params(&d).unwrap();
+        assert_eq!(p["name"], "Acme: Issues");
+        assert_eq!(p["filters"]["env"], "{\"HOST\":\"h\"}");
+        assert_eq!(p["filters"]["secretEnv"], "{\"TOKEN\":\"t\"}");
+        assert_eq!(p["filters"]["sdkTrigger"], "issues");
+        assert_eq!(p["statusMapping"], json!({ "open": "todo" }));
+        assert_eq!(p["executionProject"], "app");
+        let empty = Draft {
+            values: BTreeMap::new(),
+            ..d
+        };
+        assert_eq!(missing(&empty).as_deref(), Some("TOKEN"));
+    }
+}

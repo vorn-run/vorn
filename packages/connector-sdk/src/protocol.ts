@@ -61,7 +61,7 @@ export interface VornHelloResult {
 
 export type ConnectorManifestParams = Record<string, never>
 
-/** The manifest the SDK writes to `manifest.json`, with the protocol it speaks; the host validates the rest. */
+/** The manifest a connector reports over `connector/manifest`, with the protocol it speaks; the host validates the rest. */
 export interface ConnectorManifestResult {
   protocol: number
   id: string

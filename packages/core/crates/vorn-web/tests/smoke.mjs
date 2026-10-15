@@ -1,7 +1,9 @@
 // Loads the browser client against a test vornd in a headless Chromium, once
 // per renderer: it signs in, opens a terminal, types, and waits for the echo.
 // `pair` pairs a fresh browser with a code instead, as a phone does.
-//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair]
+// `templates` opens the example extension's settings page and works its
+// choice, secret field, Sign in button and more menu.
+//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
 import { spawn } from 'node:child_process'
@@ -15,7 +17,10 @@ const core = new URL('../../../', import.meta.url).pathname
 const bin = process.env.VORN_BIN ?? join(core, 'target/ci')
 const dist = process.env.WEB_DIST ?? join(core, 'crates/vorn-web/dist')
 const shots = process.env.SHOTS
-const runs = process.argv.slice(2).length ? process.argv.slice(2) : ['webgpu', 'webgl', 'pair']
+const runs = process.argv.slice(2).length
+  ? process.argv.slice(2)
+  : ['webgpu', 'webgl', 'pair', 'templates']
+const turns = join(core, '../../examples/extensions/turns')
 const { chromium } = await import(process.env.PLAYWRIGHT ?? 'playwright-core')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -129,6 +134,46 @@ async function pair(page, vornd, server) {
   await server.call('pairing:approve', { requestId: request.requestId })
 }
 
+/** Every accessible name and text the page mirrors, for what a template drew. */
+const mirrored = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('[aria-label]')]
+      .map((e) => `${e.getAttribute('role') ?? ''}:${e.getAttribute('aria-label')}`)
+      .join('\n')
+  )
+
+/** Clicks the mirrored element `selector` once it has a box. */
+async function press(page, selector, what) {
+  const box = await until(what, async () => {
+    const b = await page
+      .locator(selector)
+      .last()
+      .boundingBox()
+      .catch(() => null)
+    return b && b.width > 0 ? b : null
+  })
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+}
+
+/** The example extension's settings page, drawn from its template in the browser. */
+async function templates(page) {
+  await press(page, '[role="button"][aria-label="Settings"]', 'the Settings button')
+  await press(page, '[role="button"][aria-label="Turns"]', "the extension's settings page")
+  for (const shown of ['radio:Team plan', 'textbox:Paste a key', 'button:Sign in', 'button:More']) {
+    await until(shown, async () => (await mirrored(page)).split('\n').includes(shown))
+  }
+  await press(page, '[role="textbox"][aria-label="Paste a key"]', 'the secret field')
+  await page.keyboard.type('hunter2')
+  const field = page.locator('[role="textbox"][aria-label="Paste a key"]').last()
+  await until('the key masked', async () => {
+    const t = await field.textContent()
+    return t.includes('\u2022'.repeat(7)) && !t.includes('hunter2')
+  })
+  await press(page, '[role="button"][aria-label="More"]', 'the more button')
+  await press(page, '[role="menuitem"][aria-label="Forget account"]', "the menu's entry")
+  await until('the confirm', async () => (await mirrored(page)).includes('Forget Turns account?'))
+}
+
 async function run(what, vornd, server) {
   const browser = await chromium.launch({ channel: 'chromium', args: gpuArgs })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
@@ -138,6 +183,16 @@ async function run(what, vornd, server) {
   try {
     if (what === 'pair') {
       await pair(page, vornd, server)
+    } else if (what === 'templates') {
+      const device = (await server.call('token:create', { name: 'smoke templates' })).plaintext
+      await server.call('extension:link', { path: turns })
+      // Its program starts on its first call or event; this call starts it.
+      await server.call('extension:call', {
+        id: 'example.turns',
+        action: 'plan',
+        args: { id: 'free' }
+      })
+      await page.goto(`http://127.0.0.1:${vornd.port}/app/#token=${device}`)
     } else {
       const device = (await server.call('token:create', { name: `smoke ${what}` })).plaintext
       await page.goto(`http://127.0.0.1:${vornd.port}/app/?renderer=${what}#token=${device}`)
@@ -145,7 +200,15 @@ async function run(what, vornd, server) {
     const used = await until('a renderer', () =>
       page.evaluate(() => document.querySelector('canvas')?.dataset.renderer)
     )
-    if (what !== 'pair' && !used.startsWith(what)) throw new Error(`asked for ${what}, got ${used}`)
+    if (what === 'webgpu' || what === 'webgl') {
+      if (!used.startsWith(what)) throw new Error(`asked for ${what}, got ${used}`)
+    }
+    if (what === 'templates') {
+      await templates(page)
+      if (shots) await page.screenshot({ path: join(shots, 'web-templates.png') })
+      console.log(`ok templates (${used})`)
+      return
+    }
     const shown = await until('the client to show its terminal', async () => {
       const box = await page.locator('[aria-roledescription="terminal"]').first().boundingBox()
       return box && box.width > 0 ? box : null

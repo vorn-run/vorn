@@ -444,10 +444,15 @@ impl Shot {
 
     /// The control a fresh frame names `label` with a button's role, the last when several do.
     pub fn button(&mut self, app: &mut App, label: &str) -> Option<Id> {
+        self.labelled(app, "Button", label)
+    }
+
+    /// The last control of `role` (its accessibility role's name) labelled `label`.
+    pub fn labelled(&mut self, app: &mut App, role: &str, label: &str) -> Option<Id> {
         let tree = app.frame(&mut self.ui, self.size);
         tree.nodes
             .iter()
-            .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
+            .filter(|(_, n)| format!("{:?}", n.role()) == role && n.label() == Some(label))
             .map(|(id, _)| Id(id.0))
             .next_back()
     }

@@ -1,40 +1,50 @@
-//! Connections and connectors: every `connection:*` and `connector:*` call,
+//! The Connectors built-in: every `connection:*` and `connector:*` call,
 //! `credentials:import` and `http:request`, and the polls connector-poll
-//! workflows run.
+//! workflows run, on the public API ([`crate::host`]).
 //!
-//! Connections are rows of `vorn.db`; their secrets are in the vault
-//! ([`super::secrets`]), and a row holds [`IN_VAULT`] where a secret was. A
-//! connection runs as a child: an MCP server spoken to through the MCP SDK
-//! ([`super::mcp`]), or a package spoken to in the connector protocol
-//! ([`vorn_extensions::connector`]). The packs, the catalog and the HTTP connector
-//! are [`vorn_connectors`]'s; this module wires them to the store, the vault,
-//! the desktop ([`crate::bridge`]) and the clients.
+//! Connections are rows of its own tables; their secrets are in the vault,
+//! and a row holds [`IN_VAULT`] where a secret was. A connection runs as a
+//! child: an MCP server spoken to through the MCP SDK ([`crate::mcp`]), or a
+//! package spoken to in the connector protocol
+//! ([`vorn_extensions::connector`]) under the bridge's lifecycle. Tasks it
+//! imports are written by the board (`task.importItems`), polled items go to
+//! the Workflows inbox (`inbox.recordPage`), and a window signed in again
+//! wakes the steps waiting for it (`signin.completed`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use tracing::{info, warn};
-use vorn_connectors::auth::{self, Runner};
-use vorn_connectors::catalog::Catalog;
-use vorn_connectors::connections::{self as conns, filter, Item, IN_VAULT, MCP, SDK};
-use vorn_connectors::fetch::Http;
-use vorn_connectors::install::{Installer, Source as PackSource};
-use vorn_connectors::poll::{self, McpPoll, Page};
 use vorn_extensions::child::Launch;
 use vorn_extensions::connector::{self as sdk, SdkClient, SdkLaunch, Source as LaunchSource};
-use vorn_extensions::lifecycle::{Lease, Lifecycle, ServiceKey};
+use vorn_extensions::lifecycle::{Lease, ServiceKey};
+use vorn_extensions::netproxy::{hosts_in, ProxyGrant};
 use vorn_extensions::pack::PackStore;
+use vorn_extensions::signin::{Grant, Windows};
 use vorn_store::Store;
 use vorn_vault::Secret;
 
-use super::secrets::{Fields, Known};
-use super::{absolute_str, mcp, Answer, Native};
-use crate::bridge::Bridge;
+use crate::auth::{self, Runner};
+use crate::catalog::Catalog;
+use crate::connections::{self as conns, filter, Item, IN_VAULT, MCP, SDK};
+use crate::fetch::Http;
+use crate::host::{Fields, Host, Services};
+use crate::mcp;
+use crate::poll::{self, McpPoll, Page};
 
-/// Every call this module answers.
+/// The id the built-in goes by.
+pub const ID: &str = "vorn.connectors";
+
+/// Its manifest: what it declares it uses and the MCP tools it adds.
+pub const MANIFEST: &str = include_str!("../vorn-extension.toml");
+
+/// The trigger type whose polls it answers.
+pub const POLL_TRIGGER: &str = "connectorPoll";
+
+/// Every call this built-in answers.
 pub const METHODS: &[&str] = &[
     "connection:list",
     "connection:create",
@@ -72,45 +82,43 @@ pub const METHODS: &[&str] = &[
     "http:request",
 ];
 
-/// One call through a signed-in window.
-const WINDOW_CALL_TIMEOUT: Duration = Duration::from_secs(20);
-/// The requests of one tool call kept to explain it failing.
-const KEPT_CALLS: usize = 50;
-const MAX_WINDOW_REQUEST: usize = 1024 * 1024;
+/// What a call came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Answer {
+    Result(Value),
+    /// Answered with nothing.
+    Void,
+    Error(String),
+    /// Not a call this built-in answers.
+    Unanswered,
+}
+
+/// The calls answered with the built-in off: data the person moves, and
+/// requests a workflow's HTTP step makes without a connection.
+pub const WHILE_OFF: &[&str] = &["credentials:import", "http:request"];
+
 /// An MCP connection's tools are first looked for this long after it is made.
 const FIRST_DISCOVERY: Duration = Duration::from_millis(1500);
 
-/// A browser connector's child's grant to call through its connection's window.
-#[derive(Debug)]
-struct Grant {
-    token: String,
-    browser: Value,
-    /// The window requests of each tool call in flight, by the call's key.
-    calls: Mutex<HashMap<String, Vec<Value>>>,
-}
-
 /// What answers the connection and connector calls.
 pub struct Connectors {
-    native: Weak<Native>,
-    installer: Installer,
+    host: Arc<dyn Host>,
+    services: Services,
     catalog: Catalog,
-    /// The bridge's lifecycle, which every connection's child runs under.
-    lifecycle: Arc<Lifecycle>,
-    grants: Mutex<HashMap<String, Arc<Grant>>>,
+    mcp: mcp::McpClients,
+    /// The proxy grant each sandboxed child runs with, by connection.
+    proxied: Mutex<HashMap<String, ProxyGrant>>,
     /// How a checkout signs in, read once by probing it; `None` when it would not start.
     checkout_auth: Mutex<HashMap<String, Option<auth::Source>>>,
-    bridge: Arc<dyn Bridge>,
     http: Http,
-    /// Where a browser connector's child reaches its window, vornd's own address.
-    origin: String,
-    version: String,
-    repo_root: Option<PathBuf>,
+    /// The connection the Connections page is adding, while it adds one.
+    pub(crate) draft: Mutex<Option<crate::page::Draft>>,
 }
 
 impl std::fmt::Debug for Connectors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connectors")
-            .field("origin", &self.origin)
+            .field("services", &self.services)
             .finish_non_exhaustive()
     }
 }
@@ -127,16 +135,6 @@ fn now_ms() -> u64 {
 
 fn uuid() -> String {
     uuid::Uuid::new_v4().to_string()
-}
-
-/// A random token for a window grant or a call.
-fn random_token(bytes: usize) -> String {
-    let mut raw = vec![0u8; bytes];
-    for chunk in raw.chunks_mut(16) {
-        let id = uuid::Uuid::new_v4();
-        chunk.copy_from_slice(&id.as_bytes()[..chunk.len()]);
-    }
-    raw.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn failure(error: impl Into<String>) -> Value {
@@ -183,6 +181,15 @@ fn plain(fields: &Fields) -> HashMap<String, String> {
         .collect()
 }
 
+/// The values of a connection's `secretEnv` field: its plaintext, a JSON
+/// object, as `parseJsonObject` reads it.
+pub fn secret_env(fields: &Fields) -> Map<String, Value> {
+    let raw = fields
+        .get("secretEnv")
+        .map(|s| Value::String(s.expose().to_owned()));
+    mcp::parse_json_object(raw.as_ref())
+}
+
 /// Takes the secret fields of `filters` into `secrets`, leaving the marker.
 fn take_secrets(connector: &str, filters: &mut Map<String, Value>, secrets: &mut Fields) {
     for field in conns::password_fields(connector) {
@@ -201,6 +208,7 @@ fn take_secrets(connector: &str, filters: &mut Map<String, Value>, secrets: &mut
 
 /// How a child of vornd's runs a program, for the CLI sign-in probes.
 struct ProcessRunner {
+    host: Arc<dyn Host>,
     env: Vec<(String, String)>,
     source: Vec<(String, String)>,
 }
@@ -212,7 +220,7 @@ impl Runner for ProcessRunner {
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
             .map(|(_, v)| v.as_str())?;
-        super::env::find_on_path(name, path)
+        self.host.find_on_path(name, path)
     }
 
     fn run(
@@ -271,50 +279,53 @@ impl Runner for ProcessRunner {
 }
 
 impl Connectors {
-    pub fn new(
-        native: &Arc<Native>,
-        data_dir: &Path,
-        origin: String,
-        bridge: Arc<dyn Bridge>,
-        lifecycle: Arc<Lifecycle>,
-    ) -> Arc<Connectors> {
-        let home = PathBuf::from(super::shell::home_dir());
+    /// The built-in on `host`, running its connectors' programs with `services`.
+    pub fn new(host: Arc<dyn Host>, services: Services) -> Arc<Connectors> {
         Arc::new(Connectors {
-            native: Arc::downgrade(native),
-            installer: Installer::new(PackStore::new(data_dir.join("connectors"))),
-            catalog: Catalog::new(
-                home.join(".vorn").join("connector-catalog.json"),
-                std::env::var_os("VORN_CONNECTORS_ROOT").map(PathBuf::from),
-            ),
-            lifecycle,
-            grants: Mutex::default(),
+            catalog: Catalog::new(services.catalog_cache.clone(), services.repo_root.clone()),
+            host,
+            services,
+            mcp: mcp::McpClients::default(),
+            proxied: Mutex::default(),
             checkout_auth: Mutex::default(),
-            bridge,
             http: Http,
-            origin,
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            repo_root: std::env::var_os("VORN_CONNECTORS_ROOT").map(PathBuf::from),
+            draft: Mutex::default(),
         })
     }
 
-    fn native(&self) -> Result<Arc<Native>, String> {
-        self.native
-            .upgrade()
-            .ok_or_else(|| "vornd is stopping".to_owned())
+    fn packs(&self) -> &PackStore {
+        self.services.installs.store()
     }
 
-    /// Runs `f` on the store on a blocking thread.
+    fn windows(&self) -> &Windows {
+        &self.services.windows
+    }
+
+    fn repo_root(&self) -> Option<&Path> {
+        self.services.repo_root.as_deref()
+    }
+
+    /// Runs `f` on its own tables, off the runtime.
     async fn store<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Store) -> vorn_store::Result<T> + Send + 'static,
     ) -> Result<T, String> {
-        let native = self.native()?;
-        tokio::task::spawn_blocking(move || {
-            let mut store = native.store().ok_or("vornd has no database")?;
-            f(&mut store).map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        let slot: Arc<Mutex<Option<T>>> = Arc::default();
+        let out = Arc::clone(&slot);
+        self.host
+            .tables(Box::new(move |s| {
+                let value = f(s)?;
+                *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
+                Ok(())
+            }))
+            .await?;
+        let value = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        value.ok_or_else(|| "the store answered nothing".to_owned())
+    }
+
+    /// A core method of the public API.
+    async fn api(&self, method: &str, args: Value) -> Result<Value, String> {
+        self.host.call(method, args).await
     }
 
     async fn connection(&self, id: &str) -> Result<Option<Value>, String> {
@@ -327,22 +338,12 @@ impl Connectors {
 
     /// Tells every client and every process watching that the data changed.
     fn changed(&self) {
-        if let Ok(native) = self.native() {
-            native.signal_change();
-        }
+        self.host.changed();
     }
 
-    /// A connection's secrets, read off the runtime: the vault may block.
+    /// A connection's secrets.
     async fn secrets_of(&self, id: &str) -> Option<Fields> {
-        let native = self.native().ok()?;
-        let id = id.to_owned();
-        tokio::task::spawn_blocking(move || match native.secrets.lookup(&id) {
-            Known::Fields(fields) => Some(fields),
-            Known::None | Known::Unknown => None,
-        })
-        .await
-        .ok()
-        .flatten()
+        self.host.secrets(id).await
     }
 
     async fn secret(&self, id: &str, field: &str) -> Option<String> {
@@ -361,7 +362,7 @@ impl Connectors {
             "connection:delete" => self.delete(&params).await,
             "connection:getSourceLink" => {
                 let task = params.as_str().unwrap_or("").to_owned();
-                self.store(move |s| s.call("dbGetTaskSourceLink", json!([task])))
+                self.api("task.sourceLink", json!({ "taskId": task }))
                     .await
                     .map(|v| Some(from_store(v)))
             }
@@ -411,7 +412,7 @@ impl Connectors {
             "connector:rollbackPack" => Ok(Some(
                 self.rollback_pack(params.as_str().unwrap_or("")).await,
             )),
-            "connector:listPacks" => Ok(Some(json!(self.installer.store().list()))),
+            "connector:listPacks" => Ok(Some(json!(self.packs().list()))),
             "connector:seedWorkflow" => self.seed_workflow(&params).await,
             "connector:status" => Ok(Some(self.status().await)),
             "connector:probeAuth" => Ok(Some(self.probe_auth(params.as_str().unwrap_or("")).await)),
@@ -464,10 +465,10 @@ impl Connectors {
         params.insert("filters".into(), Value::Object(filters));
         let id = uuid();
         if !secrets.is_empty() {
-            self.native()?.secrets.set(&id, secrets);
+            self.host.set_secrets(&id, secrets);
         }
         let new_id = id.clone();
-        let conn = self
+        let (conn, seeded) = self
             .store(move |s| {
                 conns::create(
                     s,
@@ -479,6 +480,10 @@ impl Connectors {
                 )
             })
             .await?;
+        if !seeded.is_empty() {
+            self.api("workflow.seed", json!({ "workflows": seeded }))
+                .await?;
+        }
         self.changed();
         if connector == MCP {
             let me = Arc::clone(self);
@@ -512,7 +517,7 @@ impl Connectors {
             let had = secrets.clone();
             take_secrets(&connector, &mut filters, &mut secrets);
             if secrets.len() != before || secrets != had {
-                self.native()?.secrets.set(&id, secrets);
+                self.host.set_secrets(&id, secrets);
             }
             updates.insert("filters".into(), Value::Object(filters));
         }
@@ -543,17 +548,18 @@ impl Connectors {
     }
 
     async fn remove_connection(&self, id: &str) -> Result<(), String> {
+        self.api(
+            "workflow.unseed",
+            json!({ "prefix": conns::seeded_workflow_prefix(id) }),
+        )
+        .await?;
         let row = id.to_owned();
         self.store(move |s| conns::delete(s, &row)).await?;
-        if let Ok(native) = self.native() {
-            native.secrets.forget(id);
-        }
-        let bridge = Arc::clone(&self.bridge);
+        self.host.forget_secrets(id);
+        let host = Arc::clone(&self.host);
         let forget = id.to_owned();
         tokio::spawn(async move {
-            let _ = bridge
-                .request("session:forget", json!(forget), WINDOW_CALL_TIMEOUT)
-                .await;
+            let _ = host.call("signin.forget", json!({ "key": forget })).await;
         });
         self.stop_children(id).await;
         self.changed();
@@ -562,14 +568,16 @@ impl Connectors {
 
     async fn stop_children(&self, id: &str) {
         let scope = connection_scope(id);
-        self.lifecycle.stop_where(|k| k.scope == scope).await;
-        self.grants
+        self.services
+            .lifecycle
+            .stop_where(|k| k.scope == scope)
+            .await;
+        self.windows().revoke(id);
+        self.proxied
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(id);
-        if let Ok(native) = self.native() {
-            native.mcp.stop(id);
-        }
+        self.mcp.stop(id);
     }
 
     async fn list_mcp_tools(&self, params: &Value) -> Result<Option<Value>, String> {
@@ -619,15 +627,13 @@ impl Connectors {
             conns::HTTP => {
                 let filters = conns::filters_of(&conn);
                 let secret = self.secret(&id, "secret").await;
-                if let Some(locked) =
-                    vorn_connectors::http::locked_error(&filters, secret.is_some())
-                {
+                if let Some(locked) = crate::http::locked_error(&filters, secret.is_some()) {
                     json!({ "ok": false, "message": locked })
                 } else {
-                    let profile = vorn_connectors::http::Profile::of(&filters, secret.as_deref());
+                    let profile = crate::http::Profile::of(&filters, secret.as_deref());
                     let http = self.http.clone();
                     let result = tokio::task::spawn_blocking(move || {
-                        vorn_connectors::http::execute(&http, "test", &profile, &Map::new())
+                        crate::http::execute(&http, "test", &profile, &Map::new())
                     })
                     .await
                     .unwrap_or_else(|e| failure(e.to_string()));
@@ -660,16 +666,14 @@ impl Connectors {
         &self,
         conn: &Value,
     ) -> Result<rmcp::service::Peer<rmcp::service::RoleClient>, String> {
-        let native = self.native()?;
         let launch = self.spawn_spec(conn).await?;
         let launch = mcp::Launch {
             command: launch.launch.program.to_string_lossy().into_owned(),
             args: launch.launch.args.clone(),
             env: launch.own_env,
         };
-        native
-            .mcp
-            .client(text(conn, "id"), &launch, native.child_env())
+        self.mcp
+            .client(text(conn, "id"), &launch, self.host.child_env())
             .await
     }
 
@@ -728,9 +732,9 @@ impl Connectors {
         if sdk_id.is_empty() {
             return None;
         }
-        let local = vorn_connectors::catalog::local_launch_spec(sdk_id, self.repo_root.as_deref());
+        let local = crate::catalog::local_launch_spec(sdk_id, self.repo_root());
         let Some((command, args)) = local else {
-            let pack = self.installer.store().inspect_unmeasured(sdk_id).ok()?;
+            let pack = self.packs().inspect_unmeasured(sdk_id).ok()?;
             return Some(auth::Source {
                 auth: pack
                     .manifest
@@ -749,14 +753,14 @@ impl Connectors {
         {
             return cached.clone();
         }
-        let native = self.native().ok()?;
-        let program = super::mcp::resolve(&command, &native.child_env());
+        let env = self.host.child_env();
+        let program = mcp::resolve(&command, &env);
         let probed = sdk::probe(
             &program.to_string_lossy(),
             &args,
-            native.child_env(),
+            env,
             std::env::temp_dir(),
-            &self.version,
+            &self.services.version,
             sdk::Timeouts::default(),
         )
         .await;
@@ -785,16 +789,15 @@ impl Connectors {
     }
 
     fn runner(&self) -> Result<ProcessRunner, String> {
-        let native = self.native()?;
         Ok(ProcessRunner {
-            env: native.child_env(),
+            host: Arc::clone(&self.host),
+            env: self.host.child_env(),
             source: std::env::vars().collect(),
         })
     }
 
     /// Everything a connection's child starts with (`buildSpawnConfig`).
     async fn spawn_spec(&self, conn: &Value) -> Result<Spawn, String> {
-        let native = self.native()?;
         let filters = conns::filters_of(conn);
         let sdk_id = conns::sdk_id_of(conn);
         let mut source = LaunchSource::Command;
@@ -803,12 +806,10 @@ impl Connectors {
         let mut cwd = std::env::temp_dir();
         let mut program_args: Option<(String, Vec<String>)> = None;
         if !sdk_id.is_empty() {
-            if let Some(local) =
-                vorn_connectors::catalog::local_launch_spec(&sdk_id, self.repo_root.as_deref())
-            {
+            if let Some(local) = crate::catalog::local_launch_spec(&sdk_id, self.repo_root()) {
                 source = LaunchSource::Checkout;
                 program_args = Some(local);
-            } else if let Ok(pack) = self.installer.store().inspect_unmeasured(&sdk_id) {
+            } else if let Ok(pack) = self.packs().inspect_unmeasured(&sdk_id) {
                 source = LaunchSource::Pack;
                 protocol = pack.manifest.protocol;
                 name = pack.name().to_owned();
@@ -862,7 +863,7 @@ impl Connectors {
             put(k, v.as_str().unwrap_or("").to_owned());
         }
         if let Some(secrets) = self.secrets_of(text(conn, "id")).await {
-            for (k, v) in super::secrets::secret_env(&secrets) {
+            for (k, v) in secret_env(&secrets) {
                 put(k, v.as_str().unwrap_or("").to_owned());
             }
         }
@@ -871,12 +872,12 @@ impl Connectors {
             .and_then(|a| a.auth.as_ref())
             .filter(|a| a.get("rung").and_then(Value::as_str) == Some("browser"))
             .and_then(|a| a.get("browser").cloned());
-        let mut env = native.child_env();
+        let mut env = self.host.child_env();
         for (k, v) in &own {
             env.retain(|(key, _)| key != k);
             env.push((k.clone(), v.clone()));
         }
-        let program = super::mcp::resolve(&command, &env);
+        let program = mcp::resolve(&command, &env);
         Ok(Spawn {
             launch: Launch {
                 program,
@@ -903,61 +904,98 @@ impl Connectors {
         };
         let key = ServiceKey::new(owner, connection_scope(&id));
         let conn = conn.clone();
-        self.lifecycle
+        self.services
+            .lifecycle
             .get_or_start(&key, || async {
                 let mut spawn = self.spawn_spec(&conn).await?;
                 if let Some(browser) = spawn.browser.clone() {
-                    let token = random_token(32);
+                    let token = self.windows().grant(&id, browser)?;
                     spawn.launch.env.push((
                         "VORN_BROWSER_HOST".into(),
-                        format!("{}/connections/{id}/browser", self.origin),
+                        format!("{}/connections/{id}/browser", self.services.origin),
                     ));
-                    spawn
-                        .launch
-                        .env
-                        .push(("VORN_BROWSER_TOKEN".into(), token.clone()));
-                    self.grants
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(
-                            id.clone(),
-                            Arc::new(Grant {
-                                token,
-                                browser,
-                                calls: Mutex::default(),
-                            }),
-                        );
+                    spawn.launch.env.push(("VORN_BROWSER_TOKEN".into(), token));
                 }
                 let key = if spawn.name.is_empty() {
                     text(&conn, "name").to_owned()
                 } else {
                     spawn.name.clone()
                 };
+                let (held, grant) =
+                    self.held(spawn.launch, &conns::sdk_id_of(&conn), &spawn.own_env);
+                if let Some(grant) = grant {
+                    self.proxied
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(id.clone(), grant);
+                }
                 let launch = SdkLaunch {
-                    launch: self.held(spawn.launch, &conns::sdk_id_of(&conn)),
+                    launch: held,
                     source: spawn.source,
                     protocol: spawn.protocol,
                 };
-                sdk::open(&launch, &key, &self.version, sdk::Timeouts::default())
-                    .await
-                    .map_err(|e| e.to_string())
+                sdk::open(
+                    &launch,
+                    &key,
+                    &self.services.version,
+                    sdk::Timeouts::default(),
+                )
+                .await
+                .map_err(|e| e.to_string())
             })
             .await
     }
 
-    /// `launch` under the macOS sandbox profile when the person turned it on for package `sdk_id`.
-    fn held(&self, launch: Launch, sdk_id: &str) -> Launch {
-        let store = self.installer.store();
+    /// `launch` under the macOS sandbox profile when the person turned it
+    /// on for package `sdk_id`: no network but the proxy's, which lets it
+    /// through to the hosts its manifest declares and those the connection's
+    /// settings (`own`) name where the manifest says so.
+    fn held(
+        &self,
+        launch: Launch,
+        sdk_id: &str,
+        own: &[(String, String)],
+    ) -> (Launch, Option<ProxyGrant>) {
+        let store = self.packs();
         if !vorn_extensions::pack::is_safe_id(sdk_id)
             || !vorn_extensions::sandbox::available()
             || !vorn_extensions::sandbox::is_on(&store.root().join(sdk_id))
         {
-            return launch;
+            return (launch, None);
         }
-        match store.inspect_unmeasured(sdk_id) {
-            Ok(pack) => vorn_extensions::sandbox::wrap(launch, &pack.path),
-            Err(_) => launch,
+        let Ok(pack) = store.inspect_unmeasured(sdk_id) else {
+            return (launch, None);
+        };
+        let declares = &pack.manifest.declares;
+        let mut hosts = declares.network.clone();
+        for (name, value) in own {
+            if declares.network_from.contains(name) {
+                hosts.extend(hosts_in(value));
+            }
         }
+        let grant =
+            self.services
+                .proxy
+                .as_ref()
+                .and_then(|proxy| match proxy.grant(sdk_id, hosts) {
+                    Ok(grant) => Some(grant),
+                    Err(err) => {
+                        warn!("[connectors] {sdk_id} runs without a network: {err}");
+                        None
+                    }
+                });
+        let mut launch = launch;
+        if let Some(grant) = &grant {
+            for (k, v) in grant.env() {
+                launch.env.retain(|(key, _)| *key != k);
+                launch.env.push((k, v));
+            }
+        }
+        let port = grant.as_ref().map(ProxyGrant::port);
+        (
+            vorn_extensions::sandbox::wrap_through(launch, &pack.path, port),
+            grant,
+        )
     }
 
     /// Runs `action` in a process of its own when the connection's package
@@ -969,7 +1007,7 @@ impl Connectors {
         args: &Map<String, Value>,
     ) -> Option<Result<Value, sdk::SdkError>> {
         let sdk_id = conns::sdk_id_of(conn);
-        let pack = self.installer.store().inspect_unmeasured(&sdk_id).ok()?;
+        let pack = self.packs().inspect_unmeasured(&sdk_id).ok()?;
         let run = pack.manifest.run(action)?;
         let (program, run_args) = pack.resolve(&run.command)?;
         let mut spawn = match self.spawn_spec(conn).await {
@@ -983,13 +1021,20 @@ impl Connectors {
         };
         spawn.launch.program = program;
         spawn.launch.args = run_args;
+        let (held, _grant) = self.held(spawn.launch, &sdk_id, &spawn.own_env);
         let launch = SdkLaunch {
-            launch: self.held(spawn.launch, &sdk_id),
+            launch: held,
             source: spawn.source,
             protocol: spawn.protocol,
         };
         let name = pack.name().to_owned();
-        let client = match sdk::open(&launch, &name, &self.version, sdk::Timeouts::default()).await
+        let client = match sdk::open(
+            &launch,
+            &name,
+            &self.services.version,
+            sdk::Timeouts::default(),
+        )
+        .await
         {
             Ok(client) => client,
             Err(err) => {
@@ -1007,9 +1052,9 @@ impl Connectors {
     /// What a package connection declares: its installed pack, or what its child says.
     async fn sdk_manifest(&self, conn: &Value) -> Result<Value, String> {
         let sdk_id = conns::sdk_id_of(conn);
-        let local = vorn_connectors::catalog::local_launch_spec(&sdk_id, self.repo_root.as_deref());
+        let local = crate::catalog::local_launch_spec(&sdk_id, self.repo_root());
         if !sdk_id.is_empty() && local.is_none() {
-            if let Some(pack) = self.installer.store().describe(&sdk_id) {
+            if let Some(pack) = self.packs().describe(&sdk_id) {
                 return Ok(json!(pack));
             }
         }
@@ -1083,9 +1128,7 @@ impl Connectors {
             conns::HTTP => {
                 let filters = conns::filters_of(conn);
                 let secret = self.secret(id, "secret").await;
-                if let Some(locked) =
-                    vorn_connectors::http::locked_error(&filters, secret.is_some())
-                {
+                if let Some(locked) = crate::http::locked_error(&filters, secret.is_some()) {
                     return failure(locked);
                 }
                 let mut merged = filters.clone();
@@ -1093,10 +1136,10 @@ impl Connectors {
                     merged.insert("secret".into(), json!(secret));
                 }
                 merged.extend(args.clone());
-                let profile = vorn_connectors::http::Profile::of(&merged, secret.as_deref());
+                let profile = crate::http::Profile::of(&merged, secret.as_deref());
                 let (http, action) = (self.http.clone(), action.to_owned());
                 tokio::task::spawn_blocking(move || {
-                    vorn_connectors::http::execute(&http, &action, &profile, &merged)
+                    crate::http::execute(&http, &action, &profile, &merged)
                 })
                 .await
                 .unwrap_or_else(|e| failure(e.to_string()))
@@ -1122,30 +1165,16 @@ impl Connectors {
             Err(error) => return Err(failure(error)),
         };
         let client = lease.shared();
-        let grant = self
-            .grants
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&id)
-            .cloned();
-        let key = grant.as_ref().map(|g| {
-            let key = random_token(12);
-            g.calls
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(key.clone(), Vec::new());
-            key
-        });
-        let answered = run(client, key.clone()).await;
+        let begun = self.windows().begin(&id);
+        let key = begun.as_ref().map(|(_, k)| k.clone());
+        let answered = run(client, key).await;
         drop(lease);
-        let calls = match (&grant, &key) {
-            (Some(g), Some(k)) => g
-                .calls
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(k)
-                .unwrap_or_default(),
-            _ => Vec::new(),
+        let (grant, calls) = match begun {
+            Some((g, k)) => {
+                let calls = Windows::end(&g, &k);
+                (Some(g), calls)
+            }
+            None => (None, Vec::new()),
         };
         match answered {
             Ok(value) => Ok((value, calls)),
@@ -1197,116 +1226,11 @@ impl Connectors {
     }
 
     async fn still_signed_in(&self, id: &str, browser: &Value) -> Option<bool> {
-        if !self.bridge.connected() {
-            return None;
-        }
         let answer = self
-            .bridge
-            .request(
-                "session:check",
-                json!({ "connectionId": id, "browser": browser }),
-                WINDOW_CALL_TIMEOUT,
-            )
+            .api("signin.check", json!({ "key": id, "browser": browser }))
             .await
             .ok()?;
         answer.get("signedIn").and_then(Value::as_bool)
-    }
-
-    /// `POST /connections/<id>/browser/fetch`: a browser connector's child
-    /// calling through its window. The status and body to answer with.
-    pub async fn window_fetch(
-        &self,
-        id: &str,
-        bearer: Option<&str>,
-        call_key: Option<&str>,
-        body: &[u8],
-    ) -> (u16, Value) {
-        let refuse = |status: u16, message: &str| (status, json!({ "error": message }));
-        let grant = self
-            .grants
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .cloned();
-        let known = grant.as_ref().zip(bearer).is_some_and(|(g, t)| {
-            vorn_reach::token::constant_time_eq(t.as_bytes(), g.token.as_bytes())
-        });
-        let Some(grant) = grant.filter(|_| known) else {
-            return refuse(401, "This endpoint does not know that caller");
-        };
-        if body.len() > MAX_WINDOW_REQUEST {
-            return refuse(413, "That request is too large");
-        }
-        let Some(request) = read_window_request(body) else {
-            return refuse(400, "Send { url, method, headers?, body? }");
-        };
-        let method = text(&request, "method").to_owned();
-        if !matches!(
-            method.as_str(),
-            "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
-        ) {
-            return refuse(
-                405,
-                &format!("{method} is not a method a signed-in call may use"),
-            );
-        }
-        let url = text(&request, "url").to_owned();
-        let origins: Vec<String> = grant
-            .browser
-            .get("origins")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect();
-        if !vorn_extensions::manifest::within_origins(&origins, &url) {
-            return refuse(
-                403,
-                &format!("{url} is not on one of this connection's origins"),
-            );
-        }
-        let path = url::Url::parse(&url)
-            .map(|u| u.path().to_owned())
-            .unwrap_or_default();
-        let record = |status: Value| {
-            if let Some(key) = call_key {
-                if let Some(calls) = grant
-                    .calls
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get_mut(key)
-                {
-                    calls.push(json!({ "method": method, "path": path, "status": status }));
-                    if calls.len() > KEPT_CALLS {
-                        let excess = calls.len() - KEPT_CALLS;
-                        calls.drain(..excess);
-                    }
-                }
-            }
-        };
-        if !self.bridge.connected() {
-            record(json!("app-offline"));
-            return refuse(503, "Open Vorn on the desktop this connection signed in on");
-        }
-        let asked = self
-            .bridge
-            .request(
-                "session:fetch",
-                json!({ "connectionId": id, "origins": origins, "request": request }),
-                WINDOW_CALL_TIMEOUT,
-            )
-            .await;
-        match asked {
-            Ok(answer) => {
-                record(answer.get("status").cloned().unwrap_or(Value::Null));
-                (200, answer)
-            }
-            Err(error) => {
-                record(json!("failed"));
-                refuse(503, &error)
-            }
-        }
     }
 
     async fn browser_auth(&self, params: &Value) -> Result<Option<Value>, String> {
@@ -1337,9 +1261,12 @@ impl Connectors {
         self.store(move |s| s.call("dbSetConnectionSignIn", json!([row, identity, now_iso()])))
             .await?;
         self.changed();
-        if let Some(work) = self.native()?.work().cloned() {
-            tokio::spawn(async move { work.signed_in(&id).await });
-        }
+        let host = Arc::clone(&self.host);
+        tokio::spawn(async move {
+            if let Err(err) = host.call("signin.completed", json!({ "key": id })).await {
+                warn!("[connectors] could not wake the steps waiting on {id}: {err}");
+            }
+        });
         Ok(None)
     }
 
@@ -1359,14 +1286,10 @@ impl Connectors {
     // ---- keys ----
 
     async fn list_keys(&self) -> Result<Option<Value>, String> {
-        let (conns_list, workflows) = self
-            .store(|s| {
-                Ok((
-                    s.call("dbListSourceConnections", json!([null]))?,
-                    s.call("dbListWorkflows", json!([]))?,
-                ))
-            })
+        let conns_list = self
+            .store(|s| s.call("dbListSourceConnections", json!([null])))
             .await?;
+        let workflows = self.api("workflow.list", json!({})).await?;
         let rows: Vec<Value> = conns_list
             .as_array()
             .into_iter()
@@ -1428,11 +1351,7 @@ impl Connectors {
         let row = id.clone();
         self.store(move |s| conns::update(s, &row, updates, &[]))
             .await?;
-        let native = self.native()?;
-        let (row, key) = (id.clone(), field.clone());
-        tokio::task::spawn_blocking(move || native.secrets.merge(&row, &key, &plaintext))
-            .await
-            .map_err(|e| e.to_string())?;
+        self.host.merge_secret(&id, &field, &plaintext).await?;
         self.stop_children(&id).await;
         self.changed();
         Ok(Some(json!({ "ok": true })))
@@ -1441,7 +1360,6 @@ impl Connectors {
     /// `credentials:import`: what the desktop decrypted of the secrets it
     /// sealed, filed in the vault once, each row then holding the marker.
     async fn import(&self, params: &Value) -> Result<Option<Value>, String> {
-        let native = self.native()?;
         let mut imported = 0u64;
         for (id, fields) in params
             .get("connections")
@@ -1464,7 +1382,7 @@ impl Connectors {
                 secrets.insert(key.clone(), Secret::from(value));
                 filters.insert(key.clone(), json!(IN_VAULT));
             }
-            native.secrets.set(id, secrets);
+            self.host.set_secrets(id, secrets);
             let mut updates = Map::new();
             updates.insert("filters".into(), Value::Object(filters));
             let row = id.clone();
@@ -1476,16 +1394,7 @@ impl Connectors {
             info!(imported, "secrets the desktop sealed are in the vault");
             self.changed();
         }
-        let (n, p) = (Arc::clone(&native), params.clone());
-        let ssh = tokio::task::spawn_blocking(move || {
-            super::config::with_store(&n, |s| Ok(super::credential::import(&n, s, &p)))?
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        let (ssh_keys, host_passwords) = ssh?;
-        if host_passwords > 0 {
-            super::config::announce(&native).await;
-        }
+        let (ssh_keys, host_passwords) = self.host.import_core_credentials(params.clone()).await?;
         Ok(Some(json!({
             "connections": imported,
             "sshKeys": ssh_keys,
@@ -1531,14 +1440,13 @@ impl Connectors {
             .map(vorn_extensions::js::to_string)
             .unwrap_or_default();
         let status = params.get("initialStatus").cloned().unwrap_or(Value::Null);
-        let result = self
-            .store(move |st| {
-                let r = conns::upsert_item(st, &conn, &item_fields, &project, &status, &now, uuid)?;
-                let mut updates = Map::new();
-                updates.insert("lastSyncAt".into(), json!(now));
-                conns::update(st, &id, updates, &[])?;
-                Ok(r)
-            })
+        let mut answered = self
+            .import_items(&conn, &project, vec![(item_fields, status)])
+            .await?;
+        let result = answered.pop().unwrap_or(Value::Null);
+        let mut updates = Map::new();
+        updates.insert("lastSyncAt".into(), json!(now));
+        self.store(move |st| conns::update(st, &id, updates, &[]))
             .await?;
         self.changed();
         Ok(Some(result))
@@ -1564,28 +1472,27 @@ impl Connectors {
             .map(vorn_extensions::js::to_string)
             .unwrap_or_default();
         let mapping = conn.get("statusMapping").cloned().unwrap_or(Value::Null);
-        let c = conn.clone();
-        let written = self
-            .store(move |s| {
-                let (mut imported, mut updated) = (0u64, 0u64);
-                for item in &items {
-                    let status = mapping
-                        .get(&item.status_raw)
-                        .filter(|v| vorn_extensions::js::truthy(v))
-                        .cloned()
-                        .unwrap_or_else(|| json!("todo"));
-                    let r = conns::upsert_item(s, &c, item, &project, &status, &now, uuid)?;
-                    if r["created"] == true {
-                        imported += 1;
-                    } else {
-                        updated += 1;
-                    }
-                }
-                Ok((imported, updated, now))
+        let with_status: Vec<(Item, Value)> = items
+            .into_iter()
+            .map(|item| {
+                let status = mapping
+                    .get(&item.status_raw)
+                    .filter(|v| vorn_extensions::js::truthy(v))
+                    .cloned()
+                    .unwrap_or_else(|| json!("todo"));
+                (item, status)
             })
-            .await;
-        let (imported, updated, now) = match written {
-            Ok(counts) => counts,
+            .collect();
+        let written = if with_status.is_empty() {
+            Ok(Vec::new())
+        } else {
+            self.import_items(&conn, &project, with_status).await
+        };
+        let (imported, updated) = match written {
+            Ok(answers) => {
+                let created = answers.iter().filter(|r| r["created"] == true).count() as u64;
+                (created, answers.len() as u64 - created)
+            }
             Err(error) => return json!({ "imported": 0, "updated": 0, "error": error }),
         };
         let row = id.clone();
@@ -1609,6 +1516,35 @@ impl Connectors {
         };
         self.changed();
         answer
+    }
+
+    /// Puts items of `conn` on the board through the board's own method:
+    /// each answer `{taskId, created}` in order.
+    async fn import_items(
+        &self,
+        conn: &Value,
+        project: &str,
+        items: Vec<(Item, Value)>,
+    ) -> Result<Vec<Value>, String> {
+        let items: Vec<Value> = items
+            .into_iter()
+            .map(|(i, status)| {
+                json!({
+                    "externalId": i.external_id, "title": i.title, "description": i.description,
+                    "externalUrl": i.external_url, "statusRaw": i.status_raw,
+                    "updatedAt": i.updated_at, "status": status,
+                })
+            })
+            .collect();
+        let args = json!({
+            "connectionId": text(conn, "id"),
+            "connectorId": conn.get("connectorId").cloned().unwrap_or(Value::Null),
+            "sourceConnectorId": conns::connector_id_of(conn),
+            "project": project,
+            "items": items,
+        });
+        let answered = self.api("task.importItems", args).await?;
+        Ok(answered.as_array().cloned().unwrap_or_default())
     }
 
     async fn drain_all(&self, conn: &Value, items: &mut Vec<Item>) -> Result<(), String> {
@@ -1737,9 +1673,8 @@ impl Connectors {
     /// `connector:poll`: a connector-poll workflow's new items into its inbox,
     /// page by page, each page and its cursor kept together. The pages read.
     pub async fn poll(&self, workflow_id: &str) -> u64 {
-        let wf = workflow_id.to_owned();
         let Ok(workflow) = self
-            .store(move |s| s.call("dbGetWorkflow", json!([wf])))
+            .api("workflow.get", json!({ "workflowId": workflow_id }))
             .await
         else {
             return 0;
@@ -1786,9 +1721,11 @@ impl Connectors {
                 return 0;
             }
         };
-        let (wf, cid) = (workflow_id.to_owned(), connection_id.clone());
         let mut cursor: Option<String> = self
-            .store(move |s| s.call("dbGetConnectorPollCursor", json!([wf, cid])))
+            .api(
+                "inbox.cursor",
+                json!({ "workflowId": workflow_id, "connectionId": connection_id }),
+            )
             .await
             .ok()
             .and_then(|c| c.as_str().map(str::to_owned));
@@ -1822,10 +1759,7 @@ impl Connectors {
                     "polledAt": now,
                     "events": events,
                 });
-                if let Err(error) = self
-                    .store(move |s| s.call("dbRecordConnectorPollPage", json!([record])))
-                    .await
-                {
+                if let Err(error) = self.api("inbox.recordPage", record).await {
                     break 'pages Some(error);
                 }
                 pages += 1;
@@ -1839,9 +1773,7 @@ impl Connectors {
         if let Some(error) = failed {
             warn!("[scheduler] connectorPoll: {connector}.poll({event}) failed: {error}");
             let record = json!({ "workflowId": workflow_id, "connectionId": connection_id, "error": error, "polledAt": now });
-            let _ = self
-                .store(move |s| s.call("dbRecordConnectorPollError", json!([record])))
-                .await;
+            let _ = self.api("inbox.recordError", record).await;
         }
         pages
     }
@@ -1849,9 +1781,6 @@ impl Connectors {
     // ---- connector-wide ----
 
     async fn probe_sdk(&self, params: &Value) -> Value {
-        let Ok(native) = self.native() else {
-            return json!({ "ok": false, "error": "vornd is stopping" });
-        };
         let command = params.get("command").and_then(Value::as_str).unwrap_or("");
         let args: Vec<String> = params
             .get("args")
@@ -1861,7 +1790,7 @@ impl Connectors {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
-        let mut env = native.child_env();
+        let mut env = self.host.child_env();
         for (k, v) in params
             .get("env")
             .and_then(Value::as_object)
@@ -1873,7 +1802,7 @@ impl Connectors {
                 env.push((k.clone(), v.to_owned()));
             }
         }
-        let program = super::mcp::resolve(vorn_extensions::js::trim(command), &env);
+        let program = mcp::resolve(vorn_extensions::js::trim(command), &env);
         let shown = if program.as_os_str().is_empty() {
             command.to_owned()
         } else {
@@ -1884,7 +1813,7 @@ impl Connectors {
             &args,
             env,
             std::env::temp_dir(),
-            &self.version,
+            &self.services.version,
             sdk::Timeouts::default(),
         )
         .await
@@ -1908,48 +1837,110 @@ impl Connectors {
             .unwrap_or(false);
         let (snapshot, _) = self.catalog.snapshot(now_ms());
         if changed {
-            if let Ok(native) = self.native() {
-                native.broadcast("connector:catalogChanged", snapshot.clone());
-            }
+            self.host
+                .broadcast("connector:catalogChanged", snapshot.clone());
         }
         snapshot
     }
 
+    /// `connector:inspectPack`: clones a connector's repository and
+    /// describes it, its declared hosts and borrowed sign-in included, running
+    /// nothing of it. A `.vorn.tgz` pack of 0.8 is refused with the command
+    /// that installs it from git.
     async fn inspect_pack(self: &Arc<Self>, params: &Value) -> Value {
-        let source = match PackSource::parse(params) {
+        let source = match GitSource::parse(params) {
             Ok(s) => s,
             Err(error) => return json!({ "ok": false, "error": error }),
         };
         let me = Arc::clone(self);
-        tokio::task::spawn_blocking(move || me.installer.inspect(&source, &me.http))
+        let inspected = tokio::task::spawn_blocking(move || me.inspect_git(&source))
             .await
-            .unwrap_or_else(|e| json!({ "ok": false, "error": e.to_string() }))
+            .unwrap_or_else(|e| Err(e.to_string()));
+        match inspected {
+            Ok(preview) => json!({ "ok": true, "preview": preview }),
+            Err(error) => {
+                warn!("[connectors] inspecting a connector refused: {error}");
+                json!({ "ok": false, "error": error })
+            }
+        }
     }
 
-    async fn install_pack(self: &Arc<Self>, params: &Value) -> Value {
-        let source = match PackSource::parse(params) {
-            Ok(s) => s,
-            Err(error) => return json!({ "ok": false, "error": error }),
+    /// The preview the confirm sheet shows: 0.8's fields and the install sheet's.
+    fn inspect_git(&self, source: &GitSource) -> Result<Value, String> {
+        let installs = &self.services.installs;
+        let sheet = installs.inspect_git_at(
+            &source.url,
+            source.branch.as_deref(),
+            source.path.as_deref(),
+        )?;
+        let manifest = installs
+            .staged_manifest(&sheet.token)
+            .ok_or("That install sheet expired before it was read")?;
+        let mut preview = match serde_json::to_value(&sheet) {
+            Ok(Value::Object(map)) => map,
+            _ => Map::new(),
         };
-        let me = Arc::clone(self);
-        let native = self.native.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let progress = move |event: Value| {
-                if let Some(native) = native.upgrade() {
-                    native.broadcast("connector:installProgress", event);
-                }
-            };
-            me.installer.install(&source, &me.http, &progress)
-        })
-        .await
-        .unwrap_or_else(|e| json!({ "ok": false, "error": e.to_string() }));
-        if result["ok"] == true {
-            if let Some(id) = result.pointer("/pack/id").and_then(Value::as_str) {
-                self.pack_changed(id).await;
-            }
-            self.changed();
+        if let Some(icon) = &manifest.icon {
+            preview.insert("icon".into(), json!(icon));
         }
-        result
+        if let Some(auth) = &manifest.auth {
+            preview.insert("auth".into(), json!(auth));
+        }
+        preview.insert("triggers".into(), json!(manifest.triggers));
+        preview.insert("actions".into(), json!(manifest.actions));
+        preview.insert("env".into(), json!(manifest.env));
+        if let Some(installed) = self.packs().describe(&manifest.id) {
+            preview.insert("installedVersion".into(), json!(installed.version));
+        }
+        Ok(Value::Object(preview))
+    }
+
+    /// `connector:installPack`: puts in place what a sheet described, or
+    /// clones and installs a repository at once; a click on the sheet is
+    /// the confirmation, as it was for a pack.
+    async fn install_pack(self: &Arc<Self>, params: &Value) -> Value {
+        let token = match params.get("kind").and_then(Value::as_str) {
+            Some("staged") => match params.get("token").and_then(Value::as_str) {
+                Some(t) if !t.is_empty() => t.to_owned(),
+                _ => return json!({ "ok": false, "error": "That pack has expired" }),
+            },
+            _ => {
+                let inspected = self.inspect_pack(params).await;
+                match inspected.pointer("/preview/token").and_then(Value::as_str) {
+                    Some(t) => t.to_owned(),
+                    None => return inspected,
+                }
+            }
+        };
+        let installs = Arc::clone(&self.services.installs);
+        let Some(manifest) = installs.staged_manifest(&token) else {
+            return json!({ "ok": false, "error": "That connector was checked too long ago; open it again to install it" });
+        };
+        let id = manifest.id.clone();
+        let progress = |event: Value| {
+            let mut event = event;
+            event["id"] = json!(id);
+            self.host.broadcast("connector:installProgress", event);
+        };
+        progress(json!({ "phase": "installing", "version": manifest.version }));
+        let typed = id.clone();
+        let placed = tokio::task::spawn_blocking(move || installs.confirm(&token, &typed))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
+        match placed {
+            Ok(pack) => {
+                info!("[connectors] installed {}@{}", pack.id, pack.version);
+                progress(json!({ "phase": "installed", "version": pack.version }));
+                self.pack_changed(&pack.id).await;
+                self.changed();
+                json!({ "ok": true, "pack": pack })
+            }
+            Err(error) => {
+                warn!("[connectors] installing {id} refused: {error}");
+                progress(json!({ "phase": "failed", "error": error }));
+                json!({ "ok": false, "error": error })
+            }
+        }
     }
 
     async fn remove_pack(&self, id: &str) -> Value {
@@ -1959,22 +1950,37 @@ impl Connectors {
             .iter()
             .filter(|c| !conns::is_implicit(c))
             .count();
-        let mut result = self.installer.remove(id);
-        if result["ok"] == true {
-            self.pack_changed(id).await;
-            self.changed();
-        }
+        let installs = Arc::clone(&self.services.installs);
+        let owned = id.to_owned();
+        let removed = tokio::task::spawn_blocking(move || installs.remove(&owned))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
+        let mut result = match removed {
+            Ok(()) => {
+                self.pack_changed(id).await;
+                self.changed();
+                json!({ "ok": true })
+            }
+            Err(error) => json!({ "ok": false, "error": error }),
+        };
         result["connections"] = json!(connections);
         result
     }
 
     async fn rollback_pack(&self, id: &str) -> Value {
-        let result = self.installer.rollback(id);
-        if result["ok"] == true {
-            self.pack_changed(id).await;
-            self.changed();
+        let installs = Arc::clone(&self.services.installs);
+        let owned = id.to_owned();
+        let rolled = tokio::task::spawn_blocking(move || installs.rollback(&owned))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
+        match rolled {
+            Ok(pack) => {
+                self.pack_changed(id).await;
+                self.changed();
+                json!({ "ok": true, "pack": pack })
+            }
+            Err(error) => json!({ "ok": false, "error": error }),
         }
-        result
     }
 
     async fn connections_of(&self, connector_id: &str) -> Vec<Value> {
@@ -1991,21 +1997,21 @@ impl Connectors {
     }
 
     /// The package connection `id` belongs to, if it is one.
-    pub(crate) async fn owner_of(&self, id: &str) -> Option<String> {
+    pub async fn owner_of(&self, id: &str) -> Option<String> {
         let conn = self.connection(id).await.ok()??;
         let sdk_id = conns::sdk_id_of(&conn);
         (!sdk_id.is_empty()).then_some(sdk_id)
     }
 
     /// A package installed or linked through the extension bridge.
-    pub(crate) async fn package_changed(&self, id: &str) {
+    pub async fn package_changed(&self, id: &str) {
         self.pack_changed(id).await;
         self.changed();
     }
 
     /// A package removed through the extension bridge takes every connection
     /// made with it, and their secrets: nothing of it is left.
-    pub(crate) async fn package_removed(&self, id: &str) {
+    pub async fn package_removed(&self, id: &str) {
         for conn in self.connections_of(id).await {
             let conn_id = text(&conn, "id");
             if let Err(err) = self.remove_connection(conn_id).await {
@@ -2023,9 +2029,9 @@ impl Connectors {
         for conn in &existing {
             self.stop_children(text(conn, "id")).await;
         }
-        let pack = self.installer.store().describe(id);
+        let pack = self.packs().describe(id);
         let wants_implicit = pack.as_ref().is_some_and(|p| {
-            !p.is_extension()
+            p.manifest.kind == vorn_extensions::manifest::Kind::Connector
                 && p.manifest
                     .auth
                     .as_ref()
@@ -2077,7 +2083,7 @@ impl Connectors {
 
     /// Settles every installed pack's implicit connection, as the server did at start.
     pub async fn reconcile(&self) {
-        for pack in self.installer.store().list() {
+        for pack in self.packs().list() {
             self.pack_changed(&pack.id).await;
         }
     }
@@ -2111,16 +2117,10 @@ impl Connectors {
             .ok_or_else(|| format!("event {event} not defined by connector {connector}"))?;
         let wf_id = conns::seeded_workflow_id(&id, &event);
         let wf = conns::seeded_workflow(&conn, &manifest, &event_def);
-        let check = wf_id.clone();
-        let created = self
-            .store(move |s| {
-                if !s.call("dbGetWorkflow", json!([check]))?.is_null() {
-                    return Ok(false);
-                }
-                s.call("dbInsertWorkflow", json!([wf]))?;
-                Ok(true)
-            })
+        let seeded = self
+            .api("workflow.seed", json!({ "workflows": [wf] }))
             .await?;
+        let created = seeded.pointer("/created/0") == Some(&Value::Bool(true));
         if created {
             self.changed();
         }
@@ -2165,16 +2165,16 @@ impl Connectors {
     }
 
     fn detect_repo(&self, params: &Value) -> Value {
-        let (Some(dir), Ok(native)) = (absolute_str(params), self.native()) else {
+        let Some(dir) = params
+            .as_str()
+            .filter(|d| d.starts_with('/') || Path::new(d).is_absolute())
+        else {
             return Value::Null;
         };
-        let git = vorn_git::repo::Git {
-            bin: native.env.git_bin(),
-            env: native.env.get(),
-            ssh: None,
-        };
-        git.github_origin(Path::new(dir))
-            .map_or(Value::Null, |r| json!({ "owner": r.owner, "repo": r.repo }))
+        self.host.github_origin(Path::new(dir)).map_or(
+            Value::Null,
+            |(owner, repo)| json!({ "owner": owner, "repo": repo }),
+        )
     }
 
     async fn http_request(&self, params: &Value) -> Value {
@@ -2185,7 +2185,7 @@ impl Connectors {
                 .unwrap_or("")
                 .to_owned()
         };
-        let mut profile = vorn_connectors::http::Profile::default();
+        let mut profile = crate::http::Profile::default();
         let profile_id = s("profileConnectionId");
         if !profile_id.is_empty() {
             let conn = match self.connection(&profile_id).await {
@@ -2194,14 +2194,12 @@ impl Connectors {
             };
             let filters = conns::filters_of(&conn);
             let secret = self.secret(&profile_id, "secret").await;
-            if let Some(problem) = vorn_connectors::http::profile_error(
-                text(&conn, "connectorId"),
-                &filters,
-                secret.is_some(),
-            ) {
+            if let Some(problem) =
+                crate::http::profile_error(text(&conn, "connectorId"), &filters, secret.is_some())
+            {
                 return failure(problem);
             }
-            profile = vorn_connectors::http::Profile::of(&filters, secret.as_deref());
+            profile = crate::http::Profile::of(&filters, secret.as_deref());
         }
         let headers: Vec<(String, String)> = params
             .get("headers")
@@ -2216,17 +2214,62 @@ impl Connectors {
             .map(str::to_owned);
         let (method, url, http) = (s("method"), s("url"), self.http.clone());
         tokio::task::spawn_blocking(move || {
-            vorn_connectors::http::perform(&http, &profile, &method, &url, headers, body)
+            crate::http::perform(&http, &profile, &method, &url, headers, body)
         })
         .await
         .unwrap_or_else(|e| failure(e.to_string()))
     }
 
+    /// The installed package `id`, unmeasured, as its JSON describes it.
+    pub(crate) fn installed(&self, id: &str) -> Option<Value> {
+        self.packs().inspect_unmeasured(id).ok().map(|p| json!(p))
+    }
+
+    /// What a host the built-in runs on answers to a core method.
+    pub(crate) async fn core(&self, method: &str, args: Value) -> Result<Value, String> {
+        self.api(method, args).await
+    }
+
     /// Stops every child, as vornd stops.
     pub async fn stop(&self) {
-        self.lifecycle
+        self.services
+            .lifecycle
             .stop_where(|k| k.scope.starts_with(CONNECTION_SCOPE))
             .await;
+    }
+}
+
+/// What 0.8's `.vorn.tgz` packs are told.
+pub const PACK_FORMAT_GONE: &str = "Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.";
+
+/// A connector's repository, as a client names it to install from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitSource {
+    pub url: String,
+    pub branch: Option<String>,
+    /// The connector's folder when the repository holds several.
+    pub path: Option<String>,
+}
+
+impl GitSource {
+    /// Reads `{kind: "git", url, branch?, path?}`; any other kind is a 0.8 pack.
+    pub fn parse(raw: &Value) -> Result<GitSource, String> {
+        let text = |k: &str| {
+            raw.get(k)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+        match raw.get("kind").and_then(Value::as_str) {
+            Some("git") => Ok(GitSource {
+                url: text("url").ok_or("A git URL is required")?,
+                branch: text("branch"),
+                path: text("path"),
+            }),
+            Some("file" | "url" | "staged") => Err(PACK_FORMAT_GONE.to_owned()),
+            _ => Err("That is not a connector to install".to_owned()),
+        }
     }
 }
 
@@ -2250,32 +2293,6 @@ struct Spawn {
     browser: Option<Value>,
 }
 
-/// A window request the child sent: `{url, method, headers?, body?, binaryBody?}`.
-fn read_window_request(body: &[u8]) -> Option<Value> {
-    let value: Value = serde_json::from_slice(body).ok()?;
-    let v = value.as_object()?;
-    let url = v.get("url")?.as_str()?;
-    let method = v.get("method")?.as_str()?.to_uppercase();
-    if v.get("body").is_some_and(|b| !b.is_string()) {
-        return None;
-    }
-    let mut out = Map::new();
-    out.insert("url".into(), json!(url));
-    out.insert("method".into(), json!(method));
-    if let Some(headers) = v.get("headers").and_then(Value::as_object) {
-        let kept: BTreeMap<&String, &Value> =
-            headers.iter().filter(|(_, v)| v.is_string()).collect();
-        out.insert("headers".into(), json!(kept));
-    }
-    if let Some(body) = v.get("body") {
-        out.insert("body".into(), body.clone());
-    }
-    if v.get("binaryBody") == Some(&Value::Bool(true)) {
-        out.insert("binaryBody".into(), json!(true));
-    }
-    Some(Value::Object(out))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2297,15 +2314,6 @@ mod tests {
             def["outputSchema"]["properties"]["id"],
             json!({ "type": "string" })
         );
-    }
-
-    #[test]
-    fn reads_a_window_request_and_refuses_what_is_not_one() {
-        let req = read_window_request(br#"{"url":"https://a.example/x","method":"post","headers":{"a":"1","b":2},"body":"x"}"#).unwrap();
-        assert_eq!(req["method"], "POST");
-        assert_eq!(req["headers"], json!({ "a": "1" }));
-        assert!(read_window_request(br#"{"url":"u","method":"GET","body":3}"#).is_none());
-        assert!(read_window_request(b"[]").is_none());
     }
 
     #[test]

@@ -32,6 +32,8 @@ function write(line) {
 }
 
 const answer = (id, result) => write(JSON.stringify({ jsonrpc: '2.0', id, result }))
+const publish = (collection, ops) =>
+  write(JSON.stringify({ jsonrpc: '2.0', method: 'host.publish', params: { collection, ops } }))
 const fail = (id, code, message, data) =>
   write(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message, ...(data && { data }) } }))
 
@@ -101,6 +103,14 @@ function handle({ id, method, params = {} }) {
       else reply()
       return
     }
+    // Started as an extension too, it fills its templates' rows and answers their calls.
+    case 'guest.init':
+      publish('queue', [{ upsert: { id: '1', title: 'One' } }])
+      return answer(id, null)
+    case 'guest.handle':
+      if (params.method !== 'refresh') return fail(id, -32601, 'Method not found')
+      publish('queue', [{ upsert: { id: '2', title: 'Two' } }])
+      return answer(id, { toast: 'Refreshed' })
     case 'extension/footer':
       return answer(id, { items: [{ label: 'Branch', value: 'main' }] })
     case 'extension/handler':

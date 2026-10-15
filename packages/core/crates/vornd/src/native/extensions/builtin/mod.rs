@@ -4,6 +4,7 @@
 //! as a program. Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
+pub mod connectors;
 pub mod widget;
 pub mod worktrees;
 
@@ -71,6 +72,30 @@ pub trait Builtin: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<Value, ExtError>>;
     /// A batch of the events it subscribes to, in order.
     fn on_events<'a>(&'a self, api: &'a Api, batch: Vec<Arc<Event>>) -> BoxFuture<'a, ()>;
+    /// The moment its switch changes, before anything of it starts or stops:
+    /// a call that arrives next already sees it.
+    fn switched(&self, _on: bool) {}
+    /// Once switched off: stops what it runs, keeping what it keeps.
+    fn stop<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+    /// The MCP tools it adds, as `tools/list` lists them, under their own names.
+    fn mcp_tools(&self) -> Vec<Value> {
+        Vec::new()
+    }
+    /// An agent called its tool `name`; `None` when it adds no such tool.
+    fn mcp_call<'a>(&'a self, _name: &'a str, _arguments: Value) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(async { None })
+    }
+}
+
+/// Whether built-in `id` is switched on in `file`, `default` when the person never switched it.
+pub fn switched_on(file: &std::path::Path, id: &str, default: bool) -> bool {
+    std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<BTreeMap<String, bool>>(&b).ok())
+        .and_then(|m| m.get(id).copied())
+        .unwrap_or(default)
 }
 
 struct Entry {
@@ -106,17 +131,20 @@ impl std::fmt::Debug for Builtins {
     }
 }
 
-/// The built-ins this Vorn ships, in the order Settings lists them.
-fn shipped() -> Vec<Arc<dyn Builtin>> {
-    vec![
+/// The built-ins this Vorn ships, in the order Settings lists them, with
+/// those vornd starts before the extension host (Connectors) after them.
+fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
+    let mut all: Vec<Arc<dyn Builtin>> = vec![
         Arc::new(worktrees::Cleanup::default()),
         Arc::new(widget::Widget),
-    ]
+    ];
+    all.extend(started);
+    all
 }
 
 impl Builtins {
-    pub fn new(router: Arc<Router>, file: PathBuf) -> Builtins {
-        Builtins::with(router, file, shipped())
+    pub fn new(router: Arc<Router>, file: PathBuf, started: Vec<Arc<dyn Builtin>>) -> Builtins {
+        Builtins::with(router, file, shipped(started))
     }
 
     pub(crate) fn with(
@@ -127,7 +155,7 @@ impl Builtins {
         let entries = shipped
             .into_iter()
             .filter_map(|builtin| {
-                let manifest = match file::parse(builtin.manifest()) {
+                let manifest = match file::parse_builtin(builtin.manifest()) {
                     Ok(m) => Arc::new(m),
                     Err(err) => {
                         warn!("[extensions] a built-in's manifest does not read: {err}");
@@ -215,6 +243,8 @@ impl Builtins {
             task.abort();
         }
         self.router.drop_rows(e.id());
+        let (builtin, api) = (Arc::clone(&e.builtin), Arc::clone(&e.api));
+        tokio::spawn(async move { builtin.stop(&api).await });
     }
 
     /// Stops every built-in, for vornd's shutdown.
@@ -239,6 +269,9 @@ impl Builtins {
         };
         if let Err(err) = std::fs::write(&self.file, saved) {
             warn!("[extensions] could not keep the built-ins' switches: {err}");
+        }
+        if was != on {
+            e.builtin.switched(on);
         }
         match (was, on) {
             (false, true) => self.run(e),
@@ -280,6 +313,25 @@ impl Builtins {
             }
         }
         out
+    }
+
+    /// The MCP tools the built-ins that are on add.
+    pub fn mcp_tools(&self) -> Vec<Value> {
+        self.entries
+            .iter()
+            .filter(|e| self.is_on(e.id()))
+            .flat_map(|e| e.builtin.mcp_tools())
+            .collect()
+    }
+
+    /// An agent called tool `name`: the answer of the built-in that is on and adds it.
+    pub async fn mcp_call(&self, name: &str, arguments: Value) -> Option<Value> {
+        for e in self.entries.iter().filter(|e| self.is_on(e.id())) {
+            if let Some(answered) = e.builtin.mcp_call(name, arguments.clone()).await {
+                return Some(answered);
+            }
+        }
+        None
     }
 
     /// A call to built-in `id`; `None` when no built-in is called that.
