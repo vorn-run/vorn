@@ -29,6 +29,7 @@ import {
 import {
   normalizeRun,
   outputWhole,
+  withWorkflowsAsOrigin,
   withoutHeadlessExits,
   withoutHookLinks
 } from './helpers/sessions-parity'
@@ -228,8 +229,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         projectName: agent,
         projectPath: path.join(work, agent),
         initialPrompt: `print the ${agent} parity\nline two`,
-        workflowId: 'wf-1',
-        workflowName: 'Parity'
+        origin: { extension: 'vorn.workflows', id: 'wf-1', label: 'Parity' }
       })
     }
     const stopped = await created('headless to stop', 'headless:create', {
@@ -382,6 +382,6 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
       'agentsExits'
     ]
     const seen = Object.fromEntries(parts.map((part) => [part, run[part]]))
-    expect(seen).toEqual(recorded('terminals', seen))
+    expect(seen).toEqual(withWorkflowsAsOrigin(recorded('terminals', seen)))
   })
 })

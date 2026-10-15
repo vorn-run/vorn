@@ -119,6 +119,33 @@ function isAgentStatus(s: string): boolean {
   return s === 'running' || s === 'waiting' || s === 'idle' || s === 'error'
 }
 
+/**
+ * The one accepted difference in a session record: what started it is a
+ * generic origin, so a recorded record's `workflowId` and `workflowName` read
+ * as the origin the workflow gives its sessions now.
+ */
+export function withWorkflowsAsOrigin<T>(recorded: T): T {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk)
+    if (v === null || typeof v !== 'object') return v
+    const { workflowId, workflowName, ...rest } = v as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const [key, field] of Object.entries(rest)) out[key] = walk(field)
+    if ('agentType' in rest && typeof workflowId === 'string') {
+      out.origin = {
+        extension: 'vorn.workflows',
+        id: workflowId,
+        label: workflowName ?? workflowId
+      }
+    } else if (workflowId !== undefined || workflowName !== undefined) {
+      if (workflowId !== undefined) out.workflowId = workflowId
+      if (workflowName !== undefined) out.workflowName = workflowName
+    }
+    return out
+  }
+  return walk(recorded) as T
+}
+
 /** Every record in `answers` without the hook session it is linked to. */
 export function withoutHookLinks<T>(answers: T): T {
   const walk = (v: unknown): unknown => {

@@ -17,7 +17,9 @@ vi.mock('../packages/mcp/src/rpc-client', () => ({
     const id = (params as { id?: string } | undefined)?.id
     switch (method) {
       case 'config:load':
-        return { version: 1, revision: 3, workflows } as unknown as AppConfig
+        return { version: 1, revision: 3 } as unknown as AppConfig
+      case 'workflow:list':
+        return workflows
       case 'workflow:create':
         return (params as { workflow: WorkflowDefinition }).workflow
       case 'workflow:update':
@@ -58,7 +60,7 @@ const stored: WorkflowDefinition = {
   enabled: true
 }
 
-const writes = () => calls.filter((c) => c.method !== 'config:load')
+const writes = () => calls.filter((c) => c.method !== 'config:load' && c.method !== 'workflow:list')
 
 beforeEach(() => {
   calls.length = 0
