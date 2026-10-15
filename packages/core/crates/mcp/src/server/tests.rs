@@ -149,3 +149,34 @@ fn a_result_is_ordered_as_the_sdk_checks_it() {
         .collect();
     assert_eq!(keys, ["_meta", "content", "isError", "extra"]);
 }
+
+#[test]
+fn an_extensions_tools_are_listed_after_vorns_and_called_through_vornd() {
+    let rpc = FakeRpc::new(sample_config());
+    let tool = json!({ "name": "test_x__check", "description": "Checks", "inputSchema": { "type": "object" } });
+    rpc.answer("extension:mcpTools", json!([tool]));
+    rpc.answer(
+        "extension:mcpCall",
+        json!({ "isError": false, "content": [{ "type": "text", "text": "ok" }] }),
+    );
+    let server = Server::new("1.2.3");
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let listed = block_on(server.handle(&rpc, &caller(), &list)).unwrap();
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), crate::tool_count() + 1);
+    assert_eq!(tools.last().unwrap(), &tool);
+
+    let call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "test_x__check", "arguments": { "n": 1 } }
+    });
+    let answer = block_on(server.handle(&rpc, &caller(), &call)).unwrap();
+    assert_eq!(
+        answer["result"],
+        json!({ "content": [{ "type": "text", "text": "ok" }], "isError": false })
+    );
+    assert_eq!(
+        rpc.last("extension:mcpCall"),
+        Some(json!({ "name": "test_x__check", "arguments": { "n": 1 } }))
+    );
+}

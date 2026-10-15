@@ -76,6 +76,29 @@ pub struct Manifest {
     /// The recorded checks `vorn ext pack` runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checks: Option<Vec<String>>,
+    /// Its tables in Vorn's database, under the `storage` permission.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<Storage>,
+    /// Tools it adds to Vorn's MCP server, answered by its service.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mcp: Vec<McpTool>,
+}
+
+/// Where a package keeps the migrations that make its tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Storage {
+    /// A folder of `.sql` files, relative to the package, run once each in name order.
+    pub migrations: String,
+}
+
+/// A tool an extension adds to Vorn's MCP server: a call is `guest.handle("mcp.<name>")`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct McpTool {
+    pub name: String,
+    pub description: String,
+    /// A JSON Schema file for its arguments, relative to the package; any object without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
 }
 
 impl Manifest {
@@ -717,6 +740,8 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         runs: Vec::new(),
         credential: None,
         checks: None,
+        storage: None,
+        mcp: Vec::new(),
     })
 }
 

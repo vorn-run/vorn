@@ -6558,6 +6558,7 @@ dependencies = [
 name = "vorn-extensions"
 version = "0.0.0"
 dependencies = [
+ "criterion",
  "data-encoding",
  "flate2",
  "getrandom 0.4.3",
@@ -6883,6 +6884,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "rmcp",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

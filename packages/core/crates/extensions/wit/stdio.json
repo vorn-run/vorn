@@ -18,6 +18,11 @@
     { "method": "host.publish", "answers": "host", "params": [["collection", "string"], ["ops", "list<row-op>"]], "result": null, "error": null },
     { "method": "host.log", "answers": "host", "params": [["level", "level"], ["message", "string"]], "result": null, "error": null },
     { "method": "net.fetch", "answers": "host", "params": [["req", "request"], ["connection", "option<string>"]], "result": "response", "error": "ext-error" },
+    { "method": "storage.prefix", "answers": "host", "params": [], "result": "string", "error": "ext-error" },
+    { "method": "storage.query", "answers": "host", "params": [["sql", "string"], ["params", "list<json>"]], "result": "list<json>", "error": "ext-error" },
+    { "method": "storage.exec", "answers": "host", "params": [["sql", "string"], ["params", "list<json>"]], "result": "u64", "error": "ext-error" },
+    { "method": "storage.get", "answers": "host", "params": [["key", "string"]], "result": "option<json>", "error": "ext-error" },
+    { "method": "storage.set", "answers": "host", "params": [["key", "string"], ["value", "json"]], "result": "_", "error": "ext-error" },
     { "method": "guest.init", "answers": "guest", "params": [["ctx", "init-ctx"]], "result": "_", "error": "ext-error" },
     { "method": "guest.handle", "answers": "guest", "params": [["method", "string"], ["args", "json"], ["ctx", "call-ctx"]], "result": "json", "error": "ext-error" },
     { "method": "guest.on-event", "answers": "guest", "params": [["batch", "list<event>"]], "result": null, "error": null }

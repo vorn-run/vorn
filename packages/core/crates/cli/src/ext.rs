@@ -70,7 +70,16 @@ pub fn render_sheet(sheet: &Value) -> String {
             (text(c, "when").to_owned(), argv)
         })
         .collect();
-    out.push_str("\nIt runs\n");
+    let mark = |part: &str| {
+        if strings(sheet, "enforced").iter().any(|p| p == part) {
+            " (enforced by Vorn)"
+        } else if strings(sheet, "declared").iter().any(|p| p == part) {
+            " (declared, not enforced)"
+        } else {
+            ""
+        }
+    };
+    out.push_str(&format!("\nIt runs{}\n", mark("commands")));
     if commands.is_empty() {
         out.push_str("  nothing\n");
     }
@@ -84,7 +93,7 @@ pub fn render_sheet(sheet: &Value) -> String {
         ("It adds", "adds"),
     ] {
         let items = strings(sheet, key);
-        out.push_str(&format!("\n{title}\n"));
+        out.push_str(&format!("\n{title}{}\n", mark(key)));
         if items.is_empty() {
             out.push_str("  nothing\n");
         }
@@ -93,7 +102,7 @@ pub fn render_sheet(sheet: &Value) -> String {
         }
     }
     if let Some(c) = sheet.get("credential").and_then(Value::as_str) {
-        out.push_str(&format!("\n{c}\n"));
+        out.push_str(&format!("\n{c}{}\n", mark("credential")));
     }
     if let Some(v) = sheet.get("replaces").and_then(Value::as_str) {
         out.push_str(&format!("\nIt replaces version {v}.\n"));
@@ -310,6 +319,7 @@ mod tests {
             "source": { "git": "https://example.com/y.git", "rev": "0123456789abcdef" },
             "commands": [{ "when": "build", "argv": ["npm", "ci"] }, { "when": "action go", "argv": ["sh", "go.sh"] }],
             "hosts": ["api.example.com"], "methods": ["sessions.read (sessions.list)"], "adds": [],
+            "enforced": ["hosts", "methods", "credential"], "declared": ["commands", "adds"],
             "runsAsYou": "Y runs as you.", "confirm": "x.y"
         });
         let text = render_sheet(&sheet);
@@ -318,8 +328,10 @@ mod tests {
             text.contains("  build      npm ci\n  action go  sh go.sh\n"),
             "{text}"
         );
-        assert!(text.contains("It reaches, through Vorn\n  api.example.com\n"));
-        assert!(text.contains("It adds\n  nothing\n"));
+        assert!(text.contains("It runs (declared, not enforced)\n"), "{text}");
+        assert!(text.contains("It reaches, through Vorn (enforced by Vorn)\n  api.example.com\n"));
+        assert!(text.contains("It asks Vorn for (enforced by Vorn)\n  sessions.read (sessions.list)\n"));
+        assert!(text.contains("It adds (declared, not enforced)\n  nothing\n"));
         assert!(text.ends_with("\nY runs as you.\n"));
     }
 }

@@ -20,7 +20,7 @@ use crate::api::types::{CallCtx, Event, InitCtx, Level, RowOp};
 use crate::api::{params, ExtError, Method, Side};
 use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
 use crate::events::{self, Bus, Queue, Tally};
-use crate::gate::{self, Caller, World};
+use crate::gate::{self, Caller, StorageCall, World};
 use crate::lifecycle::{Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
@@ -523,6 +523,38 @@ async fn dispatch(
 
 type Reply = Result<Value, (i64, String, Value)>;
 
+/// A `storage.*` request's params, read.
+fn storage_call(method: Method, params: Value) -> Result<StorageCall, serde_json::Error> {
+    Ok(match method {
+        Method::StorageQuery => {
+            let p: params::StorageQuery = serde_json::from_value(params)?;
+            StorageCall::Query {
+                sql: p.sql,
+                params: p.params,
+            }
+        }
+        Method::StorageExec => {
+            let p: params::StorageExec = serde_json::from_value(params)?;
+            StorageCall::Exec {
+                sql: p.sql,
+                params: p.params,
+            }
+        }
+        Method::StorageGet => {
+            let p: params::StorageGet = serde_json::from_value(params)?;
+            StorageCall::Get { key: p.key }
+        }
+        Method::StorageSet => {
+            let p: params::StorageSet = serde_json::from_value(params)?;
+            StorageCall::Set {
+                key: p.key,
+                value: p.value,
+            }
+        }
+        _ => StorageCall::Prefix,
+    })
+}
+
 fn invalid(method: Method, err: &serde_json::Error) -> Option<Reply> {
     Some(Err((
         INVALID_PARAMS,
@@ -603,6 +635,26 @@ async fn answer(
             let result = gate::fetch(&router.world, manifest, caller, p.req, p.connection)
                 .await
                 .map(|r| json!(r));
+            from_ext(result)
+        }
+        Method::StoragePrefix
+        | Method::StorageQuery
+        | Method::StorageExec
+        | Method::StorageGet
+        | Method::StorageSet => {
+            let call = match storage_call(method, params) {
+                Ok(call) => call,
+                Err(e) => return invalid(method, &e),
+            };
+            let result = match gate::admit_storage(manifest) {
+                Ok(()) => {
+                    let migrations = router
+                        .program(&caller.extension)
+                        .and_then(|p| p.migrations());
+                    router.world.storage(caller, migrations, call).await
+                }
+                Err(e) => Err(e),
+            };
             from_ext(result)
         }
         Method::GuestInit | Method::GuestHandle | Method::GuestOnEvent => None,

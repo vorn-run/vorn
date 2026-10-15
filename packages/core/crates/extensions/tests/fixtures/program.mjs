@@ -7,6 +7,8 @@ const send = (message) =>
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 const waiting = new Map()
 const events = []
+// Every line Vorn sent, for a test that checks what the program was never given.
+const received = []
 let inited = null
 let relayed = 0
 
@@ -22,6 +24,10 @@ function handle(id, method, args, ctx) {
       return process.exit(3)
     case 'events':
       return answer(events)
+    case 'record':
+      return answer({ received, env: process.env })
+    case 'mcp.echo':
+      return answer({ echoed: args })
     case 'relay': {
       const notification = args.notification === true
       if (notification) {
@@ -45,6 +51,7 @@ function handle(id, method, args, ctx) {
 }
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  received.push(line)
   const message = JSON.parse(line)
   if (message.method === undefined) {
     const reply = waiting.get(message.id)

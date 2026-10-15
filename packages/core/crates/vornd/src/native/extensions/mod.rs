@@ -13,6 +13,7 @@ pub mod routes;
 pub mod world;
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -57,7 +58,12 @@ pub const METHODS: &[&str] = &[
     "extension:call",
     "extension:rows",
     "extension:running",
+    "extension:mcpTools",
+    "extension:mcpCall",
 ];
+
+/// The longest tool name MCP clients take.
+const MCP_NAME_MAX: usize = 64;
 
 /// Core method groups, which no extension id may take: `<id>:<action>` routes to an extension.
 pub const RESERVED: &[&str] = &[
@@ -178,6 +184,14 @@ pub trait Around: Send + Sync + 'static {
     fn pack_removed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
+}
+
+/// One extension's MCP tool, as listed and as routed.
+struct McpListed {
+    name: String,
+    extension: String,
+    tool: String,
+    listed: Value,
 }
 
 #[derive(Default)]
@@ -369,6 +383,11 @@ impl Extensions {
                     .await
                     .map_err(|e| e.message)
             }
+            "extension:mcpTools" => self
+                .listed_tools()
+                .await
+                .map(|tools| Value::Array(tools.into_iter().map(|t| t.listed).collect())),
+            "extension:mcpCall" => self.mcp_call(params).await,
             "extension:rows" => Ok(Value::Array(
                 self.router
                     .rows(text(params, "id"), text(params, "collection")),
@@ -415,6 +434,75 @@ impl Extensions {
             _ => return Answer::Unanswered,
         };
         answered.map_or_else(Answer::Error, Answer::Result)
+    }
+
+    /// The MCP tools installed extensions add, each named `<id>__<tool>`
+    /// with the id's `.` and `-` as `_`; a name another took first, or one
+    /// too long for MCP, is left out with a warning.
+    fn mcp_tools(&self) -> Vec<McpListed> {
+        let mut out: Vec<McpListed> = Vec::new();
+        for id in self.router.store().ids() {
+            let Some(pack) = self.router.program(&id) else {
+                continue;
+            };
+            for tool in &pack.manifest.mcp {
+                let name = format!("{}__{}", id.replace(['.', '-'], "_"), tool.name);
+                if name.len() > MCP_NAME_MAX || out.iter().any(|t| t.name == name) {
+                    warn!("[extensions] {id} offers the MCP tool {name}, which is too long or taken; it is not listed");
+                    continue;
+                }
+                let schema = tool
+                    .input
+                    .as_ref()
+                    .and_then(|p| fs::read_to_string(pack.path.join(p)).ok())
+                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .filter(Value::is_object)
+                    .unwrap_or_else(|| json!({ "type": "object" }));
+                out.push(McpListed {
+                    listed: json!({
+                        "name": name,
+                        "description": format!("{} (from the extension {})", tool.description, pack.name()),
+                        "inputSchema": schema,
+                    }),
+                    name,
+                    extension: id.clone(),
+                    tool: tool.name.clone(),
+                });
+            }
+        }
+        out
+    }
+
+    /// [`Extensions::mcp_tools`], off the runtime: it reads the packages' schema files.
+    async fn listed_tools(&self) -> Result<Vec<McpListed>, String> {
+        let me = self.me.upgrade().ok_or("vornd is stopping")?;
+        blocking(move || Ok(me.mcp_tools())).await
+    }
+
+    /// An agent called an extension's MCP tool: `guest.handle("mcp.<tool>")` on its service.
+    async fn mcp_call(&self, params: &Value) -> Result<Value, String> {
+        let name = text(params, "name");
+        let found = self.listed_tools().await?.into_iter().find(|t| t.name == name);
+        let Some(tool) = found else {
+            return Err(format!("No extension offers the MCP tool {name}"));
+        };
+        let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        let ctx = CallCtx {
+            caller: "mcp".to_owned(),
+            project: None,
+        };
+        let answer = self
+            .router
+            .call(&tool.extension, &format!("mcp.{}", tool.tool), args, ctx)
+            .await;
+        Ok(match answer {
+            Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
+            Ok(other) => {
+                let text = serde_json::to_string_pretty(&other).unwrap_or_default();
+                json!({ "content": [{ "type": "text", "text": text }] })
+            }
+            Err(err) => json!({ "content": [{ "type": "text", "text": err.message }], "isError": true }),
+        })
     }
 
     /// Every installed package, each saying whether a program of it runs.
@@ -1106,11 +1194,25 @@ impl Around for Wired {
     }
 
     fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
-        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let native = self.native.upgrade();
+        let connectors = native.as_ref().and_then(|n| n.connectors().cloned());
+        let db = native.and_then(|n| n.database().map(Path::to_path_buf));
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
                 connectors.package_removed(&id).await;
+            }
+            let Some(db) = db else { return };
+            let owned = id.clone();
+            let dropped = tokio::task::spawn_blocking(move || {
+                vorn_store::extension::ExtensionTables::forget(&db, &owned)
+            })
+            .await;
+            match dropped {
+                Ok(Ok(n)) if n > 0 => info!("[extensions] dropped {n} tables of {id}"),
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => warn!("[extensions] could not drop the tables of {id}: {err}"),
+                Err(err) => warn!("[extensions] could not drop the tables of {id}: {err}"),
             }
         })
     }

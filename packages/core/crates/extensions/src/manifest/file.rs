@@ -16,7 +16,8 @@ use toml::de::{DeTable, DeValue};
 use toml::Spanned;
 
 use super::{
-    Credential, Declares, Manifest, ManifestError, Permission, Run, Service, API, CONNECTOR_API,
+    Credential, Declares, Manifest, ManifestError, McpTool, Permission, Run, Service, Storage, API,
+    CONNECTOR_API,
 };
 use crate::connector::SUPPORTED_PROTOCOLS;
 
@@ -115,6 +116,24 @@ struct Raw {
     activates: Option<RawActivation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     contributes: Option<RawContributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    storage: Option<RawStorage>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    mcp: BTreeMap<String, RawMcp>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawStorage {
+    migrations: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawMcp {
+    description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -409,6 +428,16 @@ fn is_id(id: &str) -> bool {
         && !id.contains("..")
 }
 
+/// A path inside the package: relative, and never climbing out of it.
+fn is_relative_path(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    !path.is_empty()
+        && p.is_relative()
+        && p
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
 fn is_word(id: &str) -> bool {
     let b = id.as_bytes();
     !b.is_empty()
@@ -530,6 +559,38 @@ impl Raw {
                         ),
                     ));
                 }
+            }
+        }
+        if let Some(storage) = &self.storage {
+            if !self.declares.uses.iter().any(|u| u == "storage") {
+                return Err(at(
+                    "storage",
+                    "keeps tables, so declares.uses must name storage".into(),
+                ));
+            }
+            if !is_relative_path(&storage.migrations) {
+                return Err(at(
+                    "storage.migrations",
+                    "names a folder inside the package".into(),
+                ));
+            }
+        }
+        for (name, tool) in &self.mcp {
+            let field = format!("mcp.{name}");
+            if !is_word(name) || name.len() > 40 {
+                return Err(at(
+                    &field,
+                    "a tool name starts with a letter and holds up to 40 letters, digits, `-` and `_`".into(),
+                ));
+            }
+            if self.service.is_none() {
+                return Err(at(&field, "is answered by the service, and there is none".into()));
+            }
+            if tool.description.trim().is_empty() {
+                return Err(at(&format!("{field}.description"), "is empty; an agent reads it to pick the tool".into()));
+            }
+            if tool.input.as_deref().is_some_and(|p| !is_relative_path(p)) {
+                return Err(at(&format!("{field}.input"), "names a file inside the package".into()));
             }
         }
         for (id, run) in &self.actions {
@@ -722,6 +783,18 @@ impl Raw {
             field: c.field,
             header: c.header,
         });
+        manifest.storage = self.storage.map(|s| Storage {
+            migrations: s.migrations,
+        });
+        manifest.mcp = self
+            .mcp
+            .into_iter()
+            .map(|(name, t)| McpTool {
+                name,
+                description: t.description,
+                input: t.input,
+            })
+            .collect();
         Ok(manifest)
     }
 }
@@ -1252,6 +1325,22 @@ impl From<&Manifest> for Raw {
             connector,
             activates: m.activates.as_ref().map(when),
             contributes,
+            storage: m.storage.as_ref().map(|s| RawStorage {
+                migrations: s.migrations.clone(),
+            }),
+            mcp: m
+                .mcp
+                .iter()
+                .map(|t| {
+                    (
+                        t.name.clone(),
+                        RawMcp {
+                            description: t.description.clone(),
+                            input: t.input.clone(),
+                        },
+                    )
+                })
+                .collect(),
         }
     }
 }

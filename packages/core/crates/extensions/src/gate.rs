@@ -5,6 +5,7 @@
 //! vault) is a [`World`] vornd provides, so the rules are tested without it.
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -35,13 +36,69 @@ pub trait World: Send + Sync + 'static {
     fn secret(&self, caller: &Caller, connection: &str, field: &str) -> Answer<Option<String>>;
     /// Rows changed in `collection`; clients drawing it are told.
     fn published(&self, _caller: &Caller, _collection: &str) {}
+    /// A storage call the gate already allowed, on the caller's own tables,
+    /// after the package's `migrations` that have not run yet.
+    fn storage(
+        &self,
+        _caller: &Caller,
+        _migrations: Option<PathBuf>,
+        _call: StorageCall,
+    ) -> Answer<Value> {
+        Box::pin(async { Err(ExtError::new("unsupported", "this Vorn keeps no extension tables")) })
+    }
 }
 
-/// The core methods a program may call, and the permission each needs.
+/// One `storage.*` call, read.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageCall {
+    Prefix,
+    Query { sql: String, params: Vec<Value> },
+    Exec { sql: String, params: Vec<Value> },
+    Get { key: String },
+    Set { key: String, value: Value },
+}
+
+/// `storage.*`: refused unless the manifest declares `storage`.
+pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
+    let declared = manifest
+        .permissions
+        .as_deref()
+        .unwrap_or_default()
+        .contains(&Permission::Storage);
+    if declared {
+        return Ok(());
+    }
+    Err(ExtError::new(
+        "denied",
+        format!("{} does not declare storage, which storage.* needs", manifest.id),
+    ))
+}
+
+/// The core methods a program may call, and the permission each needs. A
+/// permission none of these needs (`network.tcp`, `auth.borrow`,
+/// `http.routes`, `browser.session`, `process.run`) is declared and shown,
+/// not enforced: `storage` is held at `storage.*`, the network at `net.fetch`.
 pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
+    ("sessions.get", Permission::SessionsRead),
+    ("sessions.launch", Permission::SessionsLaunch),
+    ("terminal.read", Permission::TerminalRead),
+    ("terminal.send", Permission::TerminalSend),
+    ("terminal.selection", Permission::TerminalSelection),
+    ("card.rename", Permission::CardRename),
+    ("agent.usage", Permission::AgentUsage),
     ("git.status", Permission::GitRead),
+    ("git.diff", Permission::GitRead),
+    ("git.commit", Permission::GitWrite),
+    ("files.read", Permission::FilesRead),
+    ("files.write", Permission::FilesWrite),
+    ("secrets.get", Permission::SecretsRead),
 ];
+
+/// Whether the bridge holds a program to `permission`: some method or call needs it.
+pub fn enforced(permission: Permission) -> bool {
+    permission == Permission::Storage || CORE_METHODS.iter().any(|(_, p)| *p == permission)
+}
 
 /// Headers a program may not set: credentials come from vornd alone.
 const WITHHELD: [&str; 4] = [
@@ -315,6 +372,21 @@ header = "Authorization: Bearer {token}"
             admit_call(&m, "fs.read").unwrap_err().code,
             "unknown-method"
         );
+    }
+
+    #[test]
+    fn holds_storage_to_the_storage_permission() {
+        let err = admit_storage(&manifest()).unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.message.as_str()),
+            ("denied", "x does not declare storage, which storage.* needs")
+        );
+        let mut m = manifest();
+        m.permissions = Some(vec![Permission::Storage]);
+        assert_eq!(admit_storage(&m), Ok(()));
+        assert!(enforced(Permission::Storage));
+        assert!(enforced(Permission::GitWrite));
+        assert!(!enforced(Permission::ProcessRun));
     }
 
     #[test]

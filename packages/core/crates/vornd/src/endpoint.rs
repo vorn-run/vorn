@@ -247,6 +247,7 @@ impl Daemon {
         let hosts = Hosts::new(Arc::clone(&lifecycle), store.clone(), settings);
         let world = Arc::new(crate::native::extensions::world::Wired {
             native: Arc::downgrade(native),
+            migrated: Arc::default(),
         });
         let router = Router::new(
             store.clone(),

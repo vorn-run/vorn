@@ -8,7 +8,8 @@ publish = false
 description = "Vorn's store on rusqlite: the same database file, schema and migrations as the server's database.ts"
 
 [dependencies]
-rusqlite = { version = "0.37", features = ["bundled"] }
+# `hooks` for the authorizer that holds an extension to its own tables.
+rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 vorn-protocol = { path = "../protocol" }
