@@ -201,7 +201,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: vitest-blob-${{ matrix.shard }}
-          path: .vitest-reports/
+          path: .vitest/blob/
           include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
@@ -243,7 +243,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: vitest-blob-*
-          path: .vitest-reports
+          path: .vitest/blob
           merge-multiple: true
 
       # Fails, listing the failed tests, when any part had a failure.
