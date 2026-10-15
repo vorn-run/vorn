@@ -203,3 +203,33 @@ async fn a_subscribed_extension_hears_each_session_mark_and_agent_event_once_in_
     assert_eq!(seen[5]["data"]["conversationId"], "conversation-1");
     assert_eq!(seen[0]["data"]["kind"], "terminal");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_extensions_program_stops_with_vornd() {
+    if !node() {
+        return;
+    }
+    let v = Vornd::start();
+    let _reap = Reap(v.holder());
+    let mut c = Client {
+        ws: common::connect(v.port, CREDENTIAL).await,
+        next_id: 0,
+    };
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("vorn-extension.toml"), MANIFEST).unwrap();
+    // A program that stays up after its stdin closes: only vornd stopping it ends it.
+    let lingering = format!("{PROGRAM}\nsetInterval(() => {{}}, 1000)\n");
+    std::fs::write(folder.path().join("program.mjs"), lingering).unwrap();
+    c.call_ok("extension:link", json!({ "path": folder.path() }), &v)
+        .await;
+    let echo = c.call_ok("test.events:echo", json!({}), &v).await;
+    let pid = u32::try_from(echo["pid"].as_u64().expect("a pid")).unwrap();
+    assert!(vorn_sessiond::launch::alive(pid));
+    drop(c);
+    // Dropping it closes vornd's stdin and waits for it to exit.
+    drop(v);
+    assert!(
+        !vorn_sessiond::launch::alive(pid),
+        "the extension's program outlived vornd"
+    );
+}

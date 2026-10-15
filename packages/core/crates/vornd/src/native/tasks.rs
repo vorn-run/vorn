@@ -249,3 +249,44 @@ pub fn log_event(native: &Native, session: &str, kind: &str, metadata: Option<Va
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn task(id: &str, session: &str, status: &str) -> Value {
+        json!({
+            "id": id, "projectName": "p", "title": id, "description": "", "status": status, "order": 0,
+            "assignedSessionId": session, "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z",
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_conversation_an_agent_starts_is_kept_on_its_terminals_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vorn.db");
+        let mut store = super::super::work::test_store(&db);
+        for t in [task("doing", "t1", "in_progress"), task("done", "t1", "done")] {
+            store.call("dbInsertTask", json!([t])).unwrap();
+        }
+        let native = Native::new();
+        native.set_database(db);
+        follow(&native);
+        let reached = native.events().emit(AGENT_CONVERSATION, || {
+            json!({ "sessionId": "t1", "conversationId": "c1" })
+        });
+        assert_eq!(reached, 1);
+        let mut read = |id: &str| store.call("dbGetTask", json!([id])).unwrap();
+        // The follower writes on its own task: wait for the row, with a safety net for a loaded machine.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while read("doing")["agentSessionId"].is_null() {
+            assert!(std::time::Instant::now() < deadline, "never kept");
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(read("doing")["agentSessionId"], "c1");
+        assert!(read("done")["agentSessionId"].is_null());
+    }
+}

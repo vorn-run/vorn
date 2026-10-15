@@ -159,6 +159,17 @@ impl Daemon {
         self.native.stop_hooks();
     }
 
+    /// Stops every extension program, pane terminal and connector child as vornd stops,
+    /// so none outlives it.
+    pub async fn stop_extensions(&self) {
+        if let Some(extensions) = self.native.extensions() {
+            extensions.stop().await;
+        }
+        if let Some(connectors) = self.native.connectors() {
+            connectors.stop().await;
+        }
+    }
+
     /// Tells the status widget's list as the sessions change ([`crate::native::widget`]).
     pub fn start_widget(&self) {
         self.native.start_widget();

@@ -462,6 +462,7 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     serving.request_stop();
     serving.withdraw();
     stopping.stop_hooks();
+    stopping.stop_extensions().await;
     // The endpoints go first, so a kill during the flush leaves none.
     #[cfg(unix)]
     if let Some(endpoint) = &grid {

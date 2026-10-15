@@ -521,6 +521,56 @@ mod tests {
         assert_eq!(told(&mut rx)[0]["method"], json!("session:created"));
     }
 
+    #[tokio::test]
+    async fn tells_subscribers_a_terminal_started_moved_and_ended_once_each() {
+        let fed = fed();
+        let mut events = fed.native.events().subscribe(
+            "test",
+            &[SESSION_CREATED, SESSION_STATUS, SESSION_EXITED, SESSION_MARK],
+        );
+        let mut t = Told::default();
+        let record = |status: &str| {
+            json!({ "id": "t", "status": status, "projectPath": "/p", "agentType": "claude" })
+        };
+        let upsert = |status: &str| json!({ "op": "upsert", "kind": "terminal", "record": record(status) });
+        t.note(&fed.native, &fed.registry, &upsert("running"));
+        t.note(&fed.native, &fed.registry, &upsert("running"));
+        t.note(&fed.native, &fed.registry, &upsert("waiting"));
+        let mut exited = upsert("idle");
+        exited["exited"] = json!(2);
+        t.note(&fed.native, &fed.registry, &exited);
+        t.note(
+            &fed.native,
+            &fed.registry,
+            &json!({ "op": "remove", "kind": "terminal", "id": "t" }),
+        );
+        let mark = Effect::Command(vorn_engine::Mark::Prompt);
+        effected(&fed.native, &fed.registry, &fx("sh", 3), mark);
+        let mut seen = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            seen.push((e.name.clone(), e.data.clone()));
+        }
+        let names: Vec<&str> = seen.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                SESSION_CREATED,
+                SESSION_STATUS,
+                SESSION_STATUS,
+                SESSION_STATUS,
+                SESSION_EXITED,
+                SESSION_MARK
+            ]
+        );
+        assert_eq!(
+            seen[0].1,
+            json!({ "sessionId": "t", "kind": "terminal", "projectPath": "/p", "worktreePath": "/p", "agent": "claude" })
+        );
+        assert_eq!(seen[4].1["exitCode"], 2);
+        assert_eq!(seen[5].1["sessionId"], "sh");
+        assert_eq!(seen[5].1["phase"], "prompt");
+    }
+
     #[test]
     fn an_ended_program_idles_its_terminal_and_offers_its_worktree_once() {
         let fed = fed();
