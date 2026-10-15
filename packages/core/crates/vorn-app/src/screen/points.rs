@@ -7,8 +7,8 @@ use vorn_view::Row;
 use super::Screen;
 use crate::act::{Act, Acts};
 use crate::points::{kind, Holder, Point, PointAct, Points};
-use crate::ui::{div, text, widgets, Action, El, Id, Rgba, Role, Ui};
 use crate::ui::theme::color as k;
+use crate::ui::{div, text, widgets, Action, El, Id, Rgba, Role, Ui};
 
 /// A template control's id: point `key`, drawn for `scope`, at node `slot`, for `row`.
 pub fn control_id(key: &str, scope: Option<&str>, slot: u64, row: Option<&str>) -> Id {
@@ -46,7 +46,8 @@ impl Bind for Binder<'_> {
             self.acts.bind(id, self.act(press));
         } else if self.asking == Some(id.0) {
             self.acts.bind(id, Act::Point(PointAct::Ask(None)));
-            self.acts.bind(id.child("no"), Act::Point(PointAct::Ask(None)));
+            self.acts
+                .bind(id.child("no"), Act::Point(PointAct::Ask(None)));
             self.acts.bind(id.child("ok"), self.act(press));
         } else {
             self.acts.bind(id, Act::Point(PointAct::Ask(Some(id.0))));
@@ -213,7 +214,12 @@ pub(super) fn menu_items<'a>(
                 key: p.key(),
                 args: args.to_owned(),
             });
-            (act, p.icon.as_deref().unwrap_or("puzzle"), p.title.as_str(), 2.0)
+            (
+                act,
+                p.icon.as_deref().unwrap_or("puzzle"),
+                p.title.as_str(),
+                2.0,
+            )
         })
         .collect()
 }
@@ -222,41 +228,40 @@ pub(super) fn menu_items<'a>(
 pub(super) fn launchers(s: &Screen<'_>) -> Option<El> {
     let project = s.st.composer.project.clone().unwrap_or_default();
     let args = serde_json::json!({ "project": project }).to_string();
-    let all: Vec<El> = s
-        .st
-        .points
-        .at(kind::LAUNCHERS)
-        .map(|p| {
-            let id = s.acts.on(
-                "ext-launcher",
-                Act::Point(PointAct::Choose {
-                    key: p.key(),
-                    args: args.clone(),
-                }),
-            );
-            let h = s.ui.hover(id);
-            let ink = k::GRAY_400.mix(k::WHITE, h);
-            div()
-                .id(id)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(8.0)
-                .px(8.0)
-                .py(4.0)
-                .rounded(4.0)
-                .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), h))
-                .ring(4.0)
-                .role(Role::Button, p.title.as_str())
-                .child(vorn_components::lucide(
-                    p.icon.as_deref().unwrap_or("puzzle"),
-                    14.0,
-                    1.5,
-                    ink,
-                ))
-                .child(text(&p.title, 12.0, ink).line_height(16.0).silent())
-        })
-        .collect();
+    let all: Vec<El> =
+        s.st.points
+            .at(kind::LAUNCHERS)
+            .map(|p| {
+                let id = s.acts.on(
+                    "ext-launcher",
+                    Act::Point(PointAct::Choose {
+                        key: p.key(),
+                        args: args.clone(),
+                    }),
+                );
+                let h = s.ui.hover(id);
+                let ink = k::GRAY_400.mix(k::WHITE, h);
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .row()
+                    .items_center()
+                    .gap(8.0)
+                    .px(8.0)
+                    .py(4.0)
+                    .rounded(4.0)
+                    .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), h))
+                    .ring(4.0)
+                    .role(Role::Button, p.title.as_str())
+                    .child(vorn_components::lucide(
+                        p.icon.as_deref().unwrap_or("puzzle"),
+                        14.0,
+                        1.5,
+                        ink,
+                    ))
+                    .child(text(&p.title, 12.0, ink).line_height(16.0).silent())
+            })
+            .collect();
     (!all.is_empty()).then(|| div().row().wrap_children().gap(8.0).pt(16.0).children(all))
 }
 

@@ -55,7 +55,12 @@ impl Point {
         let errors: Vec<String> = v
             .get("errors")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default();
         let per_session = matches!(
             kind.as_str(),
@@ -76,9 +81,10 @@ impl Point {
                 .map_err(|e| e.iter().map(ToString::to_string).collect()),
             }
         };
-        let size = v.get("size").and_then(Value::as_array).and_then(|a| {
-            Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))
-        });
+        let size = v
+            .get("size")
+            .and_then(Value::as_array)
+            .and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32)));
         let text = |k: &str| s(v, k).map(str::to_owned);
         let extension = s(v, "extension")?.to_owned();
         Some(Point {
@@ -165,12 +171,21 @@ pub enum PointAct {
     /// Shows the settings page of point `key`.
     Settings(String),
     /// Chooses a command, menu item or launcher; `args` is the menu's context.
-    Choose { key: String, args: String },
+    Choose {
+        key: String,
+        args: String,
+    },
     /// Opens or closes a window point.
-    Window { key: String, open: bool },
+    Window {
+        key: String,
+        open: bool,
+    },
     CloseDialog,
     /// Switches a built-in extension on or off.
-    Builtin { id: String, on: bool },
+    Builtin {
+        id: String,
+        on: bool,
+    },
 }
 
 /// The dialog or window a template is drawn in.
@@ -236,7 +251,8 @@ impl Points {
         self.loaded = true;
         self.asked.clear();
         let all = &self.all;
-        self.rows.retain(|ext, _| all.iter().any(|p| &p.extension == ext));
+        self.rows
+            .retain(|ext, _| all.iter().any(|p| &p.extension == ext));
         let keys: BTreeSet<String> = self.all.iter().map(Point::key).collect();
         self.windows.retain(|k| keys.contains(k));
         if self.dialog.as_ref().is_some_and(|d| !keys.contains(d)) {
@@ -445,7 +461,12 @@ mod tests {
     fn keys_read_as_their_codes() {
         use crate::ui::mods;
         let primary = mods::SUPER;
-        assert!(key_hit("Mod+Alt+W", "KeyW", mods::SUPER | mods::ALT, primary));
+        assert!(key_hit(
+            "Mod+Alt+W",
+            "KeyW",
+            mods::SUPER | mods::ALT,
+            primary
+        ));
         assert!(!key_hit("Mod+Alt+W", "KeyW", mods::SUPER, primary));
         assert!(key_hit("Ctrl+1", "Digit1", mods::CTRL, primary));
         assert!(key_hit("Alt+F2", "F2", mods::ALT, primary));

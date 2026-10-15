@@ -4,10 +4,12 @@
 
 use std::collections::BTreeMap;
 
+use vorn_view::{
+    Action as Do, Cond, Kind, Node, Role as TextRole, Row, Source, Style, Template, Tone,
+};
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
 use vornui::{div, text, Action, El, Id, Rgba, Ui};
-use vorn_view::{Action as Do, Cond, Kind, Node, Role as TextRole, Row, Source, Style, Template, Tone};
 
 use vornui::accesskit::Role;
 
@@ -56,7 +58,7 @@ pub fn tone(t: Tone) -> Rgba {
 /// Template `t` with `row` in scope (a session's row, for a per-session place).
 pub fn view(ui: &Ui, t: &Template, row: Option<&Row>, src: &dyn Source, bind: &dyn Bind) -> El {
     let cx = Cx { ui, src, bind };
-    cx.node(&t.view, row, 1).unwrap_or_else(|| div())
+    cx.node(&t.view, row, 1).unwrap_or_else(div)
 }
 
 /// The box drawn in place of a template with errors: which place, and each error with its line.
@@ -70,10 +72,14 @@ pub fn invalid(place: &str, errors: &[String]) -> El {
         .border(1.0, color::DANGER)
         .role(Role::Alert, place)
         .child(
-            text(&format!("{place} has template errors"), size::XS.0, color::RED_300)
-                .line_height(size::XS.1)
-                .weight(600)
-                .wrapping(),
+            text(
+                format!("{place} has template errors"),
+                size::XS.0,
+                color::RED_300,
+            )
+            .line_height(size::XS.1)
+            .weight(600)
+            .wrapping(),
         );
     for e in errors {
         b = b.child(
@@ -96,6 +102,25 @@ fn child_slot(slot: u64, i: usize) -> u64 {
     slot.wrapping_mul(31).wrapping_add(i as u64 + 1)
 }
 
+/// Every slot a node of `t` takes, as [`Bind::press`] and [`Bind::field`] are given them.
+pub fn slots(t: &Template) -> Vec<u64> {
+    fn walk(n: &Node, slot: u64, out: &mut Vec<u64>) {
+        out.push(slot);
+        match &n.kind {
+            Kind::Column(kids) | Kind::Row(kids) | Kind::Section { children: kids, .. } => {
+                for (i, k) in kids.iter().enumerate() {
+                    walk(k, child_slot(slot, i), out);
+                }
+            }
+            Kind::List { item, .. } => walk(item, child_slot(slot, 0), out),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&t.view, 1, &mut out);
+    out
+}
+
 impl Cx<'_> {
     fn holds(&self, when: Option<&Cond>, row: Option<&Row>) -> bool {
         when.is_none_or(|c| c.holds(row, self.src))
@@ -114,7 +139,11 @@ impl Cx<'_> {
         }
         let fill = |t: &vorn_view::Text| t.fill(row, self.src);
         Some(match &n.kind {
-            Kind::Column(kids) => div().col().gap(6.0).min_w0().children(self.kids(kids, row, slot)),
+            Kind::Column(kids) => div()
+                .col()
+                .gap(6.0)
+                .min_w0()
+                .children(self.kids(kids, row, slot)),
             Kind::Row(kids) => div()
                 .row()
                 .items_center()
@@ -126,7 +155,7 @@ impl Cx<'_> {
                 .gap(8.0)
                 .min_w0()
                 .child(
-                    text(&fill(title), size::SM.0, color::GRAY_200)
+                    text(fill(title), size::SM.0, color::GRAY_200)
                         .line_height(size::SM.1)
                         .weight(size::SEMIBOLD)
                         .truncate()
@@ -200,7 +229,9 @@ impl Cx<'_> {
                 let id = self
                     .bind
                     .field(slot, row.map(|r| r.id.as_str()), call, &held);
-                widgets::text_input(self.ui, id, &hint, &hint).grow().min_w0()
+                widgets::text_input(self.ui, id, &hint, &hint)
+                    .grow()
+                    .min_w0()
             }
             Kind::List { rows, item, empty } => {
                 let all = self.src.rows(rows);

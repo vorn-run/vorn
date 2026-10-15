@@ -449,7 +449,7 @@ impl Shot {
             .iter()
             .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
             .map(|(id, _)| Id(id.0))
-            .last()
+            .next_back()
     }
 
     /// The button `label` a template of point `key` draws for `row`.
@@ -461,7 +461,12 @@ impl Shot {
             .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
             .map(|(id, _)| id.0)
             .collect();
-        (0..512)
+        let slots = match &app.st.points.get(key)?.template {
+            Ok(Some(t)) => vorn_components::template::slots(t),
+            _ => return None,
+        };
+        slots
+            .into_iter()
             .map(|slot| vorn_app::screen::points::control_id(key, None, slot, Some(row)))
             .find(|id| named.contains(&id.0))
     }

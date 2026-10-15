@@ -134,7 +134,13 @@ impl App {
     }
 
     /// A one-line field's Return, with what it holds.
-    pub(super) fn point_field(&mut self, extension: &str, call: &str, row: Option<&str>, text: &str) {
+    pub(super) fn point_field(
+        &mut self,
+        extension: &str,
+        call: &str,
+        row: Option<&str>,
+        text: &str,
+    ) {
         let mut args = json!({ "value": text });
         if let Some(id) = row {
             args["id"] = json!(id);
@@ -273,10 +279,7 @@ impl App {
             .then(|| self.st.settings.ext_page.clone())
             .flatten();
         let showing: Vec<String> = page.into_iter().collect();
-        let showing: Vec<String> = showing
-            .into_iter()
-            .chain(self.open_panes())
-            .collect();
+        let showing: Vec<String> = showing.into_iter().chain(self.open_panes()).collect();
         self.st.points.shown.retain(|k| showing.contains(k));
         for key in showing {
             if self.st.points.shown.contains(&key) {

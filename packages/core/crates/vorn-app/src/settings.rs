@@ -7,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-
 /// A panel of the settings page (`SettingsCategory`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Category {

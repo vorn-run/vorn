@@ -159,7 +159,13 @@ fn every_template_kind_draws_on_every_surface() {
     });
 
     // No session yet: the empty state's launcher.
-    every_surface(&mut shot, &mut app, "t-launcher", &["Watch turns"], &["Watch turns"]);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-launcher",
+        &["Watch turns"],
+        &["Watch turns"],
+    );
 
     // An agent (a shell standing in) goes quiet: a turn finished.
     let info = app
@@ -212,7 +218,13 @@ fn every_template_kind_draws_on_every_surface() {
     shot.until(&mut app, "the template pane", |a, _| {
         a.st.ext.panes.get(&sid).map(|_| ())
     });
-    every_surface(&mut shot, &mut app, "t-pane", &["At work: 0 of 1"], &["At work: 0 of 1"]);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-pane",
+        &["At work: 0 of 1"],
+        &["At work: 0 of 1"],
+    );
     open_card_menu(&mut shot, &mut app, &sid);
     choose(&mut shot, &mut app, "Close Turns");
     assert!(!app.st.ext.panes.contains_key(&sid));
@@ -265,7 +277,11 @@ fn every_template_kind_draws_on_every_surface() {
     let clear = shot.button(&mut app, "Clear").expect("the dialog's Clear");
     shot.click(&mut app, clear);
     shot.until(&mut app, "the list cleared", |a, _| {
-        a.st.points.rows_of(ID).get("finished")?.is_empty().then_some(())
+        a.st.points
+            .rows_of(ID)
+            .get("finished")?
+            .is_empty()
+            .then_some(())
     });
     assert_eq!(app.st.points.dialog, None);
 
@@ -275,7 +291,13 @@ fn every_template_kind_draws_on_every_surface() {
     shot.until(&mut app, "the window", |a, _| {
         a.st.points.windows.contains(&window).then_some(())
     });
-    every_surface(&mut shot, &mut app, "t-window", &["At work: 0 of 1"], &["At work: 0 of 1"]);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-window",
+        &["At work: 0 of 1"],
+        &["At work: 0 of 1"],
+    );
     shot.send(&mut app, key("KeyT", MOD() | mods::ALT, None));
     shot.frame(&mut app);
     assert!(!app.st.points.windows.contains(&window));
@@ -328,7 +350,11 @@ fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
     eprintln!("live preview: {took:?}");
     assert!(took < Duration::from_millis(250), "redrawn in {took:?}");
 
-    fs::write(&view, was.replace("section \"Counting\"", "sectoin \"Counting\"")).expect("break");
+    fs::write(
+        &view,
+        was.replace("section \"Counting\"", "sectoin \"Counting\""),
+    )
+    .expect("break");
     redraw(shot, app, "views/settings.kdl:", "the error box");
     let [w, _] = cells(app, "t-error");
     assert!(w.contains("sectoin"), "the error names what is wrong:\n{w}");

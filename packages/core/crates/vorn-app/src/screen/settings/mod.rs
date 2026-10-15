@@ -74,7 +74,14 @@ pub(super) fn svg(body: &str, stroke: f32) -> String {
 fn nav_item(s: &Screen<'_>, cat: Category, rest: Rgba) -> El {
     let id = s.acts.on("settings-nav", set(SetAct::Open(cat)));
     let on = s.st.settings.category == cat && s.st.settings.ext_page.is_none();
-    nav_button(s, id, cat.label(), icon(nav_svg(cat), 16.0, nav_ink(s, id, on, rest)), on, rest)
+    nav_button(
+        s,
+        id,
+        cat.label(),
+        icon(nav_svg(cat), 16.0, nav_ink(s, id, on, rest)),
+        on,
+        rest,
+    )
 }
 
 fn nav_ink(s: &Screen<'_>, id: Id, on: bool, rest: Rgba) -> Rgba {
@@ -185,12 +192,11 @@ fn sidebar(s: &Screen<'_>) -> El {
         }
         list = list.child(items);
     }
-    let pages: Vec<El> = s
-        .st
-        .points
-        .at(crate::points::kind::SETTINGS)
-        .map(|p| ext_item(s, p))
-        .collect();
+    let pages: Vec<El> =
+        s.st.points
+            .at(crate::points::kind::SETTINGS)
+            .map(|p| ext_item(s, p))
+            .collect();
     if !pages.is_empty() {
         list = list
             .child(

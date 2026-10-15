@@ -12,8 +12,8 @@ use crate::screen::settings::{
     host_id, key_field_id, rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER,
 };
 use crate::settings::{
-    self, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState,
-    SetAct, Shell, SshKey, TestResult,
+    self, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState, SetAct,
+    Shell, SshKey, TestResult,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 

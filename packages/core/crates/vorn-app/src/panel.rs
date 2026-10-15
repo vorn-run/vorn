@@ -31,7 +31,11 @@ pub struct Panel {
 
 impl Panel {
     /// Connects to vornd at `ep` and loads point `key` with its rows.
-    pub fn connect(ep: &Endpoint, key: &str, wake: crate::client::rpc::Wake) -> Result<Panel, String> {
+    pub fn connect(
+        ep: &Endpoint,
+        key: &str,
+        wake: crate::client::rpc::Wake,
+    ) -> Result<Panel, String> {
         let (rpc, events) = Rpc::connect(ep, wake).map_err(|e| e.to_string())?;
         rpc.call(
             "subscribe:set",
@@ -55,7 +59,10 @@ impl Panel {
 
     /// The point's size, as its manifest gives it.
     pub fn size(&self) -> (f32, f32) {
-        self.points.get(&self.key).and_then(|p| p.size).unwrap_or(SIZE)
+        self.points
+            .get(&self.key)
+            .and_then(|p| p.size)
+            .unwrap_or(SIZE)
     }
 
     fn reload(&mut self) {
@@ -67,10 +74,10 @@ impl Panel {
             .unwrap_or_default();
         self.points.listed(&list);
         for (ext, coll) in self.points.to_ask() {
-            if let Ok(Value::Array(rows)) = self.rpc.call(
-                "extension:rows",
-                json!({ "id": ext, "collection": coll }),
-            ) {
+            if let Ok(Value::Array(rows)) = self
+                .rpc
+                .call("extension:rows", json!({ "id": ext, "collection": coll }))
+            {
                 self.points.fill(&ext, &coll, &rows);
             }
         }

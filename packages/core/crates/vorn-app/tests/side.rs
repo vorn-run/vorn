@@ -542,7 +542,9 @@ fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
             .then_some(())
     });
     shot.save(&mut app, "g-dialog");
-    let cancel = shot.button(&mut app, "Cancel").expect("the dialog's Cancel");
+    let cancel = shot
+        .button(&mut app, "Cancel")
+        .expect("the dialog's Cancel");
     shot.click(&mut app, cancel);
     assert_eq!(app.st.points.dialog, None);
 
@@ -556,7 +558,9 @@ fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
             .map(|_| ())
     });
     shot.save(&mut app, "g-idle");
-    let remove = shot.button(&mut app, "Remove").expect("the idle row's Remove");
+    let remove = shot
+        .button(&mut app, "Remove")
+        .expect("the idle row's Remove");
     shot.click(&mut app, remove);
     shot.until(&mut app, "the removal", |a, _| {
         a.st.toasts

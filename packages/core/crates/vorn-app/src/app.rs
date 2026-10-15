@@ -41,13 +41,13 @@ mod network;
 mod onboarding;
 mod palette;
 mod plugins;
+mod points;
 mod settings;
 mod shell;
 mod side;
 pub mod signin;
 mod tasks;
 mod term;
-mod points;
 mod workflows;
 
 /// The modifier the app's shortcuts use: Cmd on a Mac, Ctrl elsewhere.

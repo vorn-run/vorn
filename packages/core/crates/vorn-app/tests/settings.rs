@@ -191,7 +191,9 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
 
     // Worktrees is the cleanup extension's page.
     let page = "vorn.worktrees/settings/worktrees";
-    shot.until(&mut app, "the extension's page", |a, _| a.st.points.get(page).map(|_| ()));
+    shot.until(&mut app, "the extension's page", |a, _| {
+        a.st.points.get(page).map(|_| ())
+    });
     shot.click(
         &mut app,
         control(
@@ -204,7 +206,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
             .rows_of("vorn.worktrees")
             .get("worktrees")?
             .iter()
-            .find(|r| r.id.ends_with("feature-greet"))
+            .find(|r| r.fields.get("name").and_then(|n| n.as_str()) == Some("feature-greet"))
             .map(|r| r.id.clone())
     });
     shot.save(&mut app, "set-worktrees");

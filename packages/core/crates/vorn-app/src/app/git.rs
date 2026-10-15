@@ -18,17 +18,11 @@ pub(super) enum GitCall {
     Stat(String),
     Branch(String),
     Diff(String),
-    Committed {
-        cwd: String,
-        push: bool,
-    },
+    Committed { cwd: String, push: bool },
     Pushed,
     Branches(String),
     Remotes,
-    Switched {
-        cwd: String,
-        branch: String,
-    },
+    Switched { cwd: String, branch: String },
     Ides,
 }
 
