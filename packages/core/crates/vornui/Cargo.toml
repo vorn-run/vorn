@@ -64,7 +64,7 @@ softbuffer = { version = "0.4", default-features = false, features = ["x11", "x1
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 objc2-app-kit = { version = "0.2.2", default-features = false, features = ["std", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSDragging", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.2.2", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSGeometry", "NSString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSGeometry", "NSString"] }
 
 # The CPU raster raises its threads' priority (see cpu.rs); the clipboard's
 # image and where a drop landed (window.rs).
