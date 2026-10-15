@@ -302,8 +302,14 @@ async fn connectors_run_as_a_built_in_and_keep_their_data_when_off() {
 
     // Off: nothing answers, no tool is listed, nothing polls; the data stays.
     let listed = c.result("extension:builtins", json!({})).await;
-    assert_eq!(listed[0]["id"], "vorn.connectors");
-    assert_eq!(listed[0]["on"], true);
+    let ours = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "vorn.connectors")
+        .cloned()
+        .unwrap_or_else(|| panic!("Connectors is not among the built-ins: {listed}"));
+    assert_eq!(ours["on"], true);
     c.result(
         "extension:setBuiltin",
         json!({ "id": "vorn.connectors", "on": false }),

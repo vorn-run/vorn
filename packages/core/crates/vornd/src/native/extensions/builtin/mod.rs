@@ -72,6 +72,9 @@ pub trait Builtin: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<Value, ExtError>>;
     /// A batch of the events it subscribes to, in order.
     fn on_events<'a>(&'a self, api: &'a Api, batch: Vec<Arc<Event>>) -> BoxFuture<'a, ()>;
+    /// The moment its switch changes, before anything of it starts or stops:
+    /// a call that arrives next already sees it.
+    fn switched(&self, _on: bool) {}
     /// Once switched off: stops what it runs, keeping what it keeps.
     fn stop<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
         Box::pin(async {})
@@ -266,6 +269,9 @@ impl Builtins {
         };
         if let Err(err) = std::fs::write(&self.file, saved) {
             warn!("[extensions] could not keep the built-ins' switches: {err}");
+        }
+        if was != on {
+            e.builtin.switched(on);
         }
         match (was, on) {
             (false, true) => self.run(e),

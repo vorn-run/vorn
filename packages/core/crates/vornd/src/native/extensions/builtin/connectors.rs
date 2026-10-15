@@ -76,11 +76,22 @@ impl ConnectorsBuiltin {
         self.on.load(Ordering::Acquire)
     }
 
+    /// Refuses its calls and offers no polls from now on, as it is being
+    /// switched off; [`ConnectorsBuiltin::set_on`] then stops what runs.
+    fn refuse(&self) {
+        self.polls.withdraw(builtin::ID);
+        self.on.store(false, Ordering::Release);
+    }
+
     /// Turns it on or off, as its switch in the registry says. Off stops
     /// every connection's child and every poll, and keeps the connections,
     /// their secrets and their inbox as they are.
     pub async fn set_on(&self, on: bool) {
         if self.on.swap(on, Ordering::AcqRel) == on {
+            if !on {
+                // Refused already when the switch moved; what runs still stops.
+                self.inner.stop().await;
+            }
             return;
         }
         if on {
@@ -179,6 +190,12 @@ impl Builtin for Entry {
 
     fn on_events<'a>(&'a self, _api: &'a Api, _batch: Vec<Arc<Event>>) -> BoxFuture<'a, ()> {
         async {}.boxed()
+    }
+
+    fn switched(&self, on: bool) {
+        if !on {
+            self.0.refuse();
+        }
     }
 
     fn stop<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {

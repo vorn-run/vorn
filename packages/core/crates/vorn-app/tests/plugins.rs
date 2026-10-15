@@ -282,6 +282,7 @@ fn connectors_switch_off_and_on_from_the_built_ins_list() {
             }),
         )
     };
+    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Installed)));
     shot.click(&mut app, switch(false));
     shot.until(&mut app, "Connectors switched off", |app, _| {
         (!on(app)).then_some(())
