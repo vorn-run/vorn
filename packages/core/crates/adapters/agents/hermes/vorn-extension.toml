@@ -1,0 +1,47 @@
+# Hermes Agent, run from its adapter. Written from the CLI's own source (its
+# argument parser and session store); only what could be checked there is here.
+id = "vorn.agents.hermes"
+name = "Hermes Agent"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "Runs Hermes Agent: launches it, resumes a session by id and lists its past sessions."
+
+[agent]
+id = "hermes"
+name = "Hermes Agent"
+label = "Hermes"
+description = "Nous Research Hermes Agent CLI"
+icon = "icon.svg"
+mark = "☿"
+color = "#e0b44c"
+tint = "#e0b44c20"
+url = "https://github.com/NousResearch/hermes-agent"
+install = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+
+# A first prompt seeds an interactive chat; a bare prompt is read as a subcommand.
+[agent.launch]
+command = "hermes"
+prompt = ["chat", "-q", "{prompt}"]
+
+[agent.resume]
+args = ["--resume", "{id}"]
+selectors = { with_value = ["--resume", "-r"], bare = ["--continue", "-c"] }
+
+[agent.models]
+selectors = ["-m"]
+
+# Sessions in its own SQLite store, under HERMES_HOME.
+[agent.history]
+activity = "message"
+title_limit = 80
+
+[agent.history.sqlite]
+db = "{env:HERMES_HOME|~/.hermes}/state.db"
+query = "SELECT id, cwd, title, started_at, message_count FROM sessions WHERE COALESCE(archived, 0) = 0 AND COALESCE(hidden, 0) = 0 AND {scope} ORDER BY started_at DESC"
+scope = "cwd"
+id = "id"
+project = "cwd"
+title = ["title"]
+time = "started_at"
+unit = "seconds"
+count = "message_count"

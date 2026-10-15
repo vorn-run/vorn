@@ -1,7 +1,8 @@
-//! The shipped screen rules read against fixtures: a screen each agent shows
-//! in each state, and a recorded session replayed through the emulator.
+//! The shipped adapters' screen rules read against fixtures: a screen each
+//! agent shows in each state, and a recorded session replayed through the
+//! emulator.
 //!
-//! A fixture is `tests/fixtures/status/<agent>/<state>-<name>.toml`:
+//! A fixture is `agents/<name>/fixtures/status/<state>-<name>.toml`:
 //!
 //! ```toml
 //! status = "working"            # what the rules must read
@@ -12,8 +13,10 @@
 //! '''
 //! ```
 
+mod support;
+
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 use vorn_agents::Agent;
@@ -44,10 +47,8 @@ struct At {
     col: u16,
 }
 
-fn fixtures(agent: Agent) -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/status")
-        .join(agent.id());
+fn fixtures(agent: &Agent) -> Vec<PathBuf> {
+    let dir = support::package(agent.id()).join("fixtures/status");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
         .map(|e| e.unwrap().path())
@@ -83,8 +84,8 @@ fn read(rules: &Rules, fixture: &Fixture) -> Option<ScreenStatus> {
 #[test]
 fn every_fixture_reads_as_the_state_it_shows() {
     let mut wrong = Vec::new();
-    for agent in Agent::ALL {
-        let rules = agent.screen_rules();
+    for agent in support::all().iter().filter(|a| a.screen_rules().is_some()) {
+        let rules = agent.screen_rules().unwrap();
         let mut seen = BTreeSet::new();
         for path in fixtures(agent) {
             let name = path.file_stem().unwrap().to_string_lossy().into_owned();
@@ -162,15 +163,15 @@ fn replay(rules: &Rules, name: &str) -> Vec<ScreenStatus> {
 
 #[test]
 fn a_recorded_session_reads_as_waiting_at_its_picker() {
-    let seen = replay(Agent::Claude.screen_rules(), "claude");
+    let seen = replay(support::agent("claude").screen_rules().unwrap(), "claude");
     assert_eq!(seen, [ScreenStatus::Waiting]);
 }
 
 #[test]
 fn other_programs_screens_read_as_nothing() {
-    for agent in Agent::ALL {
+    for agent in support::all().iter().filter(|a| a.screen_rules().is_some()) {
         for program in ["vim", "htop"] {
-            let seen = replay(agent.screen_rules(), program);
+            let seen = replay(agent.screen_rules().unwrap(), program);
             assert!(seen.is_empty(), "{} read {program} as {seen:?}", agent.id());
         }
     }

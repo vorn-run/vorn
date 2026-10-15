@@ -1,15 +1,17 @@
-//! `vorn_agents::launch` against `tests/fixtures/launch-lines.json`; cases needing executables in `{bin}` run on Unix.
+//! The shipped adapters through `vorn_agents::launch` against the corpus 0.8
+//! recorded (`tests/fixtures/launch-lines.json`); cases needing executables
+//! in `{bin}` run on Unix.
+
+mod support;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use vorn_agents::launch::{self, env, shell, LaunchRequest, Machine, Platform, Quoting};
-use vorn_agents::{Agent, AgentCommand};
+use vorn_agents::AgentCommand;
 
 fn corpus() -> Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../tests/fixtures/launch-lines.json");
+    let path = support::repo_fixture("launch-lines.json");
     let text = std::fs::read_to_string(&path).expect("the corpus is checked in");
     serde_json::from_str(&text).expect("the corpus is JSON")
 }
@@ -88,7 +90,8 @@ fn launches_as_the_corpus_says() {
             skipped += 1;
             continue;
         }
-        let Some(agent) = Agent::from_id(case["payload"]["agentType"].as_str().unwrap()) else {
+        let agents = support::on_by_default();
+        let Some(agent) = agents.get(case["payload"]["agentType"].as_str().unwrap()).cloned() else {
             // A shell session is refused by the adapter, before the crate.
             continue;
         };
@@ -105,6 +108,7 @@ fn launches_as_the_corpus_says() {
         let case = fill(case, &vars);
 
         let p = &case["payload"];
+        let config = case["commands"].get(agent.id()).map(command);
         let req = LaunchRequest {
             agent,
             args: strings(&p["args"]),
@@ -114,7 +118,6 @@ fn launches_as_the_corpus_says() {
             session_id: string(&p["sessionId"]),
             initial_prompt: string(&p["initialPrompt"]),
         };
-        let config = case["commands"].get(agent.id()).map(command);
         let env: Vec<(String, String)> = match case["env"].as_object() {
             Some(env) => env
                 .iter()
@@ -179,10 +182,10 @@ fn strips_selectors_as_the_corpus_says() {
     let corpus = corpus();
     for case in corpus["strip"].as_array().unwrap() {
         let line = case["line"].as_str().unwrap();
-        let agent = Agent::from_id(case["agent"].as_str().unwrap()).unwrap();
+        let agent = support::agent(case["agent"].as_str().unwrap());
         let from = case["command"].as_str().unwrap().len();
         assert_eq!(
-            launch::strip_session_selectors(line, agent, from),
+            launch::strip_session_selectors(line, &agent, from),
             case["expected"].as_str().unwrap(),
             "{line:?}"
         );
@@ -226,6 +229,7 @@ fn names_resumes_and_filters_as_the_corpus_says() {
             })
             .collect()
     };
+    support::markers();
     for case in corpus["env"].as_array().unwrap() {
         let source = pairs(&case["source"]);
         let passthrough = strings(&case["passthrough"]).unwrap();

@@ -1,10 +1,11 @@
-//! `vorn_agents::launch` on seeded random lines against the recorded answers (`tests/fixtures/js-reference/launch-random.json`).
+//! The shipped adapters through `vorn_agents::launch` on seeded random lines,
+//! against the answers 0.8 recorded (`tests/fixtures/js-reference/launch-random.json`).
 
-use std::path::PathBuf;
+mod support;
 
 use serde_json::{json, Value};
 use vorn_agents::launch::{self, LaunchRequest, Machine, Platform, Quoting};
-use vorn_agents::{Agent, AgentCommand};
+use vorn_agents::AgentCommand;
 
 const CASES: usize = 4000;
 
@@ -108,7 +109,7 @@ fn cases(count: usize) -> Vec<Case> {
         if rand.next() < 0.1 {
             line.push_str(rand.pick(SEPARATORS));
         }
-        let agent = Agent::from_id(rand.pick(AGENTS)).expect("every generated agent is known");
+        let agent = support::agent(rand.pick(AGENTS));
         let platform = if rand.next() < 0.7 { "linux" } else { "win32" };
         let shell = rand.pick(&["cmd.exe", "C:\\pwsh.exe"]);
         let resume_session_id = rand.maybe(&["new", "", "a b", "it's"]).map(str::to_owned);
@@ -158,8 +159,7 @@ fn cases(count: usize) -> Vec<Case> {
 }
 
 fn reference() -> Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../tests/fixtures/js-reference/launch-random.json");
+    let path = support::repo_fixture("js-reference/launch-random.json");
     let text = std::fs::read_to_string(&path).expect("the recording is checked in");
     serde_json::from_str(&text).expect("the recording is JSON")
 }

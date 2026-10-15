@@ -6457,12 +6457,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vorn-adapters"
+version = "0.0.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+ "vorn-agents",
+ "vorn-analysis",
+ "vorn-extensions",
+ "vorn-hooks",
+ "vorn-recovery",
+ "vorn-screen",
+ "vorn-term-proto",
+]
+
+[[package]]
 name = "vorn-agents"
 version = "0.0.0"
 dependencies = [
  "data-encoding",
  "jiff",
  "libc",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

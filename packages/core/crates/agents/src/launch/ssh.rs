@@ -329,12 +329,12 @@ mod tests {
     #[test]
     fn runs_the_agent_in_the_quoted_project() {
         assert_eq!(
-            remote_command("/srv/app", "claude"),
-            "cd /srv/app && claude"
+            remote_command("/srv/app", "agent"),
+            "cd /srv/app && agent"
         );
         assert_eq!(
-            remote_command("/srv/it's here", "codex --x"),
-            "cd '/srv/it'\\''s here' && codex --x"
+            remote_command("/srv/it's here", "agent --x"),
+            "cd '/srv/it'\\''s here' && agent --x"
         );
     }
 

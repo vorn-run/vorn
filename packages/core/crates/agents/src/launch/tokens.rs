@@ -18,6 +18,7 @@
 //! inside a longer character, so both split every line at the same places;
 //! only the offsets are counted in different units.
 
+use crate::spec::Selectors;
 use crate::Agent;
 
 /// One word of a line.
@@ -142,34 +143,6 @@ impl From<&Token<'_>> for Span {
     }
 }
 
-/// The flag shapes that can be proven to select a session, split by whether
-/// the flag takes a value: that decides whether the token after it belongs
-/// to the flag or to the person who wrote the line.
-struct Selectors {
-    /// `--flag value` and `--flag=value`.
-    with_value: &'static [&'static str],
-    /// No value; whatever follows is not theirs.
-    bare: &'static [&'static str],
-}
-
-fn selectors(agent: Agent) -> Option<Selectors> {
-    match agent {
-        Agent::Claude => Some(Selectors {
-            with_value: &["--resume", "-r", "--session-id"],
-            bare: &["--continue", "-c"],
-        }),
-        Agent::Copilot => Some(Selectors {
-            with_value: &["--resume", "--session-id"],
-            bare: &[],
-        }),
-        Agent::OpenCode => Some(Selectors {
-            with_value: &["--session", "-s"],
-            bare: &[],
-        }),
-        Agent::Codex | Agent::Gemini => None,
-    }
-}
-
 /// Whether a token could be a flag's value rather than the next flag.
 fn is_value(token: Option<&Token<'_>>) -> bool {
     token.is_some_and(|t| !t.value.starts_with('-'))
@@ -180,7 +153,7 @@ fn is_value(token: Option<&Token<'_>>) -> bool {
 /// and what follows it is somebody else's argument.
 fn flag_spans(tokens: &[Token<'_>], at: usize, sel: &Selectors) -> Option<Vec<Span>> {
     let token = &tokens[at];
-    for name in sel.with_value {
+    for name in &sel.with_value {
         if token.value == *name {
             let next = tokens.get(at + 1);
             return Some(match next {
@@ -197,14 +170,17 @@ fn flag_spans(tokens: &[Token<'_>], at: usize, sel: &Selectors) -> Option<Vec<Sp
         }
     }
     sel.bare
-        .contains(&token.value.as_str())
+        .contains(&token.value)
         .then(|| vec![token.into()])
 }
 
 /// The spans on the line that select a session; empty when none can be
 /// proven. `args_from` is the byte offset where the configured command ends,
 /// known exactly because the caller composed the line.
-fn selector_spans(line: &str, agent: Agent, args_from: usize) -> Vec<Span> {
+fn selector_spans(line: &str, agent: &Agent, args_from: usize) -> Vec<Span> {
+    let Some(sel) = agent.spec().resume.as_ref().map(|r| &r.selectors) else {
+        return Vec::new();
+    };
     let Some(tokens) = tokenize(line) else {
         return Vec::new();
     };
@@ -214,10 +190,10 @@ fn selector_spans(line: &str, agent: Agent, args_from: usize) -> Vec<Span> {
         .collect();
     let mut found = Vec::new();
 
-    if agent == Agent::Codex {
-        // A subcommand, and only in the first argument position: a `resume`
-        // further along is somebody's value.
-        if let Some(first) = args.first().filter(|t| t.value == "resume") {
+    if let Some(sub) = &sel.subcommand {
+        // A subcommand, and only in the first argument position: the same
+        // word further along is somebody's value.
+        if let Some(first) = args.first().filter(|t| &t.value == sub) {
             found.push(first.into());
             if let Some(next) = args
                 .get(1)
@@ -229,9 +205,6 @@ fn selector_spans(line: &str, agent: Agent, args_from: usize) -> Vec<Span> {
         return found;
     }
 
-    let Some(sel) = selectors(agent) else {
-        return found;
-    };
     // Past a bare `--` everything is positional: a `--resume` there is a
     // prompt, not a flag.
     let end = args
@@ -241,7 +214,7 @@ fn selector_spans(line: &str, agent: Agent, args_from: usize) -> Vec<Span> {
     let scannable = &args[..end];
     let mut at = 0;
     while at < scannable.len() {
-        if let Some(spans) = flag_spans(scannable, at, &sel) {
+        if let Some(spans) = flag_spans(scannable, at, sel) {
             at += spans.len();
             found.extend(spans);
         } else {
@@ -254,7 +227,7 @@ fn selector_spans(line: &str, agent: Agent, args_from: usize) -> Vec<Span> {
 /// The line with its session selectors removed, or unchanged when none could
 /// be proven (`stripSessionSelectors`). Rebuilt by copying the gaps out of
 /// the original, so every byte outside a proven span survives as it was.
-pub fn strip_session_selectors(line: &str, agent: Agent, args_from: usize) -> String {
+pub fn strip_session_selectors(line: &str, agent: &Agent, args_from: usize) -> String {
     let mut spans = selector_spans(line, agent, args_from);
     if spans.is_empty() {
         return line.to_owned();
@@ -327,7 +300,11 @@ mod tests {
 
     #[test]
     fn offsets_count_bytes() {
+        let agent = crate::testing::agent(
+            "[agent]\nid = \"r\"\nname = \"R\"\n[agent.launch]\ncommand = \"r\"\n\
+             [agent.resume]\nargs = [\"--resume\", \"{id}\"]\n[agent.resume.selectors]\nwith_value = [\"--resume\"]\n",
+        );
         let line = "é --resume x";
-        assert_eq!(strip_session_selectors(line, Agent::Claude, "é".len()), "é");
+        assert_eq!(strip_session_selectors(line, &agent, "é".len()), "é");
     }
 }

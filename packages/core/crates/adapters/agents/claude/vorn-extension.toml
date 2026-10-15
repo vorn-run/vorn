@@ -1,0 +1,109 @@
+# Claude Code, run from its adapter: launch, resume, models, status and hooks as data.
+id = "vorn.agents.claude"
+name = "Claude Code"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "Runs Claude Code: launches and resumes it, lists its models, reads its status and answers its hooks."
+
+[agent]
+id = "claude"
+name = "Claude Code"
+label = "Claude Code"
+short_name = "Claude"
+description = "Anthropic Claude Code CLI"
+icon = "icon.svg"
+mark = "✳"
+color = "#d97757"
+tint = "#d9775720"
+url = "https://docs.anthropic.com/en/docs/claude-code"
+install = "npm install -g @anthropic-ai/claude-code"
+
+[agent.launch]
+command = "claude"
+headless_args = ["--dangerously-skip-permissions"]
+
+[agent.resume]
+args = ["--resume", "{id}"]
+pin = ["--session-id", "{id}"]
+selectors = { with_value = ["--resume", "-r", "--session-id"], bare = ["--continue", "-c"] }
+
+[agent.headless]
+prompt = ["-p"]
+no_prompt = ["-p", ""]
+resume = ["--resume", "{id}"]
+
+[agent.models]
+
+[agent.models.list]
+args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--safe-mode", "--strict-mcp-config", "--tools", ""]
+
+[[agent.models.list.steps]]
+send = [{ type = "control_request", request_id = "vorn-models", request = { subtype = "initialize" } }]
+reply = { type = "control_response" }
+require = { "response.subtype" = "success" }
+models = "response.response.models"
+
+[agent.models.list.choice]
+id = ["value"]
+skip = [
+  { path = "hidden", is = true },
+  { path = "policy.state", is = "disabled" },
+]
+
+[agent.history]
+activity = "entry"
+
+[agent.history.jsonl]
+file = "~/.claude/history.jsonl"
+session = "sessionId"
+project = "project"
+time = "timestamp"
+title = "display"
+
+[agent.hooks.settings]
+file = "~/.claude/settings.json"
+events = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "Notification", "PermissionRequest", "SessionStart", "SessionEnd"]
+# From this version it reports its own status (OSC 7501); Vorn then needs only these answered.
+own_status = { since = "2.1.295", events = ["SessionStart", "PermissionRequest"] }
+
+[agent.env]
+strip = ["CLAUDECODE"]
+strip_prefixes = ["CLAUDE_CODE_"]
+
+[agent.usage]
+transcript = "~/.claude/projects/{cwd}/{id}.jsonl"
+at = "message.usage"
+context = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+cached = "cache_read_input_tokens"
+
+[agent.mcp]
+commands = ["/plugin marketplace add vorn-run/plugin", "/plugin install vorn"]
+in_agent = true
+
+# A choice to make: a permission prompt, the trust or theme picker, a plan to
+# approve. Each draws a numbered menu with a pointer on the chosen line.
+[[agent.status]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  '^[\s│]*❯\s*\d+\.\s',
+  'Do you want to (proceed|make this edit|create|allow)',
+  'Would you like to proceed\?',
+]
+
+# A picker with no numbers, such as the theme chooser on first start.
+[[agent.status]]
+status = "waiting"
+all = ['^[\s│]*❯\s+\S', '(?i)^[\s│]*(choose|select)\b|enter to (confirm|select)']
+
+# A turn in progress: the spinner's line offers to interrupt it.
+[[agent.status]]
+status = "working"
+rows = [-12, -1]
+any = ['(?i)\besc to interrupt\b']
+
+# The prompt, empty or being typed in, with nothing running.
+[[agent.status]]
+status = "idle"
+rows = [-8, -1]
+any = ['^[\s│]*>(\s|$)', '\? for shortcuts']

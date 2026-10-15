@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
+use crate::spec::{at, ChoiceMap, Keep};
 use crate::{js, Agent, AgentCommand};
 
 /// How long a list answers without being asked for again.
@@ -90,84 +91,89 @@ impl fmt::Display for DiscoveryError {
 
 impl std::error::Error for DiscoveryError {}
 
-/// `value` as an object, or an empty one (`asObject`).
-fn object(value: Option<&Value>) -> Option<&Map<String, Value>> {
-    value.and_then(Value::as_object)
+/// The first of `paths` that is set and not null (`a ?? b`).
+fn first_set<'a>(entry: &'a Value, paths: &[String]) -> Option<&'a Value> {
+    paths
+        .iter()
+        .find_map(|p| at(entry, p).filter(|v| !v.is_null()))
 }
 
-fn field<'a>(value: Option<&'a Value>, key: &str) -> Option<&'a Value> {
-    object(value).and_then(|o| o.get(key))
-}
-
-/// `a ?? b`: the first that is neither absent nor null.
-fn either<'a>(a: Option<&'a Value>, b: Option<&'a Value>) -> Option<&'a Value> {
-    a.filter(|v| !v.is_null()).or(b)
-}
-
-/// Each CLI's answer, normalised to one shape: hidden, disabled and unusable
-/// entries dropped, a repeated id keeping its first place and its last value
-/// (`parseModelChoices`).
-pub fn parse_choices(agent: Agent, value: &Value) -> Result<Vec<ModelChoice>, DiscoveryError> {
-    if agent == Agent::OpenCode {
-        let Value::String(text) = value else {
-            return Err(DiscoveryError::InvalidCatalog);
-        };
-        return Ok(opencode_choices(text));
+/// `template` read against `entry`: a field's text, or `{field}`s filled
+/// in; `None` unless every field it names is non-empty text.
+fn text_of(entry: &Value, template: &str) -> Option<String> {
+    if !template.contains('{') {
+        return at(entry, template)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
     }
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let close = open + rest[open..].find('}')?;
+        out.push_str(&rest[..open]);
+        let value = at(entry, &rest[open + 1..close])
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())?;
+        out.push_str(value);
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+/// Whether `entry` is one the CLI lists but does not offer.
+fn skipped(entry: &Value, map: &ChoiceMap) -> bool {
+    map.skip.iter().any(|rule| {
+        let found = at(entry, &rule.path);
+        rule.is.as_ref().is_some_and(|is| found.is_some_and(|v| same(v, is)))
+            || rule
+                .is_not
+                .as_ref()
+                .is_some_and(|not| found.is_some_and(|v| !same(v, not)))
+    })
+}
+
+/// Equal as JSON, numbers by value.
+pub(crate) fn same(a: &Value, b: &Value) -> bool {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// A CLI's listed entries, normalised to one shape: entries it does not
+/// offer dropped, a repeated id keeping its first place and its last value
+/// (`parseModelChoices`).
+pub fn parse_choices(map: &ChoiceMap, value: &Value) -> Result<Vec<ModelChoice>, DiscoveryError> {
     let Value::Array(items) = value else {
         return Err(DiscoveryError::InvalidCatalog);
     };
     let mut choices: Vec<ModelChoice> = Vec::new();
-    let mut at: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
     for item in items {
-        let entry = Some(item).filter(|v| v.is_object());
-        if field(entry, "hidden") == Some(&Value::Bool(true))
-            || field(field(entry, "policy"), "state").and_then(Value::as_str) == Some("disabled")
-        {
+        if !item.is_object() || skipped(item, map) {
             continue;
         }
-        let meta = field(entry, "_meta");
-        if agent == Agent::Copilot {
-            // Present at all and not "enabled", null included, is not usable.
-            if let Some(enablement) = object(meta).and_then(|m| m.get("copilotEnablement")) {
-                if enablement.as_str() != Some("enabled") {
-                    continue;
-                }
-            }
-        }
-        let id = match agent {
-            Agent::Claude => field(entry, "value"),
-            Agent::Codex => either(field(entry, "model"), field(entry, "id")),
-            Agent::Copilot => field(entry, "modelId"),
-            _ => field(entry, "id"),
-        };
-        let Some(id) = id.and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+        let Some(id) = first_set(item, &map.id)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        else {
             continue;
         };
-        let label = either(field(entry, "displayName"), field(entry, "name"))
+        let label = first_set(item, &map.label)
             .and_then(Value::as_str)
             .unwrap_or(id);
-        let usage = if agent == Agent::Copilot {
-            field(meta, "copilotUsage").and_then(Value::as_str)
-        } else {
-            None
-        };
-        let description = match usage {
-            Some(usage) if !usage.is_empty() => Some(format!("{usage} usage")),
-            _ => field(entry, "description")
-                .and_then(Value::as_str)
-                .filter(|d| !d.is_empty())
-                .map(str::to_owned),
-        };
+        let description = map.description.iter().find_map(|t| text_of(item, t));
         let choice = ModelChoice {
             id: id.to_owned(),
             label: label.to_owned(),
             description,
         };
-        match at.get(id) {
+        match seen.get(id) {
             Some(&i) => choices[i] = choice,
             None => {
-                at.insert(id.to_owned(), choices.len());
+                seen.insert(id.to_owned(), choices.len());
                 choices.push(choice);
             }
         }
@@ -175,12 +181,13 @@ pub fn parse_choices(agent: Agent, value: &Value) -> Result<Vec<ModelChoice>, Di
     Ok(choices)
 }
 
-/// `opencode models` prints one `provider/model` per line among other text.
-fn opencode_choices(text: &str) -> Vec<ModelChoice> {
+/// A listing that prints one model id per line among other text: each
+/// line matching `pattern`, once, as its own label.
+pub fn line_choices(pattern: &regex::Regex, text: &str) -> Vec<ModelChoice> {
     let mut seen = std::collections::HashSet::new();
     text.split('\n')
         .map(|line| js::trim(line.strip_suffix('\r').unwrap_or(line)))
-        .filter(|line| is_provider_model(line))
+        .filter(|line| pattern.is_match(line))
         .filter(|id| seen.insert(*id))
         .map(|id| ModelChoice {
             id: id.to_owned(),
@@ -190,37 +197,23 @@ fn opencode_choices(text: &str) -> Vec<ModelChoice> {
         .collect()
 }
 
-/// `/^[^\s/]+\/\S+$/`.
-fn is_provider_model(line: &str) -> bool {
-    let Some((provider, model)) = line.split_once('/') else {
-        return false;
-    };
-    !provider.is_empty()
-        && !provider.chars().any(js::is_space)
-        && !model.is_empty()
-        && !model.chars().any(js::is_space)
-}
-
 /// Only the configured arguments that decide which models a CLI can see;
 /// a prompt or a mode would start work (`discoveryArguments`).
-pub fn discovery_arguments(agent: Agent, configured: &[String]) -> Vec<String> {
-    if agent != Agent::Codex {
-        return Vec::new();
-    }
-    const PAIRED: [&str; 5] = ["-c", "--config", "-p", "--profile", "--local-provider"];
+pub fn discovery_arguments(keep: &Keep, configured: &[String]) -> Vec<String> {
     let mut args = Vec::new();
     let mut i = 0;
     while i < configured.len() {
         let arg = &configured[i];
         let next = configured.get(i + 1).filter(|n| !n.is_empty());
-        if let (true, Some(next)) = (PAIRED.contains(&arg.as_str()), next) {
+        if let (true, Some(next)) = (keep.paired.contains(arg), next) {
             args.push(arg.clone());
             args.push(next.clone());
             i += 1;
-        } else if PAIRED
+        } else if keep
+            .paired
             .iter()
             .any(|flag| arg.starts_with(&format!("{flag}=")))
-            || arg == "--oss"
+            || keep.flags.contains(arg)
         {
             args.push(arg.clone());
         }
@@ -240,7 +233,7 @@ pub fn check_model_command(command: &str) -> Result<(), DiscoveryError> {
 #[derive(Clone, Debug)]
 pub struct ModelRequest {
     /// `None` for an agent type that has no models to choose: a shell, or a
-    /// name this build does not know.
+    /// name no adapter that is on describes.
     pub agent: Option<Agent>,
     /// The project, absolute; empty when none was given.
     pub project_path: String,
@@ -355,7 +348,7 @@ impl Catalog {
     where
         D: FnOnce() -> Result<Vec<ModelChoice>, DiscoveryError> + Send + 'static,
     {
-        let Some(agent) = request.agent.filter(|a| a.selects_models()) else {
+        let Some(agent) = request.agent.clone().filter(Agent::selects_models) else {
             return CatalogAnswer::unavailable("Model selection is unavailable for this agent.");
         };
         if request.remote {
@@ -459,18 +452,25 @@ mod tests {
         }
     }
 
+    fn map(toml_text: &str) -> ChoiceMap {
+        toml::from_str(toml_text).unwrap()
+    }
+
+    /// The fields and skips each shape of answer the shipped adapters read.
+    const HIDDEN: &str = "skip = [{ path = \"hidden\", is = true }, { path = \"policy.state\", is = \"disabled\" }]\n";
+
     #[test]
-    fn normalizes_each_cli_answer_and_drops_unusable_entries() {
+    fn normalizes_each_shape_of_answer_and_drops_unusable_entries() {
         assert_eq!(
             parse_choices(
-                Agent::Claude,
+                &map(&format!("id = [\"value\"]\n{HIDDEN}")),
                 &json!([{ "value": "opus[1m]", "resolvedModel": "versioned", "displayName": "Opus" }])
             ),
             Ok(vec![choice("opus[1m]", "Opus", None)])
         );
         assert_eq!(
             parse_choices(
-                Agent::Codex,
+                &map(&format!("id = [\"model\", \"id\"]\n{HIDDEN}")),
                 &json!([
                     { "id": "internal", "model": "cli-id", "displayName": "Model" },
                     { "id": "fallback", "model": null },
@@ -486,40 +486,45 @@ mod tests {
                 choice("fallback", "fallback", None)
             ])
         );
+        let usage = map(&format!(
+            "id = [\"modelId\"]\ndescription = [\"{{_meta.usage}} usage\", \"description\"]\n{}",
+            HIDDEN.replace("]\n", ", { path = \"_meta.enablement\", is_not = \"enabled\" }]\n")
+        ));
         assert_eq!(
             parse_choices(
-                Agent::Copilot,
+                &usage,
                 &json!([
-                    { "modelId": "auto", "name": "Auto", "description": "Let Copilot pick" },
+                    { "modelId": "auto", "name": "Auto", "description": "Let it pick" },
                     { "modelId": "opus", "name": "Opus",
-                      "_meta": { "copilotUsage": "15x", "copilotEnablement": "enabled" } },
-                    { "modelId": "blocked", "_meta": { "copilotEnablement": "policy_disabled" } },
-                    { "modelId": "nulled", "_meta": { "copilotEnablement": null } }
+                      "_meta": { "usage": "15x", "enablement": "enabled" } },
+                    { "modelId": "blocked", "_meta": { "enablement": "policy_disabled" } },
+                    { "modelId": "nulled", "_meta": { "enablement": null } }
                 ])
             ),
             Ok(vec![
-                choice("auto", "Auto", Some("Let Copilot pick")),
+                choice("auto", "Auto", Some("Let it pick")),
                 choice("opus", "Opus", Some("15x usage"))
             ])
         );
+        let provider_model = regex::Regex::new(r"^[^\s/]+/\S+$").unwrap();
         assert_eq!(
-            parse_choices(
-                Agent::OpenCode,
-                &json!("provider/model\r\nprovider/model\nother/model\nnoise\n a/b c\n/x\n")
+            line_choices(
+                &provider_model,
+                "provider/model\r\nprovider/model\nother/model\nnoise\n a/b c\n/x\n"
             ),
-            Ok(vec![
+            vec![
                 choice("provider/model", "provider/model", None),
                 choice("other/model", "other/model", None)
-            ])
+            ]
         );
         assert_eq!(
-            parse_choices(Agent::Claude, &json!({})),
+            parse_choices(&ChoiceMap::default(), &json!({})),
             Err(DiscoveryError::InvalidCatalog)
         );
     }
 
     #[test]
-    fn keeps_only_the_codex_arguments_that_select_models() {
+    fn keeps_only_the_arguments_that_select_models() {
         let configured: Vec<String> = [
             "--profile",
             "work",
@@ -533,8 +538,14 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
+        let keep = Keep {
+            paired: ["-c", "--config", "-p", "--profile", "--local-provider"]
+                .map(String::from)
+                .to_vec(),
+            flags: vec!["--oss".to_owned()],
+        };
         assert_eq!(
-            discovery_arguments(Agent::Codex, &configured),
+            discovery_arguments(&keep, &configured),
             [
                 "--profile",
                 "work",
@@ -544,18 +555,18 @@ mod tests {
                 "--config=a=b"
             ]
         );
-        assert!(discovery_arguments(Agent::Claude, &configured).is_empty());
+        assert!(discovery_arguments(&Keep::default(), &configured).is_empty());
     }
 
     #[test]
     fn a_model_needs_one_executable() {
-        assert_eq!(check_model_command("claude"), Ok(()));
-        assert_eq!(check_model_command("'/opt/my tools/claude'"), Ok(()));
+        assert_eq!(check_model_command("agent"), Ok(()));
+        assert_eq!(check_model_command("'/opt/my tools/agent'"), Ok(()));
         for wrapper in [
-            "npx -y claude",
-            "env A=1 claude",
-            "claude; rm",
-            "$(which claude)",
+            "npx -y agent",
+            "env A=1 agent",
+            "agent; rm",
+            "$(which agent)",
             "\"unterminated",
             "trailing\\",
             "",
@@ -572,6 +583,12 @@ mod tests {
         assert_eq!(check_model_command(spaced.to_str().unwrap()), Ok(()));
     }
 
+    fn listing() -> Agent {
+        crate::testing::agent(
+            "[agent]\nid = \"lister\"\nname = \"L\"\n[agent.launch]\ncommand = \"lister\"\n[agent.models]\n",
+        )
+    }
+
     fn request(agent: Agent) -> ModelRequest {
         ModelRequest {
             agent: Some(agent),
@@ -584,20 +601,20 @@ mod tests {
     #[test]
     fn answers_unavailable_without_asking_what_cannot_be_asked() {
         let catalog = Catalog::default();
-        let command = Agent::Codex.default_command();
+        let command = listing().default_command();
         let never = || -> Result<Vec<ModelChoice>, DiscoveryError> { panic!("asked") };
-        let mut r = request(Agent::Gemini);
+        let mut r = request(crate::testing::bare("no-models"));
         assert!(matches!(
             catalog.list(&r, &command, || 0, never),
             CatalogAnswer::Unavailable { .. }
         ));
-        r = request(Agent::Codex);
+        r = request(listing());
         r.remote = true;
         assert!(matches!(
             catalog.list(&r, &command, || 0, never),
             CatalogAnswer::Unavailable { .. }
         ));
-        r = request(Agent::Codex);
+        r = request(listing());
         r.project_path = "{{context.path}}".into();
         assert_eq!(
             catalog.list(&r, &command, || 0, never).to_json(),
@@ -609,7 +626,7 @@ mod tests {
     #[test]
     fn caches_then_refreshes_and_keeps_the_last_list_on_failure() {
         let catalog = Catalog::default();
-        let command = Agent::Codex.default_command();
+        let command = listing().default_command();
         let asked = Arc::new(AtomicUsize::new(0));
         let clock = Arc::new(AtomicU64::new(1_000));
         let now = {
@@ -623,7 +640,7 @@ mod tests {
                 Ok(vec![choice("m", "Model", None)])
             }
         };
-        let first = catalog.list(&request(Agent::Codex), &command, now.clone(), ok(&asked));
+        let first = catalog.list(&request(listing()), &command, now.clone(), ok(&asked));
         assert_eq!(
             first,
             CatalogAnswer::Ready {
@@ -631,22 +648,22 @@ mod tests {
                 fetched_at: 1_000
             }
         );
-        catalog.list(&request(Agent::Codex), &command, now.clone(), ok(&asked));
+        catalog.list(&request(listing()), &command, now.clone(), ok(&asked));
         assert_eq!(asked.load(Ordering::SeqCst), 1);
 
         // Another project or configuration is another list.
-        let mut other = request(Agent::Codex);
+        let mut other = request(listing());
         other.project_path = "/project/../another".into();
         catalog.list(&other, &command, now.clone(), ok(&asked));
         let mut profiled = command.clone();
         profiled.args = vec!["--profile".into(), "work".into()];
-        catalog.list(&request(Agent::Codex), &profiled, now.clone(), ok(&asked));
+        catalog.list(&request(listing()), &profiled, now.clone(), ok(&asked));
         assert_eq!(asked.load(Ordering::SeqCst), 3);
 
         // Past the TTL a failure answers the old list as stale.
         clock.store(1_000 + 300_001, Ordering::SeqCst);
         let failing = || Err(DiscoveryError::Failed);
-        let mut refresh = request(Agent::Codex);
+        let mut refresh = request(listing());
         refresh.refresh = true;
         let failed = catalog.list(&refresh, &command, now.clone(), failing);
         assert_eq!(
@@ -659,10 +676,10 @@ mod tests {
         );
         // Not a refresh: the stale list at once, with the last error, and a
         // fresh one asked for behind it.
-        let stale = catalog.list(&request(Agent::Codex), &command, now.clone(), ok(&asked));
+        let stale = catalog.list(&request(listing()), &command, now.clone(), ok(&asked));
         assert!(matches!(stale, CatalogAnswer::Stale { error: Some(_), .. }));
         let mut tries = 0;
-        while catalog.list(&request(Agent::Codex), &command, now.clone(), failing)
+        while catalog.list(&request(listing()), &command, now.clone(), failing)
             != (CatalogAnswer::Ready {
                 choices: vec![choice("m", "Model", None)],
                 fetched_at: 301_001,
@@ -681,15 +698,15 @@ mod tests {
     fn a_failure_with_no_list_is_unavailable_with_its_reason() {
         let catalog = Catalog::default();
         let answer = catalog.list(
-            &request(Agent::Claude),
-            &Agent::Claude.default_command(),
+            &request(listing()),
+            &listing().default_command(),
             || 5,
-            || Err(DiscoveryError::NotInstalled("claude".into())),
+            || Err(DiscoveryError::NotInstalled("lister".into())),
         );
         assert_eq!(
             answer.to_json(),
             json!({ "choices": [], "status": "unavailable",
-                    "error": "claude is not installed on this machine." })
+                    "error": "lister is not installed on this machine." })
         );
     }
 
@@ -702,8 +719,8 @@ mod tests {
                 let (catalog, asked) = (Arc::clone(&catalog), Arc::clone(&asked));
                 std::thread::spawn(move || {
                     catalog.list(
-                        &request(Agent::OpenCode),
-                        &Agent::OpenCode.default_command(),
+                        &request(listing()),
+                        &listing().default_command(),
                         || 7,
                         move || {
                             asked.fetch_add(1, Ordering::SeqCst);

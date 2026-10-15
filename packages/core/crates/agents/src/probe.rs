@@ -1,9 +1,9 @@
-//! Asking an installed CLI for its models (`probeProcess`).
+//! Asking an installed CLI for its models (`probeProcess`), as its adapter's
+//! `[agent.models.list]` says.
 //!
-//! Each CLI has one invocation that lists models without starting a
-//! conversation: Claude Code's stream-JSON initialize, Codex's app-server
-//! `model/list`, Copilot's ACP `session/new` (never prompted) and
-//! `opencode models`. [`Probe`] is that exchange as a state machine over
+//! A listing is either an exchange of JSON lines (an initialize request, a
+//! session or a page of models, never a prompt) or one run whose output
+//! lists the models. [`Probe`] is that exchange as a state machine over
 //! lines, so it can be tested without a process; [`probe`] runs it against
 //! one, bounded in time and output, with stderr drained and never returned
 //! (it can carry credentials).
@@ -15,9 +15,12 @@ use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
-use crate::models::{discovery_arguments, parse_choices, DiscoveryError, ModelChoice};
+use crate::models::{
+    discovery_arguments, line_choices, parse_choices, same, DiscoveryError, ModelChoice,
+};
+use crate::spec::{at, ModelList};
 use crate::Agent;
 
 /// How long a CLI has to list its models.
@@ -51,86 +54,54 @@ pub enum Step {
 /// One exchange with one CLI.
 #[derive(Debug)]
 pub struct Probe {
-    agent: Agent,
+    list: ModelList,
     cwd: String,
-    next_id: u64,
+    /// The step whose reply is awaited.
+    step: usize,
+    /// The last message sent, which a next page sends again.
+    last: Option<Value>,
     collected: Vec<ModelChoice>,
     cursors: HashSet<String>,
+    lines: Option<regex::Regex>,
 }
 
 impl Probe {
     /// The exchange for `agent`, run in `cwd`; `None` for an agent with no
-    /// models to list.
-    pub fn new(agent: Agent, cwd: &str) -> Option<Probe> {
-        agent.selects_models().then(|| Probe {
-            agent,
+    /// way to list its models.
+    pub fn new(agent: &Agent, cwd: &str) -> Option<Probe> {
+        let list = agent.spec().models.as_ref()?.list.clone()?;
+        // Checked when the adapter was read.
+        let lines = list.lines.as_deref().and_then(|p| regex::Regex::new(p).ok());
+        Some(Probe {
+            list,
             cwd: cwd.to_owned(),
-            next_id: 2,
+            step: 0,
+            last: None,
             collected: Vec::new(),
             cursors: HashSet::new(),
+            lines,
         })
     }
 
     /// The arguments the CLI is started with, after `configured`'s.
     pub fn arguments(&self, configured: &[String]) -> Vec<String> {
-        let mut args = discovery_arguments(self.agent, configured);
-        let own: &[&str] = match self.agent {
-            Agent::Claude => &[
-                "-p",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--no-session-persistence",
-                "--safe-mode",
-                "--strict-mcp-config",
-                "--tools",
-                "",
-            ],
-            Agent::Codex => &["app-server", "--stdio"],
-            Agent::Copilot => &["--acp", "--no-remote", "--no-remote-export"],
-            Agent::OpenCode => {
-                // Its listing takes none of the configured arguments.
-                args.clear();
-                &["models"]
-            }
-            Agent::Gemini => &[],
-        };
-        args.extend(own.iter().map(|s| (*s).to_owned()));
+        let mut args = discovery_arguments(&self.list.keep, configured);
+        args.extend(self.list.args.iter().cloned());
         args
     }
 
-    /// The first message, or `None` for a CLI that is only to read (whose
+    /// The first messages, or none for a CLI that is only to read (whose
     /// stdin is closed at once).
-    pub fn opening(&self) -> Option<Value> {
-        match self.agent {
-            Agent::Claude => Some(json!({
-                "type": "control_request",
-                "request_id": "vorn-models",
-                "request": { "subtype": "initialize" }
-            })),
-            Agent::Codex => Some(json!({
-                "id": 1,
-                "method": "initialize",
-                "params": { "clientInfo": { "name": "vorn_model_catalog", "version": "1.0.0" } }
-            })),
-            Agent::Copilot => Some(json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": 1,
-                    "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false } }
-                }
-            })),
-            Agent::OpenCode | Agent::Gemini => None,
-        }
+    pub fn opening(&mut self) -> Option<Vec<Value>> {
+        let first = self.list.steps.first()?;
+        let sent: Vec<Value> = first.send.iter().map(|m| fill(m, &self.cwd)).collect();
+        self.last = sent.last().cloned();
+        Some(sent)
     }
 
     /// Whether the answer is the whole of stdout rather than JSON lines.
     pub fn reads_whole_output(&self) -> bool {
-        self.agent == Agent::OpenCode
+        self.list.steps.is_empty()
     }
 
     /// One line of stdout. Anything this cannot read, a refusal included,
@@ -138,101 +109,105 @@ impl Probe {
     /// line is in the server.
     pub fn on_line(&mut self, line: &str) -> Result<Step, DiscoveryError> {
         let msg = match serde_json::from_str::<Value>(line) {
-            Ok(Value::Object(msg)) => msg,
-            Ok(_) => Map::new(),
+            Ok(v @ Value::Object(_)) => v,
+            Ok(_) => Value::Object(Map::new()),
             Err(_) => return Err(DiscoveryError::Unsupported),
         };
         self.read(&msg).map_err(|_| DiscoveryError::Unsupported)
     }
 
-    fn read(&mut self, msg: &Map<String, Value>) -> Result<Step, DiscoveryError> {
-        let id = msg.get("id").and_then(Value::as_f64);
-        let failed = msg.get("error").is_some_and(truthy);
-        let result = msg.get("result");
-        match self.agent {
-            Agent::Claude => {
-                if msg.get("type").and_then(Value::as_str) != Some("control_response") {
-                    return Ok(Step::Wait);
-                }
-                let response = msg.get("response");
-                if field(response, "subtype").and_then(Value::as_str) != Some("success") {
+    fn read(&mut self, msg: &Value) -> Result<Step, DiscoveryError> {
+        let Some(step) = self.list.steps.get(self.step) else {
+            return Ok(Step::Wait);
+        };
+        let sent_id = self.last.as_ref().and_then(|m| m.get("id")).cloned();
+        let answers = step.reply.iter().all(|(path, want)| {
+            let want = match want {
+                Value::String(s) if s == "{id}" => sent_id.as_ref().unwrap_or(&Value::Null),
+                other => other,
+            };
+            at(msg, path).is_some_and(|v| same(v, want))
+        });
+        if !answers {
+            return Ok(Step::Wait);
+        }
+        if step.fail.as_deref().and_then(|f| at(msg, f)).is_some_and(truthy) {
+            return Err(DiscoveryError::Unsupported);
+        }
+        let required = step
+            .require
+            .iter()
+            .all(|(path, want)| at(msg, path).is_some_and(|v| same(v, want)));
+        if !required {
+            return Err(DiscoveryError::Unsupported);
+        }
+        let Some(models) = &step.models else {
+            self.step += 1;
+            let next = self.list.steps.get(self.step);
+            let sent: Vec<Value> = next
+                .map(|n| n.send.iter().map(|m| fill(m, &self.cwd)).collect())
+                .unwrap_or_default();
+            self.last = sent.last().cloned().or(self.last.take());
+            return Ok(Step::Send(sent));
+        };
+        let listed = at(msg, models).unwrap_or(&Value::Null);
+        let paging = step.next.as_deref().zip(step.cursor.as_deref());
+        let page = parse_choices(&self.list.choice, listed)?;
+        let Some((next, cursor_at)) = paging else {
+            return Ok(Step::Done(page));
+        };
+        self.collected.extend(page);
+        match at(msg, next).and_then(Value::as_str) {
+            Some(cursor) if !cursor.is_empty() => {
+                if !self.cursors.insert(cursor.to_owned()) {
                     return Err(DiscoveryError::Unsupported);
                 }
-                let models = field(field(response, "response"), "models").unwrap_or(&Value::Null);
-                Ok(Step::Done(parse_choices(Agent::Claude, models)?))
+                let mut again = self.last.clone().unwrap_or(Value::Null);
+                let id = again.get("id").and_then(Value::as_u64).unwrap_or(0) + 1;
+                again["id"] = Value::from(id);
+                set(&mut again, cursor_at, Value::String(cursor.to_owned()));
+                self.last = Some(again.clone());
+                Ok(Step::Send(vec![again]))
             }
-            Agent::Copilot => match id {
-                Some(1.0) if failed => Err(DiscoveryError::Unsupported),
-                Some(1.0) => Ok(Step::Send(vec![json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "session/new",
-                    "params": { "cwd": self.cwd, "mcpServers": [] }
-                })])),
-                Some(2.0) if failed => Err(DiscoveryError::Unsupported),
-                Some(2.0) => {
-                    let models = field(field(result, "models"), "availableModels");
-                    Ok(Step::Done(parse_choices(
-                        Agent::Copilot,
-                        models.unwrap_or(&Value::Null),
-                    )?))
-                }
-                _ => Ok(Step::Wait),
-            },
-            Agent::Codex => {
-                if id == Some(1.0) {
-                    if failed {
-                        return Err(DiscoveryError::Unsupported);
-                    }
-                    return Ok(Step::Send(vec![
-                        json!({ "method": "initialized" }),
-                        self.list_request(None),
-                    ]));
-                }
-                if id != Some(self.next_id as f64) {
-                    return Ok(Step::Wait);
-                }
-                if failed {
-                    return Err(DiscoveryError::Unsupported);
-                }
-                let data = field(result, "data").unwrap_or(&Value::Null);
-                self.collected.extend(parse_choices(Agent::Codex, data)?);
-                match field(result, "nextCursor").and_then(Value::as_str) {
-                    Some(cursor) if !cursor.is_empty() => {
-                        if !self.cursors.insert(cursor.to_owned()) {
-                            return Err(DiscoveryError::Unsupported);
-                        }
-                        self.next_id += 1;
-                        Ok(Step::Send(vec![self.list_request(Some(cursor))]))
-                    }
-                    _ => Ok(Step::Done(dedupe(std::mem::take(&mut self.collected)))),
-                }
-            }
-            Agent::OpenCode | Agent::Gemini => Ok(Step::Wait),
+            _ => Ok(Step::Done(dedupe(std::mem::take(&mut self.collected)))),
         }
     }
 
-    fn list_request(&self, cursor: Option<&str>) -> Value {
-        let mut params = json!({ "limit": 100, "includeHidden": false });
-        if let Some(cursor) = cursor {
-            params["cursor"] = Value::String(cursor.to_owned());
-        }
-        json!({ "id": self.next_id, "method": "model/list", "params": params })
-    }
-
-    /// The CLI ended before it answered: only `opencode models` answers by
-    /// ending, and only when it succeeded.
+    /// The CLI ended before it answered: only a listing that reads the
+    /// whole output answers by ending, and only when it succeeded.
     pub fn on_exit(&self, success: bool, output: &str) -> Result<Vec<ModelChoice>, DiscoveryError> {
-        if self.agent == Agent::OpenCode && success {
-            parse_choices(Agent::OpenCode, &Value::String(output.to_owned()))
-        } else {
-            Err(DiscoveryError::Failed)
+        match (&self.lines, success) {
+            (Some(pattern), true) => Ok(line_choices(pattern, output)),
+            _ => Err(DiscoveryError::Failed),
         }
     }
 }
 
-fn field<'a>(value: Option<&'a Value>, key: &str) -> Option<&'a Value> {
-    value.and_then(Value::as_object).and_then(|o| o.get(key))
+/// `message` with each `"{cwd}"` string the directory.
+fn fill(message: &Value, cwd: &str) -> Value {
+    match message {
+        Value::String(s) if s == "{cwd}" => Value::String(cwd.to_owned()),
+        Value::Array(items) => Value::Array(items.iter().map(|v| fill(v, cwd)).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), fill(v, cwd))).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Sets the dotted `path` in `value`, making objects on the way.
+fn set(value: &mut Value, path: &str, to: Value) {
+    let mut at = value;
+    let mut keys = path.split('.').peekable();
+    while let Some(key) = keys.next() {
+        if !at.is_object() {
+            *at = Value::Object(Map::new());
+        }
+        let map = at.as_object_mut().expect("made an object above");
+        if keys.peek().is_none() {
+            map.insert(key.to_owned(), to);
+            return;
+        }
+        at = map.entry(key).or_insert_with(|| Value::Object(Map::new()));
+    }
 }
 
 fn truthy(v: &Value) -> bool {
@@ -261,7 +236,7 @@ enum Out {
 
 /// Asks the CLI in `context` for `agent`'s models, blocking this thread
 /// for up to [`PROBE_TIMEOUT`].
-pub fn probe(context: &ProbeContext, agent: Agent) -> Result<Vec<ModelChoice>, DiscoveryError> {
+pub fn probe(context: &ProbeContext, agent: &Agent) -> Result<Vec<ModelChoice>, DiscoveryError> {
     let cwd = context.cwd.to_string_lossy();
     let mut probe = Probe::new(agent, &cwd).ok_or(DiscoveryError::Failed)?;
     let mut child = vorn_spawn::command(&context.command)
@@ -308,7 +283,7 @@ fn converse(child: &mut Child, probe: &mut Probe) -> Result<Vec<ModelChoice>, Di
     });
     let mut stdin = child.stdin.take();
     match probe.opening() {
-        Some(first) => send(&mut stdin, &[first])?,
+        Some(first) => send(&mut stdin, &first)?,
         None => drop(stdin.take()),
     }
     let mut pending: Vec<u8> = Vec::new();
@@ -372,23 +347,119 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Result<bool, DiscoveryErr
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
+    use crate::testing::agent;
 
     fn line(v: Value) -> String {
         v.to_string()
     }
 
+    /// Initializes, then lists pages until no cursor is left.
+    fn paged() -> Agent {
+        agent(
+            r#"
+            [agent]
+            id = "paged"
+            name = "Paged"
+            [agent.launch]
+            command = "paged"
+            [agent.models.list]
+            args = ["serve", "--stdio"]
+            keep = { paired = ["--profile"], flags = ["--oss"] }
+            [[agent.models.list.steps]]
+            send = [{ id = 1, method = "initialize" }]
+            reply = { id = "{id}" }
+            fail = "error"
+            [[agent.models.list.steps]]
+            send = [{ method = "initialized" }, { id = 2, method = "model/list", params = { limit = 100 } }]
+            reply = { id = "{id}" }
+            fail = "error"
+            models = "result.data"
+            next = "result.nextCursor"
+            cursor = "params.cursor"
+            [agent.models.list.choice]
+            id = ["model", "id"]
+            "#,
+        )
+    }
+
+    /// Opens a session in the directory and reads the models it offers.
+    fn session() -> Agent {
+        agent(
+            r#"
+            [agent]
+            id = "session"
+            name = "Session"
+            [agent.launch]
+            command = "session"
+            [agent.models.list]
+            args = ["--rpc"]
+            [[agent.models.list.steps]]
+            send = [{ id = 1, method = "initialize" }]
+            reply = { id = "{id}" }
+            fail = "error"
+            [[agent.models.list.steps]]
+            send = [{ id = 2, method = "session/new", params = { cwd = "{cwd}" } }]
+            reply = { id = "{id}" }
+            fail = "error"
+            models = "result.models.available"
+            [agent.models.list.choice]
+            id = ["modelId"]
+            "#,
+        )
+    }
+
+    /// One request, a typed reply that must succeed.
+    fn control() -> Agent {
+        agent(
+            r#"
+            [agent]
+            id = "control"
+            name = "Control"
+            [agent.launch]
+            command = "control"
+            [agent.models.list]
+            args = ["-p"]
+            [[agent.models.list.steps]]
+            send = [{ type = "control_request", request = { subtype = "initialize" } }]
+            reply = { type = "control_response" }
+            require = { "response.subtype" = "success" }
+            models = "response.response.models"
+            [agent.models.list.choice]
+            id = ["value"]
+            "#,
+        )
+    }
+
+    /// Prints its models, one per line among other text.
+    fn printed() -> Agent {
+        agent(
+            r#"
+            [agent]
+            id = "printed"
+            name = "Printed"
+            [agent.launch]
+            command = "printed"
+            [agent.models.list]
+            args = ["models"]
+            lines = '^[^\s/]+/\S+$'
+            "#,
+        )
+    }
+
     #[test]
-    fn initializes_codex_follows_pages_and_never_starts_a_thread() {
-        let mut p = Probe::new(Agent::Codex, "/project").unwrap();
-        assert_eq!(p.opening().unwrap()["method"], "initialize");
+    fn initializes_follows_pages_and_never_starts_a_conversation() {
+        let mut p = Probe::new(&paged(), "/project").unwrap();
+        assert_eq!(p.opening().unwrap()[0]["method"], "initialize");
         let Step::Send(sent) = p.on_line(&line(json!({ "id": 1, "result": {} }))).unwrap() else {
             panic!("expected messages");
         };
         assert_eq!(sent[0], json!({ "method": "initialized" }));
         assert_eq!(
             sent[1],
-            json!({ "id": 2, "method": "model/list", "params": { "limit": 100, "includeHidden": false } })
+            json!({ "id": 2, "method": "model/list", "params": { "limit": 100 } })
         );
         assert_eq!(
             p.on_line(&line(json!({ "id": 9, "result": {} }))).unwrap(),
@@ -426,7 +497,8 @@ mod tests {
 
     #[test]
     fn refuses_a_repeated_cursor_and_anything_unreadable() {
-        let mut p = Probe::new(Agent::Codex, "/p").unwrap();
+        let mut p = Probe::new(&paged(), "/p").unwrap();
+        p.opening();
         p.on_line(&line(json!({ "id": 1, "result": {} }))).unwrap();
         p.on_line(&line(
             json!({ "id": 2, "result": { "data": [], "nextCursor": "c" } }),
@@ -438,7 +510,8 @@ mod tests {
             )),
             Err(DiscoveryError::Unsupported)
         );
-        let mut c = Probe::new(Agent::Claude, "/p").unwrap();
+        let mut c = Probe::new(&control(), "/p").unwrap();
+        c.opening();
         assert_eq!(c.on_line(""), Err(DiscoveryError::Unsupported));
         assert_eq!(c.on_line("[1]"), Ok(Step::Wait));
         assert_eq!(
@@ -447,11 +520,18 @@ mod tests {
             )),
             Err(DiscoveryError::Unsupported)
         );
+        let mut s = Probe::new(&session(), "/p").unwrap();
+        s.opening();
+        assert_eq!(
+            s.on_line(&line(json!({ "id": 1, "error": { "code": 1 } }))),
+            Err(DiscoveryError::Unsupported)
+        );
     }
 
     #[test]
-    fn reads_claude_and_copilot_models_without_prompting() {
-        let mut c = Probe::new(Agent::Claude, "/p").unwrap();
+    fn reads_models_without_prompting() {
+        let mut c = Probe::new(&control(), "/p").unwrap();
+        c.opening();
         assert_eq!(
             c.on_line(&line(json!({ "type": "system" }))).unwrap(),
             Step::Wait
@@ -464,32 +544,34 @@ mod tests {
             .unwrap();
         assert!(matches!(done, Step::Done(ref m) if m.len() == 1 && m[0].id == "opus"));
 
-        let mut p = Probe::new(Agent::Copilot, "/proj").unwrap();
+        let mut p = Probe::new(&session(), "/proj").unwrap();
+        p.opening();
         let Step::Send(sent) = p.on_line(&line(json!({ "id": 1, "result": {} }))).unwrap() else {
             panic!("expected session/new");
         };
         assert_eq!(sent[0]["method"], "session/new");
         assert_eq!(sent[0]["params"]["cwd"], "/proj");
         let done = p
-            .on_line(&line(json!({ "id": 2, "result": { "models": { "availableModels": [{ "modelId": "gpt" }] } } })))
+            .on_line(&line(json!({ "id": 2, "result": { "models": { "available": [{ "modelId": "gpt" }] } } })))
             .unwrap();
         assert!(matches!(done, Step::Done(ref m) if m[0].id == "gpt"));
-        assert!(Probe::new(Agent::Gemini, "/p").is_none());
+        assert!(Probe::new(&crate::testing::bare("none"), "/p").is_none());
     }
 
     #[test]
     fn starts_each_cli_in_its_listing_mode() {
         let configured = vec!["--profile".to_owned(), "w".to_owned(), "--yolo".to_owned()];
-        let codex = Probe::new(Agent::Codex, "/p").unwrap();
+        let paged = Probe::new(&paged(), "/p").unwrap();
         assert_eq!(
-            codex.arguments(&configured),
-            ["--profile", "w", "app-server", "--stdio"]
+            paged.arguments(&configured),
+            ["--profile", "w", "serve", "--stdio"]
         );
-        let opencode = Probe::new(Agent::OpenCode, "/p").unwrap();
-        assert_eq!(opencode.arguments(&configured), ["models"]);
-        assert!(opencode.opening().is_none());
-        assert!(opencode.on_exit(false, "a/b").is_err());
-        assert_eq!(opencode.on_exit(true, "a/b\n").unwrap()[0].id, "a/b");
+        let mut printed = Probe::new(&printed(), "/p").unwrap();
+        assert_eq!(printed.arguments(&configured), ["models"]);
+        assert!(printed.opening().is_none());
+        assert!(printed.reads_whole_output());
+        assert!(printed.on_exit(false, "a/b").is_err());
+        assert_eq!(printed.on_exit(true, "a/b\n").unwrap()[0].id, "a/b");
     }
 
     #[cfg(unix)]
@@ -497,7 +579,7 @@ mod tests {
     fn runs_a_cli_and_reads_its_answer() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("opencode");
+        let script = dir.path().join("printed");
         std::fs::write(
             &script,
             "#!/bin/sh\necho 'noise'\necho 'p/m1'\necho 'p/m2'\n",
@@ -511,21 +593,21 @@ mod tests {
             cwd: dir.path().to_path_buf(),
             env: env.clone(),
         };
-        let ids: Vec<String> = probe(&context, Agent::OpenCode)
+        let ids: Vec<String> = probe(&context, &printed())
             .unwrap()
             .into_iter()
             .map(|c| c.id)
             .collect();
         assert_eq!(ids, ["p/m1", "p/m2"]);
 
-        let failing = dir.path().join("claude");
+        let failing = dir.path().join("control");
         std::fs::write(&failing, "#!/bin/sh\nexit 3\n").unwrap();
         std::fs::set_permissions(&failing, std::fs::Permissions::from_mode(0o755)).unwrap();
         let context = ProbeContext {
             command: failing,
             ..context
         };
-        let err = probe(&context, Agent::Claude).unwrap_err();
+        let err = probe(&context, &control()).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -540,7 +622,7 @@ mod tests {
             env,
         };
         assert_eq!(
-            probe(&missing, Agent::Codex),
+            probe(&missing, &paged()),
             Err(DiscoveryError::CouldNotStart)
         );
     }

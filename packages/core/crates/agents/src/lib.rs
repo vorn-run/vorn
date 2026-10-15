@@ -1,16 +1,16 @@
 //! What Vorn reads about the coding agents it runs, without starting one.
 //!
-//! The server answers three questions about the agents before any session
-//! exists: which of them are installed ([`detect`]), which conversations each
-//! has had in a project ([`history`]), and which models each offers
-//! ([`models`]). All three read the agents' own files or ask their CLIs, and
-//! none of them touches a session, so a host can answer them on any thread.
-//! Each answers exactly as the server's TypeScript of the same purpose does
-//! (`agent-detector`, `agent-history`, `agent-model-catalog`); where a module
-//! departs from it on input no agent writes, its docs say so.
+//! Vorn knows no agent by name. Each agent CLI comes from an adapter: the
+//! `[agent]` section of an extension's manifest ([`spec`]), read into an
+//! [`Agent`]. Everything here works from that data: which agents are
+//! installed ([`detect`]), which conversations each has had in a project
+//! ([`history`]), which models each offers ([`models`]), and how each is
+//! launched, and a shell with it ([`launch`]), which starts nothing.
 //!
-//! How each is launched, and a shell with it, is worked out in [`launch`],
-//! which starts nothing.
+//! Each answers exactly as the server's TypeScript of the same purpose did
+//! (`agent-detector`, `agent-history`, `agent-model-catalog`, `agent-launch`)
+//! for the agents it knew, checked by the corpora recorded from it; where a
+//! module departs from it on input no agent writes, its docs say so.
 //!
 //! Everything here blocks the thread it runs on: file reads, SQLite queries,
 //! and for the model catalog a child process of up to fifteen seconds.
@@ -22,93 +22,173 @@ pub mod launch;
 pub mod models;
 pub mod paths;
 mod probe;
+pub mod spec;
 pub mod status;
 
-pub use probe::{probe, Probe, ProbeContext, Step};
+use std::collections::HashMap;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex, OnceLock};
 
-/// The coding agents Vorn launches. A shell is not one: it has no history,
-/// models or install check.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Agent {
-    Claude,
-    Copilot,
-    Codex,
-    OpenCode,
-    Gemini,
+use vorn_analysis::rules::Rules;
+
+pub use probe::{probe, Probe, ProbeContext, Step};
+pub use spec::{AgentSpec, SpecError};
+
+/// One agent CLI Vorn can run, as its adapter describes it. Cheap to clone;
+/// two are the same agent when their ids are.
+#[derive(Clone)]
+pub struct Agent(Arc<Inner>);
+
+struct Inner {
+    spec: AgentSpec,
+    rules: Option<&'static Rules>,
 }
 
 impl Agent {
-    /// Every agent, in the order the server checks which are installed.
-    pub const ALL: [Agent; 5] = [
-        Agent::Claude,
-        Agent::Copilot,
-        Agent::Codex,
-        Agent::OpenCode,
-        Agent::Gemini,
-    ];
-
-    /// The agent's `AiAgentType` name.
-    pub fn id(self) -> &'static str {
-        match self {
-            Agent::Claude => "claude",
-            Agent::Copilot => "copilot",
-            Agent::Codex => "codex",
-            Agent::OpenCode => "opencode",
-            Agent::Gemini => "gemini",
-        }
+    /// The agent `spec` describes, once [`AgentSpec::check`] passed.
+    pub fn new(spec: AgentSpec) -> Result<Agent, SpecError> {
+        spec.check()?;
+        let rules = (!spec.status.is_empty())
+            .then(|| status::intern(&spec.id, &spec.status))
+            .transpose()
+            .map_err(|e| SpecError {
+                field: "agent.status".to_owned(),
+                message: e.to_string(),
+            })?;
+        Ok(Agent(Arc::new(Inner { spec, rules })))
     }
 
-    /// The agent an `AiAgentType` names; `None` for `shell` or anything else.
-    pub fn from_id(id: &str) -> Option<Agent> {
-        Agent::ALL.into_iter().find(|a| a.id() == id)
+    /// Its `AiAgentType` name.
+    pub fn id(&self) -> &str {
+        &self.0.spec.id
+    }
+
+    pub fn spec(&self) -> &AgentSpec {
+        &self.0.spec
     }
 
     /// Whether a past session can be resumed by its own id
     /// (`supportsExactSessionResume`).
-    pub fn resumes_exactly(self) -> bool {
-        self != Agent::Gemini
+    pub fn resumes_exactly(&self) -> bool {
+        self.0.spec.resume.is_some()
     }
 
-    /// Whether a fresh session can be pinned to an id chosen beforehand, with
-    /// `--session-id`, to resume it by later (`supportsSessionIdPinning`).
-    pub fn pins_session_ids(self) -> bool {
-        matches!(self, Agent::Claude | Agent::Copilot)
+    /// Whether a fresh session can be pinned to an id chosen beforehand, to
+    /// resume it by later (`supportsSessionIdPinning`).
+    pub fn pins_session_ids(&self) -> bool {
+        self.0
+            .spec
+            .resume
+            .as_ref()
+            .is_some_and(|r| !r.pin.is_empty())
     }
 
     /// What one unit of a session's activity is called
     /// (`getRecentSessionActivityLabel`).
-    pub fn activity_label(self) -> &'static str {
-        match self {
-            Agent::Claude | Agent::Codex => "entry",
-            Agent::Copilot => "turn",
-            Agent::Gemini => "prompt",
-            Agent::OpenCode => "message",
-        }
+    pub fn activity_label(&self) -> &str {
+        self.0
+            .spec
+            .history
+            .as_ref()
+            .map_or("session", |h| h.activity.as_str())
     }
 
     /// Whether a model can be chosen for it (`supportsModelSelection`).
-    pub fn selects_models(self) -> bool {
-        self != Agent::Gemini
+    pub fn selects_models(&self) -> bool {
+        self.0.spec.models.is_some()
     }
 
-    /// The command the app launches it with when none is configured
+    /// The rules its status is read from its screen with, if it has any.
+    pub fn screen_rules(&self) -> Option<&'static Rules> {
+        self.0.rules
+    }
+
+    /// The command it is launched with when none is configured
     /// (`DEFAULT_AGENT_COMMANDS`).
-    pub fn default_command(self) -> AgentCommand {
-        let headless: &[&str] = match self {
-            Agent::Claude => &["--dangerously-skip-permissions"],
-            Agent::Copilot => &["--allow-all"],
-            Agent::Codex => &["-a", "never"],
-            Agent::OpenCode => &[],
-            Agent::Gemini => &["-y"],
-        };
+    pub fn default_command(&self) -> AgentCommand {
+        let launch = &self.0.spec.launch;
         AgentCommand {
-            command: self.id().to_owned(),
-            args: Vec::new(),
-            headless_args: (self != Agent::OpenCode)
-                .then(|| headless.iter().map(|s| (*s).to_owned()).collect()),
+            command: launch.command.clone(),
+            args: launch.args.clone(),
+            headless_args: launch.headless_args.clone(),
             fallback_command: None,
             fallback_args: None,
         }
+    }
+}
+
+impl PartialEq for Agent {
+    fn eq(&self, other: &Agent) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Eq for Agent {}
+
+impl Hash for Agent {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+    }
+}
+
+impl fmt::Debug for Agent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Agent({})", self.id())
+    }
+}
+
+/// The agents a host runs, in the order the launcher lists them. A shell is
+/// not one: it has no history, models or install check.
+#[derive(Clone, Debug, Default)]
+pub struct Agents {
+    list: Vec<Agent>,
+}
+
+impl Agents {
+    /// `list` in its order; a later agent with an id already taken is left
+    /// out, so the first adapter to claim an id keeps it.
+    pub fn new(list: impl IntoIterator<Item = Agent>) -> Agents {
+        let mut kept: Vec<Agent> = Vec::new();
+        for agent in list {
+            if !kept.contains(&agent) {
+                kept.push(agent);
+            }
+        }
+        Agents { list: kept }
+    }
+
+    /// The agent an `AiAgentType` names; `None` for `shell` or one no
+    /// adapter that is on describes.
+    pub fn get(&self, id: &str) -> Option<&Agent> {
+        self.list.iter().find(|a| a.id() == id)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Agent> {
+        self.list.iter()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    /// The agent a session starts when none is chosen: the first, or none,
+    /// when the launcher opens a shell.
+    pub fn first(&self) -> Option<&Agent> {
+        self.list.first()
+    }
+}
+
+impl<'a> IntoIterator for &'a Agents {
+    type Item = &'a Agent;
+    type IntoIter = std::slice::Iter<'a, Agent>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.list.iter()
     }
 }
 
@@ -125,25 +205,81 @@ pub struct AgentCommand {
     pub fallback_args: Option<Vec<String>>,
 }
 
+/// The agent a manifest's text describes, read once per process: the same
+/// text gives the same agent. `None` for a manifest with no `[agent]`.
+pub fn from_manifest_text(text: &str) -> Result<Option<Agent>, SpecError> {
+    static SEEN: OnceLock<Mutex<HashMap<String, Agent>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Mutex::default);
+    if let Some(agent) = seen.lock().unwrap_or_else(|e| e.into_inner()).get(text) {
+        return Ok(Some(agent.clone()));
+    }
+    let Some(spec) = AgentSpec::from_manifest(text)? else {
+        return Ok(None);
+    };
+    let agent = Agent::new(spec)?;
+    seen.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(text.to_owned(), agent.clone());
+    Ok(Some(agent))
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    //! Agents for this crate's own tests, written as an adapter would write them.
+
+    use super::*;
+
+    /// The agent the `[agent]` TOML in `section` describes.
+    pub fn agent(section: &str) -> Agent {
+        from_manifest_text(section)
+            .expect("the test adapter reads")
+            .expect("the test adapter has an [agent] section")
+    }
+
+    /// The smallest agent: a command and nothing else.
+    pub fn bare(id: &str) -> Agent {
+        agent(&format!(
+            "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{id}\"\n"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn names_each_agent_as_the_app_does() {
-        for agent in Agent::ALL {
-            assert_eq!(Agent::from_id(agent.id()), Some(agent));
-        }
-        assert_eq!(Agent::from_id("shell"), None);
-        assert_eq!(Agent::from_id("Claude"), None);
+    fn keeps_the_first_agent_claiming_an_id() {
+        let a = testing::bare("one");
+        let b = testing::bare("two");
+        let agents = Agents::new([a.clone(), b, testing::bare("one")]);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents.get("one"), Some(&a));
+        assert!(agents.get("shell").is_none());
+        assert_eq!(agents.first(), Some(&a));
+        assert!(Agents::default().first().is_none());
     }
 
     #[test]
-    fn opencode_alone_has_no_headless_arguments_by_default() {
-        assert_eq!(Agent::OpenCode.default_command().headless_args, None);
+    fn reads_what_the_spec_offers() {
+        let a = testing::bare("plain");
+        assert!(!a.resumes_exactly() && !a.pins_session_ids() && !a.selects_models());
+        assert_eq!(a.activity_label(), "session");
+        assert!(a.screen_rules().is_none());
+        assert_eq!(a.default_command().headless_args, None);
+        let b = testing::agent(
+            "[agent]\nid = \"rich\"\nname = \"Rich\"\n[agent.launch]\ncommand = \"rich\"\nheadless_args = [\"-y\"]\n\
+             [agent.resume]\nargs = [\"--resume\", \"{id}\"]\npin = [\"--id\", \"{id}\"]\n\
+             [agent.models]\n[agent.history]\nactivity = \"turn\"\n[agent.history.jsonl]\n\
+             file = \"~/h\"\nsession = \"s\"\nproject = \"p\"\ntime = \"t\"\ntitle = \"d\"\n\
+             [[agent.status]]\nstatus = \"idle\"\nany = [\"> \"]\n",
+        );
+        assert!(b.resumes_exactly() && b.pins_session_ids() && b.selects_models());
+        assert_eq!(b.activity_label(), "turn");
+        assert_eq!(b.screen_rules().map(Rules::agent), Some("rich"));
         assert_eq!(
-            Agent::Codex.default_command().headless_args,
-            Some(vec!["-a".to_owned(), "never".to_owned()])
+            b.default_command().headless_args,
+            Some(vec!["-y".to_owned()])
         );
     }
 }
