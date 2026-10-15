@@ -562,8 +562,10 @@ pub(super) fn overlay(s: &Screen<'_>) -> Option<El> {
         .border(1.0, white(0.08))
         .bg(c(look::SURFACE_OVERLAY))
         .role(Role::Dialog, "New session")
+        .child_if(super::points::composer(s))
         .child(prompt_box(s))
-        .child(hint(s));
+        .child(hint(s))
+        .child_if(super::points::launchers(s));
     let modal = s.acts.click(modal, "composer", Act::Nothing);
     Some(
         div()
@@ -593,7 +595,9 @@ pub(super) fn empty_state(s: &Screen<'_>) -> El {
     }
     column = column
         .child(div().h(24.0).shrink0())
+        .child_if(super::points::composer(s))
         .child(prompt_box(s))
-        .child(hint(s));
+        .child(hint(s))
+        .child_if(super::points::launchers(s));
     div().col().center().grow().px(16.0).child(column)
 }

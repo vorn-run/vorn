@@ -351,6 +351,12 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 ))
             })
             .collect();
+    let args = serde_json::json!({ "sessionId": id }).to_string();
+    for (act, icon, label, _) in super::points::menu_items(s, "card", &args) {
+        let mut it = Item::new("puzzle", label, act);
+        it.icon = None;
+        items.push(it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))));
+    }
     items.extend([
         Item::new(
             "bot",

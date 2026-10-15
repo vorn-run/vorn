@@ -29,6 +29,8 @@ embed-resource = "3"
 vornui = { path = "../vornui" }
 # The composed components the screens are built from.
 vorn-components = { path = "../vorn-components" }
+# Extension templates and their rows, checked as vornd sends them.
+vorn-view = { path = "../view" }
 vorn-protocol = { path = "../protocol" }
 vorn-grid-client = { path = "../grid-client" }
 vorn-term-mirror = { path = "../term-mirror" }

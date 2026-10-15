@@ -17,6 +17,6 @@ raise = "permissions"
 [[contributes.commands]]
 id = "toggle"
 title = "Toggle Widget"
-key = "Mod+Shift+W"
+key = "Mod+Alt+W"
 window = "widget"
 icon = "panel-top"

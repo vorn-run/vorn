@@ -42,7 +42,9 @@ pub(super) fn page(s: &Screen<'_>) -> El {
     let selected = p.selected.as_deref().and_then(|key| p.listing(key));
     let adding = p.adding.is_some();
     col = match p.tab {
-        Tab::Installed if !adding && selected.is_none() => col.child(installed::view(s)),
+        Tab::Installed if !adding && selected.is_none() => col
+            .child_if(super::points::builtins(s))
+            .child(installed::view(s)),
         Tab::Connections if !adding => col.child(connections::view(s)),
         Tab::Browse if !adding && selected.is_none() => col.child(browse::view(s)),
         _ => col,

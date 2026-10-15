@@ -413,7 +413,7 @@ pub enum Place {
     Windows,
     /// An item in a menu: a card's, the grid's, the View menu or a worktree's.
     Menus,
-    /// A dialog a call opens by answering `{"show": "<id>"}`.
+    /// A dialog a call opens by answering `{"open": "<id>"}`.
     Dialogs,
 }
 

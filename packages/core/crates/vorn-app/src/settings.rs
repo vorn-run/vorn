@@ -3,11 +3,10 @@
 //! derive from vornd's answers (`update-status.ts`, `server-runtime.ts`,
 //! the worktree manager's totals and selection).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use crate::look;
 
 /// A panel of the settings page (`SettingsCategory`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -17,7 +16,6 @@ pub enum Category {
     General,
     Updates,
     Notifications,
-    Worktrees,
     Agents,
     Ssh,
     Mcp,
@@ -35,7 +33,6 @@ impl Category {
             "general" => Category::General,
             "updates" => Category::Updates,
             "notifications" => Category::Notifications,
-            "worktrees" => Category::Worktrees,
             "agents" => Category::Agents,
             "ssh" => Category::Ssh,
             "mcp" => Category::Mcp,
@@ -53,7 +50,6 @@ impl Category {
             Category::General => "General",
             Category::Updates => "Updates",
             Category::Notifications => "Notifications",
-            Category::Worktrees => "Worktrees",
             Category::Agents => "Coding Agents",
             Category::Ssh => "SSH & Hosts",
             Category::Mcp => "Skills & MCP",
@@ -85,7 +81,6 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
             Category::General,
             Category::Updates,
             Category::Notifications,
-            Category::Worktrees,
         ],
     ),
     (
@@ -127,19 +122,6 @@ pub enum SetAct {
     UpdateNow,
     /// The sidebar's update notice put away; the gear keeps a dot.
     DismissUpdate,
-    // Worktrees.
-    Rescan,
-    ToggleWorktree(String),
-    SelectSuggested,
-    AskReclaim,
-    Reclaim,
-    AskRemove,
-    Remove,
-    ClearSelection,
-    ExpandBranches(String),
-    ToggleBranch(String, String),
-    SelectMerged(String),
-    DeleteBranches(String),
     // Coding agents.
     Redetect,
     ResetAgent(String),
@@ -430,292 +412,6 @@ pub fn describe_server(server: &str, app: &str, adopted: bool) -> (String, &'sta
     )
 }
 
-/// `formatBytes`: binary units, as `du -h` prints them.
-pub fn format_bytes(bytes: f64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    if !bytes.is_finite() || bytes <= 0.0 {
-        return "0 B".to_owned();
-    }
-    let (mut value, mut unit) = (bytes, 0);
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    let decimals = if unit <= 1 || value >= 10.0 { 0 } else { 1 };
-    format!("{value:.decimals$} {}", UNITS[unit])
-}
-
-/// One worktree the manager measured (`WorktreeInventoryEntry`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct WtEntry {
-    pub path: String,
-    pub name: String,
-    pub project_path: String,
-    pub orphan: bool,
-    pub branch: Option<String>,
-    pub main: bool,
-    pub size: f64,
-    pub artifacts: f64,
-    pub measured: bool,
-    pub idle_days: Option<i64>,
-    pub dirty: bool,
-    pub merged: bool,
-    pub active: usize,
-    pub level: String,
-    pub reasons: Vec<String>,
-    pub auto_select: bool,
-}
-
-impl WtEntry {
-    fn from_value(v: &Value) -> Option<WtEntry> {
-        let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
-        let n = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-        let b = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-        let verdict = v.get("verdict");
-        Some(WtEntry {
-            path: s("path")?,
-            name: s("name").unwrap_or_default(),
-            project_path: s("projectPath").unwrap_or_default(),
-            orphan: s("kind").as_deref() == Some("orphan-dir"),
-            branch: s("branch"),
-            main: b("isMain"),
-            size: n("sizeBytes"),
-            artifacts: n("artifactBytes"),
-            measured: b("sizeMeasured"),
-            idle_days: v.get("idleDays").and_then(Value::as_i64),
-            dirty: b("isDirty"),
-            merged: b("isMerged"),
-            active: v
-                .get("activeSessionIds")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len),
-            level: verdict
-                .and_then(|d| d.get("level"))
-                .and_then(Value::as_str)
-                .unwrap_or("keep")
-                .to_owned(),
-            reasons: verdict
-                .and_then(|d| d.get("reasons"))
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|r| r.as_str().map(str::to_owned))
-                .collect(),
-            auto_select: verdict
-                .and_then(|d| d.get("autoSelect"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        })
-    }
-
-    /// `isSelectable`: not the main checkout, and nothing running in it.
-    pub fn selectable(&self) -> bool {
-        !self.main && self.active == 0
-    }
-
-    /// `idleLabel`.
-    pub fn idle(&self) -> String {
-        match self.idle_days {
-            None => "\u{2014}".to_owned(),
-            Some(0) => "today".to_owned(),
-            Some(d) => format!("{d}d idle"),
-        }
-    }
-}
-
-/// `VERDICT_STYLES`: a verdict's label and its text and fill colours.
-pub fn verdict_style(level: &str) -> (&'static str, u32, u32, f32) {
-    match level {
-        "review" => ("Review", look::AMBER_300, look::AMBER_500, 0.12),
-        "reclaim" => ("Build output only", look::BLUE_300, look::BLUE_500, 0.12),
-        "remove" => ("Removable", look::BLUE_300, look::BLUE_500, 0.12),
-        "orphan" => ("Orphan directory", look::RED_300, look::RED_500, 0.12),
-        _ => ("Keep", look::GRAY_400, look::WHITE, 0.05),
-    }
-}
-
-/// A branch a removed worktree left behind (`StaleBranch`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stale {
-    pub name: String,
-    pub merged: bool,
-}
-
-/// One project's worktrees (`WorktreeProjectInventory`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct WtProject {
-    pub path: String,
-    pub name: String,
-    pub default_branch: Option<String>,
-    pub remote: bool,
-    pub entries: Vec<WtEntry>,
-    pub stale: Vec<Stale>,
-    pub error: Option<String>,
-}
-
-/// `worktree:inventory`'s projects.
-pub fn inventory(v: &Value) -> Vec<WtProject> {
-    v.get("projects")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            let s = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_owned);
-            Some(WtProject {
-                path: s("projectPath")?,
-                name: s("projectName").unwrap_or_default(),
-                default_branch: s("defaultBranch"),
-                remote: p.get("remoteHostId").is_some_and(|r| !r.is_null()),
-                entries: p
-                    .get("entries")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(WtEntry::from_value)
-                    .collect(),
-                stale: p
-                    .get("staleBranches")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|b| {
-                        Some(Stale {
-                            name: b.get("name")?.as_str()?.to_owned(),
-                            merged: b.get("isMerged").and_then(Value::as_bool).unwrap_or(false),
-                        })
-                    })
-                    .collect(),
-                error: s("error"),
-            })
-        })
-        .collect()
-}
-
-/// The summary card's three numbers: on disk, build output in selectable
-/// worktrees, and removable worktrees.
-pub fn totals(projects: &[WtProject]) -> (f64, f64, f64) {
-    let (mut disk, mut artifacts, mut removable) = (0.0, 0.0, 0.0);
-    for e in projects.iter().flat_map(|p| &p.entries) {
-        disk += e.size;
-        if e.selectable() {
-            artifacts += e.artifacts;
-            if e.level == "remove" || e.level == "orphan" {
-                removable += e.size;
-            }
-        }
-    }
-    (disk, artifacts, removable)
-}
-
-/// The worktree manager's page state.
-#[derive(Debug, Default)]
-pub struct WorktreesPage {
-    pub projects: Option<Vec<WtProject>>,
-    pub loading: bool,
-    pub busy: bool,
-    pub selected: BTreeSet<String>,
-    /// Stale branches chosen, as (project path, branch).
-    pub branches: BTreeSet<(String, String)>,
-    /// Projects whose stale-branch strip is open.
-    pub expanded: HashSet<String>,
-    /// Which destructive action shows its spelled-out second step.
-    pub confirming: Option<SetAct>,
-}
-
-impl WorktreesPage {
-    pub fn entries(&self) -> impl Iterator<Item = &WtEntry> {
-        self.projects.iter().flatten().flat_map(|p| &p.entries)
-    }
-
-    /// Drops selections the rescan no longer reports.
-    pub fn prune(&mut self) {
-        let live: HashSet<String> = self.entries().map(|e| e.path.clone()).collect();
-        self.selected.retain(|p| live.contains(p));
-        let stale: HashSet<(String, String)> = self
-            .projects
-            .iter()
-            .flatten()
-            .flat_map(|p| p.stale.iter().map(|b| (p.path.clone(), b.name.clone())))
-            .collect();
-        self.branches.retain(|b| stale.contains(b));
-    }
-
-    pub fn chosen(&self) -> Vec<&WtEntry> {
-        self.entries()
-            .filter(|e| self.selected.contains(&e.path))
-            .collect()
-    }
-
-    /// Worktrees with build output to reclaim.
-    pub fn reclaim_targets(&self) -> Vec<String> {
-        self.entries()
-            .filter(|e| e.selectable() && e.artifacts > 0.0)
-            .map(|e| e.path.clone())
-            .collect()
-    }
-
-    pub fn suggested(&self) -> BTreeSet<String> {
-        self.entries()
-            .filter(|e| e.selectable() && e.auto_select)
-            .map(|e| e.path.clone())
-            .collect()
-    }
-}
-
-/// The selection bar's warnings.
-pub fn selection_warnings(chosen: &[&WtEntry]) -> Vec<String> {
-    let dirty = chosen.iter().filter(|e| e.dirty).count();
-    let unmerged = chosen.iter().filter(|e| !e.orphan && !e.merged).count();
-    let orphans = chosen.iter().filter(|e| e.orphan).count();
-    let mut out = Vec::new();
-    if dirty > 0 {
-        let verb = if dirty == 1 { "has" } else { "have" };
-        out.push(format!(
-            "{dirty} {verb} uncommitted changes that will be lost"
-        ));
-    }
-    if unmerged > 0 {
-        out.push(format!("{unmerged} not merged \u{2014} the branch is kept"));
-    }
-    if orphans > 0 {
-        out.push(format!("{orphans} deleted from disk directly"));
-    }
-    out
-}
-
-/// `reportResult`: the toasts a batch's answer raises, success first.
-pub fn report(result: &Value, verb: &str) -> Vec<(String, bool)> {
-    let mut out = Vec::new();
-    let succeeded = result
-        .get("succeeded")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let freed = result
-        .get("freedBytes")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
-    if succeeded > 0 {
-        let freed = if freed > 0.0 {
-            format!(" \u{b7} freed {}", format_bytes(freed))
-        } else {
-            String::new()
-        };
-        out.push((format!("{verb} {succeeded}{freed}"), false));
-    }
-    for f in result
-        .get("failed")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let path = f.get("path").and_then(Value::as_str).unwrap_or("");
-        let name = path.rsplit('/').next().unwrap_or(path);
-        let err = f.get("error").and_then(Value::as_str).unwrap_or("");
-        out.push((format!("{name}: {err}"), true));
-    }
-    out
-}
-
 /// One of `credential:listKeys`'s stored SSH keys (`SSHKeyMeta`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshKey {
@@ -992,6 +688,8 @@ pub struct CliState {
 pub struct Settings {
     pub open: bool,
     pub category: Category,
+    /// An extension's settings page shown in place of the category's, by point key.
+    pub ext_page: Option<String>,
     pub shells: Option<Vec<Shell>>,
     /// The shell picker's typed path, while it is shown.
     pub shell_editing: bool,
@@ -1001,7 +699,6 @@ pub struct Settings {
     pub update: Option<UpdateStatus>,
     /// The sidebar's ready-update notice was dismissed (`updateBannerDismissed`).
     pub update_dismissed: bool,
-    pub worktrees: WorktreesPage,
     pub detecting: bool,
     pub agents_open: HashSet<String>,
     /// The agent whose install command was copied, and until when.
@@ -1342,78 +1039,6 @@ mod tests {
         assert_eq!(
             update_cost(3, true, false).as_deref(),
             Some("Your 3 sessions end with the update. The turn in flight is cut short.")
-        );
-    }
-
-    #[test]
-    fn bytes_read_as_du_prints_them() {
-        assert_eq!(format_bytes(0.0), "0 B");
-        assert_eq!(format_bytes(512.0), "512 B");
-        assert_eq!(format_bytes(2048.0), "2 KB");
-        assert_eq!(format_bytes(1.9 * 1024.0 * 1024.0 * 1024.0), "1.9 GB");
-        assert_eq!(format_bytes(12.4 * 1024.0 * 1024.0), "12 MB");
-    }
-
-    fn entry(path: &str, level: &str, size: f64, art: f64) -> Value {
-        json!({ "path": path, "name": path, "projectPath": "/p", "kind": "registered",
-            "branch": "b", "isMain": false, "sizeBytes": size, "artifactBytes": art,
-            "sizeMeasured": true, "idleDays": 3, "isDirty": false, "isMerged": true,
-            "activeSessionIds": [],
-            "verdict": { "level": level, "reasons": ["merged"], "autoSelect": level == "remove" } })
-    }
-
-    #[test]
-    fn worktree_totals_count_only_what_can_be_selected() {
-        let mut busy = entry("/w/b", "remove", 100.0, 40.0);
-        busy["activeSessionIds"] = json!(["s"]);
-        let inv = json!({ "projects": [{ "projectPath": "/p", "projectName": "p",
-            "entries": [entry("/w/a", "remove", 1000.0, 200.0), busy, entry("/w/c", "keep", 50.0, 0.0)],
-            "staleBranches": [{ "name": "old", "isMerged": true }] }] });
-        let projects = inventory(&inv);
-        assert_eq!(totals(&projects), (1150.0, 200.0, 1000.0));
-        let mut page = WorktreesPage {
-            projects: Some(projects),
-            ..WorktreesPage::default()
-        };
-        assert_eq!(
-            page.suggested().into_iter().collect::<Vec<_>>(),
-            vec!["/w/a"]
-        );
-        assert_eq!(page.reclaim_targets(), vec!["/w/a".to_owned()]);
-        page.selected.insert("/gone".into());
-        page.selected.insert("/w/a".into());
-        page.branches.insert(("/p".into(), "gone".into()));
-        page.prune();
-        assert_eq!(page.selected.len(), 1);
-        assert!(page.branches.is_empty());
-    }
-
-    #[test]
-    fn the_selection_bar_warns_about_what_is_lost() {
-        let mut a = WtEntry::from_value(&entry("/w/a", "remove", 1.0, 0.0)).expect("entry");
-        a.dirty = true;
-        a.merged = false;
-        let mut b = a.clone();
-        b.dirty = false;
-        b.orphan = true;
-        assert_eq!(
-            selection_warnings(&[&a, &b]),
-            vec![
-                "1 has uncommitted changes that will be lost".to_owned(),
-                "1 not merged \u{2014} the branch is kept".to_owned(),
-                "1 deleted from disk directly".to_owned()
-            ]
-        );
-        let r = report(
-            &json!({ "succeeded": ["/w/a"], "failed": [{ "path": "/w/b", "error": "busy" }], "freedBytes": 2048 }),
-            "Removed",
-        );
-        assert_eq!(
-            r,
-            vec![
-                ("Removed 1 \u{b7} freed 2 KB".to_owned(), false),
-                ("b: busy".to_owned(), true)
-            ]
         );
     }
 

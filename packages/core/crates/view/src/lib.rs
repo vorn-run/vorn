@@ -263,14 +263,12 @@ impl Row {
 
 /// Where a template's rows come from, as a client keeps them.
 pub trait Source {
-    /// The rows of `collection`, or those whose `field` is `value`.
-    fn count(&self, collection: &str, matching: Option<(&str, &str)>) -> usize;
-    fn first(&self, collection: &str) -> Option<&Row>;
-}
+    /// The rows of `collection`, in the order published.
+    fn rows(&self, collection: &str) -> &[Row];
 
-impl Source for BTreeMap<String, Vec<Row>> {
+    /// How many rows `collection` has, or how many whose `field` is `value`.
     fn count(&self, collection: &str, matching: Option<(&str, &str)>) -> usize {
-        let rows = self.get(collection).map_or(&[][..], Vec::as_slice);
+        let rows = self.rows(collection);
         match matching {
             None => rows.len(),
             Some((f, v)) => rows.iter().filter(|r| r.text(f) == v).count(),
@@ -278,7 +276,13 @@ impl Source for BTreeMap<String, Vec<Row>> {
     }
 
     fn first(&self, collection: &str) -> Option<&Row> {
-        self.get(collection).and_then(|r| r.first())
+        self.rows(collection).first()
+    }
+}
+
+impl Source for BTreeMap<String, Vec<Row>> {
+    fn rows(&self, collection: &str) -> &[Row] {
+        self.get(collection).map_or(&[][..], Vec::as_slice)
     }
 }
 

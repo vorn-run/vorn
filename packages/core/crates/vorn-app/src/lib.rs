@@ -46,8 +46,10 @@ pub mod onboarding;
 pub mod page;
 pub mod paint;
 pub mod palette;
+pub mod panel;
 pub mod panes;
 pub mod plugins;
+pub mod points;
 pub mod runs;
 pub mod screen;
 pub mod scroll;
@@ -68,7 +70,6 @@ pub mod update;
 pub mod vars;
 pub mod view;
 pub mod web;
-pub mod widget;
 pub mod workflows;
 
 /// Vorn's composed components, built on [`ui`].

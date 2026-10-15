@@ -12,7 +12,7 @@ use crate::screen::settings::{
     host_id, key_field_id, rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER,
 };
 use crate::settings::{
-    self, report, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState,
+    self, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState,
     SetAct, Shell, SshKey, TestResult,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
@@ -20,11 +20,6 @@ use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 /// A settings call whose answer changes the page.
 pub(super) enum SetCall {
     Shells,
-    Inventory,
-    /// A worktree batch; its toasts say `verb`.
-    Batch(&'static str),
-    /// `git:deleteBranches`, reported as a batch.
-    Branches,
     SshKeys,
     KeySaved,
     Test(String),
@@ -41,62 +36,6 @@ impl App {
         match call {
             SetCall::Shells => {
                 st.shells = Some(list(answer).iter().filter_map(Shell::from_value).collect());
-            }
-            SetCall::Inventory => {
-                let page = &mut st.worktrees;
-                page.loading = false;
-                match answer {
-                    Ok(v) => {
-                        page.projects = Some(settings::inventory(&v));
-                        page.prune();
-                    }
-                    Err(e) => self.st.toast(e.to_string(), true),
-                }
-            }
-            SetCall::Batch(verb) => {
-                st.worktrees.busy = false;
-                match answer {
-                    Ok(v) => {
-                        let all_failed = v
-                            .get("succeeded")
-                            .and_then(Value::as_array)
-                            .is_some_and(Vec::is_empty)
-                            && v.get("failed")
-                                .and_then(Value::as_array)
-                                .is_some_and(|f| !f.is_empty());
-                        let lines = report(&v, verb);
-                        if all_failed {
-                            if let Some((t, _)) = lines.into_iter().find(|(_, e)| *e) {
-                                self.st.toast(t, true);
-                            }
-                        } else {
-                            for (t, e) in lines {
-                                self.st.toast(t, e);
-                            }
-                        }
-                    }
-                    Err(e) => self.st.toast(e.to_string(), true),
-                }
-                self.rescan();
-            }
-            SetCall::Branches => {
-                st.worktrees.busy = false;
-                match answer {
-                    Ok(v) => {
-                        let as_batch = json!({
-                            "succeeded": v.get("deleted").cloned().unwrap_or(json!([])),
-                            "failed": v.get("failed").and_then(Value::as_array).into_iter().flatten()
-                                .map(|f| json!({ "path": f.get("branch"), "error": f.get("error") }))
-                                .collect::<Vec<_>>(),
-                            "freedBytes": 0,
-                        });
-                        for (t, e) in report(&as_batch, "Deleted") {
-                            self.st.toast(t, e);
-                        }
-                    }
-                    Err(e) => self.st.toast(e.to_string(), true),
-                }
-                self.rescan();
             }
             SetCall::SshKeys => {
                 if let Ok(v) = answer {
@@ -190,15 +129,6 @@ impl App {
         }
     }
 
-    fn rescan(&mut self) {
-        self.st.settings.worktrees.loading = true;
-        self.call(
-            Call::Set(SetCall::Inventory),
-            "worktree:inventory",
-            json!({ "refresh": true }),
-        );
-    }
-
     fn load_ssh_keys(&mut self) {
         self.call(
             Call::Set(SetCall::SshKeys),
@@ -212,7 +142,7 @@ impl App {
         let s = &mut self.st.settings;
         s.open = true;
         s.category = cat;
-        s.worktrees.confirming = None;
+        s.ext_page = None;
         match cat {
             Category::General => {
                 if s.shells.is_none() {
@@ -224,16 +154,6 @@ impl App {
                 }
                 if !crate::settings::IN_BROWSER {
                     self.st.settings.cli = Some(crate::cli_link::state());
-                }
-            }
-            Category::Worktrees => {
-                if s.worktrees.projects.is_none() {
-                    s.worktrees.loading = true;
-                    self.call(
-                        Call::Set(SetCall::Inventory),
-                        "worktree:inventory",
-                        json!({ "refresh": false }),
-                    );
                 }
             }
             Category::Ssh => self.load_ssh_keys(),
@@ -448,91 +368,6 @@ impl App {
             SetAct::CheckUpdates => self.check_updates(),
             SetAct::UpdateNow => self.update_action(),
             SetAct::DismissUpdate => self.st.settings.update_dismissed = true,
-            SetAct::Rescan => self.rescan(),
-            SetAct::ToggleWorktree(p) => {
-                let w = &mut self.st.settings.worktrees;
-                w.confirming = None;
-                if !w.selected.remove(&p) {
-                    w.selected.insert(p);
-                }
-            }
-            SetAct::SelectSuggested => {
-                let w = &mut self.st.settings.worktrees;
-                w.confirming = None;
-                w.selected = w.suggested();
-            }
-            SetAct::AskReclaim | SetAct::AskRemove => {
-                let w = &mut self.st.settings.worktrees;
-                w.confirming = if w.confirming.as_ref() == Some(&a) {
-                    None
-                } else {
-                    Some(a)
-                };
-            }
-            SetAct::ClearSelection => {
-                let w = &mut self.st.settings.worktrees;
-                w.selected.clear();
-                w.confirming = None;
-            }
-            SetAct::Reclaim => {
-                let w = &mut self.st.settings.worktrees;
-                if w.busy {
-                    return;
-                }
-                let paths = w.reclaim_targets();
-                w.busy = true;
-                w.confirming = None;
-                self.call(
-                    Call::Set(SetCall::Batch("Reclaimed")),
-                    "worktree:reclaimArtifacts",
-                    json!({ "paths": paths }),
-                );
-            }
-            SetAct::Remove => self.remove_worktrees(),
-            SetAct::ExpandBranches(p) => {
-                let e = &mut self.st.settings.worktrees.expanded;
-                if !e.remove(&p) {
-                    e.insert(p);
-                }
-            }
-            SetAct::ToggleBranch(p, b) => {
-                let s = &mut self.st.settings.worktrees.branches;
-                let k = (p, b);
-                if !s.remove(&k) {
-                    s.insert(k);
-                }
-            }
-            SetAct::SelectMerged(p) => {
-                let w = &mut self.st.settings.worktrees;
-                let merged: Vec<String> = w
-                    .projects
-                    .iter()
-                    .flatten()
-                    .filter(|x| x.path == p)
-                    .flat_map(|x| x.stale.iter().filter(|b| b.merged).map(|b| b.name.clone()))
-                    .collect();
-                for b in merged {
-                    w.branches.insert((p.clone(), b));
-                }
-            }
-            SetAct::DeleteBranches(p) => {
-                let w = &mut self.st.settings.worktrees;
-                let names: Vec<String> = w
-                    .branches
-                    .iter()
-                    .filter(|(proj, _)| *proj == p)
-                    .map(|(_, b)| b.clone())
-                    .collect();
-                if names.is_empty() || w.busy {
-                    return;
-                }
-                w.busy = true;
-                self.call(
-                    Call::Set(SetCall::Branches),
-                    "git:deleteBranches",
-                    json!({ "projectPath": p, "branches": names, "force": false }),
-                );
-            }
             SetAct::Redetect => {
                 self.st.settings.detecting = true;
                 self.call(
@@ -759,42 +594,6 @@ impl App {
                     outcome.err().map(|d| format!("Could not end them: {d}."));
                 self.health = Some(health(self.port));
             }
-        }
-    }
-
-    fn remove_worktrees(&mut self) {
-        let w = &mut self.st.settings.worktrees;
-        if w.busy {
-            return;
-        }
-        let chosen = w.chosen();
-        let items: Vec<Value> = chosen
-            .iter()
-            .filter(|e| !e.orphan)
-            .map(|e| {
-                json!({ "projectPath": e.project_path, "worktreePath": e.path, "force": e.dirty, "deleteBranch": e.merged })
-            })
-            .collect();
-        let orphans: Vec<String> = chosen
-            .iter()
-            .filter(|e| e.orphan)
-            .map(|e| e.path.clone())
-            .collect();
-        w.busy = true;
-        w.confirming = None;
-        if !items.is_empty() {
-            self.call(
-                Call::Set(SetCall::Batch("Removed")),
-                "worktree:removeMany",
-                json!({ "items": items }),
-            );
-        }
-        if !orphans.is_empty() {
-            self.call(
-                Call::Set(SetCall::Batch("Removed")),
-                "worktree:pruneOrphans",
-                json!({ "paths": orphans }),
-            );
         }
     }
 

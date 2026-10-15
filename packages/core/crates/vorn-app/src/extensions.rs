@@ -183,6 +183,14 @@ impl Extensions {
     }
 }
 
+/// What a template pane's nonce starts with: the client draws it, so vornd holds no grant.
+pub const VIEW_NONCE: &str = "view:";
+
+/// The point key of a template pane, when `p` is one.
+pub fn view_key(p: &OpenPane) -> Option<String> {
+    p.nonce.strip_prefix(VIEW_NONCE).map(str::to_owned)
+}
+
 fn panes_of(pack: Option<&Value>) -> Vec<&Value> {
     pack.and_then(|p| p.pointer("/contributes/panes"))
         .and_then(Value::as_array)

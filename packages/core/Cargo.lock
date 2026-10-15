@@ -6493,6 +6493,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-mirror",
  "vorn-term-proto",
+ "vorn-view",
  "vornui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -6533,6 +6534,7 @@ dependencies = [
 name = "vorn-components"
 version = "0.8.0-beta.12"
 dependencies = [
+ "vorn-view",
  "vornui",
 ]
 
