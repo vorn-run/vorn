@@ -338,13 +338,15 @@ const SET_AFTER_CREATE = ['order', 'completedAt', 'archivedAt']
  * their own calls, which the configuration no longer carries, for the next
  * call to start from.
  */
-async function reset(): Promise<void> {
+async function reset(rowsNow?: string): Promise<void> {
   const { rpcCall } = await import('../packages/mcp/src/rpc-client')
   const { tasks, workflows, ...config } = structuredClone(start) as AppConfig & {
     tasks: Row[]
     workflows: Row[]
   }
   await rpcCall('config:save', config)
+  // Most calls only read: their tasks and workflows are the restored ones still.
+  if (rowsNow !== undefined && rowsNow === restoredRows) return
   for (const t of await rpcCall<Row[]>('task:list', {})) await rpcCall('task:delete', { id: t.id })
   for (const w of await rpcCall<Row[]>('workflow:list')) {
     await rpcCall('workflow:delete', { id: w.id })
@@ -355,6 +357,16 @@ async function reset(): Promise<void> {
     await rpcCall('task:patch', { id: t.id, set })
   }
   for (const w of workflows) await rpcCall('workflow:create', { workflow: w })
+  restoredRows = rowsOf(await stored())
+}
+
+/** The tasks and workflows just after the last full restore, as {@link rowsOf} writes them. */
+let restoredRows: string | undefined
+
+/** The tasks and workflows of a {@link stored} reading, to tell whether a call changed them. */
+function rowsOf(config: unknown): string {
+  const { tasks, workflows } = config as { tasks: unknown; workflows: unknown }
+  return JSON.stringify([tasks, workflows])
 }
 
 /**
@@ -371,6 +383,9 @@ async function stored(): Promise<unknown> {
   return { ...config, tasks, workflows }
 }
 
+/** The tasks and workflows the last {@link both} left behind. */
+let lastRows: string | undefined
+
 /** One tool call on each side, each from the starting configuration. */
 async function both(name: string, args: Record<string, unknown> | undefined) {
   const id = nextId++
@@ -380,12 +395,13 @@ async function both(name: string, args: Record<string, unknown> | undefined) {
     method: 'tools/call',
     params: args === undefined ? { name } : { name, arguments: args }
   } as JSONRPCMessage
-  await reset()
+  await reset(lastRows)
   const theirs = await ts.send(call)
   const theirConfig = await stored()
-  await reset()
+  await reset(rowsOf(theirConfig))
   const ours = await rust.send(call)
   const ourConfig = await stored()
+  lastRows = rowsOf(ourConfig)
   return {
     theirs: comparable(theirs, theirConfig, fixtureIds),
     ours: comparable(ours, ourConfig, fixtureIds),

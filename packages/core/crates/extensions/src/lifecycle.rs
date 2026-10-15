@@ -438,7 +438,8 @@ mod tests {
     fn sleeper(name: &str) -> Result<Sleeper, String> {
         let launch = Launch {
             program: PathBuf::from("sh"),
-            args: vec!["-c".into(), "cat >/dev/null".into()],
+            // `exec`: a shell that forked `cat` would leave it holding the pipes once the shell is killed.
+            args: vec!["-c".into(), "exec cat >/dev/null".into()],
             cwd: std::env::temp_dir(),
             env: std::env::vars().filter(|(k, _)| k == "PATH").collect(),
         };
