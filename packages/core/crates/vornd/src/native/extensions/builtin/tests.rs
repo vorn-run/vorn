@@ -211,6 +211,24 @@ async fn lists_every_worktree_for_settings() {
     );
 }
 
+#[test]
+fn lists_what_each_adds_and_uses_for_settings() {
+    let s = setup();
+    let list = s.builtins.list();
+    let widget = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "vorn.widget")
+        .unwrap();
+    assert_eq!(widget["on"], false);
+    assert!(widget["contributes"]["windows"]
+        .as_array()
+        .is_some_and(|w| !w.is_empty()));
+    let uses = widget["declares"]["uses"].as_array().unwrap();
+    assert!(uses.iter().any(|u| u == "sessions.read"), "{uses:?}");
+}
+
 #[tokio::test]
 async fn the_widget_is_off_until_switched_on_and_kept_so() {
     let s = setup();
@@ -219,8 +237,10 @@ async fn the_widget_is_off_until_switched_on_and_kept_so() {
         .builtins
         .call("vorn.widget", "allow", json!({ "id": "r1" }))
         .await
-        .unwrap();
-    assert_eq!(off.unwrap_err().code, "off");
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(off.code, "off");
+    assert!(off.message.ends_with("Settings › Extensions"), "{off}");
     assert!(s
         .builtins
         .contributions()

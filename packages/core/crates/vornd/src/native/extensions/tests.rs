@@ -676,6 +676,19 @@ async fn a_linked_program_answers_and_is_removed_without_trace() {
     for file in ["vorn-extension.toml", "greet.sh"] {
         fs::copy(fixture.join(file), folder.path().join(file)).unwrap();
     }
+    let sheet = result(
+        w.call(
+            "extension:inspect",
+            json!({ "url": folder.path(), "link": true }),
+        )
+        .await,
+    );
+    assert_eq!(
+        (sheet["confirm"].as_str(), sheet["token"].as_str()),
+        (Some("test.hello"), Some(""))
+    );
+    assert!(sheet["source"]["linked"].is_string());
+    assert!(!w.ext.owns("test.hello:greet"));
     let linked = result(
         w.call("extension:link", json!({ "path": folder.path() }))
             .await,
@@ -727,4 +740,14 @@ async fn a_linked_program_answers_and_is_removed_without_trace() {
         again,
         Answer::Error("No extension \"test.hello\" is installed".into())
     );
+}
+
+/// A folder typed on the web client as `~/…` is this machine's home.
+#[test]
+fn a_typed_home_path_is_this_machines() {
+    let home = crate::native::shell::home_dir();
+    assert_eq!(super::home_path(" ~/dev/ext "), format!("{home}/dev/ext"));
+    assert_eq!(super::home_path("~"), home);
+    assert_eq!(super::home_path("~other/x"), "~other/x");
+    assert_eq!(super::home_path("https://x/y"), "https://x/y");
 }

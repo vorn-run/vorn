@@ -333,8 +333,6 @@ mod win {
 /// What the OS is asked to choose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pick {
-    /// An existing connector pack.
-    Pack(String),
     /// An existing folder.
     Folder(String),
     /// An existing workflow file.
@@ -390,7 +388,7 @@ pub fn pick(
 fn run_picker(what: Pick) -> Option<PathBuf> {
     let attempts: Vec<std::process::Command> = if cfg!(target_os = "macos") {
         let script = match &what {
-            Pick::Folder(_) | Pick::Pack(_) => {
+            Pick::Folder(_) => {
                 "POSIX path of (choose folder with prompt (item 1 of argv))"
             }
             Pick::Save { .. } => {
@@ -404,7 +402,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
         vec![c]
     } else if cfg!(windows) {
         let (script, filter) = match &what {
-            Pick::Folder(_) | Pick::Pack(_) => (WINDOWS_FOLDER, ""),
+            Pick::Folder(_) => (WINDOWS_FOLDER, ""),
             Pick::Save { .. } => (WINDOWS_SAVE, WORKFLOW_FILTER),
             Pick::Workflow(_) => (WINDOWS_OPEN, WORKFLOW_FILTER),
         };
@@ -423,7 +421,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
         z.args(["--file-selection", "--title", title]);
         let mut k = vorn_spawn::command("kdialog");
         match &what {
-            Pick::Folder(_) | Pick::Pack(_) => {
+            Pick::Folder(_) => {
                 z.arg("--directory");
                 k.args(["--getexistingdirectory", "."]);
             }
@@ -453,7 +451,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn pick_args(what: &Pick) -> Vec<String> {
     match what {
-        Pick::Pack(t) | Pick::Folder(t) | Pick::Workflow(t) => vec![t.clone()],
+        Pick::Folder(t) | Pick::Workflow(t) => vec![t.clone()],
         Pick::Save { title, at } => {
             let name = at.file_name().unwrap_or_default().to_string_lossy();
             let dir = at.parent().unwrap_or(at).to_string_lossy();

@@ -1245,6 +1245,24 @@ pub(super) fn open_url(url: &str) {
     }
 }
 
+/// Shows a folder in the system's file manager.
+pub(super) fn open_folder(path: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(windows) {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        // spawn-visible: the file manager shows the folder; nothing to do without one.
+        let _ = std::process::Command::new(opener).arg(path).spawn();
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = path;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

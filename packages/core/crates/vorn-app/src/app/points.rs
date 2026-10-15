@@ -29,6 +29,11 @@ pub(super) enum PointCall {
     Builtins,
     /// A sign-in action's window target, asked of the extension; the key it opens for.
     SignIn(String),
+    /// A built-in switched; it goes back to `was` if vornd refuses.
+    SetBuiltin {
+        id: String,
+        was: bool,
+    },
 }
 
 /// A window point's process and the lines it writes.
@@ -127,13 +132,19 @@ impl App {
                 self.st.settings.open = true;
             }
             PointAct::Builtin { id, on } => {
-                for b in &mut self.st.points.builtins {
-                    if s(b, "id") == Some(id.as_str()) {
-                        b["on"] = json!(on);
-                    }
+                let pts = &mut self.st.points;
+                if pts.switching.is_some() {
+                    return;
                 }
+                pts.set_builtin(&id, on);
+                pts.switching = Some(id.clone());
+                pts.switch_error = None;
+                pts.off_note = (!on).then(|| id.clone());
                 self.call(
-                    Call::Point(PointCall::Builtins),
+                    Call::Point(PointCall::SetBuiltin {
+                        id: id.clone(),
+                        was: !on,
+                    }),
                     "extension:setBuiltin",
                     json!({ "id": id, "on": on }),
                 );
@@ -227,6 +238,15 @@ impl App {
                     self.st.toast(e, true);
                 }
             }
+            PointCall::SetBuiltin { id, was } => {
+                let pts = &mut self.st.points;
+                pts.switching = None;
+                if let Err(e) = answer {
+                    pts.set_builtin(&id, was);
+                    pts.off_note = None;
+                    pts.switch_error = Some((id, e.to_string()));
+                }
+            }
             PointCall::Builtins => match answer {
                 Ok(Value::Array(list)) => {
                     self.st.points.builtins = list;
@@ -299,7 +319,8 @@ impl App {
                 json!({ "id": ext, "collection": coll }),
             );
         }
-        if !self.st.points.builtins_loaded && self.st.settings.open {
+        let palette = self.st.dialog == Some(crate::state::Dialog::Palette);
+        if !self.st.points.builtins_loaded && (self.st.settings.open || palette) {
             self.st.points.builtins_loaded = true;
             self.call(
                 Call::Point(PointCall::Builtins),

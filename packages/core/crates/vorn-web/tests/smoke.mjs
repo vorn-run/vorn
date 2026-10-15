@@ -2,7 +2,8 @@
 // per renderer: it signs in, opens a terminal, types, and waits for the echo.
 // `pair` pairs a fresh browser with a code instead, as a phone does.
 // `templates` opens the example extension's settings page and works its
-// choice, secret field, Sign in button and more menu.
+// choice, secret field, Sign in button and more menu, then Settings ›
+// Extensions and the Connectors built-in's Connections page.
 //   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
@@ -172,6 +173,26 @@ async function templates(page) {
   await press(page, '[role="button"][aria-label="More"]', 'the more button')
   await press(page, '[role="menuitem"][aria-label="Forget account"]', "the menu's entry")
   await until('the confirm', async () => (await mirrored(page)).includes('Forget Turns account?'))
+  await page.keyboard.press('Escape')
+  await extensions(page)
+}
+
+/** Settings › Extensions lists Connectors among the built-ins; Connections is its page. */
+async function extensions(page) {
+  await until('the confirm closed', async () => !(await mirrored(page)).includes('Forget Turns account?'))
+  if (!(await mirrored(page)).split('\n').includes('button:Extensions')) {
+    await press(page, '[role="button"][aria-label="Settings"]', 'the Settings button')
+  }
+  await press(page, '[role="button"][aria-label="Extensions"]', 'the Extensions page')
+  for (const shown of ['button:Install\u2026', 'button:About Connectors', 'button:About Turns']) {
+    await until(shown, async () => (await mirrored(page)).split('\n').includes(shown))
+  }
+  if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: join(shots, 'web-extensions.png') }))
+  await press(page, '[role="button"][aria-label="Connections"]', 'the Connections page')
+  await until('button:Add connection', async () =>
+    (await mirrored(page)).split('\n').includes('button:Add connection')
+  )
+  if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: join(shots, 'web-connections.png') }))
 }
 
 async function run(what, vornd, server) {

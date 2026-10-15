@@ -187,7 +187,7 @@ fn shortcuts(s: &Screen<'_>) -> El {
     backdrop(s, 0.4).child(panel.absolute(x, s.size.1 * 0.15))
 }
 
-pub(super) fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
+pub(in crate::screen) fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
     let id = s.acts.on("dialog-backdrop", Act::CloseDialog);
     crate::ui::widgets::scrim(id, s.size, alpha)
 }
@@ -523,6 +523,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Palette => super::palette::palette(s),
         Dialog::Welcome => super::onboarding::modal(s)?,
         Dialog::SignIn => super::signin::sheet(s)?,
+        Dialog::ExtInstall => super::plugins::dialog(s)?,
     })
 }
 

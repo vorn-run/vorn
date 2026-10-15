@@ -1,5 +1,5 @@
-//! Settings › Plugins on a vornd with its own HOME: the tabs, a listing's
-//! detail, the add forms and a connection made from one.
+//! Settings › Extensions and Connections on a vornd with its own HOME: the
+//! tabs, a listing's detail, the add forms and a connection made from one.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
@@ -10,8 +10,9 @@ use serde_json::json;
 use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
-use vorn_app::plugins::{field_id, Field, Form, PlugAct, Tab};
-use vorn_app::settings::{Category, SetAct};
+use vorn_app::plugins::{field_id, tabs_id, Field, Form, PlugAct, Tab};
+use vorn_app::points::PointAct;
+use vorn_app::settings::{Category, SetAct, CONNECTIONS_PAGE};
 use vorn_app::templates::{self, Fix};
 use vorn_app::ui::mods;
 use vorn_app::workflows::{Panel, WfAct};
@@ -19,6 +20,12 @@ use vorn_app::App;
 
 fn plug(place: &str, act: PlugAct) -> vorn_app::ui::Id {
     App::control(place, &Act::Plug(act))
+}
+
+/// The Installed or Browse pill.
+fn tab(t: Tab) -> vorn_app::ui::Id {
+    let i = Tab::ALL.iter().position(|x| *x == t).unwrap_or(0);
+    vorn_app::ui::widgets::item_id(tabs_id(), i)
 }
 
 fn loaded(app: &App) -> bool {
@@ -48,9 +55,11 @@ fn plugins_page_lists_adds_and_connects() {
         loaded(app).then_some(())
     });
     assert!(app.st.shown(Category::Connectors));
-    // Nothing installed yet, so it opens on Browse, as the renderer does.
-    assert_eq!(app.st.plugins.tab, Tab::Browse);
+    // It opens on what is installed, the built-ins first.
+    assert_eq!(app.st.plugins.tab, Tab::Installed);
     assert!(app.st.plugins.listing("http").is_some(), "HTTP is built in");
+    shot.save(&mut app, "pl-installed");
+    shot.click(&mut app, tab(Tab::Browse));
     shot.save(&mut app, "pl-browse");
 
     // Search narrows the list.
@@ -65,11 +74,29 @@ fn plugins_page_lists_adds_and_connects() {
     shot.frame(&mut app);
     assert!(!app.st.plugins.filtered().is_empty());
 
-    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Installed)));
-    shot.save(&mut app, "pl-installed");
+    // Connections is the Connectors built-in's page, listed under Extensions.
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav-ext",
+            &Act::Point(PointAct::Settings(CONNECTIONS_PAGE.into())),
+        ),
+    );
+    assert_eq!(app.st.settings.ext_page.as_deref(), Some(CONNECTIONS_PAGE));
+    shot.save(&mut app, "pl-connections");
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    shot.until(&mut app, "the page reloaded", |app, _| {
+        loaded(app).then_some(())
+    });
 
     // A listing's detail, from Browse.
-    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Browse)));
+    shot.click(&mut app, tab(Tab::Browse));
     shot.click(
         &mut app,
         plug("plug-browse-row", PlugAct::Select(Some("http".into()))),
@@ -110,7 +137,7 @@ fn plugins_page_lists_adds_and_connects() {
     shot.click(&mut app, plug("plug-save", PlugAct::Save));
     shot.until(&mut app, "the connection made", |app, _| {
         (app.st.plugins.adding.is_none()
-            && app.st.plugins.tab == Tab::Installed
+            && app.st.settings.ext_page.as_deref() == Some(CONNECTIONS_PAGE)
             && !app.st.plugins.connections.is_empty())
         .then_some(())
     });
@@ -280,15 +307,18 @@ fn connectors_switch_off_and_on_from_the_built_ins_list() {
             }),
         )
     };
-    shot.click(&mut app, plug("plug-tab", PlugAct::Tab(Tab::Installed)));
+    shot.click(&mut app, tab(Tab::Installed));
+    shot.until(&mut app, "Connections listed", |app, _| {
+        app.st.points.get(CONNECTIONS_PAGE).map(|_| ())
+    });
     shot.click(&mut app, switch(false));
     shot.until(&mut app, "Connectors switched off", |app, _| {
-        (!on(app)).then_some(())
+        (!on(app) && app.st.points.get(CONNECTIONS_PAGE).is_none()).then_some(())
     });
     assert_eq!(vorn_app::plugins::tabs(on(&app)), [Tab::Installed]);
     shot.save(&mut app, "pl-connectors-off");
     shot.click(&mut app, switch(true));
     shot.until(&mut app, "Connectors switched on", |app, _| {
-        on(app).then_some(())
+        (on(app) && app.st.points.get(CONNECTIONS_PAGE).is_some()).then_some(())
     });
 }

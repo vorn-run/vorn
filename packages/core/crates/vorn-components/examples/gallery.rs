@@ -191,7 +191,7 @@ fn primitives(b: &mut Builder) {
             ),
             Act::Rest,
             None,
-            move |_, _| toggle(Id::new("toggle"), "Toggle", on, off),
+            move |ui, _| toggle(ui, Id::new("toggle"), "Toggle", on, off),
         );
     }
 

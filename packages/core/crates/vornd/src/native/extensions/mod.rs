@@ -276,6 +276,17 @@ async fn blocking<T: Send + 'static>(
         .unwrap_or_else(|e| Err(format!("the extension work failed in vornd: {e}")))
 }
 
+/// A path typed as `~/…` on this machine's home; anything else as it is.
+fn home_path(typed: &str) -> String {
+    let typed = typed.trim();
+    match typed.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            format!("{}{rest}", super::shell::home_dir())
+        }
+        _ => typed.to_owned(),
+    }
+}
+
 fn text<'a>(params: &'a Value, key: &str) -> &'a str {
     params.get(key).and_then(Value::as_str).unwrap_or_default()
 }
@@ -401,12 +412,19 @@ impl Extensions {
             }
             "extension:installed" => Ok(self.installed()),
             "extension:inspect" => {
-                let (url, branch) = (text(params, "url").to_owned(), params.get("branch"));
+                let (url, branch) = (home_path(text(params, "url")), params.get("branch"));
                 let branch = branch.and_then(Value::as_str).map(str::to_owned);
+                let link = params.get("link") == Some(&Value::Bool(true));
                 let installs = Arc::clone(&self.installs);
-                blocking(move || installs.inspect_git(&url, branch.as_deref()))
-                    .await
-                    .map(|sheet| json!(sheet))
+                blocking(move || {
+                    if link {
+                        installs.inspect_link(Path::new(&url))
+                    } else {
+                        installs.inspect_git(&url, branch.as_deref())
+                    }
+                })
+                .await
+                .map(|sheet| json!(sheet))
             }
             "extension:install" => {
                 let (token, typed) = (
@@ -423,7 +441,7 @@ impl Extensions {
                 }
             }
             "extension:link" => {
-                let path = PathBuf::from(text(params, "path"));
+                let path = PathBuf::from(home_path(text(params, "path")));
                 let installs = Arc::clone(&self.installs);
                 match blocking(move || installs.link(&path)).await {
                     Ok(pack) => {

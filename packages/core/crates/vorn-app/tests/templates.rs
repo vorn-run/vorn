@@ -11,15 +11,18 @@ mod support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
+use vorn_app::plugins::PlugAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::term_id;
-use vorn_app::state::MenuKind;
+use vorn_app::settings::{Category, SetAct, CONNECTIONS_PAGE};
+use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::ui::backend::{Backend, Cells};
 use vorn_app::ui::{cells::units, item_id, mods, Ui};
 use vorn_app::{ui_config, App};
@@ -304,6 +307,201 @@ fn every_template_kind_draws_on_every_surface() {
             .any(|t| t.text == "Forgot Turns account")
             .then_some(())
     });
+    // Settings › Extensions: the built-ins, then what is installed.
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    shot.until(&mut app, "the extensions", |a, _| {
+        let p = &a.st.plugins;
+        (p.loaded
+            && p.loads == 0
+            && p.listing_by_id(ID).is_some()
+            && !a.st.points.builtins.is_empty())
+        .then_some(())
+    });
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-extensions",
+        &[
+            "BUILT IN",
+            "Connectors",
+            "connections",
+            "INSTALLED",
+            "Turns",
+            "Linked from",
+        ],
+        &["BUILT IN", "Connectors", "Turns"],
+    );
+
+    // Connectors is one built-in; its row opens Settings › Connections, its own page.
+    shot.click(
+        &mut app,
+        App::control(
+            "plug-builtin-row",
+            &Act::Set(SetAct::Open(Category::Connections)),
+        ),
+    );
+    assert_eq!(app.st.settings.ext_page.as_deref(), Some(CONNECTIONS_PAGE));
+    shot.until(&mut app, "the connections read", |a, _| {
+        a.st.points
+            .rows_of("vorn.connectors")
+            .contains_key("connections")
+            .then_some(())
+    });
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-connections",
+        &["Connections", "Add connection", "No connections yet"],
+        &["Connections", "Add connection"],
+    );
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    shot.until(&mut app, "the extensions again", |a, _| {
+        let p = &a.st.plugins;
+        (p.loaded && p.loads == 0 && p.listing_by_id(ID).is_some()).then_some(())
+    });
+
+    // Its page: where it shows, what it may use, what it runs.
+    let turns = app.st.plugins.listing_by_id(ID).expect("turns").key.clone();
+    shot.click(
+        &mut app,
+        App::control(
+            "plug-installed-row",
+            &Act::Plug(PlugAct::Select(Some(turns.clone()))),
+        ),
+    );
+    assert_eq!(app.st.plugins.selected.as_deref(), Some(turns.as_str()));
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-extension",
+        &["Turns", "13 PLACES", "Sessions"],
+        &["Turns", "13 PLACES"],
+    );
+
+    shot.click(
+        &mut app,
+        App::control("plug-detail-back", &Act::Plug(PlugAct::Select(None))),
+    );
+    // Install… offers Git, a folder's copy, or the folder linked in place.
+    let picked = dir.clone();
+    app.set_picker(Arc::new(move |_| Some(picked.clone())));
+    let install = App::control("plug-install", &Act::Open(MenuKind::ExtInstall));
+    shot.click(&mut app, install);
+    assert_eq!(
+        app.st.menu.as_ref().map(|m| &m.kind),
+        Some(&MenuKind::ExtInstall)
+    );
+    // Menus open in the window's own frame, so this one is a picture and its labels.
+    shot.save(&mut app, "t-install-menu");
+    assert_eq!(
+        app.menu_labels(&shot.ui),
+        ["From Git…", "From a folder…", "Link a folder…"]
+    );
+    // From Git asks for the address.
+    choose(&mut shot, &mut app, "From Git…");
+    assert_eq!(app.st.dialog, Some(Dialog::ExtInstall));
+    shot.type_text(&mut app, "https://github.com/vorn-run/turns");
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-install-git",
+        &["Install from Git", "pinned copy", "Continue"],
+        &["Install from Git"],
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert_eq!(app.st.dialog, None);
+
+    // From a folder reads the folder picked and shows what it asks before it runs.
+    shot.click(&mut app, install);
+    choose(&mut shot, &mut app, "From a folder…");
+    shot.until(&mut app, "the sheet", |a, _| {
+        a.st.plugins.pending.is_some().then_some(())
+    });
+    let pending = app.st.plugins.pending.clone().expect("pending");
+    assert!(pending.link.is_none());
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-install-sheet",
+        &["Install Turns", "Runs", "to install", "Cancel"],
+        &["Install Turns", "to install"],
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert_eq!(app.st.dialog, None);
+    assert!(app.st.plugins.pending.is_none());
+
+    // Link a folder reads it where it is, staging nothing.
+    shot.click(&mut app, install);
+    choose(&mut shot, &mut app, "Link a folder…");
+    shot.until(&mut app, "the link sheet", |a, _| {
+        a.st.plugins.pending.as_ref().and_then(|p| p.link.clone())
+    });
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-link-sheet",
+        &["Link Turns", "runs in place", "to link", "Link"],
+        &["Link Turns", "to link"],
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert_eq!(app.st.dialog, None);
+    shot.click(
+        &mut app,
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert!(!app.st.settings.open);
+
+    // The palette reaches Extensions, Install… and each of its choices, and each built-in's switch.
+    shot.send(&mut app, key("KeyK", MOD(), None));
+    shot.type_text(&mut app, "extension");
+    shot.frame(&mut app);
+    every_surface(
+        &mut shot,
+        &mut app,
+        "t-palette-extensions",
+        &[
+            "Open Extensions",
+            "Install Extension…",
+            "Install Extension from Git…",
+            "Install Extension from a Folder…",
+            "Link an Extension Folder…",
+        ],
+        &["Open Extensions"],
+    );
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    // Install Extension… opens the page with its menu under Install….
+    shot.send(&mut app, key("KeyK", MOD(), None));
+    shot.type_text(&mut app, "Install Extension…");
+    shot.frame(&mut app);
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    shot.until(&mut app, "the install menu", |a, _| {
+        (a.st.menu.as_ref().map(|m| &m.kind) == Some(&MenuKind::ExtInstall)).then_some(())
+    });
+    assert!(app.st.settings.open);
+    shot.send(&mut app, key("Escape", 0, None));
+    shot.frame(&mut app);
+    shot.click(
+        &mut app,
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+    );
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
     assert!(!app.st.settings.open);
@@ -369,7 +567,61 @@ fn every_template_kind_draws_on_every_surface() {
             .then_some(())
     });
 
+    // Last, as linking again restarts the program: confirming links the folder.
+    link_again(&mut shot, &mut app, &turns);
     live_preview(&mut shot, &mut app, &dir);
+}
+
+/// Install… › Link a folder… on the folder the picker answers, confirmed by its id;
+/// its page then offers Unlink.
+fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
+    shot.send(app, key("Comma", MOD(), None));
+    shot.click(
+        app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    shot.frame(app);
+    shot.click(
+        app,
+        App::control("plug-install", &Act::Open(MenuKind::ExtInstall)),
+    );
+    choose(shot, app, "Link a folder…");
+    shot.until(app, "the link sheet", |a, _| {
+        a.st.plugins.pending.as_ref().and_then(|p| p.link.clone())
+    });
+    shot.type_text(app, ID);
+    shot.send(app, key("Enter", 0, Some("\r")));
+    shot.until(app, "the folder linked", |a, _| {
+        (a.st.plugins.pending.is_none() && a.st.dialog.is_none()).then_some(())
+    });
+    assert!(
+        app.st.plugins.report.is_none(),
+        "{:?}",
+        app.st.plugins.report
+    );
+    shot.click(
+        app,
+        App::control(
+            "plug-installed-row",
+            &Act::Plug(PlugAct::Select(Some(turns.to_owned()))),
+        ),
+    );
+    let [wide, _] = cells(app, "t-linked");
+    assert!(wide.contains("Unlink"), "{wide}");
+    shot.click(
+        app,
+        App::control("plug-detail-back", &Act::Plug(PlugAct::Select(None))),
+    );
+    shot.click(
+        app,
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+    );
+    shot.send(app, key("Escape", 0, None));
+    shot.frame(app);
+    assert!(!app.st.settings.open);
 }
 
 /// A saved view redraws at once; a broken one shows where and why instead.

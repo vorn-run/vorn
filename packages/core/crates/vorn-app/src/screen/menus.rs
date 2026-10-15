@@ -39,6 +39,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
         MenuKind::SetShell => 288.0,
+        MenuKind::ExtInstall => 240.0,
         MenuKind::SetSelect(_) => 128.0,
         MenuKind::SshKey(_) => 300.0,
         MenuKind::OpenIn(_) => 180.0,
@@ -123,6 +124,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::TaskStatus(f) => super::tasks::status_items(s, *f),
         MenuKind::TaskProject(f) => super::tasks::project_items(s, *f),
         MenuKind::TaskAgent(f) => super::tasks::agent_items(s, *f),
+        MenuKind::ExtInstall => super::plugins::install_items(),
     }
 }
 

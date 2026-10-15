@@ -1,24 +1,29 @@
-//! The Plugins page (`ConnectorSettings`): three tabs over the listings, a
-//! listing's detail, and the add forms. Everything here reads the model in
-//! `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
+//! The Extensions page (`ConnectorSettings`): what is installed and what can
+//! be, an extension's page, the add forms and the install sheet. Everything here reads the
+//! model in `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
 
 mod browse;
 mod detail;
 mod forms;
 mod installed;
+mod sheet;
 
 use serde_json::Value;
+
+pub(in crate::screen) use sheet::dialog;
 
 use super::settings::header;
 use super::{ico, white, Screen};
 use crate::act::Act;
 use crate::library::{mark_svg, parse_icon, Look};
 use crate::plugins::{
-    count, describe_contributions, details, Activity, Listing, PackStatus, Pending, PlugAct,
-    Source, Tab, Tone,
+    count, describe_contributions, details, places, tabs_id, Activity, Listing, Origin, PackStatus,
+    Pending, PlugAct, Source, Tab, Tone,
 };
 use crate::runs::s as sv;
+use crate::state::MenuKind;
 use crate::ui::theme::color as k;
+use crate::ui::widgets::{pills, Pill};
 use crate::ui::{div, icon, text, Action, El, Rgba, Role};
 
 /// `rounded-sm` in the renderer's Tailwind.
@@ -26,83 +31,119 @@ const R: f32 = 4.0;
 
 pub(super) fn page(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let mut col = div()
-        .col()
-        .child(header(
-            "Plugins",
-            "Connectors watch a service and start workflows. Extensions add sections, badges, panes, commands and pages. Both install as packs from the same directory.",
-            None,
-        ))
-        .child(tabs(s, shown_tab(s)));
     // Nothing to say until the first answers land; an empty list would read as "none".
     if !p.loaded {
-        return col;
-    }
-    let selected = p.selected.as_deref().and_then(|key| p.listing(key));
-    let adding = p.adding.is_some();
-    col = match shown_tab(s) {
-        Tab::Installed if !adding && selected.is_none() => col
-            .child_if(super::points::builtins(s))
-            .child(installed::view(s)),
-        Tab::Browse if !adding && selected.is_none() => col.child(browse::view(s)),
-        _ => col,
-    };
-    if let (Some(l), false) = (selected, adding) {
-        col = col.child(detail::view(s, l));
+        return div().col().child(page_header());
     }
     if let Some(a) = &p.adding {
-        col = col.child(forms::view(s, a));
+        return div().col().child(forms::view(s, a));
     }
-    col
+    if let Some(key) = p.selected.as_deref() {
+        if let Some(l) = p.listing(key) {
+            return detail::view(s, l);
+        }
+        if let Some(b) = key.strip_prefix(detail::BUILTIN).and_then(|id| {
+            s.st.points
+                .builtins
+                .iter()
+                .find(|b| sv(b, "id") == Some(id))
+        }) {
+            return detail::builtin(s, b);
+        }
+    }
+    let tab = shown_tab(s);
+    let col = div().col().child(page_header()).child(bar(s, tab));
+    match tab {
+        Tab::Installed => col.child(installed::view(s)),
+        Tab::Browse => col.child(browse::view(s)),
+    }
+}
+
+fn page_header() -> El {
+    header(
+        "Extensions",
+        "Each adds to Vorn: sidebar sections, card lines, commands, windows or connections. Each runs as you, with only what it declares.",
+        None,
+    )
 }
 
 pub(super) fn act(a: PlugAct) -> Act {
     Act::Plug(a)
 }
 
+/// The tabs to show: Browse only while Connectors is on.
+fn tabs(s: &Screen<'_>) -> Vec<Tab> {
+    crate::plugins::tabs(crate::plugins::connectors_on(&s.st.points.builtins))
+}
+
 /// The tab drawn: the one chosen, unless Connectors is off and it is one of Connectors'.
 fn shown_tab(s: &Screen<'_>) -> Tab {
     let tab = s.st.plugins.tab;
-    let shown = crate::plugins::tabs(crate::plugins::connectors_on(&s.st.points.builtins));
-    if shown.contains(&tab) {
+    if tabs(s).contains(&tab) {
         tab
     } else {
         Tab::Installed
     }
 }
 
-/// The `inline-flex` segmented tabs over the page.
-fn tabs(s: &Screen<'_>, current: Tab) -> El {
-    let mut row = div()
+/// The Install menu's entries.
+pub(in crate::screen) fn install_items() -> Vec<crate::screen::menus::Item> {
+    Origin::ALL
+        .iter()
+        .map(|o| {
+            crate::screen::menus::Item::new(o.icon(), o.label(), act(PlugAct::InstallFrom(*o)))
+                .detail(o.detail())
+        })
+        .collect()
+}
+
+/// Installed and Browse, and Install… beside them.
+fn bar(s: &Screen<'_>, current: Tab) -> El {
+    let shown = tabs(s);
+    let items: Vec<Pill<'_>> = shown.iter().map(|t| Pill::new(t.label(), None)).collect();
+    let on = shown.iter().position(|t| *t == current).unwrap_or(0);
+    div()
         .row()
-        .p(2.0)
-        .gap(0.0)
+        .items_center()
+        .wrap_children()
+        .gap(12.0)
         .mb(16.0)
+        .child(pills(s.ui, tabs_id(), "Extensions", &items, on))
+        .child(div().grow())
+        .child(install_button(s))
+}
+
+/// Install…, which opens the menu of where from.
+fn install_button(s: &Screen<'_>) -> El {
+    let kind = MenuKind::ExtInstall;
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let label = "Install\u{2026}";
+    let id = s.acts.on("plug-install", Act::Open(kind));
+    let hot = if open { 1.0 } else { s.ui.hover(id) };
+    let fg = k::GRAY_300.mix(k::WHITE, hot);
+    chip(hot)
+        .id(id)
+        .on(Action::Click)
+        .ring(R)
+        .role(Role::Button, label)
+        .has_popup()
+        .expanded(open)
+        .child(ico("plus", 11.0, 2.0, fg))
+        .child(text(label, 11.5, fg).line_height(16.0).silent())
+}
+
+/// The bordered row button's box, washed by `hot`.
+fn chip(hot: f32) -> El {
+    div()
+        .row()
+        .items_center()
+        .gap(4.0)
+        .px(10.0)
+        .py(4.0)
+        .shrink0()
         .rounded(R)
-        .bg(white(0.04));
-    for tab in crate::plugins::tabs(crate::plugins::connectors_on(&s.st.points.builtins)) {
-        let id = s.acts.on("plug-tab", act(PlugAct::Tab(tab)));
-        let on = tab == current;
-        let fg = if on {
-            k::GRAY_200
-        } else {
-            k::GRAY_500.mix(k::GRAY_300, s.ui.hover(id))
-        };
-        row = row.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .ring(R)
-                .px(12.0)
-                .py(4.0)
-                .rounded(R)
-                .bg(if on { white(0.08) } else { white(0.0) })
-                .role(Role::Button, tab.label())
-                .toggled(on)
-                .child(text(tab.label(), 12.0, fg).line_height(18.0).silent()),
-        );
-    }
-    div().row().child(row)
+        .border(1.0, white(0.1))
+        .bg(white(0.06 * hot))
 }
 
 /// A listing's glyph: its own paths, else the built-in mark for its id.
@@ -205,29 +246,23 @@ pub(super) fn chip_button(
     fg: Rgba,
     enabled: bool,
 ) -> El {
-    let mut b = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .px(10.0)
-        .py(4.0)
-        .shrink0()
-        .rounded(R)
-        .border(1.0, white(0.1));
     let mut fg = fg;
-    if enabled {
+    let b = if enabled {
         let id = s.acts.on(place, act(a));
         let hot = s.ui.hover(id);
         fg = fg.mix(k::WHITE, hot);
-        b = b
+        chip(hot)
             .id(id)
             .on(Action::Click)
             .ring(R)
-            .bg(white(0.06 * hot))
-            .role(Role::Button, label);
+            .role(Role::Button, label)
     } else {
-        b = b.opacity(0.5).disabled(true).role(Role::Button, label);
-    }
+        chip(0.0)
+            .opacity(0.5)
+            .disabled(true)
+            .role(Role::Button, label)
+    };
+    let mut b = b;
     if let Some(g) = glyph {
         b = b.child(ico(g, 11.0, 2.0, fg));
     }
@@ -282,38 +317,13 @@ pub(super) fn text_button(
         .child(text(label, size, fg).line_height(size * 1.5).silent())
 }
 
-/// "Details ›" under a row, lit while the row is hovered.
-pub(super) fn details_hint(hot: f32) -> El {
-    let fg = k::GRAY_500.mix(k::GRAY_300, hot);
-    div()
-        .row()
-        .items_center()
-        .gap(2.0)
-        .mt(6.0)
-        .child(text("Details", 11.0, fg).line_height(16.0).silent())
-        .child(ico("chevron-right", 11.0, 2.0, fg))
-}
-
-/// The lettered badge beside a name: "extension", "CLI login", "verified".
-pub(super) fn badge(label: &str, glyph: Option<&str>) -> El {
-    let mut b = div()
-        .row()
-        .items_center()
-        .gap(2.0)
-        .shrink0()
-        .px(6.0)
-        .py(1.0)
-        .rounded(R)
-        .border(1.0, white(0.1));
-    if let Some(g) = glyph {
-        b = b.child(ico(g, 9.0, 2.0, k::GRAY_500));
-    }
-    b.child(text(label, 10.0, k::GRAY_500).line_height(14.0).silent())
-}
-
 /// A connector's triggers and actions, or an extension's surfaces, in words.
 pub(super) fn offers(s: &Screen<'_>, l: &Listing) -> Vec<String> {
     if l.kind == crate::plugins::Kind::Extension {
+        let n = places(l.contributes.as_ref());
+        if n > 0 {
+            return vec![count(n, "place")];
+        }
         let d = describe_contributions(l.contributes.as_ref());
         return if d.is_empty() { vec![] } else { vec![d] };
     }
@@ -524,12 +534,6 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
                 !installing,
             )),
     )
-}
-
-/// The sheet under the row it was opened from, when it was.
-pub(super) fn sheet_for(s: &Screen<'_>, key: &str) -> Option<El> {
-    let p = s.st.plugins.pending.as_ref().filter(|p| p.key == key)?;
-    Some(div().mt(8.0).mb(12.0).child(pending_sheet(s, p)))
 }
 
 /// What a workflow requirement's fix opened, at the top of the editor panel

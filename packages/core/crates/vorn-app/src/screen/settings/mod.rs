@@ -15,7 +15,7 @@ pub use ssh::{host_id, key_field_id};
 use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look;
-use crate::settings::{Category, SetAct, SECTIONS};
+use crate::settings::{Category, SetAct, CONNECTIONS_PAGE, EXTENSIONS, SECTIONS};
 use crate::ui::{div, icon, text, Action, El, Id, Rgba, Role, Sense};
 
 pub(super) fn set(a: SetAct) -> Act {
@@ -48,6 +48,9 @@ fn nav_svg(cat: Category) -> String {
             r#"<path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="4"/>"#
         }
         Category::Connectors => {
+            r#"<path d="M15.39 4.39a1 1 0 001.68-.474 2.5 2.5 0 113.014 3.015 1 1 0 00-.474 1.68l1.683 1.682a2.414 2.414 0 010 3.414L19.61 15.39a1 1 0 01-1.68-.474 2.5 2.5 0 10-3.014 3.015 1 1 0 01.474 1.68l-1.683 1.682a2.414 2.414 0 01-3.414 0L8.61 19.61a1 1 0 00-1.68.474 2.5 2.5 0 11-3.014-3.015 1 1 0 00.474-1.68l-1.683-1.682a2.414 2.414 0 010-3.414L4.39 8.61a1 1 0 011.68.474 2.5 2.5 0 103.014-3.015 1 1 0 01-.474-1.68l1.683-1.682a2.414 2.414 0 013.414 0z"/>"#
+        }
+        Category::Connections => {
             r#"<path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 010 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>"#
         }
         Category::Keys => {
@@ -192,24 +195,27 @@ fn sidebar(s: &Screen<'_>) -> El {
         }
         list = list.child(items);
     }
-    let pages: Vec<El> =
-        s.st.points
-            .at(crate::points::kind::SETTINGS)
-            .map(|p| ext_item(s, p))
-            .collect();
-    if !pages.is_empty() {
-        list = list
-            .child(
-                div().px(12.0).pt(20.0).pb(6.0).child(
-                    text("EXTENSIONS", 10.0, c(look::GRAY_600))
-                        .weight(500)
-                        .tracking(0.05)
-                        .line_height(15.0)
-                        .role(Role::Heading, "Extensions"),
-                ),
-            )
-            .child(div().col().gap(2.0).children(pages));
-    }
+    // Connections, the Connectors built-in's page, leads the extensions' pages.
+    let mut pages: Vec<_> = s.st.points.at(crate::points::kind::SETTINGS).collect();
+    pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
+    let pages = pages.into_iter().map(|p| ext_item(s, p));
+    list = list
+        .child(
+            div().px(12.0).pt(20.0).pb(6.0).child(
+                text("EXTENSIONS", 10.0, c(look::GRAY_600))
+                    .weight(500)
+                    .tracking(0.05)
+                    .line_height(15.0)
+                    .role(Role::Heading, "Extensions"),
+            ),
+        )
+        .child(
+            div()
+                .col()
+                .gap(2.0)
+                .children(EXTENSIONS.map(|cat| nav_item(s, cat, c(look::GRAY_400))))
+                .children(pages),
+        );
     div()
         .col()
         .w(224.0)
@@ -251,6 +257,7 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
         Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),
+        Category::Connections => super::points::settings_page(s, CONNECTIONS_PAGE),
         Category::Network => super::network::page(s),
     }
 }
@@ -302,12 +309,12 @@ pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<
                         .mb(4.0)
                         .role(Role::Heading, title),
                 )
-                .child(
+                .child_if((!description.is_empty()).then(|| {
                     text(description, 14.0, c(look::GRAY_500))
                         .line_height(20.0)
                         .wrapping()
-                        .silent(),
-                ),
+                        .silent()
+                })),
         )
         .child_if(actions)
 }
@@ -360,7 +367,7 @@ pub(in crate::screen) fn row(
     el
 }
 
-/// `ToggleSwitch`: 40 by 24, blue when on, its 16 px knob sliding.
+/// `ToggleSwitch`: the one switch, [`widgets::toggle`](crate::ui::widgets::toggle).
 pub(in crate::screen) fn toggle(
     s: &Screen<'_>,
     place: &str,
@@ -370,26 +377,7 @@ pub(in crate::screen) fn toggle(
     label: &str,
 ) -> El {
     let id = s.acts.on(place, act.into());
-    let mut el = div()
-        .id(id)
-        .w(40.0)
-        .h(24.0)
-        .rounded(12.0)
-        .bg(if on { c(look::BLUE_500) } else { white(0.1) })
-        .role(Role::Switch, label)
-        .toggled(on)
-        .disabled(disabled)
-        .child(
-            div()
-                .absolute(if on { 20.0 } else { 4.0 }, 4.0)
-                .size(16.0, 16.0)
-                .rounded(8.0)
-                .bg(c(look::WHITE)),
-        );
-    if !disabled {
-        el = el.on(Action::Click);
-    }
-    el
+    crate::ui::widgets::toggle(s.ui, id, label, on, disabled)
 }
 
 /// One option of a [`segmented`] control.

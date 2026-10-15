@@ -45,6 +45,7 @@ impl Palette {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Cat {
     Actions,
+    Settings,
     Terminals,
     Recent,
     Projects,
@@ -57,6 +58,7 @@ impl Cat {
     pub fn label(self) -> &'static str {
         match self {
             Cat::Actions => "Actions",
+            Cat::Settings => "Settings",
             Cat::Terminals => "Terminals",
             Cat::Recent => "Recent Sessions",
             Cat::Projects => "Projects",
@@ -168,6 +170,93 @@ fn is_local(hosts: Option<&Value>) -> bool {
     }
 }
 
+/// Extensions and Connections, Install and where from, and each built-in's switch.
+fn extensions(st: &State) -> Vec<Entry> {
+    use crate::plugins::{Origin, PlugAct};
+    use crate::settings::{Category, SetAct};
+    let mut out = vec![
+        Entry::new(
+            Cat::Settings,
+            "Open Extensions",
+            Glyph::Icon("puzzle"),
+            Act::Set(SetAct::Open(Category::Connectors)),
+        )
+        .keys(&["plugins", "connectors", "extensions", "add-ons"]),
+        Entry::new(
+            Cat::Settings,
+            "Open Connections",
+            Glyph::Icon("plug"),
+            Act::Set(SetAct::Open(Category::Connections)),
+        )
+        .keys(&["connectors", "accounts", "sign-in", "extensions"]),
+        Entry::new(
+            Cat::Settings,
+            "Install Extension\u{2026}",
+            Glyph::Icon("plus"),
+            Act::Plug(PlugAct::InstallMenu),
+        )
+        .keys(&["extensions", "plugins", "add", "git", "folder", "link"]),
+    ];
+    for (origin, title, keys) in [
+        (
+            Origin::Git,
+            "Install Extension from Git\u{2026}",
+            &["extensions", "plugins", "repository", "clone"][..],
+        ),
+        (
+            Origin::Folder,
+            "Install Extension from a Folder\u{2026}",
+            &["extensions", "plugins", "directory", "copy", "local"][..],
+        ),
+        (
+            Origin::Link,
+            "Link an Extension Folder\u{2026}",
+            &[
+                "extensions",
+                "plugins",
+                "directory",
+                "develop",
+                "live",
+                "local",
+            ][..],
+        ),
+    ] {
+        out.push(
+            Entry::new(
+                Cat::Settings,
+                title,
+                Glyph::Icon(origin.icon()),
+                Act::Plug(PlugAct::InstallFrom(origin)),
+            )
+            .keys(keys),
+        );
+    }
+    for b in &st.points.builtins {
+        let (Some(id), Some(name)) = (
+            b.get("id").and_then(Value::as_str),
+            b.get("name").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let on = b.get("on").and_then(Value::as_bool) == Some(true);
+        let verb = if on { "Off" } else { "On" };
+        out.push(
+            Entry::new(
+                Cat::Actions,
+                format!("Turn {name} {verb}"),
+                Glyph::Icon(if on { "toggle-right" } else { "toggle-left" }),
+                Act::Point(crate::points::PointAct::Builtin {
+                    id: id.to_owned(),
+                    on: !on,
+                }),
+            )
+            .sub("Built-in extension")
+            .keys(&["extension", "enable", "disable", name]),
+        );
+    }
+    out
+}
+
 /// `useCommands`: every command, in the renderer's order.
 /// `m` and `alt` are the modifier labels; the status filters show the
 /// keys that really pick them (Alt), not the renderer's ⌘ digits, which
@@ -191,6 +280,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
         }
         out.push(e);
     }
+    out.extend(extensions(st));
     for p in st.points.at(crate::points::kind::SETTINGS) {
         out.push(
             Entry::new(

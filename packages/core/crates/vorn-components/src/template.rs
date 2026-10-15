@@ -223,7 +223,7 @@ impl Cx<'_> {
                         ..Press::default()
                     },
                 );
-                let switch = widgets::toggle(id, &name, on, false).shrink0();
+                let switch = widgets::toggle(self.ui, id, &name, on, false).shrink0();
                 if name.is_empty() {
                     switch
                 } else {

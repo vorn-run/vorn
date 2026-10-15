@@ -287,10 +287,15 @@ impl Builtins {
             self.entries
                 .iter()
                 .map(|e| {
+                    let m = &e.manifest;
                     json!({
                         "id": e.id(),
-                        "name": e.manifest.name,
-                        "description": e.manifest.description,
+                        "name": m.name,
+                        "description": m.description,
+                        "version": m.version,
+                        "contributes": m.contributes,
+                        "declares": m.declares,
+                        "service": m.service,
                         "on": self.is_on(e.id()),
                     })
                 })
@@ -343,7 +348,10 @@ impl Builtins {
     ) -> Option<Result<Value, ExtError>> {
         let e = self.entry(id)?;
         if !self.is_on(id) {
-            let off = format!("{} is off; switch it on in Settings", e.manifest.name);
+            let off = format!(
+                "{} is off; switch it on in Settings › Extensions",
+                e.manifest.name
+            );
             return Some(Err(ExtError::new("off", off)));
         }
         Some(e.builtin.handle(&e.api, action, args).await)
