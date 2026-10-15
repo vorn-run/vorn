@@ -21,6 +21,9 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, warn};
 use vorn_engine::Effect;
+use vorn_extensions::events::{
+    GIT_CHANGED, SESSION_CREATED, SESSION_EXITED, SESSION_MARK, SESSION_PROGRAM, SESSION_STATUS,
+};
 
 use super::Native;
 use crate::engine::{Engine, Event};
@@ -55,6 +58,7 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
         tokio::select! {
             ev = events.recv() => match ev {
                 Ok(Event::Effect(fx, Effect::Program(p))) => {
+                    program_event(&n, &fx.session, &p);
                     reports.heard(&n, &registry, &fx, &p, std::time::Instant::now());
                 }
                 Ok(Event::Effect(fx, effect)) => effected(&n, &registry, &fx, effect),
@@ -88,6 +92,7 @@ fn effected(
             let Some(offer) = registry.terminal_exit(id, code, Stamp::from(fx)) else {
                 return;
             };
+
             // Clients hear the exit itself from the stream.
             if let Some(offer) = offer {
                 native.broadcast_to("worktree:confirmCleanup", offer, Some(id));
@@ -95,7 +100,9 @@ fn effected(
         }
         Effect::Cwd(cwd) if terminal => registry.terminal_cwd(id, &cwd),
         Effect::Command(mark) if terminal => {
-            native.broadcast_to("terminal:command", command_note(id, &mark), Some(id));
+            let note = command_note(id, &mark);
+            native.events().emit(SESSION_MARK, || mark_event(&note));
+            native.broadcast_to("terminal:command", note, Some(id));
         }
         Effect::Notify { title, body } => {
             let key = crate::journal::effect_key(fx);
@@ -181,6 +188,39 @@ impl Reports {
     }
 }
 
+/// A terminal's project and worktree, the worktree being the project when it has none of its own.
+fn place_of(t: &crate::registry::TerminalSession) -> (String, String) {
+    let worktree = t
+        .worktree_path
+        .clone()
+        .unwrap_or_else(|| t.project_path.clone());
+    (t.project_path.clone(), worktree)
+}
+
+/// `session.mark` from what clients hear of the mark: the same fields, the session named as events name it.
+fn mark_event(note: &Value) -> Value {
+    let mut event = note.clone();
+    if let Some(map) = event.as_object_mut() {
+        if let Some(id) = map.shift_remove("id") {
+            map.insert("sessionId".into(), id);
+        }
+    }
+    event
+}
+
+/// `session.program`: what a session's program now reports of itself (OSC 7501).
+fn program_event(native: &Native, id: &str, p: &vorn_engine::Programs) {
+    native.events().emit(SESSION_PROGRAM, || {
+        let status = ProgramStatus::read(p, None);
+        json!({
+            "sessionId": id,
+            "state": status.as_ref().and_then(ProgramStatus::state),
+            "message": status.as_ref().and_then(ProgramStatus::message),
+            "waitingFor": status.as_ref().and_then(ProgramStatus::waiting_for),
+        })
+    });
+}
+
 /// What clients hear of a shell's prompt or command mark, stamped when vornd read it.
 fn command_note(id: &str, mark: &vorn_engine::Mark) -> Value {
     let at = std::time::SystemTime::now()
@@ -220,7 +260,63 @@ fn first_notice(native: &Native, key: &str) -> bool {
 #[derive(Debug, Default)]
 struct Told {
     terminals: HashSet<String>,
+    headless: HashSet<String>,
     exited: HashSet<String>,
+    /// Each session's status as last told in `session.status`.
+    statuses: HashMap<String, String>,
+    /// Each terminal's project and worktree, for its `session.exited` after its record goes.
+    places: HashMap<String, (Value, Value)>,
+}
+
+/// A record's project and worktree, the worktree being the project when it has none of its own.
+fn place_in(record: &Value) -> (Value, Value) {
+    let project = record.get("projectPath").cloned().unwrap_or(Value::Null);
+    let worktree = match record.get("worktreePath") {
+        None | Some(Value::Null) => project.clone(),
+        Some(w) => w.clone(),
+    };
+    (project, worktree)
+}
+
+/// `session.created` for a record clients were just told of.
+fn created_event(native: &Native, kind: &str, record: &Value) {
+    native.events().emit(SESSION_CREATED, || {
+        let text = |k: &str| record.get(k).cloned().unwrap_or(Value::Null);
+        let (project, worktree) = place_in(record);
+        json!({
+            "sessionId": text("id"), "kind": kind, "projectPath": project,
+            "worktreePath": worktree, "agent": text("agentType"),
+        })
+    });
+}
+
+impl Told {
+    /// `session.exited` for terminal `id`, once, whether it ended or was closed first.
+    fn terminal_exited(&mut self, native: &Native, id: &str, code: Value) {
+        let Some((project, worktree)) = self.places.remove(id) else {
+            return;
+        };
+        native.events().emit(SESSION_EXITED, || {
+            json!({
+                "sessionId": id, "kind": "terminal", "exitCode": code,
+                "projectPath": project, "worktreePath": worktree,
+            })
+        });
+    }
+
+    /// `session.status` when `record`'s status moved since it was last told.
+    fn status(&mut self, native: &Native, id: &str, record: &Value) {
+        let Some(status) = record.get("status").and_then(Value::as_str) else {
+            return;
+        };
+        if self.statuses.get(id).map(String::as_str) == Some(status) {
+            return;
+        }
+        self.statuses.insert(id.to_owned(), status.to_owned());
+        native
+            .events()
+            .emit(SESSION_STATUS, || json!({ "sessionId": id, "status": status }));
+    }
 }
 
 impl Told {
@@ -236,6 +332,7 @@ impl Told {
                 {
                     if let Some(id) = t.get("id").and_then(Value::as_str) {
                         self.terminals.insert(id.to_owned());
+                        self.places.insert(id.to_owned(), place_in(t));
                     }
                 }
             }
@@ -248,14 +345,22 @@ impl Told {
                 };
                 let shown = client_record(record);
                 if self.terminals.insert(id.to_owned()) {
+                    self.places.insert(id.to_owned(), place_in(record));
+                    created_event(native, "terminal", record);
                     native.broadcast("session:created", shown);
                 } else {
                     native.broadcast_to("session:updated", shown, Some(id));
+                }
+                self.status(native, id, record);
+                if let Some(code) = note.get("exited") {
+                    self.terminal_exited(native, id, code.clone());
                 }
             }
             Some("remove") if kind == Some("terminal") => {
                 if let Some(id) = note.get("id").and_then(Value::as_str) {
                     self.terminals.remove(id);
+                    self.statuses.remove(id);
+                    self.terminal_exited(native, id, Value::Null);
                 }
             }
             Some("order") if note.get("reordered").and_then(Value::as_bool) == Some(true) => {
@@ -271,10 +376,21 @@ impl Told {
                 let Some(id) = record.get("id").and_then(Value::as_str) else {
                     return;
                 };
+                if self.headless.insert(id.to_owned()) {
+                    created_event(native, "headless", record);
+                }
+                self.status(native, id, record);
                 if record.get("status").and_then(Value::as_str) == Some("exited")
                     && self.exited.insert(id.to_owned())
                 {
                     let code = record.get("exitCode").cloned().unwrap_or(Value::Null);
+                    native.events().emit(SESSION_EXITED, || {
+                        let (project, worktree) = place_in(record);
+                        json!({
+                            "sessionId": id, "kind": "headless", "exitCode": code,
+                            "projectPath": project, "worktreePath": worktree,
+                        })
+                    });
                     native.broadcast_to(
                         "headless:exit",
                         json!({ "id": id, "exitCode": code }),
@@ -292,6 +408,8 @@ impl Told {
             Some("remove") if kind == Some("headless") => {
                 if let Some(id) = note.get("id").and_then(Value::as_str) {
                     self.exited.remove(id);
+                    self.headless.remove(id);
+                    self.statuses.remove(id);
                 }
             }
             _ => {}
@@ -316,12 +434,8 @@ async fn refresh_heads(native: &Arc<Native>, registry: &Arc<SessionRegistry>) {
         r.live_terminals()
             .filter(|t| t.remote_host_id.is_none())
             .map(|t| {
-                (
-                    t.id.clone(),
-                    t.worktree_path
-                        .clone()
-                        .unwrap_or_else(|| t.project_path.clone()),
-                )
+                let (project, worktree) = place_of(t);
+                (t.id.clone(), project, worktree)
             })
             .collect::<Vec<_>>()
     }) else {
@@ -333,9 +447,14 @@ async fn refresh_heads(native: &Arc<Native>, registry: &Arc<SessionRegistry>) {
     let (n, r) = (Arc::clone(native), Arc::clone(registry));
     let read = tokio::task::spawn_blocking(move || {
         let git = super::remote::Place::Local.git(&n);
-        for (id, dir) in dirs {
-            if let Some(head) = git.head(Path::new(&dir)) {
-                r.set_head_commit(&id, &head);
+        for (id, project, dir) in dirs {
+            let Some(head) = git.head(Path::new(&dir)) else {
+                continue;
+            };
+            if r.set_head_commit(&id, &head) {
+                n.events().emit(GIT_CHANGED, || {
+                    json!({ "projectPath": project, "worktreePath": dir, "head": head })
+                });
             }
         }
     });

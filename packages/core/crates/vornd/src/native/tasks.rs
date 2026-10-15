@@ -2,10 +2,15 @@
 //! `project:*` and `sessionEvent:*`, read and written in `vorn.db`. A write
 //! that changes the board tells every client the configuration changed, as
 //! the board reads it from there.
+//!
+//! The board also follows the public events ([`follow`]): the conversation
+//! an agent starts is kept on the in-progress task its terminal was assigned.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use serde_json::{json, Value};
+use tracing::{info, warn};
+use vorn_extensions::events::AGENT_CONVERSATION;
 use vorn_store::Store;
 use vorn_work::task_images::TaskImages;
 use vorn_work::tasks;
@@ -173,6 +178,56 @@ fn images(native: &Native, method: &str, params: &Value) -> Answer {
         Ok(Value::Null) => Answer::Void,
         Ok(value) => Answer::Result(value),
         Err(message) => Answer::Error(message),
+    }
+}
+
+/// Follows the public events the board acts on, until vornd stops.
+pub fn follow(native: &Arc<Native>) {
+    let mut events = native.events().subscribe("tasks", &[AGENT_CONVERSATION]);
+    let native = Arc::downgrade(native);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let text = |k: &str| event.data.get(k).and_then(Value::as_str).map(str::to_owned);
+            if let (Some(terminal), Some(conversation)) =
+                (text("sessionId"), text("conversationId"))
+            {
+                keep_conversation(&native, terminal, conversation).await;
+            }
+        }
+    });
+}
+
+/// The conversation a terminal started, on the in-progress task it was assigned, when the task has none yet.
+async fn keep_conversation(native: &Weak<Native>, terminal: String, conversation: String) {
+    let Some(native) = native.upgrade().filter(|n| n.database().is_some()) else {
+        return;
+    };
+    let (n, t, c) = (Arc::clone(&native), terminal.clone(), conversation.clone());
+    let changed = blocking("tasks", move || {
+        with_store(&n, |store| {
+            let tasks = store.call("dbListTasks", json!([null, "in_progress"]))?;
+            let task = tasks.as_array().into_iter().flatten().find(|task| {
+                task.get("assignedSessionId").and_then(Value::as_str) == Some(t.as_str())
+                    && task.get("agentSessionId").is_none_or(Value::is_null)
+            });
+            let Some(id) = task.and_then(|t| t.get("id")).and_then(Value::as_str) else {
+                return Ok(false);
+            };
+            store.call(
+                "dbUpdateTask",
+                json!([id, { "agentSessionId": c, "updatedAt": now_iso() }, ["agentSessionId", "updatedAt"]]),
+            )?;
+            Ok(true)
+        })
+    })
+    .await;
+    match changed {
+        Ok(true) => {
+            info!(%terminal, %conversation, "the conversation is kept on the terminal's task");
+            announce(&native).await;
+        }
+        Ok(false) => {}
+        Err(err) => warn!(%err, "could not keep the conversation on the task"),
     }
 }
 

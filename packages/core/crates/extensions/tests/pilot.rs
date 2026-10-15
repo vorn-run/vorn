@@ -251,6 +251,7 @@ fn router(store: PackStore, lifecycle: Arc<Lifecycle>) -> Arc<Router> {
         lifecycle,
         Arc::new(Nothing),
         RouterSettings::new(env(), "test"),
+        vorn_extensions::events::Bus::new(),
     )
 }
 
@@ -317,13 +318,17 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
         ..Policy::default()
     });
     let r = router(store, Arc::clone(&lifecycle));
+    r.reindex();
     assert!(
         lifecycle.running().is_empty(),
         "nothing runs until something uses it"
     );
 
-    assert_eq!(r.emit("test.tick", json!({ "n": 1 })).await, 1);
-    assert_eq!(r.emit("test.other", json!({})).await, 0);
+    assert_eq!(r.emit("test.tick", json!({ "n": 1 })), 1);
+    assert_eq!(r.emit("test.other", json!({})), 0);
+    tokio::time::timeout(Duration::from_secs(30), r.settled("test.ticks"))
+        .await
+        .unwrap();
     let first = r
         .call("test.ticks", "echo", json!({}), ctx())
         .await
@@ -336,7 +341,10 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
     }
     assert!(lifecycle.running().is_empty(), "it stops once idle");
 
-    assert_eq!(r.emit("test.tick", json!({ "n": 2 })).await, 1);
+    assert_eq!(r.emit("test.tick", json!({ "n": 2 })), 1);
+    tokio::time::timeout(Duration::from_secs(30), r.settled("test.ticks"))
+        .await
+        .unwrap();
     assert_eq!(lifecycle.running().len(), 1, "the next event starts it");
     let events = r
         .call("test.ticks", "events", json!({}), ctx())

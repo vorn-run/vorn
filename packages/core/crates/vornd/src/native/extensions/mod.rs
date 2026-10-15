@@ -300,6 +300,7 @@ impl Extensions {
     /// Keeps every session's bands and processes in step with the records
     /// and the installed packs, until vornd stops.
     pub fn start(self: &Arc<Self>) {
+        self.router.reindex();
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
     }
@@ -636,12 +637,11 @@ impl Extensions {
         if !still_open {
             self.hosts.stop_project(&session.project_path).await;
         }
-        let exited = json!({ "sessionId": session.id, "projectPath": session.project_path });
-        self.router.emit("session.exited", exited).await;
     }
 
     /// After a pack changed, no process keeps running its old files.
     async fn pack_changed(&self, extension_id: &str) {
+        self.router.reindex();
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
         self.hosts.stop_extension(extension_id).await;

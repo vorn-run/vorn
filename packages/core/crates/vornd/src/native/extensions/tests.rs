@@ -236,6 +236,7 @@ fn world() -> World {
         lifecycle,
         Arc::new(NoWorld),
         RouterSettings::new(Vec::new(), "test"),
+        vorn_extensions::events::Bus::new(),
     );
     let installs = Arc::new(Installs::new(store, "git", Vec::new()));
     let fake = Arc::new(Fake::default());

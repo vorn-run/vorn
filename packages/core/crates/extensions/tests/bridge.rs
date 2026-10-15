@@ -140,7 +140,9 @@ fn bench(ids: &[&str], policy: Policy, call_timeout: Duration) -> Bench {
         Arc::clone(&lifecycle),
         Arc::clone(&world) as Arc<dyn World>,
         settings,
+        vorn_extensions::events::Bus::new(),
     );
+    router.reindex();
     Bench {
         _packs: packs,
         _folders: folders,
@@ -212,17 +214,12 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 assert_eq!(echo["args"], sample["args"]);
             }
             (Side::Guest, Method::GuestOnEvent) => {
-                let reached = b.router.emit("test.ping", json!({ "n": 1 })).await;
+                let reached = b.router.emit("test.ping", json!({ "n": 1 }));
                 assert_eq!(reached, 1);
-                let mut events = Value::Null;
-                let deadline = Instant::now() + SAFETY;
-                while Instant::now() < deadline {
-                    events = b.call("a", "events", json!({})).await.unwrap();
-                    if events.as_array().is_some_and(|e| !e.is_empty()) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
+                tokio::time::timeout(SAFETY, b.router.settled("a"))
+                    .await
+                    .unwrap();
+                let events = b.call("a", "events", json!({})).await.unwrap();
                 check("list<event>", &events);
                 assert_eq!(events[0]["name"], "test.ping");
             }

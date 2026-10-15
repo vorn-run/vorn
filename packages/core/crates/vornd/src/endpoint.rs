@@ -123,6 +123,9 @@ impl Daemon {
     pub fn start_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
+        if native.database().is_some() {
+            crate::native::tasks::follow(native);
+        }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),
             self.listen.get().copied(),
@@ -239,6 +242,7 @@ impl Daemon {
             lifecycle,
             world,
             RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION")),
+            Arc::clone(native.events()),
         );
         let installs = Arc::new(Installs::new(store, native.git_bin(), native.child_env()));
         let daemon = Arc::downgrade(self);

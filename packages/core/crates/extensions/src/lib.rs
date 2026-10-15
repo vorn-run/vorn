@@ -17,6 +17,7 @@ pub mod api;
 pub mod bridge;
 pub mod child;
 pub mod connector;
+pub mod events;
 pub mod footer;
 pub mod gate;
 pub mod grants;

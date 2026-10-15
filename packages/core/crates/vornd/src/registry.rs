@@ -2451,10 +2451,13 @@ impl SessionRegistry {
     }
 
     /// [`Registry::set_head_commit`].
-    pub fn set_head_commit(&self, id: &str, head: &str) {
+    /// Whether it moved.
+    pub fn set_head_commit(&self, id: &str, head: &str) -> bool {
         let mut fed = self.lock();
         let note = fed.registry.set_head_commit(id, head);
+        let moved = note.is_some();
         self.tell(note);
+        moved
     }
 
     /// [`Registry::forget_headless`].

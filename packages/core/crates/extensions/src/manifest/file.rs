@@ -521,6 +521,15 @@ impl Raw {
                         format!("`{event}` is not an event name like session.exited"),
                     ));
                 }
+                if crate::events::unknown_core_event(event) {
+                    return Err(at(
+                        &format!("service.events[{i}]"),
+                        format!(
+                            "Vorn has no event `{event}`; it has {}",
+                            crate::events::CORE_EVENTS.join(", ")
+                        ),
+                    ));
+                }
             }
         }
         for (id, run) in &self.actions {
@@ -1393,6 +1402,9 @@ header = "Authorization: Bearer {token}"
         );
         let err = parse(&SERVICE.replace("session.exited", "exited")).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (9, "service.events[0]"));
+        let err = parse(&SERVICE.replace("session.exited", "session.exit")).unwrap_err();
+        assert_eq!((err.line, err.field.as_str()), (9, "service.events[0]"));
+        assert!(err.message.starts_with("Vorn has no event `session.exit`; it has session.created"), "{err}");
         let err = parse("id = \"x\"\nname = = 1\n").unwrap_err();
         assert_eq!(err.line, 2);
     }
