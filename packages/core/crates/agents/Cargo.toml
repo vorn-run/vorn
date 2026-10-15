@@ -30,7 +30,7 @@ sha2 = { version = "0.10", default-features = false }
 tempfile = "3"
 # Status fixtures: rule files read against recorded screens.
 serde = { version = "1", features = ["derive"] }
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+toml = { version = "1.1", default-features = false, features = ["parse"] }
 vorn-recovery = { path = "../recovery" }
 vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto" }

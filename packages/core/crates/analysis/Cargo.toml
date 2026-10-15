@@ -12,7 +12,7 @@ memchr = "2"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
 # Agents' screen rules are TOML files.
 serde = { version = "1", features = ["derive"] }
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+toml = { version = "1.1", default-features = false, features = ["parse"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
