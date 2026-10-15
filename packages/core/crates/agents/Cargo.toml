@@ -15,7 +15,7 @@ vorn-analysis = { path = "../analysis" }
 # Local time for the dates an agent records without an offset, as `new Date` reads them.
 jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # PowerShell's integration rides its command line in base64.
 data-encoding = "2"

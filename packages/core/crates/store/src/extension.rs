@@ -193,7 +193,7 @@ impl ExtensionTables {
             prefix,
             refused: Arc::default(),
         };
-        tables.guard(true);
+        tables.guard(true)?;
         Ok(tables)
     }
 
@@ -203,11 +203,11 @@ impl ExtensionTables {
     }
 
     /// Puts the authorizer on, or takes it off for the host's own statements.
-    fn guard(&self, on: bool) {
+    fn guard(&self, on: bool) -> Result<()> {
         if !on {
             self.conn
-                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-            return;
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+            return Ok(());
         }
         let (prefix, refused) = (self.prefix.clone(), Arc::clone(&self.refused));
         self.conn.authorizer(Some(move |ctx: AuthContext<'_>| {
@@ -218,7 +218,8 @@ impl ExtensionTables {
                     Authorization::Deny
                 }
             }
-        }));
+        }))?;
+        Ok(())
     }
 
     /// An error the authorizer caused, worded with what it refused.
@@ -241,6 +242,8 @@ impl ExtensionTables {
 
     /// The rows `sql` answers, each an object keyed by column.
     pub fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Value>> {
+        // Fails closed: an extension statement never runs without the authorizer.
+        self.guard(true)?;
         let mut stmt = self.conn.prepare(sql).map_err(|e| self.named(e))?;
         let names: Vec<String> = stmt
             .column_names()
@@ -268,6 +271,8 @@ impl ExtensionTables {
 
     /// Runs one statement; answers how many rows it changed.
     pub fn exec(&self, sql: &str, params: &[Value]) -> Result<u64> {
+        // Fails closed: an extension statement never runs without the authorizer.
+        self.guard(true)?;
         let mut stmt = self.conn.prepare(sql).map_err(|e| self.named(e))?;
         let changed = stmt
             .execute(params_from_iter(params.iter().map(to_sql)))
@@ -287,7 +292,7 @@ impl ExtensionTables {
         let table = migrations_table(&self.prefix);
         let mut ran = Vec::new();
         for name in files {
-            self.guard(false);
+            self.guard(false)?;
             let done: Option<String> = self
                 .conn
                 .query_row(
@@ -301,10 +306,10 @@ impl ExtensionTables {
             }
             let sql = std::fs::read_to_string(dir.join(&name))?;
             self.conn.execute_batch("BEGIN IMMEDIATE")?;
-            self.guard(true);
-            let applied = self.conn.execute_batch(&sql).map_err(|e| self.named(e));
-            self.guard(false);
-            let recorded = applied.and_then(|()| {
+            let applied = self
+                .guard(true)
+                .and_then(|()| self.conn.execute_batch(&sql).map_err(|e| self.named(e)));
+            let recorded = applied.and(self.guard(false)).and_then(|()| {
                 self.conn
                     .execute(
                         &format!("INSERT INTO \"{table}\" (name, applied_at) VALUES (?, ?)"),
@@ -316,7 +321,7 @@ impl ExtensionTables {
                 Ok(_) => self.conn.execute_batch("COMMIT")?,
                 Err(err) => {
                     let _ = self.conn.execute_batch("ROLLBACK");
-                    self.guard(true);
+                    self.guard(true)?;
                     return Err(match err {
                         Error::Refused(why) => Error::Refused(format!("{name}: {why}")),
                         other => Error::Refused(format!("{name}: {other}")),
@@ -325,13 +330,13 @@ impl ExtensionTables {
             }
             ran.push(name);
         }
-        self.guard(true);
+        self.guard(true)?;
         Ok(ran)
     }
 
     /// The value kept under `key`.
     pub fn get(&self, key: &str) -> Result<Option<Value>> {
-        self.guard(false);
+        self.guard(false)?;
         let text: rusqlite::Result<Option<String>> = self
             .conn
             .query_row(
@@ -343,14 +348,14 @@ impl ExtensionTables {
                 |r| r.get(0),
             )
             .optional();
-        self.guard(true);
+        self.guard(true)?;
         Ok(text?.map(|t| serde_json::from_str(&t)).transpose()?)
     }
 
     /// Keeps `value` under `key`; `null` removes it.
     pub fn set(&self, key: &str, value: &Value) -> Result<()> {
         let kv = kv_table(&self.prefix);
-        self.guard(false);
+        self.guard(false)?;
         let done = if value.is_null() {
             self.conn
                 .execute(&format!("DELETE FROM \"{kv}\" WHERE key = ?"), [key])
@@ -360,7 +365,7 @@ impl ExtensionTables {
                 [key, &value.to_string()],
             )
         };
-        self.guard(true);
+        self.guard(true)?;
         done?;
         Ok(())
     }

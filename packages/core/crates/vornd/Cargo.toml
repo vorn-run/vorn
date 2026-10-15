@@ -71,7 +71,7 @@ windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] 
 
 [dev-dependencies]
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 # What the /mcp test posts with.
 hyper = { version = "1", features = ["client"] }
 hyper-util = { version = "0.1", features = ["client-legacy"] }
