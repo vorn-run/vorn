@@ -24,6 +24,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std", "display"] }
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time", "macros"] }
 tracing = "0.1"
+vorn-view = { path = "../view", features = ["kdl"] }
 
 [target.'cfg(unix)'.dependencies]
 # SIGTERM for a child that does not leave when its stdin closes.

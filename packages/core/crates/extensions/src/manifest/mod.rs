@@ -12,6 +12,7 @@
 
 pub mod file;
 
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use serde::Serialize;
@@ -313,7 +314,7 @@ pub struct ActionOutput {
 }
 
 /// What an extension adds to a card. Each list is absent rather than empty.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributions {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -322,6 +323,9 @@ pub struct Contributions {
     pub footers: Option<Vec<Footer>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link_handlers: Option<Vec<LinkHandler>>,
+    /// What it draws from templates, by where it shows.
+    #[serde(flatten)]
+    pub points: BTreeMap<Place, Vec<Point>>,
 }
 
 impl Contributions {
@@ -337,13 +341,180 @@ impl Contributions {
         self.link_handlers.as_deref().unwrap_or_default()
     }
 
+    pub fn points(&self, place: Place) -> &[Point] {
+        self.points.get(&place).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every template it draws: each point with a view, and each pane drawn from one.
+    pub fn views(&self) -> impl Iterator<Item = (Place, &str)> {
+        let points = self
+            .points
+            .iter()
+            .flat_map(|(place, ps)| ps.iter().map(move |p| (*place, p)))
+            .filter_map(|(place, p)| Some((place, p.view.as_deref()?)));
+        let panes = self.panes().iter().filter_map(|p| match &p.draws {
+            PaneDraws::View(v) => Some((Place::Panes, v.as_str())),
+            _ => None,
+        });
+        points.chain(panes)
+    }
+
+    /// Whether it draws only from templates, as a program on the extension API does.
+    pub fn templated_only(&self) -> bool {
+        self.footers().is_empty()
+            && self
+                .panes()
+                .iter()
+                .all(|p| matches!(p.draws, PaneDraws::View(_)))
+    }
+
+    /// Whether it uses anything only the extension API can fill: a template.
+    pub fn templated(&self) -> bool {
+        !self.points.is_empty() || self.views().next().is_some()
+    }
+
     /// Every contribution's own rule, of every kind.
     pub fn rules(&self) -> impl Iterator<Item = Option<&Activation>> {
         let panes = self.panes().iter().map(|p| &p.base);
         let footers = self.footers().iter().map(|f| &f.base);
         let links = self.link_handlers().iter().map(|l| &l.base);
-        panes.chain(footers).chain(links).map(|c| c.when.as_ref())
+        let points = self.points.values().flatten().map(|p| &p.base);
+        panes
+            .chain(footers)
+            .chain(links)
+            .chain(points)
+            .map(|c| c.when.as_ref())
     }
+}
+
+/// Where a template contribution shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Place {
+    /// A section in the sidebar.
+    Sidebar,
+    /// Badges on a session's card.
+    Badges,
+    /// A line under a session's card.
+    CardFooters,
+    /// A pane beside the terminal, as `[[contributes.panes]]` with a `view`.
+    Panes,
+    /// A command in the palette, with a key.
+    Commands,
+    /// A page in Settings.
+    Settings,
+    /// Marks on a session's row in the sidebar.
+    Decorations,
+    /// A strip above the composer.
+    Composer,
+    /// An entry in the new-session launcher.
+    Launchers,
+    /// A window of its own, or a floating panel where there are no windows.
+    Windows,
+    /// An item in a menu: a card's, the grid's, the View menu or a worktree's.
+    Menus,
+    /// A dialog a call opens by answering `{"show": "<id>"}`.
+    Dialogs,
+}
+
+impl Place {
+    /// Every place a `points` entry may be, panes aside (they are `panes` with a view).
+    pub const POINTS: [Place; 11] = [
+        Place::Sidebar,
+        Place::Badges,
+        Place::CardFooters,
+        Place::Commands,
+        Place::Settings,
+        Place::Decorations,
+        Place::Composer,
+        Place::Launchers,
+        Place::Windows,
+        Place::Menus,
+        Place::Dialogs,
+    ];
+
+    /// Its key in `manifest.json`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Place::Sidebar => "sidebar",
+            Place::Badges => "badges",
+            Place::CardFooters => "cardFooters",
+            Place::Panes => "panes",
+            Place::Commands => "commands",
+            Place::Settings => "settings",
+            Place::Decorations => "decorations",
+            Place::Composer => "composer",
+            Place::Launchers => "launchers",
+            Place::Windows => "windows",
+            Place::Menus => "menus",
+            Place::Dialogs => "dialogs",
+        }
+    }
+
+    /// What the install sheet calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Place::Sidebar => "Sidebar section",
+            Place::Badges => "Card badge",
+            Place::CardFooters => "Card footer",
+            Place::Panes => "Pane",
+            Place::Commands => "Command",
+            Place::Settings => "Settings page",
+            Place::Decorations => "Sidebar row mark",
+            Place::Composer => "Composer strip",
+            Place::Launchers => "Launcher entry",
+            Place::Windows => "Window",
+            Place::Menus => "Menu item",
+            Place::Dialogs => "Dialog",
+        }
+    }
+
+    /// Drawn once per session, so `{row.*}` is that session's row.
+    pub fn per_session(self) -> bool {
+        matches!(
+            self,
+            Place::Badges | Place::CardFooters | Place::Decorations
+        )
+    }
+
+    /// Whether every entry must name a template.
+    fn needs_view(self) -> bool {
+        !matches!(self, Place::Commands | Place::Launchers | Place::Menus)
+    }
+}
+
+/// The menus an item may join.
+pub const MENUS: [&str; 4] = ["card", "grid", "view", "worktree"];
+
+/// A template contribution: what it shows, and what choosing it does.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Point {
+    #[serde(flatten)]
+    pub base: Contribution,
+    /// `views/<name>.kdl`, inside the package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// A kit icon by name, as `trash-2`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// A key that runs it, as `Mod+Shift+W`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The method choosing it calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    /// For a menu item: which menu.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub menu: Option<String>,
+    /// The window choosing it opens or closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    /// A window's width and height in points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<[u16; 2]>,
+    /// For a window: the collection whose first row brings it forward.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raise: Option<String>,
 }
 
 /// The id, title and where-it-shows every contribution carries.
@@ -367,7 +538,7 @@ pub struct Pane {
     pub draws: PaneDraws,
 }
 
-/// A pane is a page inside the pack or a program run in a terminal, never both.
+/// A pane is a page inside the pack, a program run in a terminal or a template, one of them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneDraws {
@@ -375,6 +546,8 @@ pub enum PaneDraws {
     Web(String),
     /// Argv, every element non-empty.
     Command(Vec<String>),
+    /// A path under `views/` ending in `.kdl`.
+    View(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -561,6 +734,7 @@ pattern!(executable_name, r"^[A-Za-z0-9][A-Za-z0-9._-]*$");
 pattern!(path_data, r"^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$");
 pattern!(view_box, r"^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$");
 pattern!(web_entry, r"^web\/[A-Za-z0-9._/-]+\.html$");
+pattern!(view_entry, r"^views\/[A-Za-z0-9._/-]+\.kdl$");
 pattern!(contribution_id, r"^[a-zA-Z][a-zA-Z0-9_-]*$");
 pattern!(group_open, r"^\((\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>))?");
 pattern!(
@@ -1124,6 +1298,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
                 .take(MAX_CONTRIBUTIONS)
                 .map(|a| js::slice16(a, MAX_TEXT_LENGTH).to_owned())
                 .collect();
+            let view = js::trim(&text(raw.get("view"), "")).to_owned();
             let draws = if !web.is_empty()
                 && js::test(web_entry(), &web)
                 && !web.split('/').any(|s| s == "..")
@@ -1131,6 +1306,8 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
                 PaneDraws::Web(web)
             } else if !command.is_empty() && command.iter().all(|a| !a.is_empty()) {
                 PaneDraws::Command(command)
+            } else if is_view_path(&view) {
+                PaneDraws::View(view)
             } else {
                 return None;
             };
@@ -1168,13 +1345,219 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         })
         .collect();
 
-    if panes.is_empty() && footers.is_empty() && link_handlers.is_empty() {
+    let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
+    let mut ids: Vec<String> = Vec::new();
+    for place in Place::POINTS {
+        let kept: Vec<Point> = declared(place.key())
+            .filter_map(|(base, raw)| point(place, base, raw))
+            .filter(|p| {
+                let fresh = !ids.contains(&p.base.id);
+                ids.push(p.base.id.clone());
+                fresh
+            })
+            .collect();
+        if !kept.is_empty() {
+            points.insert(place, kept);
+        }
+    }
+    // A command or menu item opens a window the extension declares, or nothing.
+    let windows: Vec<String> = points
+        .get(&Place::Windows)
+        .into_iter()
+        .flatten()
+        .map(|w| w.base.id.clone())
+        .collect();
+    for ps in points.values_mut() {
+        ps.retain(|p| p.window.as_ref().is_none_or(|w| windows.contains(w)));
+    }
+    points.retain(|_, ps| !ps.is_empty());
+
+    if panes.is_empty() && footers.is_empty() && link_handlers.is_empty() && points.is_empty() {
         return None;
     }
     Some(Contributions {
         panes: (!panes.is_empty()).then_some(panes),
         footers: (!footers.is_empty()).then_some(footers),
         link_handlers: (!link_handlers.is_empty()).then_some(link_handlers),
+        points,
+    })
+}
+
+/// `views/<name>.kdl`, never climbing out of the package.
+pub fn is_view_path(path: &str) -> bool {
+    js::test(view_entry(), path) && !path.split('/').any(|s| s == ".." || s == ".")
+}
+
+/// `Mod+Shift+W`: modifiers, then one key; at least one of Mod, Ctrl and Alt.
+pub fn is_key(key: &str) -> bool {
+    let parts: Vec<&str> = key.split('+').collect();
+    let Some((last, mods)) = parts.split_last() else {
+        return false;
+    };
+    let mut seen = Vec::new();
+    for m in mods {
+        if !["Mod", "Ctrl", "Alt", "Shift"].contains(m) || seen.contains(m) {
+            return false;
+        }
+        seen.push(*m);
+    }
+    let named = [
+        "Enter", "Escape", "Tab", "Space", "Up", "Down", "Left", "Right", "Comma", "Period",
+    ];
+    let key_ok = (last.len() == 1 && last.bytes().all(|b| b.is_ascii_alphanumeric()))
+        || named.contains(last)
+        || last
+            .strip_prefix('F')
+            .and_then(|n| n.parse::<u8>().ok())
+            .is_some_and(|n| (1..=12).contains(&n));
+    key_ok && seen.iter().any(|m| *m != "Shift")
+}
+
+fn method_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.starts_with(|c: char| c.is_ascii_alphabetic())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn icon_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+}
+
+/// One template contribution, or nothing when it could not be drawn or run.
+fn point(place: Place, base: Contribution, raw: &Map<String, Value>) -> Option<Point> {
+    read_point(place, base, raw).ok()
+}
+
+/// Why a template contribution written as `value` would be dropped: the
+/// field's suffix (`.key`) and what is wrong, or `None` when it is kept.
+pub fn point_problem(place: Place, value: &Value) -> Option<(String, String)> {
+    let raw = value.as_object()?;
+    let Some(base) = contribution(raw) else {
+        return Some((
+            ".id".into(),
+            "needs an id of letters, digits, - and _, starting with a letter".into(),
+        ));
+    };
+    read_point(place, base, raw).err().map(|(field, message)| {
+        let suffix = if field.is_empty() {
+            String::new()
+        } else {
+            format!(".{field}")
+        };
+        (suffix, message)
+    })
+}
+
+fn read_point(
+    place: Place,
+    base: Contribution,
+    raw: &Map<String, Value>,
+) -> Result<Point, (&'static str, String)> {
+    let opt = |key: &str| {
+        raw.get(key)
+            .and_then(Value::as_str)
+            .map(|s| js::trim(s).to_owned())
+            .filter(|s| !s.is_empty())
+    };
+    let view = opt("view");
+    if view.as_deref().is_some_and(|v| !is_view_path(v)) {
+        return Err((
+            "view",
+            "is not a template under views/ ending in .kdl".into(),
+        ));
+    }
+    if place.needs_view() && view.is_none() {
+        return Err((
+            "",
+            "needs a view: a template under views/ ending in .kdl".into(),
+        ));
+    }
+    let icon = opt("icon");
+    let key = opt("key");
+    let call = opt("call");
+    let menu = opt("menu");
+    let window = opt("window");
+    let raise = opt("raise");
+    if icon.as_deref().is_some_and(|i| !icon_name(i)) {
+        return Err(("icon", "is not an icon name such as trash-2".into()));
+    }
+    if key.as_deref().is_some_and(|k| !is_key(k)) {
+        return Err((
+            "key",
+            "is not a key such as Mod+Shift+W: Mod, Ctrl or Alt, then one key".into(),
+        ));
+    }
+    if call.as_deref().is_some_and(|c| !method_name(c)) {
+        return Err(("call", "is not a method name".into()));
+    }
+    let size = match raw.get("size") {
+        None => None,
+        Some(v) => {
+            let wh: Option<Vec<u16>> = v.as_array().and_then(|a| {
+                a.iter()
+                    .map(|n| n.as_u64().and_then(|n| u16::try_from(n).ok()))
+                    .collect()
+            });
+            match wh.as_deref() {
+                Some([w, h]) if (160..=2000).contains(w) && (120..=2000).contains(h) => {
+                    Some([*w, *h])
+                }
+                _ => {
+                    return Err((
+                        "size",
+                        "is a width of 160 to 2000 and a height of 120 to 2000".into(),
+                    ))
+                }
+            }
+        }
+    };
+    let does = [call.is_some(), window.is_some(), view.is_some()]
+        .iter()
+        .filter(|x| **x)
+        .count();
+    match place {
+        Place::Commands | Place::Menus if does != 1 => {
+            return Err(("", "does one of call, window and view".into()));
+        }
+        Place::Launchers if view.is_some() || does != 1 => {
+            return Err(("", "does one of call and window".into()));
+        }
+        Place::Commands | Place::Menus | Place::Launchers => {}
+        _ if window.is_some() => {
+            return Err((
+                "window",
+                "opens from a command, a menu or a launcher".into(),
+            ));
+        }
+        _ => {}
+    }
+    match place {
+        Place::Menus if !menu.as_deref().is_some_and(|m| MENUS.contains(&m)) => {
+            return Err(("menu", format!("is one of {}", MENUS.join(", "))));
+        }
+        Place::Menus => {}
+        _ if menu.is_some() => return Err(("menu", "belongs to a menu item".into())),
+        _ => {}
+    }
+    if place != Place::Windows && (size.is_some() || raise.is_some()) {
+        let field = if size.is_some() { "size" } else { "raise" };
+        return Err((field, "belongs to a window".into()));
+    }
+    Ok(Point {
+        base,
+        view,
+        icon,
+        key,
+        call,
+        menu,
+        window,
+        size,
+        raise,
     })
 }
 

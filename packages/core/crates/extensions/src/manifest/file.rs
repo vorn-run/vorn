@@ -366,6 +366,94 @@ struct RawContributes {
     footers: Vec<RawFooter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     link_handlers: Vec<RawLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sidebar: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    badges: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    card_footers: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    commands: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    settings: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    decorations: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    composer: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    launchers: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    menus: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dialogs: Vec<RawPoint>,
+}
+
+impl RawContributes {
+    /// The template points, by place.
+    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 11] {
+        use super::Place as P;
+        [
+            (P::Sidebar, &self.sidebar),
+            (P::Badges, &self.badges),
+            (P::CardFooters, &self.card_footers),
+            (P::Commands, &self.commands),
+            (P::Settings, &self.settings),
+            (P::Decorations, &self.decorations),
+            (P::Composer, &self.composer),
+            (P::Launchers, &self.launchers),
+            (P::Windows, &self.windows),
+            (P::Menus, &self.menus),
+            (P::Dialogs, &self.dialogs),
+        ]
+    }
+
+    fn points_mut(&mut self, place: super::Place) -> Option<&mut Vec<RawPoint>> {
+        use super::Place as P;
+        Some(match place {
+            P::Sidebar => &mut self.sidebar,
+            P::Badges => &mut self.badges,
+            P::CardFooters => &mut self.card_footers,
+            P::Commands => &mut self.commands,
+            P::Settings => &mut self.settings,
+            P::Decorations => &mut self.decorations,
+            P::Composer => &mut self.composer,
+            P::Launchers => &mut self.launchers,
+            P::Windows => &mut self.windows,
+            P::Menus => &mut self.menus,
+            P::Dialogs => &mut self.dialogs,
+            P::Panes => return None,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawPoint {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    call: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    menu: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    window: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<[u16; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raise: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -384,6 +472,8 @@ struct RawPane {
     web: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     command: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -652,7 +742,21 @@ impl Raw {
                 ));
             }
         }
-        let legacy = self.connector.is_some() || self.contributes.is_some();
+        let legacy = self.connector.is_some()
+            || self
+                .contributes
+                .as_ref()
+                .is_some_and(|c| !c.footers.is_empty() || c.panes.iter().any(|p| p.view.is_none()));
+        let templated = self.contributes.as_ref().is_some_and(|c| {
+            c.points().iter().any(|(_, p)| !p.is_empty())
+                || c.panes.iter().any(|p| p.view.is_some())
+        });
+        if templated && self.api != API {
+            return Err(at(
+                "contributes",
+                format!("draws templates its program fills; set api = \"{API}\""),
+            ));
+        }
         if legacy && connector_protocol.is_none() {
             let table = if self.connector.is_some() {
                 "connector"
@@ -1059,11 +1163,13 @@ impl RawContributes {
             if let Some(command) = &p.command {
                 m.insert("command".into(), json!(command));
             }
+            opt(&mut m, "view", p.view.as_ref());
             let value = Value::Object(m);
-            if kept("panes", value.clone()).is_none() {
+            let draws = [p.web.is_some(), p.command.is_some(), p.view.is_some()];
+            if kept("panes", value.clone()).is_none() || draws.iter().filter(|d| **d).count() != 1 {
                 return Err(at(
                     &field,
-                    "needs an id, and a page under web/ ending in .html or a command".into(),
+                    "needs an id, and one of a page under web/ ending in .html, a command or a view under views/ ending in .kdl".into(),
                 ));
             }
             panes.push(value);
@@ -1115,6 +1221,58 @@ impl RawContributes {
             }
             links.push(value);
         }
+        let windows: Vec<&String> = self.windows.iter().map(|w| &w.id).collect();
+        let mut ids: Vec<&String> = Vec::new();
+        for (place, raw) in self.points() {
+            let mut list = Vec::new();
+            for (i, p) in raw.iter().enumerate() {
+                let toml_key = place_toml(place);
+                let field = format!("contributes.{toml_key}[{i}]");
+                let mut m = contribution_json(
+                    &p.id,
+                    p.title.as_ref(),
+                    p.description.as_ref(),
+                    p.when.as_ref(),
+                    at,
+                    &field,
+                )?;
+                for (k, v) in [
+                    ("view", &p.view),
+                    ("icon", &p.icon),
+                    ("key", &p.key),
+                    ("call", &p.call),
+                    ("menu", &p.menu),
+                    ("window", &p.window),
+                    ("raise", &p.raise),
+                ] {
+                    opt(&mut m, k, v.as_ref());
+                }
+                if let Some(size) = p.size {
+                    m.insert("size".into(), json!(size));
+                }
+                let value = Value::Object(m);
+                if let Some(problem) = super::point_problem(place, &value) {
+                    return Err(at(&format!("{field}{}", problem.0), problem.1));
+                }
+                if ids.contains(&&p.id) {
+                    return Err(at(
+                        &format!("{field}.id"),
+                        format!("`{}` names another contribution too", p.id),
+                    ));
+                }
+                ids.push(&p.id);
+                if p.window.as_ref().is_some_and(|w| !windows.contains(&w)) {
+                    return Err(at(
+                        &format!("{field}.window"),
+                        "names no window under [[contributes.windows]]".into(),
+                    ));
+                }
+                list.push(value);
+            }
+            if !list.is_empty() {
+                out.insert(place.key().into(), Value::Array(list));
+            }
+        }
         for (key, list) in [
             ("panes", panes),
             ("footers", footers),
@@ -1128,6 +1286,15 @@ impl RawContributes {
             return Err(at("contributes", "contributes nothing".into()));
         }
         Ok(Value::Object(out))
+    }
+}
+
+/// A place's table under `[contributes]`.
+fn place_toml(place: super::Place) -> &'static str {
+    use super::Place as P;
+    match place {
+        P::CardFooters => "card_footers",
+        other => other.key(),
     }
 }
 
@@ -1245,49 +1412,73 @@ impl From<&Manifest> for Raw {
                 })
                 .collect(),
         });
-        let contributes = m.contributes.as_ref().map(|c| RawContributes {
-            panes: c
-                .panes()
-                .iter()
-                .map(|p| {
-                    let (web, command) = match &p.draws {
-                        super::PaneDraws::Web(w) => (Some(w.clone()), None),
-                        super::PaneDraws::Command(c) => (None, Some(c.clone())),
-                    };
-                    RawPane {
+        let contributes = m.contributes.as_ref().map(|c| {
+            let mut raw = RawContributes {
+                panes: c
+                    .panes()
+                    .iter()
+                    .map(|p| {
+                        let (web, command, view) = match &p.draws {
+                            super::PaneDraws::Web(w) => (Some(w.clone()), None, None),
+                            super::PaneDraws::Command(c) => (None, Some(c.clone()), None),
+                            super::PaneDraws::View(v) => (None, None, Some(v.clone())),
+                        };
+                        RawPane {
+                            id: p.base.id.clone(),
+                            title: (p.base.title != p.base.id).then(|| p.base.title.clone()),
+                            description: p.base.description.clone(),
+                            when: p.base.when.as_ref().map(when),
+                            icon: p.icon.as_ref().map(icon),
+                            web,
+                            command,
+                            view,
+                        }
+                    })
+                    .collect(),
+                footers: c
+                    .footers()
+                    .iter()
+                    .map(|f| RawFooter {
+                        id: f.base.id.clone(),
+                        title: (f.base.title != f.base.id).then(|| f.base.title.clone()),
+                        description: f.base.description.clone(),
+                        when: f.base.when.as_ref().map(when),
+                        every: f.every,
+                    })
+                    .collect(),
+                link_handlers: c
+                    .link_handlers()
+                    .iter()
+                    .map(|l| RawLink {
+                        id: l.base.id.clone(),
+                        title: (l.base.title != l.base.id).then(|| l.base.title.clone()),
+                        description: l.base.description.clone(),
+                        when: l.base.when.as_ref().map(when),
+                        pattern: l.pattern.clone(),
+                        example: l.example.clone(),
+                    })
+                    .collect(),
+                ..RawContributes::default()
+            };
+            for (place, points) in &c.points {
+                if let Some(into) = raw.points_mut(*place) {
+                    into.extend(points.iter().map(|p| RawPoint {
                         id: p.base.id.clone(),
                         title: (p.base.title != p.base.id).then(|| p.base.title.clone()),
                         description: p.base.description.clone(),
                         when: p.base.when.as_ref().map(when),
-                        icon: p.icon.as_ref().map(icon),
-                        web,
-                        command,
-                    }
-                })
-                .collect(),
-            footers: c
-                .footers()
-                .iter()
-                .map(|f| RawFooter {
-                    id: f.base.id.clone(),
-                    title: (f.base.title != f.base.id).then(|| f.base.title.clone()),
-                    description: f.base.description.clone(),
-                    when: f.base.when.as_ref().map(when),
-                    every: f.every,
-                })
-                .collect(),
-            link_handlers: c
-                .link_handlers()
-                .iter()
-                .map(|l| RawLink {
-                    id: l.base.id.clone(),
-                    title: (l.base.title != l.base.id).then(|| l.base.title.clone()),
-                    description: l.base.description.clone(),
-                    when: l.base.when.as_ref().map(when),
-                    pattern: l.pattern.clone(),
-                    example: l.example.clone(),
-                })
-                .collect(),
+                        view: p.view.clone(),
+                        icon: p.icon.clone(),
+                        key: p.key.clone(),
+                        call: p.call.clone(),
+                        menu: p.menu.clone(),
+                        window: p.window.clone(),
+                        size: p.size,
+                        raise: p.raise.clone(),
+                    }));
+                }
+            }
+            raw
         });
         let uses = if m.declares.uses.is_empty() {
             m.permissions
@@ -1520,6 +1711,75 @@ header = "Authorization: Bearer {token}"
         assert_eq!(
             parse(bare).unwrap_err().message,
             "declares no service, action, connector or contribution"
+        );
+    }
+
+    #[test]
+    fn reads_template_contributions_and_writes_them_back() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[[contributes.sidebar]]
+id = "checks"
+title = "Checks"
+view = "views/checks.kdl"
+
+[[contributes.windows]]
+id = "widget"
+view = "views/widget.kdl"
+size = [320, 400]
+raise = "asks"
+
+[[contributes.commands]]
+id = "toggle"
+title = "Toggle Widget"
+key = "Mod+Shift+W"
+window = "widget"
+
+[[contributes.menus]]
+id = "remove"
+title = "Remove Worktree"
+menu = "worktree"
+view = "views/remove.kdl"
+
+[[contributes.panes]]
+id = "pane"
+view = "views/pane.kdl"
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        assert_eq!(
+            c.points(super::super::Place::Windows)[0].size,
+            Some([320, 400])
+        );
+        assert_eq!(c.views().count(), 4);
+        let json = serde_json::to_value(c).unwrap();
+        assert_eq!(json["commands"][0]["key"], "Mod+Shift+W");
+        assert_eq!(json["panes"][0]["view"], "views/pane.kdl");
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert_eq!(
+            err("key = \"Mod+Shift+W\"", "key = \"Shift+W\""),
+            "vorn-extension.toml:20: contributes.commands[0].key: is not a key such as Mod+Shift+W: Mod, Ctrl or Alt, then one key"
+        );
+        assert_eq!(
+            err("window = \"widget\"", "window = \"widgt\""),
+            "vorn-extension.toml:21: contributes.commands[0].window: names no window under [[contributes.windows]]"
+        );
+        assert_eq!(
+            err("menu = \"worktree\"", "menu = \"file\""),
+            "vorn-extension.toml:26: contributes.menus[0].menu: is one of card, grid, view, worktree"
+        );
+        assert_eq!(
+            err("view = \"views/checks.kdl\"", "view = \"views/../x.kdl\""),
+            "vorn-extension.toml:9: contributes.sidebar[0].view: is not a template under views/ ending in .kdl"
+        );
+        assert_eq!(
+            err("vorn:extension@0.9", "vorn:connector@1"),
+            "vorn-extension.toml:6: contributes: draws templates its program fills; set api = \"vorn:extension@0.9\""
         );
     }
 
