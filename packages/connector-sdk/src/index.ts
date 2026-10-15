@@ -86,7 +86,7 @@ export {
   selfCheck,
   RECORDED_CHECKS,
   CHECKS_COMMAND,
-  CONNECTOR_API,
+  EXTENSION_API,
   MANIFEST_FILE,
   SERVICE_COMMAND
 } from './extension'

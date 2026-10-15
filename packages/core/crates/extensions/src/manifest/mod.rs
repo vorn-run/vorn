@@ -22,8 +22,14 @@ use crate::js;
 
 /// The extension API this build speaks over stdio, generated from the WIT.
 pub const API: &str = crate::api::API;
-/// What `api` says for a program in the connector protocol, before its version.
-pub const CONNECTOR_API: &str = "vorn:connector@";
+/// The api id connector packages said before there was one API, refused by name.
+pub const RETIRED_CONNECTOR_API: &str = "vorn:connector@";
+/// The kind sections a manifest may carry beside its contributions, each
+/// naming the child protocol its service speaks within [`API`]. A package
+/// with none speaks the extension API itself.
+pub const KIND_SECTIONS: &[&str] = &["connector"];
+/// The connector child protocol [`API`] includes, spoken by a `[connector]` service.
+pub const CONNECTOR_PROTOCOL: u64 = 1;
 
 /// What a package says it is, does, runs and reaches.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -40,7 +46,7 @@ pub struct Manifest {
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<Auth>,
-    /// The connector protocol its program speaks; `None` with the extension API.
+    /// The child protocol of its kind section; `None` when its program speaks the extension API.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<u64>,
     pub triggers: Vec<Trigger>,
@@ -52,7 +58,7 @@ pub struct Manifest {
     pub permissions: Option<Vec<Permission>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activates: Option<Activation>,
-    /// `vorn:extension@0.9` or `vorn:connector@1`; `None` for a pack too old to say.
+    /// `vorn:extension@0.9`; `None` for a pack too old to say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<String>,
     /// The Vorn releases it runs on, as `>=0.9`.
@@ -103,9 +109,9 @@ pub struct McpTool {
 }
 
 impl Manifest {
-    /// Whether its program speaks the extension API rather than the connector protocol.
+    /// Whether its program speaks the extension API rather than a kind section's protocol.
     pub fn speaks_api(&self) -> bool {
-        self.api.as_deref() == Some(API)
+        self.api.as_deref() == Some(API) && self.protocol.is_none()
     }
 
     /// The one-shot program for `action`, if it declares one.
@@ -912,7 +918,7 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         description: description(payload),
         icon: icon(payload.get("icon")),
         auth: auth(payload.get("auth")),
-        api: protocol.map(|p| format!("{CONNECTOR_API}{p}")),
+        api: protocol.map(|_| API.to_owned()),
         protocol,
         triggers,
         actions,

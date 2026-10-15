@@ -427,6 +427,9 @@ re-implement it, or the two will disagree about a field named `oauth2Token`.
 `vorn-connector pack` builds the folder Vorn installs from git: its
 `vorn-extension.toml`, one bundled `index.js` with every dependency inlined,
 the receipt `check` wrote (`verified.json`) and the pages its panes name.
+The manifest names Vorn's one extension API, `api = "vorn:extension@0.9"`,
+and keeps auth, triggers and actions under a `[connector]` section: that
+section is what tells Vorn the program speaks the connector protocol.
 
 ```bash
 npx vorn-connector pack ./dist/index.js --out ./release

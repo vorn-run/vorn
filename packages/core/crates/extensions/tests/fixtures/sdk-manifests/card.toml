@@ -1,7 +1,7 @@
 id = "card-sample"
 name = "Card sample"
 version = "0.1.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 
 [service]
 command = ["node", "index.js"]
@@ -11,6 +11,8 @@ command = ["node", "index.js", "--check"]
 
 [declares]
 uses = ["git.read", "terminal.read"]
+
+[connector]
 
 [[contributes.panes]]
 id = "report"

@@ -1105,7 +1105,7 @@ migrations = "migrations"
             r#"id = "test.gh"
 name = "GitHub"
 version = "1.0.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 
 [service]
 command = ["node", "index.js"]
@@ -1140,7 +1140,7 @@ type = "issue"
             r#"id = "test.x"
 name = "X"
 version = "1.0.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 [service]
 command = ["node", "index.js"]
 [declares]

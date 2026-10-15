@@ -125,7 +125,7 @@ describe('packConnector', () => {
 
     const manifest = readFileSync(join(result.dir as string, MANIFEST_FILE), 'utf8')
     expect(manifest).toContain(
-      'id = "acme"\nname = "Acme"\nversion = "1.2.3"\napi = "vorn:connector@1"'
+      'id = "acme"\nname = "Acme"\nversion = "1.2.3"\napi = "vorn:extension@0.9"'
     )
     expect(manifest).toContain('publisher = "Acme"')
     expect(manifest).toContain('[service]\ncommand = ["node", "index.js"]')

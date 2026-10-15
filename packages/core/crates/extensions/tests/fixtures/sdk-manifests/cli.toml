@@ -1,7 +1,7 @@
 id = "cli-sample"
 name = "CLI sample"
 version = "1.0.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 
 [service]
 command = ["node", "index.js"]
@@ -12,6 +12,8 @@ command = ["node", "index.js", "--check"]
 [declares]
 network = ["api.github.com"]
 network_from = ["GH_HOSTS"]
+
+[connector]
 
 [connector.auth]
 rung = "cli"

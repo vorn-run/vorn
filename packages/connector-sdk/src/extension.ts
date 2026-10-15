@@ -10,8 +10,12 @@ export const CHECKS_COMMAND = ['node', 'index.js', '--check'] as const
 /** The name Vorn reads a package's manifest from. */
 export const MANIFEST_FILE = 'vorn-extension.toml'
 
-/** The protocol a connector's program speaks, as the manifest names it. */
-export const CONNECTOR_API = 'vorn:connector@1'
+/**
+ * The one Vorn extension API a package names. A connector is an extension
+ * with a `[connector]` section, whose program speaks the connector protocol
+ * that this API version includes.
+ */
+export const EXTENSION_API = 'vorn:extension@0.9'
 
 /** Every check a receipt may record: the names `check` writes into `verified.json`. */
 export const RECORDED_CHECKS = [
@@ -98,7 +102,7 @@ export function extensionToml(manifest: ConnectorManifest, extras: ExtensionExtr
     ['id', manifest.id],
     ['name', manifest.name],
     ['version', manifest.version],
-    ['api', CONNECTOR_API],
+    ['api', EXTENSION_API],
     ['publisher', extras.publisher],
     ['description', manifest.description]
   ])
@@ -127,6 +131,8 @@ export function extensionToml(manifest: ConnectorManifest, extras: ExtensionExtr
       ['uses', manifest.permissions?.length ? manifest.permissions : undefined]
     ])
   )
+  // The kind section: it names the protocol the program speaks, so it is written even when empty.
+  out.push('', '[connector]')
   const auth = manifest.auth
   if (auth) {
     const browser = auth.browser

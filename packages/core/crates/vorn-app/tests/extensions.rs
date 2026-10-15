@@ -32,10 +32,12 @@ fn install(home: &Path) {
     let manifest = r#"id = "rep"
 name = "Reporter"
 version = "1.0.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 
 [service]
 command = ["node", "index.js"]
+
+[connector]
 
 [[contributes.panes]]
 id = "page"

@@ -17,9 +17,8 @@ use toml::Spanned;
 
 use super::{
     Credential, Declares, Manifest, ManifestError, McpTool, Permission, Run, Service, Storage, API,
-    CONNECTOR_API,
+    CONNECTOR_PROTOCOL, KIND_SECTIONS, RETIRED_CONNECTOR_API,
 };
-use crate::connector::SUPPORTED_PROTOCOLS;
 
 /// The manifest's file name in a package's folder.
 pub const FILE: &str = "vorn-extension.toml";
@@ -73,6 +72,15 @@ fn parse_as(text: &str, builtin: bool) -> Result<Manifest, FileError> {
     raw.check(&at, builtin)?;
     let manifest = raw.into_manifest(&at)?;
     Ok(manifest)
+}
+
+/// The one line a manifest still on a retired api id gets.
+pub fn retired_api(api: &str) -> String {
+    let kinds: Vec<String> = KIND_SECTIONS.iter().map(|k| format!("[{k}]")).collect();
+    format!(
+        "`{api}` is retired; set api = \"{API}\" and keep auth, triggers and actions under a {} section",
+        kinds.join(" or ")
+    )
 }
 
 /// A 0.8 pack's `manifest.json`, read as its folder runs it: `node index.js`.
@@ -621,18 +629,13 @@ impl Raw {
                 format!("`{}` is not a version like 1.2.0", self.version),
             ));
         }
-        let connector_protocol = self.api.strip_prefix(CONNECTOR_API);
-        let speaks = self.api == API
-            || connector_protocol
-                .and_then(|p| p.parse::<u64>().ok())
-                .is_some_and(|p| SUPPORTED_PROTOCOLS.contains(&p));
-        if !speaks {
+        if self.api.starts_with(RETIRED_CONNECTOR_API) {
+            return Err(at("api", retired_api(&self.api)));
+        }
+        if self.api != API {
             return Err(at(
                 "api",
-                format!(
-                    "this Vorn speaks {API} and {CONNECTOR_API}1; the package asks for {}",
-                    self.api
-                ),
+                format!("this Vorn speaks {API}; the package asks for {}", self.api),
             ));
         }
         if let Some(range) = &self.vorn {
@@ -766,30 +769,24 @@ impl Raw {
                 ));
             }
         }
-        let legacy = self.connector.is_some()
-            || self
-                .contributes
-                .as_ref()
-                .is_some_and(|c| !c.footers.is_empty() || c.panes.iter().any(|p| p.view.is_none()));
+        let legacy = self
+            .contributes
+            .as_ref()
+            .is_some_and(|c| !c.footers.is_empty() || c.panes.iter().any(|p| p.view.is_none()));
         let templated = self.contributes.as_ref().is_some_and(|c| {
             c.points().iter().any(|(_, p)| !p.is_empty())
                 || c.panes.iter().any(|p| p.view.is_some())
         });
-        if templated && self.api != API {
+        if templated && self.connector.is_some() {
             return Err(at(
                 "contributes",
-                format!("draws templates its program fills; set api = \"{API}\""),
+                "draws templates its program fills over the extension API, and a [connector] service speaks the connector protocol; ship them as two packages".into(),
             ));
         }
-        if legacy && connector_protocol.is_none() {
-            let table = if self.connector.is_some() {
-                "connector"
-            } else {
-                "contributes"
-            };
+        if legacy && self.connector.is_none() {
             return Err(at(
-                table,
-                format!("is spoken to in the connector protocol; set api = \"{CONNECTOR_API}1\""),
+                "contributes",
+                "footers and panes without a view are drawn through the connector protocol; add a [connector] section or give each a view".into(),
             ));
         }
         let does_something = self.service.is_some()
@@ -810,10 +807,7 @@ impl Raw {
     }
 
     fn into_manifest(self, at: &At<'_>) -> Result<Manifest, FileError> {
-        let protocol = self
-            .api
-            .strip_prefix(CONNECTOR_API)
-            .and_then(|p| p.parse::<u64>().ok());
+        let protocol = self.connector.is_some().then_some(CONNECTOR_PROTOCOL);
         let mut payload = Map::new();
         payload.insert("id".into(), json!(self.id));
         payload.insert("name".into(), json!(self.name));
@@ -1338,7 +1332,10 @@ impl From<&Manifest> for Raw {
             agent: a.agent.clone(),
             platform: a.platform.clone(),
         };
-        let is_connector = !m.triggers.is_empty() || !m.actions.is_empty() || m.auth.is_some();
+        let is_connector = m.protocol.is_some()
+            || !m.triggers.is_empty()
+            || !m.actions.is_empty()
+            || m.auth.is_some();
         let connector = is_connector.then(|| RawConnector {
             auth: m.auth.as_ref().map(|a| RawAuth {
                 rung: a.rung.clone(),
@@ -1519,7 +1516,7 @@ impl From<&Manifest> for Raw {
             id: m.id.clone(),
             name: m.name.clone(),
             version: m.version.clone(),
-            api: m.api.clone().unwrap_or_default(),
+            api: API.to_owned(),
             vorn: m.vorn.clone(),
             publisher: m.publisher.clone(),
             description: m.description.clone(),
@@ -1806,7 +1803,7 @@ view = "views/pane.kdl"
         );
         assert_eq!(
             err("vorn:extension@0.9", "vorn:connector@1"),
-            "vorn-extension.toml:6: contributes: draws templates its program fills; set api = \"vorn:extension@0.9\""
+            "vorn-extension.toml:4: api: `vorn:connector@1` is retired; set api = \"vorn:extension@0.9\" and keep auth, triggers and actions under a [connector] section"
         );
     }
 
@@ -1823,15 +1820,13 @@ every = 5
 "#;
         let err = parse(text).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (6, "contributes"));
-        let ok = parse(&text.replace("vorn:extension@0.9", "vorn:connector@1")).unwrap();
+        let section = format!("{text}\n[connector]\n");
+        let ok = parse(&section).unwrap();
         assert_eq!(ok.kind, super::super::Kind::Extension);
-        assert_eq!(ok.protocol, Some(1));
-        let err = parse(
-            &text
-                .replace("vorn:extension@0.9", "vorn:connector@1")
-                .replace("every = 5", "every = 1"),
-        )
-        .unwrap_err();
+        assert_eq!(ok.protocol, Some(CONNECTOR_PROTOCOL));
+        assert!(!ok.speaks_api());
+        assert_eq!(parse(&to_toml(&ok)).unwrap(), ok);
+        let err = parse(&section.replace("every = 5", "every = 1")).unwrap_err();
         assert_eq!(err.field, "contributes.footers[0].every");
         assert_eq!(err.line, 8);
     }
@@ -1847,7 +1842,8 @@ every = 5
         });
         let m = from_pack_json(pack.as_object().unwrap()).unwrap();
         let text = to_toml(&m);
-        assert!(text.contains("api = \"vorn:connector@1\""), "{text}");
+        assert!(text.contains("api = \"vorn:extension@0.9\""), "{text}");
+        assert!(text.contains("[connector"), "{text}");
         assert!(text.contains("\"index.js\""), "{text}");
         assert_eq!(parse(&text).unwrap(), m);
     }

@@ -1,7 +1,7 @@
 id = "sample"
 name = "Sample \"quoted\""
 version = "0.2.0"
-api = "vorn:connector@1"
+api = "vorn:extension@0.9"
 publisher = "Tests"
 description = "Reads a site you sign in to\nand acts on it — both ways."
 
@@ -17,6 +17,8 @@ command = ["node", "index.js", "--check"]
 
 [declares]
 network = ["sample.example", "*.sample.example"]
+
+[connector]
 
 [connector.auth]
 rung = "browser"
