@@ -266,8 +266,6 @@ pub enum Dialog {
     GateReview,
     /// The Changes panel's CommitDialog.
     GitCommit,
-    /// WorktreeCleanupDialog.
-    RemoveWorktree,
     /// "Discard unsaved changes?" before a buffer goes.
     Discard,
     /// "Paste N lines?" before a paste the program could run line by line.
@@ -504,6 +502,8 @@ pub struct State {
     pub plugins: crate::plugins::Plugins,
     pub network: crate::network::Network,
     pub ext: crate::extensions::Extensions,
+    /// What extensions contribute to the screens.
+    pub points: crate::points::Points,
     /// The sign-in sheet, while one is open.
     pub signin: Option<crate::signin::Window>,
     /// An agent has asked for permission, so Mod+Shift+A and D answer it.

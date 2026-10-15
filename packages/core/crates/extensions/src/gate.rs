@@ -34,8 +34,8 @@ pub trait World: Send + Sync + 'static {
     fn fetch(&self, caller: &Caller, request: Request) -> Answer<Response>;
     /// The secret `field` of `connection`, which must belong to the caller.
     fn secret(&self, caller: &Caller, connection: &str, field: &str) -> Answer<Option<String>>;
-    /// Rows changed in `collection`; clients drawing it are told.
-    fn published(&self, _caller: &Caller, _collection: &str) {}
+    /// Rows changed in `collection` by `ops` (`{op: upsert, row}`, `{op: delete, id}`, `{op: clear}`); clients drawing it are told.
+    fn published(&self, _caller: &Caller, _collection: &str, _ops: &[Value]) {}
     /// A storage call the gate already allowed, on the caller's own tables,
     /// after the package's `migrations` that have not run yet.
     fn storage(
@@ -90,6 +90,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
     ("sessions.get", Permission::SessionsRead),
     ("sessions.launch", Permission::SessionsLaunch),
+    ("sessions.close", Permission::SessionsLaunch),
     ("terminal.read", Permission::TerminalRead),
     ("terminal.send", Permission::TerminalSend),
     ("terminal.selection", Permission::TerminalSelection),
@@ -98,6 +99,11 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("git.status", Permission::GitRead),
     ("git.diff", Permission::GitRead),
     ("git.commit", Permission::GitWrite),
+    ("worktrees.list", Permission::GitRead),
+    ("worktrees.remove", Permission::GitWrite),
+    ("worktrees.reclaim", Permission::GitWrite),
+    ("worktrees.prune", Permission::GitWrite),
+    ("permissions.resolve", Permission::AgentPermissions),
     ("files.read", Permission::FilesRead),
     ("files.write", Permission::FilesWrite),
     ("secrets.get", Permission::SecretsRead),

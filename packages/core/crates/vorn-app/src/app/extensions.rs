@@ -34,6 +34,25 @@ impl App {
                 if showing {
                     return self.ext_close(&session);
                 }
+                if let Some(p) = self
+                    .st
+                    .points
+                    .find(&extension, crate::points::kind::PANES, &pane)
+                    .filter(|p| !matches!(p.template, Ok(None)))
+                {
+                    let open = crate::extensions::OpenPane {
+                        nonce: format!("{}{}", crate::extensions::VIEW_NONCE, p.key()),
+                        extension_id: extension.clone(),
+                        pane_id: pane.clone(),
+                        url: None,
+                        terminal_id: None,
+                        title: p.title.clone(),
+                        extension_name: p.extension_name.clone(),
+                        icon: p.icon.clone().map(serde_json::Value::String),
+                    };
+                    self.st.ext.panes.insert(session, open);
+                    return;
+                }
                 // Asked for before anything is committed: the grant is the pane.
                 self.call(
                     Call::Ext(ExtCall::Open(session.clone())),
@@ -55,6 +74,9 @@ impl App {
         let Some(p) = self.st.ext.panes.remove(session) else {
             return;
         };
+        if crate::extensions::view_key(&p).is_some() {
+            return;
+        }
         self.call(
             Call::Quiet,
             "extension:closePane",

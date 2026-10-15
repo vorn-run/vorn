@@ -141,6 +141,16 @@ impl Router {
         &self.bus
     }
 
+    /// What lies behind the gate, for a built-in extension's calls.
+    pub fn world(&self) -> &Arc<dyn World> {
+        &self.world
+    }
+
+    /// Drops every row extension `id` published.
+    pub fn drop_rows(&self, id: &str) {
+        guard(&self.rows).retain(|(ext, _), _| ext != id);
+    }
+
     /// Reads which events each installed program subscribes to into the
     /// bus's index. A queue kept from before keeps what it holds, in order.
     pub fn reindex(&self) {
@@ -421,7 +431,9 @@ impl Router {
         answer.map_err(ext_error)
     }
 
-    fn publish(&self, caller: &Caller, collection: &str, ops: Vec<RowOp>) {
+    /// Applies `ops` to `caller`'s rows in `collection`; clients drawing them are told the ops that held.
+    pub fn publish(&self, caller: &Caller, collection: &str, ops: Vec<RowOp>) {
+        let mut told = Vec::with_capacity(ops.len());
         {
             let mut rows = guard(&self.rows);
             let kept = rows
@@ -445,16 +457,24 @@ impl Router {
                             );
                             continue;
                         }
+                        told.push(json!({ "op": "upsert", "row": row }));
                         kept.insert(id, row);
                     }
                     RowOp::Delete(id) => {
-                        kept.shift_remove(&id);
+                        if kept.shift_remove(&id).is_some() {
+                            told.push(json!({ "op": "delete", "id": id }));
+                        }
                     }
-                    RowOp::Clear => kept.clear(),
+                    RowOp::Clear => {
+                        kept.clear();
+                        told.push(json!({ "op": "clear" }));
+                    }
                 }
             }
         }
-        self.world.published(caller, collection);
+        if !told.is_empty() {
+            self.world.published(caller, collection, &told);
+        }
     }
 }
 

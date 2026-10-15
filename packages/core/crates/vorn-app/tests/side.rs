@@ -15,6 +15,7 @@ use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::editor::EditAct;
 use vorn_app::git::{CommitOp, GitAct};
+use vorn_app::points::PointAct;
 use vorn_app::screen::side::editor_id;
 use vorn_app::side::{tab_key, SideAct};
 use vorn_app::state::Dialog;
@@ -468,7 +469,7 @@ fn panes_browse_edit_save_and_hold_terminals() {
 }
 
 #[test]
-fn a_worktree_whose_last_session_ends_is_offered_for_removal() {
+fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -507,13 +508,15 @@ fn a_worktree_whose_last_session_ends_is_offered_for_removal() {
             .filter(|l| l.iter().any(|w| w.path == wt))
             .map(|_| ())
     });
-    let remove = Act::Git(GitAct::Remove {
-        project: repo.to_string_lossy().into_owned(),
-        worktree: wt.clone(),
+    let key = "vorn.worktrees/menus/remove".to_owned();
+    shot.until(&mut app, "the extension's menu item", |a, _| {
+        a.st.points.get(&key).map(|_| ())
     });
-    app.click(&mut shot.ui, App::control("sidebar-worktree", &remove));
+    let project = repo.to_string_lossy().into_owned();
+    let args = json!({ "worktree": wt, "project": project }).to_string();
+    let remove = Act::Point(PointAct::Choose { key, args });
     shot.frame(&mut app);
-    if app.st.dialog.is_none() {
+    if !app.click(&mut shot.ui, App::control("sidebar-worktree", &remove)) {
         // First seen without sessions, the project starts folded.
         app.st.collapsed.remove("acme");
         shot.hover(
@@ -528,37 +531,37 @@ fn a_worktree_whose_last_session_ends_is_offered_for_removal() {
         );
         shot.click(&mut app, control("sidebar-worktree", remove));
     }
+    let asked = |a: &App| {
+        a.st.points
+            .rows_of("vorn.worktrees")
+            .get("asked")
+            .is_some_and(|r| !r.is_empty())
+    };
     shot.until(&mut app, "the removal dialog", |a, _| {
-        a.st.git
-            .removal
-            .as_ref()
-            .filter(|r| r.dirty != vorn_app::git::Dirty::Checking)
-            .map(|_| ())
+        (a.st.points.dialog.as_deref() == Some("vorn.worktrees/dialogs/confirm") && asked(a))
+            .then_some(())
     });
-    assert_eq!(
-        app.st.git.removal.as_ref().map(|r| r.sessions.clone()),
-        Some(vec![sid.clone()])
-    );
     shot.save(&mut app, "g-dialog");
-    shot.click(
-        &mut app,
-        control("removal-cancel", Act::Git(GitAct::CancelRemoval)),
-    );
+    let cancel = shot
+        .button(&mut app, "Cancel")
+        .expect("the dialog's Cancel");
+    shot.click(&mut app, cancel);
+    assert_eq!(app.st.points.dialog, None);
 
-    // Closing its last session offers the worktree; Remove takes it away.
+    // Closing its last session lists the worktree as idle; Remove takes it away.
     app.rpc().call("terminal:kill", json!(sid)).expect("kill");
-    shot.until(&mut app, "the offer", |a, _| {
-        a.st.git
-            .offers
-            .iter()
-            .find(|o| o.worktree == wt && o.dirty.is_some())
+    shot.until(&mut app, "the idle worktree", |a, _| {
+        a.st.points
+            .rows_of("vorn.worktrees")
+            .get("idle")
+            .and_then(|r| r.iter().find(|r| r.id == wt))
             .map(|_| ())
     });
-    shot.save(&mut app, "g-toast");
-    shot.click(
-        &mut app,
-        control("toast-action", Act::Git(GitAct::RemoveOffered(wt.clone()))),
-    );
+    shot.save(&mut app, "g-idle");
+    let remove = shot
+        .button(&mut app, "Remove")
+        .expect("the idle row's Remove");
+    shot.click(&mut app, remove);
     shot.until(&mut app, "the removal", |a, _| {
         a.st.toasts
             .iter()

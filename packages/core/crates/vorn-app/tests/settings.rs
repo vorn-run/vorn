@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use support::{key, seed_acme, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
+use vorn_app::points::PointAct;
 use vorn_app::screen::settings::{host_id, key_field_id, CONTENT};
 use vorn_app::settings::{AgentField, Category, HostField, KeyField, SetAct};
 use vorn_app::state::MenuKind;
@@ -188,31 +189,36 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         control("enabled", Act::Set(SetAct::Notify("enabled".into(), false))),
     );
 
-    open(&mut shot, &mut app, Category::Worktrees);
-    shot.until(&mut app, "the inventory", |a, _| {
-        (!a.st.settings.worktrees.loading).then_some(())?;
-        a.st.settings.worktrees.projects.as_ref().map(|_| ())
+    // Worktrees is the cleanup extension's page.
+    let page = "vorn.worktrees/settings/worktrees";
+    shot.until(&mut app, "the extension's page", |a, _| {
+        a.st.points.get(page).map(|_| ())
     });
-    let wt = app
-        .st
-        .settings
-        .worktrees
-        .entries()
-        .find(|e| e.name == "feature-greet")
-        .map(|e| e.path.clone())
-        .expect("the feature-greet worktree is listed");
-    shot.save(&mut app, "set-worktrees");
     shot.click(
         &mut app,
-        control("wt-check", Act::Set(SetAct::ToggleWorktree(wt.clone()))),
+        control(
+            "settings-nav-ext",
+            Act::Point(PointAct::Settings(page.to_owned())),
+        ),
     );
-    assert!(app.st.settings.worktrees.selected.contains(&wt));
-    shot.click(&mut app, control("wt-remove", Act::Set(SetAct::AskRemove)));
+    let wt = shot.until(&mut app, "the inventory", |a, _| {
+        a.st.points
+            .rows_of("vorn.worktrees")
+            .get("worktrees")?
+            .iter()
+            .find(|r| r.fields.get("name").and_then(|n| n.as_str()) == Some("feature-greet"))
+            .map(|r| r.id.clone())
+    });
+    shot.save(&mut app, "set-worktrees");
+    let remove = shot
+        .row_button(&mut app, page, &wt, "Remove")
+        .expect("the worktree's Remove");
+    shot.click(&mut app, remove);
     shot.save(&mut app, "set-worktrees-confirm");
-    shot.click(&mut app, control("wt-remove", Act::Set(SetAct::Remove)));
+    shot.click(&mut app, remove.child("ok"));
     shot.until(&mut app, "the worktree gone", |a, _| {
-        (!a.st.settings.worktrees.busy && !a.st.settings.worktrees.loading).then_some(())?;
-        (!a.st.settings.worktrees.entries().any(|e| e.path == wt)).then_some(())
+        let rows = a.st.points.rows_of("vorn.worktrees").get("worktrees")?;
+        (!rows.iter().any(|r| r.id == wt)).then_some(())
     });
     assert!(
         !std::path::Path::new(&wt).exists(),

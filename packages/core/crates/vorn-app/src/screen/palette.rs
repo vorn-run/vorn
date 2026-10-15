@@ -126,6 +126,7 @@ fn row(s: &Screen<'_>, i: usize, cmd: &palette::Entry, query: &str) -> El {
     };
     let glyph = match &cmd.glyph {
         Glyph::Icon(name) => ico(name, 14.0, 1.5, c(look::GRAY_500)),
+        Glyph::Named(name) => ico(name, 14.0, 1.5, c(look::GRAY_500)),
         Glyph::Agent(agent) => agent_icon(s, agent, 14.0),
         Glyph::None => div(),
     };

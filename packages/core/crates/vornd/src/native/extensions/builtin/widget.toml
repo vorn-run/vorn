@@ -1,0 +1,28 @@
+id = "vorn.widget"
+name = "Widget"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "A small window over the others: every agent's status, and Allow or Deny for the tools they ask to use."
+
+[declares]
+uses = ["sessions.read", "agent.permissions"]
+
+[[contributes.windows]]
+id = "widget"
+title = "Vorn"
+view = "views/widget.kdl"
+size = [280, 400]
+raise = "permissions"
+
+[[contributes.windows]]
+id = "compact"
+title = "Vorn"
+view = "views/compact.kdl"
+size = [296, 84]
+
+[[contributes.commands]]
+id = "toggle"
+title = "Toggle Widget"
+key = "Mod+Alt+W"
+window = "widget"
+icon = "panel-top"

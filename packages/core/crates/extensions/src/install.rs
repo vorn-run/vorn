@@ -231,6 +231,7 @@ impl Installs {
         let dir = root.join(format!(".staging-{}", token()));
         let staged = self.clone_into(url, branch, &dir).and_then(|rev| {
             let manifest = read_staged_manifest(&dir)?;
+            crate::views::refuse(&manifest, &dir)?;
             Ok((rev, manifest))
         });
         let (rev, manifest) = match staged {
@@ -362,6 +363,13 @@ impl Installs {
                     .iter()
                     .map(|l| format!("Link handler: {}", l.base.title)),
             );
+            for (place, points) in &c.points {
+                adds.extend(
+                    points
+                        .iter()
+                        .map(|p| format!("{}: {}", place.label(), p.base.title)),
+                );
+            }
         }
         if let Some(service) = &m.service {
             adds.extend(service.events.iter().map(|e| format!("Listens to: {e}")));
@@ -483,6 +491,10 @@ impl Installs {
         if !is_safe_id(&manifest.id) {
             return Err(format!("\"{}\" is not an extension id", manifest.id));
         }
+        // A linked folder is being written: its template errors show where it draws.
+        for e in crate::views::check(&manifest, &folder) {
+            tracing::warn!("[extensions] {}: {e}", manifest.id);
+        }
         let home = self.store.root().join(&manifest.id);
         if let Some(current) = read_current(&home) {
             if current.get("linked").and_then(Value::as_str).map(Path::new) != Some(&folder) {
@@ -573,6 +585,7 @@ pub struct Packed {
 /// bundle of it holds, writing the bundle to `out` as a `.tar.gz` when given.
 pub fn pack(folder: &Path, env: &[(String, String)], out: Option<&Path>) -> Result<Packed, String> {
     let manifest = read_dir_manifest(folder)?;
+    crate::views::refuse(&manifest, folder)?;
     let checks = match &manifest.checks {
         Some(argv) => {
             let (program, args) = argv

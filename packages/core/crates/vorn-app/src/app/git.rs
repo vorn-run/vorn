@@ -1,14 +1,13 @@
 //! The git controls: what `useGitDiffPolling`, `RightPanel`, `CommitDialog`,
-//! `useBranchSwitcher`, `OpenInButton` and the worktree cleanup do, with
-//! vornd answering the git.
+//! `useBranchSwitcher` and `OpenInButton` do, with vornd answering the git.
 
-use web_time::{Duration, Instant};
+use web_time::Instant;
 
 use serde_json::{json, Value};
 
 use super::{list, App, Call, Src};
 use crate::client::rpc::RpcError;
-use crate::git::{Branches, CommitOp, DiffOp, Dirty, GitAct, Ide, Offer, Removal, Removing, Stat};
+use crate::git::{Branches, CommitOp, DiffOp, GitAct, Ide, Stat};
 use crate::screen::git::{branch_filter_id, commit_id};
 use crate::state::{Dialog, MenuKind};
 use crate::tasks::{self, Comment, Commit, Diff, DiffFile};
@@ -19,43 +18,12 @@ pub(super) enum GitCall {
     Stat(String),
     Branch(String),
     Diff(String),
-    Committed {
-        cwd: String,
-        push: bool,
-    },
+    Committed { cwd: String, push: bool },
     Pushed,
     Branches(String),
     Remotes,
-    Switched {
-        cwd: String,
-        branch: String,
-    },
+    Switched { cwd: String, branch: String },
     Ides,
-    /// A worktree's sessions, before deciding whether to ask.
-    Active {
-        project: String,
-        worktree: String,
-    },
-    /// Its changes, the same decision's second half.
-    Dirty {
-        project: String,
-        worktree: String,
-        sessions: Vec<String>,
-    },
-    RemovalDirty(String),
-    OfferDirty(String),
-    Removed {
-        project: String,
-        worktree: String,
-    },
-}
-
-/// A removal waiting for the sessions it closed to let go of their files.
-pub(super) struct Pending {
-    pub project: String,
-    pub worktree: String,
-    pub force: bool,
-    pub at: Instant,
 }
 
 pub(super) use crate::git::session_cwd as cwd_of;
@@ -77,7 +45,7 @@ fn done(answer: Result<Value, RpcError>, fallback: &str) -> Result<(), String> {
 }
 
 impl App {
-    /// The poll and the removals waiting to run.
+    /// The poll.
     pub(super) fn git_tick(&mut self) {
         let now = Instant::now();
         if self.st.git.due(now) && !self.store.sessions.is_empty() {
@@ -136,41 +104,6 @@ impl App {
             self.st.git.ides_asked = true;
             self.call(Call::Git(GitCall::Ides), "ide:detect", Value::Null);
         }
-        let due: Vec<Pending> = {
-            let (ready, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.removals)
-                .into_iter()
-                .partition(|p| now >= p.at);
-            self.removals = wait;
-            ready
-        };
-        for p in due {
-            self.remove_now(&p.project, &p.worktree, p.force);
-        }
-    }
-
-    /// `worktree:confirmCleanup`: the last session in a worktree ended.
-    pub(super) fn git_offer(&mut self, params: &Value) {
-        let s = |k: &str| {
-            params
-                .get(k)
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned()
-        };
-        let (project, worktree) = (s("projectPath"), s("worktreePath"));
-        if worktree.is_empty() || self.st.git.offers.iter().any(|o| o.worktree == worktree) {
-            return;
-        }
-        self.st.git.offers.push(Offer {
-            project,
-            worktree: worktree.clone(),
-            dirty: None,
-        });
-        self.call(
-            Call::Git(GitCall::OfferDirty(worktree.clone())),
-            "git:worktreeDirty",
-            json!(worktree),
-        );
     }
 
     fn fetch_changes(&mut self) {
@@ -295,69 +228,6 @@ impl App {
             GitCall::Ides => {
                 g.ides = Some(list(answer).iter().filter_map(Ide::from_value).collect());
             }
-            GitCall::Active { project, worktree } => match answer {
-                Ok(v) => {
-                    let sessions: Vec<String> = v
-                        .get("sessionIds")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|x| x.as_str().map(str::to_owned))
-                        .collect();
-                    self.call(
-                        Call::Git(GitCall::Dirty {
-                            project,
-                            worktree: worktree.clone(),
-                            sessions,
-                        }),
-                        "git:worktreeDirty",
-                        json!(worktree),
-                    );
-                }
-                Err(e) => self.st.toast(e.to_string(), true),
-            },
-            GitCall::Dirty {
-                project,
-                worktree,
-                sessions,
-            } => {
-                let dirty = answer.ok().and_then(|v| v.as_bool());
-                if sessions.is_empty() && dirty == Some(false) {
-                    self.remove(&project, &worktree, &[], false);
-                } else {
-                    self.ask_removal(project, worktree, sessions);
-                }
-            }
-            GitCall::RemovalDirty(worktree) => {
-                if let Some(r) = g.removal.as_mut().filter(|r| r.worktree == worktree) {
-                    r.dirty = match answer.ok().and_then(|v| v.as_bool()) {
-                        Some(true) => Dirty::Dirty,
-                        Some(false) => Dirty::Clean,
-                        None => Dirty::Unknown,
-                    };
-                }
-            }
-            GitCall::OfferDirty(worktree) => {
-                if let Some(o) = g.offers.iter_mut().find(|o| o.worktree == worktree) {
-                    o.dirty = Some(match answer.ok().and_then(|v| v.as_bool()) {
-                        Some(d) => Ok(d),
-                        None => Err(()),
-                    });
-                }
-            }
-            GitCall::Removed { project, worktree } => {
-                g.removing.retain(|r| r.worktree != worktree);
-                if answer.ok().and_then(|v| v.as_bool()) == Some(true) {
-                    self.st.toast("Worktree removed", false);
-                } else {
-                    self.st.toast("Failed to remove worktree", true);
-                }
-                self.call(
-                    Call::Worktrees(project.clone()),
-                    "git:listWorktrees",
-                    json!(project),
-                );
-            }
         }
     }
 
@@ -367,62 +237,6 @@ impl App {
         self.st.toast(text, false);
         self.fetch_changes();
         self.refresh_stat();
-    }
-
-    /// The dialog for a worktree with sessions or changes at stake.
-    fn ask_removal(&mut self, project: String, worktree: String, sessions: Vec<String>) {
-        self.st.git.removal = Some(Removal {
-            project,
-            worktree: worktree.clone(),
-            sessions,
-            dirty: Dirty::Checking,
-        });
-        self.st.dialog = Some(Dialog::RemoveWorktree);
-        self.call(
-            Call::Git(GitCall::RemovalDirty(worktree.clone())),
-            "git:worktreeDirty",
-            json!(worktree),
-        );
-    }
-
-    /// `removeWorktreeWithProgress`: the sessions closed first, then a
-    /// moment for their processes to let go of the files.
-    fn remove(&mut self, project: &str, worktree: &str, sessions: &[String], force: bool) {
-        let label = if sessions.is_empty() {
-            "Removing worktree\u{2026}"
-        } else {
-            "Closing sessions & removing worktree\u{2026}"
-        };
-        self.st.git.removing.push(Removing {
-            project: project.to_owned(),
-            worktree: worktree.to_owned(),
-            label,
-        });
-        if sessions.is_empty() {
-            self.remove_now(project, worktree, force);
-            return;
-        }
-        for sid in sessions {
-            self.call(Call::Ignore, "terminal:kill", json!(sid));
-            self.call(Call::Ignore, "headless:kill", json!(sid));
-        }
-        self.removals.push(Pending {
-            project: project.to_owned(),
-            worktree: worktree.to_owned(),
-            force,
-            at: Instant::now() + Duration::from_millis(500),
-        });
-    }
-
-    fn remove_now(&mut self, project: &str, worktree: &str, force: bool) {
-        self.call(
-            Call::Git(GitCall::Removed {
-                project: project.to_owned(),
-                worktree: worktree.to_owned(),
-            }),
-            "git:removeWorktree",
-            json!({ "projectPath": project, "worktreePath": worktree, "force": force }),
-        );
     }
 
     /// Opens the branch switcher for `session`'s directory.
@@ -532,45 +346,6 @@ impl App {
                 }
             }
             GitAct::OpenInMenu(session) => self.open_menu(ui, MenuKind::OpenIn(session), src),
-            GitAct::Remove { project, worktree } => {
-                self.call(
-                    Call::Git(GitCall::Active {
-                        project,
-                        worktree: worktree.clone(),
-                    }),
-                    "worktree:activeSessions",
-                    json!(worktree),
-                );
-            }
-            GitAct::ConfirmRemoval => {
-                let Some(r) = self.st.git.removal.take() else {
-                    return;
-                };
-                if r.dirty == Dirty::Checking {
-                    self.st.git.removal = Some(r);
-                    return;
-                }
-                self.st.dialog = None;
-                self.remove(&r.project, &r.worktree, &r.sessions, r.warns());
-            }
-            GitAct::CancelRemoval => {
-                self.st.git.removal = None;
-                self.st.dialog = None;
-            }
-            GitAct::Keep(worktree) => self.st.git.offers.retain(|o| o.worktree != worktree),
-            GitAct::RemoveOffered(worktree) => {
-                let Some(i) = self
-                    .st
-                    .git
-                    .offers
-                    .iter()
-                    .position(|o| o.worktree == worktree)
-                else {
-                    return;
-                };
-                let o = self.st.git.offers.remove(i);
-                self.remove(&o.project, &o.worktree, &[], o.warns());
-            }
         }
     }
 
@@ -705,10 +480,6 @@ impl App {
                 self.diff_op(ui, DiffOp::CancelComment);
                 return true;
             }
-        }
-        if self.st.dialog == Some(Dialog::RemoveWorktree) && code == "Escape" {
-            self.run_git(ui, GitAct::CancelRemoval, Src::default());
-            return true;
         }
         false
     }

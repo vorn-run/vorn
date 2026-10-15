@@ -12,6 +12,7 @@ pub mod dock;
 pub mod glyph;
 pub mod sidebar;
 pub mod status;
+pub mod template;
 
 pub use agent::{agent_icon, status_icon, AgentMarks};
 pub use status::{status_dot, Status};

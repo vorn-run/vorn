@@ -415,7 +415,6 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     link.set_server_host(serving.addr().ip().to_string());
     daemon.start_connectors().await;
     daemon.start_work();
-    daemon.start_widget();
     daemon.start_hooks().await;
     daemon.start_extensions().await;
     serving.publish();

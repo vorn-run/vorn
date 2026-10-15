@@ -41,13 +41,13 @@ mod network;
 mod onboarding;
 mod palette;
 mod plugins;
+mod points;
 mod settings;
 mod shell;
 mod side;
 pub mod signin;
 mod tasks;
 mod term;
-mod widget;
 mod workflows;
 
 /// The modifier the app's shortcuts use: Cmd on a Mac, Ctrl elsewhere.
@@ -245,6 +245,7 @@ enum Call {
     Pane(browser::PaneCall),
     Plug(plugins::PlugCall),
     Ext(extensions::ExtCall),
+    Point(points::PointCall),
     /// `connection:signedIn` after the sheet saw someone sign in.
     SignedIn(Option<String>),
     Net(network::NetCall),
@@ -352,8 +353,6 @@ pub struct App {
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
-    /// Worktree removals waiting for the sessions they closed.
-    removals: Vec<git::Pending>,
     /// A discard the person agreed to is being run.
     discarding: bool,
     /// The browser and device panes' web views and calls in flight.
@@ -366,12 +365,10 @@ pub struct App {
     windowed: bool,
     /// The system-wide approve and deny keys, once an agent has asked.
     hotkeys: Option<Option<crate::hotkeys::Presses>>,
-    /// The floating widget's process, while it runs.
-    widget: Option<widget::Running>,
-    /// `defaults.widgetEnabled` last frame, to hide the widget when it turns off.
-    widget_was_enabled: bool,
-    /// A permission request arrived; the frame decides whether the widget shows.
-    widget_wanted: bool,
+    /// Window points' processes, by point key.
+    panels: HashMap<String, points::Running>,
+    /// Window points a new row asked to bring up.
+    raised: Vec<String>,
     /// The OS file picker, what it is for, while it is open.
     picking: Option<(
         Picked,
@@ -510,15 +507,13 @@ impl App {
             data_dir: None,
             health: None,
             last_focus: None,
-            removals: Vec::new(),
             discarding: false,
             web,
             wake: app_wake,
             sessions: Default::default(),
             windowed: false,
-            widget: None,
-            widget_was_enabled: false,
-            widget_wanted: false,
+            panels: HashMap::new(),
+            raised: Vec::new(),
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),
@@ -798,9 +793,8 @@ impl App {
                         self.wf_missed(&params);
                         continue;
                     }
-                    if method == "worktree:confirmCleanup" {
-                        self.git_offer(&params);
-                        continue;
+                    if method.starts_with("extension:") {
+                        self.points_notified(&method, &params);
                     }
                     let store = &self.store;
                     let heard = self.notifier.heard(
@@ -820,10 +814,6 @@ impl App {
                         web_time::Instant::now(),
                     );
                     self.notices.extend(heard);
-                    if method == "widget:permission-request" {
-                        self.st.permission_keys = true;
-                        self.widget_wanted = true;
-                    }
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
                     self.ext_notified(&method, &params);
@@ -950,6 +940,7 @@ impl App {
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Plug(c) => self.plug_answered(c, answer),
             Call::Ext(c) => self.ext_answered(c, answer),
+            Call::Point(c) => self.point_answered(c, answer),
             Call::SignedIn(identity) => {
                 self.finish_signin(answer.map(|_| identity).map_err(|e| e.to_string()))
             }
@@ -1324,6 +1315,9 @@ impl App {
     /// Holds Mod+Shift+A and D system-wide once an agent has asked, as the
     /// desktop does, and answers their presses.
     fn hotkeys_tick(&mut self) {
+        if !self.st.permission_keys {
+            self.st.permission_keys = self.store.sessions.iter().any(|s| s.status() == "waiting");
+        }
         if self.hotkeys.is_none() && self.st.permission_keys && self.windowed {
             self.hotkeys = Some(crate::hotkeys::register(Arc::clone(&self.wake)));
         }
@@ -2051,7 +2045,7 @@ impl App {
             }
             Act::Welcome => self.open_onboard(ui),
             Act::Ext(a) => self.run_ext(a),
-            Act::ToggleWidget => self.toggle_widget(),
+            Act::Point(a) => self.run_point(ui, a),
             Act::AddGroup => {
                 let mut config = self.store.config.clone();
                 let workspace = config
@@ -2559,6 +2553,16 @@ impl App {
     }
 
     fn submit(&mut self, ui: &mut Ui, id: Id) {
+        if let Some(Act::Point(crate::points::PointAct::Field {
+            extension,
+            call,
+            row,
+        })) = self.acts.text_of(id)
+        {
+            let text = ui.edit_text(id).to_owned();
+            self.point_field(&extension, &call, row.as_deref(), &text);
+            return;
+        }
         if id == COMPOSER_INPUT {
             self.launch();
             return;
@@ -2728,6 +2732,21 @@ impl App {
             .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
         if let Some(s) = s {
             self.run_shortcut(ui, s);
+            return true;
+        }
+        let command = self
+            .st
+            .points
+            .at(crate::points::kind::COMMANDS)
+            .find(|p| {
+                p.key
+                    .as_deref()
+                    .is_some_and(|k| crate::points::key_hit(k, code, *m, MOD()))
+            })
+            .map(crate::points::Point::key);
+        if let Some(key) = command {
+            let args = "{}".to_owned();
+            self.run_point(ui, crate::points::PointAct::Choose { key, args });
             return true;
         }
         // Tab in the composer picks the next project, not the next control.
@@ -3045,10 +3064,7 @@ impl App {
         }
         self.hotkeys_tick();
         self.ext_tick();
-        if std::mem::take(&mut self.widget_wanted) {
-            self.widget_asked(ui);
-        }
-        self.widget_tick(ui);
+        self.points_tick(ui);
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }

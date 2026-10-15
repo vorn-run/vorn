@@ -283,6 +283,14 @@ pub(super) fn nav_item(
 
 /// SessionItem, its branch under the name where the list asks for it.
 fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
+    let row = session_line(s, session, show_branch);
+    match super::points::decorations(s, &session.info.id) {
+        Some(d) => div().col().child(row).child(d.pl(30.0).pb(2.0)),
+        None => row,
+    }
+}
+
+fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
     use crate::components::sidebar::{session_row, Detail, SessionRow, SessionRowIds, StepRow};
     use crate::components::Status;
     let sid = session.info.id.as_str();
@@ -348,13 +356,13 @@ fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
 
 /// A sidebar row's quick actions, drawn on hover with their tooltips to
 /// the right as today's `Tooltip position="right"`.
-type Quick = (Act, &'static str, &'static str, f32);
+type Quick<'a> = (Act, &'a str, &'a str, f32);
 
-fn quick_hot(s: &Screen<'_>, place: &str, quick: &[Quick]) -> bool {
+fn quick_hot(s: &Screen<'_>, place: &str, quick: &[Quick<'_>]) -> bool {
     quick.iter().any(|(a, ..)| s.ui.hovered(Acts::id(place, a)))
 }
 
-fn quick_actions(s: &Screen<'_>, place: &str, quick: Vec<Quick>) -> El {
+fn quick_actions(s: &Screen<'_>, place: &str, quick: Vec<Quick<'_>>) -> El {
     let mut acts = div().row().items_center().gap(2.0);
     for (act, name, label, stroke) in quick {
         let to = if matches!(act, Act::Git(_)) {
@@ -636,15 +644,8 @@ fn worktree_row(
         ),
     ];
     if !wt.main {
-        quick.push((
-            Act::Git(crate::git::GitAct::Remove {
-                project: p.path.clone(),
-                worktree: wt.path.clone(),
-            }),
-            "trash-2",
-            "Remove worktree",
-            2.0,
-        ));
+        let args = serde_json::json!({ "worktree": wt.path, "project": p.path }).to_string();
+        quick.extend(super::points::menu_items(s, "worktree", &args));
     }
     let hot = s.ui.hovered(id)
         || s.ui.hovered(Acts::id("sidebar-worktree", &toggle))
@@ -1690,7 +1691,10 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
     let body = match s.st.view {
         MainView::Workflows => super::workflows::sidebar(s),
         MainView::Tasks => tasks_projects(s),
-        MainView::Sessions => sessions(s),
+        MainView::Sessions => div()
+            .col()
+            .child(sessions(s))
+            .child_if(super::points::sidebar(s)),
     };
     let scroll = div()
         .id(crate::ui::Id::new("sidebar-scroll"))

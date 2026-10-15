@@ -203,7 +203,16 @@ fn extension_pane(s: &Screen<'_>, sid: &str) -> El {
             ),
         )
         .child(controls(s, sid, PaneKind::Extension, &p.title));
-    let body = if p.url.is_some() {
+    let body = if let Some(key) = crate::extensions::view_key(p) {
+        div()
+            .id(crate::ui::Id::new("ext-view").child(sid))
+            .col()
+            .grow()
+            .min_h(0.0)
+            .scroll_y()
+            .bg(c(look::SURFACE_PANEL))
+            .child(super::points::pane(s, &key))
+    } else if p.url.is_some() {
         web_box(s, &crate::extensions::page_key(sid), p.url.as_deref()).bg(c(look::SURFACE_PANEL))
     } else {
         let slot = p

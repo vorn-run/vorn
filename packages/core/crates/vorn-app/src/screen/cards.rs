@@ -267,7 +267,9 @@ fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> E
                 .row()
                 .grow()
                 .min_w0()
-                .child(title(s, session, 13.0, dim)),
+                .gap(8.0)
+                .child(title(s, session, 13.0, dim))
+                .child_if(super::points::badges(s, &session.info.id)),
         )
         .child(right);
     div()
@@ -364,7 +366,9 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
                 .row()
                 .grow()
                 .min_w0()
-                .child(title(s, session, 13.0, 1.0)),
+                .gap(8.0)
+                .child(title(s, session, 13.0, 1.0))
+                .child_if(super::points::badges(s, &session.info.id)),
         )
         .child_if(nav_hint(s, &session.info.id))
         .child(actions(s, session, true))
@@ -1233,6 +1237,7 @@ fn term_body(s: &Screen<'_>, i: usize, session: &Session, compact: bool) -> El {
         .bg(c(look::SURFACE_SUNKEN))
         .child(div().h(look::CARD_BODY_PT).shrink0())
         .child(terminal(s, i, session))
+        .child_if(super::points::footers(s, &session.info.id))
         .child_if(composer(s, session, compact))
 }
 

@@ -71,6 +71,8 @@ impl Cat {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Glyph {
     Icon(&'static str),
+    /// An extension's icon, by its lucide name.
+    Named(String),
     Agent(String),
     None,
 }
@@ -172,6 +174,35 @@ fn is_local(hosts: Option<&Value>) -> bool {
 /// jump to a card.
 pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
+    for p in st.points.at(crate::points::kind::COMMANDS) {
+        let mut e = Entry::new(
+            Cat::Actions,
+            &p.title,
+            p.icon.clone().map_or(Glyph::Icon("puzzle"), Glyph::Named),
+            Act::Point(crate::points::PointAct::Choose {
+                key: p.key(),
+                args: "{}".to_owned(),
+            }),
+        )
+        .sub(&p.extension_name)
+        .keys(&["extension", &p.extension_name]);
+        if let Some(k) = &p.key {
+            e = e.shortcut(k.replace("Mod+", m).replace('+', ""));
+        }
+        out.push(e);
+    }
+    for p in st.points.at(crate::points::kind::SETTINGS) {
+        out.push(
+            Entry::new(
+                Cat::Actions,
+                format!("{} Settings", p.title),
+                p.icon.clone().map_or(Glyph::Icon("settings"), Glyph::Named),
+                Act::Point(crate::points::PointAct::Settings(p.key())),
+            )
+            .sub(&p.extension_name)
+            .keys(&["settings", "extension", &p.extension_name]),
+        );
+    }
     // The web client already runs in the browser.
     if cfg!(target_arch = "wasm32") {
         out.retain(|e| e.act != Act::OpenWebClient);
@@ -350,13 +381,6 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
         .keys(&["new group", "create group", "sidebar"]),
         Entry::new(
             Cat::Actions,
-            "Toggle Widget",
-            Glyph::Icon("layout-dashboard"),
-            Act::ToggleWidget,
-        )
-        .keys(&["widget", "floating", "status"]),
-        Entry::new(
-            Cat::Actions,
             "Add Workflow",
             Glyph::Icon("workflow"),
             Act::Workflow(WfAct::New),
@@ -416,24 +440,6 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
             "cursor",
             "server",
             "url",
-        ]),
-        Entry::new(
-            Cat::Actions,
-            "Manage Worktrees",
-            Glyph::Icon("hard-drive"),
-            Act::Set(crate::settings::SetAct::Open(
-                crate::settings::Category::Worktrees,
-            )),
-        )
-        .keys(&[
-            "worktree",
-            "disk",
-            "space",
-            "cleanup",
-            "clean",
-            "prune",
-            "size",
-            "node_modules",
         ]),
         Entry::new(
             Cat::Actions,

@@ -82,11 +82,13 @@ impl World for Fake {
         };
         Box::pin(async move { Ok(answer) })
     }
-    fn published(&self, caller: &Caller, collection: &str) {
-        self.published
-            .lock()
-            .unwrap()
-            .push(format!("{}/{collection}", caller.extension));
+    fn published(&self, caller: &Caller, collection: &str, ops: &[Value]) {
+        let ops: Vec<&str> = ops.iter().filter_map(|o| o["op"].as_str()).collect();
+        self.published.lock().unwrap().push(format!(
+            "{}/{collection} {}",
+            caller.extension,
+            ops.join(",")
+        ));
     }
 }
 
@@ -270,7 +272,7 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
                 assert_eq!(rows, [row]);
-                assert_eq!(*b.world.published.lock().unwrap(), ["a/x"]);
+                assert_eq!(*b.world.published.lock().unwrap(), ["a/x upsert"]);
             }
             (Side::Host, Method::HostLog) => {
                 assert_eq!(b.relay(method, sample).await, json!({ "sent": true }));

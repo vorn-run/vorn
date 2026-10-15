@@ -1,0 +1,12 @@
+// Asks before the finished list empties.
+schema "vorn:view@1"
+
+column {
+    text "Clear finished turns?" role=title
+    text "The sidebar's list empties. Each card keeps its count." role=secondary
+    row {
+        text "" grow=#true
+        button Cancel close=#true
+        button Clear call="clear" style=danger close=#true
+    }
+}

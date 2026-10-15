@@ -36,6 +36,10 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
 
   const record = async (id: string): Promise<TerminalSession | undefined> =>
     (await client.result<TerminalSession[]>('terminal:listActive')).find((s) => s.id === id)
+  type Asked = { id: string; tool: string; description: string }
+  // The Widget built-in lists open requests: the public API's way to hear of them.
+  const asked = (): Promise<Asked[]> =>
+    client.result<Asked[]>('extension:rows', { id: 'vorn.widget', collection: 'permissions' })
   const event = (name: string, session: string, extra: Record<string, unknown> = {}) => ({
     hook_event_name: name,
     session_id: session,
@@ -64,6 +68,7 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
       projectPath: server.dirs.work
     })
     await until('the agent to start', async () => ((await record(claude.id))?.pid ?? 0) > 0)
+    await client.result('extension:setBuiltin', { id: 'vorn.widget', on: true })
   })
 
   afterAll(async () => {
@@ -109,7 +114,7 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
   })
 
   it('holds a permission request until a client answers it', async () => {
-    const asked = postHook(
+    const held = postHook(
       endpoint,
       event('PermissionRequest', 'conv-a', {
         tool_name: 'Bash',
@@ -117,19 +122,19 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
       }),
       { terminal: claude.id }
     )
-    let request: { requestId: string; description?: string; terminalId?: string } | undefined
-    await until('clients to be asked', () => {
-      request = client.toldBy('widget:permission-request').at(-1) as typeof request
+    let request: Asked | undefined
+    await until('the widget to be asked', async () => {
+      request = (await asked()).at(-1)
       return !!request
     })
-    expect(request).toMatchObject({ description: 'rm -rf build', terminalId: claude.id })
+    expect(request).toMatchObject({ tool: 'Bash', description: 'rm -rf build' })
     await until('the terminal waiting', async () => (await record(claude.id))?.status === 'waiting')
     await client.result('permission:resolve', {
-      requestId: request!.requestId,
+      requestId: request!.id,
       allow: true,
       updatedInput: { command: 'rm -rf build/tmp' }
     })
-    expect(await (await asked).json()).toEqual({
+    expect(await (await held).json()).toEqual({
       hookSpecificOutput: {
         hookEventName: 'PermissionRequest',
         decision: { behavior: 'allow', updatedInput: { command: 'rm -rf build/tmp' } }
@@ -138,20 +143,13 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
   })
 
   it('lets a request go when the agent moves past it', async () => {
-    const before = client.toldBy('widget:permission-request').length
-    const asked = postHook(endpoint, event('PermissionRequest', 'conv-a', { tool_name: 'Edit' }), {
+    const held = postHook(endpoint, event('PermissionRequest', 'conv-a', { tool_name: 'Edit' }), {
       terminal: claude.id
     })
-    await until(
-      'clients to be asked',
-      () => client.toldBy('widget:permission-request').length > before
-    )
-    const { requestId } = client.toldBy('widget:permission-request').at(-1) as { requestId: string }
+    await until('the widget to be asked', async () => (await asked()).length > 0)
     await postHook(endpoint, event('PostToolUse', 'conv-a'))
-    expect(await (await asked).json()).toEqual({})
-    await until('clients to be told it is gone', () =>
-      client.toldBy('widget:permission-cancelled').includes(requestId)
-    )
+    expect(await (await held).json()).toEqual({})
+    await until('the widget to drop it', async () => (await asked()).length === 0)
     // A conversation no terminal has is the agent's own to decide.
     const loose = await postHook(
       endpoint,

@@ -9,6 +9,8 @@ description = "Vorn's composed components (agent and status icons, session card 
 
 [dependencies]
 vornui = { path = "../vornui" }
+# Extension templates, drawn by `template`.
+vorn-view = { path = "../view" }
 
 [[example]]
 name = "gallery"

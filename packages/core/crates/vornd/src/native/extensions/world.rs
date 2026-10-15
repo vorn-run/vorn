@@ -84,10 +84,47 @@ fn needs(method: &str, what: &str) -> ExtError {
 
 /// A running session as `sessions.list` and `sessions.get` describe it.
 fn session_json(t: &crate::registry::TerminalSession) -> Value {
+    let name = t
+        .display_name
+        .as_deref()
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&t.project_name);
     json!({
-        "id": t.id, "agent": t.agent_type, "status": t.status,
+        "id": t.id, "agent": t.agent_type, "status": t.status, "name": name,
         "projectPath": t.project_path, "worktreePath": t.worktree_path,
     })
+}
+
+/// `worktrees.list`: every worktree of `project`, or of every project, as the inventory scans it.
+async fn worktrees(
+    native: &Arc<Native>,
+    project: Option<String>,
+    refresh: bool,
+) -> Result<Value, ExtError> {
+    let params = json!({ "projectPaths": project.map(|p| vec![p]), "refresh": refresh });
+    let inventory = ask(native, "worktree:inventory", params).await?;
+    let mut out = Vec::new();
+    for p in inventory["projects"].as_array().into_iter().flatten() {
+        for e in p["entries"].as_array().into_iter().flatten() {
+            let reasons: Vec<&str> = e["verdict"]["reasons"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            out.push(json!({
+                "projectPath": p["projectPath"], "projectName": p["projectName"],
+                "path": e["path"], "name": e["name"], "branch": e["branch"],
+                "main": e["isMain"], "orphan": e["kind"] == "orphan-dir",
+                "dirty": e["isDirty"], "merged": e["isMerged"],
+                "sizeBytes": e["sizeBytes"], "artifactBytes": e["artifactBytes"],
+                "idleDays": e["idleDays"],
+                "sessionIds": e["activeSessionIds"],
+                "verdict": e["verdict"]["level"], "reasons": reasons.join("; "),
+            }));
+        }
+    }
+    Ok(Value::Array(out))
 }
 
 impl World for Wired {
@@ -162,6 +199,49 @@ impl World for Wired {
                     })
                     .await
                     .map_err(|e| ExtError::new("failed", e.to_string()))
+                }
+                "sessions.close" => {
+                    let id = text(&args, "sessionId")
+                        .ok_or_else(|| needs(m, "the sessionId to close"))?;
+                    ask(&native, "terminal:kill", json!(id)).await
+                }
+                "worktrees.list" => {
+                    let refresh = args.get("refresh").and_then(Value::as_bool) == Some(true);
+                    worktrees(&native, text(&args, "project"), refresh).await
+                }
+                "worktrees.reclaim" | "worktrees.prune" => {
+                    let path =
+                        text(&args, "worktree").ok_or_else(|| needs(m, "the worktree to clean"))?;
+                    let method = if m == "worktrees.reclaim" {
+                        "worktree:reclaimArtifacts"
+                    } else {
+                        "worktree:pruneOrphans"
+                    };
+                    ask(&native, method, json!({ "paths": [path] })).await
+                }
+                "worktrees.remove" => {
+                    let worktree = text(&args, "worktree")
+                        .ok_or_else(|| needs(m, "the worktree to remove"))?;
+                    let project = project.ok_or_else(|| needs(m, "the project it belongs to"))?;
+                    let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+                    let params =
+                        json!({ "projectPath": project, "worktreePath": worktree, "force": force });
+                    let removed = ask(&native, "git:removeWorktree", params).await?;
+                    Ok(json!({ "removed": removed.as_bool() == Some(true) }))
+                }
+                "permissions.resolve" => {
+                    let id = text(&args, "requestId")
+                        .ok_or_else(|| needs(m, "the requestId to answer"))?;
+                    let allow = args.get("allow").and_then(Value::as_bool).unwrap_or(false);
+                    // A rule is picked among those the agent offered, never written.
+                    let mut answer = json!({ "requestId": id, "allow": allow });
+                    if let Some(i) = args.get("suggestion").and_then(Value::as_u64) {
+                        answer["suggestion"] = json!(i);
+                    }
+                    if let Some(a) = args.get("answers").filter(|a| a.is_object()) {
+                        answer["answers"] = a.clone();
+                    }
+                    ask(&native, "permission:resolve", answer).await
                 }
                 "git.diff" => {
                     let dir = text(&args, "worktree")
@@ -305,11 +385,11 @@ impl World for Wired {
         })
     }
 
-    fn published(&self, caller: &Caller, collection: &str) {
+    fn published(&self, caller: &Caller, collection: &str, ops: &[Value]) {
         if let Some(native) = self.native.upgrade() {
             native.broadcast_to(
                 "extension:rowsChanged",
-                json!({ "extensionId": caller.extension, "collection": collection }),
+                json!({ "extensionId": caller.extension, "collection": collection, "ops": ops }),
                 None,
             );
         }

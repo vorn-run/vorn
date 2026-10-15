@@ -1,0 +1,41 @@
+// Every worktree of every project, what removing it frees and why.
+schema "vorn:view@1"
+
+rows "worktrees" {
+    name string
+    project string
+    project_path string
+    branch string
+    size string
+    verdict enum keep orphan review reclaim remove
+    reasons string
+    dirty bool
+    orphan bool
+    reclaimable bool
+    remove_dirty bool
+    remove_clean bool
+}
+
+section "Worktrees" {
+    row {
+        text "{worktrees.count} worktrees" role=secondary grow=#true
+        button Refresh call="refresh" icon="refresh-cw"
+    }
+    list "worktrees" empty="No worktrees" {
+        column {
+            row {
+                status "{row.verdict}" keep=muted orphan=warn review=warn reclaim=busy remove=good
+                text "{row.project} / {row.name}" grow=#true
+                text "{row.size}" role=mono
+                badge "changes" when="{row.dirty}" changes=warn
+            }
+            row {
+                text "{row.branch} · {row.reasons}" role=secondary grow=#true
+                button "Free space" call="reclaim" when="{row.reclaimable}"
+                button Delete call="prune" style=danger confirm="Delete the folder {row.name}?" when="{row.orphan}"
+                button Remove call="remove" style=danger confirm="Remove {row.name}? Its uncommitted changes are lost." when="{row.remove_dirty}"
+                button Remove call="remove" style=danger confirm="Remove {row.name}?" when="{row.remove_clean}"
+            }
+        }
+    }
+}

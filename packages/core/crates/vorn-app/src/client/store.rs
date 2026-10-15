@@ -23,12 +23,10 @@ pub const TOPICS: &[&str] = &[
     "session:updated",
     "session:reordered",
     "terminal:exit",
-    "widget:status-update",
     "config:changed",
     "task:changed",
     "workflow:changed",
     "workflow:runUpdated",
-    "worktree:confirmCleanup",
     "artifact:published",
     "artifact:commentsChanged",
     "connector:*",
@@ -38,7 +36,6 @@ pub const TOPICS: &[&str] = &[
     "terminal:bell",
     "terminal:notify",
     "terminal:command",
-    "widget:permission-request",
 ];
 
 /// The agent a new composer session starts when the config names none, as
@@ -362,28 +359,6 @@ impl Store {
                 s.exited = Some(params.get("exitCode").and_then(Value::as_i64).unwrap_or(0));
                 Change::Exited(id.to_owned())
             }
-            "widget:status-update" => {
-                let mut changed = false;
-                for agent in params.as_array().into_iter().flatten() {
-                    let (Some(id), Some(status)) = (
-                        agent.get("id").and_then(Value::as_str),
-                        agent.get("status").and_then(Value::as_str),
-                    ) else {
-                        continue;
-                    };
-                    if let Some(s) = self.sessions.iter_mut().find(|s| s.info.id == id) {
-                        if s.info.status.as_str() != status {
-                            s.info.status.0 = status.to_owned();
-                            changed = true;
-                        }
-                    }
-                }
-                if changed {
-                    Change::Sessions
-                } else {
-                    Change::Nothing
-                }
-            }
             "workflow:runUpdated" => {
                 if self.run_updated(&params) {
                     Change::Approvals
@@ -592,16 +567,6 @@ mod tests {
             s.apply("terminal:exit", json!({ "id": "zz" })),
             Change::Nothing
         );
-    }
-
-    #[test]
-    fn widget_updates_change_status_only_when_it_differs() {
-        let mut s = store(&["a"]);
-        let same = json!([{ "id": "a", "status": "running" }]);
-        assert_eq!(s.apply("widget:status-update", same), Change::Nothing);
-        let waiting = json!([{ "id": "a", "status": "waiting" }, { "id": "x", "status": "idle" }]);
-        assert_eq!(s.apply("widget:status-update", waiting), Change::Sessions);
-        assert_eq!(s.sessions[0].status(), "waiting");
     }
 
     #[test]

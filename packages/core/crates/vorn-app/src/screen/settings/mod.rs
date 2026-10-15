@@ -5,7 +5,6 @@
 mod agents;
 mod pages;
 mod ssh;
-mod worktrees;
 
 pub use agents::agent_field_id;
 pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
@@ -38,9 +37,6 @@ fn nav_svg(cat: Category) -> String {
         Category::Updates => r#"<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/>"#,
         Category::Notifications => {
             r#"<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>"#
-        }
-        Category::Worktrees => {
-            r#"<circle cx="6" cy="5" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="12" cy="19" r="2.5"/><path d="M6 7.5v3a2 2 0 002 2h8a2 2 0 002-2v-3M12 12.5v4"/>"#
         }
         Category::Agents => {
             r#"<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>"#
@@ -77,7 +73,44 @@ pub(super) fn svg(body: &str, stroke: f32) -> String {
 /// One category button: `px-3 py-2 rounded-md text-[13px] gap-2.5`.
 fn nav_item(s: &Screen<'_>, cat: Category, rest: Rgba) -> El {
     let id = s.acts.on("settings-nav", set(SetAct::Open(cat)));
-    let on = s.st.settings.category == cat;
+    let on = s.st.settings.category == cat && s.st.settings.ext_page.is_none();
+    nav_button(
+        s,
+        id,
+        cat.label(),
+        icon(nav_svg(cat), 16.0, nav_ink(s, id, on, rest)),
+        on,
+        rest,
+    )
+}
+
+fn nav_ink(s: &Screen<'_>, id: Id, on: bool, rest: Rgba) -> Rgba {
+    if on {
+        c(look::WHITE)
+    } else {
+        rest.mix(c(look::WHITE), s.ui.hover(id))
+    }
+}
+
+/// An extension's settings page in the nav, under its own heading.
+fn ext_item(s: &Screen<'_>, p: &crate::points::Point) -> El {
+    let key = p.key();
+    let id = s.acts.on(
+        "settings-nav-ext",
+        Act::Point(crate::points::PointAct::Settings(key.clone())),
+    );
+    let on = s.st.settings.ext_page.as_deref() == Some(key.as_str());
+    let rest = c(look::GRAY_400);
+    let glyph = vorn_components::lucide(
+        p.icon.as_deref().unwrap_or("puzzle"),
+        16.0,
+        1.5,
+        nav_ink(s, id, on, rest),
+    );
+    nav_button(s, id, &p.title, glyph, on, rest)
+}
+
+fn nav_button(s: &Screen<'_>, id: Id, label: &str, glyph: El, on: bool, rest: Rgba) -> El {
     let hot = s.ui.hover(id);
     let (fg, bg) = if on {
         (c(look::WHITE), white(0.08))
@@ -97,10 +130,10 @@ fn nav_item(s: &Screen<'_>, cat: Category, rest: Rgba) -> El {
         .py(8.0)
         .rounded(6.0)
         .bg(bg)
-        .role(Role::Button, cat.label())
+        .role(Role::Button, label)
         .selected(on)
-        .child(icon(nav_svg(cat), 16.0, fg))
-        .child(text(cat.label(), 13.0, fg).line_height(19.5).silent())
+        .child(glyph)
+        .child(text(label, 13.0, fg).line_height(19.5).silent())
 }
 
 fn sidebar(s: &Screen<'_>) -> El {
@@ -159,6 +192,24 @@ fn sidebar(s: &Screen<'_>) -> El {
         }
         list = list.child(items);
     }
+    let pages: Vec<El> =
+        s.st.points
+            .at(crate::points::kind::SETTINGS)
+            .map(|p| ext_item(s, p))
+            .collect();
+    if !pages.is_empty() {
+        list = list
+            .child(
+                div().px(12.0).pt(20.0).pb(6.0).child(
+                    text("EXTENSIONS", 10.0, c(look::GRAY_600))
+                        .weight(500)
+                        .tracking(0.05)
+                        .line_height(15.0)
+                        .role(Role::Heading, "Extensions"),
+                ),
+            )
+            .child(div().col().gap(2.0).children(pages));
+    }
     div()
         .col()
         .w(224.0)
@@ -181,12 +232,19 @@ fn sidebar(s: &Screen<'_>) -> El {
 
 /// The whole page, over the window.
 pub(super) fn page(s: &Screen<'_>) -> El {
-    let body = match s.st.settings.category {
+    let body = match (&s.st.settings.ext_page, s.st.settings.category) {
+        (Some(key), _) => super::points::settings_page(s, key),
+        (None, cat) => category_page(s, cat),
+    };
+    page_with(s, body)
+}
+
+fn category_page(s: &Screen<'_>, cat: Category) -> El {
+    match cat {
         Category::Appearance => pages::appearance(s),
         Category::General => pages::general(s),
         Category::Updates => pages::updates(s),
         Category::Notifications => pages::notifications(s),
-        Category::Worktrees => worktrees::page(s),
         Category::Agents => agents::page(s),
         Category::Ssh => ssh::page(s),
         Category::Mcp => pages::mcp(s),
@@ -194,8 +252,11 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),
         Category::Network => super::network::page(s),
-    };
-    let mut root = div()
+    }
+}
+
+fn page_with(s: &Screen<'_>, body: El) -> El {
+    div()
         .row()
         .w_full()
         .h_full()
@@ -220,11 +281,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
                         .py(32.0)
                         .child(body),
                 ),
-        );
-    if s.st.settings.category == Category::Worktrees {
-        root = root.child_if(worktrees::selection_bar(s));
-    }
-    root
+        )
 }
 
 /// `SettingsPageHeader`: the title, its description, and actions.

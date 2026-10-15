@@ -33,3 +33,4 @@ pub mod router;
 pub mod sandbox;
 pub mod token;
 pub mod usage;
+pub mod views;

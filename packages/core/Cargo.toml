@@ -35,6 +35,7 @@ members = [
   "crates/hooks",
   "crates/logfile",
   "crates/spawn",
+  "crates/view",
   "bench/scale",
   "bench/workflows",
 ]

@@ -59,16 +59,6 @@ pub enum GitAct {
     OpenIn(String, Option<String>),
     /// The editors' menu for a session's project.
     OpenInMenu(String),
-    /// A worktree's remove, asking first when sessions or changes would go.
-    Remove {
-        project: String,
-        worktree: String,
-    },
-    ConfirmRemoval,
-    CancelRemoval,
-    /// The ended-worktree toast's answers.
-    Keep(String),
-    RemoveOffered(String),
 }
 
 /// `cwd`: where a session's git and files are, its worktree or project.
@@ -167,82 +157,6 @@ impl Branches {
     }
 }
 
-/// Whether a worktree has uncommitted changes, once asked (`DirtyState`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dirty {
-    Checking,
-    Clean,
-    Dirty,
-    Unknown,
-}
-
-/// The remove-worktree dialog (`ExplicitDeleteInfo`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Removal {
-    pub project: String,
-    pub worktree: String,
-    pub sessions: Vec<String>,
-    pub dirty: Dirty,
-}
-
-impl Removal {
-    /// `showWarning`: changes would be lost, or could not be checked.
-    pub fn warns(&self) -> bool {
-        matches!(self.dirty, Dirty::Dirty | Dirty::Unknown)
-    }
-
-    /// The remove button's label.
-    pub fn action_label(&self) -> &'static str {
-        if self.dirty == Dirty::Checking {
-            "Checking\u{2026}"
-        } else if !self.sessions.is_empty() {
-            "Close sessions & remove"
-        } else if self.warns() {
-            "Remove anyway"
-        } else {
-            "Remove"
-        }
-    }
-}
-
-/// The offer to remove a worktree when its last session ended, kept until
-/// answered.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Offer {
-    pub project: String,
-    pub worktree: String,
-    /// `None` while the changes check runs; then whether it found any, or
-    /// failed (`Err`).
-    pub dirty: Option<Result<bool, ()>>,
-}
-
-impl Offer {
-    /// The toast's sentence, as the bridge words each state.
-    pub fn message(&self) -> String {
-        let name = crate::state::basename(&self.worktree);
-        match self.dirty {
-            Some(Ok(true)) => format!("Worktree \"{name}\" has uncommitted changes"),
-            Some(Err(())) => {
-                format!("Worktree \"{name}\" \u{2014} last session ended (changes check failed)")
-            }
-            _ => format!("Worktree \"{name}\" \u{2014} last session ended"),
-        }
-    }
-
-    /// The toast warns, and removing forces.
-    pub fn warns(&self) -> bool {
-        matches!(self.dirty, Some(Ok(true)) | Some(Err(())))
-    }
-}
-
-/// A removal in flight: the progress toast's state (`withProgressToast`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Removing {
-    pub project: String,
-    pub worktree: String,
-    pub label: &'static str,
-}
-
 /// What the screen keeps of git besides vornd's answers.
 #[derive(Debug, Default)]
 pub struct Git {
@@ -261,9 +175,6 @@ pub struct Git {
     /// Detected editors, the default first; `None` until vornd answers.
     pub ides: Option<Vec<Ide>>,
     pub ides_asked: bool,
-    pub removal: Option<Removal>,
-    pub offers: Vec<Offer>,
-    pub removing: Vec<Removing>,
     /// Projects whose worktrees have been asked for.
     pub listed: std::collections::HashSet<String>,
 }
@@ -315,42 +226,6 @@ mod tests {
         );
         assert_eq!(b.shown("").len(), 3);
         assert!(b.shown("zzz").is_empty());
-    }
-
-    #[test]
-    fn removal_words_follow_what_is_at_stake() {
-        let mut r = Removal {
-            project: "/p".into(),
-            worktree: "/w".into(),
-            sessions: Vec::new(),
-            dirty: Dirty::Checking,
-        };
-        assert_eq!(r.action_label(), "Checking\u{2026}");
-        r.dirty = Dirty::Clean;
-        assert_eq!(r.action_label(), "Remove");
-        r.dirty = Dirty::Unknown;
-        assert_eq!(r.action_label(), "Remove anyway");
-        r.sessions.push("s".into());
-        assert_eq!(r.action_label(), "Close sessions & remove");
-    }
-
-    #[test]
-    fn the_offer_says_what_the_check_found() {
-        let mut o = Offer {
-            project: "/p".into(),
-            worktree: "/p/.wt/feature".into(),
-            dirty: None,
-        };
-        assert_eq!(
-            o.message(),
-            "Worktree \"feature\" \u{2014} last session ended"
-        );
-        assert!(!o.warns());
-        o.dirty = Some(Ok(true));
-        assert_eq!(o.message(), "Worktree \"feature\" has uncommitted changes");
-        assert!(o.warns());
-        o.dirty = Some(Err(()));
-        assert!(o.message().ends_with("(changes check failed)"));
     }
 
     #[test]

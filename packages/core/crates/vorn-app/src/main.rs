@@ -53,7 +53,7 @@ const HELP: &str = "\
 Usage: Vorn [window] [--data-dir DIR]
        Vorn update [--channel stable|beta] [--data-dir DIR]
        Vorn install-cli [--data-dir DIR]
-       Vorn widget [--data-dir DIR]
+       Vorn panel --point KEY [--data-dir DIR]
        Vorn --version
        Vorn --help
 
@@ -64,7 +64,7 @@ Usage: Vorn [window] [--data-dir DIR]
                for a beta build, else stable; VORN_UPDATE_FEED names a feed
                to read instead.
   install-cli  Put the vorn command on PATH and say where.
-  widget       Open the floating widget.
+  panel        Open an extension's window, KEY being extension/id.
 
   --data-dir DIR  The data directory (default: VORN_DATA_DIR, else ~/.vorn).
 
@@ -827,8 +827,9 @@ fn update(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// The floating widget, a window of its own over other apps.
-fn widget(args: &Args) -> Result<(), String> {
+/// An extension's window, floating over other apps.
+fn panel(args: &Args) -> Result<(), String> {
+    let key = args.get("point").ok_or("panel needs --point")?.to_owned();
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
@@ -837,20 +838,21 @@ fn widget(args: &Args) -> Result<(), String> {
             w.wake();
         }
     });
-    let widget = vorn_app::widget::Widget::connect(&ep, wake)?;
+    let panel = vorn_app::panel::Panel::connect(&ep, &key, wake)?;
+    let size = panel.size();
     let opts = WindowOptions {
         decorations: false,
         always_on_top: true,
         skip_taskbar: true,
         transparent: true,
         corner: Some((20.0, 20.0)),
-        ..WindowOptions::sized(vorn_app::widget::FULL)
+        ..WindowOptions::sized(size)
     };
-    run_with("Vorn widget", opts, ui_config(1.0), move |_, wake| {
+    run_with("Vorn", opts, ui_config(1.0), move |_, wake| {
         if let Ok(mut slot) = waker.lock() {
             *slot = Some(wake);
         }
-        vorn_app::widget::WidgetWindow { widget }
+        vorn_app::panel::PanelWindow { panel }
     })
 }
 
@@ -860,7 +862,7 @@ fn main() {
         "cells" => cells(&args),
         "term" => term(&args),
         "window" => window(&args),
-        "widget" => widget(&args),
+        "panel" => panel(&args),
         "install-cli" => install_cli(&args),
         "update" => update(&args),
         "help" => {

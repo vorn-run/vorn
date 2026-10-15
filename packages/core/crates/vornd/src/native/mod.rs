@@ -33,7 +33,6 @@ pub mod sessions;
 pub mod shell;
 pub mod ssh;
 pub mod tasks;
-pub mod widget;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -143,7 +142,6 @@ pub enum Route {
     Identify,
     Config,
     Tasks,
-    Widget,
     About,
     Script,
     Credential,
@@ -159,7 +157,6 @@ pub enum Route {
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
     (tasks::METHODS, Route::Tasks),
-    (widget::METHODS, Route::Widget),
     (about::METHODS, Route::About),
     (&[script::METHOD], Route::Script),
     (credential::METHODS, Route::Credential),
@@ -278,8 +275,6 @@ pub struct Native {
     registry: OnceLock<Arc<SessionRegistry>>,
     /// The endpoint agents' hooks post to, once it listens ([`hooks`]).
     hooks: OnceLock<Arc<hooks::Hooks>>,
-    /// Woken when a client asks for the widget's list ([`widget`]).
-    widget: tokio::sync::Notify,
     /// What starts the sessions vornd creates: the engine, when it runs one.
     host: OnceLock<Arc<dyn sessions::Host>>,
     sessions: Arc<sessions::Sessions>,
@@ -340,7 +335,6 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
-            widget: tokio::sync::Notify::new(),
             hooks: OnceLock::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
@@ -396,13 +390,6 @@ impl Native {
     /// How the hook endpoint is doing, for the health report.
     pub fn hooks_activity(&self) -> Option<Value> {
         self.hooks.get().map(|h| h.activity())
-    }
-
-    /// Tells the status widget's list as the registry changes, once there is one.
-    pub fn start_widget(self: &Arc<Self>) {
-        if let Some(registry) = self.registry.get() {
-            tokio::spawn(widget::follow(Arc::clone(self), Arc::clone(registry)));
-        }
     }
 
     /// vornd changed the configuration: what depends on it reads it again.
@@ -599,7 +586,6 @@ impl Native {
             }
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
             Some(Route::Tasks) => return tasks::answer(self, &method, params).await,
-            Some(Route::Widget) => return widget::answer(self),
             Some(Route::About) => return about::answer(self, &method, params).await,
             Some(Route::Script) => return script::execute(self, params).await,
             Some(Route::Credential) => return credential::answer(self, &method, params).await,

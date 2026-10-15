@@ -23,6 +23,7 @@ use tracing::{debug, warn};
 use vorn_engine::Effect;
 use vorn_extensions::events::{
     GIT_CHANGED, SESSION_CREATED, SESSION_EXITED, SESSION_MARK, SESSION_PROGRAM, SESSION_STATUS,
+    WORKTREE_IDLE,
 };
 
 use super::Native;
@@ -77,6 +78,17 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
     }
 }
 
+/// The last session at work in a worktree ended: `worktree.idle`, for whoever subscribed.
+pub(super) fn worktree_idle(native: &Native, offer: &Value) {
+    native.events().emit(WORKTREE_IDLE, || {
+        json!({
+            "sessionId": offer["id"],
+            "projectPath": offer["projectPath"],
+            "worktreePath": offer["worktreePath"],
+        })
+    });
+}
+
 /// An effect of a session's program, for the terminal it is about.
 fn effected(
     native: &Native,
@@ -95,7 +107,7 @@ fn effected(
 
             // Clients hear the exit itself from the stream.
             if let Some(offer) = offer {
-                native.broadcast_to("worktree:confirmCleanup", offer, Some(id));
+                worktree_idle(native, &offer);
             }
         }
         Effect::Cwd(cwd) if terminal => registry.terminal_cwd(id, &cwd),
@@ -607,6 +619,7 @@ mod tests {
     fn an_ended_program_idles_its_terminal_and_offers_its_worktree_once() {
         let fed = fed();
         let mut rx = fed.notes();
+        let mut idle = fed.native.events().subscribe("test", &[WORKTREE_IDLE]);
         // `b` is idle already, so `a` ending leaves nothing at work in `/w`.
         let exit = Effect::Exit {
             code: Some(2),
@@ -614,13 +627,12 @@ mod tests {
         };
         effected(&fed.native, &fed.registry, &fx("a", 5), exit.clone());
         effected(&fed.native, &fed.registry, &fx("a", 5), exit);
+        assert!(told(&mut rx).is_empty());
         assert_eq!(
-            told(&mut rx),
-            [json!({
-                "method": "worktree:confirmCleanup",
-                "params": { "id": "a", "projectPath": "/p", "worktreePath": "/w" },
-            })]
+            idle.try_recv().unwrap().data,
+            json!({ "sessionId": "a", "projectPath": "/p", "worktreePath": "/w" })
         );
+        assert!(idle.try_recv().is_err());
         let a = fed
             .registry
             .read(|r| r.terminal("a").unwrap().0.clone())

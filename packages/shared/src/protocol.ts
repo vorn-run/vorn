@@ -34,8 +34,6 @@ import type {
   ScheduleLogEntry,
   ProjectConfig,
   RecentSession,
-  PermissionRequestInfo,
-  WidgetAgentInfo,
   SSHKey,
   SSHKeyMeta,
   SessionEvent,
@@ -625,7 +623,6 @@ export interface RequestMethods {
     result: string
   }
   'permission:resolve-top': { params: { allow: boolean }; result: void }
-  'widget:requestUpdate': { params: void; result: void }
   'terminal:create': { params: CreateTerminalPayload; result: TerminalSession }
   'terminal:kill': { params: string; result: void }
   'terminal:listActive': { params: void; result: TerminalSession[] }
@@ -1443,15 +1440,6 @@ export interface ServerNotifications {
   /** How far a connector pack install has got, while it runs. */
   'connector:installProgress': ConnectorInstallProgress
   'connector:catalogChanged': ConnectorCatalogSnapshot
-  'widget:status-update': WidgetAgentInfo[]
-  'widget:permission-request': PermissionRequestInfo
-  'widget:permission-cancelled': string
-  'worktree:confirmCleanup': {
-    terminalId: string
-    worktreePath: string
-    projectPath: string
-    branch?: string
-  }
   'scheduler:execute': {
     workflowId: string
     inputs?: Record<string, unknown>

@@ -16,6 +16,7 @@ mod onboarding;
 mod palette;
 mod panes;
 pub(crate) mod plugins;
+pub mod points;
 pub mod runs;
 pub mod settings;
 pub mod side;
@@ -137,7 +138,10 @@ impl Screen<'_> {
                     .child(settings::page(self)),
             );
         }
-        root = root.child_if(dialogs::dialog(self));
+        root = root
+            .child_if(points::floating(self))
+            .child_if(dialogs::dialog(self))
+            .child_if(points::dialog(self));
         if let Some(menu) = &self.st.menu {
             let w = menus::width(&menu.kind);
             let panel = match &menu.kind {

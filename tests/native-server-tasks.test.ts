@@ -255,22 +255,20 @@ describe.runIf(runnable)('the task board in vornd', () => {
     expect(all.length).toBeGreaterThan(0)
   })
 
-  it('tells the status widget each terminal, and again when asked', async () => {
-    const listed = (id: string): boolean =>
-      client
-        .toldBy('widget:status-update')
-        .some((list) => (list as Array<{ id: string }>).some((a) => a.id === id))
+  it('lists each terminal in the Widget once it is switched on', async () => {
+    type Agent = { id: string; name?: string; agent?: string; status?: string }
+    const agents = (): Promise<Agent[]> =>
+      call<Agent[]>('extension:rows', { id: 'vorn.widget', collection: 'agents' })
+    expect(await agents()).toEqual([])
+    await call('extension:setBuiltin', { id: 'vorn.widget', on: true })
     const shell = await call<TerminalSession>('shell:create', server.dirs.work)
-    await until('the widget told of the shell', () => listed(shell.id))
-    const told = client.toldBy('widget:status-update').length
-    expect(await client.call('widget:requestUpdate')).not.toHaveProperty('error')
-    await until('the widget told again', () => client.toldBy('widget:status-update').length > told)
-    const [entry] = (
-      client.toldBy('widget:status-update').at(-1) as Array<Record<string, unknown>>
-    ).filter((a) => a.id === shell.id)
-    expect(Object.keys(entry).sort()).toEqual(
-      expect.arrayContaining(['agentType', 'id', 'projectName', 'status'])
-    )
+    let entry: Agent | undefined
+    await until('the widget to list the shell', async () => {
+      entry = (await agents()).find((a) => a.id === shell.id)
+      return !!entry
+    })
+    expect(Object.keys(entry!).sort()).toEqual(['agent', 'id', 'name', 'status'])
     await call('terminal:kill', shell.id)
+    await call('extension:setBuiltin', { id: 'vorn.widget', on: false })
   })
 })

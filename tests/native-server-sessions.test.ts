@@ -97,6 +97,8 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await direct.result('config:save', {
       ...config,
       defaults: { ...(config.defaults as object), shell: '/bin/sh' },
+      // The worktree cleanup looks at the projects the config lists.
+      projects: [{ name: 'repo', path: repo, preferredAgents: ['claude'] }],
       agentCommands: Object.fromEntries(AGENTS.map((a) => [a, { command: stub, args: [] }]))
     })
 
@@ -210,6 +212,13 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     }
     await call('close the worktree agent', 'terminal:kill', inWorktree)
     await exited(inWorktree)
+    const idle = async (): Promise<Array<{ name: string }>> =>
+      direct.result('extension:rows', { id: 'vorn.worktrees', collection: 'idle' })
+    await until(
+      'the cleanup extension to offer the worktree',
+      async () => (await idle()).length > 0
+    )
+    const cleanup = (await idle()).map((row) => row.name)
     await call('close a shell', 'terminal:kill', shellB)
     await until('the shell to go', async () => !(await listed()).some((s) => s.id === shellB))
     await exited(shellB)
@@ -303,7 +312,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       told: {
         created: toldOf('session:created'),
         reordered: toldOf('session:reordered'),
-        cleanup: toldOf('worktree:confirmCleanup'),
+        cleanup,
         // In the order they were closed: each waited for the one before.
         exits: exitsTold,
         // As a client through vornd hears them: once each, whoever tells it,

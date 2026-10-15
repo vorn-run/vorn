@@ -1,0 +1,24 @@
+// A small window: each session's turns, and a way back to it.
+schema "vorn:view@1"
+
+rows "sessions" {
+    name string
+    status enum running waiting idle error
+    turns number
+    last string
+}
+
+column {
+    row {
+        text "At work: {sessions.status.running} of {sessions.count}" role=secondary grow=#true
+        button Vorn show=#true
+    }
+    list "sessions" empty="No sessions yet" {
+        row {
+            status "{row.status}" running=busy waiting=warn idle=muted error=bad
+            text "{row.name}" grow=#true
+            text "{row.turns}" role=mono
+            button Show focus="{row.id}" show=#true
+        }
+    }
+}

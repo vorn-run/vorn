@@ -1,0 +1,28 @@
+// What Turns counts, and the list it keeps.
+schema "vorn:view@1"
+
+rows "prefs" {
+    label string
+    on bool
+}
+
+rows "finished" {
+    session string
+    name string
+    turn number
+    at string
+}
+
+column {
+    section "Counting" {
+        list "prefs" {
+            toggle "{row.on}" label="{row.label}" call="pref"
+        }
+    }
+    section "Finished turns" {
+        row {
+            text "Kept: {finished.count}, the latest first" role=secondary grow=#true
+            button Clear call="ask-clear" style=danger
+        }
+    }
+}
