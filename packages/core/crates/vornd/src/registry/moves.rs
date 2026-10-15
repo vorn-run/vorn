@@ -89,14 +89,14 @@ mod tests {
     fn registry() -> Registry {
         let terminal = |id: &str, wt: Option<&str>| {
             json!({
-                "id": id, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+                "id": id, "agentType": "acme", "projectName": "p", "projectPath": "/p",
                 "status": "running", "createdAt": 1, "pid": 0,
                 "worktreePath": wt, "worktreeName": "old", "branch": "main",
             })
         };
         let headless = |id: &str, wt: &str| {
             json!({
-                "id": id, "pid": 7, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+                "id": id, "pid": 7, "agentType": "acme", "projectName": "p", "projectPath": "/p",
                 "status": "running", "startedAt": 1, "worktreePath": wt,
             })
         };

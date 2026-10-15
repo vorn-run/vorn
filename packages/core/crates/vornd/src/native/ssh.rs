@@ -86,7 +86,7 @@ mod tests {
         let remote = Remote {
             line: "ssh -t me@box".into(),
             marker: "M".into(),
-            command: "cd /p && claude".into(),
+            command: "cd /p && acme".into(),
             password: Some(Secret::new("hunter2".into())),
             key: Some(KeyFile::new(Secret::new("-----BEGIN KEY-----".into()))),
         };

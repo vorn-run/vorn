@@ -88,7 +88,8 @@ pub struct Serving {
 /// The database `dir` keeps, created, migrated and seeded as the app does.
 pub fn open_database(dir: &Path) -> Result<PathBuf, StartError> {
     let db = dir.join("vorn.db");
-    let mut options = crate::native::config::options();
+    let mut options =
+        crate::native::config::options(&crate::adapters::Adapters::standard().agents());
     options.owner_name = owner_name();
     options.seed_workflows = seed_workflows();
     match vorn_store::Store::open(&db, options) {

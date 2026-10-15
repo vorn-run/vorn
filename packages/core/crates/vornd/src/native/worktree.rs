@@ -351,7 +351,7 @@ mod tests {
         store
             .call(
                 "dbInsertProject",
-                json!([{ "name": "p", "path": project, "preferredAgents": ["claude"] }]),
+                json!([{ "name": "p", "path": project, "preferredAgents": ["acme"] }]),
             )
             .unwrap();
         drop(store);
@@ -367,7 +367,7 @@ mod tests {
                 &json!({
                     "op": "snapshot", "headless": [], "order": ["a"],
                     "terminals": [{
-                        "id": "a", "agentType": "claude", "projectName": "p",
+                        "id": "a", "agentType": "acme", "projectName": "p",
                         "projectPath": project, "status": "running", "createdAt": 1,
                         "pid": 9, "worktreePath": busy,
                     }],

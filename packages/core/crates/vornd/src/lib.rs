@@ -1,5 +1,6 @@
 //! vornd, the Vorn server: the endpoint every client uses ([`endpoint`], [`serve`]), its session holder ([`holder`]) and every call ([`native`]).
 
+pub mod adapters;
 pub mod applink;
 pub mod boot;
 pub mod bridge;

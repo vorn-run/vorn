@@ -2777,7 +2777,7 @@ mod tests {
 
     fn headless(id: &str) -> Value {
         json!({
-            "id": id, "pid": 7, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": id, "pid": 7, "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "running", "startedAt": 1,
         })
     }
@@ -3095,12 +3095,12 @@ mod tests {
             "op": "snapshot", "terminals": [agent("a"), terminal("sh")], "headless": [],
         });
         shared.feed(1, &snapshot).unwrap();
-        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+        assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
         assert_eq!(shared.agent_type("sh").as_deref(), Some("shell"));
         assert_eq!(shared.agent_type("gone"), None);
         // The server leaving does not forget what each session runs.
         shared.left(1);
-        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+        assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
     }
 
     #[test]
@@ -3145,7 +3145,7 @@ mod tests {
 
     fn agent(id: &str) -> Value {
         let mut t = terminal(id);
-        t["agentType"] = json!("claude");
+        t["agentType"] = json!("acme");
         t
     }
 

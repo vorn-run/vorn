@@ -16,9 +16,6 @@ use vorn_agents::launch::env::{is_stripped, SENSITIVE_PREFIXES};
 /// Long enough for a cold CLI, short enough that a form does not hang on it.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Names no third-party process is handed, whatever it declares.
-const NEVER_BORROWED_KEYS: [&str; 1] = ["CLAUDECODE"];
-const NEVER_BORROWED_PREFIXES: [&str; 1] = ["CLAUDE_CODE_"];
 
 /// What runs a connector's sign-in tool, so a test can answer for one.
 pub trait Runner: Send + Sync {
@@ -57,11 +54,6 @@ fn borrow_env(auth: Option<&Value>) -> Vec<String> {
         .collect()
 }
 
-fn never_borrowed(name: &str) -> bool {
-    let upper = name.to_uppercase();
-    NEVER_BORROWED_KEYS.contains(&upper.as_str())
-        || NEVER_BORROWED_PREFIXES.iter().any(|p| upper.starts_with(p))
-}
 
 fn credential_name(name: &str) -> bool {
     let upper = name.to_uppercase();
@@ -88,7 +80,8 @@ pub fn borrowable_names(source: &Source) -> Vec<String> {
     let honoured = declared_borrows(source);
     let allowed: Vec<String> = honoured
         .into_iter()
-        .filter(|n| source.trusted || (!never_borrowed(n) && !credential_name(n)))
+        // An agent's session markers are stripped for everyone ([`is_stripped`]).
+        .filter(|n| source.trusted || !credential_name(n))
         .filter(|n| !is_stripped(n))
         .collect();
     for asked in borrow_env(source.auth.as_ref()) {

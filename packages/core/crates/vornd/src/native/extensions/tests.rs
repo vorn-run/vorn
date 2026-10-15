@@ -168,7 +168,7 @@ impl World {
     fn session(&self, id: &str) -> Live {
         Live {
             id: id.into(),
-            agent: "claude".into(),
+            agent: "acme".into(),
             project_path: self.project(),
             worktree_path: None,
             agent_session_id: None,

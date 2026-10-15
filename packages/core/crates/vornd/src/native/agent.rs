@@ -1,5 +1,6 @@
 //! The `agent:*` calls and `sessions:getRecent`: what the server reads about
-//! the coding agents without starting one, answered by `vorn_agents`.
+//! the coding agents without starting one, answered by `vorn_agents` from
+//! the agents' adapters (`agent:list`).
 //!
 //! The agents' configured commands and the names passed through to what they
 //! run are settings, read fresh from the database on each call.
@@ -13,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Map, Value};
 use tracing::debug;
 use vorn_agents::history::{self, Homes, ProjectScope};
-use vorn_agents::models::{check_model_command, DiscoveryError, ModelRequest};
+use vorn_agents::models::{check_model_command, CatalogAnswer, DiscoveryError, ModelRequest};
 use vorn_agents::{detect, Agent, AgentCommand, ProbeContext};
 use vorn_git::repo::Git;
 use vorn_store::AgentSettings;
@@ -23,6 +24,7 @@ use super::{bad_params, env, Answer, Native};
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
+        "agent:list" => Answer::Result(native.adapters().describe()),
         "agent:detectInstalled" => detect_installed(native, params),
         "agent:locate" => locate(native, params),
         "agent:listModels" => list_models(native, params),
@@ -37,7 +39,7 @@ pub(super) fn no_settings() -> Answer {
 }
 
 /// The error for a stored agent command of a shape the server's code would not read.
-pub(super) fn unreadable_command(agent: Agent) -> Answer {
+pub(super) fn unreadable_command(agent: &Agent) -> Answer {
     Answer::Error(format!(
         "the {} command in the settings cannot be read",
         agent.id()
@@ -58,7 +60,7 @@ pub(super) fn settings(native: &Native) -> Option<AgentSettings> {
 
 /// The configured command for `agent`, or its default when none is stored.
 /// `None` for a stored one of a shape the server's code would not expect.
-pub(super) fn command_of(settings: &AgentSettings, agent: Agent) -> Option<AgentCommand> {
+pub(super) fn command_of(settings: &AgentSettings, agent: &Agent) -> Option<AgentCommand> {
     let Some(stored) = settings.commands.get(agent.id()) else {
         return Some(agent.default_command());
     };
@@ -114,16 +116,18 @@ pub(super) fn prepare(native: &Native, params: &Value) {
 /// Where each agent's command is on the environment agents get.
 fn found(native: &Native, _params: &Value) -> Result<Vec<(Agent, Option<PathBuf>)>, Answer> {
     let settings = settings(native).ok_or_else(no_settings)?;
-    let mut commands = HashMap::with_capacity(Agent::ALL.len());
-    for agent in Agent::ALL {
+    let agents = native.agents();
+    let mut commands = HashMap::with_capacity(agents.len());
+    for agent in agents.iter() {
         let command = command_of(&settings, agent).ok_or_else(|| unreadable_command(agent))?;
-        commands.insert(agent, command);
+        commands.insert(agent.clone(), command);
     }
     let env = native.env.get();
     Ok(detect::locate(
+        &agents,
         |agent| {
             commands
-                .remove(&agent)
+                .remove(agent)
                 .unwrap_or_else(|| agent.default_command())
         },
         path_of(&env),
@@ -188,22 +192,33 @@ fn list_models(native: &Native, params: &Value) -> Answer {
         // Not a string: the server's handler throws on it.
         _ => return bad_params("agent:listModels"),
     };
+    let agents = native.agents();
     let request = ModelRequest {
         agent: request
             .get("agentType")
             .and_then(Value::as_str)
-            .and_then(Agent::from_id),
+            .and_then(|id| agents.get(id))
+            .cloned(),
         project_path,
         remote: truthy(request.get("remoteHostId")),
         refresh: truthy(request.get("refresh")),
     };
     // Answered without settings when there is nothing to ask; a relative
     // project would be resolved against the server's directory, not vornd's.
-    let askable = request.agent.is_some_and(Agent::selects_models)
+    let askable = request.agent.as_ref().is_some_and(Agent::selects_models)
         && !request.remote
         && !request.project_path.is_empty()
         && !request.project_path.contains("{{");
-    let (agent, command, env) = match request.agent {
+    // An agent whose CLI cannot list its models takes a typed id.
+    if askable && request.agent.as_ref().is_some_and(|a| !lists_models(a)) {
+        return Answer::Result(
+            CatalogAnswer::Unavailable {
+                error: "This agent does not list its models; type a model id.".to_owned(),
+            }
+            .to_json(),
+        );
+    }
+    let (agent, command, env) = match request.agent.clone() {
         Some(agent) if askable => {
             if !Path::new(&request.project_path).is_absolute() {
                 return bad_params("agent:listModels");
@@ -211,8 +226,8 @@ fn list_models(native: &Native, params: &Value) -> Answer {
             let Some(settings) = settings(native) else {
                 return no_settings();
             };
-            let Some(command) = command_of(&settings, agent) else {
-                return unreadable_command(agent);
+            let Some(command) = command_of(&settings, &agent) else {
+                return unreadable_command(&agent);
             };
             let data_dir = native.db.get().and_then(|db| db.parent());
             let env = native.env.launch(&settings.env_passthrough, data_dir);
@@ -220,7 +235,12 @@ fn list_models(native: &Native, params: &Value) -> Answer {
         }
         // Never asked: the catalog answers these unavailable before it looks
         // at the command.
-        _ => (Agent::Claude, Agent::Claude.default_command(), Vec::new()),
+        _ => {
+            let answer = native.catalog.list(&request, &unused(), now_ms, || {
+                Err(DiscoveryError::Failed)
+            });
+            return Answer::Result(answer.to_json());
+        }
     };
     let discover = {
         let (command, cwd) = (command.clone(), PathBuf::from(&request.project_path));
@@ -240,12 +260,32 @@ fn list_models(native: &Native, params: &Value) -> Answer {
                     cwd,
                     env,
                 },
-                agent,
+                &agent,
             )
         }
     };
     let answer = native.catalog.list(&request, &command, now_ms, discover);
     Answer::Result(answer.to_json())
+}
+
+/// Whether `agent`'s adapter says how to ask its CLI for models.
+fn lists_models(agent: &Agent) -> bool {
+    agent
+        .spec()
+        .models
+        .as_ref()
+        .is_some_and(|m| m.list.is_some())
+}
+
+/// A command for a request the catalog answers without asking.
+fn unused() -> AgentCommand {
+    AgentCommand {
+        command: String::new(),
+        args: Vec::new(),
+        headless_args: None,
+        fallback_command: None,
+        fallback_args: None,
+    }
 }
 
 fn now_ms() -> u64 {
@@ -282,7 +322,12 @@ fn recent_sessions(native: &Native, params: &Value) -> Answer {
         }
         None => None,
     };
-    let list = history::recent_sessions(&homes, scope.as_ref(), history::DEFAULT_LIMIT);
+    let list = history::recent_sessions(
+        &native.agents(),
+        &homes,
+        scope.as_ref(),
+        history::DEFAULT_LIMIT,
+    );
     Answer::Result(Value::Array(
         list.iter().map(history::RecentSession::to_json).collect(),
     ))
@@ -304,18 +349,17 @@ mod tests {
     #[test]
     fn reads_a_stored_command_and_defaults_the_rest() {
         let s = settings_with(json!({
-            "gemini": { "command": "gem", "args": ["-x"], "fallbackCommand": "g2" },
-            "codex": { "command": "codex", "args": "not a list" }
+            "gamma": { "command": "gam", "args": ["-x"], "fallbackCommand": "g2" },
+            "beta": { "command": "beta", "args": "not a list" }
         }));
-        let gemini = command_of(&s, Agent::Gemini).unwrap();
-        assert_eq!(gemini.command, "gem");
-        assert_eq!(gemini.args, ["-x"]);
-        assert_eq!(gemini.fallback_command.as_deref(), Some("g2"));
-        assert_eq!(
-            command_of(&s, Agent::Claude),
-            Some(Agent::Claude.default_command())
-        );
-        assert_eq!(command_of(&s, Agent::Codex), None);
+        let agents = crate::adapters::testing::adapters().agents();
+        let gamma = command_of(&s, agents.get("gamma").unwrap()).unwrap();
+        assert_eq!(gamma.command, "gam");
+        assert_eq!(gamma.args, ["-x"]);
+        assert_eq!(gamma.fallback_command.as_deref(), Some("g2"));
+        let acme = agents.get("acme").unwrap();
+        assert_eq!(command_of(&s, acme), Some(acme.default_command()));
+        assert_eq!(command_of(&s, agents.get("beta").unwrap()), None);
     }
 
     #[test]
@@ -323,19 +367,26 @@ mod tests {
         let native = Native::new();
         let root = if cfg!(windows) { "C:\\p" } else { "/p" };
         // Nothing to ask: answered whatever the database.
-        let gemini = native.call(
-            "agent:listModels",
-            &json!({ "agentType": "gemini", "projectPath": root }),
-        );
-        assert!(
-            matches!(gemini, Answer::Result(ref v) if v["status"] == "unavailable"),
-            "{gemini:?}"
-        );
+        for agent in ["gamma", "beta", "shell"] {
+            let answer = native.call(
+                "agent:listModels",
+                &json!({ "agentType": agent, "projectPath": root }),
+            );
+            assert!(
+                matches!(answer, Answer::Result(ref v) if v["status"] == "unavailable"),
+                "{answer:?}"
+            );
+        }
+        let Answer::Result(listed) = native.call("agent:list", &json!(null)) else {
+            panic!("agent:list answers");
+        };
+        assert_eq!(listed[0]["id"], "acme");
+        assert_eq!(listed[0]["models"], true);
         // To ask, the configured command is needed, and there is no database.
         assert_eq!(
             native.call(
                 "agent:listModels",
-                &json!({ "agentType": "claude", "projectPath": root })
+                &json!({ "agentType": "acme", "projectPath": root })
             ),
             no_settings()
         );
@@ -343,7 +394,7 @@ mod tests {
         assert_eq!(
             native.call(
                 "agent:listModels",
-                &json!({ "agentType": "claude", "projectPath": "rel" })
+                &json!({ "agentType": "acme", "projectPath": "rel" })
             ),
             bad
         );

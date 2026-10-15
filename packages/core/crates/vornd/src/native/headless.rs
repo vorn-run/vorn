@@ -52,7 +52,7 @@ const PROMPT_NAME_LEN: usize = 60;
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
         // A remote host named runs the agent here, as the server ran it.
-        "headless:create" => match CreateRequest::read(params) {
+        "headless:create" => match CreateRequest::read(params, &native.agents()) {
             Some(req) => create(
                 native,
                 &CreateRequest {
@@ -83,8 +83,8 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
     let Some(settings) = agent::settings(native) else {
         return agent::no_settings();
     };
-    let Some(config) = agent::command_of(&settings, req.agent) else {
-        return agent::unreadable_command(req.agent);
+    let Some(config) = agent::command_of(&settings, &req.agent) else {
+        return agent::unreadable_command(&req.agent);
     };
     let mut holds = Holds::new(native);
     // Held from here until the record is in, so a worktree action in between
@@ -125,10 +125,16 @@ fn prepare(
     let resume = given(req.resume_session_id.as_deref());
     // Pinned before the arguments are built, so a fresh launch carries the
     // id it will resume by.
-    let mut agent_session_id = match req.agent {
-        vorn_agents::Agent::Codex => req.resume_session_id.clone(),
-        _ => None,
-    };
+    // An agent resumed headless by a subcommand runs on the conversation it names.
+    let resumes_by_tail = req
+        .agent
+        .spec()
+        .headless
+        .as_ref()
+        .is_some_and(|h| !h.resume_tail.is_empty());
+    let mut agent_session_id = resumes_by_tail
+        .then(|| req.resume_session_id.clone())
+        .flatten();
     let mut session_id = req.session_id.clone();
     if req.agent.pins_session_ids() {
         agent_session_id = Some(resume.map_or_else(
@@ -141,7 +147,7 @@ fn prepare(
         ));
     }
     let launch = LaunchRequest {
-        agent: req.agent,
+        agent: req.agent.clone(),
         args: req.args.clone(),
         model: req.model.clone(),
         remote_host_id: None,
@@ -388,7 +394,6 @@ mod tests {
     use super::super::sessions::tests::{fed, Fed};
     use super::*;
     use serde_json::json;
-    use vorn_agents::Agent;
 
     /// A project path that is absolute where the test runs.
     fn project() -> &'static str {
@@ -424,7 +429,8 @@ mod tests {
     #[test]
     fn starts_every_agent_on_pipes_with_its_prompt_on_stdin() {
         let fed = ready();
-        for agent in Agent::ALL {
+        let agents = fed.native.agents();
+        for agent in agents.iter() {
             let params = request(
                 agent.id(),
                 json!({ "origin": { "extension": "vorn.workflows", "id": "wf", "label": "w" } }),
@@ -469,14 +475,14 @@ mod tests {
         }
         assert_eq!(
             fed.registry.read(|r| r.headless().count()),
-            Some(Agent::ALL.len())
+            Some(agents.len())
         );
     }
 
     #[test]
     fn an_agent_without_a_prompt_has_its_stdin_closed_at_once() {
         let fed = ready();
-        let params = json!({ "agentType": "claude", "projectName": "p", "projectPath": project() });
+        let params = json!({ "agentType": "acme", "projectName": "p", "projectPath": project() });
         let Answer::Result(record) = call(&fed.native, "headless:create", &params) else {
             panic!("not started");
         };
@@ -497,7 +503,7 @@ mod tests {
         let fed = ready();
         let mut notes = fed.registry.subscribe();
         let Answer::Result(record) =
-            call(&fed.native, "headless:create", &request("codex", json!({})))
+            call(&fed.native, "headless:create", &request("beta", json!({})))
         else {
             panic!("not started");
         };
@@ -519,7 +525,7 @@ mod tests {
         call(
             &fed.native,
             "headless:create",
-            &request("gemini", json!({})),
+            &request("gamma", json!({})),
         );
         notes.try_recv().unwrap();
         fed.host.down("no such program");
@@ -535,7 +541,7 @@ mod tests {
         let Answer::Result(record) = call(
             &fed.native,
             "headless:create",
-            &request("claude", json!({})),
+            &request("acme", json!({})),
         ) else {
             panic!("not started");
         };
@@ -587,7 +593,7 @@ mod tests {
             "headless:create",
             // A remote project is a POSIX path whatever this host is.
             &request(
-                "claude",
+                "acme",
                 json!({ "remoteHostId": "h", "projectPath": "/p" }),
             ),
         );

@@ -26,6 +26,8 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
 serde = { version = "1", features = ["derive"] }
+# Reads a shipped adapter's manifest id; already in the tree.
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 # Key order kept, so an answer vornd frames reads as the server's does.
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process", "fs"] }
@@ -37,6 +39,8 @@ vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
 vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
+# The agent adapters Vorn ships, as data.
+vorn-adapters = { path = "../adapters" }
 vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
 vorn-layout = { path = "../layout" }

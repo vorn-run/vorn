@@ -26,7 +26,7 @@ use tracing::{debug, warn};
 use vorn_extensions::bridge::{self, Caller, Refusal, Request as Call, Route, SessionView};
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::page;
-use vorn_extensions::usage::{usage_for, Conversation};
+use vorn_extensions::usage::{usage_for, Conversation, Usage};
 
 use super::{Extensions, Live};
 use crate::endpoint::{full, Body};
@@ -281,7 +281,22 @@ async fn run(
                 worktree: session.worktree_path.as_deref(),
                 project: &session.project_path,
             };
-            Some(serde_json::to_value(usage_for(of, &extensions.home)).unwrap_or_default())
+            let agent = extensions
+                .around
+                .adapters()
+                .and_then(|a| a.get(&session.agent));
+            let usage = match agent.as_ref().and_then(|a| a.spec().usage.as_ref()) {
+                Some(spec) => {
+                    let places = vorn_agents::spec::Places {
+                        home: extensions.home.clone(),
+                        data: vorn_agents::spec::Places::from_env()
+                            .map_or_else(|| extensions.home.join(".local/share"), |p| p.data),
+                    };
+                    usage_for(of, spec, &places)
+                }
+                None => Usage::default(),
+            };
+            Some(serde_json::to_value(usage).unwrap_or_default())
         }
     })
 }

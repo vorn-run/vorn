@@ -214,6 +214,8 @@ pub struct Engine {
     journal: Mutex<Journal>,
     /// The session records.
     registry: Arc<SessionRegistry>,
+    /// The agents its sessions run, from their adapters.
+    adapters: Arc<crate::adapters::Adapters>,
     /// Sessions whose output is read as it comes, by name: a remote login's.
     taps: Mutex<HashMap<String, Tap>>,
 }
@@ -253,16 +255,21 @@ impl Engine {
         let watching = Arc::clone(&streams);
         let viewed = Viewed(Arc::new(move |id: &str| watching.viewed(id)));
         let registry = SessionRegistry::new();
-        // An agent's status is read with its screen rules once the registry
-        // says which agent a session runs.
+        let adapters = crate::adapters::Adapters::standard();
+        // An agent's status is read with its adapter's screen rules once the
+        // registry says which agent a session runs.
         let known = Arc::clone(&registry);
+        let rules_of = Arc::clone(&adapters);
         let agents = Agents(Arc::new(move |id: &str| {
-            known.agent_type(id).map(|t| vorn_agents::status::rules(&t))
+            known
+                .agent_type(id)
+                .map(|t| rules_of.get(&t).and_then(|a| a.screen_rules()))
         }));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
             registry,
+            adapters,
             // Every session's records go on to bytes clients.
             cfg: Config {
                 stream: true,
@@ -315,6 +322,11 @@ impl Engine {
     /// The session records.
     pub fn registry(&self) -> &Arc<SessionRegistry> {
         &self.registry
+    }
+
+    /// The agents its sessions run, which vornd's calls share.
+    pub fn adapters(&self) -> &Arc<crate::adapters::Adapters> {
+        &self.adapters
     }
 
     /// Has the registry decide the server's terminals' statuses from now on
@@ -1760,7 +1772,7 @@ mod tests {
 
     fn agent(id: &str) -> Value {
         json!({
-            "id": id, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": id, "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "running", "createdAt": 1, "pid": 3,
         })
     }

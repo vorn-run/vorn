@@ -264,7 +264,7 @@ impl Builtin for Cleanup {
         include_str!("worktrees.toml")
     }
 
-    fn views(&self) -> &'static [(&'static str, &'static str)] {
+    fn views(&self) -> &[(&'static str, &'static str)] {
         &[
             ("views/idle.kdl", include_str!("views/idle.kdl")),
             ("views/confirm.kdl", include_str!("views/confirm.kdl")),
