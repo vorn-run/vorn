@@ -198,8 +198,7 @@ fn prepare(
         exit_code: None,
         started_at: now_ms(),
         ended_at: None,
-        workflow_id: req.workflow_id.clone(),
-        workflow_name: req.workflow_name.clone(),
+        origin: crate::registry::SessionOrigin(req.origin.clone()),
         agent_session_id: agent_session_id.filter(|a| !a.is_empty()),
         launch_command: Some(launch_command),
         rev: None,
@@ -428,7 +427,7 @@ mod tests {
         for agent in Agent::ALL {
             let params = request(
                 agent.id(),
-                json!({ "workflowId": "wf", "workflowName": "w" }),
+                json!({ "origin": { "extension": "vorn.workflows", "id": "wf", "label": "w" } }),
             );
             let Answer::Result(record) = call(&fed.native, "headless:create", &params) else {
                 panic!("{agent:?} was not started");
@@ -439,9 +438,10 @@ mod tests {
             assert_eq!(record["displayName"], "write the tests all of them");
             assert_eq!(record["isWorktree"], false);
             assert_eq!(
-                (&record["workflowId"], &record["workflowName"]),
-                (&json!("wf"), &json!("w"))
+                record["origin"],
+                json!({ "extension": "vorn.workflows", "id": "wf", "label": "w" })
             );
+            assert!(record.get("workflowId").is_none());
             assert_eq!(
                 record["agentSessionId"].is_string(),
                 agent.pins_session_ids()

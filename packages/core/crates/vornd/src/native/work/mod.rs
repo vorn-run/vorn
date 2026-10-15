@@ -1218,6 +1218,22 @@ impl Work {
         self.engine.resume_sign_in_waits(connection_id, runs).await;
     }
 
+    /// Fires the triggers tasks fire, from the public events vornd emits as
+    /// tasks are written, until vornd stops.
+    pub fn follow_tasks(self: &Arc<Self>, bus: &vorn_extensions::events::Bus) {
+        use vorn_extensions::events::{TASK_CREATED, TASK_STATUS_CHANGED};
+        let mut events = bus.subscribe("workflows", &[TASK_CREATED, TASK_STATUS_CHANGED]);
+        let work = Arc::downgrade(self);
+        tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                let Some(work) = work.upgrade() else { return };
+                if let Err(err) = work.trigger(&event.data).await {
+                    warn!(%err, "a task trigger was refused");
+                }
+            }
+        });
+    }
+
     /// The workflows changed elsewhere: the scheduler reads them again.
     pub fn workflows_changed_elsewhere(&self) {
         self.rearm.notify_one();

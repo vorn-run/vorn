@@ -89,6 +89,9 @@ pub enum Shortcut {
     /// Mod+Shift+A and Mod+Shift+D: allow or deny the oldest pending
     /// permission request, wherever its session is.
     Permission(bool),
+    /// Mod+Shift+Up and Mod+Shift+Down: the selected terminal scrolled to
+    /// the command before or after, by the shell's prompt marks.
+    Prompt(bool),
 }
 
 /// The renderer's global shortcuts (`useKeyboardShortcuts`). Escape is not
@@ -103,6 +106,8 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             "KeyW" => Some(Shortcut::View(MainView::Workflows)),
             "KeyA" => Some(Shortcut::Permission(true)),
             "KeyD" => Some(Shortcut::Permission(false)),
+            "ArrowUp" => Some(Shortcut::Prompt(true)),
+            "ArrowDown" => Some(Shortcut::Prompt(false)),
             _ => None,
         };
     }
@@ -1285,6 +1290,34 @@ impl App {
                     json!({ "allow": allow }),
                 );
             }
+            Shortcut::Prompt(up) => self.jump_to_command(ui, up),
+        }
+    }
+
+    /// Jump by command: the current terminal scrolled to the prompt before
+    /// or after the top of its view; past the last, the live screen. A shell
+    /// showing its commands as blocks has none of its history on screen.
+    fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
+        let Some(id) = self.current() else { return };
+        let as_blocks = self.store.session(&id).is_some_and(|s| {
+            crate::blocks::split(&self.store.config, s, self.st.shells.get(&id)).is_some()
+        });
+        if as_blocks {
+            return;
+        }
+        let (Some(lines), Some(view)) = (
+            self.grid.as_ref().and_then(|g| g.lines(&id)),
+            self.views.get(&id),
+        ) else {
+            return;
+        };
+        if lines.alt {
+            return;
+        }
+        match crate::blocks::prompt_jump(&lines.prompts, view.line0, view.live_line, up) {
+            Some(0) => self.return_to_live(&id),
+            Some(back) => self.scroll_back_to(ui, &id, back),
+            None => {}
         }
     }
 
@@ -1736,6 +1769,16 @@ impl App {
 
     fn save_config(&mut self, config: Value, call: Call) {
         let before = self.store.workspace().to_owned();
+        // Tasks and workflows are not vornd's configuration: their changes go as calls of their own.
+        let mut calls =
+            crate::client::sync::tasks(self.store.config.get("tasks"), config.get("tasks"));
+        calls.extend(crate::client::sync::workflows(
+            self.store.config.get("workflows"),
+            config.get("workflows"),
+        ));
+        for (method, params) in calls {
+            self.call(Call::Quiet, method, params);
+        }
         self.store.apply("config:changed", config.clone());
         if self.store.workspace() != before {
             self.workspace_switched();
@@ -1753,7 +1796,11 @@ impl App {
         if self.saving {
             return;
         }
-        if let Some((config, call)) = self.saves.pop_front() {
+        if let Some((mut config, call)) = self.saves.pop_front() {
+            if let Some(map) = config.as_object_mut() {
+                map.remove("tasks");
+                map.remove("workflows");
+            }
             self.saving = true;
             self.call(Call::Saved(Box::new(call)), "config:save", config);
         }
@@ -3337,6 +3384,11 @@ mod tests {
         assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));
         assert_eq!(shortcut("Digit0", MOD()), None);
         assert_eq!(shortcut("BracketRight", MOD()), Some(Shortcut::Cycle(true)));
+        assert_eq!(
+            shortcut("ArrowUp", MOD() | mods::SHIFT),
+            Some(Shortcut::Prompt(true))
+        );
+        assert_eq!(shortcut("ArrowDown", MOD()), None);
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
         assert_eq!(shortcut("Slash", MOD()), Some(Shortcut::Shortcuts));
         assert_eq!(shortcut("KeyK", MOD()), Some(Shortcut::Palette));

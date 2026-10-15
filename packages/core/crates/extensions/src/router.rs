@@ -19,10 +19,12 @@ use tracing::{debug, error, info, warn};
 use crate::api::types::{CallCtx, Event, InitCtx, Level, RowOp};
 use crate::api::{params, ExtError, Method, Side};
 use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
-use crate::gate::{self, Caller, World};
+use crate::events::{self, Bus, Queue, Tally};
+use crate::gate::{self, Caller, StorageCall, World};
 use crate::lifecycle::{Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
+use crate::sandbox;
 
 /// What every program is started with.
 #[derive(Debug, Clone)]
@@ -48,6 +50,8 @@ impl RouterSettings {
     }
 }
 
+/// The most events one `guest.on-event` carries.
+const MAX_BATCH: usize = 256;
 /// How many of one program's own requests are answered at once.
 const REQUESTS_AT_ONCE: usize = 16;
 /// Rows a collection keeps; past this an upsert of a new row is dropped.
@@ -81,6 +85,9 @@ pub struct Router {
     settings: RouterSettings,
     rows: Mutex<Rows>,
     packs: Mutex<Packs>,
+    bus: Arc<Bus>,
+    /// Each subscribed extension's queue, read by its own delivery task.
+    queues: Mutex<HashMap<String, Queue>>,
     me: Weak<Router>,
 }
 
@@ -108,11 +115,14 @@ pub fn ext_error(err: CallError) -> ExtError {
 }
 
 impl Router {
+    /// A router delivering `bus`'s events to the extensions that subscribe;
+    /// none is subscribed until [`Router::reindex`].
     pub fn new(
         store: PackStore,
         lifecycle: Arc<Lifecycle>,
         world: Arc<dyn World>,
         settings: RouterSettings,
+        bus: Arc<Bus>,
     ) -> Arc<Router> {
         Arc::new_cyclic(|me| Router {
             store,
@@ -121,8 +131,62 @@ impl Router {
             settings,
             rows: Mutex::default(),
             packs: Mutex::default(),
+            bus,
+            queues: Mutex::default(),
             me: me.clone(),
         })
+    }
+
+    pub fn bus(&self) -> &Arc<Bus> {
+        &self.bus
+    }
+
+    /// Reads which events each installed program subscribes to into the
+    /// bus's index. A queue kept from before keeps what it holds, in order.
+    pub fn reindex(&self) {
+        let mut wanted: Vec<(String, Vec<String>)> = Vec::new();
+        for id in self.store.ids() {
+            let Some(pack) = self.program(&id) else {
+                continue;
+            };
+            let names = pack
+                .manifest
+                .service
+                .as_ref()
+                .map(|s| s.events.clone())
+                .unwrap_or_default();
+            if !names.is_empty() {
+                wanted.push((id, names));
+            }
+        }
+        let mut queues = guard(&self.queues);
+        queues.retain(|id, _| wanted.iter().any(|(w, _)| w == id));
+        let mut subscribed = Vec::with_capacity(wanted.len());
+        for (id, names) in wanted {
+            let queue = queues
+                .entry(id.clone())
+                .or_insert_with(|| {
+                    let (tx, rx) = mpsc::channel(events::QUEUE);
+                    let tally = Arc::new(Tally::default());
+                    tokio::spawn(deliver(self.me.clone(), id.clone(), rx, Arc::clone(&tally)));
+                    Queue {
+                        tx,
+                        tally: Some(tally),
+                    }
+                })
+                .clone();
+            subscribed.push((id, names, queue));
+        }
+        self.bus.set_extensions(subscribed);
+    }
+
+    /// Resolves once every event queued for extension `id` so far has been
+    /// handed to it, or dropped because it could not start.
+    pub async fn settled(&self, id: &str) {
+        let tally = guard(&self.queues).get(id).and_then(|q| q.tally.clone());
+        if let Some(tally) = tally {
+            tally.settled().await;
+        }
     }
 
     pub fn store(&self) -> &PackStore {
@@ -147,6 +211,23 @@ impl Router {
             guard(&self.packs).insert(id.to_owned(), (stamp, Arc::clone(&pack)));
         }
         Ok(pack)
+    }
+
+    /// Whether extension `id`'s programs start under the macOS sandbox profile.
+    pub fn sandboxed(&self, id: &str) -> bool {
+        sandbox::available() && sandbox::is_on(&self.store.root().join(id))
+    }
+
+    /// Turns the sandbox profile on or off for extension `id`; its running
+    /// programs stop, so the next start is under the new setting.
+    pub async fn set_sandboxed(&self, id: &str, on: bool) -> Result<(), String> {
+        let pack = self.pack(id)?;
+        if pack.manifest.service.is_none() && pack.manifest.runs.is_empty() {
+            return Err(format!("{} runs no program to hold", pack.name()));
+        }
+        sandbox::set(&self.store.root().join(id), on)?;
+        self.lifecycle.stop_extension(id).await;
+        Ok(())
     }
 
     /// Package `id`, if it is a program in the extension API.
@@ -221,57 +302,10 @@ impl Router {
         }
     }
 
-    /// Delivers `event` to every service that declares it, starting the
-    /// ones that are not running; answers how many it reached.
-    pub async fn emit(&self, event: &str, data: Value) -> usize {
-        let subscribers: Vec<Arc<InstalledPack>> = self
-            .store
-            .ids()
-            .iter()
-            .filter_map(|id| self.program(id))
-            .filter(|p| {
-                p.manifest
-                    .service
-                    .as_ref()
-                    .is_some_and(|s| s.events.iter().any(|e| e == event))
-            })
-            .collect();
-        let batch = params::GuestOnEvent {
-            batch: vec![Event {
-                name: event.to_owned(),
-                data,
-            }],
-        };
-        let mut deliveries = Vec::with_capacity(subscribers.len());
-        for pack in subscribers {
-            let Some(me) = self.me.upgrade() else {
-                return 0;
-            };
-            let batch = json!(batch);
-            deliveries.push(tokio::spawn(async move {
-                let key = ServiceKey::new(pack.id.clone(), "");
-                let lease = me
-                    .lifecycle
-                    .get_or_start(&key, || me.start_service(&pack))
-                    .await;
-                match lease {
-                    Ok(lease) => lease
-                        .child
-                        .notify(Method::GuestOnEvent.name(), batch)
-                        .await
-                        .is_ok(),
-                    Err(err) => {
-                        warn!("[extensions] {} missed an event: {err}", pack.id);
-                        false
-                    }
-                }
-            }));
-        }
-        let mut reached = 0;
-        for delivery in deliveries {
-            reached += usize::from(delivery.await.unwrap_or(false));
-        }
-        reached
+    /// Queues `event` for every service subscribed to it, which starts on
+    /// its first event; answers how many it was queued for.
+    pub fn emit(&self, event: &str, data: Value) -> usize {
+        self.bus.emit(event, || data)
     }
 
     /// The rows extension `id` published to `collection`, in the order they came.
@@ -287,6 +321,7 @@ impl Router {
         self.lifecycle.stop_extension(id).await;
         guard(&self.rows).retain(|(ext, _), _| ext != id);
         guard(&self.packs).remove(id);
+        self.reindex();
     }
 
     fn launch(&self, pack: &InstalledPack, argv: &[String]) -> Result<Launch, String> {
@@ -296,12 +331,16 @@ impl Router {
         let mut env = self.settings.base_env.clone();
         env.retain(|(k, _)| k != "VORN_EXTENSION_ID");
         env.push(("VORN_EXTENSION_ID".into(), pack.id.clone()));
-        Ok(Launch {
+        let launch = Launch {
             program,
             args,
             cwd: PathBuf::from(&pack.path),
             env,
-        })
+        };
+        if self.sandboxed(&pack.id) {
+            return Ok(sandbox::wrap(launch, &pack.path));
+        }
+        Ok(launch)
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.
@@ -419,6 +458,56 @@ impl Router {
     }
 }
 
+/// Hands extension `id` its events in batches, in the order they came,
+/// starting its service for the first; ends when its queue goes.
+async fn deliver(
+    router: Weak<Router>,
+    id: String,
+    mut rx: mpsc::Receiver<Arc<Event>>,
+    tally: Arc<Tally>,
+) {
+    while let Some((batch, taken)) = events::next_batch(&mut rx, MAX_BATCH).await {
+        if let Some(router) = router.upgrade() {
+            router.hand(&id, &batch).await;
+        }
+        tally.handled(taken);
+    }
+}
+
+impl Router {
+    async fn hand(&self, id: &str, batch: &[Arc<Event>]) {
+        let Some(pack) = self.program(id) else {
+            return;
+        };
+        let key = ServiceKey::new(id, "");
+        let lease = match self
+            .lifecycle
+            .get_or_start(&key, || self.start_service(&pack))
+            .await
+        {
+            Ok(lease) => lease,
+            Err(err) => {
+                warn!("[extensions] {id} missed {} events: {err}", batch.len());
+                return;
+            }
+        };
+        let params = params::GuestOnEvent {
+            batch: batch.iter().map(|e| Event::clone(e)).collect(),
+        };
+        if let Err(err) = lease
+            .child
+            .notify(Method::GuestOnEvent.name(), json!(params))
+            .await
+        {
+            warn!(
+                "[extensions] {id} missed {} events: {}",
+                batch.len(),
+                ext_error(err)
+            );
+        }
+    }
+}
+
 /// Answers each request a program makes, each on a task of its own.
 async fn dispatch(
     router: Weak<Router>,
@@ -448,6 +537,38 @@ async fn dispatch(
 }
 
 type Reply = Result<Value, (i64, String, Value)>;
+
+/// A `storage.*` request's params, read.
+fn storage_call(method: Method, params: Value) -> Result<StorageCall, serde_json::Error> {
+    Ok(match method {
+        Method::StorageQuery => {
+            let p: params::StorageQuery = serde_json::from_value(params)?;
+            StorageCall::Query {
+                sql: p.sql,
+                params: p.params,
+            }
+        }
+        Method::StorageExec => {
+            let p: params::StorageExec = serde_json::from_value(params)?;
+            StorageCall::Exec {
+                sql: p.sql,
+                params: p.params,
+            }
+        }
+        Method::StorageGet => {
+            let p: params::StorageGet = serde_json::from_value(params)?;
+            StorageCall::Get { key: p.key }
+        }
+        Method::StorageSet => {
+            let p: params::StorageSet = serde_json::from_value(params)?;
+            StorageCall::Set {
+                key: p.key,
+                value: p.value,
+            }
+        }
+        _ => StorageCall::Prefix,
+    })
+}
 
 fn invalid(method: Method, err: &serde_json::Error) -> Option<Reply> {
     Some(Err((
@@ -529,6 +650,26 @@ async fn answer(
             let result = gate::fetch(&router.world, manifest, caller, p.req, p.connection)
                 .await
                 .map(|r| json!(r));
+            from_ext(result)
+        }
+        Method::StoragePrefix
+        | Method::StorageQuery
+        | Method::StorageExec
+        | Method::StorageGet
+        | Method::StorageSet => {
+            let call = match storage_call(method, params) {
+                Ok(call) => call,
+                Err(e) => return invalid(method, &e),
+            };
+            let result = match gate::admit_storage(manifest) {
+                Ok(()) => {
+                    let migrations = router
+                        .program(&caller.extension)
+                        .and_then(|p| p.migrations());
+                    router.world.storage(caller, migrations, call).await
+                }
+                Err(e) => Err(e),
+            };
             from_ext(result)
         }
         Method::GuestInit | Method::GuestHandle | Method::GuestOnEvent => None,

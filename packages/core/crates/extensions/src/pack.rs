@@ -103,6 +103,12 @@ impl Serialize for InstalledPack {
         if !m.declares.is_empty() {
             map.serialize_entry("declares", &m.declares)?;
         }
+        if let Some(storage) = &m.storage {
+            map.serialize_entry("storage", storage)?;
+        }
+        if !m.mcp.is_empty() {
+            map.serialize_entry("mcp", &m.mcp)?;
+        }
         map.end()
     }
 }
@@ -140,6 +146,12 @@ impl InstalledPack {
             .map(|a| inside(a).map_or_else(|| a.clone(), |p| p.to_string_lossy().into_owned()))
             .collect();
         Some((program, args))
+    }
+
+    /// The folder of its tables' migrations, when it keeps tables.
+    pub fn migrations(&self) -> Option<PathBuf> {
+        let storage = self.manifest.storage.as_ref()?;
+        Some(self.path.join(&storage.migrations))
     }
 
     /// The service's program, resolved; `None` when it declares none.

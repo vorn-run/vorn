@@ -3,21 +3,24 @@
 //! from. The gate has already checked every call against the manifest.
 
 use std::path::PathBuf;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{Header, Request, Response};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::gate::{Answer, Caller, World};
+use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
+use vorn_store::extension::ExtensionTables;
 
-use crate::native::{secrets::Known, Native};
+use crate::native::config::Viewer;
+use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
 
 /// How long one `net.fetch` may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// vornd's world: its session records, git, the network and the vault.
+/// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
     pub native: Weak<Native>,
 }
@@ -26,42 +29,128 @@ fn stopping() -> ExtError {
     ExtError::new("stopping", "vornd is stopping")
 }
 
+/// The secret `field` of `connection`, which must be `owner`'s.
+async fn secret_of(
+    native: Option<Arc<Native>>,
+    owner: String,
+    connection: String,
+    field: String,
+) -> Result<Option<String>, ExtError> {
+    let native = native.ok_or_else(stopping)?;
+    let connectors = native
+        .connectors()
+        .cloned()
+        .ok_or_else(|| ExtError::new("signed-out", "vornd holds no connections"))?;
+    if connectors.owner_of(&connection).await.as_deref() != Some(owner.as_str()) {
+        return Err(ExtError::new(
+            "denied",
+            format!("the connection {connection} is not {owner}'s"),
+        ));
+    }
+    tokio::task::spawn_blocking(move || match native.secrets.lookup(&connection) {
+        Known::Fields(fields) => fields.get(&field).map(|v| v.expose().to_owned()),
+        Known::None | Known::Unknown => None,
+    })
+    .await
+    .map_err(|e| ExtError::new("failed", e.to_string()))
+}
+
+/// A client's call answered inside vornd, for a core method the gate allowed.
+async fn ask(native: &Arc<Native>, method: &str, params: Value) -> Result<Value, ExtError> {
+    match native
+        .answer(method.to_owned(), params, &Viewer::Local)
+        .await
+    {
+        NativeAnswer::Result(v) => Ok(v),
+        NativeAnswer::Void => Ok(Value::Null),
+        NativeAnswer::Error(message) => Err(ExtError::new("failed", message)),
+        NativeAnswer::Unanswered => Err(ExtError::new(
+            "unsupported",
+            format!("this vornd does not answer {method}"),
+        )),
+    }
+}
+
+fn text(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+fn needs(method: &str, what: &str) -> ExtError {
+    ExtError::new("bad-request", format!("{method} takes {what}"))
+}
+
+/// A running session as `sessions.list` and `sessions.get` describe it.
+fn session_json(t: &crate::registry::TerminalSession) -> Value {
+    json!({
+        "id": t.id, "agent": t.agent_type, "status": t.status,
+        "projectPath": t.project_path, "worktreePath": t.worktree_path,
+    })
+}
+
 impl World for Wired {
     fn call(&self, caller: &Caller, method: &str, args: Value) -> Answer<Value> {
         let native = self.native.upgrade();
         let method = method.to_owned();
-        let project = args
-            .get("project")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| caller.project.clone());
+        let extension = caller.extension.clone();
+        let project = text(&args, "project").or_else(|| caller.project.clone());
+        let weak = self.native.clone();
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
-            match method.as_str() {
+            let m = method.as_str();
+            match m {
                 "sessions.list" => {
                     let sessions = native
                         .registry
                         .get()
                         .and_then(|r| {
-                            r.read(|r| {
-                                r.live_terminals()
-                                    .map(|t| {
-                                        json!({
-                                            "id": t.id, "agent": t.agent_type,
-                                            "projectPath": t.project_path,
-                                            "worktreePath": t.worktree_path,
-                                        })
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
+                            r.read(|r| r.live_terminals().map(session_json).collect::<Vec<_>>())
                         })
                         .unwrap_or_default();
                     Ok(Value::Array(sessions))
                 }
-                "git.status" => {
-                    let project = project.ok_or_else(|| {
-                        ExtError::new("bad-request", "git.status takes the project to read")
+                "sessions.get" => {
+                    let id = text(&args, "sessionId")
+                        .ok_or_else(|| needs(m, "the sessionId to read"))?;
+                    native
+                        .registry
+                        .get()
+                        .and_then(|r| {
+                            r.read(|r| r.live_terminals().find(|t| t.id == id).map(session_json))
+                        })
+                        .flatten()
+                        .ok_or_else(|| {
+                            ExtError::new("not-found", format!("Session not found: {id}"))
+                        })
+                }
+                "sessions.launch" => {
+                    let project = project.ok_or_else(|| needs(m, "the project to start it in"))?;
+                    let agent = text(&args, "agent").unwrap_or_else(|| "shell".to_owned());
+                    let started = if agent == "shell" {
+                        ask(&native, "shell:create", json!(project)).await?
+                    } else {
+                        let name = std::path::Path::new(&project)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| project.clone());
+                        let params = json!({ "agentType": agent, "projectName": name, "projectPath": project });
+                        ask(&native, "terminal:create", params).await?
+                    };
+                    Ok(json!({ "sessionId": started.get("id").cloned().unwrap_or(Value::Null) }))
+                }
+                "terminal.read" | "terminal.send" | "terminal.selection" | "card.rename"
+                | "agent.usage" => {
+                    let host = native.extensions().cloned().ok_or_else(|| {
+                        ExtError::new("unsupported", "vornd is not hosting extensions")
                     })?;
+                    super::routes::session_call(&host, &extension, m, &args)
+                        .await
+                        .map_err(|e| ExtError::new("failed", e))
+                }
+                "git.status" => {
+                    let project = project.ok_or_else(|| needs(m, "the project to read"))?;
                     let git = vorn_git::repo::Git {
                         bin: native.env.git_bin(),
                         env: native.env.get(),
@@ -73,6 +162,57 @@ impl World for Wired {
                     })
                     .await
                     .map_err(|e| ExtError::new("failed", e.to_string()))
+                }
+                "git.diff" => {
+                    let dir = text(&args, "worktree")
+                        .or(project)
+                        .ok_or_else(|| needs(m, "the worktree to read"))?;
+                    ask(&native, "git:diffFull", json!(dir)).await
+                }
+                "git.commit" => {
+                    let dir = text(&args, "worktree")
+                        .or(project)
+                        .ok_or_else(|| needs(m, "the worktree to commit in"))?;
+                    let message =
+                        text(&args, "message").ok_or_else(|| needs(m, "the commit message"))?;
+                    let unstaged = args
+                        .get("includeUnstaged")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let params =
+                        json!({ "cwd": dir, "message": message, "includeUnstaged": unstaged });
+                    ask(&native, "git:commit", params).await
+                }
+                "files.read" => {
+                    let path =
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
+                    let mut params = json!({ "filePath": path });
+                    if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
+                        params["maxBytes"] = max.clone();
+                    }
+                    ask(&native, "file:readContent", params).await
+                }
+                "files.write" => {
+                    let path = text(&args, "path")
+                        .ok_or_else(|| needs(m, "the absolute path to write"))?;
+                    let content = args
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| needs(m, "the content to write"))?;
+                    ask(
+                        &native,
+                        "file:writeContent",
+                        json!({ "filePath": path, "content": content }),
+                    )
+                    .await
+                }
+                "secrets.get" => {
+                    let connection = text(&args, "connection")
+                        .ok_or_else(|| needs(m, "the connection to read"))?;
+                    let field =
+                        text(&args, "field").ok_or_else(|| needs(m, "the field to read"))?;
+                    let value = secret_of(weak.upgrade(), extension, connection, field).await?;
+                    Ok(json!({ "value": value }))
                 }
                 other => Err(ExtError::new(
                     "unknown-method",
@@ -112,32 +252,56 @@ impl World for Wired {
     }
 
     fn secret(&self, caller: &Caller, connection: &str, field: &str) -> Answer<Option<String>> {
-        let native = self.native.upgrade();
-        let (owner, connection, field) = (
+        let (native, owner, connection, field) = (
+            self.native.upgrade(),
             caller.extension.clone(),
             connection.to_owned(),
             field.to_owned(),
         );
+        Box::pin(secret_of(native, owner, connection, field))
+    }
+
+    fn storage(
+        &self,
+        caller: &Caller,
+        migrations: Option<PathBuf>,
+        call: StorageCall,
+    ) -> Answer<Value> {
+        let (native, id) = (self.native.upgrade(), caller.extension.clone());
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
-            let connectors = native
-                .connectors()
-                .cloned()
-                .ok_or_else(|| ExtError::new("signed-out", "vornd holds no connections"))?;
-            if connectors.owner_of(&connection).await.as_deref() != Some(owner.as_str()) {
-                return Err(ExtError::new(
-                    "denied",
-                    format!("the connection {connection} is not {owner}'s"),
-                ));
-            }
-            let found =
-                tokio::task::spawn_blocking(move || match native.secrets.lookup(&connection) {
-                    Known::Fields(fields) => fields.get(&field).map(|v| v.expose().to_owned()),
-                    Known::None | Known::Unknown => None,
+            let db = native
+                .database()
+                .map(std::path::Path::to_path_buf)
+                .ok_or_else(|| ExtError::new("unsupported", "vornd has no database"))?;
+            let done = tokio::task::spawn_blocking(move || {
+                let tables = ExtensionTables::open(&db, &id)?;
+                // Checked each call: a linked package gains files, and a reinstall starts with none run.
+                if let Some(dir) = migrations.filter(|d| d.is_dir()) {
+                    let ran = tables.migrate(&dir)?;
+                    if !ran.is_empty() {
+                        info!("[extensions] {id} ran its migrations {}", ran.join(", "));
+                    }
+                }
+                Ok::<_, vorn_store::Error>(match call {
+                    StorageCall::Prefix => json!(tables.prefix()),
+                    StorageCall::Query { sql, params } => {
+                        Value::Array(tables.query(&sql, &params)?)
+                    }
+                    StorageCall::Exec { sql, params } => json!(tables.exec(&sql, &params)?),
+                    StorageCall::Get { key } => tables.get(&key)?.unwrap_or(Value::Null),
+                    StorageCall::Set { key, value } => {
+                        tables.set(&key, &value)?;
+                        Value::Null
+                    }
                 })
-                .await
-                .map_err(|e| ExtError::new("failed", e.to_string()))?;
-            Ok(found)
+            })
+            .await
+            .map_err(|e| ExtError::new("failed", e.to_string()))?;
+            done.map_err(|e| match e {
+                vorn_store::Error::Refused(message) => ExtError::new("denied", message),
+                other => ExtError::new("failed", other.to_string()),
+            })
         })
     }
 

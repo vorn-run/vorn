@@ -1,8 +1,9 @@
-//! Tasks, projects, workspaces and workflows, read through the config blob
-//! that `config:load` carries. Tasks and workflows are written through their
-//! own methods, so the server applies its rules and arms a workflow's
-//! schedule as it stores the change; projects and workspaces, which have
-//! none, are written back through `config:save`, load-change-save per call.
+//! Tasks, projects, workspaces and workflows. Projects and workspaces are
+//! read through the config blob that `config:load` carries and written back
+//! through `config:save`, load-change-save per call; tasks and workflows are
+//! not in it, and are read and written through their own methods, so the
+//! server applies its rules and arms a workflow's schedule as it stores the
+//! change.
 //! A save carries the revision it was based on, so the server keeps what
 //! anyone else added in between.
 
@@ -12,9 +13,25 @@ use super::{pretty, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
 
-/// `get_config`: the whole configuration.
+/// `get_config`: the whole configuration, its tasks and workflows read
+/// beside it and put back where the TypeScript's answer had them.
 pub async fn get_config<R: Rpc>(cx: &Cx<'_, R>) -> Outcome {
-    Ok(pretty(&load(cx).await?))
+    let config = load(cx).await?;
+    let Value::Object(config) = config else {
+        return Ok(pretty(&config));
+    };
+    let (workflows, tasks) = (list(cx, "workflows").await?, list(cx, "tasks").await?);
+    let mut whole = Map::new();
+    for (key, value) in config {
+        whole.insert(key.clone(), value);
+        if key == "agentCommands" {
+            whole.insert("workflows".into(), Value::Array(workflows.clone()));
+        }
+        if key == "remoteHosts" {
+            whole.insert("tasks".into(), Value::Array(tasks.clone()));
+        }
+    }
+    Ok(pretty(&Value::Object(whole)))
 }
 
 /// `configManager.loadConfig()`, as the server answers `config:load`.
@@ -22,10 +39,21 @@ pub async fn load<R: Rpc>(cx: &Cx<'_, R>) -> Result<Value, String> {
     Ok(cx.call("config:load", None).await?)
 }
 
-/// `(await loadConfig()).<list> ?? []`.
+/// `(await loadConfig()).<list> ?? []`; tasks, with their descriptions, and
+/// workflows from their own calls.
 pub async fn list<R: Rpc>(cx: &Cx<'_, R>, key: &str) -> Result<Vec<Value>, String> {
-    let config = load(cx).await?;
-    Ok(super::items(json::prop(Some(&config), key)?).to_vec())
+    let read = match key {
+        "tasks" => {
+            cx.call("task:list", Some(json!({ "includeDescription": true })))
+                .await?
+        }
+        "workflows" => cx.call("workflow:list", None).await?,
+        _ => {
+            let config = load(cx).await?;
+            return Ok(super::items(json::prop(Some(&config), key)?).to_vec());
+        }
+    };
+    Ok(super::items(Some(&read)).to_vec())
 }
 
 /// Load, change one list, save: the shape every write takes.

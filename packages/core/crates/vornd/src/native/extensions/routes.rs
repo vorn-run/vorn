@@ -202,6 +202,40 @@ fn read_body(bytes: &[u8]) -> Option<Map<String, Value>> {
     }
 }
 
+/// A session's method a program called through `host.call`, once the gate
+/// allowed it: read and checked as the card bridge reads the same call.
+pub(super) async fn session_call(
+    extensions: &Extensions,
+    extension: &str,
+    method: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let short = match method {
+        "terminal.read" => "output",
+        "terminal.send" => "send",
+        "terminal.selection" => "selection",
+        "card.rename" => "rename",
+        "agent.usage" => "usage",
+        other => return Err(format!("Vorn has no method {other}")),
+    };
+    let body = args.as_object().cloned().unwrap_or_default();
+    let id = bridge::session_named(None, &body).unwrap_or_default();
+    let session = extensions.live(id)?;
+    let caller = Caller {
+        extension_id: extension.to_owned(),
+        project_path: session.project_path.clone(),
+    };
+    let view = SessionView {
+        id: &session.id,
+        project_path: &session.project_path,
+        renamed_by_person: session.renamed_by_person,
+    };
+    let asked = bridge::request(&caller, short, Some(view), &body).map_err(|r| r.message)?;
+    Ok(run(extensions, asked, &session)
+        .await?
+        .unwrap_or(Value::Null))
+}
+
 /// The extension's own reads, once the caller and the session are settled.
 async fn run(
     extensions: &Extensions,

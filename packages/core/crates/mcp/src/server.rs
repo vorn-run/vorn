@@ -137,9 +137,10 @@ impl Server {
         let outcome = match method {
             "initialize" => parse_request(method, message).map(|r| self.initialize(&r)),
             "ping" => parse_request(method, message).map(|_| json!({})),
-            "tools/list" => {
-                parse_request(method, message).map(|_| json!({ "tools": crate::tools_list() }))
-            }
+            "tools/list" => match parse_request(method, message) {
+                Ok(_) => Ok(json!({ "tools": tools_with_extensions(rpc).await })),
+                Err(err) => Err(err),
+            },
             "tools/call" => match parse_request(method, message) {
                 Ok(request) => Ok(call_tool(rpc, caller, &request["params"]).await),
                 Err(err) => Err(err),
@@ -174,11 +175,39 @@ fn tool_error(message: String) -> Value {
     json!({ "content": [{ "type": "text", "text": message }], "isError": true })
 }
 
-/// `tools/call`: the tool by name, its arguments checked, then run.
+/// How long the tools installed extensions add may take to list before they are left out.
+const EXTENSION_TOOLS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Vorn's own tools, then those installed extensions add; a server that
+/// cannot say which those are lists its own alone.
+async fn tools_with_extensions<R: Rpc>(rpc: &R) -> Value {
+    let mut tools = crate::tools_list().as_array().cloned().unwrap_or_default();
+    if let Ok(Value::Array(added)) = rpc
+        .call("extension:mcpTools", None, EXTENSION_TOOLS_TIMEOUT)
+        .await
+    {
+        tools.extend(added);
+    }
+    Value::Array(tools)
+}
+
+/// `tools/call`: the tool by name, its arguments checked, then run. A name
+/// that is not Vorn's own goes to the extension that offers it.
 async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or_default();
     let Some(schema) = zod::registry().tool(name) else {
-        return tool_error(format!("MCP error -32602: Tool {name} not found"));
+        let asked = json!({ "name": name, "arguments": params.get("arguments").cloned().unwrap_or(json!({})) });
+        return match rpc
+            .call(
+                "extension:mcpCall",
+                Some(asked),
+                crate::rpc::DEFAULT_TIMEOUT * 6,
+            )
+            .await
+        {
+            Ok(result) => normalize_result(result),
+            Err(_) => tool_error(format!("MCP error -32602: Tool {name} not found")),
+        };
     };
     let args = match schema {
         // No schema: the handler is called without looking at the arguments.

@@ -115,12 +115,23 @@ pub fn set_status(store: &mut Store, params: &Value, now: &str) -> Result<(Value
     Ok((ok(true), true))
 }
 
-/// `task:create`: the task as stored, in a project that exists.
+/// `task:create`: the task as stored, in a project that exists. A client
+/// may name the task's id (its images are kept under it already); one that
+/// is taken is refused, and without one the task gets `id`.
 pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Result<(Value, bool)> {
     let project = params.get("projectName").cloned().unwrap_or(Value::Null);
     if !project_exists(store, &project)? {
         return Ok((ok(false), false));
     }
+    let id = match params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|i| !i.is_empty())
+    {
+        Some(asked) if task(store, &json!(asked))?.is_some() => return Ok((ok(false), false)),
+        Some(asked) => asked.to_owned(),
+        None => id,
+    };
     let status = params
         .get("status")
         .filter(|s| !s.is_null())
@@ -217,6 +228,84 @@ pub fn update(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bo
     Ok((answer, true))
 }
 
+/// The fields `task:patch` sets; a date it does not set follows the status.
+const PATCHED: [&str; 12] = [
+    "projectName",
+    "title",
+    "description",
+    "status",
+    "order",
+    "branch",
+    "useWorktree",
+    "assignedAgent",
+    "assignedSessionId",
+    "agentSessionId",
+    "completedAt",
+    "archivedAt",
+];
+
+/// The fields a task may be without, which `null` clears.
+const CLEARABLE: [&str; 7] = [
+    "branch",
+    "useWorktree",
+    "assignedAgent",
+    "assignedSessionId",
+    "agentSessionId",
+    "completedAt",
+    "archivedAt",
+];
+
+/// `task:patch {id, set}`: sets exactly the fields `set` names, `null`
+/// clearing one, and nothing else. A move to another project needs that
+/// project; a status change stamps the dates the caller did not set.
+pub fn patch(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+    let id = params.get("id").cloned().unwrap_or(Value::Null);
+    let Some(before) = task(store, &id)? else {
+        return Ok((ok(false), false));
+    };
+    let Some(set) = params.get("set").and_then(Value::as_object) else {
+        return Ok((ok(false), false));
+    };
+    if let Some(project) = set
+        .get("projectName")
+        .filter(|p| Some(*p) != before.get("projectName"))
+    {
+        if !project_exists(store, project)? {
+            return Ok((ok(false), false));
+        }
+    }
+    let mut updates = Map::new();
+    let mut keys: Vec<String> = Vec::new();
+    for (k, v) in set.iter().filter(|(k, _)| PATCHED.contains(&k.as_str())) {
+        if v.is_null() && !CLEARABLE.contains(&k.as_str()) {
+            continue;
+        }
+        keys.push(k.clone());
+        updates.insert(k.clone(), v.clone());
+    }
+    if let Some(status) = set.get("status").and_then(Value::as_str) {
+        let (mut stamped, mut stamped_keys) = (Map::new(), Vec::new());
+        stamps(
+            before.get("status").and_then(Value::as_str),
+            Some(status),
+            now,
+            &mut stamped,
+            &mut stamped_keys,
+        );
+        for k in stamped_keys.into_iter().filter(|k| !set.contains_key(k)) {
+            if let Some(v) = stamped.get(&k) {
+                updates.insert(k.clone(), v.clone());
+            }
+            keys.push(k);
+        }
+    }
+    updates.insert("updatedAt".into(), json!(now));
+    keys.push("updatedAt".into());
+    store.call("dbUpdateTask", json!([id, updates, keys]))?;
+    let after = store.call("dbGetTask", json!([id]))?;
+    Ok((json!({ "ok": true, "task": after }), true))
+}
+
 /// `task:delete`.
 pub fn delete(store: &mut Store, params: &Value) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
@@ -311,6 +400,51 @@ mod tests {
         )
         .unwrap();
         s
+    }
+
+    #[test]
+    fn a_patch_sets_only_what_it_names_and_stamps_a_finish() {
+        let mut s = store();
+        let made = json!({ "id": "mine", "projectName": "app", "title": "T", "branch": "b" });
+        let (created, _) =
+            create(&mut s, &made, "unused".into(), "2026-01-01T00:00:00.000Z").unwrap();
+        assert_eq!(created["task"]["id"], "mine");
+        // The id is the client's, so a second task under it is refused.
+        assert_eq!(
+            create(&mut s, &made, "x".into(), "n").unwrap().0,
+            json!({ "ok": false })
+        );
+
+        let set = json!({ "id": "mine", "set": {
+            "status": "in_progress", "assignedSessionId": "s1", "assignedAgent": "claude", "bogus": 1
+        } });
+        let (patched, changed) = patch(&mut s, &set, "2026-01-02T00:00:00.000Z").unwrap();
+        assert!(changed);
+        let t = &patched["task"];
+        assert_eq!(
+            (t["status"].as_str(), t["assignedSessionId"].as_str()),
+            (Some("in_progress"), Some("s1"))
+        );
+        assert_eq!(t["branch"], "b", "a field it does not name stays");
+        assert_eq!(t["title"], "T");
+
+        let done = json!({ "id": "mine", "set": { "status": "done", "assignedSessionId": null } });
+        let (patched, _) = patch(&mut s, &done, "2026-01-03T00:00:00.000Z").unwrap();
+        let t = &patched["task"];
+        assert_eq!(t["completedAt"], "2026-01-03T00:00:00.000Z");
+        assert!(t.get("assignedSessionId").is_none_or(Value::is_null));
+        assert_eq!(t["assignedAgent"], "claude");
+
+        let elsewhere = json!({ "id": "mine", "set": { "projectName": "nowhere" } });
+        assert_eq!(
+            patch(&mut s, &elsewhere, "n").unwrap(),
+            (json!({ "ok": false }), false)
+        );
+        assert!(
+            !patch(&mut s, &json!({ "id": "none", "set": {} }), "n")
+                .unwrap()
+                .1
+        );
     }
 
     #[test]

@@ -284,6 +284,38 @@ fn first_difference(a: &Value, b: &Value, at: &str) -> Option<String> {
     }
 }
 
+/// The one accepted difference: a session a step starts names its workflow
+/// as a generic origin, not by `workflowId` and `workflowName`.
+fn with_session_origin(mut value: Value) -> Value {
+    match &mut value {
+        Value::Object(map) => {
+            if map.get("method").and_then(Value::as_str) == Some("headless:create") {
+                if let Some(Value::Object(params)) = map.get_mut("params") {
+                    if let (Some(id), Some(label)) = (
+                        params.shift_remove("workflowId"),
+                        params.shift_remove("workflowName"),
+                    ) {
+                        params.insert(
+                            "origin".into(),
+                            json!({ "extension": "vorn.workflows", "id": id, "label": label }),
+                        );
+                    }
+                }
+            }
+            for v in map.values_mut() {
+                *v = with_session_origin(std::mem::take(v));
+            }
+        }
+        Value::Array(items) => {
+            for v in items {
+                *v = with_session_origin(std::mem::take(v));
+            }
+        }
+        _ => {}
+    }
+    value
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_recorded_case_runs_as_the_typescript_engine_ran_it() {
     let only = std::env::var("CASE").ok();
@@ -299,7 +331,7 @@ async fn every_recorded_case_runs_as_the_typescript_engine_ran_it() {
         };
         if let Some(diff) = first_difference(
             &ids_inside_text(&got),
-            &ids_inside_text(&case["expected"]),
+            &ids_inside_text(&with_session_origin(case["expected"].clone())),
             "",
         ) {
             failures.push(format!("{name}: {diff}"));

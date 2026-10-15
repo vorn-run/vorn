@@ -25,6 +25,7 @@ mod catalog;
 mod config;
 mod connectors;
 mod dispatch;
+pub mod extension;
 mod hosts;
 mod runs;
 mod schema;

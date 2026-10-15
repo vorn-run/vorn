@@ -296,6 +296,8 @@ pub struct Native {
     main: Arc<desktop::Desktop>,
     /// The one lifecycle every extension program and connector child runs under.
     lifecycle: Arc<vorn_extensions::lifecycle::Lifecycle>,
+    /// The public events, to whoever subscribed: extensions and core modules.
+    events: Arc<vorn_extensions::events::Bus>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -348,6 +350,7 @@ impl Native {
             extensions: OnceLock::new(),
             main: Arc::default(),
             lifecycle: vorn_extensions::lifecycle::Lifecycle::new(Default::default()),
+            events: vorn_extensions::events::Bus::new(),
         })
     }
 
@@ -470,6 +473,11 @@ impl Native {
 
     pub fn extensions(&self) -> Option<&Arc<extensions::Extensions>> {
         self.extensions.get()
+    }
+
+    /// The public events: emitted by the core, delivered to whoever subscribed.
+    pub fn events(&self) -> &Arc<vorn_extensions::events::Bus> {
+        &self.events
     }
 
     /// Whether vornd answers `method`: a core method, or an installed extension's own.

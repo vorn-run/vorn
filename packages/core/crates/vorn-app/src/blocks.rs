@@ -297,9 +297,40 @@ pub fn shorten_cwd(cwd: &str) -> String {
     }
 }
 
+/// Jump by command: how far back to scroll for the prompt before (`up`) or
+/// after the line at the top of the view. `prompts` are absolute prompt lines,
+/// oldest first; `top` is the line the view starts at and `live` the live
+/// screen's first. Answers rows above the live screen, 0 for the live screen
+/// itself, and `None` when no prompt lies that way.
+pub fn prompt_jump(prompts: &[u64], top: u64, live: u64, up: bool) -> Option<u64> {
+    if up {
+        let target = prompts.iter().rev().find(|&&p| p < top)?;
+        return Some(live.saturating_sub(*target));
+    }
+    Some(match prompts.iter().find(|&&p| p > top) {
+        Some(&p) if p < live => live - p,
+        _ => 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jumps_to_the_prompt_before_or_after_the_top_of_the_view() {
+        let prompts = [10, 40, 90, 130];
+        // From the live screen at 120: up to 90, then 40, then 10, then nothing.
+        assert_eq!(prompt_jump(&prompts, 120, 120, true), Some(30));
+        assert_eq!(prompt_jump(&prompts, 90, 120, true), Some(80));
+        assert_eq!(prompt_jump(&prompts, 40, 120, true), Some(110));
+        assert_eq!(prompt_jump(&prompts, 10, 120, true), None);
+        // Down from 10 is 40; past the last one in history is the live screen.
+        assert_eq!(prompt_jump(&prompts, 10, 120, false), Some(80));
+        assert_eq!(prompt_jump(&prompts, 90, 120, false), Some(0));
+        assert_eq!(prompt_jump(&[], 50, 120, false), Some(0));
+        assert_eq!(prompt_jump(&[], 50, 120, true), None);
+    }
     use serde_json::json;
 
     fn lines(prompts: &[u64], top: u64, cursor_y: u16) -> Lines {

@@ -2,8 +2,9 @@
 //! `vorn.db` through [`vorn_store`].
 //!
 //! A save is checked against the revision the client last loaded, so two
-//! clients cannot delete each other's rows, then fires the task triggers its
-//! changes make and tells every client (`config:changed`). The settings that
+//! clients cannot delete each other's rows, then tells every client
+//! (`config:changed`). Tasks and workflows are not in the configuration: they
+//! have their own calls, and the triggers tasks fire follow from those. The settings that
 //! belong to a viewer ([`vorn_store::VIEWER_SETTING_KEYS`]) are also kept per
 //! viewer, so a device's own font size and view come back from here and its
 //! local storage is only a cache of them.
@@ -117,20 +118,18 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
         "config:save" => {
             let mut sent = params;
             let passwords = super::credential::take_host_passwords(&mut sent);
-            let to_save = sent.clone();
             let saved = blocking(method, move || {
                 for (id, password) in &passwords {
                     n.secrets.put_item(Kind::HostPassword, id, password)?;
                 }
-                let saved = with_store(&n, |store| save(store, &to_save, key.as_deref()))?;
+                let saved = with_store(&n, |store| save(store, &sent, key.as_deref()))?;
                 for id in super::credential::dropped_host_passwords(&saved.before, &saved.after) {
                     n.secrets.remove_item(Kind::HostPassword, &id);
                 }
-                Ok(saved)
+                Ok(saved.after)
             });
             match saved.await {
-                Ok(Saved { before, after }) => {
-                    fire_triggers(native, &before, &sent).await;
+                Ok(after) => {
                     native.broadcast("config:changed", after);
                     native.config_changed();
                     Answer::Void
@@ -142,17 +141,26 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
     }
 }
 
-/// Tells every client the configuration changed after a write elsewhere
-/// in vornd (a task, a project), as the server's `notifyChanged` did.
+/// Tells every client what changed after a write elsewhere in vornd (a
+/// task, a workflow, a project), as the server's `notifyChanged` did: the
+/// configuration (`config:changed`), the tasks (`task:changed`) and the
+/// workflows (`workflow:changed`), each whole.
 pub(crate) async fn announce(native: &Arc<Native>) {
     let n = Arc::clone(native);
     let loaded = blocking("config:changed", move || {
-        with_store(&n, |s| s.load_config())
+        with_store(&n, |s| {
+            let config = s.load_config()?;
+            let tasks = s.call("dbListTasks", json!([]))?;
+            let workflows = s.call("dbListWorkflows", json!([]))?;
+            Ok((config, tasks, workflows))
+        })
     })
     .await;
     match loaded {
-        Ok(config) => {
+        Ok((config, tasks, workflows)) => {
             native.broadcast("config:changed", config);
+            native.broadcast("task:changed", tasks);
+            native.broadcast("workflow:changed", workflows);
             native.config_changed();
         }
         Err(err) => warn!(%err, "could not read the configuration to announce it"),
@@ -191,20 +199,6 @@ fn save(store: &mut Store, config: &Value, viewer: Option<&str>) -> vorn_store::
     }
     let after = store.load_config()?;
     Ok(Saved { before, after })
-}
-
-/// The task triggers a save fires, read from what the client sent against
-/// what was stored before it, and the schedules armed again.
-async fn fire_triggers(native: &Native, before: &Value, sent: &Value) {
-    let Some(work) = native.work().cloned() else {
-        return;
-    };
-    for trigger in vorn_work::task_triggers::for_change(before, sent) {
-        if let Err(err) = work.trigger(&trigger).await {
-            warn!(%err, "a task trigger was refused");
-        }
-    }
-    work.workflows_changed_elsewhere();
 }
 
 #[cfg(test)]

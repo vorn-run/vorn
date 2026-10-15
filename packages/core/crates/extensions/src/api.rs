@@ -283,6 +283,11 @@ mod tests {
                 "host.publish",
                 "host.log",
                 "net.fetch",
+                "storage.prefix",
+                "storage.query",
+                "storage.exec",
+                "storage.get",
+                "storage.set",
                 "guest.init",
                 "guest.handle",
                 "guest.on-event"

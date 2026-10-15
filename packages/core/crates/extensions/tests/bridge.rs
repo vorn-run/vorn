@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use vorn_extensions::api::types::{CallCtx, Header, Request, Response};
 use vorn_extensions::api::{mapping, ExtError, Method, Side};
-use vorn_extensions::gate::{Answer, Caller, World};
+use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
@@ -67,6 +67,21 @@ impl World for Fake {
         let known = (connection == "c1").then(|| "t0ken".to_owned());
         Box::pin(async move { Ok(known) })
     }
+    fn storage(
+        &self,
+        caller: &Caller,
+        _migrations: Option<std::path::PathBuf>,
+        call: StorageCall,
+    ) -> Answer<Value> {
+        let answer = match call {
+            StorageCall::Prefix => json!(format!("x_{}_", caller.extension)),
+            StorageCall::Query { params, .. } => json!([{ "echo": params }]),
+            StorageCall::Exec { .. } => json!(1),
+            StorageCall::Get { key } => json!({ "key": key }),
+            StorageCall::Set { .. } => Value::Null,
+        };
+        Box::pin(async move { Ok(answer) })
+    }
     fn published(&self, caller: &Caller, collection: &str) {
         self.published
             .lock()
@@ -92,7 +107,7 @@ command = ["node", "program.mjs"]
 
 [declares]
 network = ["api.example.com"]
-uses = ["sessions.read"]
+uses = ["sessions.read", "storage"]
 
 [credential]
 field = "token"
@@ -140,7 +155,9 @@ fn bench(ids: &[&str], policy: Policy, call_timeout: Duration) -> Bench {
         Arc::clone(&lifecycle),
         Arc::clone(&world) as Arc<dyn World>,
         settings,
+        vorn_extensions::events::Bus::new(),
     );
+    router.reindex();
     Bench {
         _packs: packs,
         _folders: folders,
@@ -212,17 +229,12 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 assert_eq!(echo["args"], sample["args"]);
             }
             (Side::Guest, Method::GuestOnEvent) => {
-                let reached = b.router.emit("test.ping", json!({ "n": 1 })).await;
+                let reached = b.router.emit("test.ping", json!({ "n": 1 }));
                 assert_eq!(reached, 1);
-                let mut events = Value::Null;
-                let deadline = Instant::now() + SAFETY;
-                while Instant::now() < deadline {
-                    events = b.call("a", "events", json!({})).await.unwrap();
-                    if events.as_array().is_some_and(|e| !e.is_empty()) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
+                tokio::time::timeout(SAFETY, b.router.settled("a"))
+                    .await
+                    .unwrap();
+                let events = b.call("a", "events", json!({})).await.unwrap();
                 check("list<event>", &events);
                 assert_eq!(events[0]["name"], "test.ping");
             }
@@ -279,6 +291,17 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                         value: "Bearer t0ken".into()
                     }]
                 );
+            }
+            (
+                Side::Host,
+                Method::StoragePrefix
+                | Method::StorageQuery
+                | Method::StorageExec
+                | Method::StorageGet
+                | Method::StorageSet,
+            ) => {
+                let answered = b.relay(method, sample.clone()).await;
+                check(doc.result.as_deref().unwrap(), &answered["result"]);
             }
             (side, method) => {
                 panic!("{method:?} is answered by {side:?}, which nothing here drives")
@@ -519,4 +542,32 @@ async fn remove_leaves_no_files_rows_or_processes() {
     assert!(b.lifecycle.running().is_empty());
     until("its process ending", || !alive(pid)).await;
     assert!(entries(b.router.store().root()).is_empty());
+}
+
+/// A recorded run: the program fetches through a connection whose token vornd
+/// adds, and neither what it was sent nor its environment ever holds the token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_token_never_reaches_the_program() {
+    if !node() {
+        return;
+    }
+    let b = bench(&["a"], Policy::default(), Duration::from_secs(10));
+    let req = json!({ "req": { "method": "GET", "url": "https://api.example.com/x",
+        "headers": [], "body": null }, "connection": "c1" });
+    let fetched = b.relay(Method::NetFetch, req).await;
+    assert_eq!(fetched["result"]["status"], 200, "{fetched}");
+    let sent = b.world.fetched.lock().unwrap().pop().unwrap();
+    assert!(
+        sent.headers.iter().any(|h| h.value == "Bearer t0ken"),
+        "vornd added the credential"
+    );
+    let record = b.call("a", "record", json!({})).await.unwrap();
+    let lines = record["received"].as_array().unwrap();
+    assert!(lines.len() >= 3, "{record}");
+    let seen = record.to_string();
+    assert!(
+        !seen.contains("t0ken"),
+        "the program was given the token: {seen}"
+    );
+    b.lifecycle.stop_all().await;
 }

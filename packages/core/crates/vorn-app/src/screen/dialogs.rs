@@ -29,6 +29,10 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
                 ("Previous card", format!("{m}[")),
                 ("Close / deselect", "Esc".to_owned()),
                 ("Jump to card by position", format!("{m}1-9")),
+                (
+                    "Previous / next command",
+                    format!("{m}\u{21e7}\u{2191} / \u{2193}"),
+                ),
             ],
         ),
         (

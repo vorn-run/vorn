@@ -99,6 +99,25 @@ interface net {
   fetch: func(req: request, connection: option<string>) -> result<response, ext-error>;
 }
 
+/// The extension's own tables in Vorn's database, under the `storage`
+/// permission. A table it makes is named with its prefix, `x_<id>_`, which
+/// `init-ctx` does not carry: `storage.prefix` answers it. A statement on any
+/// other table fails, naming it.
+interface storage {
+  use types.{json, ext-error};
+
+  /// The prefix its tables are named with.
+  prefix: func() -> result<string, ext-error>;
+  /// The rows a query answers, each an object keyed by column.
+  query: func(sql: string, params: list<json>) -> result<list<json>, ext-error>;
+  /// Runs one statement; answers how many rows it changed.
+  exec: func(sql: string, params: list<json>) -> result<u64, ext-error>;
+  /// The value kept under a key, or null.
+  get: func(key: string) -> result<option<json>, ext-error>;
+  /// Keeps a value under a key; null removes it.
+  set: func(key: string, value: json) -> result<_, ext-error>;
+}
+
 /// What the extension answers.
 interface guest {
   use types.{json, ext-error, call-ctx, init-ctx, event};
@@ -111,5 +130,6 @@ interface guest {
 world extension {
   import host;
   import net;
+  import storage;
   export guest;
 }

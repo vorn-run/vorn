@@ -78,7 +78,7 @@ const PROMPT_NAME_LEN: usize = 60;
 
 /// The params of `terminal:create` the server's handler reads; any other
 /// is a call for the server.
-const CREATE_KEYS: [&str; 18] = [
+const CREATE_KEYS: [&str; 17] = [
     "agentType",
     "model",
     "projectName",
@@ -94,8 +94,7 @@ const CREATE_KEYS: [&str; 18] = [
     "initialPrompt",
     "promptDelayMs",
     "headless",
-    "workflowId",
-    "workflowName",
+    "origin",
     "args",
 ];
 
@@ -556,8 +555,7 @@ fn restore_request(
         initial_prompt: None,
         args: None,
         remote_host_id: previous.remote_host_id.clone(),
-        workflow_id: None,
-        workflow_name: None,
+        origin: None,
     })
 }
 
@@ -803,9 +801,8 @@ pub struct CreateRequest {
     pub args: Option<Vec<String>>,
     /// The remote host the session runs on, over ssh.
     pub remote_host_id: Option<String>,
-    /// Read by a headless create only: the workflow that asked for it.
-    pub workflow_id: Option<String>,
-    pub workflow_name: Option<String>,
+    /// Read by a headless create only: what asked for it (a workflow, an extension).
+    pub origin: Option<crate::registry::Origin>,
 }
 
 impl CreateRequest {
@@ -866,8 +863,10 @@ impl CreateRequest {
             initial_prompt: text("initialPrompt")?,
             args,
             remote_host_id,
-            workflow_id: text("workflowId")?,
-            workflow_name: text("workflowName")?,
+            origin: match p.get("origin") {
+                None | Some(Value::Null) => None,
+                Some(o) => Some(serde_json::from_value::<crate::registry::Origin>(o.clone()).ok()?),
+            },
         })
     }
 

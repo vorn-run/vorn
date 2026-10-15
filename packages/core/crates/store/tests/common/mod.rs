@@ -156,3 +156,18 @@ pub fn ids(rows: &Value, key: &str) -> Vec<String> {
         .map(|row| row[key].as_str().expect("a string id").to_owned())
         .collect()
 }
+
+/// Makes `workflows` the only ones the store has, through the workflow
+/// calls: the configuration no longer carries them.
+pub fn put_workflows(store: &mut Store, workflows: Vec<Value>) {
+    for w in call(store, "dbListWorkflows", json!([]))
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        call(store, "dbDeleteWorkflow", json!([w["id"]]));
+    }
+    for w in workflows {
+        call(store, "dbInsertWorkflow", json!([w]));
+    }
+}

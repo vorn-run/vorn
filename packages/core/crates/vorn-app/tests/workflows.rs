@@ -11,7 +11,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, Shot, TestVornd};
+use support::{add_project, connect, key, replace_workflows, seed_workflows, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::forms::field_of;
 use vorn_app::app::MOD;
@@ -43,9 +43,9 @@ fn choose(shot: &mut Shot, app: &mut App, label: &str) {
 /// The saved workflows, as vornd has them.
 fn saved(app: &App) -> Vec<Value> {
     app.rpc()
-        .call("config:load", Value::Null)
+        .call("workflow:list", Value::Null)
         .ok()
-        .and_then(|c| c["workflows"].as_array().cloned())
+        .and_then(|w| w.as_array().cloned())
         .unwrap_or_default()
 }
 
@@ -75,12 +75,8 @@ fn pick(shot: &mut Shot, app: &mut App, p: Pick) -> String {
 
 /// Puts `config` straight into vornd as a workflow.
 fn seed(app: &mut App, shot: &mut Shot, w: Value) {
-    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     let id = w["id"].as_str().unwrap_or("").to_owned();
-    let mut list = config["workflows"].as_array().cloned().unwrap_or_default();
-    list.push(w);
-    config["workflows"] = Value::Array(list);
-    app.rpc().call("config:save", config).expect("saved");
+    seed_workflows(app.rpc(), &[w]);
     shot.until(app, "the workflow listed", |app, _| {
         app.store.config["workflows"]
             .as_array()?
@@ -861,7 +857,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
         { "name": "api", "path": dir("api"), "preferredAgents": [], "iconColor": "#ef4444" },
         { "name": "docs", "path": dir("docs"), "preferredAgents": [] }
     ]);
-    config["workflows"] = json!([
+    let workflows = json!([
         { "id": "wf-bug", "name": "Triage", "icon": "Rocket", "iconColor": "#f97316",
           "enabled": true, "workspaceId": "personal", "nodes": trigger("manual"), "edges": [] },
         { "id": "wf-plain", "name": "Nightly", "icon": "", "iconColor": "", "enabled": true, "workspaceId": "personal",
@@ -870,10 +866,14 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
           "workspaceId": "personal", "nodes": trigger("connectorPoll"), "edges": [] }
     ]);
     app.rpc().call("config:save", config).expect("saved");
+    replace_workflows(app.rpc(), workflows.as_array().expect("a list"));
     let mut shot = Shot::new();
     shot.until(&mut app, "the projects and workflows", |app, _| {
-        let wfs = app.store.config["workflows"].as_array()?.len();
-        (app.store.projects.len() == 3 && wfs == 3).then_some(())
+        let wfs = app.store.config["workflows"].as_array()?;
+        let seeded = ["wf-bug", "wf-plain", "connector:c1:issue.opened"]
+            .iter()
+            .all(|id| wfs.iter().any(|w| w["id"] == *id));
+        (app.store.projects.len() == 3 && seeded).then_some(())
     });
     let web = &app.store.projects[0];
     assert_eq!(

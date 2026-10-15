@@ -50,9 +50,20 @@ pub struct Headless {
     pub exit: Option<i64>,
     pub started: f64,
     pub ended: Option<f64>,
-    pub workflow_id: Option<String>,
-    pub workflow_name: Option<String>,
+    /// What started it, when not a person: a workflow, an extension.
+    pub origin: Option<Origin>,
 }
+
+/// A session record's `origin`: the extension, its id for the thing, the words shown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Origin {
+    pub extension: String,
+    pub id: String,
+    pub label: String,
+}
+
+/// The extension a workflow's sessions name as their origin.
+pub const WORKFLOWS: &str = "vorn.workflows";
 
 impl Headless {
     pub fn from_value(v: &Value) -> Option<Headless> {
@@ -73,8 +84,14 @@ impl Headless {
             exit: v.get("exitCode").and_then(Value::as_i64),
             started: v.get("startedAt").and_then(Value::as_f64).unwrap_or(0.0),
             ended: v.get("endedAt").and_then(Value::as_f64),
-            workflow_id: s("workflowId"),
-            workflow_name: s("workflowName"),
+            origin: v.get("origin").and_then(|o| {
+                let t = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
+                Some(Origin {
+                    extension: t("extension")?,
+                    id: t("id")?,
+                    label: t("label")?,
+                })
+            }),
         })
     }
 
@@ -310,7 +327,8 @@ mod tests {
         let s = Headless::from_value(&json!({
             "id": "h1", "pid": 4, "agentType": "codex", "projectName": "web", "projectPath": "/w",
             "branch": "main", "status": "exited", "exitCode": 2, "startedAt": 1_000,
-            "endedAt": 4_000, "workflowId": "wf", "workflowName": "Ship"
+            "endedAt": 4_000,
+            "origin": { "extension": "vorn.workflows", "id": "wf", "label": "Ship" }
         }))
         .expect("session");
         assert_eq!(s.name, "web", "the project names it without a displayName");
@@ -318,7 +336,7 @@ mod tests {
             (s.started, s.ended, s.exit),
             (1_000.0, Some(4_000.0), Some(2))
         );
-        assert_eq!(s.workflow_name.as_deref(), Some("Ship"));
+        assert_eq!(s.origin.as_ref().map(|o| o.label.as_str()), Some("Ship"));
         assert!(s.errored() && !s.running());
         assert_eq!(s.duration(99_000.0), "3s", "an exited one stops at its end");
     }

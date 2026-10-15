@@ -136,8 +136,8 @@ impl App {
                     };
                     #[cfg(not(target_arch = "wasm32"))]
                     if self.workflow(&id).is_none() {
-                        if let Ok(config) = self.rpc.call("config:load", Value::Null) {
-                            self.store.apply("config:changed", config);
+                        if let Ok(list) = self.rpc.call("workflow:list", Value::Null) {
+                            self.store.apply("workflow:changed", list);
                         }
                     }
                     self.st.wf.open_next = Some(id);

@@ -22,7 +22,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::info;
 
-use crate::gate::CORE_METHODS;
+use crate::gate::{enforced, CORE_METHODS};
 use crate::manifest::{file, Manifest, Permission};
 use crate::pack::{
     directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack, PackStore,
@@ -73,6 +73,10 @@ pub struct Sheet {
     /// The version it replaces, when one is installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
+    /// The parts the bridge holds the extension to: `hosts`, `methods` and `credential`.
+    pub enforced: Vec<&'static str>,
+    /// The parts it only declares, which Vorn shows but cannot hold it to: `commands` and `adds`.
+    pub declared: Vec<&'static str>,
     /// The words the sheet ends with.
     pub runs_as_you: String,
     /// What the person types to confirm.
@@ -316,17 +320,18 @@ impl Installs {
             .uses
             .iter()
             .map(|used| {
-                let opens: Vec<&str> = Permission::named(used)
-                    .map(|p| {
-                        CORE_METHODS
-                            .iter()
-                            .filter(|(_, needs)| *needs == p)
-                            .map(|(method, _)| *method)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if opens.is_empty() {
-                    used.clone()
+                let Some(p) = Permission::named(used) else {
+                    return used.clone();
+                };
+                let opens: Vec<&str> = CORE_METHODS
+                    .iter()
+                    .filter(|(_, needs)| *needs == p)
+                    .map(|(method, _)| *method)
+                    .collect();
+                if p == Permission::Storage {
+                    format!("{used} (its own tables, storage.*)")
+                } else if !enforced(p) {
+                    format!("{used} (declared; Vorn cannot hold it to this)")
                 } else {
                     format!("{used} ({})", opens.join(", "))
                 }
@@ -361,6 +366,10 @@ impl Installs {
         if let Some(service) = &m.service {
             adds.extend(service.events.iter().map(|e| format!("Listens to: {e}")));
         }
+        adds.extend(m.mcp.iter().map(|t| format!("MCP tool: {}", t.name)));
+        if m.storage.is_some() {
+            adds.push("Tables of its own in Vorn's database".to_owned());
+        }
         let installed = self.store.describe(&m.id);
         Sheet {
             token: token.to_owned(),
@@ -386,6 +395,8 @@ impl Installs {
                 )
             }),
             replaces: installed.map(|p| p.version),
+            enforced: vec!["hosts", "methods", "credential"],
+            declared: vec!["commands", "adds"],
             runs_as_you: format!(
                 "{} runs as you. Its commands can read and change your files and reach the network like any program you start. Vorn holds it only to the hosts and methods above when it asks through Vorn.",
                 m.name
@@ -713,7 +724,10 @@ command = ["sh", "hello.sh"]
 
 [declares]
 network = ["api.example.com"]
-uses = ["sessions.read"]
+uses = ["sessions.read", "process.run", "storage"]
+
+[storage]
+migrations = "migrations"
 "#;
 
     #[test]
@@ -734,8 +748,20 @@ uses = ["sessions.read"]
         assert_eq!(sheet.publisher, "test");
         assert_eq!(sheet.confirm, "test.marker");
         assert_eq!(sheet.hosts, ["api.example.com"]);
-        assert_eq!(sheet.methods, ["sessions.read (sessions.list)"]);
-        assert_eq!(sheet.adds, ["Action: Say hello"]);
+        assert_eq!(
+            sheet.methods,
+            [
+                "sessions.read (sessions.list, sessions.get)",
+                "process.run (declared; Vorn cannot hold it to this)",
+                "storage (its own tables, storage.*)"
+            ]
+        );
+        assert_eq!(sheet.enforced, ["hosts", "methods", "credential"]);
+        assert_eq!(sheet.declared, ["commands", "adds"]);
+        assert_eq!(
+            sheet.adds,
+            ["Action: Say hello", "Tables of its own in Vorn's database"]
+        );
         let whens: Vec<&str> = sheet.commands.iter().map(|c| c.when.as_str()).collect();
         assert_eq!(whens, ["build", "action hello"]);
         assert!(sheet.runs_as_you.starts_with("Marker runs as you."));

@@ -34,6 +34,7 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
+use vorn_extensions::events::{AGENT_CONVERSATION, AGENT_HOOK};
 use vorn_hooks::mapper::{normalize, Status};
 use vorn_hooks::owner::{may_claim, may_release, Owner};
 use vorn_hooks::{claude, copilot, permission, Event, Mapper, Terminal};
@@ -349,13 +350,15 @@ impl Hooks {
                 );
             }
             hook_status(&native, &resolved.terminal, Some(status), true);
+            let terminal = resolved.terminal.as_str();
+            native.events().emit(AGENT_HOOK, || {
+                json!({ "sessionId": terminal, "event": event.name(), "tool": event.tool_name() })
+            });
             if event.name() == "SessionStart" {
-                let (n, terminal, session) = (
-                    Arc::clone(&native),
-                    resolved.terminal.clone(),
-                    event.session().to_owned(),
+                native.events().emit(
+                    AGENT_CONVERSATION,
+                    || json!({ "sessionId": terminal, "conversationId": event.session() }),
                 );
-                tokio::spawn(async move { remember_on_task(&n, &terminal, &session).await });
             }
         }
         if event.dismisses_permissions() {
@@ -599,44 +602,6 @@ fn patch(native: &Native, id: &str, fields: Value) {
         Patch::try_from(&json!({ "id": id, "fields": fields })).and_then(|p| registry.patch(&p));
     if let Err(err) = done {
         debug!(%err, "a hook's link did not apply");
-    }
-}
-
-/// The conversation a terminal started, on the in-progress task it was assigned, when the task has none yet.
-async fn remember_on_task(native: &Arc<Native>, terminal: &str, session: &str) {
-    if native.database().is_none() {
-        return;
-    }
-    let (n, t, s) = (Arc::clone(native), terminal.to_owned(), session.to_owned());
-    let changed = super::config::blocking("hooks", move || {
-        super::config::with_store(&n, |store| {
-            let tasks = store.call("dbListTasks", json!([null, "in_progress"]))?;
-            let task = tasks.as_array().into_iter().flatten().find(|task| {
-                task.get("assignedSessionId").and_then(Value::as_str) == Some(t.as_str())
-                    && task.get("agentSessionId").is_none_or(Value::is_null)
-            });
-            let Some(id) = task.and_then(|t| t.get("id")).and_then(Value::as_str) else {
-                return Ok(false);
-            };
-            let now = vorn_work::js::iso_now();
-            store.call(
-                "dbUpdateTask",
-                json!([id, { "agentSessionId": s, "updatedAt": now }, ["agentSessionId", "updatedAt"]]),
-            )?;
-            Ok(true)
-        })
-    })
-    .await;
-    match changed {
-        Ok(true) => {
-            info!(
-                terminal,
-                session, "the conversation is kept on the terminal's task"
-            );
-            super::config::announce(native).await;
-        }
-        Ok(false) => {}
-        Err(err) => warn!(%err, "could not keep the conversation on the task"),
     }
 }
 

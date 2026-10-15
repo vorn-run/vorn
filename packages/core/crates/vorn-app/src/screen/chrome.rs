@@ -484,7 +484,12 @@ fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     if expanded {
         pill = pill.w(320.0);
     }
-    if let (Some(wid), Some(name)) = (&h.workflow_id, &h.workflow_name) {
+    let workflow = h
+        .origin
+        .as_ref()
+        .filter(|o| o.extension == crate::headless::WORKFLOWS)
+        .map(|o| (&o.id, &o.label));
+    if let Some((wid, name)) = workflow {
         if let Some(w) = s.store.workflows.iter().find(|w| &w.id == wid) {
             let tag = s
                 .acts

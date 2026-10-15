@@ -1,6 +1,10 @@
 //! What the main screen shows, as vornd last told it: the config, projects,
 //! sessions, tasks and workflows, loaded once and then kept current by
 //! folding notifications in, the way the renderer's stores do.
+//!
+//! vornd's configuration carries neither tasks nor workflows; the app keeps
+//! them beside its copy of it, under `tasks` and `workflows`, so the screens
+//! read one value, and [`super::sync`] carries a change to them back.
 
 use std::collections::HashMap;
 
@@ -21,6 +25,8 @@ pub const TOPICS: &[&str] = &[
     "terminal:exit",
     "widget:status-update",
     "config:changed",
+    "task:changed",
+    "workflow:changed",
     "workflow:runUpdated",
     "worktree:confirmCleanup",
     "artifact:published",
@@ -104,7 +110,8 @@ pub enum Change {
 #[derive(Debug, Clone, Default)]
 pub struct Store {
     /// vornd's `AppConfig`, kept whole: the app reads few fields of it and
-    /// must write back the rest unchanged.
+    /// must write back the rest unchanged. Its `tasks` and `workflows` are the
+    /// app's own copies, which vornd's configuration does not carry.
     pub config: Value,
     pub projects: Vec<ProjectConfig>,
     /// In vornd's order, which is the grid's.
@@ -117,9 +124,6 @@ pub struct Store {
     pub approvals: HashMap<String, usize>,
     /// The latest of every run vornd reported since loading, by run id.
     pub runs: HashMap<String, Value>,
-    /// Whether `tasks` were read from `config` (not `task:list`), so a
-    /// change to it rereads only the tasks that changed.
-    tasks_of_config: bool,
     /// Whether vornd has said which sessions run: asked after connecting, since
     /// it waits for the session holder while vornd starts.
     pub sessions_known: bool,
@@ -134,7 +138,7 @@ fn load_calls(rpc: &Rpc) -> [Pending; 5] {
     [
         rpc.request("config:load", Value::Null),
         rpc.request("project:list", Value::Null),
-        rpc.request("task:list", json!({})),
+        rpc.request("task:list", json!({ "includeDescription": true })),
         rpc.request("workflow:list", Value::Null),
         rpc.request("workflowRun:listWaiting", Value::Null),
     ]
@@ -167,21 +171,18 @@ impl Store {
 
     fn from_answers(answers: [Result<Value, RpcError>; 5]) -> Result<Store, RpcError> {
         let [config, projects, tasks, workflows, waiting] = answers;
-        let (config, tasks) = (config?, tasks?);
-        // The configuration's tasks, as every change after brings them.
-        let tasks_of_config = config.get("tasks").is_some_and(Value::is_array);
+        let (mut config, tasks, workflows) = (config?, tasks?, workflows?);
         let mut store = Store {
-            tasks: if tasks_of_config {
-                records_in(config.get("tasks"))
-            } else {
-                records(tasks)
-            },
-            config,
+            tasks: records_in(Some(&tasks)),
+            workflows: records_in(Some(&workflows)),
             projects: records(projects?),
-            workflows: records(workflows?),
-            tasks_of_config,
             ..Store::default()
         };
+        if config.is_object() {
+            config["tasks"] = tasks;
+            config["workflows"] = workflows;
+        }
+        store.config = config;
         store.groups = groups(&store.config);
         // Runs are optional to the screen: a vornd without them still shows it.
         if let Ok(Value::Array(runs)) = waiting {
@@ -391,14 +392,36 @@ impl Store {
                 }
             }
             "config:changed" => {
+                let mut params = params;
+                // vornd's configuration carries no tasks or workflows: the app's copies stay.
+                for key in ["tasks", "workflows"] {
+                    if params.is_object() && params.get(key).is_none() {
+                        params[key] = self.config.get(key).cloned().unwrap_or(json!([]));
+                    }
+                }
                 let was = std::mem::replace(&mut self.config, params);
                 self.projects = records_in(self.config.get("projects"));
                 let tasks = std::mem::take(&mut self.tasks);
-                let was = was.get("tasks").filter(|_| self.tasks_of_config);
-                self.tasks = records_since(self.config.get("tasks"), was, tasks);
-                self.tasks_of_config = true;
+                self.tasks = records_since(self.config.get("tasks"), was.get("tasks"), tasks);
                 self.workflows = records_in(self.config.get("workflows"));
                 self.groups = groups(&self.config);
+                Change::Config
+            }
+            "task:changed" => {
+                if !params.is_array() || !self.config.is_object() {
+                    return Change::Nothing;
+                }
+                let was = std::mem::replace(&mut self.config["tasks"], params);
+                let tasks = std::mem::take(&mut self.tasks);
+                self.tasks = records_since(self.config.get("tasks"), Some(&was), tasks);
+                Change::Config
+            }
+            "workflow:changed" => {
+                if !params.is_array() || !self.config.is_object() {
+                    return Change::Nothing;
+                }
+                self.workflows = records_in(Some(&params));
+                self.config["workflows"] = params;
                 Change::Config
             }
             _ => Change::Nothing,
@@ -627,6 +650,32 @@ mod tests {
             json!({ "tasks": [task("c", "C"), task("a", "A1")] }),
         );
         assert_eq!(titles(&s), ["C", "A1"]);
+    }
+
+    #[test]
+    fn tasks_and_workflows_come_by_their_own_notes_and_stay_through_a_config_change() {
+        let mut s = Store::default();
+        s.apply("config:changed", json!({ "projects": [] }));
+        s.apply("task:changed", json!([task("a", "A")]));
+        s.apply(
+            "workflow:changed",
+            json!([{ "id": "w", "name": "W", "icon": "Zap",
+            "iconColor": "#fff", "nodes": [], "edges": [], "enabled": true }]),
+        );
+        assert_eq!(titles(&s), ["A"]);
+        assert_eq!(s.workflows.len(), 1);
+        // vornd's configuration has neither: the copies stay.
+        s.apply(
+            "config:changed",
+            json!({ "projects": [], "defaults": { "fontSize": 14 } }),
+        );
+        assert_eq!(titles(&s), ["A"]);
+        assert_eq!(s.workflows.len(), 1);
+        assert_eq!(s.config["tasks"][0]["id"], "a");
+        assert_eq!(s.config["workflows"][0]["id"], "w");
+        s.apply("task:changed", json!([task("a", "A2"), task("b", "B")]));
+        assert_eq!(titles(&s), ["A2", "B"]);
+        assert_eq!(s.apply("task:changed", json!({})), Change::Nothing);
     }
 
     #[test]

@@ -148,13 +148,10 @@ fn a_setting_can_still_be_cleared_on_purpose() {
 }
 
 #[test]
-fn updating_a_task_does_not_cascade_away_what_references_it() {
+fn a_save_does_not_cascade_away_a_task_or_what_references_it() {
     let mut store = memory();
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("t1", "first")] })),
-        &[],
-    );
+    save_config(&mut store, with_collections(json!({})), &[]);
+    call(&mut store, "dbInsertTask", json!([task("t1", "first")]));
     call(
         &mut store,
         "dbInsertSourceConnection",
@@ -175,30 +172,13 @@ fn updating_a_task_does_not_cascade_away_what_references_it() {
         }]),
     );
 
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("t1", "renamed")] })),
-        &[],
-    );
+    save_config(&mut store, with_collections(json!({ "tasks": [] })), &[]);
 
-    assert_eq!(load_config(&mut store)["tasks"][0]["title"], "renamed");
+    assert_eq!(
+        call(&mut store, "dbGetTask", json!(["t1"]))["title"],
+        "first"
+    );
     assert!(!call(&mut store, "dbGetTaskSourceLink", json!(["t1"])).is_null());
-}
-
-#[test]
-fn a_task_the_client_dropped_is_still_removed() {
-    let mut store = memory();
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("t1", "first"), task("t2", "second")] })),
-        &[],
-    );
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("t1", "first")] })),
-        &[],
-    );
-    assert_eq!(ids(&load_config(&mut store)["tasks"], "id"), ["t1"]);
 }
 
 #[test]
@@ -242,66 +222,6 @@ fn a_project_is_updated_in_place_since_tasks_reference_it_by_name() {
     let projects = load_config(&mut store)["projects"].clone();
     assert_eq!(projects.as_array().map(Vec::len), Some(1));
     assert_eq!(projects[0]["path"], "/b");
-}
-
-#[test]
-fn a_task_added_by_the_client_that_saved_first_is_kept() {
-    let mut store = memory();
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("shared", "shared")] })),
-        &[],
-    );
-    let laptop = load_config(&mut store);
-    let mut phone = load_config(&mut store);
-
-    phone["tasks"]
-        .as_array_mut()
-        .expect("tasks")
-        .push(task("from-phone", "from-phone"));
-    save_config(&mut store, phone, &[]);
-    let mut laptop_save = laptop.clone();
-    laptop_save["defaults"]["fontSize"] = json!(15);
-    save_config(&mut store, laptop_save, &[]);
-
-    let after = load_config(&mut store);
-    let mut tasks = ids(&after["tasks"], "id");
-    tasks.sort();
-    assert_eq!(tasks, ["from-phone", "shared"]);
-    assert_eq!(after["defaults"]["fontSize"], 15);
-}
-
-#[test]
-fn a_task_the_client_removed_is_still_deleted() {
-    let mut store = memory();
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("a", "a"), task("b", "b")] })),
-        &[],
-    );
-    let mut client = load_config(&mut store);
-    client["tasks"]
-        .as_array_mut()
-        .expect("tasks")
-        .retain(|t| t["id"] != "b");
-    save_config(&mut store, client, &[]);
-    assert_eq!(ids(&load_config(&mut store)["tasks"], "id"), ["a"]);
-}
-
-#[test]
-fn everything_absent_is_pruned_when_the_caller_tracks_no_revision() {
-    let mut store = memory();
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("a", "a"), task("b", "b")] })),
-        &[],
-    );
-    save_config(
-        &mut store,
-        with_collections(json!({ "tasks": [task("a", "a")] })),
-        &[],
-    );
-    assert_eq!(ids(&load_config(&mut store)["tasks"], "id"), ["a"]);
 }
 
 #[test]
@@ -513,6 +433,13 @@ mod seeded_workflows {
         call(store, "seedSystemDefaults", json!([]));
     }
 
+    /// The configuration with the workflows beside it, which it no longer carries.
+    fn loaded(store: &mut Store) -> Value {
+        let mut config = load_config(store);
+        config["workflows"] = call(store, "dbListWorkflows", json!([]));
+        config
+    }
+
     fn workflow(config: &Value, id: &str) -> Option<Value> {
         config["workflows"]
             .as_array()
@@ -540,7 +467,7 @@ mod seeded_workflows {
     fn the_default_task_workflow_is_inserted_on_the_first_call() {
         let mut store = memory();
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         let seeded = workflow(&config, DEFAULT_TASK_WORKFLOW_ID).expect("seeded");
         assert_eq!(seeded["name"], "Default Task Workflow");
         assert_eq!(seeded["enabled"], true);
@@ -563,7 +490,7 @@ mod seeded_workflows {
         let mut store = memory();
         seed(&mut store);
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         let matching = config["workflows"]
             .as_array()
             .expect("workflows")
@@ -583,7 +510,7 @@ mod seeded_workflows {
             json!([DEFAULT_TASK_WORKFLOW_ID]),
         );
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         assert!(workflow(&config, DEFAULT_TASK_WORKFLOW_ID).is_none());
         assert_eq!(config["defaults"]["hasSeededDefaultTaskWorkflow"], true);
     }
@@ -607,16 +534,21 @@ mod seeded_workflows {
             &mut store,
             base_config(
                 json!({ "theme": "dark", "shell": "/bin/zsh", "fontSize": 13 }),
-                json!([{
-                    "id": DEFAULT_TASK_WORKFLOW_ID, "name": "User Override", "icon": "Zap",
-                    "iconColor": "#ff0000", "nodes": [], "edges": [], "enabled": false,
-                    "workspaceId": "personal"
-                }]),
+                json!([]),
             ),
             &[],
         );
+        call(
+            &mut store,
+            "dbInsertWorkflow",
+            json!([{
+                "id": DEFAULT_TASK_WORKFLOW_ID, "name": "User Override", "icon": "Zap",
+                "iconColor": "#ff0000", "nodes": [], "edges": [], "enabled": false,
+                "workspaceId": "personal"
+            }]),
+        );
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         let matches: Vec<&Value> = config["workflows"]
             .as_array()
             .expect("workflows")
@@ -643,7 +575,7 @@ mod seeded_workflows {
             &[],
         );
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         assert!(workflow(&config, DEFAULT_TASK_WORKFLOW_ID).is_some());
         assert_eq!(config["defaults"]["hasSeededDefaultTaskWorkflow"], true);
     }
@@ -652,7 +584,7 @@ mod seeded_workflows {
     fn the_restore_example_is_seeded_switched_off() {
         let mut store = memory();
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         let seeded = workflow(&config, DEV_SERVER_WORKFLOW_ID).expect("seeded");
         assert_eq!(seeded["name"], "Bring the dev server back");
         assert_eq!(seeded["enabled"], false);
@@ -670,10 +602,10 @@ mod seeded_workflows {
             "dbDeleteWorkflow",
             json!([DEV_SERVER_WORKFLOW_ID]),
         );
-        let loaded = load_config(&mut store);
-        save_config(&mut store, loaded, &[]);
+        let saved = load_config(&mut store);
+        save_config(&mut store, saved, &[]);
         seed(&mut store);
-        let config = load_config(&mut store);
+        let config = loaded(&mut store);
         assert!(workflow(&config, DEV_SERVER_WORKFLOW_ID).is_none());
         assert_eq!(config["defaults"]["hasSeededDevServerWorkflow"], true);
         assert!(workflow(&config, DEFAULT_TASK_WORKFLOW_ID).is_some());

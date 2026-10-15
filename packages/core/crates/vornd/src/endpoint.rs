@@ -123,6 +123,9 @@ impl Daemon {
     pub fn start_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
+        if native.database().is_some() {
+            crate::native::tasks::follow(native);
+        }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),
             self.listen.get().copied(),
@@ -143,6 +146,7 @@ impl Daemon {
         let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
         let work = Work::new(native, db, loopback);
         native.set_work(Arc::clone(&work));
+        work.follow_tasks(native.events());
         work.start();
     }
 
@@ -154,6 +158,17 @@ impl Daemon {
     /// Gives the hook registration up as vornd stops.
     pub fn stop_hooks(&self) {
         self.native.stop_hooks();
+    }
+
+    /// Stops every extension program, pane terminal and connector child as vornd stops,
+    /// so none outlives it.
+    pub async fn stop_extensions(&self) {
+        if let Some(extensions) = self.native.extensions() {
+            extensions.stop().await;
+        }
+        if let Some(connectors) = self.native.connectors() {
+            connectors.stop().await;
+        }
     }
 
     /// Tells the status widget's list as the sessions change ([`crate::native::widget`]).
@@ -239,6 +254,7 @@ impl Daemon {
             lifecycle,
             world,
             RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION")),
+            Arc::clone(native.events()),
         );
         let installs = Arc::new(Installs::new(store, native.git_bin(), native.child_env()));
         let daemon = Arc::downgrade(self);

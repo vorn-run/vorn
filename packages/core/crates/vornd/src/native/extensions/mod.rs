@@ -13,6 +13,7 @@ pub mod routes;
 pub mod world;
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -57,7 +58,13 @@ pub const METHODS: &[&str] = &[
     "extension:call",
     "extension:rows",
     "extension:running",
+    "extension:mcpTools",
+    "extension:mcpCall",
+    "extension:setSandbox",
 ];
+
+/// The longest tool name MCP clients take.
+const MCP_NAME_MAX: usize = 64;
 
 /// Core method groups, which no extension id may take: `<id>:<action>` routes to an extension.
 pub const RESERVED: &[&str] = &[
@@ -180,6 +187,14 @@ pub trait Around: Send + Sync + 'static {
     }
 }
 
+/// One extension's MCP tool, as listed and as routed.
+struct McpListed {
+    name: String,
+    extension: String,
+    tool: String,
+    listed: Value,
+}
+
 #[derive(Default)]
 struct Bands {
     footers: Footers,
@@ -300,6 +315,7 @@ impl Extensions {
     /// Keeps every session's bands and processes in step with the records
     /// and the installed packs, until vornd stops.
     pub fn start(self: &Arc<Self>) {
+        self.router.reindex();
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
     }
@@ -368,6 +384,25 @@ impl Extensions {
                     .await
                     .map_err(|e| e.message)
             }
+            "extension:mcpTools" => self
+                .listed_tools()
+                .await
+                .map(|tools| Value::Array(tools.into_iter().map(|t| t.listed).collect())),
+            "extension:mcpCall" => self.mcp_call(params).await,
+            "extension:setSandbox" => {
+                let (id, on) = (
+                    text(params, "id"),
+                    params.get("on").and_then(Value::as_bool),
+                );
+                match on {
+                    Some(on) => self
+                        .router
+                        .set_sandboxed(id, on)
+                        .await
+                        .map(|()| json!({ "id": id, "sandboxed": on })),
+                    None => Err("extension:setSandbox takes on: true or false".to_owned()),
+                }
+            }
             "extension:rows" => Ok(Value::Array(
                 self.router
                     .rows(text(params, "id"), text(params, "collection")),
@@ -416,6 +451,84 @@ impl Extensions {
         answered.map_or_else(Answer::Error, Answer::Result)
     }
 
+    /// The MCP tools installed extensions add, each named `<id>__<tool>`
+    /// with the id's `.` and `-` as `_`; a name another took first, or one
+    /// too long for MCP, is left out with a warning.
+    fn mcp_tools(&self) -> Vec<McpListed> {
+        let mut out: Vec<McpListed> = Vec::new();
+        for id in self.router.store().ids() {
+            let Some(pack) = self.router.program(&id) else {
+                continue;
+            };
+            for tool in &pack.manifest.mcp {
+                let name = format!("{}__{}", id.replace(['.', '-'], "_"), tool.name);
+                if name.len() > MCP_NAME_MAX || out.iter().any(|t| t.name == name) {
+                    warn!("[extensions] {id} offers the MCP tool {name}, which is too long or taken; it is not listed");
+                    continue;
+                }
+                let schema = tool
+                    .input
+                    .as_ref()
+                    .and_then(|p| fs::read_to_string(pack.path.join(p)).ok())
+                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .filter(Value::is_object)
+                    .unwrap_or_else(|| json!({ "type": "object" }));
+                out.push(McpListed {
+                    listed: json!({
+                        "name": name,
+                        "description": format!("{} (from the extension {})", tool.description, pack.name()),
+                        "inputSchema": schema,
+                    }),
+                    name,
+                    extension: id.clone(),
+                    tool: tool.name.clone(),
+                });
+            }
+        }
+        out
+    }
+
+    /// [`Extensions::mcp_tools`], off the runtime: it reads the packages' schema files.
+    async fn listed_tools(&self) -> Result<Vec<McpListed>, String> {
+        let me = self.me.upgrade().ok_or("vornd is stopping")?;
+        blocking(move || Ok(me.mcp_tools())).await
+    }
+
+    /// An agent called an extension's MCP tool: `guest.handle("mcp.<tool>")` on its service.
+    async fn mcp_call(&self, params: &Value) -> Result<Value, String> {
+        let name = text(params, "name");
+        let found = self
+            .listed_tools()
+            .await?
+            .into_iter()
+            .find(|t| t.name == name);
+        let Some(tool) = found else {
+            return Err(format!("No extension offers the MCP tool {name}"));
+        };
+        let args = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let ctx = CallCtx {
+            caller: "mcp".to_owned(),
+            project: None,
+        };
+        let answer = self
+            .router
+            .call(&tool.extension, &format!("mcp.{}", tool.tool), args, ctx)
+            .await;
+        Ok(match answer {
+            Ok(Value::String(text)) => json!({ "content": [{ "type": "text", "text": text }] }),
+            Ok(other) => {
+                let text = serde_json::to_string_pretty(&other).unwrap_or_default();
+                json!({ "content": [{ "type": "text", "text": text }] })
+            }
+            Err(err) => {
+                json!({ "content": [{ "type": "text", "text": err.message }], "isError": true })
+            }
+        })
+    }
+
     /// Every installed package, each saying whether a program of it runs.
     fn installed(&self) -> Value {
         let running = self.router.lifecycle().running();
@@ -427,6 +540,8 @@ impl Extensions {
             .map(|pack| {
                 let mut value = json!(pack);
                 value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
+                value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
+                value["sandboxAvailable"] = json!(vorn_extensions::sandbox::available());
                 value
             })
             .collect();
@@ -636,12 +751,11 @@ impl Extensions {
         if !still_open {
             self.hosts.stop_project(&session.project_path).await;
         }
-        let exited = json!({ "sessionId": session.id, "projectPath": session.project_path });
-        self.router.emit("session.exited", exited).await;
     }
 
     /// After a pack changed, no process keeps running its old files.
     async fn pack_changed(&self, extension_id: &str) {
+        self.router.reindex();
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
         self.hosts.stop_extension(extension_id).await;
@@ -1106,11 +1220,25 @@ impl Around for Wired {
     }
 
     fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
-        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let native = self.native.upgrade();
+        let connectors = native.as_ref().and_then(|n| n.connectors().cloned());
+        let db = native.and_then(|n| n.database().map(Path::to_path_buf));
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
                 connectors.package_removed(&id).await;
+            }
+            let Some(db) = db else { return };
+            let owned = id.clone();
+            let dropped = tokio::task::spawn_blocking(move || {
+                vorn_store::extension::ExtensionTables::forget(&db, &owned)
+            })
+            .await;
+            match dropped {
+                Ok(Ok(n)) if n > 0 => info!("[extensions] dropped {n} tables of {id}"),
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => warn!("[extensions] could not drop the tables of {id}: {err}"),
+                Err(err) => warn!("[extensions] could not drop the tables of {id}: {err}"),
             }
         })
     }

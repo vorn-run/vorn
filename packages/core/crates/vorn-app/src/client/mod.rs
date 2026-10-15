@@ -7,6 +7,7 @@ pub mod link;
 pub mod report;
 pub mod rpc;
 pub mod store;
+pub mod sync;
 
 pub use endpoint::{data_dir, Endpoint, FindError};
 pub use rpc::{Event, Pending, Rpc, RpcError};

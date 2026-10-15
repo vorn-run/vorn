@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, Shot, TestVornd};
+use support::{add_project, connect, key, seed_tasks, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::runs::RunAct;
@@ -54,12 +54,8 @@ fn toast(shot: &mut Shot, app: &mut App, text: &str) {
 
 /// The saved task `id`, as vornd has it.
 fn saved(app: &App, id: &str) -> Option<Value> {
-    let config = app.rpc().call("config:load", Value::Null).ok()?;
-    config["tasks"]
-        .as_array()?
-        .iter()
-        .find(|t| t["id"] == id)
-        .cloned()
+    let task = app.rpc().call("task:get", json!({ "id": id })).ok()?;
+    task.is_object().then_some(task)
 }
 
 /// The Tasks view of a vornd with project `web`.
@@ -545,18 +541,15 @@ fn long_board(cells: bool) {
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
     let id = |i: usize| format!("t-{i:05}");
-    let mut config = app.rpc().call("config:load", Value::Null).unwrap();
-    config["tasks"] = (0..LONG)
+    let tasks: Vec<Value> = (0..LONG)
         .map(|i| {
             json!({
                 "id": id(i), "projectName": "web", "title": format!("Task {i}"),
                 "description": "", "status": if i % 2 == 0 { "todo" } else { "done" },
-                "order": i, "createdAt": "2026-10-14T00:00:00.000Z",
-                "updatedAt": "2026-10-14T00:00:00.000Z"
             })
         })
         .collect();
-    app.rpc().call("config:save", config).unwrap();
+    seed_tasks(app.rpc(), &tasks);
     let (mut ui, size) = if cells {
         let ui = Ui::cells(&ui_config(1.0));
         (ui, vorn_app::ui::cells::units::px(180, 40))
