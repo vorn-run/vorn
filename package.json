@@ -55,7 +55,7 @@
     "libsql": "^0.5.29",
     "lint-staged": "^17.6.0",
     "playwright-core": "1.64.0",
-    "prettier": "^3.9.10",
+    "prettier": "^3.8.3",
     "simple-git-hooks": "^2.14.0",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^6.0.3",
