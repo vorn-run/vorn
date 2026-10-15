@@ -349,6 +349,11 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
         };
         any = true;
         let w = p.size.map_or(280.0, |(w, _)| w);
+        let mut h = p.size.map_or(400.0, |(_, h)| h);
+        if s.ui.is_cells() {
+            // A frame, a title and a rule take four rows; the body keeps at least one.
+            h = h.max(5.0 * crate::ui::cells::units::ROW);
+        }
         let close = s.acts.on(
             "ext-window",
             Act::Point(PointAct::Window {
@@ -360,7 +365,7 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
             div()
                 .col()
                 .w(w)
-                .max_h(p.size.map_or(400.0, |(_, h)| h))
+                .max_h(h)
                 .rounded(4.0)
                 .bg(k::SURFACE_OVERLAY)
                 .border(1.0, Rgba::white(0.08))

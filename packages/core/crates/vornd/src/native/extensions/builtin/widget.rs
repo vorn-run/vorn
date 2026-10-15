@@ -119,16 +119,13 @@ fn permission(api: &Api, data: &Value) {
     let list = |k: &str| data[k].as_array().cloned().unwrap_or_default();
     let questions = list("questions");
     let suggestions = list("permissionSuggestions");
-    let suggestions = suggestions
-        .iter()
-        .enumerate()
-        .map(|(i, sg)| {
-            RowOp::Upsert(json!({
-                "id": format!("{id}:{i}"),
-                "request": id,
-                "label": suggestion_label(sg, tool),
-            }))
-        });
+    let suggestions = suggestions.iter().enumerate().map(|(i, sg)| {
+        RowOp::Upsert(json!({
+            "id": format!("{id}:{i}"),
+            "request": id,
+            "label": suggestion_label(sg, tool),
+        }))
+    });
     api.publish(SUGGESTIONS, suggestions.collect());
     let mut options = Vec::new();
     for (q, question) in questions.iter().enumerate() {

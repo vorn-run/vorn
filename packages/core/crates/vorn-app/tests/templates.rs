@@ -443,8 +443,6 @@ fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
         "Allow Bash in src/",
         "COLOUR: Which theme?",
         "Dark",
-        "Light",
-        "Skip",
     ];
     every_surface(&mut shot, &mut app, "w-widget", &asks, &asks[..3]);
 

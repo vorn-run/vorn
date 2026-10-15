@@ -18,7 +18,7 @@ raise = "permissions"
 id = "compact"
 title = "Vorn"
 view = "views/compact.kdl"
-size = [240, 84]
+size = [296, 84]
 
 [[contributes.commands]]
 id = "toggle"
