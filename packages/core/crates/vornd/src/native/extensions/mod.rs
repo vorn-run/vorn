@@ -16,7 +16,7 @@ pub mod world;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -235,6 +235,8 @@ pub struct Extensions {
     /// The newest sync asked for each session; reading git can finish them out of order.
     syncs: Mutex<HashMap<String, u64>>,
     next_sync: AtomicU64,
+    /// A package was linked or installed: the template watcher lists the linked ones again.
+    relist: AtomicBool,
     me: Weak<Extensions>,
 }
 
@@ -306,6 +308,7 @@ impl Extensions {
             next_selection: AtomicU64::new(0),
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
+            relist: AtomicBool::new(false),
             me: me.clone(),
         })
     }
@@ -652,6 +655,7 @@ impl Extensions {
         self.pack_changed(id).await;
         self.router.lifecycle().stop_extension(id).await;
         self.around.pack_changed(id).await;
+        self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);
     }
 
@@ -1182,7 +1186,7 @@ async fn watch_views(me: Weak<Extensions>) {
             return;
         };
         since_list += VIEW_CHECK;
-        if since_list >= PACK_CHECK {
+        if since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed) {
             since_list = Duration::ZERO;
             let store = extensions.router.store().clone();
             linked = store
