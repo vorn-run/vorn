@@ -123,7 +123,11 @@ pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Resul
     if !project_exists(store, &project)? {
         return Ok((ok(false), false));
     }
-    let id = match params.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()) {
+    let id = match params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|i| !i.is_empty())
+    {
         Some(asked) if task(store, &json!(asked))?.is_some() => return Ok((ok(false), false)),
         Some(asked) => asked.to_owned(),
         None => id,
@@ -262,7 +266,10 @@ pub fn patch(store: &mut Store, params: &Value, now: &str) -> Result<(Value, boo
     let Some(set) = params.get("set").and_then(Value::as_object) else {
         return Ok((ok(false), false));
     };
-    if let Some(project) = set.get("projectName").filter(|p| Some(*p) != before.get("projectName")) {
+    if let Some(project) = set
+        .get("projectName")
+        .filter(|p| Some(*p) != before.get("projectName"))
+    {
         if !project_exists(store, project)? {
             return Ok((ok(false), false));
         }
@@ -399,10 +406,14 @@ mod tests {
     fn a_patch_sets_only_what_it_names_and_stamps_a_finish() {
         let mut s = store();
         let made = json!({ "id": "mine", "projectName": "app", "title": "T", "branch": "b" });
-        let (created, _) = create(&mut s, &made, "unused".into(), "2026-01-01T00:00:00.000Z").unwrap();
+        let (created, _) =
+            create(&mut s, &made, "unused".into(), "2026-01-01T00:00:00.000Z").unwrap();
         assert_eq!(created["task"]["id"], "mine");
         // The id is the client's, so a second task under it is refused.
-        assert_eq!(create(&mut s, &made, "x".into(), "n").unwrap().0, json!({ "ok": false }));
+        assert_eq!(
+            create(&mut s, &made, "x".into(), "n").unwrap().0,
+            json!({ "ok": false })
+        );
 
         let set = json!({ "id": "mine", "set": {
             "status": "in_progress", "assignedSessionId": "s1", "assignedAgent": "claude", "bogus": 1
@@ -410,7 +421,10 @@ mod tests {
         let (patched, changed) = patch(&mut s, &set, "2026-01-02T00:00:00.000Z").unwrap();
         assert!(changed);
         let t = &patched["task"];
-        assert_eq!((t["status"].as_str(), t["assignedSessionId"].as_str()), (Some("in_progress"), Some("s1")));
+        assert_eq!(
+            (t["status"].as_str(), t["assignedSessionId"].as_str()),
+            (Some("in_progress"), Some("s1"))
+        );
         assert_eq!(t["branch"], "b", "a field it does not name stays");
         assert_eq!(t["title"], "T");
 
@@ -422,8 +436,16 @@ mod tests {
         assert_eq!(t["assignedAgent"], "claude");
 
         let elsewhere = json!({ "id": "mine", "set": { "projectName": "nowhere" } });
-        assert_eq!(patch(&mut s, &elsewhere, "n").unwrap(), (json!({ "ok": false }), false));
-        assert_eq!(patch(&mut s, &json!({ "id": "none", "set": {} }), "n").unwrap().1, false);
+        assert_eq!(
+            patch(&mut s, &elsewhere, "n").unwrap(),
+            (json!({ "ok": false }), false)
+        );
+        assert_eq!(
+            patch(&mut s, &json!({ "id": "none", "set": {} }), "n")
+                .unwrap()
+                .1,
+            false
+        );
     }
 
     #[test]

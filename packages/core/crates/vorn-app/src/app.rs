@@ -1295,9 +1295,16 @@ impl App {
     }
 
     /// Jump by command: the current terminal scrolled to the prompt before
-    /// or after the top of its view; past the last, the live screen.
+    /// or after the top of its view; past the last, the live screen. A shell
+    /// showing its commands as blocks has none of its history on screen.
     fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
         let Some(id) = self.current() else { return };
+        let as_blocks = self.store.session(&id).is_some_and(|s| {
+            crate::blocks::split(&self.store.config, s, self.st.shells.get(&id)).is_some()
+        });
+        if as_blocks {
+            return;
+        }
         let (Some(lines), Some(view)) = (
             self.grid.as_ref().and_then(|g| g.lines(&id)),
             self.views.get(&id),
@@ -1763,7 +1770,8 @@ impl App {
     fn save_config(&mut self, config: Value, call: Call) {
         let before = self.store.workspace().to_owned();
         // Tasks and workflows are not vornd's configuration: their changes go as calls of their own.
-        let mut calls = crate::client::sync::tasks(self.store.config.get("tasks"), config.get("tasks"));
+        let mut calls =
+            crate::client::sync::tasks(self.store.config.get("tasks"), config.get("tasks"));
         calls.extend(crate::client::sync::workflows(
             self.store.config.get("workflows"),
             config.get("workflows"),

@@ -2800,12 +2800,18 @@ mod tests {
         assert_eq!(record.origin.0.as_ref(), Some(&wanted));
         let written = serde_json::to_value(&record).unwrap();
         assert!(written.get("workflowId").is_none() && written.get("workflowName").is_none());
-        assert_eq!(written["origin"], json!({ "extension": "vorn.workflows", "id": "wf", "label": "Ship" }));
+        assert_eq!(
+            written["origin"],
+            json!({ "extension": "vorn.workflows", "id": "wf", "label": "Ship" })
+        );
         // Read back, it is the same record: the change happens once.
         assert_eq!(HeadlessSession::deserialize(&written).unwrap(), record);
         let plain = HeadlessSession::deserialize(&headless("p")).unwrap();
         assert_eq!(plain.origin, SessionOrigin(None));
-        assert!(serde_json::to_value(&plain).unwrap().get("origin").is_none());
+        assert!(serde_json::to_value(&plain)
+            .unwrap()
+            .get("origin")
+            .is_none());
     }
 
     fn upsert(record: Value) -> Change {

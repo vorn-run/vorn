@@ -97,3 +97,77 @@ fn a_shells_commands_become_blocks_with_status_and_duration() {
     let kept = std::fs::read_to_string(vorn_app::intent::history_file(&v.home)).expect("history");
     assert!(kept.contains("echo vorn-42"), "{kept}");
 }
+
+/// Jump by command: Mod+Shift+Up scrolls the terminal to the prompt before
+/// the top of its view, again to the one before that, and Down comes back,
+/// past the last to the live screen.
+#[cfg(unix)]
+#[test]
+fn jumps_between_commands_by_their_prompts() {
+    use vorn_app::app::MOD;
+    let Some(shell) = integrated_shell() else {
+        return;
+    };
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    // Blocks off: the terminal shows its own history, which the jump scrolls.
+    add_project(
+        &mut app,
+        &v,
+        "demo",
+        json!({ "shell": shell, "domBlockRendering": false }),
+    );
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's first prompt", |app, _| {
+        app.st
+            .shells
+            .get(&id)
+            .is_some_and(|sh| sh.integrated())
+            .then_some(())
+    });
+    shot.type_line(&mut app, "seq 1 120; seq 2 121; echo the-$((40+2))");
+    shot.until(&mut app, "the commands' output", |app, _| {
+        let p = app.pane(&id)?;
+        String::from_utf8_lossy(&p.text)
+            .contains("the-42")
+            .then_some(())
+    });
+    // Two more prompts, each with a command's output above it.
+    for cmd in ["seq 3 122", "echo the-$((40+3))"] {
+        shot.type_line(&mut app, cmd);
+    }
+    shot.until(&mut app, "the last output", |app, _| {
+        let p = app.pane(&id)?;
+        String::from_utf8_lossy(&p.text)
+            .contains("the-43")
+            .then_some(())
+    });
+    let at = |app: &vorn_app::App| app.pane(&id).map(|p| (p.line0, p.live_line));
+    let (_, live) = at(&app).expect("a view");
+    let up = key("ArrowUp", MOD() | mods::SHIFT, None);
+    let down = key("ArrowDown", MOD() | mods::SHIFT, None);
+    shot.send(&mut app, up.clone());
+    let first = shot.until(&mut app, "the view at the last command", |app, _| {
+        at(app).and_then(|(top, _)| (top < live).then_some(top))
+    });
+    shot.send(&mut app, up);
+    let second = shot.until(&mut app, "the view at the command before", |app, _| {
+        at(app).and_then(|(top, _)| (top < first).then_some(top))
+    });
+    assert!(first - second >= 120, "a whole seq apart: {first} {second}");
+    shot.send(&mut app, down.clone());
+    shot.until(&mut app, "the view back at the last command", |app, _| {
+        at(app).and_then(|(top, _)| (top == first).then_some(()))
+    });
+    shot.send(&mut app, down);
+    shot.until(&mut app, "the live screen", |app, _| {
+        at(app).and_then(|(top, live)| (top == live).then_some(()))
+    });
+}

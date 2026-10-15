@@ -547,7 +547,9 @@ pub fn seed_tasks(rpc: &vorn_app::client::Rpc, tasks: &[Value]) {
 
 /// Makes `workflows` the only ones vornd has, as a test's world starts.
 pub fn replace_workflows(rpc: &vorn_app::client::Rpc, workflows: &[Value]) {
-    let old = rpc.call("workflow:list", Value::Null).expect("workflow:list");
+    let old = rpc
+        .call("workflow:list", Value::Null)
+        .expect("workflow:list");
     for w in old.as_array().into_iter().flatten() {
         rpc.call("workflow:delete", json!({ "id": w["id"] }))
             .expect("workflow:delete");

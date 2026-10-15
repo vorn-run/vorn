@@ -37,7 +37,10 @@ const PATCHED: [&str; 12] = [
 ];
 
 fn rows(list: Option<&Value>) -> Vec<&Value> {
-    list.and_then(Value::as_array).into_iter().flatten().collect()
+    list.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 fn id_of(row: &Value) -> Option<&str> {
@@ -52,7 +55,12 @@ fn find<'a>(list: &[&'a Value], id: &str) -> Option<&'a Value> {
 fn moved(before: &Value, after: &Value, keys: &[&str]) -> Map<String, Value> {
     keys.iter()
         .filter(|k| before.get(**k) != after.get(**k))
-        .map(|k| ((*k).to_owned(), after.get(*k).cloned().unwrap_or(Value::Null)))
+        .map(|k| {
+            (
+                (*k).to_owned(),
+                after.get(*k).cloned().unwrap_or(Value::Null),
+            )
+        })
         .collect()
 }
 
@@ -147,7 +155,8 @@ mod tests {
 
     #[test]
     fn a_task_change_goes_as_the_fields_that_moved() {
-        let before = json!({ "id": "t", "title": "A", "status": "todo", "branch": "b", "updatedAt": "1" });
+        let before =
+            json!({ "id": "t", "title": "A", "status": "todo", "branch": "b", "updatedAt": "1" });
         let after = json!({ "id": "t", "title": "A", "status": "in_progress",
             "assignedSessionId": "s", "updatedAt": "2", "images": ["x.png"] });
         assert_eq!(
@@ -175,7 +184,10 @@ mod tests {
                     "task:create",
                     json!({ "id": "n", "projectName": "p", "title": "N", "status": "in_progress" })
                 ),
-                ("task:patch", json!({ "id": "n", "set": { "assignedSessionId": "s" } })),
+                (
+                    "task:patch",
+                    json!({ "id": "n", "set": { "assignedSessionId": "s" } })
+                ),
             ]
         );
     }
@@ -191,7 +203,10 @@ mod tests {
             workflows(Some(&json!([a, b])), Some(&json!([renamed, c]))),
             [
                 ("workflow:delete", json!({ "id": "a" })),
-                ("workflow:update", json!({ "id": "b", "updates": { "name": "B2", "workspaceId": "w" } })),
+                (
+                    "workflow:update",
+                    json!({ "id": "b", "updates": { "name": "B2", "workspaceId": "w" } })
+                ),
                 ("workflow:create", json!({ "workflow": c })),
             ]
         );

@@ -174,7 +174,10 @@ fn a_save_does_not_cascade_away_a_task_or_what_references_it() {
 
     save_config(&mut store, with_collections(json!({ "tasks": [] })), &[]);
 
-    assert_eq!(call(&mut store, "dbGetTask", json!(["t1"]))["title"], "first");
+    assert_eq!(
+        call(&mut store, "dbGetTask", json!(["t1"]))["title"],
+        "first"
+    );
     assert!(!call(&mut store, "dbGetTaskSourceLink", json!(["t1"])).is_null());
 }
 

@@ -29,10 +29,13 @@ fn every_recorded_save_fires_what_the_server_fired() {
     let cases = recorded["cases"].as_array().expect("cases");
     assert!(cases.len() > 50);
     for (i, case) in cases.iter().enumerate() {
-        let before: HashMap<String, &Value> =
-            tasks(&case["before"]).map(|t| (key(t.get("id")), t)).collect();
+        let before: HashMap<String, &Value> = tasks(&case["before"])
+            .map(|t| (key(t.get("id")), t))
+            .collect();
         let fired: Vec<Value> = tasks(&case["after"])
-            .filter_map(|t| vorn_work::task_triggers::for_task(before.get(&key(t.get("id"))).copied(), t))
+            .filter_map(|t| {
+                vorn_work::task_triggers::for_task(before.get(&key(t.get("id"))).copied(), t)
+            })
             .collect();
         assert_eq!(Value::Array(fired), case["triggers"], "case {i}");
     }

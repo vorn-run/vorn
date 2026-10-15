@@ -291,9 +291,10 @@ fn with_session_origin(mut value: Value) -> Value {
         Value::Object(map) => {
             if map.get("method").and_then(Value::as_str) == Some("headless:create") {
                 if let Some(Value::Object(params)) = map.get_mut("params") {
-                    if let (Some(id), Some(label)) =
-                        (params.shift_remove("workflowId"), params.shift_remove("workflowName"))
-                    {
+                    if let (Some(id), Some(label)) = (
+                        params.shift_remove("workflowId"),
+                        params.shift_remove("workflowName"),
+                    ) {
                         params.insert(
                             "origin".into(),
                             json!({ "extension": "vorn.workflows", "id": id, "label": label }),

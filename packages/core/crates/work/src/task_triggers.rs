@@ -91,7 +91,10 @@ mod tests {
             Some(json!({ "effectId": "task-created/c", "kind": "taskCreated", "task": made }))
         );
         let same = task("a", "todo", "2030-01-02");
-        assert_eq!(for_task(Some(&task("a", "todo", "2030-01-01")), &same), None);
+        assert_eq!(
+            for_task(Some(&task("a", "todo", "2030-01-01")), &same),
+            None
+        );
     }
 
     #[test]

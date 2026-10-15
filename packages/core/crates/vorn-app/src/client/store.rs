@@ -657,12 +657,18 @@ mod tests {
         let mut s = Store::default();
         s.apply("config:changed", json!({ "projects": [] }));
         s.apply("task:changed", json!([task("a", "A")]));
-        s.apply("workflow:changed", json!([{ "id": "w", "name": "W", "icon": "Zap",
-            "iconColor": "#fff", "nodes": [], "edges": [], "enabled": true }]));
+        s.apply(
+            "workflow:changed",
+            json!([{ "id": "w", "name": "W", "icon": "Zap",
+            "iconColor": "#fff", "nodes": [], "edges": [], "enabled": true }]),
+        );
         assert_eq!(titles(&s), ["A"]);
         assert_eq!(s.workflows.len(), 1);
         // vornd's configuration has neither: the copies stay.
-        s.apply("config:changed", json!({ "projects": [], "defaults": { "fontSize": 14 } }));
+        s.apply(
+            "config:changed",
+            json!({ "projects": [], "defaults": { "fontSize": 14 } }),
+        );
         assert_eq!(titles(&s), ["A"]);
         assert_eq!(s.workflows.len(), 1);
         assert_eq!(s.config["tasks"][0]["id"], "a");
