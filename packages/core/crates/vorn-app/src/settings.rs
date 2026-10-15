@@ -18,7 +18,11 @@ pub enum Category {
     Agents,
     Ssh,
     Mcp,
+    /// The Extensions manager (its route keeps the old `connectors`).
     Connectors,
+    /// Settings › Connections: opens the Connectors built-in's own page,
+    /// [`CONNECTIONS_PAGE`].
+    Connections,
     Keys,
     Network,
     About,
@@ -35,7 +39,8 @@ impl Category {
             "agents" => Category::Agents,
             "ssh" => Category::Ssh,
             "mcp" => Category::Mcp,
-            "connectors" => Category::Connectors,
+            "connectors" | "extensions" | "plugins" => Category::Connectors,
+            "connections" => Category::Connections,
             "keys" => Category::Keys,
             "network" => Category::Network,
             "about" => Category::About,
@@ -52,7 +57,8 @@ impl Category {
             Category::Agents => "Coding Agents",
             Category::Ssh => "SSH & Hosts",
             Category::Mcp => "Skills & MCP",
-            Category::Connectors => "Plugins",
+            Category::Connectors => "Extensions",
+            Category::Connections => "Connections",
             Category::Keys => "Keys",
             Category::Network => "Remote Access",
             Category::About => "About",
@@ -71,7 +77,8 @@ impl Category {
     }
 }
 
-/// The sidebar's sections, as `SIDEBAR_SECTIONS` lists them.
+/// The sidebar's sections, as `SIDEBAR_SECTIONS` lists them; the
+/// EXTENSIONS group follows them, with [`EXTENSIONS`] first.
 pub const SECTIONS: [(&str, &[Category]); 2] = [
     (
         "APP SETTINGS",
@@ -88,12 +95,18 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
             Category::Agents,
             Category::Ssh,
             Category::Mcp,
-            Category::Connectors,
             Category::Keys,
             Category::Network,
         ],
     ),
 ];
+
+/// The EXTENSIONS group's own pages, before each extension's settings.
+pub const EXTENSIONS: [Category; 1] = [Category::Connectors];
+
+/// The Connectors built-in's settings page, which every "Settings ›
+/// Connections" opens; first of the extensions' pages in the nav.
+pub const CONNECTIONS_PAGE: &str = "vorn.connectors/settings/connections";
 
 /// What a settings control does.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

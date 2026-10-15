@@ -13,7 +13,7 @@ use crate::screen::settings::{
 };
 use crate::settings::{
     self, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState, SetAct,
-    Shell, SshKey, TestResult,
+    Shell, SshKey, TestResult, CONNECTIONS_PAGE,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
@@ -142,7 +142,7 @@ impl App {
         let s = &mut self.st.settings;
         s.open = true;
         s.category = cat;
-        s.ext_page = None;
+        s.ext_page = (cat == Category::Connections).then(|| CONNECTIONS_PAGE.to_owned());
         match cat {
             Category::General => {
                 if s.shells.is_none() {
@@ -791,6 +791,11 @@ impl App {
         }
         if !self.st.settings.open || code != "Escape" || self.st.menu.is_some() {
             return false;
+        }
+        if self.st.dialog == Some(crate::state::Dialog::ExtInstall) {
+            self.run_plug(ui, crate::plugins::PlugAct::CancelInstall);
+            ui.set_focus(None);
+            return true;
         }
         if ui.focus() == Some(SHELL_PATH) {
             self.st.settings.shell_editing = false;

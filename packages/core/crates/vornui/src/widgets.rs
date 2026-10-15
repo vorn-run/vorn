@@ -766,11 +766,32 @@ pub fn switch_track(on: bool) -> El {
         )
 }
 
+/// A switch on a terminal: the word "on" or "off" in its track's colour.
+fn switch_cells(on: bool) -> El {
+    let (fg, bg) = if on {
+        (color::WHITE, color::BLUE_500)
+    } else {
+        (color::GRAY_400, Rgba::white(0.1))
+    };
+    div()
+        .row()
+        .justify_center()
+        .w(40.0)
+        .shrink0()
+        .bg(bg)
+        .child(text(if on { "on" } else { "off" }, 12.0, fg).silent())
+}
+
 /// `ToggleSwitch`: a `w-10 h-6` track, blue when on, its knob sliding
-/// from `translate-x-1` to `translate-x-5`. Clicking reports `Click` on
-/// `id`; the caller flips the value.
-pub fn toggle(id: Id, name: &str, on: bool, disabled: bool) -> El {
-    let track = switch_track(on)
+/// from `translate-x-1` to `translate-x-5`; on a terminal it reads "on" or
+/// "off". Clicking reports `Click` on `id`; the caller flips the value.
+pub fn toggle(ui: &Ui, id: Id, name: &str, on: bool, disabled: bool) -> El {
+    let look = if ui.is_cells() {
+        switch_cells(on)
+    } else {
+        switch_track(on)
+    };
+    let track = look
         .id(id)
         .ring(radius::FULL)
         .role(Role::Switch, name)

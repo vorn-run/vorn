@@ -189,6 +189,8 @@ pub enum MenuKind {
     TaskStatus(crate::tasks::Form),
     TaskProject(crate::tasks::Form),
     TaskAgent(crate::tasks::Form),
+    /// Settings › Extensions' Install…: from Git, a folder, or a linked folder.
+    ExtInstall,
     /// The landing's status filter.
     RunStatus,
     /// The sidebar's workflow filter.
@@ -272,6 +274,8 @@ pub enum Dialog {
     Paste,
     /// CommandPalette.
     Palette,
+    /// Install…'s address or folder, and the sheet read before any extension installs or links.
+    ExtInstall,
     /// OnboardingModal: the welcome guide.
     Welcome,
     /// A connection's sign-in page, in its own profile.
@@ -514,6 +518,11 @@ impl State {
     /// Settings is open on `cat`.
     pub fn shown(&self, cat: crate::settings::Category) -> bool {
         self.settings.open && self.settings.category == cat
+    }
+
+    /// Settings is open on Extensions.
+    pub fn shows_plugins(&self) -> bool {
+        self.shown(crate::settings::Category::Connectors)
     }
 
     /// The cards the grid shows, as indexes into `store.sessions`: the

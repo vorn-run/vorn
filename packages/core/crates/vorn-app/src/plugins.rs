@@ -1,5 +1,5 @@
-//! Settings › Plugins: the connectors a person can add, the packs on disk and
-//! the connections made to them. The pure half lives here (listings, pack
+//! Settings › Extensions: the connectors and extensions a person can add, the
+//! packs on disk and the connections made to them. The pure half lives here (listings, pack
 //! status, filters, form rules) so the screen and the RPC glue only read it.
 
 use std::collections::{BTreeMap, HashMap};
@@ -23,11 +23,21 @@ pub enum PlugAct {
     CloseForm,
     /// Install, update or retry a listing's pack.
     Install(String),
-    /// Pick a connector's git repository on this disk, then check it.
-    InstallFile,
+    /// Open the Extensions page with its Install menu open.
+    InstallMenu,
+    /// Install from Git, a folder, or link one: a dialog or the folder picker.
+    InstallFrom(Origin),
+    /// Read the repository or folder the dialog names, for its sheet.
+    ReadSource,
     ConfirmInstall,
     CancelInstall,
     Remove(String),
+    /// Run an installed extension sandboxed, or not.
+    Sandbox(String, bool),
+    /// Open an installed extension's folder.
+    ShowFolder(String),
+    /// Browse the connectors, to add a connection to one.
+    AddConnection,
     Rollback(String),
     CatalogRefresh,
     Text(Field),
@@ -57,12 +67,51 @@ pub fn pick_id(pick: &Pick) -> crate::ui::Id {
     crate::ui::Id::new("plug-pick").child(pick)
 }
 
+/// The Installed and Browse pills; choosing one reports `Event::Select` on this group.
+pub fn tabs_id() -> crate::ui::Id {
+    crate::ui::Id::new("plug-tabs")
+}
+
+/// The All, Connectors and Interface pills over Browse.
+pub fn kinds_id() -> crate::ui::Id {
+    crate::ui::Id::new("plug-kinds")
+}
+
+/// A git sheet's "Pane: Turns, Listens to: session.created, …" as a count of
+/// places and the first few kinds, and the events it listens to.
+pub fn adds_line(adds: &[String]) -> Option<String> {
+    let (events, places): (Vec<&String>, Vec<&String>) =
+        adds.iter().partition(|a| a.starts_with("Listens to"));
+    let mut kinds: Vec<String> = Vec::new();
+    for a in &places {
+        let kind = a
+            .split_once(':')
+            .map_or(a.as_str(), |(k, _)| k)
+            .to_lowercase();
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    let mut parts = Vec::new();
+    if !places.is_empty() {
+        let mut shown = kinds.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+        if kinds.len() > 3 {
+            shown.push_str(", \u{2026}");
+        }
+        parts.push(format!("{}: {shown}", count(places.len(), "place")));
+    }
+    if !events.is_empty() {
+        parts.push(format!("listens to {}", count(events.len(), "event")));
+    }
+    (!parts.is_empty()).then(|| parts.join("; "))
+}
+
 /// The id a page text field edits under.
 pub fn field_id(field: &Field) -> crate::ui::Id {
     crate::ui::Id::new("plug-field").child(field)
 }
 
-/// The three views the page offers.
+/// The two views the page offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Tab {
     #[default]
@@ -97,6 +146,10 @@ pub enum Field {
     ProfileUrl,
     ProfileHeader,
     ProfileSecret,
+    /// The install dialog's repository or folder.
+    Source,
+    /// The install sheet's typed id.
+    Confirm,
 }
 
 /// A picker the page binds.
@@ -141,7 +194,7 @@ impl Kind {
     pub fn label(self) -> &'static str {
         match self {
             Kind::Connector => "Connectors",
-            Kind::Extension => "Extensions",
+            Kind::Extension => "Interface",
         }
     }
 }
@@ -628,6 +681,8 @@ pub fn build_listings(
         }
         if pack.get("permissions").is_some() {
             l.permissions = strings(pack.get("permissions"));
+        } else if pack.pointer("/declares/uses").is_some() {
+            l.permissions = strings(pack.pointer("/declares/uses"));
         }
         if let Some(a) = pack.get("activates") {
             l.activates = Some(a.clone());
@@ -795,6 +850,320 @@ pub fn describe_contributions(contributes: Option<&Value>) -> String {
     .join(", ")
 }
 
+/// Where each place an extension adds to is grouped on its page, with the
+/// noun an untitled or titled entry reads with (none for a sidebar section or a command).
+const PLACES: [(&str, &str, &str); 14] = [
+    ("Sidebar", "sidebar", ""),
+    ("Cards", "badges", "badge"),
+    ("Cards", "cardFooters", "footer"),
+    ("Cards", "footers", "footer"),
+    ("Cards", "decorations", "row mark"),
+    ("Cards", "panes", "pane"),
+    ("Cards", "linkHandlers", "link"),
+    ("Composer", "composer", "strip"),
+    ("Composer", "launchers", "launcher"),
+    ("Commands", "commands", ""),
+    ("Commands", "menus", ""),
+    ("Windows", "windows", "window"),
+    ("Windows", "dialogs", "dialog"),
+    ("Windows", "settings", "settings"),
+];
+
+/// How many places an extension adds to Vorn.
+pub fn places(contributes: Option<&Value>) -> usize {
+    PLACES
+        .iter()
+        .map(|(_, key, _)| contributes.map_or(0, |c| array(c, key)))
+        .sum()
+}
+
+/// "Mod+Alt+T" as the menus write it: "⌥⌘T".
+pub fn key_label(key: &str) -> String {
+    let parts: Vec<&str> = key.split('+').collect();
+    let Some((last, mods)) = parts.split_last() else {
+        return String::new();
+    };
+    let has = |names: &[&str]| mods.iter().any(|m| names.contains(m));
+    let mut out = String::new();
+    for (names, sign) in [
+        (&["Ctrl", "Control"][..], "\u{2303}"),
+        (&["Alt", "Option"][..], "\u{2325}"),
+        (&["Shift"][..], "\u{21e7}"),
+        (&["Mod", "Cmd", "Super"][..], "\u{2318}"),
+    ] {
+        if has(names) {
+            out.push_str(sign);
+        }
+    }
+    out.push_str(&last.to_uppercase());
+    out
+}
+
+/// What an extension adds, by group: `("Cards", ["count badge", "Turns pane"])`.
+pub fn place_groups(contributes: Option<&Value>) -> Vec<(&'static str, Vec<String>)> {
+    let mut out: Vec<(&'static str, Vec<String>)> = Vec::new();
+    for (group, key, noun) in PLACES {
+        for item in contributes
+            .and_then(|c| c.get(key))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let title = s(item, "title")
+                .filter(|t| !t.is_empty())
+                .or_else(|| s(item, "id"))
+                .unwrap_or("");
+            let mut line = if noun.is_empty() {
+                title.to_owned()
+            } else {
+                format!("{title} {noun}")
+            };
+            if let Some(k) = s(item, "key") {
+                line = format!("{line} {}", key_label(k));
+            }
+            match out.iter_mut().find(|(g, _)| *g == group) {
+                Some((_, items)) => items.push(line),
+                None => out.push((group, vec![line])),
+            }
+        }
+    }
+    out
+}
+
+/// What switching a built-in off hides, from the titles of what it adds.
+pub fn hidden_while_off(builtin: &Value) -> String {
+    let c = builtin.get("contributes");
+    let titled = |key: &str| -> Vec<(String, Option<String>)> {
+        c.and_then(|c| c.get(key))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|i| {
+                let t = s(i, "title").filter(|t| !t.is_empty())?;
+                Some((t.to_owned(), s(i, "menu").map(str::to_owned)))
+            })
+            .collect()
+    };
+    let mut parts = Vec::new();
+    for (t, _) in titled("settings") {
+        parts.push(format!("the {t} page"));
+    }
+    for (t, _) in titled("windows") {
+        parts.push(format!("the {t} window"));
+    }
+    for (t, _) in titled("sidebar") {
+        parts.push(format!("{t} in the sidebar"));
+    }
+    for (t, _) in titled("panes") {
+        parts.push(format!("the {t} pane"));
+    }
+    for (t, _) in titled("commands") {
+        parts.push(format!("{t} in the palette"));
+    }
+    for (t, menu) in titled("menus") {
+        parts.push(match menu {
+            Some(m) => format!("{t} in the {m} menu"),
+            None => format!("{t} in its menu"),
+        });
+    }
+    let mut note = match parts.as_slice() {
+        [] => "Hidden while off: everything it adds.".to_owned(),
+        [one] => format!("Hidden while off: {one}."),
+        [rest @ .., last] => format!("Hidden while off: {}, and {last}.", rest.join(", ")),
+    };
+    // What a built-in leaves of yours, where it is worth saying.
+    if s(builtin, "id") == Some("vorn.worktrees") {
+        note.push_str(" Your worktrees stay.");
+    }
+    note
+}
+
+/// One line of what an extension may use: what, how, and whether Vorn holds it to that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Use {
+    pub what: &'static str,
+    pub how: String,
+    pub enforced: bool,
+}
+
+/// Every permission an extension may declare, as the page says it, and
+/// whether Vorn's bridge holds a program to it.
+fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
+    let name = name.split_once(':').map_or(name, |(n, _)| n);
+    Some(match name {
+        "sessions.read" => ("Sessions", "reads your sessions and their status", true),
+        "sessions.launch" => ("Sessions", "starts and closes sessions", true),
+        "terminal.read" => ("Terminal", "reads recent output", true),
+        "terminal.selection" => ("Terminal", "reads the selected text", true),
+        "terminal.send" => ("Terminal", "types into a session", true),
+        "card.rename" => ("Cards", "renames session cards", true),
+        "agent.usage" => ("Agents", "reads context and allowance", true),
+        "agent.permissions" => ("Agents", "answers their requests to use a tool", true),
+        "git.read" => ("Git", "reads status, diffs and worktrees", true),
+        "git.write" => ("Git", "commits and removes worktrees", true),
+        "files.read" => ("Files", "reads files in your projects", true),
+        "files.write" => ("Files", "writes files in your projects", true),
+        "secrets.read" => ("Secrets", "reads a connection's secrets", true),
+        "storage" => ("Storage", "keeps tables of its own", true),
+        "network.tcp" => ("Network", "opens connections of its own", false),
+        "http.routes" => ("Network", "answers web requests", false),
+        "auth.borrow" => ("Sign-in", "borrows a command line tool's sign-in", false),
+        "browser.session" => ("Sign-in", "uses a signed-in browser window", false),
+        "process.run" => ("Programs", "runs programs", false),
+        _ => return None,
+    })
+}
+
+/// `declares`: what an extension may use, by what it touches, network last.
+pub fn uses(declared: &[String], hosts: &[String]) -> Vec<Use> {
+    let mut out: Vec<Use> = Vec::new();
+    for (what, how, enforced) in declared.iter().filter_map(|d| use_phrase(d)) {
+        match out.iter_mut().find(|u| u.what == what) {
+            Some(u) => {
+                u.how = format!("{}, {how}", u.how);
+                u.enforced &= enforced;
+            }
+            None => out.push(Use {
+                what,
+                how: how.to_owned(),
+                enforced,
+            }),
+        }
+    }
+    let at = out.iter().position(|u| u.what == "Network");
+    let mut network = at.map(|i| out.remove(i));
+    if !hosts.is_empty() {
+        let reach = format!("reaches {}", hosts.join(", "));
+        network = Some(match network {
+            Some(n) => Use {
+                how: format!("{reach}, {}", n.how),
+                enforced: false,
+                ..n
+            },
+            None => Use {
+                what: "Network",
+                how: reach,
+                enforced: true,
+            },
+        });
+    }
+    out.push(network.unwrap_or(Use {
+        what: "Network",
+        how: "nothing".to_owned(),
+        enforced: true,
+    }));
+    out
+}
+
+/// The program an extension runs and when: "node program.mjs while sessions open, close or change".
+pub fn runs_line(service: Option<&Value>) -> Option<String> {
+    let service = service?;
+    let argv = strings(service.get("command")).join(" ");
+    if argv.is_empty() {
+        return None;
+    }
+    let mut what = Vec::new();
+    for e in strings(service.get("events")) {
+        let (noun, verb) = e.split_once('.').unwrap_or((e.as_str(), ""));
+        let phrase = match verb {
+            "created" | "opened" => "open",
+            "exited" | "closed" => "close",
+            "status" | "changed" | "renamed" => "change",
+            _ => continue,
+        };
+        if !what.contains(&(noun.to_owned(), phrase)) {
+            what.push((noun.to_owned(), phrase));
+        }
+    }
+    let Some((noun, _)) = what.first().cloned() else {
+        return Some(argv);
+    };
+    let verbs: Vec<String> = what
+        .iter()
+        .filter(|(n, _)| *n == noun)
+        .map(|(_, v)| (*v).to_owned())
+        .collect();
+    Some(format!("{argv} while {noun}s {}", any_of(&verbs)))
+}
+
+/// A path under the home folder as `~/…`.
+pub fn tilde(path: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    match path.strip_prefix(home.as_str()) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_owned(),
+    }
+}
+
+/// A repository as a person names it: "owner/repo" for a forge URL, else the URL.
+pub fn short_repo(url: &str) -> String {
+    let bare = url
+        .split_once("://")
+        .map_or(url, |(_, rest)| rest)
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
+    let bare = bare
+        .strip_prefix("git@")
+        .unwrap_or(bare)
+        .replacen(':', "/", 1);
+    let parts: Vec<&str> = bare.split('/').collect();
+    match parts.as_slice() {
+        [host, owner, repo] if host.contains('.') => format!("{owner}/{repo}"),
+        _ => bare.to_owned(),
+    }
+}
+
+/// Where an installed pack came from: "Linked from ~/dev/turns",
+/// "v1.0.0 from owner/repo", "v1.0.0 copied from ~/dev/turns".
+pub fn pack_origin(pack: &Value) -> String {
+    let version = s(pack, "version").map(|v| format!("v{v}"));
+    if pack.get("linked") == Some(&Value::Bool(true)) {
+        return format!("Linked from {}", tilde(s(pack, "path").unwrap_or("")));
+    }
+    let source = pack.get("source");
+    let from = source
+        .and_then(|v| s(v, "git"))
+        .map(|g| format!("from {}", short_repo(g)))
+        .or_else(|| {
+            source
+                .and_then(|v| s(v, "path"))
+                .map(|p| format!("copied from {}", tilde(p)))
+        });
+    match (version, from) {
+        (Some(v), Some(f)) => format!("{v} {f}"),
+        (Some(v), None) => v,
+        (None, Some(f)) => f,
+        (None, None) => String::new(),
+    }
+}
+
+/// An installed pack's second line: where it came from, whether it runs, and what it adds.
+pub fn pack_line(l: &Listing) -> String {
+    let Some(pack) = l.pack.as_ref() else {
+        return String::new();
+    };
+    let mut parts = vec![pack_origin(pack)];
+    if pack.get("running") == Some(&Value::Bool(true)) {
+        parts.push("running".to_owned());
+    }
+    if pack.get("sandboxed") == Some(&Value::Bool(true)) {
+        parts.push("sandboxed".to_owned());
+    }
+    if l.kind == Kind::Extension {
+        parts.push(count(places(l.contributes.as_ref()), "place"));
+    } else if l.connected > 0 {
+        parts.push(count(l.connected, "connection"));
+    } else if l.implicit {
+        parts.push("ready".to_owned());
+    } else {
+        parts.push("no connection yet".to_owned());
+    }
+    parts.retain(|p| !p.is_empty());
+    parts.join(" \u{b7} ")
+}
+
 fn any_of(values: &[String]) -> String {
     match values {
         [] => String::new(),
@@ -872,7 +1241,7 @@ fn haystack(l: &Listing) -> String {
     ];
     parts.extend(l.capabilities.iter().map(String::as_str));
     parts.extend(l.keywords.iter().map(String::as_str));
-    for key in ["panes", "footers", "linkHandlers"] {
+    for (_, key, _) in PLACES {
         if let Some(items) = l.contributes.as_ref().and_then(|c| c.get(key)?.as_array()) {
             parts.extend(items.iter().filter_map(|i| s(i, "title")));
         }
@@ -940,12 +1309,17 @@ pub fn rungs(listings: &[Listing]) -> Vec<Rung> {
 }
 
 /// `groupListingsByCategory`: first-seen order.
+/// The directory by category, every extension under "Interface".
 pub fn sections(listings: Vec<&Listing>) -> Vec<(String, Vec<&Listing>)> {
     let mut out: Vec<(String, Vec<&Listing>)> = Vec::new();
     for l in listings {
-        match out.iter_mut().find(|(c, _)| *c == l.category) {
+        let category = match l.kind {
+            Kind::Extension => Kind::Extension.label(),
+            Kind::Connector => l.category.as_str(),
+        };
+        match out.iter_mut().find(|(c, _)| c == category) {
             Some((_, items)) => items.push(l),
-            None => out.push((l.category.clone(), vec![l])),
+            None => out.push((category.to_owned(), vec![l])),
         }
     }
     out
@@ -1242,10 +1616,285 @@ pub fn failure(message: Option<&str>) -> String {
 }
 
 /// A pack checked and waiting on the confirm sheet.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Pending {
     pub key: String,
     pub preview: Value,
+    /// What was typed to confirm it.
+    pub typed: String,
+    /// The preview is `extension:inspect`'s sheet, not a catalog pack's.
+    pub git: bool,
+    /// The folder confirming links in place, rather than installing a copy.
+    pub link: Option<String>,
+}
+
+impl Pending {
+    /// The id typed to confirm the install.
+    pub fn id(&self) -> &str {
+        s(&self.preview, "confirm")
+            .or_else(|| s(&self.preview, "id"))
+            .unwrap_or("")
+    }
+
+    pub fn confirmed(&self) -> bool {
+        !self.id().is_empty() && self.typed.trim() == self.id()
+    }
+}
+
+/// One line of the install sheet, and whether Vorn holds the extension to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetRow {
+    pub label: &'static str,
+    pub text: String,
+    pub enforced: bool,
+}
+
+/// What the install sheet says, from either kind of preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetView {
+    pub title: String,
+    pub subtitle: String,
+    pub rows: Vec<SheetRow>,
+    pub note: String,
+    pub replaces: Option<String>,
+    /// It links a folder in place rather than installing a copy.
+    pub linking: bool,
+}
+
+impl Pending {
+    pub fn sheet(&self) -> SheetView {
+        let pv = &self.preview;
+        let name = s(pv, "name").or_else(|| s(pv, "id")).unwrap_or("");
+        let version = s(pv, "version").unwrap_or("");
+        let mut from = Vec::new();
+        if let Some(p) = s(pv, "publisher").filter(|p| !p.is_empty() && *p != "not named") {
+            from.push(format!("Published by {p}"));
+        }
+        let source = pv.get("source");
+        if let Some(git) = source.and_then(|v| s(v, "git")) {
+            let rev: String = source
+                .and_then(|v| s(v, "rev"))
+                .unwrap_or("")
+                .chars()
+                .take(12)
+                .collect();
+            from.push(if rev.is_empty() {
+                git.to_owned()
+            } else {
+                format!("{git} at {rev}")
+            });
+        } else if let Some(path) = source.and_then(|v| s(v, "path").or_else(|| s(v, "linked"))) {
+            from.push(path.to_owned());
+        }
+        let linking = self.link.is_some();
+        let row = |label, text: String, enforced| SheetRow {
+            label,
+            text,
+            enforced,
+        };
+        let mut rows = Vec::new();
+        if self.git {
+            let held = strings(pv.get("enforced"));
+            let held = |part: &str| held.iter().any(|e| e == part);
+            let hosts = strings(pv.get("hosts"));
+            let reach = if hosts.is_empty() {
+                "nothing".to_owned()
+            } else {
+                hosts.join(", ")
+            };
+            rows.push(row("Reaches", reach, held("hosts")));
+            let methods = strings(pv.get("methods"));
+            if !methods.is_empty() {
+                rows.push(row("Asks Vorn", methods.join(", "), held("methods")));
+            }
+            if let Some(c) = s(pv, "credential") {
+                rows.push(row("Credential", c.to_owned(), held("credential")));
+            }
+            let commands: Vec<String> = pv
+                .get("commands")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|c| {
+                    let argv = strings(c.get("argv")).join(" ");
+                    match s(c, "when") {
+                        Some(w) => format!("{w}: {argv}"),
+                        None => argv,
+                    }
+                })
+                .collect();
+            if !commands.is_empty() {
+                rows.push(row("Runs", commands.join("; "), held("commands")));
+            }
+            if let Some(adds) = adds_line(&strings(pv.get("adds"))) {
+                rows.push(row("Adds", adds, held("adds")));
+            }
+        } else {
+            let declared = if pv.get("permissions").is_some() {
+                strings(pv.get("permissions"))
+            } else {
+                strings(pv.pointer("/declares/uses"))
+            };
+            let hosts = strings(pv.pointer("/declares/network"));
+            let mut asks = Vec::new();
+            let mut asks_held = true;
+            for u in uses(&declared, &hosts) {
+                if u.what == "Network" {
+                    rows.push(row("Reaches", u.how, u.enforced));
+                } else {
+                    asks.push(format!("{} \u{2014} {}", u.what, u.how));
+                    asks_held &= u.enforced;
+                }
+            }
+            if !asks.is_empty() {
+                rows.push(row("Asks Vorn", asks.join("; "), asks_held));
+            }
+            let mut needs: Vec<String> = pv
+                .get("env")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|e| e.get("required") == Some(&Value::Bool(true)))
+                .filter_map(|e| s(e, "name").map(str::to_owned))
+                .collect();
+            let borrows = borrowable(pv);
+            if !borrows.is_empty() {
+                let probe = pv
+                    .pointer("/auth/probe/command")
+                    .and_then(Value::as_str)
+                    .unwrap_or("its command line tool");
+                needs.push(format!("{} from {probe}", borrows.join(", ")));
+            }
+            if !needs.is_empty() {
+                rows.push(row("Credential", needs.join(", "), true));
+            }
+            let triggers = array(pv, "triggers");
+            let actions = array(pv, "actions");
+            let runs = runs_line(pv.get("service")).or_else(|| {
+                (triggers + actions > 0)
+                    .then(|| "its program, while a connection uses it".to_owned())
+            });
+            if let Some(r) = runs {
+                rows.push(row("Runs", r, false));
+            }
+            let mut adds: Vec<String> = place_groups(pv.get("contributes"))
+                .into_iter()
+                .flat_map(|(_, items)| items)
+                .collect();
+            if triggers > 0 {
+                adds.push(count(triggers, "trigger"));
+            }
+            if actions > 0 {
+                adds.push(count(actions, "action"));
+            }
+            if !adds.is_empty() {
+                rows.push(row("Adds", adds.join(", "), false));
+            }
+        }
+        let verb = if linking { "Link" } else { "Install" };
+        let mut note = s(pv, "runsAsYou")
+            .unwrap_or("It runs as you, on this Mac.")
+            .to_owned();
+        if linking {
+            note.push_str(
+                " It runs in place from the folder, so your edits take effect without installing again.",
+            );
+        }
+        SheetView {
+            title: format!("{verb} {name} {version}").trim_end().to_owned(),
+            subtitle: from.join(" \u{b7} "),
+            rows,
+            note,
+            linking,
+            replaces: s(pv, "replaces")
+                .or_else(|| s(pv, "installedVersion"))
+                .filter(|v| *v != version)
+                .map(str::to_owned),
+        }
+    }
+}
+
+/// Where Install… takes an extension from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Origin {
+    /// A repository's address: a pinned copy that can roll back.
+    #[default]
+    Git,
+    /// A folder, a repository or not: a copy of it.
+    Folder,
+    /// A folder run in place, its edits live (`vorn ext link`).
+    Link,
+}
+
+impl Origin {
+    pub const ALL: [Origin; 3] = [Origin::Git, Origin::Folder, Origin::Link];
+
+    /// Its entry in the Install menu.
+    pub fn label(self) -> &'static str {
+        match self {
+            Origin::Git => "From Git\u{2026}",
+            Origin::Folder => "From a folder\u{2026}",
+            Origin::Link => "Link a folder\u{2026}",
+        }
+    }
+
+    /// What the menu says it gives, beside its entry.
+    pub fn detail(self) -> &'static str {
+        match self {
+            Origin::Git => "pinned copy",
+            Origin::Folder => "a copy",
+            Origin::Link => "edits are live",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Origin::Git => "git-branch",
+            Origin::Folder => "folder",
+            Origin::Link => "link",
+        }
+    }
+
+    /// Its dialog's title, and the folder picker's.
+    pub fn title(self) -> &'static str {
+        match self {
+            Origin::Git => "Install from Git",
+            Origin::Folder => "Install from a folder",
+            Origin::Link => "Link a folder",
+        }
+    }
+
+    pub fn help(self) -> &'static str {
+        match self {
+            Origin::Git => "A repository's address. Vorn installs a pinned copy you can roll back. Nothing runs until you have read what it asks for.",
+            Origin::Folder => "A folder on the machine Vorn runs on: a repository or an extension. Vorn installs a copy of it. Nothing runs until you have read what it asks for.",
+            Origin::Link => "A folder on the machine Vorn runs on. It runs in place, so your edits take effect without installing again. Nothing runs until you have read what it asks for.",
+        }
+    }
+
+    pub fn placeholder(self) -> &'static str {
+        match self {
+            Origin::Git => "https://github.com/owner/repo",
+            Origin::Folder | Origin::Link => "~/dev/my-extension",
+        }
+    }
+
+    /// The field's accessible name.
+    pub fn field(self) -> &'static str {
+        match self {
+            Origin::Git => "Repository",
+            Origin::Folder | Origin::Link => "Folder",
+        }
+    }
+}
+
+/// The install dialog, before its sheet: where the extension comes from.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SourceDialog {
+    pub origin: Origin,
+    pub url: String,
+    pub busy: bool,
+    pub error: Option<String>,
 }
 
 /// A built-in connector's form (`AddConnectionForm`).
@@ -1561,8 +2210,6 @@ pub struct Plugins {
     pub loads: u8,
     /// Set once something answered, so the page can say it is still reading.
     pub loaded: bool,
-    /// The first pack list picks the opening tab, once per visit.
-    pub decided: bool,
     pub tab: Tab,
     pub selected: Option<String>,
     pub adding: Option<Adding>,
@@ -1572,6 +2219,9 @@ pub struct Plugins {
     pub rung: Option<Rung>,
     pub progress: HashMap<String, Progress>,
     pub pending: Option<Pending>,
+    pub source: Option<SourceDialog>,
+    /// Install Extension… from the palette: open the Install menu once its button is laid out.
+    pub menu_soon: bool,
     pub installing: bool,
     /// The last install or remove report, shown under the directory.
     pub report: Option<String>,
@@ -1864,6 +2514,83 @@ mod tests {
         assert!(is_newer("1.0.0-beta", "1.0.0-1"));
         assert!(is_newer("1.0.0-a.1", "1.0.0-a"));
         assert!(!is_newer("1.0.0+build", "1.0.0"));
+    }
+
+    #[test]
+    fn says_where_a_pack_came_from() {
+        assert_eq!(
+            short_repo("https://github.com/vorn-run/turns.git"),
+            "vorn-run/turns"
+        );
+        assert_eq!(
+            short_repo("git@github.com:vorn-run/turns"),
+            "vorn-run/turns"
+        );
+        assert_eq!(short_repo("/srv/git/turns"), "/srv/git/turns");
+        let git = json!({"version": "1.2.0", "source": {"git": "https://github.com/o/r"}});
+        assert_eq!(pack_origin(&git), "v1.2.0 from o/r");
+        let copied = json!({"version": "0.1.0", "source": {"path": "/x/turns"}});
+        assert_eq!(pack_origin(&copied), "v0.1.0 copied from /x/turns");
+        let linked = json!({"version": "0.1.0", "linked": true, "path": "/x/turns"});
+        assert_eq!(pack_origin(&linked), "Linked from /x/turns");
+    }
+
+    #[test]
+    fn a_git_sheet_counts_what_it_adds() {
+        let adds: Vec<String> = [
+            "Pane: Turns",
+            "Sidebar section: Finished",
+            "Command: Toggle",
+            "Command: Clear",
+            "Window: Turns",
+            "Listens to: session.created",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(
+            adds_line(&adds).as_deref(),
+            Some("5 places: pane, sidebar section, command, \u{2026}; listens to 1 event")
+        );
+        assert_eq!(adds_line(&[]), None);
+    }
+
+    #[test]
+    fn a_link_sheet_says_it_runs_in_place() {
+        let preview = json!({
+            "id": "example.turns",
+            "name": "Turns",
+            "version": "1.0.0",
+            "publisher": "not named",
+            "source": { "linked": "/x/turns" },
+            "runsAsYou": "Turns runs as you.",
+            "confirm": "example.turns",
+            "token": "",
+        });
+        let mut pending = Pending {
+            key: "example.turns".into(),
+            preview,
+            git: true,
+            link: Some("/x/turns".into()),
+            ..Pending::default()
+        };
+        let view = pending.sheet();
+        assert!(view.linking);
+        assert_eq!(view.title, "Link Turns 1.0.0");
+        assert_eq!(view.subtitle, "/x/turns");
+        assert!(view.note.starts_with("Turns runs as you. It runs in place"));
+        pending.link = None;
+        let view = pending.sheet();
+        assert!(!view.linking);
+        assert_eq!(view.title, "Install Turns 1.0.0");
+        assert_eq!(view.note, "Turns runs as you.");
+        assert_eq!(
+            Origin::ALL.map(Origin::label),
+            [
+                "From Git\u{2026}",
+                "From a folder\u{2026}",
+                "Link a folder\u{2026}"
+            ]
+        );
     }
 
     #[test]

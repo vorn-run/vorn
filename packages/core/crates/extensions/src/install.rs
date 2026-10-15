@@ -243,7 +243,8 @@ impl Installs {
         });
     }
 
-    /// Clones `url` and describes what it would install, running nothing of it.
+    /// Clones `url`, or copies a folder that is not a repository, and
+    /// describes what it would install, running nothing of it.
     pub fn inspect_git(&self, url: &str, branch: Option<&str>) -> Result<Sheet, String> {
         self.inspect_git_at(url, branch, None)
     }
@@ -269,28 +270,32 @@ impl Installs {
         let root = self.store.root();
         fs::create_dir_all(root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
         let dir = root.join(format!(".staging-{}", token()));
-        let staged = self
-            .clone_into(url, branch, &dir)
-            .and_then(|rev| match path {
-                Some(p) => keep_only(&dir, p).map(|()| rev),
-                None => Ok(rev),
+        let folder = Path::new(url);
+        let plain = folder.is_dir() && !folder.join(".git").exists();
+        let copied = if plain {
+            copy_folder(folder, &dir).map(|()| json!({ "path": url }))
+        } else {
+            self.clone_into(url, branch, &dir).and_then(|rev| {
+                let mut source = json!({ "git": url, "rev": rev });
+                if let Some(p) = path {
+                    keep_only(&dir, p)?;
+                    source["path"] = json!(p);
+                }
+                Ok(source)
             })
-            .and_then(|rev| {
-                let manifest = read_staged_manifest(&dir)?;
-                crate::views::refuse(&manifest, &dir)?;
-                Ok((rev, manifest))
-            });
-        let (rev, manifest) = match staged {
+        };
+        let staged = copied.and_then(|source| {
+            let manifest = read_staged_manifest(&dir)?;
+            crate::views::refuse(&manifest, &dir)?;
+            Ok((source, manifest))
+        });
+        let (source, manifest) = match staged {
             Ok(found) => found,
             Err(err) => {
                 let _ = fs::remove_dir_all(&dir);
                 return Err(err);
             }
         };
-        let mut source = json!({ "git": url, "rev": rev });
-        if let Some(p) = path {
-            source["path"] = json!(p);
-        }
         let token = token();
         let sheet = self.sheet(&token, &manifest, &source);
         lock(&self.staged).insert(
@@ -573,15 +578,16 @@ impl Installs {
         self.store.inspect(id)
     }
 
+    /// Describes what linking `folder` would run, reading it where it is;
+    /// nothing is staged, so the sheet carries no token.
+    pub fn inspect_link(&self, folder: &Path) -> Result<Sheet, String> {
+        let (folder, manifest) = linkable(folder)?;
+        Ok(self.sheet("", &manifest, &json!({ "linked": folder })))
+    }
+
     /// Runs `folder` in place as its manifest's extension; edits are live.
     pub fn link(&self, folder: &Path) -> Result<InstalledPack, String> {
-        let folder = folder
-            .canonicalize()
-            .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
-        let manifest = read_dir_manifest(&folder)?;
-        if !is_safe_id(&manifest.id) {
-            return Err(format!("\"{}\" is not an extension id", manifest.id));
-        }
+        let (folder, manifest) = linkable(folder)?;
         // A linked folder is being written: its template errors show where it draws.
         for e in crate::views::check(&manifest, &folder) {
             tracing::warn!("[extensions] {}: {e}", manifest.id);
@@ -683,6 +689,18 @@ fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
 }
 
 /// A git install carries `vorn-extension.toml`; 0.8 packs install as archives.
+/// `folder` resolved, and the manifest it would be linked as.
+fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
+    let folder = folder
+        .canonicalize()
+        .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
+    let manifest = read_dir_manifest(&folder)?;
+    if !is_safe_id(&manifest.id) {
+        return Err(format!("\"{}\" is not an extension id", manifest.id));
+    }
+    Ok((folder, manifest))
+}
+
 fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     if !dir.join(file::FILE).is_file() {
         return Err(format!("The repository has no {} at its root", file::FILE));
@@ -792,6 +810,23 @@ fn bundle(folder: &Path, files: &[String], top: &str, out: &Path) -> std::io::Re
         tar.append_path_with_name(folder.join(f), format!("{top}/{f}"))?;
     }
     tar.into_inner()?.finish()?.flush()
+}
+
+/// What `pack` would bundle of `folder`, copied into `dir`.
+fn copy_folder(folder: &Path, dir: &Path) -> Result<(), String> {
+    let copy = || -> std::io::Result<()> {
+        let mut files = Vec::new();
+        walk(folder, "", &mut files)?;
+        for f in &files {
+            let to = dir.join(f);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(folder.join(f), to)?;
+        }
+        Ok(())
+    };
+    copy().map_err(|e| format!("cannot copy {}: {e}", folder.display()))
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> {
@@ -949,6 +984,30 @@ migrations = "migrations"
     }
 
     #[test]
+    fn installs_a_folder_that_is_not_a_repository_as_a_copy() {
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join(file::FILE),
+            MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", ""),
+        )
+        .unwrap();
+        fs::write(folder.path().join("hello.sh"), "").unwrap();
+        fs::create_dir_all(folder.path().join("node_modules/x")).unwrap();
+        fs::write(folder.path().join("node_modules/x/i.js"), "").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let path = folder.path().display().to_string();
+        let sheet = installs.inspect_git(&path, None).unwrap();
+        assert_eq!(sheet.source, json!({ "path": path }));
+        let pack = installs.confirm(&sheet.token, "test.marker").unwrap();
+        assert!(!pack.linked);
+        assert!(pack.path.join("hello.sh").exists());
+        assert!(!pack.path.join("node_modules").exists());
+        fs::write(folder.path().join("hello.sh"), "echo edited").unwrap();
+        assert_eq!(fs::read_to_string(pack.path.join("hello.sh")).unwrap(), "");
+    }
+
+    #[test]
     fn a_failed_build_installs_nothing() {
         let Some(git) = git() else { return };
         let source = repo(&[
@@ -1000,6 +1059,12 @@ migrations = "migrations"
         fs::write(folder.path().join("node_modules/x/i.js"), "").unwrap();
         let root = tempfile::tempdir().unwrap();
         let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let sheet = installs.inspect_link(folder.path()).unwrap();
+        assert!(sheet.token.is_empty());
+        assert_eq!(sheet.confirm, "test.marker");
+        let canonical = folder.path().canonicalize().unwrap();
+        assert_eq!(sheet.source, json!({ "linked": canonical }));
+        assert!(installs.store.describe("test.marker").is_none());
         let pack = installs.link(folder.path()).unwrap();
         assert!(pack.linked);
         // Linking the same folder again is a no-op; another id in its place is not.

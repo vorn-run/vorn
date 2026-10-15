@@ -184,7 +184,7 @@ Agents running inside Vorn can access tasks, projects, workflows, sessions, and 
 
 ### Floating Widget
 
-A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is a built-in extension, off until you turn it on in Settings › Plugins; Cmd+Alt+W shows or hides it.
+A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is a built-in extension, off until you turn it on in Settings › Extensions; Cmd+Alt+W shows or hides it.
 
 <p align="center">
   <img src="docs/screenshots/floating-widget.png" alt="Floating widget" width="400" />

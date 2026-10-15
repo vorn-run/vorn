@@ -221,6 +221,12 @@ pub struct Points {
     /// Built-in extensions: `{id, name, description, on}`.
     pub builtins: Vec<Value>,
     pub builtins_loaded: bool,
+    /// The built-in whose switch vornd has not answered yet.
+    pub switching: Option<String>,
+    /// The built-in that just went off, so its row says what that hid.
+    pub off_note: Option<String>,
+    /// A built-in whose switch was refused, and why.
+    pub switch_error: Option<(String, String)>,
     /// Settings pages and panes whose `call` ran since they showed.
     pub shown: BTreeSet<String>,
     /// Window points draw inside the app, which cannot open windows of their own.
@@ -233,6 +239,15 @@ impl Points {
     /// The contributions placed at `kind`, in order.
     pub fn at<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Point> + 'a {
         self.all.iter().filter(move |p| p.kind == kind)
+    }
+
+    /// Shows built-in `id` as on or off, ahead of vornd's answer.
+    pub fn set_builtin(&mut self, id: &str, on: bool) {
+        for b in &mut self.builtins {
+            if b.get("id").and_then(Value::as_str) == Some(id) {
+                b["on"] = Value::Bool(on);
+            }
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<&Point> {

@@ -197,14 +197,14 @@ pub fn carried_cause(entry: &Value) -> &'static str {
 // A browser installs no packs and downloads exports instead.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Picked {
-    /// A connector pack to install.
-    Pack,
     /// The add-project dialog's folder.
     Folder,
     /// Where a workflow is exported to.
     Export(String),
     /// A workflow file to import.
     Import,
+    /// A folder to install an extension from, or link.
+    ExtFolder(crate::plugins::Origin),
 }
 
 /// A call whose answer changes the screen.
@@ -319,6 +319,8 @@ pub struct App {
     preedit: String,
     /// The composer showed last frame: it takes the keyboard when it appears.
     was_composing: bool,
+    /// The install sheet just opened, so its field takes the keys next frame.
+    focus_confirm: bool,
     calls: Vec<(Call, Pending)>,
     /// Config saves not yet sent: vornd runs them in parallel, so a later
     /// one could land first.
@@ -489,6 +491,7 @@ impl App {
             web_url: ep.web_url(),
             preedit: String::new(),
             was_composing: false,
+            focus_confirm: false,
             calls: Vec::new(),
             saves: VecDeque::new(),
             saving: false,
@@ -634,7 +637,6 @@ impl App {
         let Some(path) = picked else { return };
         let path = path.to_string_lossy().into_owned();
         match purpose {
-            Picked::Pack => self.plug_picked(&path),
             Picked::Folder => {
                 if matches!(self.st.dialog, Some(Dialog::Project(_))) {
                     ui.set_edit_text(PROJECT_PATH, &path);
@@ -643,6 +645,7 @@ impl App {
             }
             Picked::Export(id) => self.export(&id, &path),
             Picked::Import => self.import(&path),
+            Picked::ExtFolder(origin) => self.plug_picked(ui, origin, &path),
         }
     }
 
@@ -1367,6 +1370,7 @@ impl App {
                         | MenuKind::ViewOptions
                         | MenuKind::TaskOptions
                         | MenuKind::TaskCard(_)
+                        | MenuKind::ExtInstall
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -1914,9 +1918,9 @@ impl App {
             }
             Act::Workflow(a) => self.run_wf(ui, a, src),
             Act::Set(a) => {
-                let was = self.st.shown(crate::settings::Category::Connectors);
+                let was = self.st.shows_plugins();
                 self.run_set(ui, a);
-                match (was, self.st.shown(crate::settings::Category::Connectors)) {
+                match (was, self.st.shows_plugins()) {
                     (true, false) => self.plug_leave(),
                     (false, true) => self.run_plug(ui, crate::plugins::PlugAct::Refresh),
                     _ => {}
@@ -2032,6 +2036,9 @@ impl App {
             Act::OpenWebClient => tasks::open_url(&self.web_url),
             Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
                 self.close_task_dialog(ui);
+            }
+            Act::CloseDialog if self.st.dialog == Some(Dialog::ExtInstall) => {
+                self.run_plug(ui, crate::plugins::PlugAct::CancelInstall);
             }
             Act::CloseDialog => {
                 self.st.dialog = None;
@@ -3059,7 +3066,7 @@ impl App {
         self.panes_tick(ui);
         self.tasks_tick(ui);
         self.net_tick(ui);
-        self.plug_tick();
+        self.plug_tick(ui);
         self.pick_tick(ui);
         self.headless_tick(ui, now);
         if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {

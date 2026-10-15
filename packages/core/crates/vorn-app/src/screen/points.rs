@@ -8,7 +8,7 @@ use super::Screen;
 use crate::act::{Act, Acts};
 use crate::points::{kind, Holder, Point, PointAct, Points};
 use crate::ui::theme::color as k;
-use crate::ui::{div, text, widgets, Action, El, Id, Rgba, Role, Ui};
+use crate::ui::{div, text, Action, El, Id, Rgba, Role, Ui};
 
 /// A template control's id: point `key`, drawn for `scope`, at node `slot`, for `row`.
 pub fn control_id(key: &str, scope: Option<&str>, slot: u64, row: Option<&str>) -> Id {
@@ -406,43 +406,4 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
         );
     }
     any.then(|| div().absolute_right(16.0, 16.0).layered().child(col))
-}
-
-/// Built-in extensions' switches, for Settings › Plugins.
-pub(super) fn builtins(s: &Screen<'_>) -> Option<El> {
-    if s.st.points.builtins.is_empty() {
-        return None;
-    }
-    let mut col = div().col().gap(8.0).mb(24.0).child(heading("BUILT IN"));
-    for b in &s.st.points.builtins {
-        let id = crate::runs::s(b, "id").unwrap_or_default();
-        let name = crate::runs::s(b, "name").unwrap_or(id);
-        let on = b.get("on").and_then(serde_json::Value::as_bool) == Some(true);
-        let switch = s.acts.on(
-            "ext-builtin",
-            Act::Point(PointAct::Builtin {
-                id: id.to_owned(),
-                on: !on,
-            }),
-        );
-        let desc = crate::runs::s(b, "description").unwrap_or_default();
-        col = col.child(
-            div()
-                .row()
-                .items_center()
-                .gap(16.0)
-                .py(8.0)
-                .child(
-                    div()
-                        .col()
-                        .grow()
-                        .min_w0()
-                        .gap(2.0)
-                        .child(text(name, 13.0, k::GRAY_200).line_height(18.0).truncate())
-                        .child(text(desc, 12.0, k::GRAY_500).line_height(16.0).wrapping()),
-                )
-                .child(widgets::toggle(switch, name, on, false).shrink0()),
-        );
-    }
-    Some(col)
 }

@@ -1,16 +1,17 @@
-//! What the Plugins page's controls do, and the answers to its calls.
+//! What the Extensions and Connections pages' controls do, and the answers to their calls.
 
 use serde_json::{json, Value};
 
 use super::{tasks::open_url, Act, App, Call, Src};
 use crate::client::RpcError;
 use crate::plugins::{
-    self as plug, failure, pick_id, Activity, BuiltinForm, Field, Form, Pending, Pick, PlugAct,
-    ProfileForm, Progress, Rung, SdkForm, Tab, Verb,
+    self as plug, failure, field_id, kinds_id, pick_id, tabs_id, Activity, BuiltinForm, Field,
+    Form, Origin, Pending, Pick, PlugAct, ProfileForm, Progress, Rung, SdkForm, Tab, Verb,
 };
 use crate::runs::s;
 use crate::settings::Category;
 use crate::settings::SetAct;
+use crate::state::{Dialog, MenuKind};
 use crate::templates::Fix;
 use crate::ui::{widgets, Event as UiEvent, Ui};
 use crate::workflows::WfAct;
@@ -20,7 +21,10 @@ pub(super) enum PlugCall {
     Builtins,
     Connections,
     Statuses,
-    Packs,
+    /// `extension:installed`, else `connector:listPacks` when that is all vornd has.
+    Packs {
+        fallback: bool,
+    },
     Catalog {
         load: bool,
     },
@@ -29,11 +33,16 @@ pub(super) enum PlugCall {
         key: String,
         direct: bool,
     },
-    /// A pack picked from disk; it has no row until it names itself.
-    InspectFile,
+    /// The install dialog's repository or folder, read for its sheet.
+    ReadSource(Origin),
     Install {
         id: String,
     },
+    /// An extension from Git or a folder, installed or linked once its id was typed.
+    ExtInstall {
+        linked: bool,
+    },
+    Sandbox,
     Remove(String),
     Rollback(String),
     /// A pack's manifest, read by starting it from this launch line.
@@ -69,8 +78,8 @@ impl App {
         match act {
             PlugAct::Refresh => {
                 p.tab = Tab::Installed;
-                p.decided = false;
                 p.selected = None;
+                p.source = None;
                 p.adding = None;
                 p.pending = None;
                 p.report = None;
@@ -86,37 +95,116 @@ impl App {
             PlugAct::Add(key) => self.plug_open(&key),
             PlugAct::CloseForm if p.from_editor => self.plug_leave(),
             PlugAct::CloseForm => p.adding = None,
-            PlugAct::Install(key) => self.plug_inspect(&key, true),
-            #[cfg(target_arch = "wasm32")]
-            PlugAct::InstallFile => {
-                let why = "Install a pack from a file in the desktop app; the catalog works here.";
-                self.st.toast(why.to_owned(), true);
+            // The editor's panel installs a listed pack outright; the page shows its sheet first.
+            PlugAct::Install(key) => {
+                let direct = p.from_editor;
+                self.plug_inspect(&key, direct);
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            PlugAct::InstallFile => {
-                p.report = None;
+            PlugAct::InstallMenu => {
+                self.plug_show_page(ui);
+                self.st.plugins.menu_soon = true;
+            }
+            PlugAct::InstallFrom(origin) => {
+                self.plug_show_page(ui);
+                let p = &mut self.st.plugins;
                 p.pending = None;
-                self.start_pick(
-                    super::Picked::Pack,
-                    crate::system::Pick::Pack(
-                        "Install a connector from its git repository".to_owned(),
-                    ),
+                p.report = None;
+                p.source = None;
+                // A browser cannot hand vornd a folder on its machine, so it is typed there too.
+                if origin == Origin::Git || cfg!(target_arch = "wasm32") {
+                    self.plug_source(ui, origin, "");
+                } else {
+                    let title = origin.title().to_owned();
+                    self.start_pick(
+                        super::Picked::ExtFolder(origin),
+                        crate::system::Pick::Folder(title),
+                    );
+                }
+            }
+            PlugAct::ReadSource => {
+                let Some(g) = p.source.as_mut().filter(|g| !g.busy) else {
+                    return;
+                };
+                let url = g.url.trim().to_owned();
+                if url.is_empty() {
+                    return;
+                }
+                g.busy = true;
+                g.error = None;
+                let origin = g.origin;
+                self.call(
+                    Call::Plug(PlugCall::ReadSource(origin)),
+                    "extension:inspect",
+                    json!({ "url": url, "link": origin == Origin::Link }),
                 );
             }
             PlugAct::ConfirmInstall => {
-                if let Some(pending) = p.pending.clone() {
+                let Some(pending) = p.pending.clone() else {
+                    return;
+                };
+                // The page asks for the id typed; the editor's inline sheet does not.
+                if p.installing || !p.from_editor && !pending.confirmed() {
+                    return;
+                }
+                if let Some(path) = &pending.link {
+                    p.installing = true;
+                    p.report = None;
+                    self.call(
+                        Call::Plug(PlugCall::ExtInstall { linked: true }),
+                        "extension:link",
+                        json!({ "path": path }),
+                    );
+                } else if pending.git {
+                    p.installing = true;
+                    p.report = None;
+                    let token = s(&pending.preview, "token").unwrap_or("").to_owned();
+                    self.call(
+                        Call::Plug(PlugCall::ExtInstall { linked: false }),
+                        "extension:install",
+                        json!({ "token": token, "confirm": pending.typed.trim() }),
+                    );
+                } else {
                     self.plug_keep(pending);
                 }
             }
-            PlugAct::CancelInstall => p.pending = None,
+            PlugAct::CancelInstall => {
+                if !p.installing {
+                    self.plug_close_sheet();
+                }
+            }
             PlugAct::Remove(id) => {
                 if self.plug_start(Verb::Remove, &id) {
+                    self.st.plugins.selected = None;
                     self.call(
                         Call::Plug(PlugCall::Remove(id.clone())),
-                        "connector:removePack",
-                        json!(id),
+                        "extension:remove",
+                        json!({ "id": id }),
                     );
                 }
+            }
+            PlugAct::Sandbox(id, on) => {
+                if let Some(pack) = p.packs.iter_mut().find(|k| s(k, "id") == Some(id.as_str())) {
+                    pack["sandboxed"] = json!(on);
+                }
+                p.rebuild();
+                self.call(
+                    Call::Plug(PlugCall::Sandbox),
+                    "extension:setSandbox",
+                    json!({ "id": id, "on": on }),
+                );
+            }
+            PlugAct::ShowFolder(path) => super::tasks::open_folder(&path),
+            PlugAct::AddConnection => {
+                self.run(
+                    ui,
+                    Act::Set(SetAct::Open(Category::Connectors)),
+                    Src::default(),
+                );
+                let p = &mut self.st.plugins;
+                p.tab = Tab::Browse;
+                p.kind = Some(plug::Kind::Connector);
+                p.selected = None;
+                p.adding = None;
             }
             PlugAct::Rollback(id) => {
                 if self.plug_start(Verb::Rollback, &id) {
@@ -261,6 +349,7 @@ impl App {
     fn plug_load(&mut self, catalog: bool) {
         let p = &mut self.st.plugins;
         p.loads += 4 + u8::from(catalog);
+        self.st.ext.loaded = false;
         self.call(
             Call::Plug(PlugCall::Builtins),
             "connector:list",
@@ -277,8 +366,8 @@ impl App {
             Value::Null,
         );
         self.call(
-            Call::Plug(PlugCall::Packs),
-            "connector:listPacks",
+            Call::Plug(PlugCall::Packs { fallback: false }),
+            "extension:installed",
             Value::Null,
         );
         if catalog {
@@ -513,8 +602,63 @@ impl App {
         let p = &mut self.st.plugins;
         p.adding = None;
         p.selected = None;
-        p.tab = Tab::Installed;
+        self.open_settings(Category::Connections);
+        // The page reads its rows again, with the connection just made.
+        self.st.points.shown.clear();
         self.plug_load(false);
+    }
+
+    /// Opens Settings › Extensions unless it shows.
+    fn plug_show_page(&mut self, ui: &mut Ui) {
+        if !self.st.shows_plugins() {
+            self.run(
+                ui,
+                Act::Set(SetAct::Open(Category::Connectors)),
+                Src::default(),
+            );
+        }
+    }
+
+    /// Opens the install dialog on `origin`, its field holding `url`.
+    fn plug_source(&mut self, ui: &mut Ui, origin: Origin, url: &str) {
+        let p = &mut self.st.plugins;
+        p.pending = None;
+        p.report = None;
+        p.source = Some(plug::SourceDialog {
+            origin,
+            url: url.to_owned(),
+            ..plug::SourceDialog::default()
+        });
+        self.st.dialog = Some(Dialog::ExtInstall);
+        let id = field_id(&Field::Source);
+        ui.set_edit_text(id, url);
+        ui.set_focus(Some(id));
+    }
+
+    /// The folder picker chose `path` to install from or link: its sheet is read at once.
+    pub(super) fn plug_picked(&mut self, ui: &mut Ui, origin: Origin, path: &str) {
+        self.plug_source(ui, origin, path);
+        self.run_plug(ui, PlugAct::ReadSource);
+    }
+
+    /// Puts the install dialog away, and what it was showing.
+    fn plug_close_sheet(&mut self) {
+        let p = &mut self.st.plugins;
+        if let Some(id) = p
+            .pending
+            .as_ref()
+            .and_then(|pd| p.listing(&pd.key))
+            .map(|l| l.id.clone())
+        {
+            p.progress.remove(&id);
+        }
+        p.pending = None;
+        p.source = None;
+        p.report = None;
+        p.installing = false;
+        if self.st.dialog == Some(Dialog::ExtInstall) {
+            self.st.dialog = None;
+        }
     }
 
     /// Leaves the page; a workflow editor under it re-reads what its requirements check.
@@ -599,15 +743,16 @@ impl App {
                 }
                 self.plug_loaded();
             }
-            PlugCall::Packs => {
+            PlugCall::Packs { fallback: false } if answer.is_err() => {
+                self.call(
+                    Call::Plug(PlugCall::Packs { fallback: true }),
+                    "connector:listPacks",
+                    Value::Null,
+                );
+            }
+            PlugCall::Packs { .. } => {
                 if let Ok(v) = &answer {
                     p.packs = arr(v);
-                }
-                if !p.decided {
-                    p.decided = true;
-                    if p.packs.is_empty() {
-                        p.tab = Tab::Browse;
-                    }
                 }
                 for id in std::mem::take(&mut p.forget) {
                     p.progress.remove(&id);
@@ -628,17 +773,54 @@ impl App {
                     self.plug_catalog(v);
                 }
             }
-            PlugCall::InspectFile => match answer {
-                Err(e) => p.report = Some(e.to_string()),
-                Ok(v) => match refused(&v) {
-                    Some(e) => p.report = Some(e),
-                    None => {
-                        let preview = v.get("preview").cloned().unwrap_or(Value::Null);
-                        let key = s(&preview, "id").unwrap_or("").to_owned();
-                        p.pending = Some(Pending { key, preview });
+            PlugCall::ReadSource(origin) => {
+                let Some(g) = p.source.as_mut().filter(|g| g.origin == origin) else {
+                    return;
+                };
+                g.busy = false;
+                match answer {
+                    Err(e) => g.error = Some(e.to_string()),
+                    Ok(sheet) => {
+                        let key = s(&sheet, "id").unwrap_or("").to_owned();
+                        let link = (origin == Origin::Link).then(|| {
+                            sheet
+                                .pointer("/source/linked")
+                                .and_then(Value::as_str)
+                                .unwrap_or(g.url.trim())
+                                .to_owned()
+                        });
+                        p.pending = Some(Pending {
+                            key,
+                            preview: sheet,
+                            git: true,
+                            link,
+                            ..Pending::default()
+                        });
+                        self.focus_confirm = true;
                     }
-                },
-            },
+                }
+            }
+            PlugCall::ExtInstall { linked } => {
+                p.installing = false;
+                match answer {
+                    Err(e) => p.report = Some(e.to_string()),
+                    Ok(pack) => {
+                        let name = s(&pack, "name").unwrap_or("The extension").to_owned();
+                        self.plug_close_sheet();
+                        let verb = if linked { "Linked" } else { "Installed" };
+                        self.st.toast(format!("{verb} {name}"), false);
+                        self.st.points.stale = true;
+                        self.st.points.builtins_loaded = false;
+                        self.plug_load(false);
+                    }
+                }
+            }
+            PlugCall::Sandbox => {
+                if let Err(e) = answer {
+                    self.st.toast(e.to_string(), true);
+                }
+                self.plug_load(false);
+            }
             PlugCall::Inspect { key, direct } => {
                 let Some(l) = p.listing(&key).cloned() else {
                     return;
@@ -663,12 +845,20 @@ impl App {
                         Some(e) => fail(p, e),
                         None => {
                             let preview = v.get("preview").cloned().unwrap_or(Value::Null);
-                            let pending = Pending { key, preview };
+                            let pending = Pending {
+                                key,
+                                preview,
+                                ..Pending::default()
+                            };
                             if direct && plug::matches_listing(&pending.preview, &l) {
                                 self.plug_keep(pending);
                             } else {
                                 p.progress.remove(&l.id);
                                 p.pending = Some(pending);
+                                if !p.from_editor {
+                                    self.st.dialog = Some(Dialog::ExtInstall);
+                                    self.focus_confirm = true;
+                                }
                             }
                         }
                     },
@@ -676,7 +866,6 @@ impl App {
             }
             PlugCall::Install { id } => {
                 p.installing = false;
-                p.pending = None;
                 let error = match &answer {
                     Ok(v) => refused(v),
                     Err(e) => Some(e.to_string()),
@@ -690,13 +879,17 @@ impl App {
                         };
                         p.progress.insert(id, progress);
                         p.report = Some(e);
+                        if p.from_editor {
+                            p.pending = None;
+                        }
                     }
                     None => {
+                        self.plug_close_sheet();
+                        let p = &mut self.st.plugins;
                         p.progress.insert(id.clone(), Progress::phase("installing"));
                         p.forget.push(id);
                         let editor = p.from_editor;
-                        // What a card offers is read from the extension list, which just changed.
-                        self.st.ext.loaded = false;
+                        self.st.points.stale = true;
                         self.plug_load(false);
                         if editor && self.st.wf.editor.is_some() {
                             self.load_library();
@@ -724,7 +917,7 @@ impl App {
                     }
                 }
                 self.plug_finish(&id, error);
-                self.st.ext.loaded = false;
+                self.st.points.stale = true;
                 self.plug_load(false);
             }
             PlugCall::Rollback(id) => {
@@ -954,7 +1147,7 @@ impl App {
                 }
             }
             "connector:catalogChanged" => self.plug_catalog(params),
-            _ if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor => {}
+            _ if !self.st.shows_plugins() && !self.st.plugins.from_editor => {}
             "config:changed" => {
                 self.call(
                     Call::Plug(PlugCall::Connections),
@@ -988,12 +1181,39 @@ impl App {
         }
     }
 
-    /// Once a frame: an editor fix is put away once its panel is.
-    pub(super) fn plug_tick(&mut self) {
+    /// Once a frame: an editor fix is put away once its panel is, and the
+    /// sheet's field takes the keys once it shows.
+    pub(super) fn plug_tick(&mut self, ui: &mut Ui) {
+        if std::mem::take(&mut self.focus_confirm) {
+            let id = field_id(&Field::Confirm);
+            ui.set_edit_text(id, "");
+            ui.set_focus(Some(id));
+        }
+        if self.st.dialog == Some(Dialog::ExtInstall)
+            && self.st.plugins.pending.is_none()
+            && self.st.plugins.source.is_none()
+        {
+            self.st.dialog = None;
+        }
+        if self.st.plugins.menu_soon {
+            let id = super::Acts::id("plug-install", &Act::Open(MenuKind::ExtInstall));
+            if !self.st.shows_plugins() {
+                self.st.plugins.menu_soon = false;
+            } else if ui.authored_rect(id).is_some() {
+                self.st.plugins.menu_soon = false;
+                if self.st.menu.as_ref().map(|m| &m.kind) != Some(&MenuKind::ExtInstall) {
+                    let src = Src {
+                        id: Some(id),
+                        at: None,
+                    };
+                    self.open_menu(ui, MenuKind::ExtInstall, src);
+                }
+            }
+        }
         let panel_open = self.st.wf.editor.is_some()
             && (self.st.wf.panel == crate::workflows::Panel::StartFrom
                 || !self.st.wf.still_needed().is_empty());
-        if self.st.plugins.from_editor && !panel_open && !self.st.shown(Category::Connectors) {
+        if self.st.plugins.from_editor && !panel_open && !self.st.shows_plugins() {
             let p = &mut self.st.plugins;
             p.from_editor = false;
             p.adding = None;
@@ -1003,17 +1223,8 @@ impl App {
         }
     }
 
-    /// A connector's repository picked on disk goes to vornd to be checked.
-    pub(super) fn plug_picked(&mut self, path: &str) {
-        self.call(
-            Call::Plug(PlugCall::InspectFile),
-            "connector:inspectPack",
-            json!({ "kind": "git", "url": path }),
-        );
-    }
-
     pub(super) fn plug_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
-        if !self.st.shown(Category::Connectors) && !self.st.plugins.from_editor {
+        if !self.st.shows_plugins() && !self.st.plugins.from_editor {
             return false;
         }
         match event {
@@ -1031,12 +1242,35 @@ impl App {
                     true
                 }
                 Some(Act::Plug(PlugAct::Text(Field::Query))) => true,
+                Some(Act::Plug(PlugAct::Text(Field::Source))) => {
+                    self.run_plug(ui, PlugAct::ReadSource);
+                    true
+                }
+                Some(Act::Plug(PlugAct::Text(Field::Confirm))) => {
+                    self.run_plug(ui, PlugAct::ConfirmInstall);
+                    true
+                }
                 Some(Act::Plug(PlugAct::Text(_))) => {
                     self.run_plug(ui, PlugAct::Save);
                     true
                 }
                 _ => false,
             },
+            UiEvent::Select { group, index } if *group == kinds_id() => {
+                let p = &mut self.st.plugins;
+                p.kind = match index {
+                    1 => Some(plug::Kind::Connector),
+                    2 => Some(plug::Kind::Extension),
+                    _ => None,
+                };
+                true
+            }
+            UiEvent::Select { group, index } if *group == tabs_id() => {
+                if let Some(tab) = Tab::ALL.get(*index) {
+                    self.run_plug(ui, PlugAct::Tab(*tab));
+                }
+                true
+            }
             UiEvent::Select { group, index } => {
                 let Some(pick) = self
                     .plug_picks()
@@ -1158,9 +1392,22 @@ impl App {
 
     fn plug_text(&mut self, field: Field, value: String) {
         let p = &mut self.st.plugins;
-        if field == Field::Query {
-            p.query = value;
-            return;
+        match field {
+            Field::Query => return p.query = value,
+            Field::Source => {
+                if let Some(g) = p.source.as_mut() {
+                    g.url = value;
+                    g.error = None;
+                }
+                return;
+            }
+            Field::Confirm => {
+                if let Some(pd) = p.pending.as_mut() {
+                    pd.typed = value;
+                }
+                return;
+            }
+            _ => {}
         }
         let Some(a) = p.adding.as_mut() else { return };
         match (field, &mut a.form) {
