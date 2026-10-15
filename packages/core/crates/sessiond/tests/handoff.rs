@@ -23,24 +23,45 @@ struct Client {
 }
 
 impl Client {
+    /// Connects and says Hello. A connection made as a loaded runner starts
+    /// the listener has been dropped before its Hello was read (a broken
+    /// pipe); that one is made again, within a bound, saying why.
     async fn hello(d: &Sessiond) -> (Client, Welcome) {
-        let sock = UnixStream::connect(d.endpoint()).await.expect("connect");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match Client::try_hello(d).await {
+                Ok(done) => return done,
+                Err(err) if std::time::Instant::now() < deadline => {
+                    eprintln!("hello again: {err}");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(err) => panic!("no Welcome within 10 s: {err}"),
+            }
+        }
+    }
+
+    async fn try_hello(d: &Sessiond) -> std::io::Result<(Client, Welcome)> {
+        let sock = UnixStream::connect(d.endpoint()).await?;
         let mut c = Client {
             sock,
             frames: FrameReader::default(),
             logs: HashMap::new(),
             written: Vec::new(),
         };
-        c.send(ToSessiond::Hello(Hello {
+        let hello = ToSessiond::Hello(Hello {
             proto_min: PROTO,
             proto_max: PROTO,
             vornd_instance: 1,
             vornd_build: "test".into(),
-        }))
-        .await;
+        });
+        c.sock.write_all(&hello.encode()).await?;
         match c.recv().await {
-            Some(ToVornd::Welcome(w)) => (c, w),
-            other => panic!("expected Welcome, got {other:?}"),
+            Some(ToVornd::Welcome(w)) => Ok((c, w)),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "closed before its Welcome",
+            )),
+            Some(other) => panic!("expected Welcome, got {other:?}"),
         }
     }
 
