@@ -2,11 +2,11 @@
 
 mod common;
 
-use common::{call, memory, save_config, update_task};
+use common::{call, memory, put_workflows, update_task};
 use serde_json::{json, Value};
 use vorn_store::Store;
 
-/// Saves `workflows` (each merged over a default row) through `saveConfig`.
+/// Puts `workflows` (each merged over a default row) in the store.
 fn seed(store: &mut Store, workflows: Vec<Value>) {
     let workflows: Vec<Value> = workflows
         .into_iter()
@@ -21,15 +21,7 @@ fn seed(store: &mut Store, workflows: Vec<Value>) {
             row
         })
         .collect();
-    save_config(
-        store,
-        json!({
-            "version": 1,
-            "defaults": { "shell": "/bin/zsh", "fontSize": 13, "theme": "dark" },
-            "projects": [], "tasks": [], "workflows": workflows
-        }),
-        &[],
-    );
+    put_workflows(store, workflows);
 }
 
 fn update(store: &mut Store, id: &str, updates: Value) -> Value {

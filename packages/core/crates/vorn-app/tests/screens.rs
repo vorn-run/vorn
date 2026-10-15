@@ -115,7 +115,9 @@ fn seed(v: &TestVornd, shot: &mut Shot, app: &mut App) {
     shot.until(app, "the seed loaded", |app, _| {
         (!app.store.projects.is_empty()
             && !app.store.groups.is_empty()
-            && app.store.tasks.len() == 3)
+            && app.store.tasks.len() == 3
+            && app.store.workflows.len() == 1
+            && app.store.workflows[0].id == "wf-hello")
             .then_some(())
     });
     shot.until(app, "the worktrees listed", |app, _| {

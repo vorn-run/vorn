@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{call, ids, lacks, memory, save_config};
+use common::{call, ids, lacks, memory, put_workflows};
 use serde_json::{json, Value};
 use vorn_store::Store;
 
@@ -242,8 +242,8 @@ mod all_runs {
         ids(&Value::Array(runs.to_vec()), "workflowId")
     }
 
-    fn config_with_workflows(workflows: &[(&str, &str, Option<&str>)]) -> Value {
-        let workflows: Vec<Value> = workflows
+    fn workflows_of(workflows: &[(&str, &str, Option<&str>)]) -> Vec<Value> {
+        workflows
             .iter()
             .map(|(id, name, workspace)| {
                 let mut w = json!({
@@ -259,20 +259,7 @@ mod all_runs {
                 }
                 w
             })
-            .collect();
-        json!({
-            "version": 1,
-            "defaults": { "shell": "bash", "fontSize": 14, "theme": "dark" },
-            "projects": [], "workflows": workflows
-        })
-    }
-
-    fn empty_config() -> Value {
-        json!({
-            "version": 1,
-            "defaults": { "shell": "bash", "fontSize": 14, "theme": "dark" },
-            "projects": []
-        })
+            .collect()
     }
 
     fn bare_run(workflow: &str, started: &str) -> Value {
@@ -285,10 +272,9 @@ mod all_runs {
     #[test]
     fn runs_of_every_workflow_come_newest_first_with_their_names() {
         let mut store = memory();
-        save_config(
+        put_workflows(
             &mut store,
-            config_with_workflows(&[("wf-a", "Alpha", None), ("wf-b", "Beta", None)]),
-            &[],
+            workflows_of(&[("wf-a", "Alpha", None), ("wf-b", "Beta", None)]),
         );
         save(
             &mut store,
@@ -317,13 +303,12 @@ mod all_runs {
     #[test]
     fn a_workspace_narrows_to_its_workflows() {
         let mut store = memory();
-        save_config(
+        put_workflows(
             &mut store,
-            config_with_workflows(&[
+            workflows_of(&[
                 ("wf-personal", "P", Some("personal")),
                 ("wf-team", "T", Some("team")),
             ]),
-            &[],
         );
         save(&mut store, bare_run("wf-personal", "2026-04-20T10:00:00Z"));
         save(&mut store, bare_run("wf-team", "2026-04-20T10:00:30Z"));
@@ -340,11 +325,7 @@ mod all_runs {
     #[test]
     fn the_limit_is_honoured_and_clamped_to_500() {
         let mut store = memory();
-        save_config(
-            &mut store,
-            config_with_workflows(&[("wf-x", "X", None)]),
-            &[],
-        );
+        put_workflows(&mut store, workflows_of(&[("wf-x", "X", None)]));
         for i in 0..5 {
             save(
                 &mut store,
@@ -358,16 +339,12 @@ mod all_runs {
     #[test]
     fn the_trigger_task_comes_back_and_an_orphaned_run_survives() {
         let mut store = memory();
-        save_config(
-            &mut store,
-            config_with_workflows(&[("wf-orphan", "O", None)]),
-            &[],
-        );
+        put_workflows(&mut store, workflows_of(&[("wf-orphan", "O", None)]));
         let mut run = bare_run("wf-orphan", "2026-04-20T10:00:00Z");
         run["triggerTaskId"] = json!("task-7");
         save(&mut store, run);
-        // The workflow goes from the config; its run row stays.
-        save_config(&mut store, empty_config(), &[]);
+        // The workflow goes; its run row stays.
+        put_workflows(&mut store, Vec::new());
         let listed = all(&mut store, Value::Null, 50);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0]["triggerTaskId"], "task-7");
@@ -377,13 +354,12 @@ mod all_runs {
     #[test]
     fn orphaned_runs_are_left_out_of_a_workspace_listing() {
         let mut store = memory();
-        save_config(
+        put_workflows(
             &mut store,
-            config_with_workflows(&[("wf-orphan", "O", Some("team"))]),
-            &[],
+            workflows_of(&[("wf-orphan", "O", Some("team"))]),
         );
         save(&mut store, bare_run("wf-orphan", "2026-04-20T10:00:00Z"));
-        save_config(&mut store, empty_config(), &[]);
+        put_workflows(&mut store, Vec::new());
         assert!(all(&mut store, json!("personal"), 50).is_empty());
         assert!(all(&mut store, json!("team"), 50).is_empty());
         assert_eq!(all(&mut store, Value::Null, 50).len(), 1);
