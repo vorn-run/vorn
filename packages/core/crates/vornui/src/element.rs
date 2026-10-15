@@ -275,6 +275,8 @@ pub struct El {
     pub(crate) frames: Option<Id>,
     /// A scroll view whose children a [`crate::Windowed`] chose.
     pub(crate) windowed: bool,
+    /// What the box means to a native backend (see [`crate::native`]).
+    pub(crate) sem: Option<Box<crate::native::Sem>>,
 }
 
 pub fn div() -> El {
@@ -307,6 +309,7 @@ pub fn div() -> El {
         glyph: None,
         glyph_tint: None,
         windowed: false,
+        sem: None,
     }
 }
 
@@ -861,6 +864,11 @@ impl El {
     /// A role with no label of its own (its children say it).
     pub fn role_only(mut self, role: Role) -> El {
         self.a11y.role = Some(role);
+        self
+    }
+    /// Tags the box with what it means, for a native backend to draw it as a platform view.
+    pub fn sem(mut self, s: crate::native::Sem) -> El {
+        self.sem = Some(Box::new(s));
         self
     }
     /// Keeps a text element out of the accessibility tree (its parent's

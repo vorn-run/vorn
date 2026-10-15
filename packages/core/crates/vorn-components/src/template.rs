@@ -8,6 +8,7 @@ use vorn_view::{
     Action as Do, BoardColumn, Cond, Group, Kind, Node, Role as TextRole, Row, Source, Style,
     Template, Tone,
 };
+use vornui::native::Sem;
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
 use vornui::{div, text, Action, El, Id, Place, Rgba, Sense, Ui};
@@ -87,6 +88,19 @@ pub fn tone(t: Tone) -> Rgba {
         Tone::Muted => color::INK_FAINT,
         Tone::Idle => color::STATUS_SLATE,
         Tone::Active => color::STATUS_BLUE,
+    }
+}
+
+/// A tone's name, as a native backend reads it.
+pub fn tone_name(t: Tone) -> &'static str {
+    match t {
+        Tone::Good => "good",
+        Tone::Bad => "bad",
+        Tone::Warn => "warn",
+        Tone::Busy => "busy",
+        Tone::Muted => "muted",
+        Tone::Idle => "idle",
+        Tone::Active => "active",
     }
 }
 
@@ -252,7 +266,9 @@ impl Cx<'_> {
         }
         let fill = |t: &vorn_view::Text| t.fill_in(row, self.src, self.column);
         Some(match &n.kind {
-            Kind::Column(kids) => column().children(self.kids(kids, row, slot)),
+            Kind::Column(kids) => column()
+                .sem(Sem::Column)
+                .children(self.kids(kids, row, slot)),
             Kind::Toolbar(kids) => div()
                 .row()
                 .items_center()
@@ -267,6 +283,7 @@ impl Cx<'_> {
             } => self.entry_row(slot, &fill(title), detail.as_ref().map(fill), children, row),
             Kind::Notice { value, tone: t } => self.notice(&fill(value), *t),
             Kind::Row(kids) => div()
+                .sem(Sem::Row)
                 .row()
                 .items_center()
                 .gap(8.0)
@@ -276,6 +293,7 @@ impl Cx<'_> {
             Kind::Section { title, children } => {
                 let title = fill(title);
                 div()
+                    .sem(Sem::Section(title.clone()))
                     .col()
                     .gap(12.0)
                     .min_w0()
@@ -285,7 +303,8 @@ impl Cx<'_> {
                             .weight(size::MEDIUM)
                             .tracking(0.05)
                             .truncate()
-                            .role(Role::Heading, title.as_str()),
+                            .role(Role::Heading, title.as_str())
+                            .sem(Sem::Hidden),
                     )
                     .children(self.kids(children, row, slot))
             }
@@ -320,20 +339,27 @@ impl Cx<'_> {
                 };
                 let ink = t.map_or(color::GRAY_400, |t| self.tone_of(t));
                 let name = fill(name);
-                match self.bind.icon(&name, 14.0) {
+                let drawn = match self.bind.icon(&name, 14.0) {
                     Some(drawn) => drawn.shrink0(),
                     None => crate::lucide(&name, 14.0, 2.0, ink).shrink0(),
-                }
+                };
+                drawn.sem(Sem::Icon(name))
             }
             Kind::Status { value, tones } => self.status(&fill(value), tones),
             Kind::Badge { value, tones } => {
                 let v = fill(value);
-                let ink = if tones.is_empty() {
-                    color::GRAY_300
+                let (ink, name) = if tones.is_empty() {
+                    (color::GRAY_300, "")
                 } else {
-                    self.tone_of(Tone::of(tones, &v))
+                    let t = Tone::of(tones, &v);
+                    (self.tone_of(t), tone_name(t))
                 };
-                widgets::badge(&v, ink, Rgba::white(0.06)).role(Role::Label, v.as_str())
+                widgets::badge(&v, ink, Rgba::white(0.06))
+                    .role(Role::Label, v.as_str())
+                    .sem(Sem::Badge {
+                        value: v,
+                        tone: name,
+                    })
             }
             Kind::Button {
                 label,
@@ -366,7 +392,12 @@ impl Cx<'_> {
                         .items_center()
                         .gap(8.0)
                         .min_w0()
-                        .child(div().grow().min_w0().child(words(&name, TextRole::Body)))
+                        .child(
+                            div()
+                                .grow()
+                                .min_w0()
+                                .child(words(&name, TextRole::Body).sem(Sem::Hidden)),
+                        )
                         .child(switch)
                 }
             }
@@ -430,7 +461,11 @@ impl Cx<'_> {
                     Some(g) => self.groups(all, g, item, slot, boxed),
                 }
             }
-            Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
+            Kind::Divider => div()
+                .sem(Sem::Divider)
+                .w_full()
+                .h(0.0)
+                .border_top(1.0, Rgba::white(0.08)),
             Kind::Board(b) => crate::board::view(self, b, slot),
         })
     }
@@ -445,7 +480,12 @@ impl Cx<'_> {
         selected: Option<&Cond>,
         call: &str,
     ) -> El {
-        let mut line = div().row().wrap_children().gap(4.0).min_w0();
+        let mut line = div()
+            .sem(Sem::Choice)
+            .row()
+            .wrap_children()
+            .gap(4.0)
+            .min_w0();
         for (i, r) in self
             .src
             .rows(rows)
@@ -497,13 +537,17 @@ impl Cx<'_> {
     }
 
     fn status(&self, value: &str, tones: &BTreeMap<String, Tone>) -> El {
-        let ink = self.tone_of(Tone::of(tones, value));
+        let t = Tone::of(tones, value);
+        let ink = self.tone_of(t);
         let dot = if self.ui.is_cells() {
             text("●", 12.0, ink).line_height(16.0).silent()
         } else {
             div().size(6.0, 6.0).rounded(3.0).bg(ink)
         };
-        dot.shrink0().role(Role::Status, value)
+        dot.shrink0().role(Role::Status, value).sem(Sem::Status {
+            value: value.to_owned(),
+            tone: tone_name(t),
+        })
     }
 
     /// A "more" button and, while open, its menu of the buttons that hold;
@@ -531,13 +575,21 @@ impl Cx<'_> {
             let ask = confirm.as_ref().map(|c| c.fill(row, self.src));
             let press = filled(action, row, self.src, ask.clone());
             let id = self.bind.press(child_slot(slot, i), press);
+            let sem = Sem::Button {
+                style: style_name(*style),
+                confirm: ask.clone(),
+                icon: icon.clone(),
+            };
             if let (Some(message), Some(ids)) = (ask, self.bind.confirming(id)) {
                 asking = Some((message, label.clone(), *style, ids));
             }
-            entries.push(self.entry(id, &label, *style, icon.as_deref()));
+            entries.push(self.entry(id, &label, *style, icon.as_deref()).sem(sem));
         }
         if entries.is_empty() {
             return None;
+        }
+        if self.ui.is_native() {
+            return Some(div().id(menu).sem(Sem::More).children(entries));
         }
         let hot = self.ui.hover(menu);
         let open = self.bind.menu_open(menu);
@@ -631,6 +683,11 @@ impl Cx<'_> {
         icon: Option<&str>,
     ) -> (Id, El) {
         let ask = press.confirm.clone();
+        let sem = Sem::Button {
+            style: style_name(style),
+            confirm: ask.clone(),
+            icon: icon.map(str::to_owned),
+        };
         let id = self.bind.press(slot, press);
         let hot = self.ui.hover(id);
         let (rest, lit) = match style {
@@ -655,7 +712,8 @@ impl Cx<'_> {
             .rounded(radius::SM)
             .bg(fill)
             .ring(radius::SM)
-            .role(Role::Button, label);
+            .role(Role::Button, label)
+            .sem(sem);
         if let Some(name) = icon {
             b = b.child(crate::lucide(name, 12.0, 2.0, ink));
         }
@@ -687,9 +745,10 @@ impl Cx<'_> {
             .into_iter()
             .filter_map(|r| self.node(item, Some(r), child_slot(slot, 0)));
         if !boxed {
-            return div().col().gap(4.0).min_w0().children(els);
+            return div().sem(Sem::List).col().gap(4.0).min_w0().children(els);
         }
         div()
+            .sem(Sem::List)
             .col()
             .min_w0()
             .rounded(radius::SM)
@@ -928,9 +987,30 @@ fn state(copy: &str, boxed: bool) -> El {
         .child(t)
 }
 
+fn style_name(s: Style) -> &'static str {
+    match s {
+        Style::Plain => "plain",
+        Style::Primary => "primary",
+        Style::Danger => "danger",
+    }
+}
+
+fn role_name(role: TextRole) -> &'static str {
+    match role {
+        TextRole::Title => "title",
+        TextRole::Body => "body",
+        TextRole::Secondary => "secondary",
+        TextRole::Mono => "mono",
+        TextRole::Number => "number",
+    }
+}
+
 /// Text in a role, on as many lines as it takes.
 fn wrapped(s: &str, role: TextRole) -> El {
-    styled(s, role).wrapping().silent()
+    styled(s, role)
+        .wrapping()
+        .silent()
+        .sem(Sem::Text(role_name(role)))
 }
 
 fn styled(s: &str, role: TextRole) -> El {
@@ -946,7 +1026,10 @@ fn styled(s: &str, role: TextRole) -> El {
 }
 
 fn words(s: &str, role: TextRole) -> El {
-    styled(s, role).truncate().silent()
+    styled(s, role)
+        .truncate()
+        .silent()
+        .sem(Sem::Text(role_name(role)))
 }
 
 fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) -> Press {
@@ -961,5 +1044,117 @@ fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) 
         row: row.map(|r| r.id.clone()),
         value: None,
         confirm,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use vorn_view::{file, Options};
+    use vornui::UiConfig;
+
+    const EVERY: &str = r#"schema "vorn:view@1"
+rows "items" {
+    name string
+    on bool
+    state enum pass fail
+}
+column {
+    section "All" {
+        row {
+            icon "check" tone=good
+            badge "3"
+            text "Every node" role=secondary
+        }
+        list "items" {
+            row {
+                status "{row.state}" pass=good fail=bad
+                toggle "{row.on}" label="{row.name}" call="flip"
+                button "Run" call="run" style=primary
+                more {
+                    button "Drop" call="drop" style=danger confirm="Drop {row.name}?"
+                }
+            }
+        }
+        divider
+        choice "items" label="{row.name}" selected="{row.on}" call="pick"
+        field placeholder="Key" call="key" secret=#true
+    }
+}
+"#;
+
+    struct Rows(Vec<Row>);
+
+    impl Source for Rows {
+        fn rows(&self, _: &str) -> &[Row] {
+            &self.0
+        }
+    }
+
+    #[derive(Default)]
+    struct Ids(Cell<u64>);
+
+    impl Ids {
+        fn next(&self) -> Id {
+            self.0.set(self.0.get() + 1);
+            Id::new("bind").child(self.0.get())
+        }
+    }
+
+    impl Bind for Ids {
+        fn press(&self, _: u64, _: Press) -> Id {
+            self.next()
+        }
+        fn field(&self, _: u64, _: Option<&str>, _: &str, _: &str) -> Id {
+            self.next()
+        }
+        fn confirming(&self, _: Id) -> Option<(Id, Id)> {
+            None
+        }
+        fn menu(&self, _: u64, _: Option<&str>) -> Id {
+            self.next()
+        }
+        fn menu_open(&self, _: Id) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn the_native_tree_has_a_node_for_every_template_node() {
+        let t = file::parse("views/every.kdl", EVERY, Options::default()).unwrap();
+        let row = |id: &str, on: bool| {
+            Row::from_value(&serde_json::json!({ "id": id, "name": id, "on": on, "state": "pass" }))
+                .unwrap()
+        };
+        let src = Rows(vec![row("a", true), row("b", false)]);
+        let mut ui = Ui::native(&UiConfig::system(3.0, 15.0));
+        let el = view(&ui, &t, None, &src, &Ids::default());
+        ui.begin(Rgba::TRANSPARENT);
+        ui.layout(el, (390.0, 844.0));
+        let tree = ui.native_tree().unwrap();
+        let all = tree.walk();
+        let kinds: Vec<_> = all.iter().map(|n| n.kind).collect();
+        for k in vorn_view::NODES {
+            assert!(kinds.contains(k), "no {k} node in {kinds:?}");
+        }
+        let toggle = all.iter().find(|n| n.kind == "toggle").unwrap();
+        assert_eq!((toggle.label.as_str(), toggle.on), ("a", Some(true)));
+        let field = all.iter().find(|n| n.kind == "field").unwrap();
+        assert!(field.secret && field.label == "Key");
+        let drop = all.iter().find(|n| n.label == "Drop").unwrap();
+        assert_eq!(
+            (drop.style, drop.confirm.as_deref()),
+            ("danger", Some("Drop a?"))
+        );
+        let options: Vec<_> = all.iter().filter(|n| n.kind == "option").collect();
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].on, Some(true));
+        let section = all.iter().find(|n| n.kind == "section").unwrap();
+        assert_eq!(section.label, "All");
+        assert!(
+            !all.iter().any(|n| n.kind == "text" && n.label == "All"),
+            "a section's title is the section's, not a text of its own"
+        );
     }
 }
