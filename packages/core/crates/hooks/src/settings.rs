@@ -93,7 +93,13 @@ fn hooks_of(settings: &mut Value) -> &mut Map<String, Value> {
 
 /// `settings` with Vorn's hooks for `events` pointing at `port`, any
 /// earlier ones of Vorn's among `all` removed.
-pub fn install(mut settings: Value, port: u16, token: &str, all: &[&str], events: &[&str]) -> Value {
+pub fn install(
+    mut settings: Value,
+    port: u16,
+    token: &str,
+    all: &[&str],
+    events: &[&str],
+) -> Value {
     let hooks = hooks_of(&mut settings);
     for &event in all {
         let existing = hooks.get(event).and_then(Value::as_array).cloned();
@@ -161,8 +167,7 @@ pub fn uninstall_file(file: &Path, all: &[&str]) -> io::Result<()> {
     let Ok(settings) = serde_json::from_str::<Value>(&text) else {
         return Ok(());
     };
-    let text =
-        serde_json::to_string_pretty(&uninstall(settings, all)).map_err(io::Error::other)?;
+    let text = serde_json::to_string_pretty(&uninstall(settings, all)).map_err(io::Error::other)?;
     std::fs::write(file, text)
 }
 

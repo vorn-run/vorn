@@ -163,7 +163,7 @@ fn replay(rules: &Rules, name: &str) -> Vec<ScreenStatus> {
 
 #[test]
 fn a_recorded_session_reads_as_waiting_at_its_picker() {
-    let seen = replay(support::agent("claude").screen_rules().unwrap(), "claude");
+    let seen = replay(support::agent("claude").screen_rules().unwrap(), "agent");
     assert_eq!(seen, [ScreenStatus::Waiting]);
 }
 

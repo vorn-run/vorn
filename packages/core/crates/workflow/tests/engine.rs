@@ -38,10 +38,10 @@ fn agent(config: Value) -> Value {
 
 fn host(workflows: Vec<Value>, replies: Value) -> Fake {
     let config = json!({
-        "defaults": { "defaultAgent": "codex" },
+        "defaults": { "defaultAgent": "beta" },
         "projects": [{ "name": "p", "path": "/p" }],
         "tasks": [
-            { "id": "t1", "projectName": "p", "title": "Mine", "description": "", "status": "todo", "order": 1, "assignedAgent": "gemini" }
+            { "id": "t1", "projectName": "p", "title": "Mine", "description": "", "status": "todo", "order": 1, "assignedAgent": "gamma" }
         ],
         "workflows": workflows,
     });
@@ -262,18 +262,18 @@ async fn a_redelivered_item_hands_its_new_lease_to_the_run_already_going() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn which_agent_a_step_runs() {
     let cases = [
-        (json!({ "agentType": "claude" }), None, "claude"),
+        (json!({ "agentType": "acme" }), None, "acme"),
         (
             json!({ "agentType": "fromTask" }),
-            Some(json!({ "id": "x", "assignedAgent": "opencode" })),
-            "opencode",
+            Some(json!({ "id": "x", "assignedAgent": "delta" })),
+            "delta",
         ),
         (
             json!({ "agentType": "fromTask", "taskId": "t1" }),
             None,
-            "gemini",
+            "gamma",
         ),
-        (json!({ "agentType": "fromTask" }), None, "codex"),
+        (json!({ "agentType": "fromTask" }), None, "beta"),
     ];
     for (config, task, want) in cases {
         let fake = host(
@@ -317,7 +317,7 @@ async fn which_agent_a_step_runs() {
         .unwrap()
         .finish()
         .await;
-    assert_eq!(fake.calls_of("headless:create")[0]["agentType"], "claude");
+    assert_eq!(fake.calls_of("headless:create")[0]["agentType"], "acme");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

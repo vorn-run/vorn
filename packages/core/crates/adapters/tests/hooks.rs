@@ -15,7 +15,14 @@ fn fixture(name: &str, file: &str) -> String {
 #[test]
 fn merges_the_settings_hooks_as_recorded() {
     let claude = support::agent("claude");
-    let spec = claude.spec().hooks.as_ref().unwrap().settings.as_ref().unwrap();
+    let spec = claude
+        .spec()
+        .hooks
+        .as_ref()
+        .unwrap()
+        .settings
+        .as_ref()
+        .unwrap();
     let all: Vec<&str> = spec.events.iter().map(String::as_str).collect();
     let own = spec.own_status.as_ref().unwrap();
     let answered: Vec<&str> = own.events.iter().map(String::as_str).collect();
@@ -25,15 +32,28 @@ fn merges_the_settings_hooks_as_recorded() {
     let trimmed = settings::install(full, 56432, "tok", &all, &answered);
     assert_eq!(trimmed, recorded["trimmed"]);
     assert_eq!(settings::uninstall(trimmed, &all), recorded["removed"]);
-    assert!(settings::reports_status("2.1.295 (Claude Code)", &own.since));
-    assert!(!settings::reports_status("2.1.294 (Claude Code)", &own.since));
+    assert!(settings::reports_status(
+        "2.1.295 (Claude Code)",
+        &own.since
+    ));
+    assert!(!settings::reports_status(
+        "2.1.294 (Claude Code)",
+        &own.since
+    ));
     assert_eq!(spec.file, "~/.claude/settings.json");
 }
 
 #[test]
 fn writes_the_hooks_file_as_recorded() {
     let copilot = support::agent("copilot");
-    let spec = copilot.spec().hooks.as_ref().unwrap().file.as_ref().unwrap();
+    let spec = copilot
+        .spec()
+        .hooks
+        .as_ref()
+        .unwrap()
+        .file
+        .as_ref()
+        .unwrap();
     let file_spec = file::Spec {
         session: &spec.session,
         events: &spec.events,
@@ -49,10 +69,14 @@ fn writes_the_hooks_file_as_recorded() {
     };
     assert_eq!(
         places.path_with(&spec.path, &|_| None),
-        Path::new("/h").join(".copilot").join("hooks").join("vorn.json")
+        Path::new("/h")
+            .join(".copilot")
+            .join("hooks")
+            .join("vorn.json")
     );
     assert_eq!(
-        places.path_with(&spec.path, &|n| (n == "COPILOT_HOME").then(|| "/c".to_owned())),
+        places.path_with(&spec.path, &|n| (n == "COPILOT_HOME")
+            .then(|| "/c".to_owned())),
         Path::new("/c").join("hooks").join("vorn.json")
     );
 }
@@ -65,7 +89,14 @@ fn captures_codex_and_opencode_conversations_from_their_databases() {
         data: dir.path().join(".local/share"),
     };
     let codex = support::agent("codex");
-    let capture = codex.spec().resume.as_ref().unwrap().capture.as_ref().unwrap();
+    let capture = codex
+        .spec()
+        .resume
+        .as_ref()
+        .unwrap()
+        .capture
+        .as_ref()
+        .unwrap();
     let db = places.path(&capture.db);
     assert_eq!(db, dir.path().join(".codex").join("state_5.sqlite"));
     std::fs::create_dir_all(db.parent().unwrap()).unwrap();
@@ -83,9 +114,19 @@ fn captures_codex_and_opencode_conversations_from_their_databases() {
         Some("new")
     );
     let opencode = support::agent("opencode");
-    let capture = opencode.spec().resume.as_ref().unwrap().capture.as_ref().unwrap();
+    let capture = opencode
+        .spec()
+        .resume
+        .as_ref()
+        .unwrap()
+        .capture
+        .as_ref()
+        .unwrap();
     assert_eq!(
         places.path(&capture.db),
-        dir.path().join(".local/share").join("opencode").join("opencode.db")
+        dir.path()
+            .join(".local/share")
+            .join("opencode")
+            .join("opencode.db")
     );
 }

@@ -330,7 +330,7 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
 
 fn session_buttons(s: &Screen<'_>, t: &TaskConfig) -> Option<El> {
     let live = live(s, t);
-    let resume = !live && can_resume(t);
+    let resume = !live && can_resume(s, t);
     if !live && !resume {
         return None;
     }

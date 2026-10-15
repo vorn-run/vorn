@@ -7,7 +7,9 @@ use std::path::Path;
 
 use rusqlite::Connection;
 use serde_json::json;
-use vorn_agents::history::{recent_sessions, recent_sessions_for, Homes, ProjectScope, RecentSession};
+use vorn_agents::history::{
+    recent_sessions, recent_sessions_for, Homes, ProjectScope, RecentSession,
+};
 
 fn homes(dir: &Path) -> Homes {
     Homes {

@@ -571,9 +571,7 @@ impl App {
             .unwrap_or("")
             .to_owned();
         let key = (agent.clone(), path.clone());
-        if matches!(agent.as_str(), "claude" | "copilot" | "opencode" | "codex")
-            && !self.st.wf.models.contains_key(&key)
-        {
+        if self.store.agents.selects_models(&agent) && !self.st.wf.models.contains_key(&key) {
             self.st.wf.models.insert(key.clone(), Vec::new());
             self.call(
                 Call::Workflow(WfCall::Models(key.0, key.1)),
@@ -882,6 +880,7 @@ impl App {
                     return;
                 };
                 let project = self.first_project();
+                let agent = self.store.agents.default_key().to_owned();
                 let mut added = None;
                 self.edit(|d| {
                     added = wf::pick(
@@ -889,6 +888,7 @@ impl App {
                         &at,
                         &p,
                         project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
+                        &agent,
                     )
                 });
                 match added {

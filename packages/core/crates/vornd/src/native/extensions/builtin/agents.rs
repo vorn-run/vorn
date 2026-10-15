@@ -192,10 +192,22 @@ mod tests {
         let mut a = AgentAdapter::new(shipped, adapters);
         a.agent = Some("acme".to_owned());
         let ops = a.fold(&[
-            event(SESSION_CREATED, json!({ "sessionId": "s", "agent": "acme", "model": "m1" })),
-            event(SESSION_CREATED, json!({ "sessionId": "o", "agent": "beta" })),
-            event(AGENT_HOOK, json!({ "sessionId": "s", "event": "PreToolUse", "tool": "edit" })),
-            event(AGENT_HOOK, json!({ "sessionId": "o", "event": "PreToolUse", "tool": "x" })),
+            event(
+                SESSION_CREATED,
+                json!({ "sessionId": "s", "agent": "acme", "model": "m1" }),
+            ),
+            event(
+                SESSION_CREATED,
+                json!({ "sessionId": "o", "agent": "beta" }),
+            ),
+            event(
+                AGENT_HOOK,
+                json!({ "sessionId": "s", "event": "PreToolUse", "tool": "edit" }),
+            ),
+            event(
+                AGENT_HOOK,
+                json!({ "sessionId": "o", "event": "PreToolUse", "tool": "x" }),
+            ),
         ]);
         assert_eq!(
             ops.last(),

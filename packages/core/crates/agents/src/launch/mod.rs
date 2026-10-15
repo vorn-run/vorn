@@ -331,7 +331,7 @@ pub fn launch_line(
         machine.quoting
     };
     let args = with_model(req, cmd.command, req.args.as_deref().unwrap_or(cmd.args))?;
-    // Only a path with spaces that names one file is quoted: `~/bin/claude`
+    // Only a path with spaces that names one file is quoted: `~/bin/agent`
     // keeps its expansion, and a wrapper is read as written.
     let command_line = if cmd.command.chars().any(js::is_space)
         && command_shape(cmd.command, !remote) == CommandShape::Executable
@@ -457,7 +457,11 @@ pub fn headless_spawn(
             args.extend(filled(&headless.resume, ID, id));
         }
         (_, Some(id)) if agent.pins_session_ids() => {
-            let pin = spec.resume.as_ref().map(|r| r.pin.as_slice()).unwrap_or_default();
+            let pin = spec
+                .resume
+                .as_ref()
+                .map(|r| r.pin.as_slice())
+                .unwrap_or_default();
             args.extend(filled(pin, ID, id));
         }
         _ => {}

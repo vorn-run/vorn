@@ -150,7 +150,7 @@ impl Scenario {
 
 fn project() -> Value {
     json!({
-        "name": "proj", "path": "/tmp/proj", "preferredAgents": ["claude"],
+        "name": "proj", "path": "/tmp/proj", "preferredAgents": ["acme"],
         "icon": "Folder", "hostIds": ["local"], "workspaceId": "personal"
     })
 }
@@ -182,7 +182,7 @@ fn run(id: &str, status: &str) -> Value {
         "workflowId": "wf-1", "runId": id, "startedAt": "2026-10-01T10:00:00.000Z",
         "status": status, "triggerTaskId": "t1",
         "nodeStates": [
-            { "nodeId": "n1", "status": "success", "output": "ok", "agentType": "claude" },
+            { "nodeId": "n1", "status": "success", "output": "ok", "agentType": "acme" },
             { "nodeId": "gate", "status": "waiting", "waitingFor": "signIn" }
         ]
     })
@@ -564,7 +564,7 @@ fn scenario(store: Store) -> Vec<(String, Value)> {
     s.call(
         "saveSessions",
         json!([[{
-            "id": "s1", "agentType": "claude", "projectName": "proj",
+            "id": "s1", "agentType": "acme", "projectName": "proj",
             "projectPath": "/tmp/proj", "status": "running", "createdAt": 1_700_000_000_000_i64,
             "pid": 42, "branch": "main", "isWorktree": false
         }]]),

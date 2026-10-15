@@ -307,7 +307,31 @@ fn primitives(b: &mut Builder) {
     }
 }
 
-const AGENTS: [&str; 6] = ["claude", "copilot", "codex", "opencode", "gemini", "shell"];
+const AGENTS: [&str; 6] = ["alpha", "beta", "gamma", "delta", "epsilon", "shell"];
+
+/// Marks for the gallery's agents, as an adapter would ship them.
+fn marks() -> Vec<(&'static str, String, Option<&'static str>)> {
+    [
+        ("alpha", "#d97757", "✳"),
+        ("beta", "#6cc644", "◉"),
+        ("gamma", "#7a9dff", "◎"),
+        ("delta", "#ffffff", "▣"),
+        ("epsilon", "#3186ff", "✦"),
+    ]
+    .into_iter()
+    .map(|(id, fill, glyph)| {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle fill="{fill}" cx="12" cy="12" r="9"/></svg>"#
+        );
+        (id, svg, Some(glyph))
+    })
+    .collect()
+}
+
+fn load_marks(marks: &mut AgentMarks, ui: &mut Ui) {
+    let list = self::marks();
+    marks.load(ui, list.iter().map(|(id, svg, g)| (*id, svg.as_str(), *g)));
+}
 
 fn composed(b: &mut Builder) {
     for agent in AGENTS {
@@ -319,11 +343,11 @@ fn composed(b: &mut Builder) {
         );
     }
     for (state, agent, status, clock) in [
-        ("running-0s", "claude", Status::Running, 0.0),
-        ("running-0.7s", "claude", Status::Running, 0.7),
-        ("running-1.6s", "codex", Status::Running, 1.6),
-        ("waiting", "claude", Status::Waiting, 0.0),
-        ("idle", "copilot", Status::Idle, 0.0),
+        ("running-0s", "alpha", Status::Running, 0.0),
+        ("running-0.7s", "alpha", Status::Running, 0.7),
+        ("running-1.6s", "gamma", Status::Running, 1.6),
+        ("waiting", "alpha", Status::Waiting, 0.0),
+        ("idle", "beta", Status::Idle, 0.0),
         ("shell-running", "shell", Status::Running, 0.0),
     ] {
         b.add(
@@ -387,7 +411,7 @@ fn composed(b: &mut Builder) {
                     &SessionRow {
                         name: "api-server",
                         branch: None,
-                        agent: "claude",
+                        agent: "alpha",
                         status: Status::Waiting,
                         active,
                         detail: None,
@@ -517,7 +541,7 @@ fn dock_cases(b: &mut Builder) {
                     pill,
                     &Minimized {
                         name: "api-server",
-                        agent: "claude",
+                        agent: "alpha",
                         status: Status::Waiting,
                         branch,
                         worktree,
@@ -730,7 +754,7 @@ fn render(dir: &str, only: Option<&str>) -> Result<(), String> {
         marks: AgentMarks::default(),
         clicked: Cell::new(false),
     };
-    ctx.marks.load(&mut ui);
+    load_marks(&mut ctx.marks, &mut ui);
     let cases = cases();
     let epoch = Instant::now();
     for (i, case) in cases.iter().enumerate() {
@@ -766,7 +790,7 @@ struct Gallery {
 
 impl vornui::App for Gallery {
     fn view(&mut self, ui: &mut Ui) -> El {
-        self.ctx.marks.load(ui);
+        load_marks(&mut self.ctx.marks, ui);
         let mut col = div()
             .id(Id::new("gallery"))
             .col()

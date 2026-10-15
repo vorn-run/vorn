@@ -12,8 +12,6 @@ use crate::render;
 use crate::status;
 use crate::target::{self, Candidate, Miss};
 
-pub const AGENTS: [&str; 5] = ["claude", "copilot", "codex", "opencode", "gemini"];
-
 pub const SESSION_USAGE: &str = "Usage
   vorn session start --agent <agent> [--prompt <text>] [options]
   vorn session list [--recent] [--project <name>] [--json]
@@ -50,7 +48,7 @@ Waiting
   waits instead for the program's status (as the app shows it) and exits 0.
 
 Agents
-  claude, copilot, codex, opencode, gemini
+  Each agent that is on in Vorn, by the name its adapter gives it
 
 Options for start
   --prompt <text>     First thing the agent is told
@@ -191,9 +189,22 @@ async fn start(ctx: &mut Context<'_>) -> ExitCode {
     let Some(agent) = ctx.args.agent.clone() else {
         return ctx.usage("session start needs --agent", SESSION_USAGE);
     };
-    if !AGENTS.contains(&agent.as_str()) {
+    // The agents vornd runs come from their adapters; it names those that are on.
+    let known: Vec<String> = match ctx.call("agent:list", None).await {
+        Ok(listed) => items(listed)
+            .iter()
+            .filter_map(|a| field(a, "id").and_then(Value::as_str).map(str::to_owned))
+            .collect(),
+        Err(err) => return ctx.failed("could not start the session", CommandError::from(err)),
+    };
+    if !known.contains(&agent) {
+        let names = if known.is_empty() {
+            "none is on; switch one on in Settings".to_owned()
+        } else {
+            known.join(", ")
+        };
         return ctx.usage(
-            &format!("unknown agent \"{agent}\". Try: {}", AGENTS.join(", ")),
+            &format!("unknown agent \"{agent}\". Try: {names}"),
             SESSION_USAGE,
         );
     }

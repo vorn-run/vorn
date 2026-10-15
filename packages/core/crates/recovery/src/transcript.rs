@@ -23,7 +23,7 @@ const MAGIC: &[u8] = b"VREC1\n";
 pub const BUILTIN: &[(&str, &[u8])] = &[
     ("vim", include_bytes!("../transcripts/vim.rec")),
     ("htop", include_bytes!("../transcripts/htop.rec")),
-    ("claude", include_bytes!("../transcripts/claude.rec")),
+    ("agent", include_bytes!("../transcripts/agent.rec")),
 ];
 
 /// A shipped transcript by name.

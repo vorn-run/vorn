@@ -133,7 +133,7 @@ mod tests {
 
     fn session(program: serde_json::Value) -> Session {
         let info = serde_json::from_value(json!({
-            "id": "a", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": "a", "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "waiting", "createdAt": 1.0, "pid": 1.0, "programStatus": program,
         }))
         .unwrap();

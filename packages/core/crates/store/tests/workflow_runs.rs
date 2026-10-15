@@ -36,7 +36,7 @@ mod persistence {
                 "status": "success",
                 "nodeStates": [{
                     "nodeId": "node-1", "status": "success", "agentSessionId": "agent-xyz",
-                    "agentType": "claude", "projectName": "proj", "projectPath": "/abs/proj",
+                    "agentType": "acme", "projectName": "proj", "projectPath": "/abs/proj",
                     "approvedAt": "2026-04-20T10:00:04Z"
                 }]
             }),
@@ -44,7 +44,7 @@ mod persistence {
         let listed = runs(&mut store, "wf-1", 20);
         assert_eq!(listed.len(), 1);
         let state = &listed[0]["nodeStates"][0];
-        assert_eq!(state["agentType"], "claude");
+        assert_eq!(state["agentType"], "acme");
         assert_eq!(state["projectName"], "proj");
         assert_eq!(state["projectPath"], "/abs/proj");
         assert_eq!(state["agentSessionId"], "agent-xyz");
@@ -112,8 +112,8 @@ mod persistence {
     #[test]
     fn step_diagnostics_round_trip() {
         let mut store = memory();
-        let timeline = "[+0.0s] Launching claude in /abs/proj\n\
-            [+0.4s] Session sess-1 started (pid 4242): claude --dangerously-skip-permissions -p\n\
+        let timeline = "[+0.0s] Launching acme in /abs/proj\n\
+            [+0.4s] Session sess-1 started (pid 4242): acme --dangerously-skip-permissions -p\n\
             [+3600.0s] Step timed out. The agent was started but never produced any output.";
         save(
             &mut store,
@@ -575,7 +575,7 @@ mod waiting_gates {
                     "nodeId": "gate", "status": "waiting", "startedAt": "2026-04-20T10:00:00Z",
                     "completedAt": "2026-04-20T10:00:05Z", "sessionId": "s1", "error": "none",
                     "logs": "log line", "taskId": "t1", "agentSessionId": "as1",
-                    "agentType": "claude", "projectName": "p", "projectPath": "/p",
+                    "agentType": "acme", "projectName": "p", "projectPath": "/p",
                     "approvedAt": "2026-04-20T10:00:10Z"
                 }],
                 "triggerTaskId": "trig-1", "completedAt": "2026-04-20T10:00:10Z"
@@ -585,7 +585,7 @@ mod waiting_gates {
         let ns = &got["nodeStates"][0];
         for (key, value) in [
             ("status", "waiting"),
-            ("agentType", "claude"),
+            ("agentType", "acme"),
             ("projectName", "p"),
             ("projectPath", "/p"),
             ("approvedAt", "2026-04-20T10:00:10Z"),

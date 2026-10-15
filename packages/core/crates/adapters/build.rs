@@ -17,7 +17,11 @@ fn files(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
                 files(&path, root, out);
             }
         } else if path.file_name().is_some_and(|n| n != "vorn-extension.toml") {
-            out.push(path.strip_prefix(root).expect("under its root").to_path_buf());
+            out.push(
+                path.strip_prefix(root)
+                    .expect("under its root")
+                    .to_path_buf(),
+            );
         }
     }
 }
@@ -36,7 +40,8 @@ fn list(text: &str, key: &str) -> Vec<String> {
 }
 
 fn main() {
-    let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo")).join("agents");
+    let root =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo")).join("agents");
     println!("cargo:rerun-if-changed={}", root.display());
     let shipped = std::fs::read_to_string(root.join("shipped.toml")).expect("agents/shipped.toml");
     let (order, off) = (list(&shipped, "order"), list(&shipped, "off"));
@@ -47,11 +52,23 @@ fn main() {
         assert!(manifest.is_file(), "{} has no manifest", dir.display());
         let mut found = Vec::new();
         files(&dir, &dir, &mut found);
-        let _ = writeln!(code, "    Shipped {{\n        name: {name:?},\n        manifest: include_str!({:?}),", manifest.display().to_string());
-        let _ = writeln!(code, "        on_by_default: {},\n        files: &[", !off.contains(name));
+        let _ = writeln!(
+            code,
+            "    Shipped {{\n        name: {name:?},\n        manifest: include_str!({:?}),",
+            manifest.display().to_string()
+        );
+        let _ = writeln!(
+            code,
+            "        on_by_default: {},\n        files: &[",
+            !off.contains(name)
+        );
         for f in &found {
             let published = f.to_string_lossy().replace('\\', "/");
-            let _ = writeln!(code, "            ({published:?}, include_bytes!({:?})),", dir.join(f).display().to_string());
+            let _ = writeln!(
+                code,
+                "            ({published:?}, include_bytes!({:?})),",
+                dir.join(f).display().to_string()
+            );
         }
         code.push_str("        ],\n    },\n");
     }

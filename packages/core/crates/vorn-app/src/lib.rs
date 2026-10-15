@@ -12,6 +12,7 @@
 //! The UI layer is reached only through [`ui`], so it can be repointed.
 
 pub mod act;
+pub mod agents;
 pub mod app;
 pub mod artifact;
 pub mod blocks;

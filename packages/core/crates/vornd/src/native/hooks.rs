@@ -37,13 +37,13 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
+use vorn_agents::spec::{Places, SettingsHooks};
+use vorn_agents::Agent;
 use vorn_extensions::events::{
     AGENT_CONVERSATION, AGENT_HOOK, AGENT_PERMISSION, AGENT_PERMISSION_CLOSED,
 };
 use vorn_hooks::mapper::{normalize, Status};
 use vorn_hooks::owner::{may_claim, may_release, Owner};
-use vorn_agents::spec::{Places, SettingsHooks};
-use vorn_agents::Agent;
 use vorn_hooks::{file, permission, settings, Event, Mapper, Terminal};
 
 use super::{Answer, Native};
@@ -333,7 +333,14 @@ impl Hooks {
             .agents()
             .iter()
             .filter_map(|a| {
-                let own = a.spec().hooks.as_ref()?.settings.as_ref()?.own_status.as_ref()?;
+                let own = a
+                    .spec()
+                    .hooks
+                    .as_ref()?
+                    .settings
+                    .as_ref()?
+                    .own_status
+                    .as_ref()?;
                 Some((
                     a.id().to_owned(),
                     a.spec().launch.command.clone(),
@@ -899,7 +906,11 @@ async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<
                 seen.insert(id.to_owned());
                 continue;
             };
-            let has_file = agent.spec().hooks.as_ref().is_some_and(|h| h.file.is_some());
+            let has_file = agent
+                .spec()
+                .hooks
+                .as_ref()
+                .is_some_and(|h| h.file.is_some());
             if has_file && text("hookSessionId").is_none() {
                 hooks.file_terminal(&native, &agent, id);
             }
@@ -910,11 +921,7 @@ async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<
                 && !agent.pins_session_ids()
                 && text("agentSessionId").is_none()
                 && text("remoteHostId").is_none();
-            let capture_spec = agent
-                .spec()
-                .resume
-                .as_ref()
-                .and_then(|r| r.capture.clone());
+            let capture_spec = agent.spec().resume.as_ref().and_then(|r| r.capture.clone());
             if let (true, Some(spec)) = (wants_capture, capture_spec) {
                 tokio::spawn(capture(
                     Arc::downgrade(&native),
@@ -971,12 +978,11 @@ async fn capture(native: Weak<Native>, db: PathBuf, query: String, id: String) {
             return;
         }
         let (db2, query2) = (db.clone(), query.clone());
-        let found = tokio::task::spawn_blocking(move || {
-            vorn_hooks::capture::capture(&query2, &cwd, &db2)
-        })
-        .await
-        .ok()
-        .flatten();
+        let found =
+            tokio::task::spawn_blocking(move || vorn_hooks::capture::capture(&query2, &cwd, &db2))
+                .await
+                .ok()
+                .flatten();
         if let Some(conversation) = found {
             patch(&native, &id, json!({ "agentSessionId": conversation }));
             release();

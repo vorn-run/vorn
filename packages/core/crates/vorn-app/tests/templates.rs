@@ -175,7 +175,7 @@ fn every_template_kind_draws_on_every_surface() {
         .rpc()
         .call(
             "terminal:create",
-            json!({ "agentType": "claude", "projectName": "api", "projectPath": project }),
+            json!({ "agentType": "acme", "projectName": "api", "projectPath": project }),
         )
         .expect("an agent");
     let sid = info["id"].as_str().expect("id").to_owned();

@@ -1,5 +1,7 @@
 //! `AgentIcon` and `AgentStatusIcon`: each agent's own mark in its own
 //! colours, a shell's terminal, and the running glyph while an agent works.
+//! The marks come from the agents' adapters, as SVG text and one character
+//! for a cells surface.
 
 use std::collections::HashMap;
 
@@ -8,42 +10,61 @@ use vornui::{image, rasterize_svg_rgba, El, Rgba, Ui};
 
 use crate::status::Status;
 
-/// The marks `AgentIcon` draws, by agent type (`agent-icons`).
-pub const MARKS: [(&str, &str); 5] = [
-    ("claude", include_str!("../assets/agents/claude.svg")),
-    ("copilot", include_str!("../assets/agents/copilot.svg")),
-    ("codex", include_str!("../assets/agents/codex.svg")),
-    ("opencode", include_str!("../assets/agents/opencode.svg")),
-    ("gemini", include_str!("../assets/agents/gemini.svg")),
-];
-
 /// How many pixels a mark is rasterized at: enough for the largest size
 /// drawn (24) at 2x.
 const RASTER: u32 = 48;
 
-/// The marks registered as images with a [`Ui`], once per window.
+/// One registered mark: its image, its character and its colour.
+#[derive(Debug, Clone)]
+struct Mark {
+    image: Option<u32>,
+    glyph: String,
+    tint: Rgba,
+    /// The SVG it was made from, so a changed mark is made again.
+    svg: String,
+}
+
+/// The marks registered as images with a [`Ui`], once per window and agent.
 #[derive(Debug, Default)]
-pub struct AgentMarks(HashMap<&'static str, u32>);
+pub struct AgentMarks(HashMap<String, Mark>);
 
 impl AgentMarks {
-    /// Registers every mark that is not registered yet; a mark that does
-    /// not rasterize costs only itself, falling back to the terminal.
-    pub fn load(&mut self, ui: &mut Ui) {
-        if !self.0.is_empty() {
-            return;
-        }
-        for (name, svg) in MARKS {
-            if let Some(id) = rasterize_svg_rgba(svg, RASTER, RASTER)
-                .and_then(|rgba| ui.image(RASTER, RASTER, &rgba))
-            {
-                self.0.insert(name, id);
+    /// Registers each of `marks` (agent type, SVG, character) not registered
+    /// yet; a mark that does not rasterize costs only its image, falling
+    /// back to the terminal.
+    pub fn load<'a>(
+        &mut self,
+        ui: &mut Ui,
+        marks: impl IntoIterator<Item = (&'a str, &'a str, Option<&'a str>)>,
+    ) {
+        for (name, svg, glyph) in marks {
+            if self.0.get(name).is_some_and(|m| m.svg == svg) {
+                continue;
             }
+            let image = rasterize_svg_rgba(svg, RASTER, RASTER)
+                .and_then(|rgba| ui.image(RASTER, RASTER, &rgba));
+            self.0.insert(
+                name.to_owned(),
+                Mark {
+                    image,
+                    glyph: glyph.unwrap_or("›").to_owned(),
+                    tint: first_fill(svg).unwrap_or(color::INK),
+                    svg: svg.to_owned(),
+                },
+            );
         }
     }
 
     /// The image of `agent`'s mark.
     pub fn get(&self, agent: &str) -> Option<u32> {
-        self.0.get(agent).copied()
+        self.0.get(agent).and_then(|m| m.image)
+    }
+
+    /// `agent`'s mark on a cells surface: one character in the mark's own colour.
+    fn cell_mark(&self, agent: &str) -> (&str, Rgba) {
+        self.0
+            .get(agent)
+            .map_or(("›", color::INK), |m| (m.glyph.as_str(), m.tint))
     }
 }
 
@@ -52,29 +73,11 @@ impl AgentMarks {
 pub fn agent_icon(marks: &AgentMarks, agent: &str, size: f32) -> El {
     match marks.get(agent) {
         Some(id) => {
-            let (g, tint) = cell_mark(agent);
+            let (g, tint) = marks.cell_mark(agent);
             image(id, size, size).glyph(g).glyph_tint(tint)
         }
         None => crate::lucide("terminal", size, 1.5, color::GRAY_400),
     }
-}
-
-/// An agent's mark on a cells surface: one character in the mark's own colour.
-fn cell_mark(agent: &str) -> (&'static str, Rgba) {
-    let g = match agent {
-        "claude" => "✳",
-        "copilot" => "◉",
-        "codex" => "◎",
-        "opencode" => "▣",
-        "gemini" => "✦",
-        _ => "›",
-    };
-    let tint = MARKS
-        .iter()
-        .find(|(n, _)| *n == agent)
-        .and_then(|(_, svg)| first_fill(svg))
-        .unwrap_or(color::INK);
-    (g, tint)
 }
 
 /// A mark's first `fill="#rrggbb"` (or `#rgb`).
@@ -112,8 +115,15 @@ mod tests {
 
     #[test]
     fn a_mark_keeps_its_colour_in_a_terminal() {
-        assert_eq!(cell_mark("claude"), ("✳", Rgba::hex(0xd97757)));
-        assert_eq!(cell_mark("codex").1, Rgba::hex(0xffffff));
-        assert_eq!(cell_mark("shell"), ("›", color::INK));
+        assert_eq!(
+            first_fill(r##"<svg><path fill="#d97757" d="M0 0"/></svg>"##),
+            Some(Rgba::hex(0xd97757))
+        );
+        assert_eq!(
+            first_fill(r##"<path fill="#fff"/>"##),
+            Some(Rgba::hex(0xffffff))
+        );
+        assert_eq!(first_fill("<svg/>"), None);
+        assert_eq!(AgentMarks::default().cell_mark("shell"), ("›", color::INK));
     }
 }

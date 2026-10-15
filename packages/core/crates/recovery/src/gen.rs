@@ -799,7 +799,7 @@ const WORDS: &[&str] = &[
 const TITLES: &[&str] = &[
     "vim",
     "htop",
-    "✳ claude",
+    "✳ agent",
     "~/src",
     "build: 3/7",
     "",

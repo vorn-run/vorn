@@ -741,78 +741,8 @@ impl Settings {
     }
 }
 
-/// An agent's definition (`AGENT_DEFINITIONS`) and default command
-/// (`DEFAULT_AGENT_COMMANDS`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Agent {
-    pub key: &'static str,
-    pub name: &'static str,
-    pub color: u32,
-    pub bg_alpha: f32,
-    pub description: &'static str,
-    pub install: &'static str,
-    pub url: &'static str,
-    pub command: &'static str,
-    pub headless: &'static [&'static str],
-}
-
-pub const AGENTS: [Agent; 5] = [
-    Agent {
-        key: "claude",
-        name: "Claude Code",
-        color: 0xd97757,
-        bg_alpha: 0x20 as f32 / 255.0,
-        description: "Anthropic Claude Code CLI",
-        install: "npm install -g @anthropic-ai/claude-code",
-        url: "https://docs.anthropic.com/en/docs/claude-code",
-        command: "claude",
-        headless: &["--dangerously-skip-permissions"],
-    },
-    Agent {
-        key: "copilot",
-        name: "GitHub Copilot",
-        color: 0x6cc644,
-        bg_alpha: 0x20 as f32 / 255.0,
-        description: "GitHub Copilot CLI",
-        install: "brew install copilot-cli",
-        url: "https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-agent-mode",
-        command: "copilot",
-        headless: &["--allow-all"],
-    },
-    Agent {
-        key: "codex",
-        name: "Codex CLI",
-        color: 0x7a9dff,
-        bg_alpha: 0x20 as f32 / 255.0,
-        description: "OpenAI Codex CLI",
-        install: "npm install -g @openai/codex",
-        url: "https://github.com/openai/codex",
-        command: "codex",
-        headless: &["-a", "never"],
-    },
-    Agent {
-        key: "opencode",
-        name: "OpenCode",
-        color: 0xffffff,
-        bg_alpha: 0x15 as f32 / 255.0,
-        description: "OpenCode CLI",
-        install: "npm install -g opencode-ai",
-        url: "https://opencode.ai",
-        command: "opencode",
-        headless: &[],
-    },
-    Agent {
-        key: "gemini",
-        name: "Gemini CLI",
-        color: 0x3186ff,
-        bg_alpha: 0x20 as f32 / 255.0,
-        description: "Google Gemini CLI",
-        install: "npm install -g @google/gemini-cli",
-        url: "https://github.com/google-gemini/gemini-cli",
-        command: "gemini",
-        headless: &["-y"],
-    },
-];
+/// An agent's definition (`AGENT_DEFINITIONS`), as its adapter gives it.
+pub use crate::agents::{AgentInfo as Agent, McpSetup};
 
 /// `path` with a macOS or Linux home directory written as `~`.
 pub fn home_relative(path: &str) -> String {
@@ -838,13 +768,9 @@ pub fn located(answer: &Value) -> Option<(Vec<String>, HashMap<String, String>)>
     Some((found, paths))
 }
 
-pub fn agent(key: &str) -> Option<&'static Agent> {
-    AGENTS.iter().find(|a| a.key == key)
-}
-
 /// The default `agentCommands[key]`.
 pub fn default_command(a: &Agent) -> Value {
-    let mut v = serde_json::json!({ "command": a.command, "args": [] });
+    let mut v = serde_json::json!({ "command": a.command, "args": a.args });
     if !a.headless.is_empty() {
         v["headlessArgs"] = serde_json::json!(a.headless);
     }
@@ -855,7 +781,7 @@ pub fn default_command(a: &Agent) -> Value {
 pub fn command_of(config: &Value, a: &Agent) -> Value {
     config
         .get("agentCommands")
-        .and_then(|c| c.get(a.key))
+        .and_then(|c| c.get(&a.key))
         .filter(|c| c.is_object())
         .cloned()
         .unwrap_or_else(|| default_command(a))
@@ -886,61 +812,6 @@ pub fn modified(cmd: &Value, a: &Agent) -> bool {
 pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
-
-/// `AGENT_MCP_SETUPS`: how each agent connects to Vorn.
-pub struct McpSetup {
-    pub agent: &'static str,
-    pub commands: &'static [&'static str],
-    pub in_agent: bool,
-    pub note: Option<&'static str>,
-}
-
-pub const MCP_SETUPS: [McpSetup; 5] = [
-    McpSetup {
-        agent: "claude",
-        commands: &[
-            "/plugin marketplace add vorn-run/plugin",
-            "/plugin install vorn",
-        ],
-        in_agent: true,
-        note: None,
-    },
-    McpSetup {
-        agent: "copilot",
-        commands: &[
-            "copilot plugin marketplace add vorn-run/plugin",
-            "copilot plugin install vorn@vorn",
-        ],
-        in_agent: false,
-        note: None,
-    },
-    McpSetup {
-        agent: "codex",
-        commands: &[
-            "codex plugin marketplace add vorn-run/plugin",
-            "codex plugin add vorn@vorn",
-        ],
-        in_agent: false,
-        note: Some("Restart, or start a fresh session \u{2014} skills load at session start."),
-    },
-    McpSetup {
-        agent: "opencode",
-        commands: &[
-            "opencode mcp add vorn -- npx -y @vornrun/mcp@latest",
-            "git clone https://github.com/vorn-run/plugin ~/.config/opencode/vorn",
-        ],
-        in_agent: false,
-        note: Some("Then add \"skills\": { \"paths\": [\"~/.config/opencode/vorn/skills\"] } to ~/.config/opencode/opencode.jsonc"),
-    },
-    McpSetup {
-        agent: "gemini",
-        commands: &["gemini extensions install https://github.com/vorn-run/plugin"],
-        in_agent: false,
-        note: Some(
-            "Gemini disables MCP servers in a folder it does not trust, user-level ones included.",
-        ),
-    },
-];
 
 /// `serverStaysUp`: why the server will not shut down on its own, if it
 /// will not.
@@ -989,21 +860,21 @@ mod tests {
     #[test]
     fn reads_where_each_agent_was_found() {
         let answer = serde_json::json!({
-            "agents": { "claude": "/h/.local/bin/claude", "codex": null, "gemini": "/opt/homebrew/bin/gemini" },
+            "agents": { "acme": "/h/.local/bin/acme", "beta": null, "gamma": "/opt/homebrew/bin/gamma" },
             "shellResolved": true,
         });
         let (found, paths) = located(&answer).expect("answer");
-        assert_eq!(found, ["claude", "gemini"]);
-        assert_eq!(paths["claude"], "/h/.local/bin/claude");
-        assert!(!paths.contains_key("codex"));
-        assert_eq!(located(&serde_json::json!({ "claude": true })), None);
+        assert_eq!(found, ["acme", "gamma"]);
+        assert_eq!(paths["acme"], "/h/.local/bin/acme");
+        assert!(!paths.contains_key("beta"));
+        assert_eq!(located(&serde_json::json!({ "acme": true })), None);
         assert_eq!(
-            home_relative("/Users/me/.local/bin/claude"),
-            "~/.local/bin/claude"
+            home_relative("/Users/me/.local/bin/acme"),
+            "~/.local/bin/acme"
         );
         assert_eq!(
-            home_relative("/opt/homebrew/bin/codex"),
-            "/opt/homebrew/bin/codex"
+            home_relative("/opt/homebrew/bin/beta"),
+            "/opt/homebrew/bin/beta"
         );
     }
 
@@ -1056,14 +927,15 @@ mod tests {
 
     #[test]
     fn agent_commands_compare_with_their_defaults() {
-        let claude = agent("claude").expect("claude");
+        let agents = crate::agents::testing::agents();
+        let acme = agents.get("acme").expect("acme");
         let config = json!({});
-        let cmd = command_of(&config, claude);
-        assert!(!modified(&cmd, claude));
-        assert_eq!(args_text(&cmd, true), "--dangerously-skip-permissions");
+        let cmd = command_of(&config, acme);
+        assert!(!modified(&cmd, acme));
+        assert_eq!(args_text(&cmd, true), "--yes");
         let changed =
-            json!({ "agentCommands": { "claude": { "command": "claude", "args": ["--x"] } } });
-        assert!(modified(&command_of(&changed, claude), claude));
+            json!({ "agentCommands": { "acme": { "command": "acme", "args": ["--x"] } } });
+        assert!(modified(&command_of(&changed, acme), acme));
         assert_eq!(split_args("  a   b "), vec!["a", "b"]);
     }
 

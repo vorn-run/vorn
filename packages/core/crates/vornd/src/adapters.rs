@@ -157,7 +157,11 @@ impl Adapters {
     /// Switches the shipped adapter of extension `extension` on or off.
     pub fn set_shipped(&self, extension: &str, on: bool) {
         self.change(|state| {
-            for k in state.shipped.iter_mut().filter(|k| k.extension == extension) {
+            for k in state
+                .shipped
+                .iter_mut()
+                .filter(|k| k.extension == extension)
+            {
                 k.on = on;
             }
         });
@@ -381,18 +385,21 @@ command = "gamma"
 no_prompt = ["-p", ""]
 "##;
 
-    const ICON: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#d97757\" d=\"M0 0h1v1z\"/></svg>";
+    const ICON: &[u8] =
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#d97757\" d=\"M0 0h1v1z\"/></svg>";
 
     /// The three test adapters, all on.
     pub fn adapters() -> Arc<Adapters> {
-        Adapters::from_packages([("acme", ACME), ("beta", BETA), ("gamma", GAMMA)].into_iter().map(
-            |(name, manifest)| Package {
-                name,
-                manifest,
-                on: true,
-                file: Box::new(|p: &str| (p == "icon.svg").then_some(ICON)),
-            },
-        ))
+        Adapters::from_packages(
+            [("acme", ACME), ("beta", BETA), ("gamma", GAMMA)]
+                .into_iter()
+                .map(|(name, manifest)| Package {
+                    name,
+                    manifest,
+                    on: true,
+                    file: Box::new(|p: &str| (p == "icon.svg").then_some(ICON)),
+                }),
+        )
     }
 }
 
@@ -409,12 +416,18 @@ mod tests {
     #[test]
     fn switches_adapters_and_keeps_the_launcher_s_order() {
         let adapters = testing::adapters();
-        let on: Vec<String> = adapters.agents().iter().map(|a| a.id().to_owned()).collect();
+        let on: Vec<String> = adapters
+            .agents()
+            .iter()
+            .map(|a| a.id().to_owned())
+            .collect();
         assert!(!on.is_empty());
         let first = adapters.agents().first().cloned().unwrap();
         let listed = adapters.describe();
         assert_eq!(listed[0]["id"], first.id());
-        assert!(listed[0]["icon"].as_str().is_some_and(|s| s.contains("<svg")));
+        assert!(listed[0]["icon"]
+            .as_str()
+            .is_some_and(|s| s.contains("<svg")));
         let ext = listed[0]["extension"].as_str().unwrap().to_owned();
         adapters.set_shipped(&ext, false);
         assert!(adapters.get(first.id()).is_none());

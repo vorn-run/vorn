@@ -2,7 +2,7 @@
 //! and refusing to when that cannot be done safely (`launch-tokens`).
 //!
 //! A configured command is a string the launch line interpolates unescaped:
-//! `npx -y @anthropic-ai/claude-code` is a working configuration. So there is
+//! `npx -y @some/agent-cli` is a working configuration. So there is
 //! no argument array to inspect, only a line, and it has to be read as one.
 //!
 //! The point is to leave exactly one selector on the line. Too cautious ships
@@ -169,9 +169,7 @@ fn flag_spans(tokens: &[Token<'_>], at: usize, sel: &Selectors) -> Option<Vec<Sp
             return Some(vec![token.into()]);
         }
     }
-    sel.bare
-        .contains(&token.value)
-        .then(|| vec![token.into()])
+    sel.bare.contains(&token.value).then(|| vec![token.into()])
 }
 
 /// The spans on the line that select a session; empty when none can be
@@ -260,12 +258,12 @@ mod tests {
 
     #[test]
     fn keeps_quoting_out_of_the_value_and_offsets_on_the_line() {
-        let tokens = tokenize(r#"claude --model "gpt 4""#).unwrap();
+        let tokens = tokenize(r#"agent --model "gpt 4""#).unwrap();
         let raw: Vec<&str> = tokens.iter().map(|t| t.raw).collect();
-        assert_eq!(raw, ["claude", "--model", "\"gpt 4\""]);
+        assert_eq!(raw, ["agent", "--model", "\"gpt 4\""]);
         assert_eq!(
-            values(r#"claude --model "gpt 4""#).unwrap(),
-            ["claude", "--model", "gpt 4"]
+            values(r#"agent --model "gpt 4""#).unwrap(),
+            ["agent", "--model", "gpt 4"]
         );
     }
 

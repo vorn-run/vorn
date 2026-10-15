@@ -315,7 +315,7 @@ mod tests {
     fn session(id: &str, extra: serde_json::Value) -> TerminalSession {
         let mut value = json!({
             "id": id,
-            "agentType": "claude",
+            "agentType": "acme",
             "projectName": "p",
             "projectPath": "/p",
             "status": "running",

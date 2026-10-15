@@ -45,7 +45,10 @@ fn normalizes_each_cli_answer_and_drops_unusable_entries() {
                 { "id": "cli-id", "name": "Again", "description": "" }
             ])
         ),
-        [choice("cli-id", "Again", None), choice("fallback", "fallback", None)]
+        [
+            choice("cli-id", "Again", None),
+            choice("fallback", "fallback", None)
+        ]
     );
     assert_eq!(
         parse(
@@ -66,7 +69,10 @@ fn normalizes_each_cli_answer_and_drops_unusable_entries() {
     let opencode = Probe::new(&support::agent("opencode"), "/p").unwrap();
     assert_eq!(
         opencode
-            .on_exit(true, "provider/model\r\nprovider/model\nother/model\nnoise\n a/b c\n/x\n")
+            .on_exit(
+                true,
+                "provider/model\r\nprovider/model\nother/model\nnoise\n a/b c\n/x\n"
+            )
             .unwrap(),
         [
             choice("provider/model", "provider/model", None),
@@ -79,22 +85,56 @@ fn normalizes_each_cli_answer_and_drops_unusable_entries() {
 #[test]
 fn starts_each_cli_in_its_listing_mode() {
     let configured: Vec<String> = [
-        "--profile", "work", "-c", "model=x", "--oss", "--config=a=b", "--yolo", "-m", "gpt", "-p",
+        "--profile",
+        "work",
+        "-c",
+        "model=x",
+        "--oss",
+        "--config=a=b",
+        "--yolo",
+        "-m",
+        "gpt",
+        "-p",
     ]
     .map(String::from)
     .to_vec();
-    let args = |name: &str| Probe::new(&support::agent(name), "/p").unwrap().arguments(&configured);
+    let args = |name: &str| {
+        Probe::new(&support::agent(name), "/p")
+            .unwrap()
+            .arguments(&configured)
+    };
     assert_eq!(
         args("codex"),
-        ["--profile", "work", "-c", "model=x", "--oss", "--config=a=b", "app-server", "--stdio"]
+        [
+            "--profile",
+            "work",
+            "-c",
+            "model=x",
+            "--oss",
+            "--config=a=b",
+            "app-server",
+            "--stdio"
+        ]
     );
     assert_eq!(args("opencode"), ["models"]);
-    assert_eq!(args("copilot"), ["--acp", "--no-remote", "--no-remote-export"]);
+    assert_eq!(
+        args("copilot"),
+        ["--acp", "--no-remote", "--no-remote-export"]
+    );
     assert_eq!(
         args("claude"),
         [
-            "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-            "--no-session-persistence", "--safe-mode", "--strict-mcp-config", "--tools", ""
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--safe-mode",
+            "--strict-mcp-config",
+            "--tools",
+            ""
         ]
     );
 }
@@ -107,7 +147,10 @@ fn exchanges_each_cli_s_messages_as_0_8_did() {
         [json!({ "id": 1, "method": "initialize",
                  "params": { "clientInfo": { "name": "vorn_model_catalog", "version": "1.0.0" } } })]
     );
-    let Step::Send(sent) = codex.on_line(&line(json!({ "id": 1, "result": {} }))).unwrap() else {
+    let Step::Send(sent) = codex
+        .on_line(&line(json!({ "id": 1, "result": {} })))
+        .unwrap()
+    else {
         panic!("expected messages");
     };
     assert_eq!(sent[0], json!({ "method": "initialized" }));
@@ -116,7 +159,9 @@ fn exchanges_each_cli_s_messages_as_0_8_did() {
         json!({ "id": 2, "method": "model/list", "params": { "limit": 100, "includeHidden": false } })
     );
     let Step::Send(next) = codex
-        .on_line(&line(json!({ "id": 2, "result": { "data": [{ "model": "first" }], "nextCursor": "c" } })))
+        .on_line(&line(
+            json!({ "id": 2, "result": { "data": [{ "model": "first" }], "nextCursor": "c" } }),
+        ))
         .unwrap()
     else {
         panic!("expected the next page");
@@ -129,17 +174,27 @@ fn exchanges_each_cli_s_messages_as_0_8_did() {
     let mut claude = Probe::new(&support::agent("claude"), "/p").unwrap();
     assert_eq!(
         claude.opening().unwrap(),
-        [json!({ "type": "control_request", "request_id": "vorn-models", "request": { "subtype": "initialize" } })]
+        [
+            json!({ "type": "control_request", "request_id": "vorn-models", "request": { "subtype": "initialize" } })
+        ]
     );
     let done = claude
-        .on_line(&line(json!({ "type": "control_response", "response": { "subtype": "success",
-            "response": { "models": [{ "value": "opus", "displayName": "Opus" }] } } })))
+        .on_line(&line(
+            json!({ "type": "control_response", "response": { "subtype": "success",
+            "response": { "models": [{ "value": "opus", "displayName": "Opus" }] } } }),
+        ))
         .unwrap();
     assert_eq!(done, Step::Done(vec![choice("opus", "Opus", None)]));
 
     let mut copilot = Probe::new(&support::agent("copilot"), "/proj").unwrap();
-    assert_eq!(copilot.opening().unwrap()[0]["params"]["protocolVersion"], 1);
-    let Step::Send(sent) = copilot.on_line(&line(json!({ "id": 1, "result": {} }))).unwrap() else {
+    assert_eq!(
+        copilot.opening().unwrap()[0]["params"]["protocolVersion"],
+        1
+    );
+    let Step::Send(sent) = copilot
+        .on_line(&line(json!({ "id": 1, "result": {} })))
+        .unwrap()
+    else {
         panic!("expected session/new");
     };
     assert_eq!(

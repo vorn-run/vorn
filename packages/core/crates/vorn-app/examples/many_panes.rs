@@ -102,7 +102,7 @@ mod transcript {
     /// An agent's TUI: a status line redrawn in place, tool calls between.
     fn spinner_frames(target: usize, seed: u32) -> Vec<String> {
         let mut rand = Rng(seed);
-        let mut frames = vec!["\x1b]0;✳ claude\x07\x1b[?2004h\x1b[?25l".to_owned()];
+        let mut frames = vec!["\x1b]0;✳ agent\x07\x1b[?2004h\x1b[?25l".to_owned()];
         let mut bytes = frames[0].len();
         let mut tick = 0usize;
         while bytes < target {

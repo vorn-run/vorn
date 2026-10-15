@@ -1,12 +1,11 @@
 //! The empty grid's composer (`PromptLauncher` inline): the logo, the
 //! prompt box with its pickers and send button, and the line under it.
 
-use super::menus::launch_name;
 use super::{agent_icon, c, ico, mod_label, truncate, white, Screen};
 use crate::act::Act;
 use crate::app::MODEL_ID;
 use crate::look;
-use crate::models::{footer, rows, selects_models, Listing, Row, Status};
+use crate::models::{footer, rows, Listing, Row, Status};
 use crate::state::{basename, MenuKind};
 use crate::ui::{area, div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
 
@@ -124,7 +123,7 @@ fn prompt_box(s: &Screen<'_>) -> El {
             s,
             MenuKind::LaunchAgent,
             agent,
-            launch_name(agent),
+            s.store.agents.name(agent),
             14.0,
             look::GRAY_400,
             "Agent",
@@ -184,7 +183,7 @@ fn model_state<'a>(s: &'a Screen<'_>) -> (&'a str, Option<&'a Listing>, Option<&
 
 /// `ModelPicker`'s compact trigger, for the agents that take a model.
 fn model_chip(s: &Screen<'_>, agent: &str) -> Option<El> {
-    if !selects_models(agent) {
+    if !s.store.agents.selects_models(agent) {
         return None;
     }
     let (_, listing, value) = model_state(s);
@@ -300,7 +299,8 @@ pub(super) fn model_panel(s: &Screen<'_>) -> El {
         .py(4.0)
         .max_h(240.0)
         .scroll_y();
-    for r in rows(agent, listing, value, s.ui.edit_text(MODEL_ID)) {
+    let group = s.store.agents.get(agent).is_some_and(|a| a.group_models);
+    for r in rows(group, listing, value, s.ui.edit_text(MODEL_ID)) {
         list = list.child(match r {
             Row::Asking => div()
                 .row()

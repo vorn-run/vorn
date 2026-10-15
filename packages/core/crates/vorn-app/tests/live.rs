@@ -285,7 +285,7 @@ fn the_composer_starts_the_default_agent_in_the_chosen_project() {
         app.st.selected.clone()
     });
     let session = app.store.session(&id).expect("card");
-    assert_eq!(session.info.agent_type.as_str(), "claude");
+    assert_eq!(session.info.agent_type.as_str(), "acme");
     assert_eq!(session.info.project_name, "demo");
     assert!(
         app.st.composer.text.is_empty(),

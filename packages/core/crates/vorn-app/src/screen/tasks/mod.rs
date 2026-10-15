@@ -16,7 +16,7 @@ use vorn_protocol::TaskConfig;
 use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
-use crate::screen::menus::{Item, AGENTS};
+use crate::screen::menus::Item;
 use crate::state::MenuKind;
 use crate::tasks::{self, Form, Mode, Source, Status, TaskAct, STATUSES};
 use crate::ui::{div, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
@@ -114,14 +114,14 @@ pub(super) fn live(s: &Screen<'_>, t: &TaskConfig) -> bool {
 /// `getOpenSessionHandler`: a live session to focus or an agent session to
 /// resume.
 pub(super) fn can_open(s: &Screen<'_>, t: &TaskConfig) -> bool {
-    live(s, t) || can_resume(t)
+    live(s, t) || can_resume(s, t)
 }
 
-pub(super) fn can_resume(t: &TaskConfig) -> bool {
+pub(super) fn can_resume(s: &Screen<'_>, t: &TaskConfig) -> bool {
     t.agent_session_id.is_some()
         && t.assigned_agent
             .as_ref()
-            .is_some_and(|a| tasks::resumable(&a.to_string()))
+            .is_some_and(|a| tasks::resumable(&s.store.agents, &a.to_string()))
         && matches!(
             t.status.to_string().as_str(),
             "in_progress" | "in_review" | "done"
@@ -1152,7 +1152,8 @@ pub(in crate::screen) fn agent_items(s: &Screen<'_>, form: Form) -> Vec<Item> {
     let mut none = Item::new("circle", "None", Act::Task(TaskAct::PickAgent(form, None)));
     none.checked = current.is_none();
     let mut items = vec![none];
-    for (k, name) in AGENTS {
+    for agent in &s.store.agents {
+        let (k, name) = (agent.key.as_str(), agent.label.as_str());
         let ok =
             s.st.installed
                 .as_ref()
@@ -1286,7 +1287,7 @@ pub(super) fn agent_picker(s: &Screen<'_>, form: Form) -> El {
         "task-agent-picker",
         MenuKind::TaskAgent(form),
         icon,
-        a.map_or("Unassigned", crate::screen::menus::agent_name),
+        a.map_or("Unassigned", |a| s.store.agents.label(a)),
         if a.is_some() {
             c(look::GRAY_300)
         } else {

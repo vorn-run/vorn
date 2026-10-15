@@ -236,9 +236,9 @@ fn list_models(native: &Native, params: &Value) -> Answer {
         // Never asked: the catalog answers these unavailable before it looks
         // at the command.
         _ => {
-            let answer = native.catalog.list(&request, &unused(), now_ms, || {
-                Err(DiscoveryError::Failed)
-            });
+            let answer = native
+                .catalog
+                .list(&request, &unused(), now_ms, || Err(DiscoveryError::Failed));
             return Answer::Result(answer.to_json());
         }
     };

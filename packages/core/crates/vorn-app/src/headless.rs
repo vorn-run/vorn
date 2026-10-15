@@ -316,7 +316,7 @@ mod tests {
 
     fn h(id: &str, status: &str, exit: Option<i64>, ended: Option<f64>) -> Headless {
         Headless::from_value(&json!({
-            "id": id, "agentType": "claude", "projectName": "web", "status": status,
+            "id": id, "agentType": "acme", "projectName": "web", "status": status,
             "exitCode": exit, "startedAt": 1_000.0, "endedAt": ended,
         }))
         .expect("session")
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn a_record_reads_as_vornd_writes_it() {
         let s = Headless::from_value(&json!({
-            "id": "h1", "pid": 4, "agentType": "codex", "projectName": "web", "projectPath": "/w",
+            "id": "h1", "pid": 4, "agentType": "beta", "projectName": "web", "projectPath": "/w",
             "branch": "main", "status": "exited", "exitCode": 2, "startedAt": 1_000,
             "endedAt": 4_000,
             "origin": { "extension": "vorn.workflows", "id": "wf", "label": "Ship" }

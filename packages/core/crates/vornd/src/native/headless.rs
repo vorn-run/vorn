@@ -522,11 +522,7 @@ mod tests {
             Some(Some(77))
         );
 
-        call(
-            &fed.native,
-            "headless:create",
-            &request("gamma", json!({})),
-        );
+        call(&fed.native, "headless:create", &request("gamma", json!({})));
         notes.try_recv().unwrap();
         fed.host.down("no such program");
         let failed = notes.try_recv().unwrap();
@@ -538,11 +534,9 @@ mod tests {
     #[test]
     fn stops_an_agent_with_term_then_kill_and_one_still_starting_once_it_is_up() {
         let fed = ready();
-        let Answer::Result(record) = call(
-            &fed.native,
-            "headless:create",
-            &request("acme", json!({})),
-        ) else {
+        let Answer::Result(record) =
+            call(&fed.native, "headless:create", &request("acme", json!({})))
+        else {
             panic!("not started");
         };
         let id = record["id"].as_str().unwrap().to_owned();
@@ -592,10 +586,7 @@ mod tests {
             &fed.native,
             "headless:create",
             // A remote project is a POSIX path whatever this host is.
-            &request(
-                "acme",
-                json!({ "remoteHostId": "h", "projectPath": "/p" }),
-            ),
+            &request("acme", json!({ "remoteHostId": "h", "projectPath": "/p" })),
         );
         assert!(matches!(made, Answer::Result(_)), "{made:?}");
         assert_eq!(fed.host.starts.lock().unwrap().len(), 1);

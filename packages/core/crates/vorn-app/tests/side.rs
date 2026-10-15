@@ -39,13 +39,13 @@ fn shell(shot: &mut Shot, app: &mut App, dir: &std::path::Path) -> String {
 /// An agent session in `dir`, its agent a plain shell, selected.
 fn agent(shot: &mut Shot, app: &mut App, dir: &std::path::Path) -> String {
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
-    config["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
+    config["agentCommands"]["acme"] = json!({ "command": "/bin/sh", "args": [] });
     app.rpc().call("config:save", config).expect("saved");
     let info = app
         .rpc()
         .call(
             "terminal:create",
-            json!({ "agentType": "claude", "projectName": "acme", "projectPath": dir }),
+            json!({ "agentType": "acme", "projectName": "acme", "projectPath": dir }),
         )
         .expect("agent");
     let id = info["id"].as_str().expect("id").to_owned();
@@ -476,7 +476,7 @@ fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
     let mut app = support::connect(&v);
     let repo = seed_acme(&mut app, &v);
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
-    config["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
+    config["agentCommands"]["acme"] = json!({ "command": "/bin/sh", "args": [] });
     app.rpc().call("config:save", config).expect("saved");
     let list = app
         .rpc()
@@ -498,7 +498,7 @@ fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
         .rpc()
         .call(
             "terminal:create",
-            json!({ "agentType": "claude", "projectName": "acme", "projectPath": repo, "existingWorktreePath": wt }),
+            json!({ "agentType": "acme", "projectName": "acme", "projectPath": repo, "existingWorktreePath": wt }),
         )
         .expect("a session in the worktree");
     let sid = info["id"].as_str().expect("id").to_owned();

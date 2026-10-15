@@ -1173,7 +1173,10 @@ fn any_of(values: &[String]) -> String {
 }
 
 /// `describeActivation`: where an extension shows, as clauses.
-pub fn describe_activation(activates: Option<&Value>) -> Vec<String> {
+pub fn describe_activation(
+    agents: &crate::agents::Agents,
+    activates: Option<&Value>,
+) -> Vec<String> {
     let list = |key| {
         strings(activates.and_then(|a| a.get(key)))
             .into_iter()
@@ -1202,9 +1205,9 @@ pub fn describe_activation(activates: Option<&Value>) -> Vec<String> {
     }
     let agents: Vec<String> = list("agent")
         .into_iter()
-        .map(|a| match crate::onboarding::agent_def(&a) {
+        .map(|a| match agents.get(&a) {
             _ if a == "shell" => a,
-            Some(def) => def.name.to_owned(),
+            Some(def) => def.name.clone(),
             None => a,
         })
         .collect();
@@ -1535,7 +1538,8 @@ pub fn chip_value(key: &str, value: &Value, secret: bool) -> Option<String> {
     })
 }
 
-/// `isCredentialEnvName` or `isNeverBorrowedEnvName`: never handed over.
+/// `isCredentialEnvName`: never handed over. An agent's session markers are
+/// refused by vornd itself, which knows them from the adapters.
 fn unborrowable(name: &str) -> bool {
     const SENSITIVE: [&str; 14] = [
         "AWS_SECRET",
@@ -1554,9 +1558,7 @@ fn unborrowable(name: &str) -> bool {
         "NODE_AUTH_TOKEN",
     ];
     let upper = name.to_uppercase();
-    upper == "CLAUDECODE"
-        || upper.starts_with("CLAUDE_CODE_")
-        || SENSITIVE.iter().any(|p| upper.starts_with(p))
+    SENSITIVE.iter().any(|p| upper.starts_with(p))
 }
 
 /// `borrowableFromManifest`: the env a signed-in CLI hands over.
@@ -2702,10 +2704,13 @@ mod tests {
     fn extension_copy() {
         let c = json!({"panes": [{"title": "a"}, {"title": "b"}], "footers": [{}]});
         assert_eq!(describe_contributions(Some(&c)), "2 panes, 1 footer");
-        assert_eq!(describe_activation(None), ["every session"]);
+        assert_eq!(
+            describe_activation(&crate::agents::testing::agents(), None),
+            ["every session"]
+        );
         let a = json!({"remoteHost": ["github.com", "x.dev"], "platform": ["darwin"]});
         assert_eq!(
-            describe_activation(Some(&a)),
+            describe_activation(&crate::agents::testing::agents(), Some(&a)),
             ["GitHub or x.dev remotes", "macOS"]
         );
         let asked = vec!["terminal.send".to_owned(), "git.read".to_owned()];

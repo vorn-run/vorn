@@ -9,7 +9,7 @@ use crate::screen::menus::Item;
 use crate::screen::{agent_icon, c, ico, white, Screen};
 use crate::settings::{
     self, describe_field, describe_update, describe_usage, older_note, sigil, SetAct, Tone,
-    UpdateAction, UpdateStatus, AGENTS, MCP_SETUPS,
+    UpdateAction, UpdateStatus,
 };
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{div, icon, image, text, Action, El, Id, Rgba, Role, Sense, TextStyle};
@@ -475,7 +475,7 @@ fn agent_choice(s: &Screen<'_>) -> El {
     let current = defaults(s)
         .and_then(|d| d.get("defaultAgent"))
         .and_then(Value::as_str)
-        .unwrap_or("claude");
+        .unwrap_or(s.store.agents.default_key());
     let mut row = div()
         .row()
         .shrink0()
@@ -483,11 +483,11 @@ fn agent_choice(s: &Screen<'_>) -> El {
         .p(2.0)
         .rounded(8.0)
         .bg(white(0.04));
-    for a in AGENTS {
+    for a in &s.store.agents {
         let installed =
             s.st.installed
                 .as_ref()
-                .is_none_or(|l| l.iter().any(|k| k == a.key));
+                .is_none_or(|l| l.iter().any(|k| *k == a.key));
         let id = s.acts.on(
             "default-agent",
             set(default_act("defaultAgent", format!("\"{}\"", a.key))),
@@ -501,7 +501,7 @@ fn agent_choice(s: &Screen<'_>) -> El {
         } else {
             c(look::GRAY_500).mix(c(look::GRAY_300), hot)
         };
-        let short = a.name.split(' ').next().unwrap_or(a.name);
+        let short = a.name.split(' ').next().unwrap_or(&a.name);
         let mut b = div()
             .id(id)
             .row()
@@ -510,9 +510,9 @@ fn agent_choice(s: &Screen<'_>) -> El {
             .px(10.0)
             .py(4.0)
             .rounded(6.0)
-            .role(Role::RadioButton, a.name)
+            .role(Role::RadioButton, a.name.as_str())
             .selected(on)
-            .child(agent_icon(s, a.key, 14.0))
+            .child(agent_icon(s, &a.key, 14.0))
             .child(text(short, 12.0, fg).line_height(16.0).silent());
         if on && installed {
             b = b.bg(white(0.1));
@@ -523,7 +523,7 @@ fn agent_choice(s: &Screen<'_>) -> El {
             b.opacity(0.3)
         };
         let tip = if installed {
-            a.name.to_owned()
+            a.name.clone()
         } else {
             format!("{} is not installed", a.name)
         };
@@ -1140,13 +1140,13 @@ fn volume_knob(v: f32) -> El {
 
 pub(super) fn mcp(s: &Screen<'_>) -> El {
     let mut list = div().col().gap(12.0);
-    for setup in MCP_SETUPS {
-        let Some(a) = settings::agent(setup.agent) else {
+    for a in &s.store.agents {
+        let Some(setup) = &a.mcp else {
             continue;
         };
         let mut cmds = div().col().gap(8.0);
-        for cmd in setup.commands {
-            let id = s.acts.on("mcp-copy", set(SetAct::Copy((*cmd).to_owned())));
+        for cmd in &setup.commands {
+            let id = s.acts.on("mcp-copy", set(SetAct::Copy(cmd.clone())));
             let hot = s.ui.hover(id);
             let copied = s.st.settings.copied.as_ref().is_some_and(|(k, _)| k == cmd);
             cmds = cmds.child(
@@ -1165,7 +1165,7 @@ pub(super) fn mcp(s: &Screen<'_>) -> El {
                             .border(1.0, white(0.08))
                             .clip()
                             .child(
-                                text(*cmd, 12.0, c(look::GRAY_300))
+                                text(cmd.as_str(), 12.0, c(look::GRAY_300))
                                     .mono()
                                     .line_height(16.0)
                                     .silent(),
@@ -1205,9 +1205,9 @@ pub(super) fn mcp(s: &Screen<'_>) -> El {
                     .items_center()
                     .gap(12.0)
                     .mb(12.0)
-                    .child(agent_icon(s, a.key, 20.0))
+                    .child(agent_icon(s, &a.key, 20.0))
                     .child(
-                        text(a.name, 14.0, c(look::GRAY_200))
+                        text(a.name.as_str(), 14.0, c(look::GRAY_200))
                             .weight(500)
                             .line_height(20.0)
                             .silent(),
@@ -1227,9 +1227,9 @@ pub(super) fn mcp(s: &Screen<'_>) -> El {
                     ),
             )
             .child(cmds);
-        if let Some(n) = setup.note {
+        if let Some(n) = &setup.note {
             card = card.child(
-                text(n, 11.0, c(look::GRAY_500))
+                text(n.as_str(), 11.0, c(look::GRAY_500))
                     .line_height(16.5)
                     .mt(8.0)
                     .wrapping()

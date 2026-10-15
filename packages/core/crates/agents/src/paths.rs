@@ -48,7 +48,7 @@ pub fn comparable(p: &str) -> String {
 }
 
 /// `path.join(dir, file)` on this host: joined with the host's separator and
-/// normalized, so `/usr//bin/` and `claude` give `/usr/bin/claude`.
+/// normalized, so `/usr//bin/` and `agent` give `/usr/bin/agent`.
 pub(crate) fn join(dir: &str, file: &str) -> String {
     // `path.join` skips an empty segment rather than rooting what follows.
     // Callers never pass one with a file that needs normalizing.

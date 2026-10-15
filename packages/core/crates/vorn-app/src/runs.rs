@@ -333,7 +333,13 @@ pub fn timeline(logs: Option<&str>, diagnostics: Option<&str>) -> Vec<Line> {
 
 /// What "Resume session" on step `nid` starts (`terminal:create`'s
 /// params), as RunEntry gathers it from the step, its node and the tasks.
-pub fn resume_params(run: &Value, nodes: &Value, nid: &str, tasks: &[Value]) -> Option<Value> {
+pub fn resume_params(
+    agents: &crate::agents::Agents,
+    run: &Value,
+    nodes: &Value,
+    nid: &str,
+    tasks: &[Value],
+) -> Option<Value> {
     let ns = states(run).find(|n| s(n, "nodeId") == Some(nid))?;
     let session = s(ns, "agentSessionId")?;
     let config = node(nodes, nid).and_then(|n| n.get("config"));
@@ -352,7 +358,7 @@ pub fn resume_params(run: &Value, nodes: &Value, nid: &str, tasks: &[Value]) -> 
                 .and_then(Value::as_str)
                 .filter(|a| *a != "fromTask")
         })
-        .filter(|a| crate::tasks::resumable(a))?;
+        .filter(|a| crate::tasks::resumable(agents, a))?;
     fn nonempty(v: Option<&Value>) -> Option<&str> {
         v.and_then(Value::as_str).filter(|x| !x.is_empty())
     }
@@ -455,16 +461,19 @@ mod tests {
     #[test]
     fn resume_takes_the_project_from_the_task() {
         let run = serde_json::json!({ "triggerTaskId": "t1", "nodeStates": [
-            { "nodeId": "a", "agentSessionId": "s1", "agentType": "claude" },
-            { "nodeId": "b", "agentSessionId": "s2", "agentType": "gemini" }
+            { "nodeId": "a", "agentSessionId": "s1", "agentType": "acme" },
+            { "nodeId": "b", "agentSessionId": "s2", "agentType": "gamma" }
         ]});
         let nodes = serde_json::json!([{ "id": "a", "config": { "agentType": "fromTask" } }]);
         let tasks = [serde_json::json!({ "id": "t1", "projectName": "web", "branch": "x" })];
-        let p = resume_params(&run, &nodes, "a", &tasks).unwrap();
+        let p =
+            resume_params(&crate::agents::testing::agents(), &run, &nodes, "a", &tasks).unwrap();
         assert_eq!(p["projectName"], "web");
         assert_eq!(p["branch"], "x");
         assert_eq!(p["resumeSessionId"], "s1");
-        assert!(resume_params(&run, &nodes, "b", &tasks).is_none());
-        assert!(resume_params(&run, &nodes, "a", &[]).is_none());
+        assert!(
+            resume_params(&crate::agents::testing::agents(), &run, &nodes, "b", &tasks).is_none()
+        );
+        assert!(resume_params(&crate::agents::testing::agents(), &run, &nodes, "a", &[]).is_none());
     }
 }

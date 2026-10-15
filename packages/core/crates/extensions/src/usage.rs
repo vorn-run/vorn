@@ -204,10 +204,7 @@ mod tests {
         );
         assert_eq!(read(of("z", None), home.path()), Usage::default());
         assert_eq!(read(of("../z", None), home.path()), Usage::default());
-        assert_eq!(
-            read(of("missing", None), home.path()),
-            Usage::default()
-        );
+        assert_eq!(read(of("missing", None), home.path()), Usage::default());
         let none = Conversation {
             agent_session_id: None,
             worktree: None,

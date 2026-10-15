@@ -25,9 +25,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 
-use crate::spec::{
-    History, JsonFilesHistory, JsonlHistory, Places, SqliteHistory, TimeUnit,
-};
+use crate::spec::{History, JsonFilesHistory, JsonlHistory, Places, SqliteHistory, TimeUnit};
 use crate::{js, paths, Agent, Agents};
 
 /// How many sessions an agent lists, and how many the merged list keeps.
@@ -600,7 +598,12 @@ fn sqlite(
     Some(scoped_rows(
         &db,
         scope,
-        |s| format!("{} LIMIT {limit}", spec.query.replace("{scope}", &s.where_clause(&spec.scope))),
+        |s| {
+            format!(
+                "{} LIMIT {limit}",
+                spec.query.replace("{scope}", &s.where_clause(&spec.scope))
+            )
+        },
         &spec.query.replace("{scope}", "1"),
         |row| {
             let id = js_string(row.get(&spec.id));
@@ -775,9 +778,7 @@ mod tests {
         assert_eq!(list[0].project_path, "/proj");
         assert!(!list[0].agent.resumes_exactly());
         let elsewhere = ProjectScope::new("/elsewhere", []);
-        assert!(
-            recent_sessions_for(&chats(), &homes(dir.path()), Some(&elsewhere), 20).is_empty()
-        );
+        assert!(recent_sessions_for(&chats(), &homes(dir.path()), Some(&elsewhere), 20).is_empty());
     }
 
     #[test]

@@ -84,11 +84,11 @@ fn the_sidebar_options_persist_and_rearrange_it() {
             .filter(|w| w.len() > 1)
             .map(|_| ())
     });
-    let claude = session(&mut shot, &mut app, "claude", "acme", &path);
+    let agent = session(&mut shot, &mut app, "acme", "acme", &path);
     session(&mut shot, &mut app, "shell", "acme", &path);
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar-worktrees-sessions");
-    assert!(app.store.session(&claude).is_some());
+    assert!(app.store.session(&agent).is_some());
 
     let options = control("sidebar", Act::Open(MenuKind::SidebarOptions));
     shot.click(&mut app, options);
@@ -243,7 +243,7 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
     let mut shot = Shot::new();
     let repo = seed_acme(&mut app, &v);
     let path = repo.to_string_lossy().into_owned();
-    session(&mut shot, &mut app, "claude", "acme", &path);
+    session(&mut shot, &mut app, "acme", "acme", &path);
     shot.until(&mut app, "the worktrees", |app, _| {
         app.st
             .worktrees

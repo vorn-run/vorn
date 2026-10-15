@@ -91,7 +91,10 @@ fn launches_as_the_corpus_says() {
             continue;
         }
         let agents = support::on_by_default();
-        let Some(agent) = agents.get(case["payload"]["agentType"].as_str().unwrap()).cloned() else {
+        let Some(agent) = agents
+            .get(case["payload"]["agentType"].as_str().unwrap())
+            .cloned()
+        else {
             // A shell session is refused by the adapter, before the crate.
             continue;
         };

@@ -16,7 +16,6 @@ use vorn_agents::launch::env::{is_stripped, SENSITIVE_PREFIXES};
 /// Long enough for a cold CLI, short enough that a form does not hang on it.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-
 /// What runs a connector's sign-in tool, so a test can answer for one.
 pub trait Runner: Send + Sync {
     /// The executable `name` resolves to, if it is installed.
@@ -53,7 +52,6 @@ fn borrow_env(auth: Option<&Value>) -> Vec<String> {
         .map(str::to_owned)
         .collect()
 }
-
 
 fn credential_name(name: &str) -> bool {
     let upper = name.to_uppercase();

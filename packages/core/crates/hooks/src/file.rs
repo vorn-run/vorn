@@ -21,7 +21,7 @@ pub struct Spec<'a> {
 }
 
 impl Spec<'_> {
-    /// The conversation id a terminal's hooks post (`copilotHookSessionId`).
+    /// The conversation id a terminal's hooks post.
     pub fn session_id(&self, terminal: &str) -> String {
         self.session.replace("{terminal}", terminal)
     }

@@ -71,7 +71,10 @@ impl Probe {
     pub fn new(agent: &Agent, cwd: &str) -> Option<Probe> {
         let list = agent.spec().models.as_ref()?.list.clone()?;
         // Checked when the adapter was read.
-        let lines = list.lines.as_deref().and_then(|p| regex::Regex::new(p).ok());
+        let lines = list
+            .lines
+            .as_deref()
+            .and_then(|p| regex::Regex::new(p).ok());
         Some(Probe {
             list,
             cwd: cwd.to_owned(),
@@ -131,7 +134,12 @@ impl Probe {
         if !answers {
             return Ok(Step::Wait);
         }
-        if step.fail.as_deref().and_then(|f| at(msg, f)).is_some_and(truthy) {
+        if step
+            .fail
+            .as_deref()
+            .and_then(|f| at(msg, f))
+            .is_some_and(truthy)
+        {
             return Err(DiscoveryError::Unsupported);
         }
         let required = step
@@ -188,7 +196,9 @@ fn fill(message: &Value, cwd: &str) -> Value {
     match message {
         Value::String(s) if s == "{cwd}" => Value::String(cwd.to_owned()),
         Value::Array(items) => Value::Array(items.iter().map(|v| fill(v, cwd)).collect()),
-        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), fill(v, cwd))).collect()),
+        Value::Object(o) => {
+            Value::Object(o.iter().map(|(k, v)| (k.clone(), fill(v, cwd))).collect())
+        }
         other => other.clone(),
     }
 }
@@ -552,7 +562,9 @@ mod tests {
         assert_eq!(sent[0]["method"], "session/new");
         assert_eq!(sent[0]["params"]["cwd"], "/proj");
         let done = p
-            .on_line(&line(json!({ "id": 2, "result": { "models": { "available": [{ "modelId": "gpt" }] } } })))
+            .on_line(&line(
+                json!({ "id": 2, "result": { "models": { "available": [{ "modelId": "gpt" }] } } }),
+            ))
             .unwrap();
         assert!(matches!(done, Step::Done(ref m) if m[0].id == "gpt"));
         assert!(Probe::new(&crate::testing::bare("none"), "/p").is_none());

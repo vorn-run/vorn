@@ -372,7 +372,7 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str, trigger: boo
             );
         }
         if expanded {
-            let resume = runs::resume_params(run, nodes, nid, &tasks).is_some();
+            let resume = runs::resume_params(&s.store.agents, run, nodes, nid, &tasks).is_some();
             item = item.child(trace(s, ns, key, nid, resume));
         }
         col = col.child(item);
@@ -504,8 +504,8 @@ mod tests {
 
     #[test]
     fn step_meta_joins_what_the_node_sets() {
-        let n = json!({ "type": "launchAgent", "config": { "projectName": "web", "agentType": "claude", "branch": " " } });
-        assert_eq!(step_meta(Some(&n)).as_deref(), Some("web \u{b7} claude"));
+        let n = json!({ "type": "launchAgent", "config": { "projectName": "web", "agentType": "acme", "branch": " " } });
+        assert_eq!(step_meta(Some(&n)).as_deref(), Some("web \u{b7} acme"));
         assert_eq!(step_meta(Some(&json!({ "type": "approval" }))), None);
         assert_eq!(node_icon("approval"), "hand");
     }

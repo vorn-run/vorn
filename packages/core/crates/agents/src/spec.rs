@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use vorn_analysis::rules::{Rules, RuleSpec};
+use vorn_analysis::rules::{RuleSpec, Rules};
 
 /// An `[agent]` section as written.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -29,7 +29,7 @@ pub struct AgentSpec {
     /// The agent type sessions carry (`AiAgentType`): lowercase letters,
     /// digits and dashes. `shell` is taken.
     pub id: String,
-    /// What the launcher and Settings call it, as `Claude Code`.
+    /// What the launcher and Settings call it, as `Acme Code`.
     pub name: String,
     /// What menus, the palette and the task board call it; `name` when absent.
     #[serde(default)]
@@ -623,7 +623,10 @@ impl AgentSpec {
             }
         }
         if let Some(h) = &self.headless {
-            for (field, words) in [("headless.resume", &h.resume), ("headless.resume_tail", &h.resume_tail)] {
+            for (field, words) in [
+                ("headless.resume", &h.resume),
+                ("headless.resume_tail", &h.resume_tail),
+            ] {
                 if !words.is_empty() && !has_word(words, ID) {
                     return Err(error(field, "names no {id}"));
                 }
@@ -660,7 +663,11 @@ impl AgentSpec {
             }
         }
         if let Some(h) = &self.history {
-            let kinds = [h.jsonl.is_some(), h.sqlite.is_some(), h.json_files.is_some()];
+            let kinds = [
+                h.jsonl.is_some(),
+                h.sqlite.is_some(),
+                h.json_files.is_some(),
+            ];
             if kinds.iter().filter(|k| **k).count() != 1 {
                 return Err(error(
                     "history",
@@ -755,7 +762,10 @@ impl Places {
         if first == "{data}" {
             return self.data.clone();
         }
-        if let Some(inner) = first.strip_prefix("{env:").and_then(|r| r.strip_suffix('}')) {
+        if let Some(inner) = first
+            .strip_prefix("{env:")
+            .and_then(|r| r.strip_suffix('}'))
+        {
             let (name, fallback) = inner.split_once('|').unwrap_or((inner, ""));
             return match env(name).filter(|v| !v.is_empty()) {
                 Some(v) => PathBuf::from(v),
@@ -794,7 +804,10 @@ pub fn at<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
 /// one that is relative.
 pub fn rooted(template: &str) -> bool {
     let (first, _) = split_first(template);
-    first == "~" || first == "{data}" || first.starts_with("{env:") || Path::new(first).is_absolute()
+    first == "~"
+        || first == "{data}"
+        || first.starts_with("{env:")
+        || Path::new(first).is_absolute()
 }
 
 #[cfg(test)]
@@ -812,8 +825,14 @@ mod tests {
     fn reads_places_in_paths() {
         let p = places();
         let none = &|_: &str| None;
-        assert_eq!(p.path_with("~/.x/y.db", none), Path::new("/h").join(".x").join("y.db"));
-        assert_eq!(p.path_with("{data}/a/b", none), Path::new("/d").join("a").join("b"));
+        assert_eq!(
+            p.path_with("~/.x/y.db", none),
+            Path::new("/h").join(".x").join("y.db")
+        );
+        assert_eq!(
+            p.path_with("{data}/a/b", none),
+            Path::new("/d").join("a").join("b")
+        );
         assert_eq!(
             p.path_with("{env:X_HOME|~/.x}/hooks/v.json", none),
             Path::new("/h").join(".x").join("hooks").join("v.json")

@@ -536,7 +536,7 @@ mod tests {
         serde_json::from_value(json!({
             "name": name,
             "path": "/p",
-            "preferredAgents": ["claude"]
+            "preferredAgents": ["acme"]
         }))
         .unwrap()
     }
@@ -561,7 +561,7 @@ mod tests {
         let json = serde_json::to_value(store.db_get_project("a").unwrap().unwrap()).unwrap();
         assert_eq!(
             json,
-            json!({ "name": "a", "path": "/p", "preferredAgents": ["claude"], "workspaceId": "personal" })
+            json!({ "name": "a", "path": "/p", "preferredAgents": ["acme"], "workspaceId": "personal" })
         );
 
         let updates = json!({ "hostIds": ["h1"], "icon": "Folder", "path": "/q" });

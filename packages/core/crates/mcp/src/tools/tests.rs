@@ -320,10 +320,10 @@ fn workflows_are_checked_stored_and_run() {
     let made = parsed(&run(
         &rpc,
         "create_workflow",
-        json!({ "name": "Flat", "actions": [{ "agentType": "claude", "projectName": "app", "projectPath": "/work/app" }] }),
+        json!({ "name": "Flat", "actions": [{ "agentType": "acme", "projectName": "app", "projectPath": "/work/app" }] }),
     ));
     assert_eq!(made["nodes"][0]["label"], "Manual Trigger");
-    assert_eq!(made["nodes"][1]["label"], "Launch claude");
+    assert_eq!(made["nodes"][1]["label"], "Launch acme");
     assert_eq!(made["nodes"][1]["position"], json!({ "x": 0, "y": 140 }));
     assert_eq!(made["edges"][0]["source"], made["nodes"][0]["id"]);
     let id = made["id"].as_str().unwrap().to_owned();

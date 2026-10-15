@@ -362,7 +362,7 @@ mod tests {
 
     fn who(id: &str) -> Option<Who<'static>> {
         (id == "s1").then(|| Who {
-            agent: "Claude Code",
+            agent: "Acme Code",
             name: "api".into(),
         })
     }
@@ -387,7 +387,7 @@ mod tests {
             .heard("terminal:bell", &stranger, &on(), who, now)
             .is_empty());
         let got = n.heard("terminal:bell", &bell, &on(), who, now);
-        assert_eq!(got[0].title, "Claude Code notification");
+        assert_eq!(got[0].title, "Acme Code notification");
         assert_eq!(got[0].body, "api is requesting your attention");
     }
 

@@ -259,7 +259,23 @@ pub fn connect(v: &TestVornd) -> App {
     let mut config = rpc.call("config:load", Value::Null).expect("config");
     config["defaults"]["hasSeenOnboarding"] = json!(2);
     rpc.call("config:save", config).expect("saved");
+    link_test_agent(&rpc);
     first_run(v)
+}
+
+/// Links the test agent's adapter (`fixtures/acme-adapter`), as a person
+/// links a folder, so the tests run an agent without naming a real CLI.
+pub fn link_test_agent(rpc: &vorn_app::client::Rpc) {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/acme-adapter");
+    wait_for("the test agent's adapter", || {
+        rpc.call("extension:link", json!({ "path": folder })).ok()?;
+        let agents = rpc.call("agent:list", Value::Null).ok()?;
+        agents
+            .as_array()?
+            .iter()
+            .any(|a| a["id"] == "acme")
+            .then_some(())
+    });
 }
 
 /// The app over `v` as it opens on a first run.
@@ -288,8 +304,8 @@ pub fn add_project(app: &mut App, v: &TestVornd, name: &str, defaults: Value) ->
     std::fs::create_dir_all(&path).expect("project dir");
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     config["projects"] = json!([{ "name": name, "path": path, "preferredAgents": [] }]);
-    config["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
-    config["defaults"]["defaultAgent"] = json!("claude");
+    config["agentCommands"]["acme"] = json!({ "command": "/bin/sh", "args": [] });
+    config["defaults"]["defaultAgent"] = json!("acme");
     if let (Some(d), Value::Object(more)) = (config["defaults"].as_object_mut(), defaults) {
         d.extend(more);
     }
@@ -549,7 +565,7 @@ pub fn seed_acme(app: &mut App, v: &TestVornd) -> PathBuf {
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     let projects = config["projects"].as_array().cloned().unwrap_or_default();
     let mut projects = projects;
-    projects.push(json!({ "name": "acme", "path": repo, "preferredAgents": ["claude"], "icon": "Code", "iconColor": "#6F8FAF", "workspaceId": "personal" }));
+    projects.push(json!({ "name": "acme", "path": repo, "preferredAgents": ["acme"], "icon": "Code", "iconColor": "#6F8FAF", "workspaceId": "personal" }));
     config["projects"] = json!(projects);
     config["remoteHosts"] = json!([{ "id": "host-1", "label": "Build box", "hostname": "build.example.com", "user": "ci", "port": 2222, "authMethod": "agent" }]);
     app.rpc().call("config:save", config).expect("saved");

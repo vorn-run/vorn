@@ -16,11 +16,11 @@ pub const DEV_SERVER_WORKFLOW_ID: &str = "system:dev-server-on-restore";
 /// The app's agent commands (`DEFAULT_AGENT_COMMANDS`).
 pub fn default_agent_commands() -> Map<String, Value> {
     let commands = json!({
-        "claude": { "command": "claude", "args": [], "headlessArgs": ["--dangerously-skip-permissions"] },
-        "copilot": { "command": "copilot", "args": [], "headlessArgs": ["--allow-all"] },
-        "codex": { "command": "codex", "args": [], "headlessArgs": ["-a", "never"] },
-        "opencode": { "command": "opencode", "args": [] },
-        "gemini": { "command": "gemini", "args": [], "headlessArgs": ["-y"] }
+        "acme": { "command": "acme", "args": [], "headlessArgs": ["--dangerously-skip-permissions"] },
+        "epsilon": { "command": "epsilon", "args": [], "headlessArgs": ["--allow-all"] },
+        "beta": { "command": "beta", "args": [], "headlessArgs": ["-a", "never"] },
+        "delta": { "command": "delta", "args": [] },
+        "gamma": { "command": "gamma", "args": [], "headlessArgs": ["-y"] }
     });
     match commands {
         Value::Object(map) => map,

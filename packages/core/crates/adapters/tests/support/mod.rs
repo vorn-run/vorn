@@ -51,5 +51,7 @@ pub fn repo_fixture(path: &str) -> PathBuf {
 
 /// The package folder of the adapter shipped as `name`.
 pub fn package(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agents").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("agents")
+        .join(name)
 }

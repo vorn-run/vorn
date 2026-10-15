@@ -126,7 +126,9 @@ fn text_of(entry: &Value, template: &str) -> Option<String> {
 fn skipped(entry: &Value, map: &ChoiceMap) -> bool {
     map.skip.iter().any(|rule| {
         let found = at(entry, &rule.path);
-        rule.is.as_ref().is_some_and(|is| found.is_some_and(|v| same(v, is)))
+        rule.is
+            .as_ref()
+            .is_some_and(|is| found.is_some_and(|v| same(v, is)))
             || rule
                 .is_not
                 .as_ref()
@@ -486,7 +488,8 @@ mod tests {
                 choice("fallback", "fallback", None)
             ])
         );
-        let usage = map(&format!(
+        let usage =
+            map(&format!(
             "id = [\"modelId\"]\ndescription = [\"{{_meta.usage}} usage\", \"description\"]\n{}",
             HIDDEN.replace("]\n", ", { path = \"_meta.enablement\", is_not = \"enabled\" }]\n")
         ));

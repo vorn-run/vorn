@@ -242,19 +242,19 @@ impl App {
     }
 
     fn write_agent(&mut self, key: &str, f: impl FnOnce(&mut Value)) {
-        let Some(a) = settings::agent(key) else {
+        let Some(a) = self.store.agents.get(key).cloned() else {
             return;
         };
         let mut config = self.store.config.clone();
         if !config.get("agentCommands").is_some_and(Value::is_object) {
             config["agentCommands"] = json!({});
         }
-        for d in settings::AGENTS {
-            if config["agentCommands"].get(d.key).is_none() {
-                config["agentCommands"][d.key] = settings::default_command(&d);
+        for d in &self.store.agents {
+            if config["agentCommands"].get(&d.key).is_none() {
+                config["agentCommands"][&d.key] = settings::default_command(d);
             }
         }
-        let mut cmd = settings::command_of(&config, a);
+        let mut cmd = settings::command_of(&config, &a);
         f(&mut cmd);
         config["agentCommands"][key] = cmd;
         self.save_config(config, Call::Quiet);
@@ -377,7 +377,9 @@ impl App {
                 );
             }
             SetAct::ResetAgent(k) => {
-                let Some(a) = settings::agent(&k) else { return };
+                let Some(a) = self.store.agents.get(&k) else {
+                    return;
+                };
                 let d = settings::default_command(a);
                 self.write_agent(&k, |c| *c = d);
                 self.st.settings.args.retain(|(agent, _), _| *agent != k);
@@ -390,8 +392,8 @@ impl App {
                 }
             }
             SetAct::CopyInstall(k) => {
-                if let Some(a) = settings::agent(&k) {
-                    ui.clipboard().set(a.install);
+                if let Some(a) = self.store.agents.get(&k) {
+                    ui.clipboard().set(&a.install);
                     self.st.settings.copied = Some((k, web_time::Instant::now()));
                 }
             }

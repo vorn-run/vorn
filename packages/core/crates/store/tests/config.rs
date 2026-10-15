@@ -268,7 +268,7 @@ mod session_groups {
 
     fn session(id: &str, group: Option<&str>) -> Value {
         let mut session = json!({
-            "id": id, "agentType": "claude", "projectName": "vorn",
+            "id": id, "agentType": "acme", "projectName": "vorn",
             "projectPath": "/tmp/vorn", "status": "idle", "createdAt": 1, "pid": 1
         });
         if let Some(group) = group {
@@ -376,13 +376,12 @@ mod headless_args {
         save_config(
             &mut store,
             make_config(|c| {
-                c["claude"]["headlessArgs"] =
-                    json!(["--dangerously-skip-permissions", "--verbose"]);
+                c["acme"]["headlessArgs"] = json!(["--dangerously-skip-permissions", "--verbose"]);
             }),
             &[],
         );
         assert_eq!(
-            load_config(&mut store)["agentCommands"]["claude"]["headlessArgs"],
+            load_config(&mut store)["agentCommands"]["acme"]["headlessArgs"],
             json!(["--dangerously-skip-permissions", "--verbose"])
         );
     }
@@ -393,12 +392,12 @@ mod headless_args {
         save_config(
             &mut store,
             make_config(|c| {
-                c["opencode"] = json!({ "command": "opencode", "args": [] });
+                c["delta"] = json!({ "command": "delta", "args": [] });
             }),
             &[],
         );
         assert!(lacks(
-            &load_config(&mut store)["agentCommands"]["opencode"],
+            &load_config(&mut store)["agentCommands"]["delta"],
             "headlessArgs"
         ));
     }
@@ -409,18 +408,18 @@ mod headless_args {
         save_config(&mut store, make_config(|_| {}), &[]);
 
         let mut loaded = load_config(&mut store);
-        let mut gemini = default_agent_commands()["gemini"].clone();
-        gemini["headlessArgs"] = json!(["-y", "--no-confirm"]);
-        loaded["agentCommands"]["gemini"] = gemini;
+        let mut gamma = default_agent_commands()["gamma"].clone();
+        gamma["headlessArgs"] = json!(["-y", "--no-confirm"]);
+        loaded["agentCommands"]["gamma"] = gamma;
         save_config(&mut store, loaded, &[]);
 
         let reloaded = load_config(&mut store);
         assert_eq!(
-            reloaded["agentCommands"]["gemini"]["headlessArgs"],
+            reloaded["agentCommands"]["gamma"]["headlessArgs"],
             json!(["-y", "--no-confirm"])
         );
         assert_eq!(
-            reloaded["agentCommands"]["claude"]["headlessArgs"],
+            reloaded["agentCommands"]["acme"]["headlessArgs"],
             json!(["--dangerously-skip-permissions"])
         );
     }

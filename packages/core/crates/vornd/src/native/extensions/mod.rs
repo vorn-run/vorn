@@ -382,7 +382,9 @@ impl Extensions {
             let Some(section) = pack.manifest.agent.clone() else {
                 continue;
             };
-            let agent = match vorn_agents::AgentSpec::from_toml(section).and_then(vorn_agents::Agent::new) {
+            let agent = match vorn_agents::AgentSpec::from_toml(section)
+                .and_then(vorn_agents::Agent::new)
+            {
                 Ok(agent) => agent,
                 Err(err) => {
                     warn!("[extensions] the agent adapter in {id} does not read: {err}");

@@ -107,7 +107,7 @@ mod tests {
             r#"CREATE TABLE agent_commands (agent_type TEXT PRIMARY KEY, command TEXT NOT NULL,
                  args TEXT NOT NULL, headless_args TEXT, fallback_command TEXT, fallback_args TEXT,
                  row_revision INTEGER);
-               INSERT INTO agent_commands VALUES ('gemini', 'gem', '["--x"]', NULL, 'gem2', NULL, 1);
+               INSERT INTO agent_commands VALUES ('gamma', 'gem', '["--x"]', NULL, 'gem2', NULL, 1);
                INSERT INTO defaults VALUES ('envPassthrough', '["ANTHROPIC_API_KEY", 3]');"#,
         )
         .unwrap();
@@ -125,7 +125,7 @@ mod tests {
             (Some("/bin/sh"), true)
         );
         assert_eq!(
-            read.commands["gemini"],
+            read.commands["gamma"],
             serde_json::json!({ "command": "gem", "args": ["--x"], "fallbackCommand": "gem2" })
         );
         conn.execute_batch("UPDATE agent_commands SET args = 'not json'")

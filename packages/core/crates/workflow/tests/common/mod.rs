@@ -117,6 +117,10 @@ impl Host for Fake {
 
     fn publish(&self, _run: &WorkflowExecution) {}
 
+    fn first_agent(&self) -> Option<String> {
+        Some("acme".to_owned())
+    }
+
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
         let creates = matches!(method, "headless:create" | "terminal:create");
         if creates {

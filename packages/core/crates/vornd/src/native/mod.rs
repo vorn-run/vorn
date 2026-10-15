@@ -380,7 +380,8 @@ impl Native {
 
     /// The agents vornd runs, from their adapters.
     pub fn adapters(&self) -> &Arc<crate::adapters::Adapters> {
-        self.adapters.get_or_init(crate::adapters::Adapters::standard)
+        self.adapters
+            .get_or_init(crate::adapters::Adapters::standard)
     }
 
     /// Keeps the model session `id` is started with.
