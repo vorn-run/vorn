@@ -2,19 +2,19 @@
   {
     "tool": "get_task",
     "args": null,
-    "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+    "error": "Invalid input: expected string, received undefined at id"
   },
   {
     "tool": "get_task",
     "args": {},
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+    "error": "Invalid input: expected string, received undefined at id"
   },
   {
     "tool": "get_task",
     "args": {
       "id": 5
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+    "error": "Invalid input: expected string, received number at id"
   },
   {
     "tool": "get_task",
@@ -22,7 +22,7 @@
       "id": "",
       "extra": 1
     },
-    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+    "error": "ID must not be empty at id"
   },
   {
     "tool": "get_task",
@@ -42,7 +42,7 @@
       "icon_color": "blue",
       "preferred_agents": ["claude", "shell"]
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not contain path traversal characters (.. / \\\\)\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"claude\",\n      \"copilot\",\n      \"codex\",\n      \"opencode\",\n      \"gemini\"\n    ],\n    \"path\": [\n      \"preferred_agents\",\n      1\n    ],\n    \"message\": \"Invalid option: expected one of \\\"claude\\\"|\\\"copilot\\\"|\\\"codex\\\"|\\\"opencode\\\"|\\\"gemini\\\"\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"invalid_format\",\n    \"format\": \"regex\",\n    \"pattern\": \"/^#[0-9a-fA-F]{3,8}$/\",\n    \"path\": [\n      \"icon_color\"\n    ],\n    \"message\": \"Must be a valid hex color (e.g. #6366f1)\"\n  }\n]"
+    "error": "Name must not contain path traversal characters (.. / \\) at name\nPath must be absolute (start with /) at path\nInvalid option: expected one of \"claude\"|\"copilot\"|\"codex\"|\"opencode\"|\"gemini\" at preferred_agents[1]\nMust be a valid hex color (e.g. #6366f1) at icon_color"
   },
   {
     "tool": "create_project",
@@ -63,7 +63,7 @@
       "name": "",
       "path": ""
     },
-    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not be empty\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must not be empty\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  }\n]"
+    "error": "Name must not be empty at name\nPath must not be empty at path\nPath must be absolute (start with /) at path"
   },
   {
     "tool": "update_workspace",
@@ -71,7 +71,7 @@
       "id": "w",
       "order": 1.5
     },
-    "error": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+    "error": "Invalid input: expected int, received number at order"
   },
   {
     "tool": "update_workspace",
@@ -79,7 +79,7 @@
       "id": "w",
       "order": -1
     },
-    "error": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Too small: expected number to be >=0\"\n  }\n]"
+    "error": "Too small: expected number to be >=0 at order"
   },
   {
     "tool": "update_workspace",
@@ -87,7 +87,7 @@
       "id": "w",
       "order": 1e300
     },
-    "error": "[\n  {\n    \"code\": \"too_big\",\n    \"maximum\": 9007199254740991,\n    \"note\": \"Integers must be within the safe integer range.\",\n    \"origin\": \"int\",\n    \"inclusive\": true,\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Too big: expected int to be <=9007199254740991\"\n  }\n]"
+    "error": "Too big: expected int to be <=9007199254740991 at order"
   },
   {
     "tool": "update_workspace",
@@ -95,7 +95,7 @@
       "id": "w",
       "order": "3"
     },
-    "error": "[\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Invalid input: expected number, received string\"\n  }\n]"
+    "error": "Invalid input: expected number, received string at order"
   },
   {
     "tool": "read_session_output",
@@ -103,7 +103,7 @@
       "id": "s",
       "lines": 0
     },
-    "error": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"lines\"\n    ],\n    \"message\": \"Too small: expected number to be >=1\"\n  }\n]"
+    "error": "Too small: expected number to be >=1 at lines"
   },
   {
     "tool": "read_session_output",
@@ -111,21 +111,21 @@
       "id": "s",
       "lines": 2000.5
     },
-    "error": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"lines\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+    "error": "Invalid input: expected int, received number at lines"
   },
   {
     "tool": "reorder_sessions",
     "args": {
       "session_ids": []
     },
-    "error": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"At least one session ID is required\"\n  }\n]"
+    "error": "At least one session ID is required at session_ids"
   },
   {
     "tool": "reorder_sessions",
     "args": {
       "session_ids": ["a", 1, ""]
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"session_ids\",\n      1\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\",\n      2\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+    "error": "Invalid input: expected string, received number at session_ids[1]\nID must not be empty at session_ids[2]"
   },
   {
     "tool": "send_key",
@@ -149,7 +149,7 @@
         "a": true
       }
     },
-    "error": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received null\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"number\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected number, received null\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"boolean\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected boolean, received null\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"inputs\",\n      \"1\"\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+    "error": "Invalid input at inputs.1"
   },
   {
     "tool": "execute_workflow",
@@ -157,7 +157,7 @@
       "workflow_id": "w",
       "inputs": []
     },
-    "error": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"inputs\"\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+    "error": "Invalid input: expected record, received array at inputs"
   },
   {
     "tool": "list_tasks",
@@ -165,7 +165,7 @@
       "status": "nope",
       "assigned_agent": 3
     },
-    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"todo\",\n      \"in_progress\",\n      \"in_review\",\n      \"done\",\n      \"cancelled\"\n    ],\n    \"path\": [\n      \"status\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"todo\\\"|\\\"in_progress\\\"|\\\"in_review\\\"|\\\"done\\\"|\\\"cancelled\\\"\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"claude\",\n      \"copilot\",\n      \"codex\",\n      \"opencode\",\n      \"gemini\"\n    ],\n    \"path\": [\n      \"assigned_agent\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"claude\\\"|\\\"copilot\\\"|\\\"codex\\\"|\\\"opencode\\\"|\\\"gemini\\\"\"\n  }\n]"
+    "error": "Invalid option: expected one of \"todo\"|\"in_progress\"|\"in_review\"|\"done\"|\"cancelled\" at status\nInvalid option: expected one of \"claude\"|\"copilot\"|\"codex\"|\"opencode\"|\"gemini\" at assigned_agent"
   },
   {
     "tool": "create_workflow",
@@ -175,7 +175,7 @@
         "triggerType": "nope"
       }
     },
-    "error": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [],\n    \"note\": \"No matching discriminator\",\n    \"discriminator\": \"triggerType\",\n    \"options\": [\n      \"manual\",\n      \"once\",\n      \"recurring\",\n      \"taskCreated\",\n      \"taskStatusChanged\",\n      \"sessionRestored\",\n      \"connectorPoll\",\n      \"webhook\"\n    ],\n    \"path\": [\n      \"trigger\",\n      \"triggerType\"\n    ],\n    \"message\": \"Invalid discriminator value. Expected 'manual' | 'once' | 'recurring' | 'taskCreated' | 'taskStatusChanged' | 'sessionRestored' | 'connectorPoll' | 'webhook'\"\n  }\n]"
+    "error": "Invalid discriminator value. Expected 'manual' | 'once' | 'recurring' | 'taskCreated' | 'taskStatusChanged' | 'sessionRestored' | 'connectorPoll' | 'webhook' at trigger.triggerType"
   },
   {
     "tool": "create_workflow",
@@ -183,7 +183,7 @@
       "name": "W",
       "trigger": 5
     },
-    "error": "[\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"object\",\n    \"path\": [\n      \"trigger\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  }\n]"
+    "error": "Invalid input: expected object, received number at trigger"
   },
   {
     "tool": "create_workflow",
@@ -206,7 +206,7 @@
         ]
       }
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      0,\n      \"options\"\n    ],\n    \"message\": \"select input \\\"a\\\" declares no options, so the run dialog could offer nothing\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      1,\n      \"defaultValue\"\n    ],\n    \"message\": \"default \\\"x\\\" for number input \\\"a\\\" is not a finite number\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      1,\n      \"key\"\n    ],\n    \"message\": \"duplicate input key \\\"a\\\" — only one value can survive under {{inputs.a}}\"\n  }\n]"
+    "error": "select input \"a\" declares no options, so the run dialog could offer nothing at trigger.inputs[0].options\ndefault \"x\" for number input \"a\" is not a finite number at trigger.inputs[1].defaultValue\nduplicate input key \"a\" — only one value can survive under {{inputs.a}} at trigger.inputs[1].key"
   },
   {
     "tool": "create_workflow",
@@ -225,7 +225,7 @@
         ]
       }
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      0,\n      \"defaultValue\"\n    ],\n    \"message\": \"default \\\"yes\\\" for boolean input \\\"a\\\" must be \\\"true\\\" or \\\"false\\\"\"\n  }\n]"
+    "error": "default \"yes\" for boolean input \"a\" must be \"true\" or \"false\" at trigger.inputs[0].defaultValue"
   },
   {
     "tool": "create_workflow",
@@ -245,7 +245,7 @@
         }
       ]
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"actions\",\n      0,\n      \"outputSchema\"\n    ],\n    \"message\": \"outputSchema requires headless: true\"\n  }\n]"
+    "error": "outputSchema requires headless: true at actions[0].outputSchema"
   },
   {
     "tool": "create_workflow",
@@ -277,7 +277,7 @@
       ],
       "edges": []
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"bodyNodeIds\"\n    ],\n    \"message\": \"Too small: expected array to have >=1 items\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"maxIterations\"\n    ],\n    \"message\": \"a repeat loop needs maxIterations as a whole number from 1 to 10\"\n  },\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"position\",\n      \"y\"\n    ],\n    \"message\": \"Invalid input: expected number, received undefined\"\n  }\n]"
+    "error": "Too small: expected array to have >=1 items at nodes[0].config.bodyNodeIds\na repeat loop needs maxIterations as a whole number from 1 to 10 at nodes[0].config.maxIterations\nInvalid input: expected number, received undefined at nodes[1].position.y"
   },
   {
     "tool": "create_workflow",
@@ -319,7 +319,7 @@
         }
       ]
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"items\"\n    ],\n    \"message\": \"a forEach loop needs items: a template naming the list to walk\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"projectName\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"projectPath\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"edges\",\n      0,\n      \"target\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+    "error": "a forEach loop needs items: a template naming the list to walk at nodes[0].config.items\nInvalid input: expected string, received undefined at nodes[1].config.projectName\nInvalid input: expected string, received undefined at nodes[1].config.projectPath\nInvalid input: expected string, received undefined at edges[0].target"
   },
   {
     "tool": "create_workflow",
@@ -352,7 +352,7 @@
       ],
       "edges": []
     },
-    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"inputs\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"variable\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"operator\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"equals\\\"|\\\"notEquals\\\"|\\\"contains\\\"|\\\"notContains\\\"|\\\"isEmpty\\\"|\\\"isNotEmpty\\\"\"\n  }\n]"
+    "error": "Invalid input: expected array, received string at nodes[0].config.inputs\nInvalid input: expected string, received undefined at nodes[1].config.variable\nInvalid option: expected one of \"equals\"|\"notEquals\"|\"contains\"|\"notContains\"|\"isEmpty\"|\"isNotEmpty\" at nodes[1].config.operator"
   },
   {
     "tool": "update_workflow",
@@ -371,7 +371,7 @@
         }
       ]
     },
-    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"trigger\",\n      \"launchAgent\",\n      \"script\",\n      \"condition\",\n      \"approval\",\n      \"createTaskFromItem\",\n      \"callConnectorAction\",\n      \"httpRequest\",\n      \"loop\"\n    ],\n    \"path\": [\n      \"nodes\",\n      0,\n      \"type\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"trigger\\\"|\\\"launchAgent\\\"|\\\"script\\\"|\\\"condition\\\"|\\\"approval\\\"|\\\"createTaskFromItem\\\"|\\\"callConnectorAction\\\"|\\\"httpRequest\\\"|\\\"loop\\\"\"\n  }\n]"
+    "error": "Invalid option: expected one of \"trigger\"|\"launchAgent\"|\"script\"|\"condition\"|\"approval\"|\"createTaskFromItem\"|\"callConnectorAction\"|\"httpRequest\"|\"loop\" at nodes[0].type"
   },
   {
     "tool": "resolve_gate",
@@ -388,7 +388,7 @@
         }
       ]
     },
-    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"comments\",\n      0,\n      \"comment\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"comments\",\n      1,\n      \"quote\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+    "error": "Too small: expected string to have >=1 characters at comments[0].comment\nInvalid input: expected string, received number at comments[1].quote"
   },
   {
     "tool": "install_connector",
@@ -399,7 +399,7 @@
       },
       "sync_interval_minutes": 0
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"env\",\n      \"A\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"sync_interval_minutes\"\n    ],\n    \"message\": \"Too small: expected number to be >=1\"\n  }\n]"
+    "error": "Invalid input: expected string, received number at env.A\nToo small: expected number to be >=1 at sync_interval_minutes"
   },
   {
     "tool": "device_interact",
@@ -407,12 +407,12 @@
       "action": "tap",
       "ref": ""
     },
-    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"ref\"\n    ],\n    \"message\": \"Value must not be empty\"\n  }\n]"
+    "error": "Value must not be empty at ref"
   },
   {
     "tool": "device_list",
     "args": null,
-    "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+    "data": {}
   },
   {
     "tool": "device_list",
@@ -426,7 +426,7 @@
     "args": {
       "types": ["loop", "nope"]
     },
-    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"trigger\",\n      \"launchAgent\",\n      \"script\",\n      \"condition\",\n      \"approval\",\n      \"createTaskFromItem\",\n      \"callConnectorAction\",\n      \"httpRequest\",\n      \"loop\"\n    ],\n    \"path\": [\n      \"types\",\n      1\n    ],\n    \"message\": \"Invalid option: expected one of \\\"trigger\\\"|\\\"launchAgent\\\"|\\\"script\\\"|\\\"condition\\\"|\\\"approval\\\"|\\\"createTaskFromItem\\\"|\\\"callConnectorAction\\\"|\\\"httpRequest\\\"|\\\"loop\\\"\"\n  }\n]"
+    "error": "Invalid option: expected one of \"trigger\"|\"launchAgent\"|\"script\"|\"condition\"|\"approval\"|\"createTaskFromItem\"|\"callConnectorAction\"|\"httpRequest\"|\"loop\" at types[1]"
   },
   {
     "tool": "run_connector_action",
@@ -455,14 +455,14 @@
       "connector_id": [],
       "failing_only": true
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+    "error": "Invalid input: expected string, received array at connector_id\nID must not be empty at connector_id"
   },
   {
     "tool": "list_connections",
     "args": {
       "connector_id": 7
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+    "error": "Invalid input: expected string, received number at connector_id"
   },
   {
     "tool": "list_connections",
@@ -471,7 +471,7 @@
         "length": 0
       }
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received object\"\n  },\n  {\n    \"origin\": \"unknown\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+    "error": "Invalid input: expected string, received object at connector_id\nID must not be empty at connector_id"
   },
   {
     "tool": "create_project",
@@ -479,13 +479,13 @@
       "name": [],
       "path": ""
     },
-    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not be empty\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must not be empty\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  }\n]"
+    "error": "Invalid input: expected string, received array at name\nName must not be empty at name\nPath must not be empty at path\nPath must be absolute (start with /) at path"
   },
   {
     "tool": "reorder_sessions",
     "args": {
       "session_ids": ""
     },
-    "error": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"At least one session ID is required\"\n  }\n]"
+    "error": "Invalid input: expected array, received string at session_ids\nAt least one session ID is required at session_ids"
   }
 ]
