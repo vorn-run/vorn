@@ -9,7 +9,7 @@ publish = false
 description = "Agents' hooks: the events they post, which terminal each comes from, the settings that register them, and the conversation an agent took"
 
 [dependencies]
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tracing = "0.1"
 
