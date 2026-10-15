@@ -1,20 +1,9 @@
 version: 2
 updates:
-  # One entry for the whole workspace, not one per package.
-  #
-  # There is a single yarn.lock, at the root. Pointed at `/packages/server` and
-  # the rest, Dependabot treated each as a project of its own, found no lockfile
-  # beside the manifest, and opened pull requests that changed a package.json
-  # and nothing else -- which `yarn install --immutable` rejects on sight. Those
-  # could never go green, and three of them were open at once. From the root it
-  # resolves the workspace manifests together and updates the one lockfile they
-  # share.
-  #
-  # TypeScript 7 is the native (Go port) rewrite: its main entry no longer
-  # exposes the classic compiler API (breaks typescript-eslint) and Yarn's
-  # bundled compat/typescript patch fails to install it. Hold the major bump
-  # until the toolchain supports the native port. TS 6.x minor and patch
-  # updates still flow.
+  # One entry for the whole workspace: a single yarn.lock at the root resolves
+  # every workspace manifest together.
+  # TypeScript 7 is the native rewrite and breaks the lint toolchain; hold its
+  # major bump. Minor and patch updates still flow.
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
@@ -22,8 +11,29 @@ updates:
     ignore:
       - dependency-name: 'typescript'
         update-types: ['version-update:semver-major']
+    groups:
+      npm-minor-patch:
+        update-types: ['minor', 'patch']
+
+  # The Rust workspace: vornd, the session holder, vornui and the apps.
+  - package-ecosystem: 'cargo'
+    directory: '/packages/core'
+    schedule:
+      interval: 'weekly'
+    groups:
+      cargo-minor-patch:
+        update-types: ['minor', 'patch']
+
+  # The SwiftUI Mac app.
+  - package-ecosystem: 'swift'
+    directory: '/apps/macos'
+    schedule:
+      interval: 'weekly'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: 'weekly'
+    groups:
+      actions:
+        patterns: ['*']

@@ -1,2 +1,0 @@
-target/release/vornui-proto.exe 12352000
-gpui/target/release/gpui-proto.exe 19813888

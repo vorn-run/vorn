@@ -279,10 +279,7 @@ impl TextGamma {
         contrast: 0.0,
     };
 
-    /// The text weight today's app has on this platform. The macOS value is
-    /// fitted to the ink in `spikes/vornui/results/mac/today.png`. The
-    /// Windows (enhanced contrast) and Linux (lighter gamma) values are
-    /// estimates.
+    /// The text weight today's app has on this platform: measured on macOS, estimated elsewhere.
     pub fn platform() -> TextGamma {
         if cfg!(target_os = "macos") {
             TextGamma {
