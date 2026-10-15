@@ -28,7 +28,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: never
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # libghostty-vt-sys builds Ghostty's VT library from source with Zig.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -50,7 +50,7 @@ jobs:
           mkdir -p shots
           VORN_APP_SHOT="$PWD/shots/windows" cargo test --profile ci --locked -p vorn-app
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: vorn-app-windows
