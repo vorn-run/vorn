@@ -535,3 +535,30 @@ pub fn seed_acme(app: &mut App, v: &TestVornd) -> PathBuf {
     });
     repo
 }
+
+/// Puts `tasks` straight into vornd through its task calls, each under its
+/// own id, in its status; vornd's configuration carries none.
+pub fn seed_tasks(rpc: &vorn_app::client::Rpc, tasks: &[Value]) {
+    for t in tasks {
+        let made = rpc.call("task:create", t.clone()).expect("task:create");
+        assert_eq!(made["ok"], true, "{t}");
+    }
+}
+
+/// Makes `workflows` the only ones vornd has, as a test's world starts.
+pub fn replace_workflows(rpc: &vorn_app::client::Rpc, workflows: &[Value]) {
+    let old = rpc.call("workflow:list", Value::Null).expect("workflow:list");
+    for w in old.as_array().into_iter().flatten() {
+        rpc.call("workflow:delete", json!({ "id": w["id"] }))
+            .expect("workflow:delete");
+    }
+    seed_workflows(rpc, workflows);
+}
+
+/// Puts `workflows` straight into vornd through its workflow calls.
+pub fn seed_workflows(rpc: &vorn_app::client::Rpc, workflows: &[Value]) {
+    for w in workflows {
+        rpc.call("workflow:create", json!({ "workflow": w }))
+            .expect("workflow:create");
+    }
+}

@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use support::{connect, key, Shot, TestVornd};
+use support::{connect, key, replace_workflows, seed_tasks, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::{GROUP_NAME, MOD, MODEL_ID};
 use vorn_app::git::GitAct;
@@ -90,14 +90,14 @@ fn seed(v: &TestVornd, shot: &mut Shot, app: &mut App) {
     c["projects"] = json!([{ "name": "demo", "path": path, "preferredAgents": [] }]);
     c["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
     c["defaults"]["defaultAgent"] = json!("claude");
-    c["tasks"] = json!([
+    let tasks = [
         task("t1", "Fix login", "todo"),
         task("t2", "Add dark mode", "in_progress"),
         task("t3", "Write release notes", "done"),
-    ]);
+    ];
     c["sessionGroups"] =
         json!([{ "id": "g1", "name": "Backend", "order": 0, "workspaceId": "personal" }]);
-    c["workflows"] = json!([{
+    let workflows = json!([{
         "id": "wf-hello", "name": "Hello flow", "icon": "Rocket", "iconColor": "#22c55e",
         "enabled": true, "workspaceId": "personal",
         "nodes": [
@@ -110,6 +110,8 @@ fn seed(v: &TestVornd, shot: &mut Shot, app: &mut App) {
         "edges": [{ "id": "e", "source": "t", "target": "s" }]
     }]);
     app.rpc().call("config:save", c).expect("saved");
+    seed_tasks(app.rpc(), &tasks);
+    replace_workflows(app.rpc(), workflows.as_array().expect("a list"));
     shot.until(app, "the seed loaded", |app, _| {
         (!app.store.projects.is_empty()
             && !app.store.groups.is_empty()

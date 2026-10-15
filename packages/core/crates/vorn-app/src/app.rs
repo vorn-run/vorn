@@ -1736,6 +1736,15 @@ impl App {
 
     fn save_config(&mut self, config: Value, call: Call) {
         let before = self.store.workspace().to_owned();
+        // Tasks and workflows are not vornd's configuration: their changes go as calls of their own.
+        let mut calls = crate::client::sync::tasks(self.store.config.get("tasks"), config.get("tasks"));
+        calls.extend(crate::client::sync::workflows(
+            self.store.config.get("workflows"),
+            config.get("workflows"),
+        ));
+        for (method, params) in calls {
+            self.call(Call::Quiet, method, params);
+        }
         self.store.apply("config:changed", config.clone());
         if self.store.workspace() != before {
             self.workspace_switched();
@@ -1753,7 +1762,11 @@ impl App {
         if self.saving {
             return;
         }
-        if let Some((config, call)) = self.saves.pop_front() {
+        if let Some((mut config, call)) = self.saves.pop_front() {
+            if let Some(map) = config.as_object_mut() {
+                map.remove("tasks");
+                map.remove("workflows");
+            }
             self.saving = true;
             self.call(Call::Saved(Box::new(call)), "config:save", config);
         }

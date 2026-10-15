@@ -155,20 +155,29 @@ impl App {
         self.fetch_diff();
     }
 
-    /// Saves the config with the tasks `f` changed, toasting `text`.
-    /// Changes the task `id` with `f` and saves, rereading only that task:
-    /// the store's config changes in place, and vornd is sent a copy.
+    /// Changes the task `id` with `f`, rereading only that task, and sends
+    /// vornd the task calls that make its row the same, toasting `text`.
     fn change_tasks(
         &mut self,
         id: &str,
         text: Option<&str>,
         f: impl FnOnce(&mut Value, &str) -> bool,
     ) {
+        let row = |config: &Value| {
+            config["tasks"]
+                .as_array()
+                .and_then(|l| l.iter().find(|t| t["id"] == id))
+                .cloned()
+        };
+        let before = row(&self.store.config);
         if !f(&mut self.store.config, &tasks::now_iso()) {
             return;
         }
         self.store.reread_task(id);
-        self.queue_save(self.store.config.clone(), Call::Quiet);
+        let after = row(&self.store.config);
+        for (method, params) in crate::client::sync::task(before.as_ref(), after.as_ref()) {
+            self.call(Call::Quiet, method, params);
+        }
         if let Some(text) = text {
             self.st.toast(text, false);
         }

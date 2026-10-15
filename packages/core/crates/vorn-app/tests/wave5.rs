@@ -7,7 +7,7 @@
 mod support;
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, Shot, TestVornd};
+use support::{add_project, connect, key, replace_workflows, Shot, TestVornd};
 use vorn_app::app::MOD;
 use vorn_app::screen::{MainView, PALETTE_INPUT};
 use vorn_app::state::Dialog;
@@ -86,9 +86,7 @@ fn a_waiting_gate_badges_the_workflows_pill() {
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
     let mut shot = Shot::new();
-    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
-    config["workflows"] = json!([gated()]);
-    app.rpc().call("config:save", config).expect("saved");
+    replace_workflows(app.rpc(), &[gated()]);
     app.rpc()
         .call("workflow:runManual", json!({ "workflowId": "wf-gate" }))
         .expect("runs");
