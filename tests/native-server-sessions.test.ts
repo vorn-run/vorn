@@ -97,6 +97,8 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await direct.result('config:save', {
       ...config,
       defaults: { ...(config.defaults as object), shell: '/bin/sh' },
+      // The worktree cleanup looks at the projects the config lists.
+      projects: [{ name: 'repo', path: repo, preferredAgents: ['claude'] }],
       agentCommands: Object.fromEntries(AGENTS.map((a) => [a, { command: stub, args: [] }]))
     })
 
