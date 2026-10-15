@@ -179,7 +179,10 @@ async function templates(page) {
 
 /** Settings › Extensions lists Connectors among the built-ins; Connections is its page. */
 async function extensions(page) {
-  await until('the confirm closed', async () => !(await mirrored(page)).includes('Forget Turns account?'))
+  await until(
+    'the confirm closed',
+    async () => !(await mirrored(page)).includes('Forget Turns account?')
+  )
   if (!(await mirrored(page)).split('\n').includes('button:Extensions')) {
     await press(page, '[role="button"][aria-label="Settings"]', 'the Settings button')
   }
@@ -187,12 +190,18 @@ async function extensions(page) {
   for (const shown of ['button:Install\u2026', 'button:About Connectors', 'button:About Turns']) {
     await until(shown, async () => (await mirrored(page)).split('\n').includes(shown))
   }
-  if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: join(shots, 'web-extensions.png') }))
+  if (shots)
+    await page
+      .waitForTimeout(400)
+      .then(() => page.screenshot({ path: join(shots, 'web-extensions.png') }))
   await press(page, '[role="button"][aria-label="Connections"]', 'the Connections page')
   await until('button:Add connection', async () =>
     (await mirrored(page)).split('\n').includes('button:Add connection')
   )
-  if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: join(shots, 'web-connections.png') }))
+  if (shots)
+    await page
+      .waitForTimeout(400)
+      .then(() => page.screenshot({ path: join(shots, 'web-connections.png') }))
 }
 
 async function run(what, vornd, server) {
