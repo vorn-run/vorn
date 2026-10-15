@@ -148,13 +148,13 @@ impl InstalledPack {
         Some((program, args))
     }
 
-    /// The service's program, resolved; `None` when it declares none.
     /// The folder of its tables' migrations, when it keeps tables.
     pub fn migrations(&self) -> Option<PathBuf> {
         let storage = self.manifest.storage.as_ref()?;
         Some(self.path.join(&storage.migrations))
     }
 
+    /// The service's program, resolved; `None` when it declares none.
     pub fn service_command(&self) -> Option<(PathBuf, Vec<String>)> {
         self.resolve(&self.manifest.service.as_ref()?.command)
     }

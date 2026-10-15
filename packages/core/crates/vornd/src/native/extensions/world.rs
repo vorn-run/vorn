@@ -2,9 +2,8 @@
 //! call, the network `net.fetch` reaches, and the vault its credentials come
 //! from. The gate has already checked every call against the manifest.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -24,12 +23,6 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
     pub native: Weak<Native>,
-    /// The migration folders already run this time vornd runs, by extension.
-    pub migrated: Arc<Mutex<HashSet<(String, PathBuf)>>>,
-}
-
-fn guard<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn stopping() -> ExtError {
@@ -275,7 +268,6 @@ impl World for Wired {
         call: StorageCall,
     ) -> Answer<Value> {
         let (native, id) = (self.native.upgrade(), caller.extension.clone());
-        let migrated = Arc::clone(&self.migrated);
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
             let db = native
@@ -284,15 +276,11 @@ impl World for Wired {
                 .ok_or_else(|| ExtError::new("unsupported", "vornd has no database"))?;
             let done = tokio::task::spawn_blocking(move || {
                 let tables = ExtensionTables::open(&db, &id)?;
+                // Checked each call: a linked package gains files, and a reinstall starts with none run.
                 if let Some(dir) = migrations.filter(|d| d.is_dir()) {
-                    let key = (id.clone(), dir.clone());
-                    let fresh = !guard(&migrated).contains(&key);
-                    if fresh {
-                        let ran = tables.migrate(&dir)?;
-                        if !ran.is_empty() {
-                            info!("[extensions] {id} ran its migrations {}", ran.join(", "));
-                        }
-                        guard(&migrated).insert(key);
+                    let ran = tables.migrate(&dir)?;
+                    if !ran.is_empty() {
+                        info!("[extensions] {id} ran its migrations {}", ran.join(", "));
                     }
                 }
                 Ok::<_, vorn_store::Error>(match call {

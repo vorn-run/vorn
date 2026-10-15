@@ -578,6 +578,32 @@ mod tests {
     }
 
     #[test]
+    fn a_programs_own_report_is_an_event() {
+        use vorn_engine::{BlockedKind, ProgramRecord, ProgramState, Programs};
+        let fed = fed();
+        let mut events = fed.native.events().subscribe("test", &[SESSION_PROGRAM]);
+        let blocked = Programs {
+            native: true,
+            records: vec![ProgramRecord {
+                id: String::new(),
+                state: ProgramState::Blocked,
+                kind: Some(BlockedKind::Permission),
+                progress: None,
+                app: "agent".into(),
+                title: String::new(),
+                msg: "May I?".into(),
+                from_progress: false,
+            }],
+        };
+        program_event(&fed.native, "a", &blocked);
+        let e = events.try_recv().expect("an event");
+        assert_eq!(
+            e.data,
+            json!({ "sessionId": "a", "state": "blocked", "message": "May I?", "waitingFor": "permission" })
+        );
+    }
+
+    #[test]
     fn an_ended_program_idles_its_terminal_and_offers_its_worktree_once() {
         let fed = fed();
         let mut rx = fed.notes();

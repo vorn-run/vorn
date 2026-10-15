@@ -440,11 +440,10 @@ mod tests {
             patch(&mut s, &elsewhere, "n").unwrap(),
             (json!({ "ok": false }), false)
         );
-        assert_eq!(
-            patch(&mut s, &json!({ "id": "none", "set": {} }), "n")
+        assert!(
+            !patch(&mut s, &json!({ "id": "none", "set": {} }), "n")
                 .unwrap()
-                .1,
-            false
+                .1
         );
     }
 

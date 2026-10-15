@@ -225,4 +225,13 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
         .await;
     assert!(removed.get("error").is_none(), "{removed}");
     assert!(tables(&db).is_empty(), "{:?}", tables(&db));
+
+    // Linked again, its migration runs again and its table is back.
+    let linked = c
+        .call("extension:link", json!({ "path": folder.path() }))
+        .await;
+    assert!(linked.get("error").is_none(), "{linked}");
+    let insert =
+        json!({ "sql": "INSERT INTO x_test_0rules_notes (body) VALUES (?)", "params": ["again"] });
+    assert_eq!(c.relay("storage.exec", insert).await["result"], 1);
 }

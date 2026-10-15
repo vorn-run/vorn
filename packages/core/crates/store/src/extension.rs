@@ -375,7 +375,13 @@ impl ExtensionTables {
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
-            .filter(|t| t.to_ascii_lowercase().starts_with(&prefix))
+            // Its own names start with a letter past the prefix, the host's with `_`; another id's never do.
+            .filter(|t| {
+                t.to_ascii_lowercase()
+                    .strip_prefix(&prefix)
+                    .and_then(|rest| rest.chars().next())
+                    .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+            })
             .collect();
         drop(stmt);
         for t in &tables {
@@ -538,6 +544,11 @@ mod tests {
         );
 
         drop(t);
+        // `test`'s prefix begins `test.x`'s: forgetting it leaves `test.x`'s tables.
+        let shorter = ExtensionTables::open(&path, "test").unwrap();
+        shorter.exec("CREATE TABLE x_test_rows (a)", &[]).unwrap();
+        drop(shorter);
+        assert_eq!(ExtensionTables::forget(&path, "test").unwrap(), 3);
         assert_eq!(ExtensionTables::forget(&path, "test.x").unwrap(), 3);
         let conn = Connection::open(&path).unwrap();
         let left: i64 = conn
