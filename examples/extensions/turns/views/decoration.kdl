@@ -1,0 +1,14 @@
+// A session row's status and turn count, under its name.
+schema "vorn:view@1"
+
+rows "sessions" {
+    name string
+    status enum running waiting idle error
+    turns number
+    last string
+}
+
+row when="{row.turns}" {
+    status "{row.status}" running=busy waiting=warn idle=muted error=bad
+    text "Turns: {row.turns}" role=secondary
+}

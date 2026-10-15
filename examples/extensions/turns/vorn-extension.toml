@@ -1,0 +1,84 @@
+# An example extension: counts each agent's turns and shows them where Vorn
+# lets an extension draw, with a template for every place that takes one.
+id = "example.turns"
+name = "Turns"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+description = "Counts each agent's turns, shows them on its card and lists the latest finishes."
+
+[declares]
+uses = ["sessions.read"]
+
+[service]
+command = ["node", "program.mjs"]
+events = ["session.created", "session.status", "session.exited"]
+
+[[contributes.sidebar]]
+id = "finished"
+title = "Finished turns"
+view = "views/finished.kdl"
+
+[[contributes.badges]]
+id = "count"
+view = "views/badge.kdl"
+
+[[contributes.card_footers]]
+id = "last"
+view = "views/footer.kdl"
+
+[[contributes.decorations]]
+id = "line"
+view = "views/decoration.kdl"
+
+[[contributes.panes]]
+id = "all"
+title = "Turns"
+view = "views/pane.kdl"
+
+[[contributes.composer]]
+id = "summary"
+view = "views/composer.kdl"
+
+[[contributes.settings]]
+id = "prefs"
+title = "Turns"
+description = "What Turns counts, and the list it keeps."
+icon = "history"
+view = "views/settings.kdl"
+
+[[contributes.windows]]
+id = "turns"
+title = "Turns"
+view = "views/window.kdl"
+size = [300, 360]
+
+[[contributes.dialogs]]
+id = "clear"
+title = "Clear Finished Turns"
+view = "views/clear.kdl"
+
+[[contributes.commands]]
+id = "toggle"
+title = "Toggle Turns Window"
+key = "Mod+Alt+T"
+window = "turns"
+icon = "history"
+
+[[contributes.commands]]
+id = "clear-finished"
+title = "Clear Finished Turns…"
+call = "ask-clear"
+icon = "trash-2"
+
+[[contributes.menus]]
+id = "reset"
+title = "Reset Turn Count"
+menu = "card"
+call = "reset"
+icon = "rotate-ccw"
+
+[[contributes.launchers]]
+id = "window"
+title = "Watch turns"
+window = "turns"
+icon = "history"

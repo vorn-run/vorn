@@ -1,0 +1,20 @@
+// Every session's turns, beside a card's terminal.
+schema "vorn:view@1"
+
+rows "sessions" {
+    name string
+    status enum running waiting idle error
+    turns number
+    last string
+}
+
+section "Turns" {
+    text "At work: {sessions.status.running} of {sessions.count}" role=secondary
+    list "sessions" empty="No sessions yet" {
+        row {
+            status "{row.status}" running=busy waiting=warn idle=muted error=bad
+            text "{row.name}" grow=#true
+            text "{row.turns}" role=mono
+        }
+    }
+}
