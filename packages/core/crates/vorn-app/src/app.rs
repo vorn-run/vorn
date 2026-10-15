@@ -353,8 +353,6 @@ pub struct App {
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
-    /// Worktree removals waiting for the sessions they closed.
-    removals: Vec<git::Pending>,
     /// A discard the person agreed to is being run.
     discarding: bool,
     /// The browser and device panes' web views and calls in flight.
@@ -509,7 +507,6 @@ impl App {
             data_dir: None,
             health: None,
             last_focus: None,
-            removals: Vec::new(),
             discarding: false,
             web,
             wake: app_wake,

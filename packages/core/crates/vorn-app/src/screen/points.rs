@@ -10,6 +10,11 @@ use crate::points::{kind, Holder, Point, PointAct, Points};
 use crate::ui::{div, text, widgets, Action, El, Id, Rgba, Role, Ui};
 use crate::ui::theme::color as k;
 
+/// A template control's id: point `key`, drawn for `scope`, at node `slot`, for `row`.
+pub fn control_id(key: &str, scope: Option<&str>, slot: u64, row: Option<&str>) -> Id {
+    Id::new(key).child(scope).child(slot).child(row)
+}
+
 /// Binds a template's controls in one point to the app's acts.
 struct Binder<'a> {
     acts: &'a Acts,
@@ -22,10 +27,7 @@ struct Binder<'a> {
 
 impl Binder<'_> {
     fn base(&self, slot: u64, row: Option<&str>) -> Id {
-        Id::new(&self.point.key())
-            .child(self.scope)
-            .child(slot)
-            .child(row)
+        control_id(&self.point.key(), self.scope, slot, row)
     }
 
     fn act(&self, press: Press) -> Act {

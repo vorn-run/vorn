@@ -729,16 +729,6 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             None,
         ));
     rows = rows.child_if(cli_row(s));
-    if !settings::IN_BROWSER {
-        rows = rows.child(switch_row(
-            s,
-            "widgetEnabled",
-            flag(s, "widgetEnabled", false),
-            "Floating Widget",
-            "Show agent status widget when app is not focused",
-            None,
-        ));
-    }
     rows = rows.child(switch_row(
         s,
         "showHeadlessAgents",

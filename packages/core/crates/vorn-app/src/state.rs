@@ -266,8 +266,6 @@ pub enum Dialog {
     GateReview,
     /// The Changes panel's CommitDialog.
     GitCommit,
-    /// WorktreeCleanupDialog.
-    RemoveWorktree,
     /// "Discard unsaved changes?" before a buffer goes.
     Discard,
     /// "Paste N lines?" before a paste the program could run line by line.

@@ -1021,15 +1021,11 @@ fn cli_notice(s: &Screen<'_>) -> Option<El> {
 
 /// The toasts, newest at the bottom right.
 pub(super) fn toasts(s: &Screen<'_>) -> Option<El> {
-    let mut worktrees = super::git::toasts(s);
-    worktrees.extend(cli_notice(s));
-    if s.st.toasts.is_empty() && worktrees.is_empty() {
+    let notice = cli_notice(s);
+    if s.st.toasts.is_empty() && notice.is_none() {
         return None;
     }
-    let mut col = div().col().gap(8.0);
-    for t in worktrees {
-        col = col.child(t);
-    }
+    let mut col = div().col().gap(8.0).child_if(notice);
     for t in &s.st.toasts {
         let kind = if t.error {
             ToastKind::Error

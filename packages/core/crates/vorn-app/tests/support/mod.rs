@@ -442,6 +442,30 @@ impl Shot {
         self.frame(app);
     }
 
+    /// The control a fresh frame names `label` with a button's role, the last when several do.
+    pub fn button(&mut self, app: &mut App, label: &str) -> Option<Id> {
+        let tree = app.frame(&mut self.ui, self.size);
+        tree.nodes
+            .iter()
+            .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
+            .map(|(id, _)| Id(id.0))
+            .last()
+    }
+
+    /// The button `label` a template of point `key` draws for `row`.
+    pub fn row_button(&mut self, app: &mut App, key: &str, row: &str, label: &str) -> Option<Id> {
+        let tree = app.frame(&mut self.ui, self.size);
+        let named: Vec<u64> = tree
+            .nodes
+            .iter()
+            .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
+            .map(|(id, _)| id.0)
+            .collect();
+        (0..512)
+            .map(|slot| vorn_app::screen::points::control_id(key, None, slot, Some(row)))
+            .find(|id| named.contains(&id.0))
+    }
+
     /// Lays out frames until `f` answers.
     #[track_caller]
     pub fn until<T>(
