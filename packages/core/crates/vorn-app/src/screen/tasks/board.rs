@@ -39,7 +39,7 @@ pub(super) fn point<'a>(s: &Screen<'a>) -> Option<&'a Point> {
     s.st.points.find(TASKS, kind::VIEWS, "board")
 }
 
-fn template<'a>(p: &'a Point) -> Option<&'a Template> {
+fn template(p: &Point) -> Option<&Template> {
     match &p.template {
         Ok(Some(t)) if matches!(t.view.kind, Kind::Board(_)) => Some(t),
         _ => None,
