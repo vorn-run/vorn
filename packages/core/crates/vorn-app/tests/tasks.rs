@@ -712,10 +712,7 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
     let project = add_project(&mut app, &v, "web", json!({}));
     let info = app
         .rpc()
-        .call(
-            "terminal:create",
-            json!({ "agentType": "shell", "projectName": "web", "projectPath": project }),
-        )
+        .call("shell:create", json!(project))
         .expect("a shell");
     let sid = info["id"].as_str().expect("id").to_owned();
     let made = app
