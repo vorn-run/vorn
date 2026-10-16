@@ -218,8 +218,8 @@ builds it from opaque steps, never blur:
 
 A person runs 16 agents at once, each streaming. Code that runs per byte a
 terminal sends, per frame, or once per pane is a hot path; these rules bind
-there. The many-pane bench (`yarn bench:panes`, numbers in
-`docs/native-core/benchmarks.md`) measures them.
+there. The many-pane bench (`yarn bench:panes`, baselines in
+`packages/core/bench/many-panes/`) measures them.
 
 - **No work that grows with panes × bytes.** A pane's bytes are folded into its
   own screen once; nothing loops over every pane for each byte or chunk one

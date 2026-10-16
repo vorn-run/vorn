@@ -21,23 +21,22 @@ in code.
 ## 1. Orient
 
 1. Read the spec and every linked section. Note each must-pass test id.
-2. Find the TypeScript being replaced (`packages/server/src/...`) and every
-   test that covers it (`tests/*.test.ts`). Those tests become your acceptance
-   suite with the switch on.
-3. Read the existing crates (`packages/core/crates/*`) and the adapter for the
-   nearest finished package (`src/git.rs` is the async model, `src/screen.rs` the
-   stateful one). Reuse their shapes.
+2. Find the code being changed and every test that covers it (the crate's
+   `tests/`, `crates/vornd/tests/`, `tests/*.test.ts`). Those tests become your
+   acceptance suite with the switch on.
+3. Read the existing crates (`packages/core/crates/*`) and how the nearest
+   finished one is wired into vornd or vorn-app. Reuse their shapes.
 
 ## 2. Design the crate API first
 
 - New logic goes in a plain crate under `packages/core/crates/<name>`
-  (package `vorn-<name>`), added to the workspace `members`. No napi, no
-  tokio unless the logic itself is concurrent.
+  (package `vorn-<name>`), added to the workspace `members`. No tokio unless
+  the logic itself is concurrent.
 - Write the public API as types and signatures with `///` docs before the
   bodies: what it owns, what it borrows, what can fail (an error enum), what
   is `Send`.
 - Keep the API in the vocabulary of the design notes (record, cursor, epoch,
-  checkpoint), not of the JS implementation.
+  checkpoint).
 
 ## 3. Implement with tests
 
@@ -49,52 +48,30 @@ in code.
 - Criterion benches in `crates/<name>/benches/` when the spec has a number.
 - Apply the `rust-idioms` skill throughout.
 
-## 4. Adapter and switch
+## 4. Wiring and switch
 
-- Thin napi adapter in `packages/core/src/<name>.rs`, following the
-  `napi-boundary` skill.
-- The server side (`packages/server/src/native-core.ts` and the module being
-  replaced) chooses the path by the switch. A switch that is on with a missing
-  or failing binary falls back to the TypeScript, logs why, and says so on the
-  settings page.
+- vornd, vorn-app or the CLI calls the crate; keep that layer thin (types,
+  concurrency, errors).
 - One switch in Settings › Experimental for the whole batch of native work
   being tried, never one per feature. Add to the batch's switch if it has
   one.
 
-## 5. Parity
-
-- Add or extend a parity test under `tests/` that feeds identical input to the
-  JS and native paths and compares per feature. Accepted differences get a
-  named normalizer in a `tests/helpers/*-parity.ts` file, never an inline
-  tweak.
-- Tests that need the binary skip cleanly when `packages/core/vorn_core.node`
-  is absent, as `tests/js-reference.test.ts` does.
-- When a batch becomes the default, record the TypeScript path's outputs as
-  fixtures first (`tests/fixtures/js-reference/`), then remove its switch and
-  the TypeScript in the same change.
-
-## 6. Validate locally (before every push)
+## 5. Validate locally (before every push)
 
 ```sh
 cd packages/core
 cargo fmt --all --check
 cargo clippy --release --locked --workspace --all-targets -- -D warnings
-# The plain crates only, as CI does: vorn-core's own test binary needs symbols
-# only Node provides and may not link. The adapter is covered from vitest.
-cargo test --release --locked --workspace --exclude vorn-core
+cargo test --release --locked -p <the crates you touched>
 cd ../..
 # The full build. --no-ghostty builds vornd without its session engine, so it
 # holds no screens; use it only for work that needs no Ghostty.
 yarn build:core
 yarn lint && yarn format:check && yarn typecheck
-# The whole CI pipeline, including the 80 % patch-coverage gate (diff-cover
-# against origin/main). CI collects coverage from vitest shards that have no
-# native binary, so switch-on branches need tests that fake the binary's side.
-yarn ci:local
 
 # Acceptance runs with the switch off and on: the tests that cover a switched
-# path turn it on themselves, as the server would read it from the settings.
-yarn vitest run tests/<the files the spec names> tests/native-core*.test.ts
+# path turn it on themselves, as vornd would read it from the settings.
+yarn vitest run tests/<the files the spec names>
 
 # When the spec has a number.
 yarn bench
@@ -132,7 +109,7 @@ lint cannot turn clippy red on its own, so a clippy failure is yours.
 - If a step truly cannot run here (a macOS-only check, a device), say so in the
   PR rather than pushing to see what CI does.
 
-## 7. Commit, PR, review, merge
+## 6. Commit, PR, review, merge
 
 - No Claude attribution: plain commit messages with no `Co-Authored-By:` or
   `Claude-Session:` trailers, and no "Generated with Claude Code" line or

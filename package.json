@@ -22,7 +22,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "ci:local": "bash scripts/ci-local.sh",
     "deps:install": "bash scripts/yarn-install.sh",
     "prepare": "simple-git-hooks",
     "typecheck:mcp": "tsc --build --force packages/shared && tsc --noEmit -p packages/mcp/tsconfig.json"
