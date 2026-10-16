@@ -1,7 +1,6 @@
-//! `cargo bench -p vorn-analysis`: the analysis alone, without napi, on two of
-//! the shapes of output the server bench uses, a spinner and a bulk dump. Generated here so the crate
-//! needs nothing outside it; the server bench (`yarn bench`) is the number the
-//! work packages are accepted on.
+//! `cargo bench -p vorn-analysis`: the analysis alone, on two shapes of
+//! output, a spinner and a bulk dump, generated here so the crate needs
+//! nothing outside it.
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::hint::black_box;
@@ -69,7 +68,7 @@ fn bench(c: &mut Criterion) {
                 }
             })
         });
-        // What the server pays when it analyzes once per flush instead.
+        // What analyzing once per flush instead costs.
         let flushes: Vec<String> = chunks.chunks(100).map(|c| c.concat()).collect();
         g.bench_function(format!("per_flush/{name}"), |b| {
             b.iter(|| {

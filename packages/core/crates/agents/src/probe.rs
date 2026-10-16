@@ -1,4 +1,4 @@
-//! Asking an installed CLI for its models (`probeProcess`), as its adapter's
+//! Asking an installed CLI for its models, as its adapter's
 //! `[agent.models.list]` says.
 //!
 //! A listing is either an exchange of JSON lines (an initialize request, a
@@ -108,8 +108,7 @@ impl Probe {
     }
 
     /// One line of stdout. Anything this cannot read, a refusal included,
-    /// is [`DiscoveryError::Unsupported`], as every failure while reading a
-    /// line is in the server.
+    /// is [`DiscoveryError::Unsupported`].
     pub fn on_line(&mut self, line: &str) -> Result<Step, DiscoveryError> {
         let msg = match serde_json::from_str::<Value>(line) {
             Ok(v @ Value::Object(_)) => v,

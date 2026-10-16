@@ -1,11 +1,9 @@
-//! A checkpoint's file body, as `packages/server/src/history/checkpoint.ts`
-//! reads it: one JSON object holding the screen, the scrollback behind it and
-//! where in the record stream they end.
+//! A checkpoint's file body: one JSON object holding the screen, the
+//! scrollback behind it and where in the record stream they end.
 //!
-//! Built here because the scrollback is a quarter of a megabyte of escape
-//! sequences, and `JSON.stringify` over it -- every ESC becoming six characters
-//! -- held the event loop for up to three milliseconds per checkpoint, which a
-//! busy terminal takes several of a second.
+//! The scrollback is a quarter of a megabyte of escape sequences, each ESC
+//! six characters once escaped, and a busy terminal takes several
+//! checkpoints a second, so the body is built on the terminal's own thread.
 
 use vorn_screen::Snapshot;
 
@@ -114,7 +112,7 @@ mod tests {
     };
 
     #[test]
-    fn is_the_object_checkpoint_ts_reads() {
+    fn is_one_json_object_with_the_screen_and_cursor() {
         let screen = "\x1b[31mred\x1b[0m\r\n\ttab \\ back \u{1}\u{7f} 🙂";
         let body = encode(&snapshot(screen), "scroll\x1b[K\u{0}back", META);
         let value: Value = serde_json::from_slice(&body).unwrap();

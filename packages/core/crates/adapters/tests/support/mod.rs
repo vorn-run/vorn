@@ -1,5 +1,5 @@
-//! The shipped adapters as Vorn reads them, for the tests that replay what
-//! 0.8 recorded against them.
+//! The shipped adapters as Vorn reads them, for the tests that replay
+//! recorded cases against them.
 
 #![allow(dead_code)]
 
@@ -27,7 +27,7 @@ pub fn all() -> Agents {
     Agents::new(vorn_adapters::shipped().iter().map(|s| agent(s.name)))
 }
 
-/// The shipped adapters on by default: the agents 0.8 knew.
+/// The shipped adapters on by default.
 pub fn on_by_default() -> Agents {
     Agents::new(
         vorn_adapters::shipped()

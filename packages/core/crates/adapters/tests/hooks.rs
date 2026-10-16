@@ -1,4 +1,4 @@
-//! The shipped adapters' hook installers write what 0.8 wrote: the recorded
+//! The shipped adapters' hook installers write the recorded
 //! settings merge and hooks file under `agents/<name>/fixtures/`.
 
 mod support;

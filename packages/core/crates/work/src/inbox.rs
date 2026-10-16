@@ -1,6 +1,5 @@
 //! The connector inbox, which carries connector items and webhook requests
-//! to the workflows that run on them (the inbox half of `scheduler.ts`, and
-//! `webhook-trigger.ts`).
+//! to the workflows that run on them.
 //!
 //! A poll or a webhook request lands in the inbox first, so an event
 //! received while nothing can run it is still there later. Rows are leased
@@ -57,9 +56,8 @@ pub fn release_leases(store: &mut Store, now_ms: i64) {
     );
 }
 
-/// `deliverPendingConnectorInbox`, up to running: leases what is due and
-/// can be taken, settles rows whose run already finished, and returns the
-/// rest.
+/// Leases what is due and can be taken, settles rows whose run already
+/// finished, and returns the rest.
 pub fn claim_due(store: &mut Store, now_ms: i64) -> Vec<Due> {
     let now = js::iso(now_ms);
     let active = call(store, "dbCountActiveConnectorInboxLeases", json!([now]))
@@ -110,7 +108,7 @@ pub fn claim_due(store: &mut Store, now_ms: i64) -> Vec<Due> {
     due
 }
 
-/// `completeConnectorInbox`: a run settles its row.
+/// A run settles its row.
 pub fn complete(
     store: &mut Store,
     id: i64,

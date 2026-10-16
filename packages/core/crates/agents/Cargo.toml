@@ -29,7 +29,7 @@ data-encoding = "2"
 libc = "0.2"
 
 [dev-dependencies]
-# Pins the shims to the versions the server wrote.
+# Pins the shims' contents by digest.
 sha2 = { version = "0.10", default-features = false }
 tempfile = "3"
 # Status fixtures: rule files read against recorded screens.

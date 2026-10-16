@@ -21,7 +21,7 @@ vorn-extensions = { path = "../extensions" }
 # The tools it adds to Vorn's MCP server are written with the server's own toolkit.
 vorn-mcp = { path = "../mcp" }
 vorn-store = { path = "../store" }
-# JavaScript's truthiness and number formatting, as the board's rules were written in it.
+# The truthiness and number formatting the board's rules use.
 vorn-work = { path = "../work" }
 
 [dev-dependencies]

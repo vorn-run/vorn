@@ -250,7 +250,7 @@ mod source_connections {
 mod task_source_links {
     use super::*;
 
-    /// A connection and a task to link, as the TypeScript `beforeEach` made.
+    /// A store with a connection and a task to link.
     fn store() -> Store {
         let mut store = memory();
         insert_conn(&mut store, make_conn(json!({ "id": "conn-1" })));

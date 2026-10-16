@@ -105,7 +105,7 @@ fn row(store: &mut Store, id: &Value) -> vorn_store::Result<Option<Value>> {
     Ok((!found.is_null()).then_some(found))
 }
 
-/// Runs `method` on the store, as the server's handlers did.
+/// Runs `method` on the store.
 fn write(store: &mut Store, method: &str, params: &Value) -> vorn_store::Result<Done> {
     let now = now_iso();
     // A task being created was not there before, whatever id it is given.

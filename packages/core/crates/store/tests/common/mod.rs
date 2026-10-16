@@ -1,4 +1,4 @@
-//! The options the store is opened with in tests, and calls by their TypeScript name.
+//! The options the store is opened with in tests, and calls by their call name.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ const SEED_WORKFLOWS: [(&str, &str); 2] = [
     ),
 ];
 
-/// Seeded workflows' ids, as `default-workflows.ts` named them.
+/// Seeded workflows' ids.
 pub const DEFAULT_TASK_WORKFLOW_ID: &str = "system:default-task-workflow";
 pub const DEV_SERVER_WORKFLOW_ID: &str = "system:dev-server-on-restore";
 
@@ -65,7 +65,7 @@ fn seed_workflows() -> Vec<SeedWorkflow> {
         .collect()
 }
 
-/// What the server passed the store (`nativeOptions()`), with the machine's shell and user name given.
+/// The options vornd opens the store with, with the machine's shell and user name given.
 pub fn options_with(default_shell: &str, owner_name: &str) -> StoreOptions {
     StoreOptions {
         default_shell: default_shell.to_owned(),
@@ -87,7 +87,7 @@ pub fn options() -> StoreOptions {
     options_with("/bin/zsh", "owner")
 }
 
-/// A store in memory, as `initTestDatabase()` opened one.
+/// A store in memory with the test options.
 pub fn memory() -> Store {
     Store::open_in_memory(options()).expect("an in-memory store opens")
 }
@@ -114,16 +114,18 @@ pub fn raw(dir: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(db_file(dir)).expect("the file opens")
 }
 
-/// The call named `name`, with `args` in signature order, answered as the TypeScript caller read it; panics on an error.
+/// The call named `name`, with `args` in signature order, whole floats read
+/// as integers; panics on an error.
 pub fn call(store: &mut Store, name: &str, args: Value) -> Value {
     let result = store
         .call(name, args)
         .unwrap_or_else(|err| panic!("{name}: {err}"));
-    as_javascript_read_it(result)
+    with_whole_floats_as_integers(result)
 }
 
-/// `value` with every whole float as an integer. The store answers a field typed `number` as an f64 (`15.0`); JavaScript has one number type, so the caller that parsed it saw `15`, and so do these tests.
-pub fn as_javascript_read_it(value: Value) -> Value {
+/// `value` with every whole float as an integer: a field typed `number` is an
+/// f64 (`15.0`), and these tests compare it as `15`.
+pub fn with_whole_floats_as_integers(value: Value) -> Value {
     match value {
         Value::Number(n) => match n.as_f64() {
             Some(f) if n.is_f64() && f.fract() == 0.0 && f.abs() <= 9_007_199_254_740_992.0 => {
@@ -131,17 +133,22 @@ pub fn as_javascript_read_it(value: Value) -> Value {
             }
             _ => Value::Number(n),
         },
-        Value::Array(items) => Value::Array(items.into_iter().map(as_javascript_read_it).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(with_whole_floats_as_integers)
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.into_iter()
-                .map(|(k, v)| (k, as_javascript_read_it(v)))
+                .map(|(k, v)| (k, with_whole_floats_as_integers(v)))
                 .collect(),
         ),
         other => other,
     }
 }
 
-/// `saveConfig(config)`: the wrapper sent the keys of `defaults` set to `undefined` beside the config, as `deleted`.
+/// `saveConfig`, with the `defaults` keys to clear as `deleted`.
 pub fn save_config(store: &mut Store, config: Value, deleted: &[&str]) {
     call(store, "saveConfig", json!([config, deleted]));
 }
@@ -150,7 +157,8 @@ pub fn load_config(store: &mut Store) -> Value {
     call(store, "loadConfig", json!([]))
 }
 
-/// `dbUpdateTask(id, updates)`: the wrapper sent `Object.keys(updates)` too, which names a key set to `undefined` that the JSON of `updates` drops.
+/// `dbUpdateTask`, with `present` naming every key the update had, including
+/// cleared ones the JSON of `updates` drops.
 pub fn update_task(store: &mut Store, id: &str, updates: Value, present: &[&str]) {
     call(store, "dbUpdateTask", json!([id, updates, present]));
 }
@@ -164,7 +172,7 @@ pub fn update_connection(store: &mut Store, id: &str, updates: Value, present: &
     );
 }
 
-/// Whether `value` has no `key` at all: what `toBeUndefined()` and `not.toHaveProperty` asked of a value that crossed as JSON.
+/// Whether `value` has no `key` at all.
 pub fn lacks(value: &Value, key: &str) -> bool {
     value.get(key).is_none()
 }

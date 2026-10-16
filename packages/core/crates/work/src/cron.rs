@@ -1,7 +1,6 @@
-//! Cron expressions as node-cron 4.2 reads them, so a schedule fires in the
-//! same minutes whichever side arms it.
+//! Cron expressions, and the times a schedule fires at.
 //!
-//! node-cron is not Vixie cron, and the differences are kept:
+//! The rules differ from Vixie cron:
 //!
 //! - five fields get a seconds field of `0` in front; six are taken as they
 //!   are, and fields past the sixth are ignored;
@@ -10,7 +9,8 @@
 //!   (`1-7` is Sunday and Monday, a range swapped into `0-1`);
 //! - only the first `*` of a field is its full range;
 //! - a range is `a-b` or `a-b/s`, its ends swapped when `a > b`; a value is
-//!   whatever `parseInt` makes of it, so `5/10` is `5` and `0x1f` is 31;
+//!   its leading integer (hexadecimal after `0x`), so `5/10` is `5` and
+//!   `0x1f` is 31;
 //! - a time matches when every field does: day of month and day of week are
 //!   both required, never either.
 //!
@@ -59,12 +59,12 @@ const WEEKDAYS: [&str; 7] = [
 ];
 const SHORT_WEEKDAYS: [&str; 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-/// The most values one range may produce. node-cron would build any list,
-/// and refuse it afterwards when a value is out of bounds; a bound here
-/// keeps a typo from allocating without end.
+/// The most values one range may produce. A range is listed before its
+/// values are checked against the field's bounds; this bound keeps a typo
+/// from allocating without end.
 const MAX_RANGE_VALUES: i64 = 10_000;
 
-/// An expression node-cron's `validate` refuses: such a schedule is never armed.
+/// An expression that is not a valid schedule: such a schedule is never armed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidCron(pub String);
 
@@ -84,7 +84,7 @@ pub struct Cron {
 }
 
 impl Cron {
-    /// Reads `expression` as node-cron's `validate` and `schedule` do.
+    /// Reads `expression`, or says it is not a valid schedule.
     pub fn parse(expression: &str) -> Result<Cron, InvalidCron> {
         let invalid = || InvalidCron(expression.to_owned());
         let normalized = collapse_spaces(expression);
@@ -111,7 +111,7 @@ impl Cron {
         Ok(Cron { fields })
     }
 
-    /// Whether node-cron fires at the wall-clock time `at`.
+    /// Whether the schedule fires at the wall-clock time `at`.
     pub fn matches(&self, at: &Zoned) -> bool {
         let allows = |field: usize, value: i8| {
             u32::try_from(value).is_ok_and(|v| v < 64 && self.fields[field] & (1 << v) != 0)
@@ -124,7 +124,7 @@ impl Cron {
             && allows(5, at.weekday().to_sunday_zero_offset())
     }
 
-    /// The first second, in Unix milliseconds, at which node-cron fires in
+    /// The first second, in Unix milliseconds, at which the schedule fires in
     /// the minute `minute` (Unix minutes, as the scheduler's tick locks are
     /// keyed), in time zone `tz`; `None` when it does not fire in it.
     pub fn fires_in(&self, minute: i64, tz: &TimeZone) -> Option<i64> {
@@ -150,7 +150,7 @@ impl Cron {
     }
 }
 
-/// `str.replace(/\s{2,}/g, ' ').trim()`.
+/// Runs of two or more spaces made one space, then the ends trimmed.
 fn collapse_spaces(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut run = String::new();
@@ -171,7 +171,7 @@ fn collapse_spaces(text: &str) -> String {
     out.trim_matches(is_js_space).to_owned()
 }
 
-/// What `\s` and `trim` count as space.
+/// Unicode whitespace and the byte order mark.
 fn is_js_space(c: char) -> bool {
     c.is_whitespace() || c == '\u{feff}'
 }
@@ -211,8 +211,8 @@ fn replace_ignoring_case(haystack: &str, needle: &str, with: &str) -> String {
 }
 
 /// Replaces each `a-b(/s)?`, leftmost first, with the values it stands for,
-/// until none is left. `None` for a step of zero (node-cron never returns)
-/// or a range too long to list.
+/// until none is left. `None` for a step of zero or a range too long to
+/// list.
 fn expand_ranges(field: &str) -> Option<String> {
     let mut field = field.to_owned();
     while let Some(found) = find_range(&field) {
@@ -240,7 +240,7 @@ struct Range {
     step: Option<i64>,
 }
 
-/// The leftmost match of `/(\d+)-(\d+)(\/(\d+)|)/`.
+/// The leftmost `a-b` or `a-b/s`, in ASCII digits.
 fn find_range(text: &str) -> Option<Range> {
     let bytes = text.as_bytes();
     let digits = |at: usize| {
@@ -282,9 +282,9 @@ fn find_range(text: &str) -> Option<Range> {
     })
 }
 
-/// `parseInt(text)` without a radix, for a value that fits a field: leading
-/// space, a sign, `0x` for hexadecimal, then as many digits as there are.
-/// `None` where it would be `NaN`.
+/// The integer at the start of `text`, for a value that fits a field:
+/// leading space, a sign, `0x` for hexadecimal, then as many digits as
+/// there are. `None` without a digit.
 fn parse_int(text: &str) -> Option<i64> {
     let text = text.trim_start_matches(is_js_space);
     let (negative, text) = match text.as_bytes().first() {
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_what_validate_refuses() {
+    fn refuses_invalid_expressions() {
         for bad in [
             "",
             "* * * *",
@@ -356,8 +356,8 @@ mod tests {
     }
 
     #[test]
-    fn keeps_node_crons_leniencies() {
-        // parseInt reads the leading number and stops.
+    fn reads_lenient_fields() {
+        // A value is its leading number.
         assert_eq!(values(&parse("5/10 * * * *"), 1), [5]);
         assert_eq!(values(&parse("0x1f * * * *"), 1), [31]);
         assert_eq!(values(&parse("+5 * * * *"), 1), [5]);
@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_parse_int_as_javascript_does() {
+    fn reads_leading_integers() {
         assert_eq!(parse_int(" 12abc"), Some(12));
         assert_eq!(parse_int("-3"), Some(-3));
         assert_eq!(parse_int("0X1A"), Some(26));

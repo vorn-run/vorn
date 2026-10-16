@@ -1,9 +1,8 @@
 //! The task board's calls (`task:*`): read, create, update, move, reorder,
-//! archive and delete, with the rules the server kept. Listing is the core's. A task in a
-//! project that does not exist is refused; finishing one stamps
-//! `completedAt` and reopening one clears it and `archivedAt`; a reorder
-//! permutes the places the named tasks already hold rather than numbering
-//! them.
+//! archive and delete. Listing is the core's. A task in a project that does
+//! not exist is refused; finishing one stamps `completedAt` and reopening one
+//! clears it and `archivedAt`; a reorder permutes the places the named tasks
+//! already hold rather than numbering them.
 
 use serde_json::{json, Map, Value};
 use vorn_store::{Result, Store};
@@ -13,7 +12,7 @@ pub fn is_terminal(status: Option<&str>) -> bool {
     matches!(status, Some("done" | "cancelled"))
 }
 
-/// What a status change does to the dates that hang off it (`terminalStamps`).
+/// What a status change does to the dates that hang off it.
 fn stamps(
     from: Option<&str>,
     to: Option<&str>,

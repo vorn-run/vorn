@@ -48,7 +48,7 @@ pub struct UiConfig {
 }
 
 impl UiConfig {
-    /// The faces the app's CSS stacks resolve to on this platform
+    /// The faces the theme's font stacks resolve to on this platform
     /// ([`crate::theme::font`]).
     pub fn system(scale: f32, term_size: f32) -> UiConfig {
         let (ui_font, mono_font) = (crate::theme::font::UI, crate::theme::font::MONO);

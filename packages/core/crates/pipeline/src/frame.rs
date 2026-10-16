@@ -1,9 +1,6 @@
-//! History log frames, byte for byte as `packages/server/src/history/log.ts`
-//! writes them: a kind, the payload's length and its CRC-32, then the payload,
-//! which starts with the record's number and the byte offset it starts at.
-//!
-//! The reader stays in TypeScript, so this side only ever has to agree with it;
-//! `tests/history-pipeline.test.ts` reads frames built here.
+//! History log frames: a kind, the payload's length and its CRC-32, then the
+//! payload, which starts with the record's number and the byte offset it
+//! starts at.
 
 /// Kind byte, payload length, CRC-32.
 pub const PREFIX_BYTES: usize = 1 + 4 + 4;
@@ -40,8 +37,7 @@ pub fn data_from(out: &mut Vec<u8>, at: Record, stream: u8, bytes: &[u8]) {
     finish(out, start);
 }
 
-/// Append one resize record to `out`. Pixel sizes are written as zero, as the
-/// TypeScript writer does.
+/// Append one resize record to `out`. Pixel sizes are written as zero.
 pub fn resize(out: &mut Vec<u8>, at: Record, cols: u16, rows: u16) {
     let start = begin(out, KIND_RESIZE, RECORD_HEADER_BYTES + 8, at);
     out.extend_from_slice(&cols.to_le_bytes());
@@ -76,7 +72,7 @@ mod tests {
 
     #[test]
     fn checksum_is_ieee_crc32() {
-        // The check value every IEEE CRC-32 is tested against, as log.ts pins it.
+        // The check value every IEEE CRC-32 is tested against.
         assert_eq!(crc32fast::hash(b"123456789"), 0xcbf43926);
     }
 

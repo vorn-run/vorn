@@ -57,7 +57,7 @@ pub mod rgb {
     pub const SKY_400: u32 = 0x00bcff;
 }
 
-/// Colours from `theme.css` and Tailwind, ready to paint.
+/// The theme's colours and Tailwind's, ready to paint.
 pub mod color {
     use super::{rgb, Rgba};
 

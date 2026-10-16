@@ -1,11 +1,11 @@
-//! Output analysis: what the server's JavaScript `appendOutput`, `stripAnsi` and
-//! status parser did per raw PTY chunk, in one pass over the bytes.
+//! Output analysis: each raw PTY chunk appended to the session's output,
+//! stripped of escape sequences and checked for a status, in one pass over
+//! the bytes.
 //!
-//! Plain Rust, which vornd's session engine uses. It keeps
-//! the JavaScript's outputs (a ring of stripped lines, bracketed-paste status,
-//! the status patterns on the last lines), recorded in
-//! `tests/fixtures/js-reference`, with differences that make it closer to a
-//! terminal rather than further:
+//! vornd's session engine uses it. It keeps a ring of stripped lines,
+//! bracketed-paste status and the status patterns on the last lines, checked
+//! against recorded outputs in `tests/fixtures/js-reference`, and behaves
+//! like a terminal:
 //!
 //! - parser state outlives the chunk, so an escape sequence split across two
 //!   reads is still stripped;
@@ -14,8 +14,8 @@
 //!   instead of growing by every frame until the next newline;
 //! - the status patterns run line by line on the last five lines, so a
 //!   completed line is checked at most once and only the line in progress is
-//!   checked on every chunk. They still only see what falls in the JavaScript's
-//!   2000-character window: a line, or the part of one, further back than that
+//!   checked on every chunk. They only see what falls in the last 2000
+//!   characters: a line, or the part of one, further back than that
 //!   is not matched even when it is among the last five.
 
 pub mod rules;
@@ -32,10 +32,10 @@ const MAX_OUTPUT_LINES: usize = 1000;
 /// An OSC/DCS/APC payload longer than this is taken as unterminated and
 /// dropped, so one stray `ESC ]` cannot swallow the rest of a session's output.
 const MAX_STRING_BYTES: usize = 4096;
-/// `analyzeOutput` reads the last five lines: four completed and the current one.
+/// The status reads the last five lines: four completed and the current one.
 const RECENT_COMPLETED: usize = 4;
-/// How far back `analyzeOutput` looks for the last non-blank line: its buffer
-/// holds the last 2000 characters of stripped output.
+/// How far back the status looks, in characters of stripped output, for an
+/// error or the last non-blank line.
 const WAITING_WINDOW_CHARS: usize = 2000;
 
 /// Returned by [`Analyzer::append`].
@@ -75,7 +75,7 @@ struct Line {
     text: String,
     /// Whether an error pattern matches, worked out the first time the line is
     /// among the recent ones when a chunk ends. Lines that scroll past inside
-    /// one chunk are never checked, as in the JavaScript.
+    /// one chunk are never checked.
     error: Option<bool>,
 }
 
@@ -120,7 +120,7 @@ impl Analyzer {
     }
 
     /// The last `lines` completed lines, oldest first; all of them when omitted
-    /// or zero, as `getOutput` reads it.
+    /// or zero.
     pub fn output(&self, lines: Option<u32>) -> Vec<String> {
         let n = lines
             .filter(|&n| n > 0)
@@ -132,7 +132,7 @@ impl Analyzer {
             .collect()
     }
 
-    /// The line in progress, stripped, as the JavaScript kept it between chunks.
+    /// The line in progress, stripped, as kept between chunks.
     pub fn partial(&self) -> String {
         self.line.clone()
     }
@@ -401,11 +401,11 @@ impl Analyzer {
         }
     }
 
-    /// `analyzeOutput`: errors on the last five lines, the line in progress
-    /// included; the waiting prompt anywhere in the last 2000 characters.
+    /// Errors on the last five lines, the line in progress included; the
+    /// waiting prompt anywhere in the last 2000 characters.
     fn status(&mut self) -> u32 {
-        // Only the window `analyzeOutput` keeps, 2000 characters of the stream
-        // shared across its last five lines: a long stream with no newline
+        // Only the window, 2000 characters of the stream shared across the
+        // last five lines: a long stream with no newline
         // would otherwise be rescanned in full on every chunk.
         let mut left = WAITING_WINDOW_CHARS;
         let current = tail(&self.line, left);
@@ -432,9 +432,8 @@ impl Analyzer {
         if error {
             return STATUS_ERROR;
         }
-        // The last line with something on it, as `trimEnd().split('\n').pop()`
-        // found it in the JavaScript's 2000-character buffer: blank lines after a
-        // prompt don't hide it.
+        // The last line with something on it in the 2000-character window:
+        // blank lines after a prompt don't hide it.
         let mut budget = WAITING_WINDOW_CHARS;
         let mut last = "";
         let mut completed = self.lines.iter().rev();
@@ -664,8 +663,8 @@ mod tests {
     }
 
     #[test]
-    fn error_window_is_shared_like_js() {
-        // An error more than 2000 characters back is out of the JS window,
+    fn error_window_is_shared_by_the_last_lines() {
+        // An error more than 2000 characters back is out of the window,
         // even when it is within the last five lines.
         let mut a = Analyzer::new();
         assert_eq!(a.append_str("error: boom\n", true), STATUS_ERROR);
@@ -674,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_window_is_shared_like_js() {
+    fn waiting_window_is_shared_by_the_last_lines() {
         // The prompt is 1500 blank characters and a newline back, so only
         // the last 499 characters of its line are in the window: no prompt.
         let mut a = Analyzer::new();
@@ -686,8 +685,7 @@ mod tests {
 
     #[test]
     fn prompt_found_past_blank_lines() {
-        // `analyzeOutput` trims its whole buffer, so blank lines after a
-        // prompt still leave the prompt as the last line.
+        // Blank lines after a prompt still leave the prompt as the last line.
         let mut a = Analyzer::new();
         assert_eq!(
             a.append_str(
@@ -703,7 +701,7 @@ mod tests {
             ),
             STATUS_WAITING
         );
-        // Beyond the 2000-character window it is gone, as in JS.
+        // Beyond the 2000-character window it is gone.
         let blank = format!("{}\n", " ".repeat(100)).repeat(25);
         assert_eq!(a.append_str(&blank, true), STATUS_RUNNING);
     }

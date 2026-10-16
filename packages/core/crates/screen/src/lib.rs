@@ -1,14 +1,12 @@
 //! A terminal's screen, kept in a libghostty-vt terminal: what the server's
 //! history checkpoints serialize, and the title and cwd that travel beside it.
 //!
-//! Plain Rust, so vornd and the native UI can link it and its tests run as ordinary binaries.
+//! Plain Rust, so vornd and the native UI can link it and its tests run as
+//! ordinary binaries.
 //!
-//! Differences from the headless xterm it replaces that callers see: the parse
-//! is synchronous, so there is no queue to bound and no drain to wait for, and
-//! the serialized screen comes from Ghostty's own VT formatter rather than
-//! `@xterm/addon-serialize`. Each accepted difference is named in
-//! `tests/helpers/screen-parity.ts` and checked against the recorded JS
-//! reference in `tests/js-reference.test.ts`.
+//! The parse is synchronous, so there is no queue to bound and no drain to
+//! wait for, and the serialized screen comes from Ghostty's own VT
+//! formatter.
 
 pub mod checkpoint;
 pub mod emulator;
@@ -28,7 +26,7 @@ use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::terminal::Terminal;
 use memchr::memchr;
 
-/// How much of a title or a cwd is kept, in UTF-16 units as the JS model counts.
+/// How much of a title or a cwd is kept, in UTF-16 units.
 pub const MAX_LABEL_UNITS: usize = 512;
 /// How much of one OSC payload is held while it is scanned. Enough for a full
 /// label even percent-encoded; the rest of an oversized payload is skipped.
@@ -77,7 +75,7 @@ pub struct Snapshot {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Fed {
     /// The cwd an OSC 5522 moved to, for the session record. OSC 7 moves the
-    /// model's cwd without reporting, as the JS model does.
+    /// model's cwd without reporting.
     pub cwd: Option<String>,
     /// How many BELs rang: a real 0x07 as a terminal acts on it, not one
     /// that ends an OSC title.
@@ -97,7 +95,7 @@ pub struct Screen {
 
 impl Screen {
     pub fn new(cols: u32, rows: u32) -> Result<Self> {
-        // Same as the xterm model: the screen, not history.
+        // The screen, not history.
         Self::with_scrollback(cols, rows, 0)
     }
 
@@ -130,9 +128,9 @@ impl Screen {
         self.term.vt_write(bytes);
         let bells = self.bells.swap(0, Ordering::Relaxed);
         // Titles and cwds are read off the stream here rather than from Ghostty,
-        // which drops a title over 2 KB instead of keeping its start, and so the
-        // xterm model's rules apply: last writer wins, OSC 7 is percent-decoded,
-        // and a sequence split across flushes still counts.
+        // which drops a title over 2 KB instead of keeping its start: last
+        // writer wins, OSC 7 is percent-decoded, and a sequence split across
+        // flushes still counts.
         let mut reported = None;
         let (title, cwd) = (&mut self.title, &mut self.cwd);
         self.osc.scan(bytes, |num, payload| match num {
@@ -270,9 +268,8 @@ enum OscState {
     PayloadEsc,
 }
 
-/// Finds OSC sequences in a stream, across calls, as xterm's parser delimits
-/// them: `ESC ]`, a number, `;`, a payload, then BEL or `ESC \`. CAN and SUB
-/// abort one.
+/// Finds OSC sequences in a stream, across calls: `ESC ]`, a number, `;`, a
+/// payload, then BEL or `ESC \`. CAN and SUB abort one.
 #[derive(Default)]
 struct OscScanner {
     state: OscState,
@@ -369,7 +366,8 @@ fn clip_units(s: &str) -> String {
     s.to_owned()
 }
 
-/// `decodeURIComponent`: `None` where it would throw, so the caller keeps the raw value.
+/// Percent-decodes `s`; `None` for a bad escape or invalid UTF-8, so the
+/// caller keeps the raw value.
 fn percent_decode(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -388,7 +386,7 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// `isPlausiblePath`, as the JavaScript screen model had it.
+/// An absolute path, POSIX or with a drive letter, without control characters.
 fn is_plausible_path(p: &str) -> bool {
     let b = p.as_bytes();
     let absolute = p.starts_with('/')

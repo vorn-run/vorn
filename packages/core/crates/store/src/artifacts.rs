@@ -15,7 +15,7 @@ use crate::sql::{
 use crate::tasks::bind;
 use crate::{Error, Result, Store};
 
-/// An `artifacts` row as `mapArtifactRow` maps it: `sessionId` and
+/// An `artifacts` row as an artifact: `sessionId` and
 /// `projectName` are always there, null when unset.
 fn map_artifact_row(row: &Row<'_>) -> Result<Artifact> {
     Ok(Artifact {
@@ -32,7 +32,7 @@ fn map_artifact_row(row: &Row<'_>) -> Result<Artifact> {
     })
 }
 
-/// An `artifact_comments` row as `mapArtifactCommentRow` maps it: `anchor`
+/// An `artifact_comments` row as a comment: `anchor`
 /// is parsed, and null when empty or NULL.
 fn map_comment_row(row: &Row<'_>) -> Result<ArtifactComment> {
     let anchor = match get_opt_text(row, "anchor")? {
@@ -156,8 +156,8 @@ impl Store {
         Ok(token.flatten())
     }
 
-    /// The newest first. A session and a project narrow it together with OR,
-    /// as the TypeScript does; `limit` defaults to 50.
+    /// The newest first. A session and a project narrow it together with OR;
+    /// `limit` defaults to 50.
     pub fn list_artifacts(
         &self,
         filter: &vorn_protocol::ArtifactFilter,

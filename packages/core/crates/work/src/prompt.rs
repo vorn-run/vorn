@@ -1,6 +1,6 @@
-//! The prompts an agent step is started with (`prompt-builder.ts`): a
-//! task's, with its project and the other tasks beside it, and the
-//! workflow's wrapper around the step's own words.
+//! The prompts an agent step is started with: a task's, with its project and
+//! the other tasks beside it, and the workflow's wrapper around the step's
+//! own words.
 
 use serde_json::Value;
 
@@ -11,7 +11,7 @@ fn text<'a>(record: &'a Value, key: &str) -> &'a str {
     record.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-/// `${record.key}`: absent reads `undefined`, as a template literal does.
+/// A record's field as text; an absent one reads `undefined`.
 fn shown(record: &Value, key: &str) -> String {
     record
         .get(key)
@@ -29,7 +29,7 @@ fn status_name(status: &str) -> &str {
     }
 }
 
-/// `buildTaskPrompt`: the task, its project and branch, what else is going
+/// The task, its project and branch, what else is going
 /// on in the project, and the tools the agent has.
 pub fn task_prompt(task: &Value, project: &Value, siblings: &[Value]) -> String {
     let mut lines: Vec<String> = Vec::new();
@@ -126,8 +126,8 @@ pub fn task_prompt(task: &Value, project: &Value, siblings: &[Value]) -> String 
     lines.join("\n")
 }
 
-/// `buildWorkflowPrompt`: the step's prompt inside the workflow it belongs
-/// to, with the output instructions when it declares a schema.
+/// The step's prompt inside the workflow it belongs to, with the output
+/// instructions when it declares a schema.
 pub fn workflow_prompt(
     workflow_id: &str,
     workflow_name: &str,

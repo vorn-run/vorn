@@ -1,5 +1,5 @@
 //! `VORN_TRANSCRIPTS=<dir of <name>.json flush arrays> cargo run --release -p vorn-analysis --example throughput`:
-//! the analysis over the server bench's own transcripts, fed per flush.
+//! the analysis over recorded transcripts, fed per flush.
 use std::time::Instant;
 use vorn_analysis::Analyzer;
 

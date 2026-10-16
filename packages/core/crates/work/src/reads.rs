@@ -1,7 +1,6 @@
-//! The work model's read calls, answered from `vorn.db` as the server's
-//! handlers answer them: workflows, their runs, the schedule log, the next
-//! run of a schedule, the webhook address, and artifacts with the URLs that
-//! open them.
+//! The work model's read calls, answered from `vorn.db`: workflows, their
+//! runs, the schedule log, the next run of a schedule, the webhook address,
+//! and artifacts with the URLs that open them.
 
 use std::path::Path;
 
@@ -30,7 +29,7 @@ pub const METHODS: &[&str] = &[
     "artifact:readSource",
 ];
 
-/// What the server's process knows that the database does not.
+/// What the host process knows that the database does not.
 #[derive(Clone, Copy, Debug)]
 pub struct Host<'a> {
     /// The data directory, where artifact bodies are kept.
@@ -49,10 +48,10 @@ pub struct Host<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Reply {
     Value(Value),
-    /// The handler returned `undefined`: the frame has no `result`.
+    /// No value: the frame has no `result`.
     Void,
-    /// Only the server can answer: the call needs its sessions or caches,
-    /// its handler would throw, or the store refused the call.
+    /// No answer from the database: the call needs sessions or caches, its
+    /// params cannot be read, or the store refused the call.
     Server,
 }
 
@@ -78,7 +77,7 @@ fn reply(store: &mut Store, host: &Host<'_>, method: &str, params: &Value) -> Op
         "workflowRun:listRunning" => {
             without_definitions(call(store, "listRunningRuns", json!([]))?)
         }
-        // The server logs a failed read and answers an empty log.
+        // A failed read answers an empty log.
         "scheduler:getLog" => value(
             call(store, "getScheduleLogEntries", json!([params])).unwrap_or_else(|| json!([])),
         ),
@@ -103,19 +102,18 @@ fn reply(store: &mut Store, host: &Host<'_>, method: &str, params: &Value) -> Op
     }
 }
 
-/// `({ a, b }) =>` reads fields of anything but `null` and `undefined`,
-/// which it throws on.
+/// Params whose fields can be read: anything but `null`.
 fn destructure(params: &Value) -> Option<&Value> {
     (!params.is_null()).then_some(params)
 }
 
-/// A store call's answer, numbers as the server prints them; `None` when
+/// A store call's answer, whole numbers as integers; `None` when
 /// the store refuses or fails it.
 fn call(store: &mut Store, name: &str, args: Value) -> Option<Value> {
     store.call(name, args).ok().map(js_numbers)
 }
 
-/// `list(params[key], params.limit).map(withoutDefinition)`.
+/// The runs a list call returns for `params[key]` and `params.limit`, without definitions.
 fn runs(store: &mut Store, name: &str, params: &Value, key: &str) -> Option<Reply> {
     let params = destructure(params)?;
     let arg = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
@@ -134,7 +132,7 @@ fn without_definitions(runs: Value) -> Option<Reply> {
     Some(Reply::Value(Value::Array(runs)))
 }
 
-/// `scheduler.getNextRun`: a `once` trigger's `runAt` while it is ahead,
+/// A workflow's next run: a `once` trigger's `runAt` while it is ahead,
 /// a cron trigger's expression, or `null`.
 fn next_run(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Reply> {
     let null = Some(Reply::Value(Value::Null));
@@ -152,7 +150,7 @@ fn next_run(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Reply>
         Trigger::Cron {
             cron: Some(cron), ..
         } => Some(Reply::Value(cron.clone())),
-        // `new Date(undefined)` and `new Date(null)` are never ahead.
+        // A missing or null `runAt` is never ahead.
         Trigger::Once {
             run_at: None | Some(Value::Null),
         } => null,
@@ -180,7 +178,7 @@ pub fn artifact_path(artifact_id: &str, version: i64, token: &str) -> String {
     )
 }
 
-/// JavaScript's `encodeURIComponent`.
+/// Percent-encodes every byte but ASCII letters, digits and `-_.!~*'()`.
 fn encode_uri_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
@@ -216,7 +214,7 @@ fn version_url(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Rep
     } else {
         Some(latest_version(&artifact)?)
     };
-    // A version JavaScript would compare or print other than as an integer is the server's.
+    // A version that is not an integer is not answered here.
     let n = match params.get("version") {
         None | Some(Value::Null) => latest.unwrap_or(0),
         Some(v) => v.as_i64()?,
@@ -252,7 +250,7 @@ fn for_gate(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Reply>
     ))
 }
 
-/// `readArtifactSource`: a version's row and the body kept for it.
+/// A version's row and the body kept for it.
 fn read_source(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Reply> {
     if is_truthy(params.get("sessionId")) {
         return None;
@@ -265,7 +263,7 @@ fn read_source(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Rep
     let n = match params.get("version") {
         None | Some(Value::Null) => artifact.get("latestVersion")?.as_f64()?,
         Some(Value::Number(v)) => v.as_f64()?,
-        // `===` never matches a version row's number.
+        // A version that is not a number matches no row.
         Some(_) => return Some(Reply::Value(Value::Null)),
     };
     let versions = call(store, "listArtifactVersions", json!([id]))?;
@@ -294,7 +292,7 @@ fn read_source(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Rep
 }
 
 /// An artifact id as a directory name: each UTF-16 unit but
-/// `[A-Za-z0-9._-]` is `_`, as the server's regex replaces it.
+/// `[A-Za-z0-9._-]` is `_`.
 fn segment(id: &str) -> String {
     let mut out = String::with_capacity(id.len());
     for c in id.chars() {

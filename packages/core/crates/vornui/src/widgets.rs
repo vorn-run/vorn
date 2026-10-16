@@ -1,7 +1,6 @@
-//! The controls the app is built from, with the look and behaviour of
-//! today's components (`src/renderer/components`): tooltips, buttons, icon
-//! buttons, pills, pickers and their menus, list rows, tab strips, split
-//! panes, scroll views, text inputs and the prompt composer.
+//! The controls the app is built from: tooltips, buttons, icon buttons,
+//! pills, pickers and their menus, list rows, tab strips, split panes, scroll
+//! views, text inputs and the prompt composer.
 //!
 //! Each is a function from the [`Ui`]'s interaction state to an [`El`]:
 //! hover and focus are read while building, choices come back as
@@ -34,8 +33,8 @@ fn label(s: &str, (size, line): (f32, f32), c: Rgba) -> El {
     text(s, size, c).line_height(line).silent()
 }
 
-/// Makes `owner` show `label` above it after the pointer rests on it, as
-/// `Tooltip.tsx` does: hover only, never on focus, gone on scroll or press.
+/// Makes `owner` show `label` above it after the pointer rests on it: hover
+/// only, never on focus, gone on scroll or press.
 pub fn tooltip(ui: &Ui, owner: El, id: Id, label: &str, shortcut: Option<&str>) -> El {
     tooltip_at(ui, owner, id, label, shortcut, Place::Above)
 }
@@ -897,7 +896,7 @@ pub enum ToastKind {
 }
 
 impl ToastKind {
-    /// The icon and the Tailwind 400/500 pair `Toast.tsx` tints it with.
+    /// The icon and the Tailwind 400/500 pair it is tinted with.
     fn look(self) -> (&'static str, u32, u32) {
         use crate::theme::rgb;
         match self {

@@ -1,6 +1,5 @@
 //! What the operating system says about this machine: its name and its
-//! network addresses, read as Node's `os.hostname()` and
-//! `os.networkInterfaces()` read them (both are libuv's).
+//! network addresses.
 
 use std::net::Ipv4Addr;
 

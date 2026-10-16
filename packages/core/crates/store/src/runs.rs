@@ -3,7 +3,7 @@
 //!
 //! Reads return JSON objects rather than [`WorkflowExecution`]: the lists add
 //! `workflowName`, which the type does not have, and building the object from
-//! the columns keeps numbers as libsql hands them to JavaScript.
+//! the columns keeps each number as the column stores it.
 
 use std::collections::HashMap;
 
@@ -18,7 +18,7 @@ use crate::{Result, Store};
 /// Runs kept per workflow; older finished ones are trimmed on save.
 const MAX_WORKFLOW_RUNS: i64 = 50;
 
-/// `ns.feedback?.length ? JSON.stringify(ns.feedback) : null`.
+/// Feedback as JSON text when it is a non-empty array or string, else `null`.
 fn feedback_text(feedback: Option<&Value>) -> Result<SqlValue> {
     let stored = match feedback {
         Some(v @ Value::Array(items)) if !items.is_empty() => Some(v),
@@ -31,8 +31,7 @@ fn feedback_text(feedback: Option<&Value>) -> Result<SqlValue> {
     }
 }
 
-/// `parseRunInputs` and `parseStructuredOutput`: a JSON object, or nothing
-/// for empty text, a parse error, an array or a scalar.
+/// A JSON object, or nothing for empty text, a parse error, an array or a scalar.
 fn parse_object(raw: Option<&str>) -> Option<Value> {
     let raw = raw.filter(|r| !r.is_empty())?;
     serde_json::from_str::<Value>(raw)
@@ -40,15 +39,14 @@ fn parse_object(raw: Option<&str>) -> Option<Value> {
         .filter(Value::is_object)
 }
 
-/// `parseGateFeedback`: a non-empty array, or nothing.
+/// A gate's feedback: a non-empty array, or nothing.
 fn parse_feedback(raw: Option<&str>) -> Option<Value> {
     serde_json::from_str::<Value>(raw?)
         .ok()
         .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()))
 }
 
-/// Sets `key` to the column as JavaScript reads it, unless it is NULL
-/// (`...(r.col != null && { key: r.col })`).
+/// Sets `key` to the column's value, unless it is NULL.
 fn put_if_set(obj: &mut Map<String, Value>, key: &str, row: &Row<'_>, column: &str) -> Result<()> {
     let value = column_value(row, column)?;
     if !value.is_null() {
@@ -57,7 +55,7 @@ fn put_if_set(obj: &mut Map<String, Value>, key: &str, row: &Row<'_>, column: &s
     Ok(())
 }
 
-/// A `workflow_run_nodes` row as `mapNodeRow` maps it.
+/// A `workflow_run_nodes` row as a node state.
 fn map_node_row(row: &Row<'_>) -> Result<Value> {
     let mut node = Map::new();
     node.insert("nodeId".into(), column_value(row, "node_id")?);
@@ -79,8 +77,6 @@ fn map_node_row(row: &Row<'_>) -> Result<Value> {
     ] {
         put_if_set(&mut node, key, row, column)?;
     }
-    // `parseStructuredOutput` runs on any non-NULL column, but an empty
-    // string fails `JSON.parse` there just as `parse_object` skips it.
     if let Some(structured) = parse_object(text_column(row, "structured_output")?.as_deref()) {
         node.insert("structuredOutput".into(), structured);
     }
@@ -107,9 +103,8 @@ fn map_node_row(row: &Row<'_>) -> Result<Value> {
     Ok(Value::Object(node))
 }
 
-/// A column only when it holds text: the strict `=== 'x'` tests of the
-/// mappers never match a number, and `JSON.parse` of a number is not an
-/// object or an array either.
+/// A column only when it holds text: a number never matches a status word,
+/// and never parses as an object or an array.
 fn text_column(row: &Row<'_>, column: &str) -> Result<Option<String>> {
     Ok(match row.get_ref(column)? {
         rusqlite::types::ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
@@ -117,7 +112,7 @@ fn text_column(row: &Row<'_>, column: &str) -> Result<Option<String>> {
     })
 }
 
-/// `fetchNodesByRunIds`: every node of these runs in one query, grouped by
+/// Every node of these runs in one query, grouped by
 /// run in the order SQLite returns them.
 fn fetch_nodes_by_run_ids(
     conn: &Connection,
@@ -139,7 +134,7 @@ fn fetch_nodes_by_run_ids(
     Ok(out)
 }
 
-/// A `workflow_runs` row as `mapRunRows` maps it, without its nodes.
+/// A `workflow_runs` row as a run, without its nodes.
 fn map_run_row(row: &Row<'_>) -> Result<(String, Map<String, Value>)> {
     let id = get_text(row, "id")?;
     let mut run = Map::new();
@@ -180,8 +175,7 @@ fn map_run_row(row: &Row<'_>) -> Result<(String, Map<String, Value>)> {
     Ok((id, run))
 }
 
-/// Runs a query for run rows and attaches their nodes, as each list does
-/// with `mapRunRows` over `fetchNodesByRunIds`.
+/// Runs a query for run rows and attaches their nodes.
 fn query_runs(conn: &Connection, sql: &str, args: &[SqlValue]) -> Result<Vec<Value>> {
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query(params_from_iter(args))?;
@@ -201,7 +195,7 @@ fn query_runs(conn: &Connection, sql: &str, args: &[SqlValue]) -> Result<Vec<Val
         .collect())
 }
 
-/// Binds the columns of one node as `saveWorkflowRun` does.
+/// The columns of one node, bound for `saveWorkflowRun`.
 fn node_params(run_id: &str, ns: &NodeExecutionState) -> Result<Vec<SqlValue>> {
     let text = |s: &Option<String>| s.clone().map_or(SqlValue::Null, SqlValue::Text);
     Ok(vec![
@@ -435,7 +429,7 @@ impl Store {
         workspace_id: Option<&str>,
         limit: Option<f64>,
     ) -> Result<Vec<Value>> {
-        // `Math.max(1, Math.min(limit, 500))`, NaN staying NaN as there.
+        // A NaN limit stays NaN.
         let capped = num(limit.unwrap_or(50.0).clamp(1.0, 500.0));
         let workspace_id = workspace_id.filter(|w| !w.is_empty());
         let filter = if workspace_id.is_some() {

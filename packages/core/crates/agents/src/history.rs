@@ -1,5 +1,5 @@
-//! The conversations each agent has had, read from the agent's own files
-//! (`agent-history`), for offering one to resume.
+//! The conversations each agent has had, read from the agent's own files,
+//! for offering one to resume.
 //!
 //! Every agent keeps its sessions differently, and its adapter's
 //! `[agent.history]` says how, as one of three shapes:
@@ -12,10 +12,9 @@
 //!   project, the projects named by marker files or a map.
 //!
 //! A file that is missing or unreadable lists nothing for its agent, as a
-//! malformed line or session file lists nothing for itself. One departure from
-//! the server, on input no agent writes: a line or file whose fields are not
-//! the types the agent writes (a numeric session id, a missing timestamp) is
-//! skipped here, where the server may list it half-filled.
+//! malformed line or session file lists nothing for itself. A line or file
+//! whose fields are not the types the agent writes (a numeric session id, a
+//! missing timestamp) is skipped.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -59,8 +58,7 @@ impl ProjectScope {
         self.normalized.contains(normalized)
     }
 
-    /// A `WHERE` term matching `column` against any of the paths, as
-    /// `buildPathWhereClause` writes it.
+    /// A `WHERE` term matching `column` against any of the paths.
     fn where_clause(&self, column: &str) -> String {
         let terms: Vec<String> = self
             .raw
@@ -106,7 +104,7 @@ impl RecentSession {
     }
 }
 
-/// Every agent's sessions, newest first, at most `limit` (`getRecentSessions`).
+/// Every agent's sessions, newest first, at most `limit`.
 /// With a scope, only the sessions recorded in one of its directories.
 /// Sessions at the same moment keep their agents' history rank, then `agents`' order.
 pub fn recent_sessions(
@@ -127,7 +125,7 @@ pub fn recent_sessions(
 }
 
 /// One agent's sessions, newest first, so a busy agent cannot crowd out a
-/// quiet one (`getRecentSessionsFor`).
+/// quiet one.
 pub fn recent_sessions_for(
     agent: &Agent,
     homes: &Homes,
@@ -168,7 +166,7 @@ fn titled(history: &History, text: &str) -> String {
     }
 }
 
-/// `normalizePath` once per distinct path: history repeats them.
+/// [`paths::normalize`] once per distinct path: history repeats them.
 #[derive(Default)]
 struct Normalized(HashMap<String, String>);
 
@@ -269,8 +267,8 @@ fn text<'a>(entry: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
 
-/// Names in a directory, sorted by their bytes as Node's `readdirSync` sorts
-/// them; an error when the directory cannot be read.
+/// Names in a directory, sorted by their bytes (left in the directory's own
+/// order on Windows); an error when the directory cannot be read.
 fn read_dir_sorted(dir: &Path) -> std::io::Result<Vec<String>> {
     let mut names: Vec<String> = fs::read_dir(dir)?
         .filter_map(Result::ok)
@@ -282,8 +280,8 @@ fn read_dir_sorted(dir: &Path) -> std::io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// `stat.mtimeMs`: milliseconds with the fraction kept, so two files are
-/// told apart as finely as the server tells them apart.
+/// A modification time in milliseconds with the fraction kept, so two files
+/// are told apart finely.
 fn mtime_ms(t: std::time::SystemTime) -> f64 {
     match t.duration_since(std::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs_f64() * 1000.0,
@@ -444,11 +442,11 @@ fn json_session(
     })
 }
 
-/// A row as libsql hands it to JavaScript, one value per column.
+/// A row as JSON, one value per column.
 type Row = Map<String, Value>;
 
 /// The rows of a read-only query, or none when the file cannot be opened
-/// or the query fails (`querySqlite`).
+/// or the query fails.
 fn query(db: &Path, sql: &str) -> Vec<Row> {
     let run = || -> rusqlite::Result<Vec<Row>> {
         let conn = Connection::open_with_flags(
@@ -485,7 +483,7 @@ fn column(value: ValueRef<'_>) -> Value {
     }
 }
 
-/// `String(v)`.
+/// `v` as text: `undefined` when missing, `null`, the string, the number, or the JSON.
 fn js_string(v: Option<&Value>) -> String {
     match v {
         None => "undefined".to_owned(),
@@ -499,7 +497,7 @@ fn js_string(v: Option<&Value>) -> String {
     }
 }
 
-/// `Number(v)`.
+/// `v` as a number: NaN when missing, 0 for null, booleans as 0 or 1, strings parsed.
 fn js_number(v: Option<&Value>) -> f64 {
     match v {
         None => f64::NAN,
@@ -529,7 +527,7 @@ fn truthy(v: &Value) -> bool {
     }
 }
 
-/// `Number(v) || 0`.
+/// `v` as a number, 0 when that is NaN.
 fn count(v: Option<&Value>) -> f64 {
     let n = js_number(v);
     if n.is_nan() {

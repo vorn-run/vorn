@@ -1,4 +1,4 @@
-//! The models an agent offers, asked of its own CLI (`agent-model-catalog`).
+//! The models an agent offers, asked of its own CLI.
 //!
 //! [`parse_choices`] reads each CLI's answer into one shape, and [`Catalog`]
 //! keeps one list per agent, project and command configuration for five
@@ -41,8 +41,8 @@ impl ModelChoice {
     }
 }
 
-/// Why an agent's models could not be listed. Each reads as the server's
-/// message for it, which the picker shows.
+/// Why an agent's models could not be listed. Each message is what the
+/// picker shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiscoveryError {
     /// The command is a wrapper with its own flags, which a model cannot ride.
@@ -91,7 +91,7 @@ impl fmt::Display for DiscoveryError {
 
 impl std::error::Error for DiscoveryError {}
 
-/// The first of `paths` that is set and not null (`a ?? b`).
+/// The first of `paths` that is set and not null.
 fn first_set<'a>(entry: &'a Value, paths: &[String]) -> Option<&'a Value> {
     paths
         .iter()
@@ -145,8 +145,7 @@ pub(crate) fn same(a: &Value, b: &Value) -> bool {
 }
 
 /// A CLI's listed entries, normalised to one shape: entries it does not
-/// offer dropped, a repeated id keeping its first place and its last value
-/// (`parseModelChoices`).
+/// offer dropped, a repeated id keeping its first place and its last value.
 pub fn parse_choices(map: &ChoiceMap, value: &Value) -> Result<Vec<ModelChoice>, DiscoveryError> {
     let Value::Array(items) = value else {
         return Err(DiscoveryError::InvalidCatalog);
@@ -200,7 +199,7 @@ pub fn line_choices(pattern: &regex::Regex, text: &str) -> Vec<ModelChoice> {
 }
 
 /// Only the configured arguments that decide which models a CLI can see;
-/// a prompt or a mode would start work (`discoveryArguments`).
+/// a prompt or a mode would start work.
 pub fn discovery_arguments(keep: &Keep, configured: &[String]) -> Vec<String> {
     let mut args = Vec::new();
     let mut i = 0;
@@ -224,9 +223,9 @@ pub fn discovery_arguments(keep: &Keep, configured: &[String]) -> Vec<String> {
     args
 }
 
-/// A model rides the arguments, so the command must be one executable
-/// (`assertModelCommand`). A command of several words is still one when it
-/// is the path of a file, spaces and all.
+/// A model rides the arguments, so the command must be one executable. A
+/// command of several words is still one when it is the path of a file,
+/// spaces and all.
 pub fn check_model_command(command: &str) -> Result<(), DiscoveryError> {
     crate::launch::model::check_model_command(command, true).map_err(|_| DiscoveryError::Wrapper)
 }
@@ -329,7 +328,7 @@ impl Entry {
     }
 }
 
-/// The lists, kept while the host runs (`createModelCatalogService`).
+/// The lists, kept while the host runs.
 #[derive(Debug, Default)]
 pub struct Catalog {
     entries: Mutex<HashMap<Key, Arc<Entry>>>,

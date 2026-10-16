@@ -1,16 +1,14 @@
 //! What the server asks of a repository: branches, worktrees, diffs, commits.
 //!
-//! Each function is one of the server's `git-utils` calls for a local
-//! repository, answering exactly what that call answers, failures included:
-//! where it collapses an error to `false`, `[]` or `None`, so does this, and
-//! where it lets git's error through, this returns that error worded as Node
-//! words it. Every command goes through [`crate::run`], so the reads gix
+//! Each function is one repository operation. Some collapse a failure to
+//! `false`, `[]` or `None`; the rest return git's error with the failed
+//! command line. Every command goes through [`crate::run`], so the reads gix
 //! answers byte for byte never start a process.
 //!
 //! The calls block their thread for as long as git runs. A host calls them
 //! from a worker thread, and makes the calls that change a repository take
-//! turns per [`repo_key`] as the server does, so a commit's `add` and
-//! `commit` never have another change between them.
+//! turns per [`repo_key`], so a commit's `add` and `commit` never have
+//! another change between them.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -18,7 +16,7 @@ use std::time::Duration;
 
 use crate::{run, Error, Request};
 
-/// Stdout past this is an error unless a call asks for more, as for the server.
+/// Stdout past this is an error unless a call asks for more.
 pub const DEFAULT_MAX_BUFFER: usize = 1024 * 1024;
 
 /// As much diff as a reader can use; past this it is a file to open.
@@ -27,9 +25,9 @@ pub const MAX_DIFF_TEXT_BYTES: usize = 500 * 1024;
 /// The marker a diff cut at [`MAX_DIFF_TEXT_BYTES`] ends with.
 const TRUNCATED_DIFF: &str = "\n\n... diff truncated (too large) ...\n";
 
-/// How to run git: the executable and the whole environment it gets, as the
-/// server resolves them, and the login to run it through for a repository on
-/// a remote host (`gitExec` with `remote`), where paths are POSIX.
+/// How to run git: the executable and the whole environment it gets, and the
+/// login to run it through for a repository on a remote host, where paths are
+/// POSIX.
 #[derive(Clone, Debug)]
 pub struct Git {
     pub bin: String,
@@ -112,7 +110,7 @@ pub struct FullDiff {
 
 /// What the diff is of: the working tree against HEAD, or one commit
 /// against another. The ends are given as the client gave them; a missing
-/// one is the word `undefined`, as it is when the server formats it.
+/// one is the word `undefined`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiffTarget {
     WorkingTree,
@@ -128,14 +126,14 @@ impl DiffTarget {
     }
 }
 
-/// A change that either happened or did not, with git's reason when not.
-/// A worktree moved to a new name, as `renameWorktree` answers it.
+/// A worktree moved to a new name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MovedWorktree {
     pub path: String,
     pub name: String,
 }
 
+/// A change that either happened or did not, with git's reason when not.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Done {
     Ok,
@@ -143,7 +141,7 @@ pub enum Done {
 }
 
 impl Git {
-    /// `git <args>` in `cwd`, trimmed, as the server's `gitExec` answers.
+    /// `git <args>` in `cwd`, with the output trimmed.
     fn exec(
         &self,
         args: &[&str],
@@ -231,15 +229,14 @@ impl Git {
             .unwrap_or_default()
     }
 
-    /// The commit checked out in `cwd`, or `None` when git cannot say
-    /// (`getGitHead`).
+    /// The commit checked out in `cwd`, or `None` when git cannot say.
     pub fn head(&self, cwd: &Path) -> Option<String> {
         self.exec_default(&["rev-parse", "HEAD"], cwd, 3000)
             .ok()
             .filter(|out| !out.is_empty())
     }
 
-    /// Checks out `branch` in `cwd` (`checkoutBranch`), with git's refusal
+    /// Checks out `branch` in `cwd`, with git's refusal
     /// when it refuses.
     pub fn checkout(&self, cwd: &Path, branch: &str) -> Done {
         match self.exec_default(&["checkout", branch], cwd, 10_000) {
@@ -249,8 +246,8 @@ impl Git {
     }
 
     /// Renames the branch checked out in `worktree` to `new_branch`, trimmed,
-    /// or starts it there when HEAD is detached (`renameWorktreeBranch`).
-    /// False when the name is refused or git fails.
+    /// or starts it there when HEAD is detached. False when the name is
+    /// refused or git fails.
     pub fn rename_branch(&self, worktree: &Path, new_branch: &str) -> bool {
         let Some(name) = branch_rename_name(new_branch) else {
             return false;
@@ -262,10 +259,9 @@ impl Git {
         self.exec_default(&args, worktree, 10_000).is_ok()
     }
 
-    /// Moves a vorn worktree to `<parent>/<new name>-<its id>`
-    /// (`renameWorktree`). `None` when the name sanitizes to nothing, the
-    /// directory carries no id, the target is the worktree itself or is
-    /// taken, or git refuses the move.
+    /// Moves a vorn worktree to `<parent>/<new name>-<its id>`. `None` when
+    /// the name sanitizes to nothing, the directory carries no id, the target
+    /// is the worktree itself or is taken, or git refuses the move.
     pub fn move_worktree(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
         if let Some(login) = &self.ssh {
             let target = move_target(Style::Posix, worktree, new_name)?;
@@ -466,14 +462,14 @@ impl Git {
         })
     }
 
-    /// The working tree's diff as git prints it (`getGitDiffText`), cut at
+    /// The working tree's diff as git prints it, cut at
     /// [`MAX_DIFF_TEXT_BYTES`].
     pub fn diff_text(&self, cwd: &Path) -> Result<String, Error> {
         self.exec(&["diff", "-U3"], cwd, 15_000, MAX_DIFF_TEXT_BYTES * 2)
             .map(truncate_diff)
     }
 
-    /// `git status --porcelain` (`getGitStatusPorcelain`).
+    /// `git status --porcelain`.
     pub fn status_porcelain(&self, cwd: &Path) -> Result<String, Error> {
         self.exec_default(&["status", "--porcelain"], cwd, 5000)
     }
@@ -506,9 +502,8 @@ impl Git {
         }
     }
 
-    /// The GitHub repository `cwd`'s `origin` points at, as the server's
-    /// `detectRepoSlug` reads it: `None` for no repository, no origin, no git
-    /// or a remote that is not on GitHub.
+    /// The GitHub repository `cwd`'s `origin` points at: `None` for no
+    /// repository, no origin, no git or a remote that is not on GitHub.
     pub fn github_origin(&self, cwd: &Path) -> Option<GitHubRepo> {
         parse_github_remote(&self.origin_url(cwd)?)
     }
@@ -609,7 +604,7 @@ pub struct GitHubRepo {
     pub repo: String,
 }
 
-/// The server's `parseGitHubRemote`: the regular expression
+/// A GitHub remote URL as owner and repository: the regular expression
 /// `^(?:https?://|ssh://)?(?:[^@/]+@)?github\.com[:/]+([^/]+)/(.+?)(?:\.git)?/?$`,
 /// ignoring ASCII case, on the trimmed URL, and then no nested path in the
 /// repository. Each alternative is tried in the order the expression's
@@ -683,7 +678,7 @@ fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
         .then(|| &s[prefix.len()..])
 }
 
-/// The separator the server joins worktree paths with on this platform.
+/// The separator worktree paths are joined with on this platform.
 const SEP: char = Style::HOST.sep();
 
 /// Where a project's worktrees go: `<parent>/.vorn-worktrees/<project>`.
@@ -746,7 +741,7 @@ fn common_git_dir(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// JavaScript's `String.prototype.trim`: whitespace and line terminators.
+/// Trims whitespace, line terminators and the byte order mark from both ends.
 fn js_trim(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
@@ -818,8 +813,8 @@ fn parse_numstat_files(out: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// `parseInt(s, 10) || 0` for a count: leading digits after optional
-/// whitespace and sign; anything else, or a negative, is 0.
+/// A count from its leading digits, after optional whitespace and sign;
+/// anything else, or a negative, is 0.
 fn js_parse_int(s: &str) -> u64 {
     let s = s.trim_start();
     let (negative, digits) = match s.as_bytes().first() {
@@ -869,14 +864,14 @@ fn parse_worktree_list(out: &str) -> Vec<WorktreeEntry> {
     worktrees
 }
 
-/// A branch name as `renameWorktreeBranch` takes it: trimmed, and never
+/// A branch name for [`Git::rename_branch`]: trimmed, and never
 /// one git would read as an option.
 fn branch_rename_name(raw: &str) -> Option<&str> {
     let name = js_trim(raw);
     (!name.is_empty() && !name.starts_with('-')).then_some(name)
 }
 
-/// Where `renameWorktree` moves `worktree` for `new_name`: the name
+/// Where [`Git::move_worktree`] moves `worktree` for `new_name`: the name
 /// sanitized, runs of `-` collapsed and one stripped from each end, beside
 /// the worktree and keeping its `-<8 hex>` id.
 pub fn worktree_move_target(worktree: &str, new_name: &str) -> Option<MovedWorktree> {
@@ -930,8 +925,7 @@ pub fn extract_worktree_name(worktree: &str) -> String {
 }
 
 /// A worktree name as a directory and branch name: anything but ASCII
-/// letters, digits and `-` becomes `-`, one per UTF-16 unit as the server
-/// replaces it.
+/// letters, digits and `-` becomes `-`, one per UTF-16 unit.
 pub fn sanitize_name(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for c in raw.chars() {
@@ -946,8 +940,7 @@ pub fn sanitize_name(raw: &str) -> String {
     out
 }
 
-/// Cuts a diff past [`MAX_DIFF_TEXT_BYTES`] UTF-16 units, as the server
-/// measures and slices a string, and says so at the end.
+/// Cuts a diff past [`MAX_DIFF_TEXT_BYTES`] UTF-16 units, and says so at the end.
 fn truncate_diff(raw: String) -> String {
     let mut units = 0usize;
     let mut cut = None;
@@ -960,8 +953,7 @@ fn truncate_diff(raw: String) -> String {
         units = next;
     }
     match cut {
-        // A character straddling the limit is left out whole: a Rust string
-        // cannot end in half of one, where the server's would.
+        // A character straddling the limit is left out whole.
         Some(at) => {
             let mut out = raw;
             out.truncate(at);
@@ -972,8 +964,8 @@ fn truncate_diff(raw: String) -> String {
     }
 }
 
-/// Where JavaScript's multiline `^` matches: the start, and after each line
-/// terminator.
+/// Where each line starts: the start, and after each `\n`, `\r`, U+2028 or
+/// U+2029.
 fn line_starts(text: &str) -> impl Iterator<Item = usize> + '_ {
     let after_terminators = text
         .char_indices()
@@ -1004,7 +996,7 @@ fn split_diff(raw: &str, counts: &[(String, u64, u64)]) -> Vec<FileDiff> {
     cuts.push(raw.len());
     let mut sections = Vec::with_capacity(cuts.len());
     // What comes before the first header is a section of its own when it is
-    // not empty, as `split` leaves it.
+    // not empty.
     if cuts[0] > 0 {
         sections.push(&raw[..cuts[0]]);
     }
@@ -1036,7 +1028,7 @@ fn split_diff(raw: &str, counts: &[(String, u64, u64)]) -> Vec<FileDiff> {
             } else {
                 FileStatus::Modified
             };
-            // The last count for a path wins, as a map filled in order keeps it.
+            // The last count for a path wins.
             let (insertions, deletions) = counts
                 .iter()
                 .rev()
@@ -1053,13 +1045,13 @@ fn split_diff(raw: &str, counts: &[(String, u64, u64)]) -> Vec<FileDiff> {
         .collect()
 }
 
-/// Node's `path.basename` for this platform's separators: the last part,
-/// trailing separators ignored.
+/// The last part of `p` by this platform's separators, trailing separators
+/// ignored.
 pub fn node_basename(p: &str) -> &str {
     Style::HOST.basename(p)
 }
 
-/// Node's `path.dirname` for this platform's separators.
+/// Everything before the last part of `p`, by this platform's separators.
 pub fn node_dirname(p: &str) -> &str {
     Style::HOST.dirname(p)
 }
@@ -1079,7 +1071,7 @@ impl Style {
         Style::Posix
     };
 
-    /// The separator Node's `path.sep` joins with.
+    /// The separator paths are joined with.
     const fn sep(self) -> char {
         match self {
             Style::Posix => '/',
@@ -1133,7 +1125,7 @@ impl Style {
     }
 }
 
-/// The first eight hex digits of a random UUID, as the server takes them.
+/// The first eight hex digits of a random UUID.
 fn short_id() -> String {
     let mut id = uuid::Uuid::new_v4().simple().to_string();
     id.truncate(8);
@@ -1196,8 +1188,8 @@ const NOUNS: [&str; 25] = [
     "muse",
 ];
 
-/// An adjective-noun pair from the server's lists, which its stale-branch
-/// cleanup recognises as vorn's own.
+/// An adjective-noun pair from the lists above, which stale-branch cleanup
+/// recognises as vorn's own.
 fn generate_name() -> String {
     let bytes = uuid::Uuid::new_v4().into_bytes();
     let pick = |b: u8, n: usize| usize::from(b) % n;
@@ -1351,7 +1343,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_counts_as_parse_int_does() {
+    fn parses_counts_from_leading_digits() {
         assert_eq!(js_parse_int("12"), 12);
         assert_eq!(js_parse_int("  7x"), 7);
         assert_eq!(js_parse_int("x7"), 0);
@@ -1450,7 +1442,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_split_as_node_splits_them_with_each_platforms_separators() {
+    fn paths_split_on_each_platforms_separators() {
         assert_eq!(Style::Windows.basename(r"C:\a\b\"), "b");
         assert_eq!(Style::Windows.basename("C:/a/b"), "b");
         assert_eq!(Style::Windows.dirname(r"C:\a/b"), r"C:\a");
@@ -1537,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_github_remotes_as_the_server_does() {
+    fn reads_github_remotes() {
         assert_eq!(
             parse_github_remote("git@github.com:vorn-run/vorn.git"),
             gh("vorn-run", "vorn")

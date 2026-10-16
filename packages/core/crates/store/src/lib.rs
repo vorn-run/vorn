@@ -193,8 +193,8 @@ impl Store {
         Ok(store)
     }
 
-    /// Opens `path` for a process standing beside the server (vornd), which
-    /// reads and updates rows the server's schema already has: nothing is
+    /// Opens `path` for a process other than the server (vornd), which reads
+    /// and updates rows the server's schema already has: nothing is
     /// created, migrated or seeded, and the journal mode is left as the
     /// server set it. `None` when there is no such file yet.
     ///
@@ -225,8 +225,8 @@ impl Store {
     }
 
     fn prepare_connection(&mut self) -> Result<()> {
-        // Another process (the MCP server, the other implementation) can hold
-        // the file; wait for it rather than fail the call.
+        // Another process (the MCP server, the CLI) can hold the file; wait
+        // for it rather than fail the call.
         self.conn.busy_timeout(std::time::Duration::from_secs(5))?;
         self.conn.pragma_update(None, "journal_mode", "WAL")?;
         self.conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -285,7 +285,7 @@ fn is_corrupt(err: &Error) -> bool {
 
 /// Begins a transaction that takes the write lock up front (`BEGIN IMMEDIATE`).
 ///
-/// The server and vornd both write the file. A deferred transaction that
+/// More than one process writes the file. A deferred transaction that
 /// reads and then writes holds a snapshot, and once the other process
 /// commits, SQLite refuses to upgrade that snapshot to a write
 /// (`SQLITE_BUSY_SNAPSHOT`) without calling the busy handler, so

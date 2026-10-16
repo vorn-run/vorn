@@ -14,8 +14,7 @@ pub enum Status {
 }
 
 impl Status {
-    /// vornd's word for it; anything unknown reads as idle, as the
-    /// renderer's maps fall back.
+    /// vornd's word for it; anything unknown reads as idle.
     pub fn parse(s: &str) -> Status {
         match s {
             "running" => Status::Running,

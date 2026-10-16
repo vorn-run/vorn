@@ -1,6 +1,6 @@
 //! The cleanup actions: remove worktrees, sweep their build output, delete
 //! directories git has forgotten. Each goes on past a failure and reports
-//! every path on one side or the other, in the server's words.
+//! every path on one side or the other.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -77,7 +77,7 @@ pub struct Cleanup<'a> {
     pub artifact_dirs: &'a [String],
     pub projects: &'a [Project],
     pub guard: &'a dyn Guard,
-    /// The remote host any path is on (`resolveRemoteHostByPath`), for an orphan directory.
+    /// The remote host any path is on, for an orphan directory.
     pub remote_of: &'a dyn Fn(&str) -> Option<Remote>,
 }
 

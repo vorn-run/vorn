@@ -126,9 +126,8 @@ impl TaskImages {
     }
 }
 
-/// `Buffer.from(text, 'base64')`: lenient, as Node's is, about padding,
-/// whitespace and the URL-safe alphabet; it stops at the first character it
-/// cannot read.
+/// Base64, lenient about padding, whitespace and the URL-safe alphabet; it
+/// stops at the first character it cannot read.
 fn decode_base64(text: &str) -> Vec<u8> {
     let value = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
@@ -156,7 +155,7 @@ fn decode_base64(text: &str) -> Vec<u8> {
     out
 }
 
-/// A random version-4 UUID, as `randomUUID` makes.
+/// A random version-4 UUID.
 fn uuid_v4() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -219,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn decodes_base64_as_node_does() {
+    fn decodes_base64_leniently() {
         assert_eq!(decode_base64("aGVsbG8="), b"hello");
         assert_eq!(decode_base64("aGVs bG8"), b"hello");
         assert_eq!(decode_base64("_-8"), [0xff, 0xef]);

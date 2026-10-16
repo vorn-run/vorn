@@ -1,7 +1,6 @@
 //! `cargo bench -p vorn-screen`: the libghostty-vt parse and the checkpoint
-//! serialize, without napi, fed per flush as the server feeds them, and a
-//! session engine's [`Emulator`]: its parse of text in many scripts and the
-//! checkpoint it cuts over deep history.
+//! serialize, fed per flush, and a session engine's [`Emulator`]: its parse
+//! of text in many scripts and the checkpoint it cuts over deep history.
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::hint::black_box;

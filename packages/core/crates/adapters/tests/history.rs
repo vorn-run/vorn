@@ -1,4 +1,4 @@
-//! The shipped adapters' past sessions, read as 0.8 read each agent's files.
+//! The shipped adapters' past sessions, read from each agent's files as recorded.
 
 mod support;
 

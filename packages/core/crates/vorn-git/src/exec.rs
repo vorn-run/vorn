@@ -1,4 +1,4 @@
-//! git itself, as a child process, with the limits `execFileSync` applied.
+//! git itself, as a child process, with a timeout and an output limit.
 
 use std::io::Read;
 use std::process::{Child, Stdio};
@@ -29,7 +29,7 @@ pub(crate) fn run(req: &Request) -> Result<String, Error> {
     thread::spawn(move || {
         let _ = out_tx.send(Stream::Out(read_capped(stdout, limit)));
     });
-    // `maxBuffer` bounds stderr too, as it does for `execFileSync`.
+    // `max_buffer` bounds stderr too.
     thread::spawn(move || {
         let _ = tx.send(Stream::Err(read_capped(stderr, limit)));
     });

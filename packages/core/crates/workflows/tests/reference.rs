@@ -1,4 +1,4 @@
-//! Every case the TypeScript engine was recorded on
+//! Every recorded engine case
 //! (`tests/fixtures/js-reference/workflow-engine.json`), replayed here: the
 //! same workflow, configuration and host replies, the same steps taken, and
 //! the runs, calls and answers compared after times, generated ids and the
@@ -317,7 +317,7 @@ fn with_session_origin(mut value: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn every_recorded_case_runs_as_the_typescript_engine_ran_it() {
+async fn every_recorded_case_runs_as_recorded() {
     let only = std::env::var("CASE").ok();
     let mut failures = Vec::new();
     for case in cases() {

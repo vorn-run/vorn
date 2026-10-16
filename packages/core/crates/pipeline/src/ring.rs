@@ -1,14 +1,12 @@
 //! The bytes a terminal emitted, kept as they were emitted, up to a cap.
 //!
 //! What a client attaching to a live session is given first, so its emulator
-//! draws what is on screen before live output starts. The same rules as the
-//! JavaScript buffer it replaced (the server's old scrollback): trimmed from the
-//! front at a line boundary, so a client is never handed half an escape
-//! sequence, and compacted only once it has run a quarter past its cap.
+//! draws what is on screen before live output starts. Trimmed from the front
+//! at a line boundary, so a client is never handed half an escape sequence,
+//! and compacted only once it has run a quarter past its cap.
 //!
-//! Counted in bytes, where the JavaScript buffer counts UTF-16 units. For the
-//! ASCII nearly all terminal output is they are the same; a run of CJK keeps a
-//! third as many characters here, for the same memory.
+//! Counted in bytes: a run of CJK keeps a third as many characters as ASCII
+//! for the same memory.
 
 use memchr::memchr;
 
@@ -86,7 +84,7 @@ fn is_continuation(byte: u8) -> bool {
 mod tests {
     use super::*;
 
-    /// The rule as the JavaScript buffer stated it, on the joined text.
+    /// The trimming rule stated plainly, on the joined text.
     fn reference(data: &[u8]) -> Vec<u8> {
         if data.len() <= MAX_BYTES {
             return data.to_vec();
@@ -143,10 +141,9 @@ mod tests {
         }
     }
 
-    /// The one place the two buffers differ, kept on purpose: the cap is
-    /// bytes, so three-byte text keeps a third of the characters the
-    /// JavaScript buffer's 256 K units would. Same memory, less history; the
-    /// cap that matters on a machine with a hundred terminals is the memory.
+    /// The cap is bytes, so three-byte text keeps a third as many characters
+    /// as ASCII. Same memory, less history; the cap that matters on a machine
+    /// with a hundred terminals is the memory.
     #[test]
     fn caps_bytes_not_characters() {
         let mut ring = Scrollback::default();

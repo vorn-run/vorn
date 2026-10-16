@@ -1,15 +1,14 @@
-//! What JavaScript does to strings and values, where the workflow engine's
-//! answers depend on it: lengths and cuts counted in UTF-16 units, `String()`
-//! of a value, and `JSON.stringify`.
+//! The string and value rules the workflow engine's answers depend on:
+//! lengths and cuts counted in UTF-16 units, a value as text, and JSON text.
 //!
-//! A cut JavaScript would make inside a surrogate pair is moved back to the
-//! character's start here, since a Rust string cannot hold half a character.
+//! A cut inside a surrogate pair is moved back to the character's start,
+//! since a Rust string cannot hold half a character.
 
 use serde_json::Value;
 
 use crate::js_numbers;
 
-/// `text.length`.
+/// The length of `text` in UTF-16 units.
 pub fn utf16_len(text: &str) -> usize {
     text.chars().map(char::len_utf16).sum()
 }
@@ -26,13 +25,13 @@ fn byte_at_unit(text: &str, units: usize) -> usize {
     text.len()
 }
 
-/// `text.slice(0, units)`.
+/// The first `units` UTF-16 units of `text`.
 pub fn head(text: &str, units: usize) -> &str {
     &text[..byte_at_unit(text, units)]
 }
 
-/// `text.slice(-units)` for a text longer than `units`; the whole text
-/// otherwise.
+/// The last `units` UTF-16 units of a text longer than `units`; the whole
+/// text otherwise.
 pub fn tail(text: &str, units: usize) -> &str {
     let len = utf16_len(text);
     if len <= units {
@@ -43,30 +42,30 @@ pub fn tail(text: &str, units: usize) -> &str {
     &text[from..]
 }
 
-/// `new Date(ms).toISOString()`.
+/// `ms` as an ISO 8601 UTC time with milliseconds.
 pub fn iso(ms: i64) -> String {
     jiff::Timestamp::from_millisecond(ms)
         .map(|t| t.strftime("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
         .unwrap_or_default()
 }
 
-/// `new Date().toISOString()`.
+/// Now as an ISO 8601 UTC time with milliseconds.
 pub fn iso_now() -> String {
     iso(jiff::Timestamp::now().as_millisecond())
 }
 
-/// `JSON.stringify(value)`: whole numbers without a fraction, as JavaScript
-/// prints them.
+/// `value` as compact JSON, whole numbers without a fraction.
 pub fn stringify(value: &Value) -> String {
     serde_json::to_string(&js_numbers(value.clone())).unwrap_or_default()
 }
 
-/// `JSON.stringify(value, null, 2)`.
+/// `value` as JSON indented by two spaces.
 pub fn stringify_pretty(value: &Value) -> String {
     serde_json::to_string_pretty(&js_numbers(value.clone())).unwrap_or_default()
 }
 
-/// `String(value)`.
+/// `value` as text: strings bare, lists joined by commas with nulls empty,
+/// objects as `[object Object]`.
 pub fn to_string(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
@@ -85,7 +84,7 @@ pub fn to_string(value: &Value) -> String {
     }
 }
 
-/// A number as JavaScript prints it.
+/// A number as text: whole numbers without a fraction.
 fn number_text(value: &Value) -> String {
     match js_numbers(value.clone()) {
         Value::Number(n) => {
@@ -103,9 +102,9 @@ fn number_text(value: &Value) -> String {
     }
 }
 
-/// `Number(text)` for the strings a model writes where a number belongs:
+/// The number in the strings a model writes where a number belongs:
 /// decimal, exponent, hexadecimal, octal and binary, with blanks around.
-/// `None` where JavaScript gives `NaN`.
+/// `None` for anything else.
 pub fn number(text: &str) -> Option<f64> {
     let t = text.trim();
     if t.is_empty() {
@@ -128,7 +127,7 @@ pub fn number(text: &str) -> Option<f64> {
         "-Infinity" => return Some(f64::NEG_INFINITY),
         _ => {}
     }
-    // Rust also reads `inf` and `nan`, which JavaScript does not.
+    // Rust's parser also reads `inf` and `nan`, which are not numbers here.
     if !t
         .bytes()
         .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-'))
@@ -143,7 +142,7 @@ pub fn number_value(n: f64) -> Value {
     serde_json::Number::from_f64(n).map_or(Value::Null, |n| js_numbers(Value::Number(n)))
 }
 
-/// JavaScript truthiness.
+/// Whether `value` is truthy: not null, false, zero, NaN or empty text.
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -172,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn strings_values_as_javascript_does() {
+    fn values_as_text_and_json() {
         assert_eq!(to_string(&json!(3.0)), "3");
         assert_eq!(to_string(&json!(2.5)), "2.5");
         assert_eq!(to_string(&json!(["a", 1, null, true])), "a,1,,true");
@@ -189,14 +188,14 @@ mod tests {
     }
 
     #[test]
-    fn prints_times_as_to_iso_string_does() {
+    fn prints_times_as_iso_8601() {
         assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
         assert_eq!(iso_now().len(), 24);
     }
 
     #[test]
-    fn reads_numbers_as_number_does() {
+    fn reads_number_strings() {
         assert_eq!(number(" 42 "), Some(42.0));
         assert_eq!(number("1e3"), Some(1000.0));
         assert_eq!(number("0x10"), Some(16.0));

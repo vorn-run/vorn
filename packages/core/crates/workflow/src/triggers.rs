@@ -92,7 +92,7 @@ impl<H: Host> Engine<H> {
         let _ = sender.send((workflow, context));
     }
 
-    /// `runScheduled`: a schedule fired, or `workflow:runManual` asked.
+    /// A schedule fired, or `workflow:runManual` asked.
     pub async fn run_scheduled(&self, workflow_id: &str, inputs: Option<Map<String, Value>>) {
         let Some(config) = self.config().await else {
             return;
@@ -106,13 +106,13 @@ impl<H: Host> Engine<H> {
         self.run_scheduled_workflow(workflow, inputs);
     }
 
-    /// `runScheduled` of a workflow the caller has already read.
+    /// [`Self::run_scheduled`] for a workflow the caller has already read.
     pub fn run_scheduled_workflow(&self, workflow: Workflow, inputs: Option<Map<String, Value>>) {
         let context = scheduler_context(None, inputs);
         self.start(workflow, context, Some(Source::Scheduler));
     }
 
-    /// `runConnectorItem`: an inbox row delivered. A row whose workflow is
+    /// An inbox row delivered. A row whose workflow is
     /// gone is deferred rather than dropped; a run already going takes the
     /// row's lease instead of a second run starting.
     pub async fn run_connector_item(

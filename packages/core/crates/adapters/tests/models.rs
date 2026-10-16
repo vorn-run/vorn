@@ -1,4 +1,4 @@
-//! The shipped adapters' model listings, read as 0.8 read each CLI's answer.
+//! The shipped adapters' model listings, read from each CLI's recorded answer.
 
 mod support;
 
@@ -140,7 +140,7 @@ fn starts_each_cli_in_its_listing_mode() {
 }
 
 #[test]
-fn exchanges_each_cli_s_messages_as_0_8_did() {
+fn exchanges_each_cli_s_messages_as_recorded() {
     let mut codex = Probe::new(&support::agent("codex"), "/project").unwrap();
     assert_eq!(
         codex.opening().unwrap(),

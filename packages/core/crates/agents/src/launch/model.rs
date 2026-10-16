@@ -1,6 +1,6 @@
-//! A chosen model on an agent's arguments (`model-arguments`): the
-//! configured arguments with the model as their one selector, and whether a
-//! command is one executable a model can ride.
+//! A chosen model on an agent's arguments: the configured arguments with the
+//! model as their one selector, and whether a command is one executable a
+//! model can ride.
 
 use std::path::Path;
 
@@ -18,9 +18,9 @@ pub enum CommandShape {
     Wrapper,
 }
 
-/// `commandShape`. A path with spaces splits into several words yet names
-/// one file, which only this machine can tell, so a remote command of
-/// several words is always a wrapper.
+/// Whether a command is one executable or a wrapper. A path with spaces
+/// splits into several words yet names one file, which only this machine can
+/// tell, so a remote command of several words is always a wrapper.
 pub fn command_shape(command: &str, on_this_machine: bool) -> CommandShape {
     let operator = command
         .bytes()
@@ -37,7 +37,7 @@ pub fn command_shape(command: &str, on_this_machine: bool) -> CommandShape {
     }
 }
 
-/// `assertModelCommand`: a model rides the arguments, so the command must be
+/// A model rides the arguments, so the command must be
 /// one executable.
 pub fn check_model_command(command: &str, on_this_machine: bool) -> Result<(), LaunchError> {
     match command_shape(command, on_this_machine) {
@@ -46,7 +46,7 @@ pub fn check_model_command(command: &str, on_this_machine: bool) -> Result<(), L
     }
 }
 
-/// `validateModelId`: the id trimmed, refused when empty, dash-led, or with
+/// The model id trimmed, refused when empty, dash-led, or with
 /// whitespace or control characters in it.
 pub fn validate_model_id(value: &str) -> Result<&str, LaunchError> {
     let model = js::trim(value);
@@ -120,8 +120,8 @@ fn selector_len(models: &Models, args: &[String], i: usize) -> Result<usize, Lau
     Ok(0)
 }
 
-/// `applyModelArguments`: the configured arguments with `model` as their
-/// one model selector, appended; nothing past `--` is touched.
+/// The configured arguments with `model` as their one model selector,
+/// appended; nothing past `--` is touched.
 pub fn apply_model_arguments(
     agent: &Agent,
     args: &[String],

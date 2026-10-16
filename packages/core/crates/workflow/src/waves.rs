@@ -1,7 +1,7 @@
-//! One graph, run in waves (`graph-runner.ts`): every step whose
-//! predecessors have settled runs, together, then the next wave. The main
-//! run drives the workflow through this, and a loop its body once per pass,
-//! so a condition inside a loop branches exactly as one outside it does.
+//! One graph, run in waves: every step whose predecessors have settled runs,
+//! together, then the next wave. The main run drives the workflow through
+//! this, and a loop its body once per pass, so a condition inside a loop
+//! branches exactly as one outside it does.
 
 use std::collections::HashSet;
 use std::future::Future;

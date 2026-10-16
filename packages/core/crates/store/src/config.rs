@@ -24,14 +24,13 @@ use crate::sql::{
 };
 use crate::{Result, Store};
 
-/// `Number.MAX_SAFE_INTEGER`: the base revision of a caller that does not
-/// track revisions (the CLI, a test, the server saving its own port), so its
-/// snapshot prunes everything it omits.
+/// 2^53 - 1, the largest exact integer in an f64: the base revision of a
+/// caller that does not track revisions (the CLI, a test, the server saving
+/// its own port), so its snapshot prunes everything it omits.
 const NO_BASE_REVISION: f64 = 9_007_199_254_740_991.0;
 
 /// The parts of an `AppConfig` a save reads. A collection that is absent or
-/// `null` is `?? []` there and `None` here; `defaults` and `projects` are
-/// required, as `Object.entries` and `.map` would throw without them.
+/// `null` is `None`; `defaults` and `projects` are required.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedConfig {
@@ -39,7 +38,7 @@ struct SavedConfig {
     defaults: Map<String, Value>,
     projects: Vec<ProjectConfig>,
     /// Values stay JSON: an entry whose value is falsy is kept from pruning
-    /// but not written, as `if (cmd)` skips it.
+    /// but not written.
     agent_commands: Option<Map<String, Value>>,
     remote_hosts: Option<Vec<RemoteHost>>,
     workspaces: Option<Vec<WorkspaceConfig>>,
@@ -47,7 +46,7 @@ struct SavedConfig {
 }
 
 impl Store {
-    /// The `AppConfig` object, keys in the order `loadConfig` writes them.
+    /// The `AppConfig` object, keys in a fixed order.
     /// Tasks and workflows are not in it: they have their own calls.
     pub fn load_config(&self) -> Result<Value> {
         let conn = self.conn();
@@ -87,12 +86,8 @@ impl Store {
         Ok(Value::Object(config))
     }
 
-    /// `defaults` as `loadDefaults` builds it: an explicit list of keys, so a
-    /// row for a key not listed here does not load. `??` keys fall back when
-    /// the row is missing or holds `null`; the conditional keys appear when
-    /// the row exists, even holding `null`.
     /// The `defaults` rows as stored, without the app's fallbacks: what a
-    /// store opened beside the server can read of them.
+    /// store opened by [`Store::open_beside`] can read of them.
     pub fn stored_defaults(&self) -> Result<Map<String, Value>> {
         let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;
         let mut rows = stmt.query([])?;
@@ -103,6 +98,10 @@ impl Store {
         Ok(stored)
     }
 
+    /// `defaults` from an explicit list of keys, so a row for a key not listed
+    /// here does not load. Keys with a fallback use it when the row is missing
+    /// or holds `null`; the conditional keys appear when the row exists, even
+    /// holding `null`.
     fn load_defaults(&self) -> Result<Map<String, Value>> {
         let stored = {
             let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;
@@ -200,11 +199,11 @@ impl Store {
         Ok(out)
     }
 
-    /// Writes a whole `AppConfig` snapshot in one transaction, as `saveConfig`
-    /// does. `deleted_defaults` names the `defaults` keys the caller set to
-    /// `undefined`, which JSON cannot carry: those rows are deleted, while a
-    /// key simply absent from `defaults` is left as it is. A key is never in
-    /// both, so deleting after the upserts loses nothing.
+    /// Writes a whole `AppConfig` snapshot in one transaction.
+    /// `deleted_defaults` names the `defaults` keys the caller cleared: those
+    /// rows are deleted, while a key simply absent from `defaults` is left as
+    /// it is. A key is never in both, so deleting after the upserts loses
+    /// nothing.
     pub fn save_config(&mut self, config: &Value, deleted_defaults: &[String]) -> Result<()> {
         let config = SavedConfig::deserialize(config)?;
         let default_workspace = self.options()?.default_workspace.clone();
@@ -392,8 +391,7 @@ fn prune_missing(
     };
     let delete = format!("DELETE FROM {table} WHERE {key_column} = ?");
     for (key, revision) in existing {
-        // Only a text key can match: the snapshot's keys are strings, as the
-        // `Set` of strings is in the TypeScript.
+        // Only a text key can match: the snapshot's keys are strings.
         if matches!(&key, SqlValue::Text(k) if wanted.contains(k.as_str())) {
             continue;
         }
@@ -434,7 +432,7 @@ pub const VIEWER_SETTING_KEYS: &[&str] = &[
     "hasSeenOnboarding",
 ];
 
-/// The `defaults` row a viewer's own settings are kept in. `loadDefaults`
+/// The `defaults` row a viewer's own settings are kept in. `load_defaults`
 /// reads only the keys it lists, so these rows never reach a config.
 fn viewer_row(viewer: &str) -> String {
     format!("viewer:{viewer}")
@@ -478,7 +476,7 @@ impl Store {
         Ok(())
     }
 
-    /// `loadConfig`, with `viewer`'s own settings laid over the shared ones.
+    /// [`Store::load_config`], with `viewer`'s own settings laid over the shared ones.
     pub fn load_config_for(&self, viewer: &str) -> Result<Value> {
         let mut config = self.load_config()?;
         let own = self.viewer_settings(viewer)?;
@@ -489,8 +487,7 @@ impl Store {
     }
 }
 
-/// The viewer settings in `source`, `null` and `undefined` left out as
-/// `pickViewerSettings` leaves them.
+/// The viewer settings in `source`, `null` and missing ones left out.
 fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
     VIEWER_SETTING_KEYS
         .iter()
@@ -503,7 +500,7 @@ fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// `readConfigRevision`: `Number(value)`, and 0 when that is not finite
+/// The stored config revision as a number, and 0 when that is not finite
 /// (no row, or text that is not a number).
 fn read_config_revision(conn: &Connection) -> Result<f64> {
     let mut stmt = conn.prepare("SELECT value FROM schema_meta WHERE key = ?")?;
@@ -515,10 +512,9 @@ fn read_config_revision(conn: &Connection) -> Result<f64> {
     Ok(if parsed.is_finite() { parsed } else { 0.0 })
 }
 
-/// JavaScript's `Number(text)`: trimmed, empty is 0, `0x`/`0o`/`0b` prefixes
-/// read in their base, anything else that is not a decimal is NaN. Rust's
-/// parser also takes `inf` and `nan`, which JavaScript reads as NaN; both are
-/// non-finite, which is all a caller here looks at.
+/// `text` as a number: trimmed, empty is 0, `0x`/`0o`/`0b` prefixes read in
+/// their base, anything else that is not a decimal is NaN. `inf` and `nan`
+/// parse too; both are non-finite, which is all a caller here looks at.
 fn js_number(text: &str) -> f64 {
     let text = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     if text.is_empty() {
@@ -546,8 +542,8 @@ fn js_number(text: &str) -> f64 {
     text.parse().unwrap_or(f64::NAN)
 }
 
-/// A number as `JSON.stringify` writes it: integral values without a
-/// fraction, so a revision reads back as `3`, not `3.0`.
+/// A number as JSON, integral values without a fraction, so a revision reads
+/// back as `3`, not `3.0`.
 fn js_number_value(n: f64) -> Value {
     if n.fract() == 0.0 && n.abs() <= NO_BASE_REVISION {
         // In range and integral: the cast is exact.
@@ -557,8 +553,8 @@ fn js_number_value(n: f64) -> Value {
     }
 }
 
-/// An object's keys in the order JavaScript enumerates them: array-index
-/// keys first, ascending, then the rest in insertion order.
+/// An object's keys reordered: array-index keys first, ascending, then the
+/// rest in insertion order.
 fn js_key_order(map: Map<String, Value>) -> Map<String, Value> {
     let index = |key: &str| -> Option<u32> {
         key.parse::<u32>()
@@ -574,7 +570,7 @@ fn js_key_order(map: Map<String, Value>) -> Map<String, Value> {
     indexed.into_iter().chain(rest).collect()
 }
 
-/// `loadAgentCommands`: by agent type, `args` parsed, the optional fields
+/// The agent commands by agent type, `args` parsed, the optional fields
 /// present only when their column is not NULL.
 pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value>> {
     let mut stmt = conn.prepare("SELECT * FROM agent_commands")?;
@@ -593,7 +589,7 @@ pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value
     Ok(js_key_order(result))
 }
 
-/// A `remote_hosts` row as `loadRemoteHosts` maps it.
+/// A `remote_hosts` row as a remote host.
 pub(crate) fn row_to_remote_host(row: &Row<'_>) -> Result<RemoteHost> {
     Ok(RemoteHost {
         id: get_text(row, "id")?,

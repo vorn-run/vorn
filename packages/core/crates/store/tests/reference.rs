@@ -1,4 +1,5 @@
-//! Every store call replayed against the recorded reference (`tests/fixtures/js-reference/store.json`).
+//! Every store call replayed against recorded expected answers
+//! (`tests/fixtures/js-reference/store.json`).
 
 mod common;
 
@@ -60,7 +61,7 @@ fn iso_ms(s: &str) -> Option<i64> {
     Some(((days * 24 + n(11..13)) * 60 + n(14..16)) * 60_000 + n(17..19) * 1000 + n(20..23))
 }
 
-/// `normalizeStoreOutput`: a copy of `value` with what the store made up replaced by placeholders.
+/// A copy of `value` with what the store made up (ids, times) replaced by placeholders.
 fn normalize(value: &Value, now: i64) -> Value {
     struct Names(HashMap<String, String>);
     impl Names {
@@ -237,7 +238,7 @@ fn scenario(store: Store) -> Vec<(String, Value)> {
         json!({ "status": "done", "completedAt": "2026-10-02T00:00:00.000Z" }),
         &["status", "completedAt"],
     );
-    // `{ completedAt: undefined }`: JSON drops the key, the wrapper names it.
+    // `completedAt` cleared: absent from the JSON, named in `present`.
     update_task(&mut s.store, "t1", json!({}), &["completedAt"]);
     s.record("dbListTasks", "dbListTasks", json!(["proj", null]));
     s.record(
@@ -716,9 +717,8 @@ fn scenario(store: Store) -> Vec<(String, Value)> {
     s.out
 }
 
-/// The one accepted difference: tasks and workflows left the configuration
-/// document for their own calls, so a recorded `loadConfig` answer is read
-/// without them. Their rows are compared where those calls are recorded.
+/// Tasks and workflows have their own calls, so a recorded `loadConfig`
+/// answer is read without them. Their rows are compared where those calls are recorded.
 fn without_tasks_and_workflows(label: &str, mut value: Value) -> Value {
     if label.starts_with("loadConfig") {
         if let Some(map) = value.as_object_mut() {
@@ -730,7 +730,7 @@ fn without_tasks_and_workflows(label: &str, mut value: Value) -> Value {
 }
 
 #[test]
-fn every_call_is_answered_as_the_typescript_store_answered_it() {
+fn every_call_answers_as_recorded() {
     let store = Store::open_in_memory(options_with("<default shell>", "<owner name>"))
         .expect("an in-memory store opens");
     let now = now_ms();

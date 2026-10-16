@@ -1,4 +1,4 @@
-//! Typed output of a headless agent step (`structured-output.ts`).
+//! Typed output of a headless agent step.
 //!
 //! An agent that declares an output schema is asked to end its run with a
 //! JSON object between two marker lines. The object is pulled back out of
@@ -139,8 +139,7 @@ fn coerce(mut obj: Map<String, Value>, schema: &Value) -> Map<String, Value> {
     obj
 }
 
-/// `extractStructuredOutput`: the object the agent produced, or why there
-/// is none.
+/// The object the agent produced, or why there is none.
 pub fn extract(logs: &str, schema: &Value) -> Result<Map<String, Value>, String> {
     let text = json_text(logs).ok_or("No JSON output block found in the agent output.")?;
     let parsed: Map<String, Value> = serde_json::from_str(text)

@@ -148,7 +148,7 @@ fn normalise_code(raw: &Value) -> String {
         .unwrap_or_default()
 }
 
-/// JavaScript's `trim`: Unicode white space and the byte order mark.
+/// Trims Unicode white space and the byte order mark.
 fn js_trim(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }

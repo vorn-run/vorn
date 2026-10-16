@@ -11,9 +11,8 @@
 //! redacted and it has no `Display`, so a log line or an error that names one
 //! by mistake shows nothing. No [`Error`] carries an item's contents.
 //!
-//! The desktop used to seal secrets with its own encryption before they were
-//! stored in the database. [`import`] files what it decrypted once, so that
-//! from then on vornd holds them and no process has to hand them over again.
+//! [`import`] files secrets a client hands over once, so that from then on
+//! vornd holds them and no process has to hand them over again.
 
 pub mod file;
 pub mod memory;
@@ -257,7 +256,7 @@ pub fn set_connection_fields(
 }
 
 /// The fields of a connection item; `None` when it is not a JSON object.
-/// A non-string value is kept as its JSON text, as the server's reader did.
+/// A non-string value is kept as its JSON text.
 pub fn parse_fields(text: &str) -> Option<BTreeMap<String, Secret>> {
     let serde_json::Value::Object(map) = serde_json::from_str(text).ok()? else {
         return None;
@@ -365,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_connection_items_as_the_server_wrote_them() {
+    fn reads_connection_items_with_non_string_values() {
         let parsed = parse_fields(r#"{"secretEnv":"{\"K\":\"v\"}","n":3}"#).unwrap();
         assert_eq!(parsed["secretEnv"].expose(), r#"{"K":"v"}"#);
         assert_eq!(parsed["n"].expose(), "3");

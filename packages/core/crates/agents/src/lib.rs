@@ -7,10 +7,7 @@
 //! ([`history`]), which models each offers ([`models`]), and how each is
 //! launched, and a shell with it ([`launch`]), which starts nothing.
 //!
-//! Each answers exactly as the server's TypeScript of the same purpose did
-//! (`agent-detector`, `agent-history`, `agent-model-catalog`, `agent-launch`)
-//! for the agents it knew, checked by the corpora recorded from it; where a
-//! module departs from it on input no agent writes, its docs say so.
+//! Each module is checked against recorded corpora of expected answers.
 //!
 //! Everything here blocks the thread it runs on: file reads, SQLite queries,
 //! and for the model catalog a child process of up to fifteen seconds.
@@ -74,14 +71,13 @@ impl Agent {
         &self.0.spec
     }
 
-    /// Whether a past session can be resumed by its own id
-    /// (`supportsExactSessionResume`).
+    /// Whether a past session can be resumed by its own id.
     pub fn resumes_exactly(&self) -> bool {
         self.0.spec.resume.is_some()
     }
 
     /// Whether a fresh session can be pinned to an id chosen beforehand, to
-    /// resume it by later (`supportsSessionIdPinning`).
+    /// resume it by later.
     pub fn pins_session_ids(&self) -> bool {
         self.0
             .spec
@@ -90,8 +86,7 @@ impl Agent {
             .is_some_and(|r| !r.pin.is_empty())
     }
 
-    /// What one unit of a session's activity is called
-    /// (`getRecentSessionActivityLabel`).
+    /// What one unit of a session's activity is called.
     pub fn activity_label(&self) -> &str {
         self.0
             .spec
@@ -100,7 +95,7 @@ impl Agent {
             .map_or("session", |h| h.activity.as_str())
     }
 
-    /// Whether a model can be chosen for it (`supportsModelSelection`).
+    /// Whether a model can be chosen for it.
     pub fn selects_models(&self) -> bool {
         self.0.spec.models.is_some()
     }

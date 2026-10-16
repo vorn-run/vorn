@@ -1,5 +1,5 @@
 //! Reading a launch line well enough to remove a session selector from it,
-//! and refusing to when that cannot be done safely (`launch-tokens`).
+//! and refusing to when that cannot be done safely.
 //!
 //! A configured command is a string the launch line interpolates unescaped:
 //! `npx -y @some/agent-cli` is a working configuration. So there is
@@ -13,10 +13,8 @@
 //! clustered shorts like `-ir` are left alone too, since splitting them
 //! needs to know which letters take values.
 //!
-//! The server reads the line in UTF-16 code units and this reads it in bytes.
-//! Every character either one stops at is ASCII, which UTF-8 never uses
-//! inside a longer character, so both split every line at the same places;
-//! only the offsets are counted in different units.
+//! Offsets are in bytes. Every character a split stops at is ASCII, which
+//! UTF-8 never uses inside a longer character.
 
 use crate::spec::Selectors;
 use crate::Agent;
@@ -223,8 +221,8 @@ fn selector_spans(line: &str, agent: &Agent, args_from: usize) -> Vec<Span> {
 }
 
 /// The line with its session selectors removed, or unchanged when none could
-/// be proven (`stripSessionSelectors`). Rebuilt by copying the gaps out of
-/// the original, so every byte outside a proven span survives as it was.
+/// be proven. Rebuilt by copying the gaps out of the original, so every byte
+/// outside a proven span survives as it was.
 pub fn strip_session_selectors(line: &str, agent: &Agent, args_from: usize) -> String {
     let mut spans = selector_spans(line, agent, args_from);
     if spans.is_empty() {

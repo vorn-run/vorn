@@ -122,7 +122,7 @@ pub struct GateComment {
 
 impl GateComment {
     /// The comments with words in them, each quote kept only when it names
-    /// some (`cleanComments`).
+    /// some.
     pub fn clean(list: &Value) -> Vec<GateComment> {
         list.as_array()
             .into_iter()
@@ -334,7 +334,7 @@ impl<H: Host> Engine<H> {
         locked(&self.inner.claims).release(workflow_id, params, run_id);
     }
 
-    /// `publishRun`: a step moving goes out at once; output alone at most
+    /// A step moving goes out at once; output alone at most
     /// every few seconds.
     pub(crate) fn publish(&self, run: &Run) {
         let snapshot = {
@@ -400,7 +400,7 @@ impl<H: Host> Engine<H> {
             .find(|w| w.id == workflow_id)
     }
 
-    /// `executeWorkflow`.
+    /// Starts a run of `workflow`.
     pub async fn execute(
         &self,
         workflow: &Workflow,
@@ -572,8 +572,8 @@ impl<H: Host> Engine<H> {
         }
     }
 
-    /// `retryRunFromFailure`: a new run where steps that succeeded keep
-    /// their outputs and the walk starts again at the failure.
+    /// A new run where steps that succeeded keep their outputs and the walk
+    /// starts again at the failure.
     pub async fn retry(
         &self,
         workflow: &Workflow,
@@ -608,7 +608,7 @@ impl<H: Host> Engine<H> {
         Ok(self.walk(workflow.clone(), run, context, None))
     }
 
-    /// `rerunWorkflowRun`: a fresh run with an earlier one's context.
+    /// A fresh run with an earlier one's context.
     pub async fn rerun(
         &self,
         workflow: &Workflow,
@@ -631,7 +631,7 @@ impl<H: Host> Engine<H> {
         self.inner.host.task(id?).await
     }
 
-    /// `contextFromRun`: a run's launch context, so a retry resolves the
+    /// A run's launch context, so a retry resolves the
     /// same templates. The inbox lease stays the original run's.
     pub async fn context_from_run(&self, run: &WorkflowExecution) -> Option<Context> {
         let task = self.task_by_id(run.trigger_task_id.as_deref()).await;
@@ -660,7 +660,7 @@ impl<H: Host> Engine<H> {
         })
     }
 
-    /// `rebuildContextForResume`: what the steps after a gate read.
+    /// What the steps after a gate read.
     pub(crate) async fn resume_context(&self, run: &Run) -> Option<Context> {
         let (task_id, item, inputs) = {
             let r = lock(run);
@@ -684,7 +684,7 @@ impl<H: Host> Engine<H> {
         })
     }
 
-    /// `runExecution`: walks the run until it ends or parks on a gate, then
+    /// Walks the run until it ends or parks on a gate, then
     /// closes it out.
     pub(crate) async fn run_execution(
         &self,
@@ -972,8 +972,8 @@ impl<H: Host> Engine<H> {
         futures_util::future::join_all(cleanups).await;
     }
 
-    /// `stopWorkflowRun`: ends the run's agents, then closes it as
-    /// cancelled. Worktrees stay: a stopped run usually did partial work.
+    /// Ends the run's agents, then closes it as cancelled. Worktrees stay: a
+    /// stopped run usually did partial work.
     pub async fn stop(&self, run_id: &str) {
         let handle = locked(&self.inner.active).get(run_id).cloned();
         let run = match &handle {
@@ -1168,7 +1168,7 @@ impl<H: Host> Engine<H> {
         Some(Value::Array(list))
     }
 
-    /// `approveWorkflowGate`.
+    /// Approves a waiting gate.
     pub(crate) async fn approve(
         &self,
         run: &Run,
@@ -1207,7 +1207,7 @@ impl<H: Host> Engine<H> {
         self.run_execution(&workflow, run, context, None).await;
     }
 
-    /// `rejectWorkflowGate`: a person's answer, or the gate's own timeout.
+    /// A person's answer, or the gate's own timeout.
     pub(crate) async fn reject(&self, run: &Run, node_id: &str, rejection: Rejection) {
         if !self.resolve_waiting(run, node_id, Decision::Reject) {
             return;
@@ -1266,7 +1266,7 @@ impl<H: Host> Engine<H> {
         self.run_execution(&workflow, run, context, None).await;
     }
 
-    /// `changesPlan`: the steps a request for changes sends back, or why
+    /// The steps a request for changes sends back, or why
     /// the gate cannot take it.
     async fn changes_plan(
         &self,
@@ -1309,7 +1309,7 @@ impl<H: Host> Engine<H> {
         Ok((from, reset))
     }
 
-    /// `requestGateChanges`: every step from the gate's `from` to the gate
+    /// Every step from the gate's `from` to the gate
     /// runs again, and the gate asks again.
     pub(crate) async fn request_changes(
         &self,
@@ -1366,7 +1366,7 @@ impl<H: Host> Engine<H> {
         self.run_execution(&workflow, run, context, None).await;
     }
 
-    /// `applyGateDecision`: an answer from any client, acted on where the
+    /// An answer from any client, acted on where the
     /// run is. A gate already answered sends the run out as it stands.
     pub async fn apply_gate_decision(&self, run_id: &str, node_id: &str, answer: Answer) {
         let Some(run) = self.run_by_id(run_id).await else {
@@ -1495,7 +1495,7 @@ impl<H: Host> Engine<H> {
             .then(|| s.round.unwrap_or(1.0) as u32)
     }
 
-    /// `resumeSignInWaits`: the steps that waited for `connection_id` run
+    /// The steps that waited for `connection_id` run
     /// again; what ran before them is kept.
     pub async fn resume_sign_in_waits(&self, connection_id: &str, parked: Vec<WorkflowExecution>) {
         let mut resumes = Vec::new();
@@ -1545,8 +1545,7 @@ impl<H: Host> Engine<H> {
         futures_util::future::join_all(resumes).await;
     }
 
-    /// `adoptConnectorInboxLease`: a run already going takes the lease of
-    /// its item's newer delivery.
+    /// A run already going takes the lease of its item's newer delivery.
     pub async fn adopt_lease(&self, run_id: &str, item: &Value) {
         let Some(run) = self.run_by_id(run_id).await else {
             return;
@@ -1663,8 +1662,8 @@ impl<H: Host> Engine<H> {
             .await;
     }
 
-    /// `reconcileRunningExecutions`: runs left `running` by an earlier
-    /// process are closed from their sessions' exits, never resumed.
+    /// Runs left `running` by an earlier process are closed from their
+    /// sessions' exits, never resumed.
     pub async fn reconcile(&self, runs: Vec<WorkflowExecution>, workflows: &[Workflow]) {
         for stored in runs {
             let run = Arc::new(Mutex::new(stored));
@@ -1815,8 +1814,7 @@ impl<H: Host> Engine<H> {
         }
     }
 
-    /// `rescheduleWaitingGateTimers`: gates left waiting by an earlier
-    /// process time out as they would have.
+    /// Gates left waiting by an earlier process time out as they would have.
     pub async fn rearm_gates(&self, runs: Vec<WorkflowExecution>, workflows: &[Workflow]) {
         let now = vorn_work_now() as f64;
         for stored in runs {
@@ -1943,7 +1941,7 @@ pub(crate) fn tasks_of(config: &Value) -> &[Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-/// `new Date(text).getTime()` for the times the engine writes.
+/// Unix milliseconds of an ISO time the engine wrote.
 fn parse_ms(text: &str) -> Option<f64> {
     text.parse::<jiff::Timestamp>()
         .ok()

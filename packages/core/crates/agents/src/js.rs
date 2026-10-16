@@ -1,6 +1,6 @@
-//! The few JavaScript semantics the server's answers depend on: what counts
-//! as whitespace, how `Number` and `new Date` read a string, how a string is
-//! cut by UTF-16 length, and how a number is written as JSON.
+//! Text and number rules the agents' answers share: what counts as
+//! whitespace, how a string reads as a number or a date, how a string is cut
+//! by UTF-16 length, and how a number is written as JSON.
 
 use std::cmp::Ordering;
 
@@ -8,7 +8,7 @@ use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::{Offset, TimeZone};
 use serde_json::Value;
 
-/// Whitespace as `String.prototype.trim` and the regex `\s` see it.
+/// Whitespace: ASCII and Unicode spaces, line terminators and the byte order mark.
 pub fn is_space(c: char) -> bool {
     matches!(
         c,
@@ -23,14 +23,13 @@ pub fn is_space(c: char) -> bool {
     )
 }
 
-/// `s.trim()`: unlike `str::trim`, this strips a byte order mark.
+/// Trims [`is_space`] from both ends: unlike `str::trim`, this strips a byte order mark.
 pub fn trim(s: &str) -> &str {
     s.trim_matches(is_space)
 }
 
-/// `s.slice(0, n)`: the first `n` UTF-16 code units. A surrogate pair the
-/// cut would split is left out whole, where JavaScript would keep its first
-/// half as a lone surrogate, which a Rust string cannot hold.
+/// The first `n` UTF-16 code units of `s`. A surrogate pair the cut would
+/// split is left out whole.
 pub fn slice_utf16(s: &str, n: usize) -> String {
     let mut units = 0;
     for (at, c) in s.char_indices() {
@@ -42,8 +41,8 @@ pub fn slice_utf16(s: &str, n: usize) -> String {
     s.to_owned()
 }
 
-/// A number as `JSON.stringify` writes it: an integer without a fraction,
-/// `null` for NaN and the infinities.
+/// A number as JSON: an integer without a fraction, `null` for NaN and the
+/// infinities.
 pub fn number(n: f64) -> Value {
     if n.is_finite() && n.fract() == 0.0 && n.abs() < 9_007_199_254_740_992.0 {
         // Exact: an integral f64 below 2^53 is an i64.
@@ -53,7 +52,7 @@ pub fn number(n: f64) -> Value {
     }
 }
 
-/// `Number(text)`: the decimal and `0x`/`0o`/`0b` literals JavaScript reads,
+/// `text` as a number: decimal (with `Infinity`) and `0x`/`0o`/`0b` literals,
 /// `0` for blank text, NaN for anything else.
 pub fn to_number(text: &str) -> f64 {
     let t = trim(text);
@@ -80,7 +79,7 @@ pub fn to_number(text: &str) -> f64 {
             f64::INFINITY
         };
     }
-    // Rust also reads `inf` and `NaN`, which JavaScript does not.
+    // Rust's parser also reads `inf` and `NaN`; those are NaN here.
     let decimal = unsigned
         .bytes()
         .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-'))
@@ -94,10 +93,8 @@ pub fn to_number(text: &str) -> f64 {
     t.parse().unwrap_or(f64::NAN)
 }
 
-/// Orders by `timestamp` newest first, as `sort((a, b) => b.timestamp -
-/// a.timestamp)` does, keeping ties in their order. A NaN timestamp sorts
-/// last: JavaScript's comparator calls it equal to everything, which is no
-/// order at all.
+/// Orders timestamps newest first, keeping ties in their order. A NaN
+/// timestamp sorts last.
 pub fn newest_first(a: f64, b: f64) -> Ordering {
     match (a.is_nan(), b.is_nan()) {
         (true, true) => Ordering::Equal,
@@ -107,11 +104,11 @@ pub fn newest_first(a: f64, b: f64) -> Ordering {
     }
 }
 
-/// `new Date(text).getTime()` for the forms an agent records a time in: ISO
-/// 8601 dates (`2025-01-02`, read as UTC) and date-times with a `T` or a
+/// Milliseconds since the epoch for the forms an agent records a time in:
+/// ISO 8601 dates (`2025-01-02`, read as UTC) and date-times with a `T` or a
 /// space, with or without fractional seconds and an offset (read as local
-/// time without one). NaN for anything else, including the looser forms
-/// V8's fallback parser also accepts (`2025-1-2`).
+/// time without one). NaN for anything else, including looser forms such as
+/// `2025-1-2`.
 pub fn date_ms(text: &str) -> f64 {
     parse_date(text).unwrap_or(f64::NAN)
 }
@@ -141,7 +138,7 @@ fn parse_date(text: &str) -> Option<f64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    // A day past the month's end runs on into the next, as V8 has it.
+    // A day past the month's end runs on into the next.
     let date = Date::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, 1)
         .ok()?
         .checked_add(jiff::Span::new().days(day - 1))
@@ -238,7 +235,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trims_what_javascript_trims() {
+    fn trims_unicode_whitespace_and_the_bom() {
         assert_eq!(trim("\u{FEFF} a b \u{3000}\n"), "a b");
         assert_eq!(trim("\u{85}x"), "\u{85}x");
     }
@@ -252,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_numbers_as_json_stringify_does() {
+    fn writes_whole_numbers_as_integers() {
         assert_eq!(number(1_735_787_045_000.0).to_string(), "1735787045000");
         assert_eq!(number(1.5).to_string(), "1.5");
         assert_eq!(number(f64::NAN), Value::Null);
@@ -260,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_numbers_as_the_number_function_does() {
+    fn reads_decimal_and_prefixed_numbers() {
         assert_eq!(to_number(" 12 "), 12.0);
         assert_eq!(to_number(""), 0.0);
         assert_eq!(to_number("1.5e3"), 1500.0);
@@ -273,8 +270,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_iso_dates_as_v8_does() {
-        // Each value is what `new Date(text).getTime()` gives in Node.
+    fn reads_iso_dates() {
+        // Each value is the expected milliseconds since the epoch.
         let utc = [
             ("2025-01-02T03:04:05.678Z", 1_735_787_045_678.0),
             ("2025-01-02T03:04:05Z", 1_735_787_045_000.0),

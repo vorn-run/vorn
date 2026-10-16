@@ -1,5 +1,5 @@
 //! The shipped adapters through `vorn_agents::launch` on seeded random lines,
-//! against the answers 0.8 recorded (`tests/fixtures/js-reference/launch-random.json`).
+//! against the recorded answers (`tests/fixtures/js-reference/launch-random.json`).
 
 mod support;
 
@@ -9,7 +9,7 @@ use vorn_agents::AgentCommand;
 
 const CASES: usize = 4000;
 
-/// mulberry32 in wrapping 32-bit arithmetic, as `Math.imul` and `>>>` compute it.
+/// mulberry32 in wrapping 32-bit arithmetic.
 struct Seeded(u32);
 
 impl Seeded {

@@ -1,7 +1,7 @@
-//! The parts of running a workflow that decide rather than do
-//! (`workflow-graph.ts`): the graph's shape, which steps a failure or a
-//! branch skips, a retry's starting states, loops' bodies, conditions, the
-//! outputs later steps read, and a run's trigger fingerprint.
+//! The parts of running a workflow that decide rather than do: the graph's
+//! shape, which steps a failure or a branch skips, a retry's starting states,
+//! loops' bodies, conditions, the outputs later steps read, and a run's
+//! trigger fingerprint.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -38,8 +38,7 @@ pub const MAX_GATE_ROUNDS: u32 = 10;
 
 pub const DEFAULT_GATE_ROUNDS: u32 = 3;
 
-/// `appendBoundedLog`: past [`LOG_BUFFER_MAX`] units only the last
-/// [`LOG_BUFFER_KEEP`] are kept.
+/// Past [`LOG_BUFFER_MAX`] units only the last [`LOG_BUFFER_KEEP`] are kept.
 pub fn append_bounded_log(buffer: &mut String, chunk: &str) {
     buffer.push_str(chunk);
     // Counting is only needed once the bytes could be past the limit.
@@ -69,8 +68,8 @@ fn interpolated(value: Option<&Value>) -> String {
     value.map_or_else(|| "undefined".to_owned(), js::to_string)
 }
 
-/// `dedupeFingerprint`: what a run was triggered with. Two runs of a
-/// workflow are the same trigger only when this matches.
+/// What a run was triggered with. Two runs of a workflow are the same trigger
+/// only when this matches.
 pub fn dedupe_fingerprint(context: Option<&Context>) -> String {
     let inputs = context
         .and_then(|c| c.inputs.as_ref())
@@ -139,8 +138,7 @@ pub fn resolve_script_config(
     Value::Object(out)
 }
 
-/// `buildStepOutputsMap`: by slug, each settled step's outputs, and each
-/// gate that has asked.
+/// Each settled step's outputs by slug, and each gate that has asked.
 pub fn step_outputs(execution: &WorkflowExecution, workflow: &Workflow) -> StepOutputs {
     let by_id: HashMap<&str, &Node> = workflow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let mut outputs = StepOutputs::new();
@@ -243,7 +241,7 @@ pub fn output_or_logs(ns: &NodeExecutionState) -> &str {
         .unwrap_or("")
 }
 
-/// `{ ...value }` into `into`.
+/// Copies `value`'s fields into `into`: an object's keys, a list's indices.
 fn spread(into: &mut Map<String, Value>, value: Option<&Value>) {
     match value {
         Some(Value::Object(map)) => {
@@ -329,7 +327,7 @@ fn gate_outputs(ns: &NodeExecutionState) -> Option<Map<String, Value>> {
     Some(out)
 }
 
-/// `gateEditRefusal`: why a gate would refuse this rewrite. A gate that
+/// Why a gate would refuse this rewrite. A gate that
 /// showed a list of records hands those on as data, so a rewrite that no
 /// longer parses is refused with where it broke.
 pub fn gate_edit_refusal(editable: Option<&str>, edited: Option<&str>) -> Option<String> {
@@ -350,7 +348,7 @@ pub fn gate_edit_refusal(editable: Option<&str>, edited: Option<&str>) -> Option
         .map(|why| format!("The edited text is no longer a list. {why}"))
 }
 
-/// `Number(value)`, as far as a config's numbers go.
+/// A config value as a number: 0 for null, booleans as 0 or 1, strings parsed.
 pub fn js_number(value: Option<&Value>) -> Option<f64> {
     match value {
         None => None,
@@ -407,7 +405,7 @@ fn reach(start: &str, next: &HashMap<String, Vec<String>>) -> HashSet<String> {
     seen
 }
 
-/// `evaluateCondition`.
+/// Whether `resolved` passes the condition `operator` with `value`.
 pub fn evaluate_condition(operator: &str, resolved: &str, value: &str) -> bool {
     match operator {
         "equals" => resolved == value,
@@ -420,7 +418,7 @@ pub fn evaluate_condition(operator: &str, resolved: &str, value: &str) -> bool {
     }
 }
 
-/// `loopShouldStop`: a half-written condition means "not configured yet",
+/// A half-written condition means "not configured yet",
 /// never "stop now".
 pub fn loop_should_stop(until: Option<&Value>, variable: &str, value: &str) -> bool {
     let Some(until) = until.filter(|u| !u.is_null()) else {
@@ -496,7 +494,7 @@ pub struct Graph {
 }
 
 impl Graph {
-    /// `buildGraph`.
+    /// The graph `edges` make.
     pub fn of(edges: &[Edge]) -> Graph {
         let mut graph = Graph::default();
         for e in edges {
@@ -523,8 +521,8 @@ impl Graph {
     }
 }
 
-/// `collectSkippedBranch`: the branch from `start`, stopping at a join
-/// whose other predecessors are not settled. In the order reached.
+/// The branch from `start`, stopping at a join whose other predecessors are
+/// not settled. In the order reached.
 pub fn collect_skipped_branch(
     start: &str,
     graph: &Graph,
@@ -552,7 +550,7 @@ pub fn collect_skipped_branch(
     skipped
 }
 
-/// `skipEntryPoints`: the first hops of the branch a failed step feeds,
+/// The first hops of the branch a failed step feeds,
 /// leaving out a join another live predecessor still feeds.
 pub fn skip_entry_points(
     failed: &str,
@@ -573,7 +571,7 @@ pub fn skip_entry_points(
         .collect()
 }
 
-/// `seedRetryStates`: successes and deliberate skips kept, the rest pending;
+/// Successes and deliberate skips kept, the rest pending;
 /// a loop and its body go together.
 pub fn seed_retry_states(
     workflow: &Workflow,
@@ -684,7 +682,7 @@ pub struct Body<'a> {
     pub entries: Vec<String>,
 }
 
-/// `loopBodyGraph`: a body without edges between its members is chained in
+/// A body without edges between its members is chained in
 /// `bodyNodeIds` order.
 pub fn loop_body_graph<'a>(nodes: &'a [Node], edges: &[Edge], lp: &Node) -> Body<'a> {
     let owners = loop_body_owners(nodes);
@@ -723,7 +721,7 @@ pub fn loop_body_graph<'a>(nodes: &'a [Node], edges: &[Edge], lp: &Node) -> Body
     }
 }
 
-/// `loopStructureError`: why a loop's body cannot run.
+/// Why a loop's body cannot run.
 pub fn loop_structure_error(nodes: &[Node], edges: &[Edge], lp: &Node) -> Option<String> {
     let body = loop_body_graph(nodes, edges, lp);
     if body.members.is_empty() {
@@ -806,7 +804,7 @@ pub enum WorktreeMode {
     FromContext,
 }
 
-/// `getWorktreeMode`.
+/// A step config's worktree mode, from `worktreeMode` or the older `useWorktree`.
 pub fn worktree_mode(config: &Value) -> WorktreeMode {
     if config.get("useWorktree").and_then(Value::as_str) == Some("fromContext") {
         return WorktreeMode::FromContext;
@@ -828,8 +826,7 @@ pub fn worktree_mode(config: &Value) -> WorktreeMode {
     }
 }
 
-/// `webhookTriggerFromItem`: a webhook run's `{{trigger.*}}`, rebuilt from
-/// the event's stored request.
+/// A webhook run's `{{trigger.*}}`, rebuilt from the event's stored request.
 pub fn webhook_trigger_from_item(item: Option<&Value>) -> Option<Value> {
     let item = item?;
     if item.get("connectorId").and_then(Value::as_str) != Some("webhook") {
@@ -846,8 +843,8 @@ pub fn webhook_trigger_from_item(item: Option<&Value>) -> Option<Value> {
     Some(Value::Object(trigger))
 }
 
-/// `schedulerExecutionContext`: a delivered event's context, a webhook's
-/// request lifted into `{{trigger.*}}`.
+/// A delivered event's context, a webhook's request lifted into
+/// `{{trigger.*}}`.
 pub fn scheduler_context(
     item: Option<Value>,
     inputs: Option<Map<String, Value>>,
@@ -864,7 +861,7 @@ pub fn scheduler_context(
     })
 }
 
-/// `getAncestorNodes`: every step above `current`, nearest first, triggers
+/// Every step above `current`, nearest first, triggers
 /// left out.
 pub fn ancestors<'a>(nodes: &'a [Node], edges: &[Edge], current: &str) -> Vec<&'a Node> {
     let graph = Graph::of(edges);

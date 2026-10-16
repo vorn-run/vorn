@@ -42,7 +42,7 @@ fn flag(row: &Row<'_>, name: &str) -> Result<Option<bool>> {
         .then_some(true))
 }
 
-/// A `sessions` row as `getPreviousSessions` maps it: NULL columns and unset
+/// A `sessions` row as a session: NULL columns and unset
 /// flags leave their field out.
 fn row_to_session(row: &Row<'_>) -> Result<TerminalSession> {
     Ok(TerminalSession {
@@ -220,7 +220,7 @@ impl Store {
 
     /// Records that the effect `effect_id` was acted on. True the first time,
     /// false for every delivery after: the caller acts only on true. `now`
-    /// defaults to `Date.now()`.
+    /// defaults to the current time in milliseconds.
     pub fn claim_effect(&self, effect_id: &str, kind: &str, now: Option<f64>) -> Result<bool> {
         let now = now.unwrap_or_else(|| now_millis() as f64);
         let changes = self.conn().execute(

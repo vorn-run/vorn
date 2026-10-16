@@ -252,7 +252,7 @@ fn a_command_gix_does_not_know_runs_git() {
 }
 
 #[test]
-fn git_failures_read_as_node_words_them() {
+fn git_failures_name_the_command_and_its_stderr() {
     let t = tmp();
     let dir = repo(t.path(), "fails");
     let err = run(&request(&dir, &["checkout", "no-such-branch"])).unwrap_err();

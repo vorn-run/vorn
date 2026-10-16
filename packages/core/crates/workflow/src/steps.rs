@@ -27,7 +27,7 @@ fn text_of(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str).map(str::to_owned)
 }
 
-/// `value || undefined` for a string.
+/// `None` for an empty string.
 fn nonempty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }

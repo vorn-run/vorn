@@ -1,11 +1,10 @@
-//! Which variables reach what a session runs (`filterEnv`, `getSafeEnv`,
-//! `getLaunchEnv`), as rules over a given environment. Where that
-//! environment comes from (the login shell's answer, or the host's own until
-//! it has one) is the host's business.
+//! Which variables reach what a session runs, as rules over a given
+//! environment. Where that environment comes from (the login shell's answer,
+//! or the host's own until it has one) is the host's business.
 
 use std::sync::{PoisonError, RwLock};
 
-/// The desktop's launch credential (`BOOTSTRAP_ENV_VAR`), stripped whatever
+/// The desktop's launch credential, stripped whatever
 /// the configuration says.
 pub const STRIP_PREFIXES: &[&str] = &["SECRET_VORN_BOOTSTRAP_TOKEN"];
 
@@ -52,7 +51,7 @@ pub const SENSITIVE_PREFIXES: &[&str] = &[
 /// An environment as name and value pairs, in the order they were given.
 pub type Env = Vec<(String, String)>;
 
-/// `normalizePassthrough`: the names trimmed and uppercased, blanks dropped.
+/// The passthrough names trimmed and uppercased, blanks dropped.
 pub fn normalize_passthrough<S: AsRef<str>>(names: &[S]) -> Vec<String> {
     names
         .iter()
@@ -61,8 +60,7 @@ pub fn normalize_passthrough<S: AsRef<str>>(names: &[S]) -> Vec<String> {
         .collect()
 }
 
-/// Whether a name is stripped no matter who asks
-/// (`isAbsolutelyStrippedEnvName`). Compared uppercased: Windows names are
+/// Whether a name is stripped no matter who asks. Compared uppercased: Windows names are
 /// case-insensitive, and this list is meant to be absolute.
 pub fn is_stripped(name: &str) -> bool {
     let upper = name.to_uppercase();
@@ -73,7 +71,7 @@ pub fn is_stripped(name: &str) -> bool {
     markers.0.contains(&upper) || markers.1.iter().any(|p| upper.starts_with(p.as_str()))
 }
 
-/// `filterEnv`: `passthrough`, normalized names, lets those credential-shaped
+/// `source` filtered: `passthrough`, normalized names, lets those credential-shaped
 /// names through, but never one [`is_stripped`] refuses.
 pub fn filter_env(
     source: impl IntoIterator<Item = (String, String)>,
@@ -90,13 +88,13 @@ pub fn filter_env(
         .collect()
 }
 
-/// `getSafeEnv` over `source`: for what the person never asked about (git,
+/// [`filter_env`] with no passthrough: for what the person never asked about (git,
 /// detection, helpers), so nothing is passed through.
 pub fn safe_env(source: impl IntoIterator<Item = (String, String)>) -> Env {
     filter_env(source, &[])
 }
 
-/// `getLaunchEnv` over `source`: for an agent terminal, a headless agent or
+/// [`filter_env`] over `source` for an agent terminal, a headless agent or
 /// a workflow script, the only launches that forward the configured
 /// passthrough names; with `VORN_DATA_DIR` naming the server's data
 /// directory when it has one, where an existing entry keeps its place.
