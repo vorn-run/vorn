@@ -6,6 +6,8 @@ final class Core: ObservableObject {
     let handle: OpaquePointer
     @Published var revision = 0
     let launched = ProcessInfo.processInfo.systemUptime
+    /// The stack that acted last: where an answer that arrives later goes.
+    weak var front: Nav?
 
     private let box = WakeBox()
 
@@ -24,6 +26,14 @@ final class Core: ObservableObject {
     func woke() {
         _ = vp_pump(handle)
         revision += 1
+        if let go = takeGo() { front?.apply(go) }
+    }
+
+    /// Where the core says to go next, once.
+    func takeGo() -> String? {
+        guard let p = vp_take_go(handle) else { return nil }
+        defer { vp_free_string(p) }
+        return String(cString: p)
     }
 
     func tree(_ screen: String) -> Node? {

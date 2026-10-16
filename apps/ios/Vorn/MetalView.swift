@@ -92,7 +92,7 @@ final class MetalView: UIView, UITextInput {
             typed = ""
             becomeFirstResponder()
         } else if !wants && isFirstResponder {
-            resignFirstResponder()
+            _ = resignFirstResponder()
         }
     }
 

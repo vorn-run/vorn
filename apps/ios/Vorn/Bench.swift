@@ -21,7 +21,7 @@ final class Bench {
         var session: String?
         for _ in 0..<200 where session == nil {
             try? await Task.sleep(for: .milliseconds(100))
-            session = core.tree("sessions")?.walk().first { $0.k == "link" }?.value?
+            session = core.tree("sessions")?.walk().first { $0.k == "link" && $0.value?.hasPrefix("session:") == true }?.value?
                 .split(separator: ":", maxSplits: 1).last.map(String.init)
         }
         guard let session else {
