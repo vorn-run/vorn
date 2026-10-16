@@ -730,17 +730,18 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
         )
         .expect("assigned");
     app.st.view = MainView::Sessions;
-    support::wait_for("the badge's row", || {
-        let mut ui = Ui::cells(&ui_config(1.0));
-        app.frame(&mut ui, (1200.0, 800.0));
+    // The badge shows once its row and its template have both come.
+    let mut shown = String::new();
+    support::wait_for("the badge on the card", || {
         let rows = app.st.points.rows_of("vorn.tasks");
-        rows.get("working")?
-            .iter()
-            .any(|r| r.id == sid && r.text("title") == "Badge me")
-            .then_some(())
+        let row = rows.get("working").is_some_and(|w| {
+            w.iter()
+                .any(|r| r.id == sid && r.text("title") == "Badge me")
+        });
+        let point = app.st.points.find("vorn.tasks", "badges", "task").is_some();
+        shown = cells_text(&mut app);
+        (row && point && shown.contains("Badge me")).then_some(())
     });
-    let shown = cells_text(&mut app);
-    assert!(shown.contains("Badge me"), "the card's badge:\n{shown}");
 
     // Switched off, the board says so, the tasks stay, and writes are refused.
     app.rpc()

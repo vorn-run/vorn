@@ -5,7 +5,8 @@
  * must answer the same, call for call, and tell clients the configuration
  * changed after the same calls.
  *
- * Ids, times and the test's directories are normalized before comparing.
+ * Ids, times, the default shell and the test's directories are normalized
+ * before comparing.
  * `VORN_RECORD_TASKS=1` records the fixtures again from the vornd built here.
  *
  * Runs where vornd has been built.
@@ -35,6 +36,8 @@ function normalizer(dirs: Record<string, string>): (value: unknown) => unknown {
       if (!ids.has(id)) ids.set(id, `<id${ids.size + 1}>`)
       return ids.get(id)!
     })
+    // The default shell is the machine's.
+    out = out.replace(/"shell": "[^"]*"/g, '"shell": "<shell>"')
     return out.replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z/g, '<time>')
   }
   const walk = (v: unknown): unknown => {
