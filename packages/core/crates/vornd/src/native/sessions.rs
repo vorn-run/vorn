@@ -273,7 +273,8 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             Value::Object(o) => {
                 let text = |k: &str| o.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
                 let cwd = text("cwd");
-                if o.keys().any(|k| !["cwd", "command", "displayName"].contains(&k.as_str()))
+                if o.keys()
+                    .any(|k| !["cwd", "command", "displayName"].contains(&k.as_str()))
                     || cwd.is_some_and(|c| !Path::new(c).is_absolute())
                 {
                     return bad_params(method);

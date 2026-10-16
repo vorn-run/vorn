@@ -53,8 +53,10 @@ impl<'a> Context<'a> {
     pub fn error(&mut self, what: &str, err: CommandError) -> ExitCode {
         match err {
             CommandError::Ambiguous { given, found } => {
-                self.io
-                    .write_err(&format!("vorn: {}", crate::target::describe(&given, &found)));
+                self.io.write_err(&format!(
+                    "vorn: {}",
+                    crate::target::describe(&given, &found)
+                ));
                 if self.args.json {
                     let data = crate::target::describe_json(&given, &found);
                     self.io.write(&crate::js::as_json(&data));

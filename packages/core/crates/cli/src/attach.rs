@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use crate::args::ClientArgs;
 use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
-use crate::target::{self, Candidate, Miss};
 use crate::output::Io;
+use crate::target::{self, Candidate, Miss};
 
 pub const ATTACH_USAGE: &str = "Usage
   vorn attach [<session>] [--data-dir <path>]
@@ -49,7 +49,9 @@ fn pick(sessions: &[Candidate], given: Option<&str>) -> Result<String, CommandEr
             .max_by(|a, b| a.created.total_cmp(&b.created))
             .map(|s| s.id.clone())
             .ok_or_else(|| {
-                CommandError::Refused("no sessions running. Start one with: vorn session start".into())
+                CommandError::Refused(
+                    "no sessions running. Start one with: vorn session start".into(),
+                )
             });
     };
     let found = match target::resolve(given, sessions) {
@@ -165,8 +167,14 @@ mod tests {
         assert_eq!(pick(&all, Some("aaaa")).unwrap(), "aaaa1111");
         assert_eq!(pick(&all, Some("2")).unwrap(), "bbbb2222");
         assert_eq!(pick(&all, Some("Build")).unwrap(), "aaaa1111");
-        assert!(pick(&all, Some("3")).unwrap_err().to_string().contains("headless"));
-        assert!(pick(&all, Some("zz")).unwrap_err().to_string().contains("no session"));
+        assert!(pick(&all, Some("3"))
+            .unwrap_err()
+            .to_string()
+            .contains("headless"));
+        assert!(pick(&all, Some("zz"))
+            .unwrap_err()
+            .to_string()
+            .contains("no session"));
         assert!(matches!(
             pick(&all, Some("a")),
             Ok(_) | Err(CommandError::Ambiguous { .. })

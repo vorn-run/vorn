@@ -52,6 +52,13 @@ pub enum Act {
         id: String,
         source: Option<String>,
     },
+    /// Starts a saved layout's sessions, in the active project when the layout names none.
+    OpenLayout {
+        name: String,
+        source: String,
+    },
+    /// The palette's "Open Layout ›": narrows the palette to the layouts.
+    OpenLayoutMenu,
     Rename(String),
     /// Asks before closing a session.
     AskClose(String),

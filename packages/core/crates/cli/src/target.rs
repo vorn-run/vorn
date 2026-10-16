@@ -58,10 +58,7 @@ pub enum Miss {
     Ambiguous(Vec<(usize, Candidate)>),
 }
 
-fn pick<'a>(
-    list: &'a [Candidate],
-    hit: impl Fn(&Candidate) -> bool,
-) -> Option<Result<&'a Candidate, Miss>> {
+fn pick(list: &[Candidate], hit: impl Fn(&Candidate) -> bool) -> Option<Result<&Candidate, Miss>> {
     let found: Vec<(usize, &Candidate)> = list.iter().enumerate().filter(|(_, c)| hit(c)).collect();
     match found.as_slice() {
         [] => None,

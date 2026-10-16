@@ -444,7 +444,10 @@ pub fn parse_duration(raw: &str) -> Option<std::time::Duration> {
     let end = raw
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
         .unwrap_or(raw.len());
-    let n: f64 = raw[..end].parse().ok().filter(|n: &f64| n.is_finite() && *n > 0.0)?;
+    let n: f64 = raw[..end]
+        .parse()
+        .ok()
+        .filter(|n: &f64| n.is_finite() && *n > 0.0)?;
     let unit = match &raw[end..] {
         "" | "s" => 1.0,
         "ms" => 0.001,
@@ -513,13 +516,19 @@ impl ClientArgs {
             })?),
         };
         let format = owned("format");
-        if let Some(f) = format.as_deref().filter(|f| !["text", "vt", "html"].contains(f)) {
+        if let Some(f) = format
+            .as_deref()
+            .filter(|f| !["text", "vt", "html"].contains(f))
+        {
             return Err(ArgsError(format!(
                 "--format must be text, vt or html, got \"{f}\""
             )));
         }
         let status = owned("status");
-        if let Some(s) = status.as_deref().filter(|s| !["idle", "done", "blocked"].contains(s)) {
+        if let Some(s) = status
+            .as_deref()
+            .filter(|s| !["idle", "done", "blocked"].contains(s))
+        {
             return Err(ArgsError(format!(
                 "--status must be idle, done or blocked, got \"{s}\""
             )));
@@ -740,7 +749,10 @@ mod tests {
         assert_eq!(parse_duration("0"), None);
         assert_eq!(parse_duration("3x"), None);
         let a = ClientArgs::parse(&argv(&["session", "wait", "x", "--timeout", "2s"])).unwrap();
-        assert_eq!((a.wait_timeout, a.timeout_ms), (Some(Duration::from_secs(2)), None));
+        assert_eq!(
+            (a.wait_timeout, a.timeout_ms),
+            (Some(Duration::from_secs(2)), None)
+        );
         let a = ClientArgs::parse(&argv(&["session", "list", "--timeout", "2000"])).unwrap();
         assert_eq!((a.wait_timeout, a.timeout_ms), (None, Some(2000.0)));
         assert!(ClientArgs::parse(&argv(&["--format", "pdf"])).is_err());

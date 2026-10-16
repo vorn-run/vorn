@@ -32,6 +32,7 @@ impl App {
         ui.set_focus(Some(PALETTE_INPUT));
         ui.set_scroll_offset(PALETTE_LIST, 0.0);
         self.call(Call::Recent, "sessions:getRecent", Value::Null);
+        self.call(Call::Layouts, "layout:list", Value::Null);
         for p in self.store.projects.clone() {
             self.call(
                 Call::Worktrees(p.path.clone()),
@@ -47,6 +48,14 @@ impl App {
                 let Some(cmd) = self.palette_rows().into_iter().nth(i) else {
                     return;
                 };
+                if cmd.act == Act::OpenLayoutMenu {
+                    // A submenu in the palette's own terms: the list narrows to the layouts.
+                    self.st.palette.query = palette::LAYOUT_MENU.to_owned();
+                    self.st.palette.active = 0;
+                    ui.set_edit_text(PALETTE_INPUT, palette::LAYOUT_MENU);
+                    ui.set_focus(Some(PALETTE_INPUT));
+                    return;
+                }
                 self.st.dialog = None;
                 ui.set_focus(None);
                 self.run(ui, cmd.act, Src::default());

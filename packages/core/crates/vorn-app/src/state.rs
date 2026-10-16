@@ -403,6 +403,29 @@ pub struct Models {
     pub opened_at: u64,
 }
 
+/// A saved layout in `layout:list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutRow {
+    pub name: String,
+    /// `user`, or the id of the extension that offers it.
+    pub source: String,
+    pub sessions: u64,
+}
+
+impl LayoutRow {
+    /// A row that read; one with an error is left out of the palette.
+    pub fn from_value(v: &Value) -> Option<LayoutRow> {
+        if v.get("error").is_some_and(|e| !e.is_null()) {
+            return None;
+        }
+        Some(LayoutRow {
+            name: v.get("name")?.as_str()?.to_owned(),
+            source: v.get("source")?.as_str()?.to_owned(),
+            sessions: v.get("sessions").and_then(Value::as_u64).unwrap_or(0),
+        })
+    }
+}
+
 /// Everything the screen shows that vornd does not keep.
 #[derive(Debug, Default)]
 pub struct State {
@@ -456,6 +479,8 @@ pub struct State {
     pub banner: Vec<TerminalSession>,
     pub restoring: bool,
     pub recent: Vec<Recent>,
+    /// The saved layouts the palette offers (`layout:list`).
+    pub layouts: Vec<LayoutRow>,
     pub headless: crate::headless::Tracker,
     pub worktrees: HashMap<String, Vec<Worktree>>,
     pub branches: HashMap<String, Vec<String>>,

@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use vorn_extensions::events::{
-    next_batch, Bus, Owner, AGENT_HOOK, GIT_CHANGED, SESSION_CREATED, SESSION_EXITED,
-    SESSION_MARK, SESSION_PROGRAM, SESSION_STATUS, TASK_CREATED, TASK_STATUS_CHANGED,
+    next_batch, Bus, Owner, AGENT_HOOK, GIT_CHANGED, SESSION_CREATED, SESSION_EXITED, SESSION_MARK,
+    SESSION_PROGRAM, SESSION_STATUS, TASK_CREATED, TASK_STATUS_CHANGED,
 };
 
 use crate::streams::Forwarder;
@@ -70,10 +70,9 @@ fn wanted(params: &Value) -> Result<Wanted, String> {
             let mut chosen = Vec::with_capacity(names.len());
             for name in names {
                 let name = name.as_str().unwrap_or_default();
-                let known = STREAMED
-                    .iter()
-                    .find(|e| **e == name)
-                    .ok_or_else(|| format!("unknown event \"{name}\". Try: {}", STREAMED.join(", ")))?;
+                let known = STREAMED.iter().find(|e| **e == name).ok_or_else(|| {
+                    format!("unknown event \"{name}\". Try: {}", STREAMED.join(", "))
+                })?;
                 if !chosen.contains(known) {
                     chosen.push(*known);
                 }
@@ -132,8 +131,10 @@ pub fn open(
                 if session.as_deref().is_some_and(|wanted| sid != Some(wanted)) {
                     continue;
                 }
-                out.send(Message::text(envelope(&event.name, &event.data, at).to_string()))
-                    .await;
+                out.send(Message::text(
+                    envelope(&event.name, &event.data, at).to_string(),
+                ))
+                .await;
             }
             if out.is_closed() {
                 return;
@@ -178,7 +179,11 @@ mod tests {
 
     #[test]
     fn names_the_session_in_the_envelope_when_the_event_has_one() {
-        let e = envelope(SESSION_EXITED, &json!({ "sessionId": "s1", "exitCode": 3 }), 9);
+        let e = envelope(
+            SESSION_EXITED,
+            &json!({ "sessionId": "s1", "exitCode": 3 }),
+            9,
+        );
         assert_eq!(e["params"]["v"], 1);
         assert_eq!(e["params"]["session"], "s1");
         assert_eq!(e["params"]["at"], 9);

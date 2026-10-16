@@ -465,10 +465,7 @@ async fn read_screen(
     format: &str,
 ) -> Result<ExitCode, CommandError> {
     let answer = ctx
-        .call(
-            "terminal:readScrollback",
-            Some(json!({ "id": target.id })),
-        )
+        .call("terminal:readScrollback", Some(json!({ "id": target.id })))
         .await?;
     let mut lines = render::parse(&text(field(&answer, "data")));
     if ctx.args.trim {
@@ -560,21 +557,34 @@ async fn wait_for(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comman
         )));
     };
     let state = |status: Option<&str>, program: Option<&str>| {
-        want.as_deref()
-            .is_some_and(|w| reached(w, status, program))
+        want.as_deref().is_some_and(|w| reached(w, status, program))
     };
     if state(
         field(&now, "status").and_then(Value::as_str),
         program_state(&now).as_deref(),
     ) {
-        return Ok(reported(ctx, &target, json!({ "status": want }), ExitCode::Ok));
+        return Ok(reported(
+            ctx,
+            &target,
+            json!({ "status": want }),
+            ExitCode::Ok,
+        ));
     }
     if field(&now, "status").and_then(Value::as_str) == Some("exited") {
         let code = field(&now, "exitCode").and_then(Value::as_i64);
-        return Ok(finished(ctx, &target, want.as_deref(), json!({ "exitCode": code }), code));
+        return Ok(finished(
+            ctx,
+            &target,
+            want.as_deref(),
+            json!({ "exitCode": code }),
+            code,
+        ));
     }
 
-    let deadline = ctx.args.wait_timeout.map(|d| tokio::time::Instant::now() + d);
+    let deadline = ctx
+        .args
+        .wait_timeout
+        .map(|d| tokio::time::Instant::now() + d);
     let mut status: Option<String> = None;
     loop {
         let next = events.next();
@@ -605,7 +615,9 @@ async fn wait_for(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comman
                 return Ok(finished(ctx, &target, want.as_deref(), data, code));
             }
             Some("session.status") => {
-                status = field(&data, "status").and_then(Value::as_str).map(str::to_owned);
+                status = field(&data, "status")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
             }
             Some("session.program") => {}
             _ => continue,
@@ -617,7 +629,12 @@ async fn wait_for(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comman
             None
         };
         if state(status.as_deref(), program) {
-            return Ok(reported(ctx, &target, json!({ "status": want }), ExitCode::Ok));
+            return Ok(reported(
+                ctx,
+                &target,
+                json!({ "status": want }),
+                ExitCode::Ok,
+            ));
         }
     }
 }

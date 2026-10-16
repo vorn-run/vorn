@@ -280,7 +280,10 @@ pub fn html(lines: &[Line]) -> String {
     for line in lines {
         for (s, t) in line {
             let (fg, bg) = if s.inverse {
-                (s.bg.or(Some(Color::Index(0))), s.fg.or(Some(Color::Index(7))))
+                (
+                    s.bg.or(Some(Color::Index(0))),
+                    s.fg.or(Some(Color::Index(7))),
+                )
             } else {
                 (s.fg, s.bg)
             };

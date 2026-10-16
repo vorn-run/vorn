@@ -16,12 +16,12 @@
 pub mod args;
 pub mod attach;
 pub mod client;
-pub mod exit;
 pub mod events;
+pub mod exit;
 pub mod ext;
 pub mod js;
-pub mod layout;
 pub mod launch;
+pub mod layout;
 pub mod mcp;
 pub mod output;
 pub mod paths;
@@ -211,7 +211,9 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
         "server" => server::run(&without_command(argv, command), io),
         // `vorn-server` was called this way for as long as it existed.
         "serve" | "token" => server::run(argv, io),
-        "session" | "workflow" | "ext" | "events" | "layout" => client_command(argv, io, false).await,
+        "session" | "workflow" | "ext" | "events" | "layout" => {
+            client_command(argv, io, false).await
+        }
         "mcp" => client_command(&without_command(argv, command), io, true).await,
         "web" => web::run(&without_command(argv, command), io),
         _ => {

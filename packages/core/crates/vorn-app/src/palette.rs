@@ -50,6 +50,7 @@ pub enum Cat {
     Recent,
     Projects,
     Workflows,
+    Layouts,
     QuickLaunch,
     Filter,
 }
@@ -63,6 +64,7 @@ impl Cat {
             Cat::Recent => "Recent Sessions",
             Cat::Projects => "Projects",
             Cat::Workflows => "Workflows",
+            Cat::Layouts => "Layouts",
             Cat::QuickLaunch => "Quick Launch",
             Cat::Filter => "Filter & Sort",
         }
@@ -143,11 +145,23 @@ pub fn score(query: &str, cmd: &Entry) -> u32 {
 /// The rows the palette shows, in order: by category with nothing typed
 /// (Quick Launch left out), else every match, best first.
 pub fn shown(commands: Vec<Entry>, query: &str) -> Vec<Entry> {
+    // Inside "Open Layout ›" only the layouts are listed, matched on the rest of what is typed.
+    let (commands, query) = match query.strip_prefix(LAYOUT_MENU) {
+        Some(rest) => (
+            commands
+                .into_iter()
+                .filter(|c| c.cat == Cat::Layouts)
+                .collect(),
+            rest,
+        ),
+        None => (commands, query),
+    };
     let q = query.trim();
     if q.is_empty() {
+        let in_menu = commands.iter().all(|c| c.cat == Cat::Layouts) && !commands.is_empty();
         let mut list: Vec<Entry> = commands
             .into_iter()
-            .filter(|c| c.cat != Cat::QuickLaunch)
+            .filter(|c| in_menu || !matches!(c.cat, Cat::QuickLaunch | Cat::Layouts))
             .collect();
         list.sort_by_key(|c| c.cat);
         return list;
@@ -387,9 +401,54 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
             .keys(&projects),
         );
     }
+    layouts(st, &mut out);
     quick_launch(store, st, &mut out);
     filters(alt, &mut out);
     out
+}
+
+/// The text the palette narrows to for "Open Layout ›".
+pub const LAYOUT_MENU: &str = "Open Layout \u{203a} ";
+
+/// "Open Layout ›", which lists the layouts, and a row for each.
+fn layouts(st: &State, out: &mut Vec<Entry>) {
+    if st.layouts.is_empty() {
+        return;
+    }
+    out.push(
+        Entry::new(
+            Cat::Actions,
+            "Open Layout \u{203a}",
+            Glyph::Icon("layout-grid"),
+            Act::OpenLayoutMenu,
+        )
+        .keys(&["layouts", "arrangement", "sessions", "workspace"]),
+    );
+    for l in &st.layouts {
+        let sessions = if l.sessions == 1 {
+            "1 session".to_owned()
+        } else {
+            format!("{} sessions", l.sessions)
+        };
+        let sub = if l.source == "user" {
+            sessions
+        } else {
+            format!("{sessions} \u{b7} {}", l.source)
+        };
+        out.push(
+            Entry::new(
+                Cat::Layouts,
+                format!("{LAYOUT_MENU}{}", l.name),
+                Glyph::Icon("layout-grid"),
+                Act::OpenLayout {
+                    name: l.name.clone(),
+                    source: l.source.clone(),
+                },
+            )
+            .sub(sub)
+            .keys(&["layout", "open"]),
+        );
+    }
 }
 
 fn actions(store: &Store, m: &str) -> Vec<Entry> {
@@ -689,6 +748,7 @@ fn filters(alt: &str, out: &mut Vec<Entry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::LayoutRow;
 
     fn cmd(label: &str, keys: &[&str]) -> Entry {
         Entry::new(Cat::Actions, label, Glyph::None, Act::Nothing).keys(keys)
@@ -722,6 +782,43 @@ mod tests {
         // Typed, quick launch takes part and the best match comes first.
         let list = shown(vec![cmd("Add Claude", &[]), quick], "claude");
         assert_eq!(list[0].label, "Claude Code on p");
+    }
+
+    #[test]
+    fn open_layout_narrows_the_palette_to_the_layouts() {
+        let st = State {
+            layouts: vec![
+                LayoutRow {
+                    name: "dev".into(),
+                    source: "user".into(),
+                    sessions: 3,
+                },
+                LayoutRow {
+                    name: "docs".into(),
+                    source: "acme.tools".into(),
+                    sessions: 1,
+                },
+            ],
+            ..State::default()
+        };
+        let mut all = Vec::new();
+        layouts(&st, &mut all);
+        // Nothing typed: the menu entry only, not every layout.
+        let rows = shown(all.clone(), "");
+        let labels: Vec<_> = rows.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(labels, ["Open Layout \u{203a}"]);
+        assert_eq!(rows[0].act, Act::OpenLayoutMenu);
+        // The menu's text lists the layouts and not the entry itself.
+        let rows = shown(all, LAYOUT_MENU);
+        let labels: Vec<_> = rows.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["Open Layout \u{203a} dev", "Open Layout \u{203a} docs"]
+        );
+        assert_eq!(
+            rows[1].sublabel.as_deref(),
+            Some("1 session \u{b7} acme.tools")
+        );
     }
 
     #[test]

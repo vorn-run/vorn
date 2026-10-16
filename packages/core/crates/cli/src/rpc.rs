@@ -531,7 +531,9 @@ impl Client {
 
 /// A server's public events, as they arrive.
 pub struct Events {
-    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     dir: DataDir,
 }
 
@@ -565,7 +567,10 @@ impl Events {
         let mut frame = self
             .frame(|f| f.get("method").and_then(Value::as_str) == Some("events:event"))
             .await?;
-        Ok(frame.get_mut("params").map(Value::take).unwrap_or(Value::Null))
+        Ok(frame
+            .get_mut("params")
+            .map(Value::take)
+            .unwrap_or(Value::Null))
     }
 }
 

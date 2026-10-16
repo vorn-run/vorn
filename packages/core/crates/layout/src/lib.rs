@@ -276,7 +276,10 @@ impl Reader<'_> {
                     .iter()
                     .find(|(k, _)| k.get_ref() == second)
                     .map_or(start, |(k, _)| k.span().start);
-                self.bad(at, format!("`{second}` cannot be combined with `{}`", kinds[0]));
+                self.bad(
+                    at,
+                    format!("`{second}` cannot be combined with `{}`", kinds[0]),
+                );
                 None
             }
         }
@@ -318,7 +321,6 @@ impl Reader<'_> {
                         for item in items {
                             match item.get_ref() {
                                 DeValue::Table(ct) => {
-                                    let ct = ct;
                                     if let Some(n) = self.node(ct, false, item.span().start) {
                                         children.push(n);
                                     }
@@ -327,7 +329,10 @@ impl Reader<'_> {
                             }
                         }
                     }
-                    _ => self.bad(v.span().start, "`children` needs at least one `[[children]]`".into()),
+                    _ => self.bad(
+                        v.span().start,
+                        "`children` needs at least one `[[children]]`".into(),
+                    ),
                 },
             }
             return Some(Node::Split {
@@ -371,7 +376,9 @@ impl Reader<'_> {
                 match v.get_ref() {
                     DeValue::Array(words)
                         if !words.is_empty()
-                            && words.iter().all(|w| matches!(w.get_ref(), DeValue::String(_))) =>
+                            && words
+                                .iter()
+                                .all(|w| matches!(w.get_ref(), DeValue::String(_))) =>
                     {
                         Launch::Command(
                             words
@@ -429,10 +436,7 @@ pub fn parse(text: &str, agents: &[&str]) -> Result<Layout, Vec<Problem>> {
                 .iter()
                 .find(|(k, _)| k.get_ref() == "name")
                 .map_or(0, |(_, v)| v.span().start);
-            r.bad(
-                at,
-                "`name` is letters, digits, `.`, `_` and `-`".to_owned(),
-            );
+            r.bad(at, "`name` is letters, digits, `.`, `_` and `-`".to_owned());
         }
     }
     let project = named("project", &mut r);
@@ -485,12 +489,16 @@ url = "http://localhost:3000"
         assert_eq!(l.project.as_deref(), Some("vorn"));
         let leaves = l.leaves();
         assert_eq!(leaves.len(), 3);
-        assert!(matches!(leaves[0], Leaf::Session(s) if s.launch == Launch::Agent("claude".into())
-            && s.label.as_deref() == Some("agent")));
+        assert!(
+            matches!(leaves[0], Leaf::Session(s) if s.launch == Launch::Agent("claude".into())
+            && s.label.as_deref() == Some("agent"))
+        );
         assert!(matches!(leaves[1], Leaf::Session(s) if s.launch
             == Launch::Command(vec!["tail".into(), "-f".into(), "app.log".into()])
             && s.cwd.as_deref() == Some("logs")));
-        assert!(matches!(leaves[2], Leaf::Pane(p) if p.url.as_deref() == Some("http://localhost:3000")));
+        assert!(
+            matches!(leaves[2], Leaf::Pane(p) if p.url.as_deref() == Some("http://localhost:3000"))
+        );
         assert!(matches!(&l.root, Node::Split { ratio, .. } if (*ratio - 0.6).abs() < 1e-9));
     }
 
@@ -539,17 +547,23 @@ url = "http://localhost:3000"
     #[test]
     fn reports_syntax_errors_and_shapes_that_cannot_be_opened() {
         assert_eq!(lines("name = \n")[0].0, 1);
-        assert!(lines("name = \"x\"\n")[0].1.contains("says nothing to open"));
+        assert!(lines("name = \"x\"\n")[0]
+            .1
+            .contains("says nothing to open"));
         assert!(lines("shell = true\nagent = \"claude\"\n")[0]
             .1
             .contains("cannot be combined"));
         assert!(lines("split = \"vertical\"\n")[0].1.contains("children"));
-        assert!(lines("split = \"vertical\"\nratio = 1.5\n[[children]]\nshell = true\n")[0]
-            .1
-            .contains("between 0 and 1"));
+        assert!(
+            lines("split = \"vertical\"\nratio = 1.5\n[[children]]\nshell = true\n")[0]
+                .1
+                .contains("between 0 and 1")
+        );
         assert!(lines("command = []\n")[0].1.contains("list of strings"));
         assert!(lines("pane = \"video\"\n")[0].1.contains("browser"));
-        assert!(lines("name = \"a/b\"\nshell = true\n")[0].1.contains("letters"));
+        assert!(lines("name = \"a/b\"\nshell = true\n")[0]
+            .1
+            .contains("letters"));
     }
 
     #[test]

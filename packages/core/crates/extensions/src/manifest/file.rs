@@ -1788,6 +1788,30 @@ header = "Authorization: Bearer {token}"
     }
 
     #[test]
+    fn reads_layout_contributions_and_names_a_file_outside_layouts() {
+        let head = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[[contributes.layouts]]\nid = \"dev\"\ntitle = \"Dev\"\n";
+        let m = parse(&format!("{head}file = \"layouts/dev.toml\"\n")).unwrap();
+        let layouts = m.contributes.as_ref().unwrap().layouts();
+        assert_eq!(
+            (layouts[0].base.id.as_str(), layouts[0].file.as_str()),
+            ("dev", "layouts/dev.toml")
+        );
+        for bad in [
+            "../dev.toml",
+            "layouts/../dev.toml",
+            "dev.toml",
+            "layouts/dev.json",
+        ] {
+            let err = parse(&format!("{head}file = \"{bad}\"\n")).unwrap_err();
+            assert_eq!(
+                (err.line, err.field.as_str()),
+                (6, "contributes.layouts[0].file"),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
     fn reads_template_contributions_and_writes_them_back() {
         let text = r#"id = "x"
 name = "X"

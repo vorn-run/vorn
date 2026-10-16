@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 
-use crate::client::{Context, CommandError};
+use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
 use crate::js::{self, field};
 use crate::output::table;
@@ -37,23 +37,25 @@ Split direction and ratio are kept in the file but do not size cards.
 
 fn names(rows: &[Value]) -> Vec<(String, String)> {
     rows.iter()
-        .map(|r| {
-            (
-                js::string(field(r, "name")),
-                js::string(field(r, "source")),
-            )
-        })
+        .map(|r| (js::string(field(r, "name")), js::string(field(r, "source"))))
         .collect()
 }
 
-/// The layout `given` names: (name, source), or the candidates it is ambiguous between.
-fn resolve(given: &str, rows: &[Value]) -> Result<(String, String), Result<(), Vec<(String, String)>>> {
+/// Why a name picked no single layout.
+#[derive(Debug, PartialEq, Eq)]
+enum Unresolved {
+    None,
+    /// The (name, source) pairs it could mean.
+    Ambiguous(Vec<(String, String)>),
+}
+
+/// The layout `given` names: (name, source).
+fn resolve(given: &str, rows: &[Value]) -> Result<(String, String), Unresolved> {
     let all = names(rows);
-    let steps: [&dyn Fn(&str) -> bool; 3] = [
-        &|n| n == given,
-        &|n| n.eq_ignore_ascii_case(given),
-        &|n| !given.is_empty() && n.starts_with(given),
-    ];
+    let steps: [&dyn Fn(&str) -> bool; 3] =
+        [&|n| n == given, &|n| n.eq_ignore_ascii_case(given), &|n| {
+            !given.is_empty() && n.to_lowercase().starts_with(&given.to_lowercase())
+        }];
     for hit in steps {
         let mut found: Vec<&(String, String)> = all.iter().filter(|(n, _)| hit(n)).collect();
         // A person's own layout is what a bare name means.
@@ -66,10 +68,14 @@ fn resolve(given: &str, rows: &[Value]) -> Result<(String, String), Result<(), V
         match found.as_slice() {
             [] => {}
             [one] => return Ok((*one).clone()),
-            many => return Err(Err(many.iter().map(|c| (*c).clone()).collect())),
+            many => {
+                return Err(Unresolved::Ambiguous(
+                    many.iter().map(|c| (*c).clone()).collect(),
+                ))
+            }
         }
     }
-    Err(Ok(()))
+    Err(Unresolved::None)
 }
 
 async fn rows(ctx: &Context<'_>) -> Result<Vec<Value>, CommandError> {
@@ -110,8 +116,11 @@ async fn list(ctx: &mut Context<'_>) -> ExitCode {
             ]
         })
         .collect();
-    ctx.io
-        .write(&table(&["NAME", "SOURCE", "PROJECT", "SESSIONS"], &cells, None));
+    ctx.io.write(&table(
+        &["NAME", "SOURCE", "PROJECT", "SESSIONS"],
+        &cells,
+        None,
+    ));
     ExitCode::Ok
 }
 
@@ -131,18 +140,16 @@ async fn open(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
     };
     let (name, source) = match resolve(given, &all) {
         Ok(one) => one,
-        Err(Ok(())) => {
+        Err(Unresolved::None) => {
             ctx.io
                 .write_err(&format!("vorn: no layout matches \"{given}\"\n"));
             return ExitCode::Failure;
         }
-        Err(Err(candidates)) => return ambiguous(ctx, given, &candidates),
+        Err(Unresolved::Ambiguous(candidates)) => return ambiguous(ctx, given, &candidates),
     };
     let own = all
         .iter()
-        .find(|r| {
-            js::string(field(r, "name")) == name && js::string(field(r, "source")) == source
-        })
+        .find(|r| js::string(field(r, "name")) == name && js::string(field(r, "source")) == source)
         .and_then(|r| field(r, "project").and_then(Value::as_str))
         .map(str::to_owned);
     let project = match ctx.args.project.clone().or(own) {
@@ -210,7 +217,10 @@ async fn save(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
         None => here().await,
     };
     let Some(project) = project else {
-        return ctx.usage("layout save needs --project, or a repository here", LAYOUT_USAGE);
+        return ctx.usage(
+            "layout save needs --project, or a repository here",
+            LAYOUT_USAGE,
+        );
     };
     let ask = json!({
         "name": given, "project": project,
@@ -221,7 +231,8 @@ async fn save(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
             if ctx.args.json {
                 ctx.io.write(&js::as_json(&done));
             } else {
-                ctx.io.write(&format!("{}\n", js::string(field(&done, "path"))));
+                ctx.io
+                    .write(&format!("{}\n", js::string(field(&done, "path"))));
             }
             ExitCode::Ok
         }
@@ -250,11 +261,11 @@ fn check(ctx: &mut Context<'_>, file: Option<&str>) -> ExitCode {
                 .filter(|l| matches!(l, vorn_layout::Leaf::Session(_)))
                 .count();
             if ctx.args.json {
-                ctx.io
-                    .write(&js::as_json(&json!({ "file": file, "ok": true, "sessions": sessions })));
+                ctx.io.write(&js::as_json(
+                    &json!({ "file": file, "ok": true, "sessions": sessions }),
+                ));
             } else {
-                ctx.io
-                    .write(&format!("{file}: ok, {sessions} sessions\n"));
+                ctx.io.write(&format!("{file}: ok, {sessions} sessions\n"));
             }
             ExitCode::Ok
         }
@@ -267,8 +278,9 @@ fn check(ctx: &mut Context<'_>, file: Option<&str>) -> ExitCode {
                     .iter()
                     .map(|p| json!({ "line": p.line, "message": p.message }))
                     .collect();
-                ctx.io
-                    .write(&js::as_json(&json!({ "file": file, "ok": false, "problems": list })));
+                ctx.io.write(&js::as_json(
+                    &json!({ "file": file, "ok": false, "problems": list }),
+                ));
             }
             ExitCode::Failure
         }
@@ -324,11 +336,11 @@ mod tests {
     #[test]
     fn two_extensions_with_one_name_are_ambiguous() {
         let all = rows(&[("dev", "a.x"), ("dev", "b.y"), ("docs", "user")]);
-        let Err(Err(found)) = resolve("dev", &all) else {
+        let Err(Unresolved::Ambiguous(found)) = resolve("dev", &all) else {
             panic!("not ambiguous")
         };
         assert_eq!(found.len(), 2);
         assert_eq!(resolve("Doc", &all).unwrap().0, "docs");
-        assert!(matches!(resolve("zz", &all), Err(Ok(()))));
+        assert_eq!(resolve("zz", &all), Err(Unresolved::None));
     }
 }

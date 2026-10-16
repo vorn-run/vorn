@@ -226,6 +226,10 @@ enum Call {
     /// Toasts only an error.
     Quiet,
     Recent,
+    /// `layout:list`, for the palette.
+    Layouts,
+    /// A `layout:open`: toasts what started.
+    LayoutOpened(String),
     Headless,
     Restored,
     Installed,
@@ -966,6 +970,32 @@ impl App {
             Call::Recent => {
                 self.st.recent = list(answer).iter().filter_map(Recent::from_value).collect();
             }
+            Call::Layouts => {
+                self.st.layouts = list(answer)
+                    .iter()
+                    .filter_map(crate::state::LayoutRow::from_value)
+                    .collect();
+            }
+            Call::LayoutOpened(name) => match answer {
+                Ok(done) => {
+                    let started = done
+                        .get("sessions")
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len);
+                    let problem = done
+                        .get("errors")
+                        .and_then(Value::as_array)
+                        .and_then(|e| e.first())
+                        .and_then(Value::as_str);
+                    match problem {
+                        Some(p) => self.st.toast(format!("Layout {name}: {p}"), true),
+                        None => self
+                            .st
+                            .toast(format!("Opened layout {name}: {started} started"), false),
+                    }
+                }
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
             Call::Headless => {
                 if answer.is_ok() {
                     let list = list(answer);
@@ -1916,6 +1946,15 @@ impl App {
                     .map(|s| json!(s.info));
                 self.start_run(ui, &id, source, None);
             }
+            Act::OpenLayout { name, source } => {
+                let mut ask = json!({ "name": name, "source": source });
+                if let Some((_, path)) = self.active_project() {
+                    // Only for a layout that names no project of its own.
+                    ask["defaultProject"] = json!(path);
+                }
+                self.call(Call::LayoutOpened(name), "layout:open", ask);
+            }
+            Act::OpenLayoutMenu => {}
             Act::Workflow(a) => self.run_wf(ui, a, src),
             Act::Set(a) => {
                 let was = self.st.shows_plugins();

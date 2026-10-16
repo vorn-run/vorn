@@ -54,7 +54,8 @@ fn found(native: &Native) -> Vec<Found> {
             .filter_map(|e| {
                 let path = e.path();
                 let name = path.file_stem()?.to_str()?.to_owned();
-                (path.extension()? == "toml" && vorn_layout::valid_name(&name)).then_some((name, path))
+                (path.extension()? == "toml" && vorn_layout::valid_name(&name))
+                    .then_some((name, path))
             })
             .collect();
         names.sort();
@@ -66,12 +67,16 @@ fn found(native: &Native) -> Vec<Found> {
         }));
     }
     if let Some(host) = native.extensions.get() {
-        out.extend(host.layout_files().into_iter().map(|(ext, name, title, path)| Found {
-            name,
-            source: ext,
-            title: Some(title),
-            path,
-        }));
+        out.extend(
+            host.layout_files()
+                .into_iter()
+                .map(|(ext, name, title, path)| Found {
+                    name,
+                    source: ext,
+                    title: Some(title),
+                    path,
+                }),
+        );
     }
     out
 }
@@ -94,7 +99,10 @@ fn pick(native: &Native, params: &Value) -> Result<Found, String> {
         [one] => Ok((*one).clone()),
         many => Err(format!(
             "\"{name}\" is offered by {}; say which with source",
-            many.iter().map(|f| f.source.as_str()).collect::<Vec<_>>().join(", ")
+            many.iter()
+                .map(|f| f.source.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
     }
 }
@@ -104,7 +112,11 @@ fn read(found: &Found) -> Result<(String, Layout), String> {
         .map_err(|e| format!("could not read {}: {e}", found.path.display()))?;
     let file = found.path.display().to_string();
     let layout = vorn_layout::parse(&text, &agents()).map_err(|problems| {
-        problems.iter().map(|p| p.at(&file)).collect::<Vec<_>>().join("\n")
+        problems
+            .iter()
+            .map(|p| p.at(&file))
+            .collect::<Vec<_>>()
+            .join("\n")
     })?;
     Ok((text, layout))
 }
@@ -112,10 +124,14 @@ fn read(found: &Found) -> Result<(String, Layout), String> {
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &Viewer) -> Answer {
     match method {
         "layout:list" => list(native),
-        "layout:get" => match pick(native, &params).and_then(|f| read(&f).map(|(text, _)| (f, text))) {
-            Ok((f, text)) => Answer::Result(json!({ "name": f.name, "source": f.source, "toml": text })),
-            Err(e) => Answer::Error(e),
-        },
+        "layout:get" => {
+            match pick(native, &params).and_then(|f| read(&f).map(|(text, _)| (f, text))) {
+                Ok((f, text)) => {
+                    Answer::Result(json!({ "name": f.name, "source": f.source, "toml": text }))
+                }
+                Err(e) => Answer::Error(e),
+            }
+        }
         "layout:open" => open(native, &params, viewer).await,
         "layout:save" => save(native, &params, viewer).await,
         _ => Answer::Unanswered,
@@ -137,8 +153,15 @@ fn list(native: &Native) -> Answer {
 }
 
 /// A project's name and path from `wanted` (a name, or a path), against the configured projects.
-async fn project(native: &Arc<Native>, wanted: &str, viewer: &Viewer) -> Result<(String, String), String> {
-    let config = match native.answer("config:load".into(), Value::Null, viewer).await {
+async fn project(
+    native: &Arc<Native>,
+    wanted: &str,
+    viewer: &Viewer,
+) -> Result<(String, String, bool), String> {
+    let config = match native
+        .answer("config:load".into(), Value::Null, viewer)
+        .await
+    {
         Answer::Result(c) => c,
         _ => Value::Null,
     };
@@ -149,26 +172,23 @@ async fn project(native: &Arc<Native>, wanted: &str, viewer: &Viewer) -> Result<
         .flatten()
         .collect();
     let field = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
-    let is_path = wanted.contains(['/', '\\']) || wanted.starts_with(['~', '.']);
+    let is_path = wanted.contains(['/', '\\']) || wanted.starts_with('~');
     if is_path {
         if !Path::new(wanted).is_absolute() {
             return Err(format!("project path \"{wanted}\" is not absolute"));
         }
-        let name = known
-            .iter()
-            .find(|p| field(p, "path") == wanted)
-            .map(|p| field(p, "name"))
-            .unwrap_or_else(|| {
-                Path::new(wanted)
-                    .file_name()
-                    .map_or_else(|| wanted.to_owned(), |n| n.to_string_lossy().into_owned())
-            });
-        return Ok((name, wanted.to_owned()));
+        let registered = known.iter().find(|p| field(p, "path") == wanted);
+        let name = registered.map(|p| field(p, "name")).unwrap_or_else(|| {
+            Path::new(wanted)
+                .file_name()
+                .map_or_else(|| wanted.to_owned(), |n| n.to_string_lossy().into_owned())
+        });
+        return Ok((name, wanted.to_owned(), registered.is_some()));
     }
     known
         .iter()
         .find(|p| field(p, "name") == wanted)
-        .map(|p| (field(p, "name"), field(p, "path")))
+        .map(|p| (field(p, "name"), field(p, "path"), true))
         .ok_or_else(|| format!("no project named \"{wanted}\""))
 }
 
@@ -182,7 +202,11 @@ fn resolve_cwd(cwd: Option<&str>, project: &str) -> String {
 
 fn command_line(words: &[String]) -> String {
     let quoting = Quoting::local(Platform::HOST, "");
-    words.iter().map(|w| quoting.quote(w)).collect::<Vec<_>>().join(" ")
+    words
+        .iter()
+        .map(|w| quoting.quote(w))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
@@ -194,14 +218,20 @@ async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
         .get("project")
         .and_then(Value::as_str)
         .filter(|p| !p.is_empty())
-        .or(layout.project.as_deref());
+        .or(layout.project.as_deref())
+        .or_else(|| {
+            params
+                .get("defaultProject")
+                .and_then(Value::as_str)
+                .filter(|p| !p.is_empty())
+        });
     let Some(wanted) = wanted else {
         return Answer::Error(format!(
             "layout \"{}\" names no project; say which with project",
             found.name
         ));
     };
-    let (project_name, project_path) = match project(native, wanted, viewer).await {
+    let (project_name, project_path, _) = match project(native, wanted, viewer).await {
         Ok(p) => p,
         Err(e) => return Answer::Error(e),
     };
@@ -238,7 +268,11 @@ async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
                 };
                 match native.answer(method.into(), ask, viewer).await {
                     Answer::Result(record) => {
-                        let id = record.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
+                        let id = record
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned();
                         sessions.push(json!({
                             "id": id, "label": label,
                             "agent": record.get("agentType"), "cwd": cwd,
@@ -249,7 +283,9 @@ async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
                     _ => errors.push(format!("{}: not started", describe(s))),
                 }
             }
-            Leaf::Pane(p) => panes.push(open_pane(native, p, last.as_deref(), viewer, &mut errors).await),
+            Leaf::Pane(p) => {
+                panes.push(open_pane(native, p, last.as_deref(), viewer, &mut errors).await)
+            }
         }
     }
     Answer::Result(json!({
@@ -281,7 +317,9 @@ async fn open_pane(
     };
     let ask = json!({ "sessionId": session, "url": pane.url });
     match native.answer("browser:openPane".into(), ask, viewer).await {
-        Answer::Result(_) | Answer::Void => json!({ "kind": pane.kind, "session": session, "opened": true }),
+        Answer::Result(_) | Answer::Void => {
+            json!({ "kind": pane.kind, "session": session, "opened": true })
+        }
         other => {
             let reason = match other {
                 Answer::Error(e) => e,
@@ -297,14 +335,16 @@ async fn open_pane(
 async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     if !vorn_layout::valid_name(name) {
-        return Answer::Error(
-            "a layout's name is letters, digits, `.`, `_` and `-`".to_owned(),
-        );
+        return Answer::Error("a layout's name is letters, digits, `.`, `_` and `-`".to_owned());
     }
-    let Some(wanted) = params.get("project").and_then(Value::as_str).filter(|p| !p.is_empty()) else {
+    let Some(wanted) = params
+        .get("project")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+    else {
         return Answer::Error("layout:save needs project".to_owned());
     };
-    let (project_name, project_path) = match project(native, wanted, viewer).await {
+    let (project_name, project_path, registered) = match project(native, wanted, viewer).await {
         Ok(p) => p,
         Err(e) => return Answer::Error(e),
     };
@@ -313,13 +353,15 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     };
     let file = dir.join(format!("{name}.toml"));
     if file.exists() && params.get("overwrite") != Some(&Value::Bool(true)) {
-        return Answer::Error(format!("layout \"{name}\" exists; pass overwrite to replace it"));
+        return Answer::Error(format!(
+            "layout \"{name}\" exists; pass overwrite to replace it"
+        ));
     }
     let Some(open) = native.registry.get().and_then(|r| {
         r.read(|r: &Registry| {
             r.terminals()
                 .into_iter()
-                .filter(|t| t.project_path == project_path)
+                .filter(|t| Path::new(&t.project_path).starts_with(&project_path))
                 .map(|t| {
                     (
                         t.agent_type.clone(),
@@ -353,7 +395,10 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
         .collect();
     let count = leaves.len();
     let root = if count == 1 {
-        leaves.into_iter().next().unwrap_or_else(|| unreachable!("one leaf"))
+        leaves
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| unreachable!("one leaf"))
     } else {
         Node::Split {
             direction: Direction::Horizontal,
@@ -363,7 +408,12 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     };
     let layout = Layout {
         name: Some(name.to_owned()),
-        project: Some(project_name),
+        // A project Vorn does not know is kept by its path, which names it anywhere.
+        project: Some(if registered {
+            project_name
+        } else {
+            project_path.clone()
+        }),
         root,
     };
     let (text, to) = (layout.to_toml(), file.clone());
