@@ -21,7 +21,7 @@ pub const SCHEMA: &str = "vorn:view@1";
 /// The node kinds, for the error that lists them.
 pub const NODES: &[&str] = &[
     "column", "row", "section", "text", "icon", "status", "badge", "button", "toggle", "field",
-    "choice", "list", "divider", "more",
+    "choice", "list", "divider", "more", "board",
 ];
 
 /// The name of a template's first row collection, whatever it is called.
@@ -122,11 +122,15 @@ pub enum Kind {
         value: Text,
         role: Role,
         grow: bool,
+        /// Wraps onto more lines instead of being cut short.
+        wrap: bool,
     },
     /// A named icon from the kit's set.
     Icon {
         name: Text,
         tone: Option<Tone>,
+        /// In a board's card: drawn in the tone of the card's column.
+        column_tone: bool,
     },
     /// A status dot whose tone follows a value.
     Status {
@@ -177,6 +181,40 @@ pub enum Kind {
         only: Option<(String, Text)>,
     },
     Divider,
+    /// The rows of `rows` as cards in columns, one column per value of the
+    /// enum field `by`, in the order published; the client windows the
+    /// cards, drags them between columns and opens them.
+    Board(Box<Board>),
+}
+
+/// A board: where its cards come from, its columns and its card.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Board {
+    pub rows: String,
+    /// The enum field whose value puts a row in a column.
+    pub by: String,
+    pub columns: Vec<BoardColumn>,
+    /// One card per row, with `{row.*}` and `{column.*}` in scope.
+    pub card: Node,
+    /// Called with `{ id, to }` when a card is dropped on another column.
+    pub moved: Option<String>,
+    /// Called with the row's id when a card is clicked.
+    pub open: Option<String>,
+    /// Called with `{ column }` from a column's add button; none without it.
+    pub add: Option<String>,
+    /// Shown in a column with no cards.
+    pub empty: Option<Text>,
+    /// The cards drawn faded, as a cancelled or archived one.
+    pub dim: Option<Cond>,
+}
+
+/// One column of a board: the value of `by` it holds, and its header.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardColumn {
+    pub value: String,
+    pub label: String,
+    pub icon: Option<String>,
+    pub tone: Option<Tone>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +233,10 @@ pub enum Tone {
     Warn,
     Busy,
     Muted,
+    /// Waiting to start.
+    Idle,
+    /// Under way.
+    Active,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -247,6 +289,8 @@ enum Piece {
     CountWhere(String, String, String),
     /// A field of a collection's first row.
     First(String, String),
+    /// A field of the board column a card is in: value, label or icon.
+    Column(String),
 }
 
 /// A row: its key and its fields.
@@ -315,6 +359,16 @@ impl Text {
 
     /// The text with its bindings filled from `row` (in a list's item or a session's template) and `src`.
     pub fn fill(&self, row: Option<&Row>, src: &dyn Source) -> String {
+        self.fill_in(row, src, None)
+    }
+
+    /// [`Text::fill`] in a board's card, `column` the column it is in.
+    pub fn fill_in(
+        &self,
+        row: Option<&Row>,
+        src: &dyn Source,
+        column: Option<&BoardColumn>,
+    ) -> String {
         let mut out = String::new();
         for p in &self.0 {
             match p {
@@ -326,6 +380,14 @@ impl Text {
                 }
                 Piece::First(c, f) => {
                     out.push_str(&src.first(c).map(|r| r.text(f)).unwrap_or_default());
+                }
+                Piece::Column(f) => {
+                    let c = column.map(|c| match f.as_str() {
+                        "value" => c.value.as_str(),
+                        "label" => c.label.as_str(),
+                        _ => c.icon.as_deref().unwrap_or(""),
+                    });
+                    out.push_str(c.unwrap_or(""));
                 }
             }
         }
@@ -343,7 +405,17 @@ impl Text {
 
 impl Cond {
     pub fn holds(&self, row: Option<&Row>, src: &dyn Source) -> bool {
-        truthy(&self.text.fill(row, src)) != self.negate
+        self.holds_in(row, src, None)
+    }
+
+    /// [`Cond::holds`] in a board's card, `column` the column it is in.
+    pub fn holds_in(
+        &self,
+        row: Option<&Row>,
+        src: &dyn Source,
+        column: Option<&BoardColumn>,
+    ) -> bool {
+        truthy(&self.text.fill_in(row, src, column)) != self.negate
     }
 }
 
@@ -365,6 +437,8 @@ impl Tone {
             "warn" => Tone::Warn,
             "busy" => Tone::Busy,
             "muted" => Tone::Muted,
+            "idle" => Tone::Idle,
+            "active" => Tone::Active,
             _ => return None,
         })
     }
@@ -413,6 +487,8 @@ struct Scope<'a> {
     in_item: bool,
     /// Inside the item of a list that is itself in an item.
     nested: bool,
+    /// Inside a board's card, where `{column.*}` reads its column.
+    card: bool,
 }
 
 /// `'a', 'b' and 'c'`, for an error listing names.
@@ -432,7 +508,7 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
     match kind {
         "column" | "row" | "more" => &["children", "when"],
         "section" => &["title", "children", "when"],
-        "text" => &["value", "role", "grow", "when"],
+        "text" => &["value", "role", "grow", "wrap", "when"],
         "icon" => &["value", "tone", "when"],
         "status" | "badge" => &["value", "tones", "when"],
         "button" => &["label", "action", "confirm", "style", "icon", "when"],
@@ -440,6 +516,9 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
         "field" => &["value", "placeholder", "call", "secret", "when"],
         "choice" => &["rows", "label", "selected", "call", "when"],
         "list" => &["rows", "item", "empty", "where", "is", "when"],
+        "board" => &[
+            "rows", "by", "columns", "card", "move", "open", "add", "empty", "dim", "when",
+        ],
         _ => &["when"],
     }
 }
@@ -453,6 +532,7 @@ fn required_of(kind: &str) -> &'static [&'static str] {
         "field" => &["call"],
         "choice" => &["rows", "label", "call"],
         "list" => &["item"],
+        "board" => &["rows", "by", "columns", "card"],
         _ => &[],
     }
 }
@@ -503,6 +583,7 @@ impl Parser {
             row: opts.session_row.then_some(first.as_deref()).flatten(),
             in_item: false,
             nested: false,
+            card: false,
         };
         if opts.session_row && first.is_none() {
             self.err(
@@ -688,14 +769,32 @@ impl Parser {
                     },
                 };
                 let grow = self.boolean(body.get("grow"), &format!("{path}.grow"));
-                Kind::Text { value, role, grow }
+                let wrap = self.boolean(body.get("wrap"), &format!("{path}.wrap"));
+                Kind::Text {
+                    value,
+                    role,
+                    grow,
+                    wrap,
+                }
             }
             "icon" => {
                 let name = text(self, "value")?;
+                let column_tone = body.get("tone").and_then(Value::as_str) == Some("column");
+                if column_tone && !scope.card {
+                    self.err(
+                        &format!("{path}.tone"),
+                        "tone=column means something only in a board's card",
+                    );
+                }
                 let tone = body
                     .get("tone")
+                    .filter(|_| !column_tone)
                     .and_then(|t| self.tone(t, &format!("{path}.tone")));
-                Kind::Icon { name, tone }
+                Kind::Icon {
+                    name,
+                    tone,
+                    column_tone,
+                }
             }
             "status" | "badge" => {
                 let value = text(self, "value")?;
@@ -848,6 +947,7 @@ impl Parser {
                         row: Some(&rows),
                         in_item: true,
                         nested: scope.in_item,
+                        card: false,
                     },
                 )?;
                 let empty = text(self, "empty");
@@ -868,9 +968,130 @@ impl Parser {
                     only,
                 }
             }
+            "board" => Kind::Board(Box::new(self.board(body, &path, scope)?)),
             _ => Kind::Divider,
         };
         Some(Node { kind, when })
+    }
+
+    /// A board: a collection, an enum field of it, a column per value it
+    /// shows and a card; never inside a list's item or another board.
+    fn board(&mut self, body: &Map<String, Value>, path: &str, scope: Scope<'_>) -> Option<Board> {
+        if scope.in_item || scope.card {
+            self.err(
+                path,
+                "a board draws a whole collection; it cannot sit in an item or a card",
+            );
+        }
+        let rows = match body.get("rows") {
+            Some(Value::String(c)) => self.collection(c, &format!("{path}.rows"))?,
+            _ => {
+                self.err(
+                    &format!("{path}.rows"),
+                    "a board names the collection its cards are",
+                );
+                return None;
+            }
+        };
+        let by = body.get("by").and_then(Value::as_str).unwrap_or_default();
+        let values = match self.field_type(Some(&rows), by) {
+            Some(FieldType::Enum(vs)) => vs.clone(),
+            _ => {
+                self.err(
+                    &format!("{path}.by"),
+                    format!("a board's columns follow an enum field of '{rows}', not '{by}'"),
+                );
+                return None;
+            }
+        };
+        let mut columns: Vec<BoardColumn> = Vec::new();
+        let given = body.get("columns").and_then(Value::as_array);
+        if given.is_none_or(Vec::is_empty) {
+            self.err(path, "a board has one column or more");
+        }
+        for (i, c) in given.into_iter().flatten().enumerate() {
+            let at = format!("{path}.columns[{i}]");
+            let Some(o) = c.as_object() else {
+                self.err(&at, "expected a column");
+                continue;
+            };
+            for k in o.keys() {
+                if !COLUMN_KEYS.contains(&k.as_str()) {
+                    let h = hint(k, COLUMN_KEYS, || {
+                        "a column takes value, label, icon and tone".into()
+                    });
+                    self.err(
+                        &format!("{at}.{k}"),
+                        format!("unknown attribute '{k}' on column{h}"),
+                    );
+                }
+            }
+            let value = o.get("value").and_then(Value::as_str).unwrap_or_default();
+            if !values.iter().any(|v| v == value) {
+                let names: Vec<&str> = values.iter().map(String::as_str).collect();
+                let h = hint(value, &names, || {
+                    format!("{by} is one of {}", listed(&names))
+                });
+                self.err(
+                    &format!("{at}.value"),
+                    format!("'{value}' is not a value of {by}{h}"),
+                );
+                continue;
+            }
+            if columns.iter().any(|c| c.value == value) {
+                self.err(
+                    &format!("{at}.value"),
+                    format!("a second column for '{value}'"),
+                );
+                continue;
+            }
+            let tone = o
+                .get("tone")
+                .and_then(|t| self.tone(t, &format!("{at}.tone")));
+            columns.push(BoardColumn {
+                value: value.to_owned(),
+                label: o
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .unwrap_or(value)
+                    .to_owned(),
+                icon: o.get("icon").and_then(Value::as_str).map(str::to_owned),
+                tone,
+            });
+        }
+        let inner = Scope {
+            row: Some(&rows),
+            in_item: true,
+            nested: false,
+            card: true,
+        };
+        let card = self.node(body.get("card")?, &format!("{path}.card"), inner)?;
+        let method = |p: &mut Self, key: &str| {
+            body.get(key)
+                .and_then(|v| p.method(v, &format!("{path}.{key}")))
+        };
+        let (moved, open, add) = (
+            method(self, "move"),
+            method(self, "open"),
+            method(self, "add"),
+        );
+        let empty = body
+            .get("empty")
+            .and_then(|v| self.text(v, &format!("{path}.empty"), scope));
+        let dim = body
+            .get("dim")
+            .and_then(|v| self.cond(v, &format!("{path}.dim"), inner));
+        Some(Board {
+            rows,
+            by: by.to_owned(),
+            columns,
+            card,
+            moved,
+            open,
+            add,
+            empty,
+            dim,
+        })
     }
 
     fn children(&mut self, v: Option<&Value>, path: &str, scope: Scope<'_>) -> Vec<Node> {
@@ -970,8 +1191,8 @@ impl Parser {
         let s = v.as_str().unwrap_or("");
         let t = Tone::named(s);
         if t.is_none() {
-            let h = hint(s, &["good", "bad", "warn", "busy", "muted"], || {
-                "a tone is good, bad, warn, busy or muted".into()
+            let h = hint(s, TONES, || {
+                "a tone is good, bad, warn, busy, muted, idle or active".into()
             });
             self.err(path, format!("unknown tone '{s}'{h}"));
         }
@@ -1174,6 +1395,26 @@ impl Parser {
     fn binding(&mut self, b: &str, path: &str, scope: Scope<'_>) -> Option<Piece> {
         let parts: Vec<&str> = b.split('.').collect();
         match parts.as_slice() {
+            ["column", _]
+                if !scope.card && !self.collections.iter().any(|(n, _)| n == "column") =>
+            {
+                self.err(
+                    path,
+                    format!("'{{{b}}}' means something only in a board's card"),
+                );
+                None
+            }
+            ["column", f] if scope.card => {
+                if ["value", "label", "icon"].contains(f) {
+                    Some(Piece::Column((*f).to_owned()))
+                } else {
+                    self.err(
+                        path,
+                        format!("'{{{b}}}': a column has value, label and icon"),
+                    );
+                    None
+                }
+            }
             ["row", f] => {
                 let Some(c) = scope.row else {
                     self.err(
@@ -1216,6 +1457,12 @@ impl Parser {
         }
     }
 }
+
+/// The tone names, for the error that lists them.
+const TONES: &[&str] = &["good", "bad", "warn", "busy", "muted", "idle", "active"];
+
+/// What a board's column takes.
+const COLUMN_KEYS: &[&str] = &["value", "label", "icon", "tone"];
 
 /// The candidate within a small edit distance of `word`, for "did you mean".
 pub fn suggest<'a>(word: &str, candidates: &[&'a str]) -> Option<&'a str> {

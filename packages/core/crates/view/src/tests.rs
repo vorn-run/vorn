@@ -86,7 +86,7 @@ fn names_an_unknown_attribute_and_lists_what_a_node_takes() {
         errors(&broken),
         [
             "views/checks.kdl:13:73: unknown attribute 'rol' on text; did you mean 'role'?",
-            "views/checks.kdl:17:31: unknown attribute 'size' on text; text takes value, role, grow, when",
+            "views/checks.kdl:17:31: unknown attribute 'size' on text; text takes value, role, grow, wrap, when",
         ]
     );
 }
@@ -387,5 +387,124 @@ list "items" {
     assert!(
         errs[0].contains("a more menu holds one button or more"),
         "{errs:?}"
+    );
+}
+
+const BOARD: &str = r#"schema "vorn:view@1"
+rows "cards" {
+    title string
+    state enum todo doing done
+    late bool
+}
+board "cards" by="state" move="move" open="open" add="add" empty="Drop cards here" dim="{row.late}" {
+    column todo label="To do" icon="circle" tone=idle
+    column doing label="Doing" icon="clock" tone=active
+    column done label="Done" icon="circle-check" tone=good
+    card {
+        row {
+            icon "{column.icon}" tone=column
+            text "{row.title}" role=title grow=#true wrap=#true
+        }
+        text "In {column.label}" role=secondary when="!{row.late}"
+    }
+}
+"#;
+
+#[test]
+fn reads_a_board_its_columns_and_its_card() {
+    let t = file::parse("views/board.kdl", BOARD, Options::default()).unwrap();
+    let Kind::Board(b) = &t.view.kind else {
+        panic!("a board")
+    };
+    assert_eq!((b.rows.as_str(), b.by.as_str()), ("cards", "state"));
+    let values: Vec<&str> = b.columns.iter().map(|c| c.value.as_str()).collect();
+    assert_eq!(values, ["todo", "doing", "done"]);
+    assert_eq!(b.columns[1].tone, Some(Tone::Active));
+    assert_eq!(b.moved.as_deref(), Some("move"));
+    assert_eq!(b.open.as_deref(), Some("open"));
+    assert_eq!(b.add.as_deref(), Some("add"));
+    let Kind::Column(kids) = &b.card.kind else {
+        panic!("a card is a column")
+    };
+    let Kind::Row(line) = &kids[0].kind else {
+        panic!("a row")
+    };
+    assert!(matches!(
+        line[0].kind,
+        Kind::Icon {
+            column_tone: true,
+            ..
+        }
+    ));
+    assert!(matches!(line[1].kind, Kind::Text { wrap: true, .. }));
+    let Kind::Text { value, .. } = &kids[1].kind else {
+        panic!("a text")
+    };
+    let src = BTreeMap::<String, Vec<Row>>::new();
+    let row = Row::from_value(&json!({ "id": "a", "title": "T", "state": "doing" })).unwrap();
+    assert_eq!(
+        value.fill_in(Some(&row), &src, Some(&b.columns[1])),
+        "In Doing"
+    );
+    let late = Row::from_value(&json!({ "id": "b", "late": true })).unwrap();
+    assert!(b.dim.as_ref().unwrap().holds(Some(&late), &src));
+    let json = file::to_json("views/board.kdl", BOARD, Options::default()).unwrap();
+    assert_eq!(json["view"]["board"]["columns"][2]["icon"], "circle-check");
+    assert_eq!(parse_value(&json, Options::default()).unwrap(), t);
+}
+
+#[test]
+fn a_board_follows_an_enum_and_names_its_values() {
+    let err = |from: &str, to: &str| {
+        file::parse(
+            "views/board.kdl",
+            &BOARD.replace(from, to),
+            Options::default(),
+        )
+        .unwrap_err()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        err("by=\"state\"", "by=\"title\""),
+        ["views/board.kdl:7:15: a board's columns follow an enum field of 'cards', not 'title'"]
+    );
+    assert_eq!(
+        err("column done", "column dnoe"),
+        ["views/board.kdl:10:5: 'dnoe' is not a value of state; did you mean 'done'?"]
+    );
+    assert_eq!(
+        err("column doing label", "column todo label"),
+        ["views/board.kdl:9:5: a second column for 'todo'"]
+    );
+    assert_eq!(
+        err("tone=active", "tone=busyy"),
+        ["views/board.kdl:9:45: unknown tone 'busyy'; did you mean 'busy'?"]
+    );
+    assert_eq!(
+        err("{column.label}", "{column.title}"),
+        ["views/board.kdl:16:14: '{column.title}': a column has value, label and icon"]
+    );
+    assert_eq!(
+        err("    card {", "    cart {"),
+        [
+            "views/board.kdl:7:1: board needs 'card'",
+            "views/board.kdl:11:5: a board holds columns and one card, not 'cart'"
+        ]
+    );
+}
+
+#[test]
+fn a_column_binding_and_a_column_tone_need_a_card() {
+    let tone = CHECKS.replace("text \"{row.name}\" grow=#true", "icon x tone=column");
+    assert_eq!(
+        errors(&tone),
+        ["views/checks.kdl:17:20: tone=column means something only in a board's card"]
+    );
+    let bound = CHECKS.replace("{row.name}", "{column.label}");
+    assert_eq!(
+        errors(&bound),
+        ["views/checks.kdl:17:18: '{column.label}' means something only in a board's card"]
     );
 }
