@@ -25,6 +25,8 @@ pub enum Ev {
         list: String,
         rows: Vec<String>,
         on: bool,
+        /// The list's Select all, apart from a one-row list's own box.
+        all: bool,
     },
     /// Opens an entry's more menu, or closes it.
     Menu { node: String },
@@ -458,10 +460,12 @@ impl Cx<'_> {
                     .truncate()
                     .silent(),
             );
-        if end {
-            e.items_end().shrink0()
-        } else {
-            e.grow()
+        match (end, self.ui.is_cells()) {
+            // A terminal's narrow page cuts the long label, not the page's total.
+            (true, true) => e.items_end(),
+            (true, false) => e.items_end().shrink0(),
+            (false, true) => e.shrink0(),
+            (false, false) => e.grow(),
         }
     }
 
@@ -660,6 +664,7 @@ impl Cx<'_> {
                 list: l.id.to_owned(),
                 rows: can.to_vec(),
                 on: !all,
+                all: true,
             },
             all,
             "Select all",
@@ -926,6 +931,7 @@ impl Cx<'_> {
                         list: l.id.to_owned(),
                         rows: vec![node.to_owned()],
                         on: !on,
+                        all: false,
                     },
                     on,
                     &format!("Select {}", e.title),

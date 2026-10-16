@@ -84,10 +84,10 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
     let id = s(r, "id");
     let name = s(r, "name");
     let status = match s(r, "state") {
-        "ok" => Tone::Good,
-        "failing" => Tone::Bad,
-        "signin" => Tone::Warn,
-        _ => Tone::Neutral,
+        "ok" => Some(Tone::Good),
+        "failing" => Some(Tone::Bad),
+        "signin" => Some(Tone::Warn),
+        _ => None,
     };
     let mut actions = Vec::new();
     if on(r, "needs_signin") {
@@ -115,13 +115,16 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
         .iter()
         .filter(|f| s(f, "parent") == id)
         .map(|f| s(f, "text").to_owned());
-    entry(id, name)
+    let mut e = entry(id, name)
         .icon(s(r, "icon"))
         .detail(s(r, "line"))
-        .tone(status)
         .chips(chips)
         .actions(actions)
-        .more(more)
+        .more(more);
+    if let Some(t) = status {
+        e = e.tone(t);
+    }
+    e
 }
 
 /// The form a new connection is set up in, from its connector to where its tasks go.

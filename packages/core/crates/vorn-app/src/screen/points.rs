@@ -162,8 +162,17 @@ impl TreeBind for TreeBinder<'_> {
                     .text(id, self.act(PointAct::TreeField { key, node }), value);
                 id
             }
-            Ev::Check { list, rows, on } => {
-                let id = self.base().child("check").child(&list).child(&rows);
+            Ev::Check {
+                list,
+                rows,
+                on,
+                all,
+            } => {
+                let id = self.base().child("check").child(&list);
+                let id = match rows.first() {
+                    Some(row) if !all => id.child(row),
+                    _ => id.child("all"),
+                };
                 let act = self.act(PointAct::TreeCheck {
                     key,
                     list,
