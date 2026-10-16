@@ -1,6 +1,8 @@
 // Turns the bench's results.json into the markdown tables the report quotes:
 // each number is the median of the runs. `node summary.mjs results.json`
 import { readFileSync } from 'node:fs'
+import console from 'node:console'
+import process from 'node:process'
 
 const r = JSON.parse(readFileSync(process.argv[2] ?? 'results/results.json', 'utf8'))
 const tiers = ['builtin', 'program', 'wasm']
