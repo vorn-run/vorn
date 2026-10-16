@@ -3,6 +3,7 @@
 //! sessions or changes are at stake), and Settings lists every worktree with
 //! what removing it frees.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,6 +21,12 @@ const NAME: &str = "Worktree cleanup";
 const IDLE: &str = "idle";
 const ASKED: &str = "asked";
 const ALL: &str = "worktrees";
+/// The settings page's scan: whether the first is under way, and why the last failed.
+const SCAN: &str = "scan";
+/// How often a first scan is tried before the page says it failed: vornd
+/// may not have read its sessions yet when the page first asks.
+const FIRST_TRIES: u32 = 3;
+const RETRY: Duration = Duration::from_secs(1);
 /// How long a closed session's processes get to let go of the worktree.
 const SETTLE: Duration = Duration::from_millis(500);
 
@@ -27,6 +34,8 @@ const SETTLE: Duration = Duration::from_millis(500);
 pub struct Cleanup {
     /// The worktree the confirm dialog asks about.
     asked: Mutex<Option<(String, String)>>,
+    /// Whether a scan has listed the worktrees once.
+    scanned: AtomicBool,
 }
 
 /// A worktree as `worktrees.list` gives it.
@@ -66,7 +75,24 @@ impl Found {
         !self.flag("main") && !self.flag("orphan")
     }
 
-    fn settings_row(&self) -> Value {
+    fn size(&self) -> u64 {
+        self.0["sizeBytes"].as_u64().unwrap_or(0)
+    }
+
+    /// Its branch and why it is kept or can go: `fix-login · merged · idle 11 days`.
+    fn detail(&self) -> String {
+        let reasons = self.0["reasons"].as_str().unwrap_or_default();
+        let branch = self.branch();
+        // The title already reads as the branch when the folder is named for it.
+        Some(branch.as_str())
+            .filter(|b| *b != self.name())
+            .into_iter()
+            .chain(reasons.split("; ").filter(|r| !r.is_empty()))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    fn settings_row(&self, project_size: u64) -> Value {
         let artifacts = self.0["artifactBytes"].as_u64().unwrap_or(0);
         let dirty = self.flag("dirty");
         json!({
@@ -74,8 +100,10 @@ impl Found {
             "name": self.name(),
             "project": self.0["projectName"],
             "project_path": self.project(),
+            "project_size": bytes(project_size),
             "branch": self.branch(),
-            "size": bytes(self.0["sizeBytes"].as_u64().unwrap_or(0)),
+            "size": bytes(self.size()),
+            "detail": self.detail(),
             "verdict": self.0["verdict"],
             "reasons": self.0["reasons"],
             "dirty": dirty,
@@ -97,7 +125,7 @@ fn bytes(n: u64) -> String {
         size /= 1024.0;
         unit += 1;
     }
-    if unit < 2 {
+    if unit < 2 || size >= 10.0 {
         format!("{size:.0} {}", UNITS[unit])
     } else {
         format!("{size:.1} {}", UNITS[unit])
@@ -164,15 +192,79 @@ async fn remove(api: &Api, path: &str, project: &str) -> Result<Value, ExtError>
     Ok(json!({ "removed": path, "toast": "Worktree removed" }))
 }
 
+/// The settings page's rows: every worktree but the projects' own
+/// checkouts, by project in the order listed, the largest first in each.
+fn settings_rows(found: &[Found]) -> Vec<Value> {
+    let mut shown: Vec<&Found> = found.iter().filter(|f| !f.flag("main")).collect();
+    let mut order: Vec<&str> = Vec::new();
+    for f in &shown {
+        if !order.contains(&f.project()) {
+            order.push(f.project());
+        }
+    }
+    let at = |p: &str| order.iter().position(|o| *o == p);
+    shown.sort_by(|a, b| {
+        at(a.project())
+            .cmp(&at(b.project()))
+            .then(b.size().cmp(&a.size()))
+    });
+    let total = |p: &str| -> u64 {
+        shown
+            .iter()
+            .filter(|f| f.project() == p)
+            .map(|f| f.size())
+            .sum()
+    };
+    shown
+        .iter()
+        .map(|f| f.settings_row(total(f.project())))
+        .collect()
+}
+
+fn scan_state(api: &Api, busy: bool, error: Option<String>) {
+    let row = json!({ "id": SCAN, "busy": busy, "error": error.unwrap_or_default() });
+    api.publish(SCAN, vec![RowOp::Clear, RowOp::Upsert(row)]);
+}
+
 async fn scan(api: &Api, refresh: bool) -> Result<Value, ExtError> {
     let found = list(api, None, refresh).await?;
     let mut ops = vec![RowOp::Clear];
-    ops.extend(found.iter().map(|f| RowOp::Upsert(f.settings_row())));
+    ops.extend(settings_rows(&found).into_iter().map(RowOp::Upsert));
     api.publish(ALL, ops);
     Ok(json!({ "worktrees": found.len() }))
 }
 
 impl Cleanup {
+    /// Scans for the settings page, trying a first scan again before it
+    /// says why it failed; until one lists, the page says it is measuring.
+    async fn scan(&self, api: &Api, refresh: bool) -> Result<Value, ExtError> {
+        let first = !self.scanned.load(Ordering::Relaxed);
+        if first {
+            scan_state(api, true, None);
+        }
+        let tries = if first { FIRST_TRIES } else { 1 };
+        let mut tried = 0;
+        loop {
+            tried += 1;
+            match scan(api, refresh).await {
+                Ok(v) => {
+                    self.scanned.store(true, Ordering::Relaxed);
+                    scan_state(api, false, None);
+                    return Ok(v);
+                }
+                Err(_) if tried < tries => tokio::time::sleep(RETRY).await,
+                Err(e) => {
+                    let why = format!(
+                        "Could not measure the worktrees: {}. Refresh to try again.",
+                        e.message.trim_end_matches('.')
+                    );
+                    scan_state(api, false, Some(why));
+                    return Err(e);
+                }
+            }
+        }
+    }
+
     async fn idle(&self, api: &Api, data: &Value) {
         let (Some(path), Some(project)) =
             (data["worktreePath"].as_str(), data["projectPath"].as_str())
@@ -246,8 +338,8 @@ impl Cleanup {
                 let (path, project) = row()?;
                 remove(api, &path, &project).await
             }
-            "scan" => scan(api, false).await,
-            "refresh" => scan(api, true).await,
+            "scan" => self.scan(api, false).await,
+            "refresh" => self.scan(api, true).await,
             "reclaim" | "prune" => {
                 let (path, _) = row()?;
                 api.call(&format!("worktrees.{action}"), json!({ "worktree": path }))
@@ -311,7 +403,8 @@ mod tests {
     fn sizes_read_in_the_largest_whole_unit() {
         assert_eq!(bytes(512), "512 B");
         assert_eq!(bytes(12 * 1024), "12 KB");
-        assert_eq!(bytes(340 * 1024 * 1024), "340.0 MB");
+        assert_eq!(bytes(340 * 1024 * 1024), "340 MB");
+        assert_eq!(bytes(9 * 1024 * 1024), "9.0 MB");
         assert_eq!(bytes(1288 * 1024 * 1024), "1.3 GB");
     }
 }

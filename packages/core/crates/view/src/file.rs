@@ -195,7 +195,7 @@ impl Reader<'_> {
         let mut o = Map::new();
         let first = match kind {
             "button" => "label",
-            "section" => "title",
+            "section" | "entry" => "title",
             "list" | "choice" | "board" => "rows",
             _ => "value",
         };

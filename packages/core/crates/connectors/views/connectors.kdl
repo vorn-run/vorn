@@ -4,6 +4,7 @@ schema "vorn:view@1"
 
 rows "connections" {
     name string
+    icon string
     line string
     state enum ok failing idle signin
     needs_signin bool
@@ -42,51 +43,53 @@ rows "settings" {
 }
 
 column {
-    row {
-        text "Services your workflows watch and act on. From the Connectors extension." role=secondary grow=#true
-        button "Add connection" call="add" style=primary icon="plus" when="!{form.count}"
+    toolbar when="!{form.count}" {
+        button "Add connection" call="add" style=primary icon="plus"
     }
-    column when="{form.count}" {
-        text "Add a connection" role=title
-        text "No connector is installed yet." role=secondary when="{form.none_installed}"
-        choice "connectors" label="{row.name}" selected="{row.selected}" call="pick"
-        text "Connectors for other services are in Settings › Extensions › Browse." role=secondary
+    section "New connection" when="{form.count}" {
+        notice "No connector is installed yet. Connectors for other services are in Extensions › Browse." when="{form.none_installed}"
+        column when="!{form.none_installed}" {
+            text "Service" role=secondary
+            choice "connectors" label="{row.name}" selected="{row.selected}" call="pick"
+        }
         column when="{form.picked}" {
             text "Trigger" role=secondary
             choice "triggers" label="{row.name}" selected="{row.selected}" call="trigger"
-            list "settings" {
-                column {
-                    row {
-                        text "{row.label}" grow=#true
-                        badge "kept" when="{row.kept}" kept=good
-                    }
-                    field value="{row.value}" placeholder="{row.hint}" call="set" when="!{row.secret}"
-                    field placeholder="{row.hint}" call="set" secret=#true when="{row.secret}"
+        }
+        list "settings" when="{form.picked}" {
+            column {
+                row {
+                    text "{row.label}" role=secondary grow=#true
+                    text "Saved" role=secondary when="{row.kept}"
                 }
+                field value="{row.value}" placeholder="{row.hint}" call="set" when="!{row.secret}"
+                field placeholder="{row.hint}" call="set" secret=#true when="{row.secret}"
             }
+        }
+        column when="{form.picked}" {
             text "Tasks go to" role=secondary
             choice "projects" label="{row.name}" selected="{row.selected}" call="project"
         }
-        text "{form.error}" role=secondary when="{form.error}"
+        notice "{form.error}" tone=bad when="{form.error}"
         row {
             button Save call="save" style=primary when="{form.can_save}"
             button Cancel call="cancel"
         }
     }
-    list "connections" empty="No connections yet. Add one with Add connection." {
-        row {
+    list "connections" empty="No connections yet. Add one to have a workflow watch a service." {
+        entry "{row.name}" detail="{row.line}" {
             status "{row.state}" ok=good failing=bad idle=muted signin=warn
-            column {
-                text "{row.name}" grow=#true
-                text "{row.line}" role=secondary
-            }
+            icon "{row.icon}"
             button "Sign in" signin="{row.id}" style=primary when="{row.needs_signin}"
             button Test call="test"
             button "Import now" call="backfill"
             more {
+                button Test call="test" icon="zap"
+                button "Import now" call="backfill" icon="import"
                 button "Roll back to v{row.previous}" call="rollback" icon="rotate-ccw" when="{row.can_roll_back}"
                 button Remove call="remove" style=danger icon="trash-2" confirm="Remove {row.name}? Its tasks stay on the board."
             }
         }
     }
+    text "Connectors for other services are in Extensions › Browse." role=secondary when="!{form.count}"
 }

@@ -480,11 +480,33 @@ impl Shot {
 
     /// The button `label` a template of point `key` draws for `row`.
     pub fn row_button(&mut self, app: &mut App, key: &str, row: &str, label: &str) -> Option<Id> {
+        self.row_control(app, key, row, "Button", label, |id| id)
+    }
+
+    /// The more button a template of point `key` draws for `row`.
+    pub fn row_more(&mut self, app: &mut App, key: &str, row: &str) -> Option<Id> {
+        self.row_control(app, key, row, "Button", "More", |id| id.child("more"))
+    }
+
+    /// The entry `label` of `row`'s open more menu on point `key`.
+    pub fn row_item(&mut self, app: &mut App, key: &str, row: &str, label: &str) -> Option<Id> {
+        self.row_control(app, key, row, "MenuItem", label, |id| id)
+    }
+
+    fn row_control(
+        &mut self,
+        app: &mut App,
+        key: &str,
+        row: &str,
+        role: &str,
+        label: &str,
+        at: impl Fn(Id) -> Id,
+    ) -> Option<Id> {
         let tree = app.frame(&mut self.ui, self.size);
         let named: Vec<u64> = tree
             .nodes
             .iter()
-            .filter(|(_, n)| format!("{:?}", n.role()) == "Button" && n.label() == Some(label))
+            .filter(|(_, n)| format!("{:?}", n.role()) == role && n.label() == Some(label))
             .map(|(id, _)| id.0)
             .collect();
         let slots = match &app.st.points.get(key)?.template {
@@ -493,7 +515,14 @@ impl Shot {
         };
         slots
             .into_iter()
-            .map(|slot| vorn_app::screen::points::control_id(key, None, slot, Some(row)))
+            .map(|slot| {
+                at(vorn_app::screen::points::control_id(
+                    key,
+                    None,
+                    slot,
+                    Some(row),
+                ))
+            })
             .find(|id| named.contains(&id.0))
     }
 

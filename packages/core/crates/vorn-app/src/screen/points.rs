@@ -97,6 +97,22 @@ impl Bind for Binder<'_> {
     fn menu_open(&self, id: Id) -> bool {
         self.more == Some(id.0)
     }
+
+    fn hover(&self, slot: u64, row: Option<&str>) -> Id {
+        self.base(slot, row).child("entry")
+    }
+
+    /// `connector:<id>`: a connector's mark, a plug for one without.
+    fn icon(&self, name: &str, size: f32) -> Option<El> {
+        let id = name.strip_prefix("connector:")?;
+        let name = match id {
+            "http" => "globe",
+            "mcp" | "sdk" => "mcp",
+            other if crate::look::icon(other, 2.0).is_some() => other,
+            _ => "plug",
+        };
+        Some(super::ico(name, size, 2.0, k::GRAY_400))
+    }
 }
 
 /// Point `p`'s template, with `row` in scope for a per-session place; its
@@ -124,6 +140,17 @@ pub fn draw(
         }
         Ok(None) => None,
         Err(errors) => Some(template::invalid(&p.place(), errors)),
+    }
+}
+
+/// Point `p`'s template as a page: its toolbar apart, for the page's header, and its body.
+fn draw_page(s: &Screen<'_>, p: &Point) -> (Option<El>, Option<El>) {
+    match &p.template {
+        Ok(Some(t)) => {
+            let bind = Binder::whole(s.acts, &s.st.points, p);
+            template::page(s.ui, t, None, s.st.points.rows_of(&p.extension), &bind)
+        }
+        _ => (None, drawn(s, p, None, None)),
     }
 }
 
@@ -297,10 +324,11 @@ pub(super) fn settings_page(s: &Screen<'_>, key: &str) -> El {
         return text("This page is gone", 13.0, k::GRAY_500).line_height(20.0);
     };
     let desc = p.description.clone().unwrap_or_default();
+    let (bar, body) = draw_page(s, p);
     div()
         .col()
-        .child(super::settings::header(&p.title, &desc, None))
-        .child_if(drawn(s, p, None, None))
+        .child(super::settings::header(&p.title, &desc, bar))
+        .child_if(body)
 }
 
 /// An extension pane's body.

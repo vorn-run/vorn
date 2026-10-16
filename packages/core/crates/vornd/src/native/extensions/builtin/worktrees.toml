@@ -27,6 +27,7 @@ view = "views/confirm.kdl"
 [[contributes.settings]]
 id = "worktrees"
 title = "Worktrees"
+description = "What every worktree costs on disk, and what can safely go."
 icon = "git-branch"
 view = "views/settings.kdl"
 call = "scan"

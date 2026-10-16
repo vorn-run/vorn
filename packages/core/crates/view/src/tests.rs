@@ -150,7 +150,7 @@ fn a_leaf_holds_no_children_and_a_list_one_item() {
     );
     assert_eq!(
         errors(&leaf),
-        ["views/checks.kdl:17:44: 'text' holds no children; only column, row, section, more and list do"]
+        ["views/checks.kdl:17:44: 'text' holds no children; only column, row, section, more, entry, toolbar and list do"]
     );
     let two = CHECKS.replace("        row {", "        divider\n        row {");
     assert_eq!(
@@ -507,4 +507,109 @@ fn a_column_binding_and_a_column_tone_need_a_card() {
         errors(&bound),
         ["views/checks.kdl:17:18: '{column.label}' means something only in a board's card"]
     );
+}
+
+const ENTRIES: &str = r#"schema "vorn:view@1"
+rows "trees" {
+    name string
+    detail string
+    project string
+    total string
+    size string
+}
+rows "scan" {
+    busy bool
+    error string
+}
+column {
+    toolbar {
+        button Refresh call="refresh" icon="refresh-cw"
+    }
+    notice "{scan.error}" tone=bad when="{scan.error}"
+    list "trees" by="project" aside="{row.total}" busy="{scan.busy}" loading="Measuring…" empty="None yet" {
+        entry "{row.name}" detail="{row.detail}" {
+            icon "folder-git-2"
+            text "{row.size}" role=number
+            button "Free space" call="reclaim"
+            more {
+                button Remove call="remove" style=danger confirm="Remove {row.name}?"
+            }
+        }
+    }
+}
+"#;
+
+#[test]
+fn reads_entries_in_groups_under_a_toolbar() {
+    let t = file::parse("views/t.kdl", ENTRIES, Options::default()).unwrap();
+    let Kind::Column(kids) = &t.view.kind else {
+        panic!("a column");
+    };
+    assert!(matches!(&kids[0].kind, Kind::Toolbar(b) if b.len() == 1));
+    assert!(matches!(
+        &kids[1].kind,
+        Kind::Notice {
+            tone: Some(Tone::Bad),
+            ..
+        }
+    ));
+    let Kind::List {
+        item,
+        group: Some(group),
+        loading: Some(loading),
+        ..
+    } = &kids[2].kind
+    else {
+        panic!("a grouped list that loads");
+    };
+    assert_eq!(group.by, "project");
+    let src = BTreeMap::from([(
+        "trees".to_owned(),
+        vec![Row::from_value(
+            &json!({ "id": "a", "name": "fix", "project": "acme", "total": "9 MB" }),
+        )
+        .unwrap()],
+    )]);
+    let row = &src["trees"][0];
+    assert_eq!(group.heading.fill(Some(row), &src), "acme");
+    assert_eq!(group.aside.as_ref().unwrap().fill(Some(row), &src), "9 MB");
+    assert_eq!(loading.1.fill(None, &src), "Measuring…");
+    let Kind::Entry {
+        title, children, ..
+    } = &item.kind
+    else {
+        panic!("an entry");
+    };
+    assert_eq!(title.fill(Some(row), &src), "fix");
+    assert!(matches!(
+        &children[1].kind,
+        Kind::Text {
+            role: Role::Number,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_entry_keeps_danger_in_its_more_menu() {
+    let errs = errors(&ENTRIES.replace(
+        "button \"Free space\" call=\"reclaim\"",
+        "button Remove call=\"remove\" style=danger",
+    ));
+    assert!(
+        errs[0].contains("goes in the entry's more menu"),
+        "{errs:?}"
+    );
+    let errs = errors(&ENTRIES.replace("icon \"folder-git-2\"", "row { text \"x\" }"));
+    assert!(errs[0].contains("an entry holds"), "{errs:?}");
+}
+
+#[test]
+fn a_group_and_a_loading_state_need_their_partners() {
+    let errs = errors(&ENTRIES.replace(" by=\"project\"", ""));
+    assert!(errs[0].contains("aside names a group"), "{errs:?}");
+    let errs = errors(&ENTRIES.replace("by=\"project\"", "by=\"owner\""));
+    assert!(errs[0].contains("'trees' has no field 'owner'"), "{errs:?}");
+    let errs = errors(&ENTRIES.replace(" loading=\"Measuring…\"", ""));
+    assert!(errs[0].contains("busy and loading go together"), "{errs:?}");
 }

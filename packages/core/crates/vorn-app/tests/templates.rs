@@ -669,7 +669,11 @@ fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
         });
         let took = t.elapsed();
         let [w, _] = cells(app, "t-live", None);
-        assert!(w.contains(text), "{what} shows {text:?}:\n{w}");
+        // A section's heading reads in capitals.
+        assert!(
+            w.contains(text) || w.contains(&text.to_uppercase()),
+            "{what} shows {text:?}:\n{w}"
+        );
         took
     };
     fs::write(&view, was.replace("Counting", "What counts")).expect("edit");

@@ -210,8 +210,21 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
             .map(|r| r.id.clone())
     });
     shot.save(&mut app, "set-worktrees");
+    // The main checkout is not one to clean up, so the page leaves it out.
+    let rows = app.st.points.rows_of("vorn.worktrees");
+    assert!(
+        rows["worktrees"]
+            .iter()
+            .all(|r| r.fields.get("name").and_then(|n| n.as_str()) != Some("acme")),
+        "no main checkout"
+    );
+    // Remove is destructive, so it waits in the row's more menu.
+    let more = shot
+        .row_more(&mut app, page, &wt)
+        .expect("the worktree's more menu");
+    shot.click(&mut app, more);
     let remove = shot
-        .row_button(&mut app, page, &wt, "Remove")
+        .row_item(&mut app, page, &wt, "Remove")
         .expect("the worktree's Remove");
     shot.click(&mut app, remove);
     shot.save(&mut app, "set-worktrees-confirm");

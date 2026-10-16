@@ -5,12 +5,12 @@
 use std::collections::BTreeMap;
 
 use vorn_view::{
-    Action as Do, BoardColumn, Cond, Kind, Node, Role as TextRole, Row, Source, Style, Template,
-    Tone,
+    Action as Do, BoardColumn, Cond, Group, Kind, Node, Role as TextRole, Row, Source, Style,
+    Template, Tone,
 };
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
-use vornui::{div, text, Action, El, Id, Place, Rgba, Ui};
+use vornui::{div, text, Action, El, Id, Place, Rgba, Sense, Ui};
 
 use vornui::accesskit::Role;
 
@@ -68,7 +68,14 @@ pub trait Bind {
         let _ = (name, size);
         None
     }
+    /// The id an entry's row hovers by, so its actions show.
+    fn hover(&self, slot: u64, row: Option<&str>) -> Id {
+        Id::new("template-entry").child(slot).child(row)
+    }
 }
+
+/// How wide a `number` text's column is, so figures line up down a list.
+pub const NUMBER_WIDTH: f32 = 80.0;
 
 /// The colour a tone draws in.
 pub fn tone(t: Tone) -> Rgba {
@@ -94,6 +101,47 @@ pub fn view(ui: &Ui, t: &Template, row: Option<&Row>, src: &dyn Source, bind: &d
         reveal: None,
     };
     cx.node(&t.view, row, 1).unwrap_or_else(div)
+}
+
+/// Template `t` as a page: its toolbar, when the view is one or its root
+/// column holds one, apart for the page's header, and the rest.
+pub fn page(
+    ui: &Ui,
+    t: &Template,
+    row: Option<&Row>,
+    src: &dyn Source,
+    bind: &dyn Bind,
+) -> (Option<El>, Option<El>) {
+    let cx = Cx {
+        ui,
+        src,
+        bind,
+        column: None,
+        soft: false,
+        reveal: None,
+    };
+    let root = &t.view;
+    match &root.kind {
+        Kind::Toolbar(_) => (cx.node(root, row, 1), None),
+        Kind::Column(kids) if cx.holds(root.when.as_ref(), row) => {
+            let at = kids.iter().position(|k| matches!(k.kind, Kind::Toolbar(_)));
+            let Some(at) = at else {
+                return (None, cx.node(root, row, 1));
+            };
+            let bar = cx.node(&kids[at], row, child_slot(1, at));
+            let body = kids
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != at)
+                .filter_map(|(i, k)| cx.node(k, row, child_slot(1, i)));
+            (bar, Some(column().children(body)))
+        }
+        _ => (None, cx.node(root, row, 1)),
+    }
+}
+
+fn column() -> El {
+    div().col().gap(6.0).min_w0()
 }
 
 /// The box drawn in place of a template with errors: which place, and each error with its line.
@@ -151,6 +199,8 @@ pub fn slots(t: &Template) -> Vec<u64> {
             Kind::Column(kids)
             | Kind::Row(kids)
             | Kind::More(kids)
+            | Kind::Toolbar(kids)
+            | Kind::Entry { children: kids, .. }
             | Kind::Section { children: kids, .. } => {
                 for (i, k) in kids.iter().enumerate() {
                     walk(k, child_slot(slot, i), out);
@@ -202,11 +252,20 @@ impl Cx<'_> {
         }
         let fill = |t: &vorn_view::Text| t.fill_in(row, self.src, self.column);
         Some(match &n.kind {
-            Kind::Column(kids) => div()
-                .col()
-                .gap(6.0)
-                .min_w0()
+            Kind::Column(kids) => column().children(self.kids(kids, row, slot)),
+            Kind::Toolbar(kids) => div()
+                .row()
+                .items_center()
+                .justify_end()
+                .gap(8.0)
+                .shrink0()
                 .children(self.kids(kids, row, slot)),
+            Kind::Entry {
+                title,
+                detail,
+                children,
+            } => self.entry_row(slot, &fill(title), detail.as_ref().map(fill), children, row),
+            Kind::Notice { value, tone: t } => self.notice(&fill(value), *t),
             Kind::Row(kids) => div()
                 .row()
                 .items_center()
@@ -214,18 +273,22 @@ impl Cx<'_> {
                 .min_w0()
                 .children(self.kids(kids, row, slot)),
             Kind::More(items) => return self.more(slot, items, row),
-            Kind::Section { title, children } => div()
-                .col()
-                .gap(8.0)
-                .min_w0()
-                .child(
-                    text(fill(title), size::SM.0, color::GRAY_200)
-                        .line_height(size::SM.1)
-                        .weight(size::SEMIBOLD)
-                        .truncate()
-                        .silent(),
-                )
-                .children(self.kids(children, row, slot)),
+            Kind::Section { title, children } => {
+                let title = fill(title);
+                div()
+                    .col()
+                    .gap(12.0)
+                    .min_w0()
+                    .child(
+                        text(title.to_uppercase(), size::XS.0, color::GRAY_500)
+                            .line_height(size::XS.1)
+                            .weight(size::MEDIUM)
+                            .tracking(0.05)
+                            .truncate()
+                            .role(Role::Heading, title.as_str()),
+                    )
+                    .children(self.kids(children, row, slot))
+            }
             Kind::Text {
                 value,
                 role,
@@ -237,7 +300,9 @@ impl Cx<'_> {
                 } else {
                     words(&fill(value), *role)
                 };
-                if *grow {
+                if *role == TextRole::Number {
+                    div().row().justify_end().w(NUMBER_WIDTH).shrink0().child(t)
+                } else if *grow {
                     div().grow().min_w0().child(t)
                 } else {
                     t.shrink0()
@@ -336,26 +401,34 @@ impl Cx<'_> {
                 item,
                 empty,
                 only,
+                group,
+                loading,
             } => {
+                let boxed = matches!(item.kind, Kind::Entry { .. });
+                if let Some(l) = loading.as_deref() {
+                    if l.0.holds_in(row, self.src, self.column) {
+                        return Some(state(&fill(&l.1), boxed));
+                    }
+                }
                 let only = only.as_ref().map(|(f, is)| (f.as_str(), fill(is)));
                 let all: Vec<&Row> = self
                     .src
                     .rows(rows)
                     .iter()
                     .filter(|r| only.as_ref().is_none_or(|(f, is)| r.text(f) == *is))
+                    .take(vorn_view::MAX_LIST)
                     .collect();
                 if all.is_empty() {
                     let e = empty.as_ref().map(fill).unwrap_or_default();
                     if e.is_empty() {
                         return None;
                     }
-                    return Some(words(&e, TextRole::Secondary));
+                    return Some(state(&e, boxed));
                 }
-                div().col().gap(4.0).min_w0().children(
-                    all.into_iter()
-                        .take(vorn_view::MAX_LIST)
-                        .filter_map(|r| self.node(item, Some(r), child_slot(slot, 0))),
-                )
+                match group.as_deref() {
+                    None => self.items(all, item, slot, boxed),
+                    Some(g) => self.groups(all, g, item, slot, boxed),
+                }
             }
             Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
             Kind::Board(b) => crate::board::view(self, b, slot),
@@ -545,6 +618,18 @@ impl Cx<'_> {
     }
 
     fn button(&self, slot: u64, label: &str, press: Press, style: Style, icon: Option<&str>) -> El {
+        self.button_parts(slot, label, press, style, icon).1
+    }
+
+    /// A button and its id, as an entry needs to know when it is hovered or focused.
+    fn button_parts(
+        &self,
+        slot: u64,
+        label: &str,
+        press: Press,
+        style: Style,
+        icon: Option<&str>,
+    ) -> (Id, El) {
         let ask = press.confirm.clone();
         let id = self.bind.press(slot, press);
         let hot = self.ui.hover(id);
@@ -582,7 +667,7 @@ impl Cx<'_> {
                     .silent(),
             );
         }
-        match (ask, self.bind.confirming(id)) {
+        let b = match (ask, self.bind.confirming(id)) {
             (Some(message), Some((ok, cancel))) => {
                 let t = if style == Style::Danger {
                     ConfirmTone::Danger
@@ -592,8 +677,255 @@ impl Cx<'_> {
                 widgets::confirm(self.ui, b, &message, (ok, label), cancel, t)
             }
             _ => b,
-        }
+        };
+        (id, b)
     }
+
+    /// A list's items; entries share one box, a hairline between each.
+    fn items(&self, rows: Vec<&Row>, item: &Node, slot: u64, boxed: bool) -> El {
+        let els = rows
+            .into_iter()
+            .filter_map(|r| self.node(item, Some(r), child_slot(slot, 0)));
+        if !boxed {
+            return div().col().gap(4.0).min_w0().children(els);
+        }
+        div()
+            .col()
+            .min_w0()
+            .rounded(radius::SM)
+            .border(1.0, Rgba::white(0.06))
+            .bg(Rgba::white(0.02))
+            .clip()
+            .children(els.enumerate().map(|(i, e)| {
+                if i == 0 {
+                    e
+                } else {
+                    e.border_top(1.0, Rgba::white(0.06))
+                }
+            }))
+    }
+
+    /// A list's rows in groups by `g.by`, in the order first published, each under its heading.
+    fn groups(&self, rows: Vec<&Row>, g: &Group, item: &Node, slot: u64, boxed: bool) -> El {
+        let mut groups: Vec<(String, Vec<&Row>)> = Vec::new();
+        for r in rows {
+            let key = r.text(&g.by);
+            match groups.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, rs)) => rs.push(r),
+                None => groups.push((key, vec![r])),
+            }
+        }
+        div()
+            .col()
+            .gap(24.0)
+            .min_w0()
+            .children(groups.into_iter().map(|(_, rs)| {
+                let first = rs.first().copied();
+                let heading = g.heading.fill_in(first, self.src, self.column);
+                let aside = g
+                    .aside
+                    .as_ref()
+                    .map(|a| a.fill_in(first, self.src, self.column))
+                    .filter(|a| !a.is_empty());
+                let head = div()
+                    .row()
+                    .items_center()
+                    .gap(8.0)
+                    .px(if boxed { 12.0 } else { 0.0 })
+                    .min_w0()
+                    .child(
+                        div().grow().min_w0().child(
+                            text(&heading, size::XS.0, color::GRAY_400)
+                                .line_height(size::XS.1)
+                                .weight(size::MEDIUM)
+                                .truncate()
+                                .role(Role::Heading, heading.as_str()),
+                        ),
+                    )
+                    .child_if(aside.map(|a| {
+                        text(a, size::XS.0, color::GRAY_500)
+                            .line_height(size::XS.1)
+                            .shrink0()
+                            .silent()
+                    }));
+                div()
+                    .col()
+                    .gap(8.0)
+                    .min_w0()
+                    .role(Role::Group, heading.as_str())
+                    .child(head)
+                    .child(self.items(rs, item, slot, boxed))
+            }))
+    }
+
+    /// One entry: icon, title over detail, trailing text, and actions that
+    /// show while the row is hovered or one of them has focus.
+    fn entry_row(
+        &self,
+        slot: u64,
+        title: &str,
+        detail: Option<String>,
+        kids: &[Node],
+        row: Option<&Row>,
+    ) -> El {
+        let id = self.bind.hover(slot, row.map(|r| r.id.as_str()));
+        let hot = self.ui.hover(id);
+        let cells = self.ui.is_cells();
+        let (mut lead, mut dots, mut badges, mut trail, mut acts, mut last) = (
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        for (i, k) in kids.iter().enumerate() {
+            if !self.holds(k.when.as_ref(), row) {
+                continue;
+            }
+            let at = child_slot(slot, i);
+            match &k.kind {
+                Kind::Button {
+                    label,
+                    action,
+                    confirm,
+                    style,
+                    icon,
+                } => {
+                    let fill = |t: &vorn_view::Text| t.fill_in(row, self.src, self.column);
+                    let press = filled(action, row, self.src, confirm.as_ref().map(fill));
+                    let (b, el) =
+                        self.button_parts(at, &fill(label), press, *style, icon.as_deref());
+                    let pinned = *style == Style::Primary
+                        || self.ui.key_focused(b)
+                        || self.bind.confirming(b).is_some();
+                    // A terminal has no hover to reveal it, so there the
+                    // shortcut gives its room back; the more menu still has it.
+                    if pinned {
+                        acts.push(el);
+                    } else if !cells {
+                        acts.push(el.opacity(hot.max(self.ui.hover(b))));
+                    }
+                }
+                Kind::Icon { .. } => {
+                    lead = self.node(k, row, at).map(|icon| {
+                        div()
+                            .size(28.0, 28.0)
+                            .shrink0()
+                            .center()
+                            .rounded(radius::SM)
+                            .bg(Rgba::white(0.04))
+                            .child(icon)
+                    });
+                }
+                Kind::Status { .. } => dots.extend(self.node(k, row, at)),
+                Kind::Badge { .. } => badges.extend(self.node(k, row, at)),
+                Kind::Text { .. } => trail.extend(self.node(k, row, at)),
+                _ => last.extend(self.node(k, row, at)),
+            }
+        }
+        let two = detail.as_deref().is_some_and(|d| !d.is_empty());
+        let line = div()
+            .row()
+            .items_center()
+            .gap(8.0)
+            .min_w0()
+            .children(dots)
+            .child(
+                text(title, 13.0, color::GRAY_100)
+                    .line_height(18.0)
+                    .weight(size::MEDIUM)
+                    .truncate()
+                    .silent(),
+            )
+            .children(badges);
+        let middle = div()
+            .col()
+            .grow()
+            .min_w0()
+            .child(line)
+            .child_if(detail.filter(|_| two).map(|d| {
+                text(d, size::XS.0, color::GRAY_500)
+                    .line_height(size::XS.1)
+                    .truncate()
+                    .silent()
+            }));
+        let mut e = div()
+            .id(id)
+            .sense(Sense::HOVER)
+            .row()
+            .items_center()
+            .gap(12.0)
+            .px(12.0)
+            .min_w0()
+            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.03), hot))
+            .role(Role::ListItem, title)
+            .child_if(lead.filter(|_| !cells))
+            .child(middle);
+        if !cells {
+            e = e.min_h(if two { 52.0 } else { 40.0 }).py(8.0);
+        }
+        // Actions that only show on hover sit before the numbers, so a row
+        // without one keeps its number in the same column as its neighbours.
+        let group = |els: Vec<El>| div().row().items_center().gap(4.0).shrink0().children(els);
+        if !acts.is_empty() {
+            e = e.child(group(acts));
+        }
+        e = e.children(trail);
+        if !last.is_empty() {
+            e = e.child(group(last));
+        }
+        e
+    }
+
+    /// A line that stands out, as an error says what happened.
+    fn notice(&self, value: &str, t: Option<Tone>) -> El {
+        let (icon, ink) = match t {
+            Some(Tone::Bad) => ("circle-alert", color::RED_400),
+            Some(Tone::Warn) => ("triangle-alert", color::AMBER_400),
+            Some(other) => ("info", self.tone_of(other)),
+            None => ("info", color::GRAY_500),
+        };
+        div()
+            .row()
+            .items_start()
+            .gap(8.0)
+            .px(12.0)
+            .py(8.0)
+            .min_w0()
+            .rounded(radius::SM)
+            .border(1.0, Rgba::white(0.08))
+            .bg(color::SURFACE_SUNKEN)
+            .role(Role::Status, value)
+            .child(crate::lucide(icon, 14.0, 2.0, ink).mt(1.0).shrink0())
+            .child(
+                div().grow().min_w0().child(
+                    text(value, size::XS.0, color::GRAY_300)
+                        .line_height(size::XS.1)
+                        .wrapping()
+                        .silent(),
+                ),
+            )
+    }
+}
+
+/// What a list says in place of its rows: empty, or still loading.
+fn state(copy: &str, boxed: bool) -> El {
+    let t = text(copy, size::XS.0, color::GRAY_500)
+        .line_height(size::XS.1)
+        .wrapping()
+        .silent();
+    if !boxed {
+        return t;
+    }
+    div()
+        .px(12.0)
+        .py(16.0)
+        .min_w0()
+        .rounded(radius::SM)
+        .border(1.0, Rgba::white(0.06))
+        .role(Role::Status, copy)
+        .child(t)
 }
 
 /// Text in a role, on as many lines as it takes.
@@ -609,6 +941,7 @@ fn styled(s: &str, role: TextRole) -> El {
         TextRole::Body => text(s, size::XS.0, color::GRAY_300).line_height(size::XS.1),
         TextRole::Secondary => text(s, 11.0, color::GRAY_500).line_height(16.0),
         TextRole::Mono => text(s, 11.0, color::GRAY_400).mono().line_height(16.0),
+        TextRole::Number => text(s, size::XS.0, color::GRAY_300).line_height(size::XS.1),
     }
 }
 

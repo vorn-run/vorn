@@ -183,6 +183,7 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
             json!({
                 "id": conn.get("id"),
                 "name": text(conn, "name"),
+                "icon": format!("connector:{id}"),
                 "line": line.join(" · "),
                 "state": state,
                 "needs_signin": needs_signin,
