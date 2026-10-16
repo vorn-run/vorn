@@ -9,6 +9,29 @@ use crate::host::{draw, App};
 use crate::ui::{Laid, Ui, UiConfig};
 use crate::RenderMode;
 
+/// A surface on the `CAMetalLayer` `layer`.
+///
+/// # Safety
+/// `layer` outlives the surface.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+unsafe fn layer_surface(
+    instance: &wgpu::Instance,
+    layer: *mut c_void,
+) -> Result<wgpu::Surface<'static>, String> {
+    // SAFETY: the caller's guarantee.
+    unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer)) }
+        .map_err(|e| e.to_string())
+}
+
+/// Core Animation exists only on Apple's platforms.
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+unsafe fn layer_surface(
+    _: &wgpu::Instance,
+    _: *mut c_void,
+) -> Result<wgpu::Surface<'static>, String> {
+    Err("there are no Core Animation layers on this platform".to_owned())
+}
+
 /// A UI and the surface of the layer it draws into.
 pub struct Layer {
     pub ui: Ui,
@@ -28,10 +51,7 @@ impl Layer {
     ) -> Result<Layer, String> {
         let instance = wgpu::Instance::new(instance_desc());
         // SAFETY: the caller keeps the layer alive for the surface's life.
-        let surface = unsafe {
-            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer))
-        }
-        .map_err(|e| e.to_string())?;
+        let surface = unsafe { layer_surface(&instance, layer) }?;
         let gpu = Gpu::new(instance, Some(&surface))?;
         let (surface, config) = crate::window::configure(&gpu, surface, px, false)?;
         let ui = Ui::new(Some(gpu), RenderMode::Gpu, config.format, cfg);

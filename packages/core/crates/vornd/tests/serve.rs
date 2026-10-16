@@ -300,9 +300,7 @@ async fn trusts_a_client_only_with_the_pinned_certificate() {
     assert_eq!(next(&mut ws).await.unwrap()["method"], "server:hello");
 
     let wrong = vorn_reach::tls::fingerprint(b"another certificate");
-    let refused = open_pinned(served.port, &wrong)
-        .await
-        .expect_err("refused");
+    let refused = open_pinned(served.port, &wrong).await.expect_err("refused");
     assert!(refused.contains("certificate"), "{refused}");
 
     // The certificate is kept, so a paired phone's pin holds after a restart.
