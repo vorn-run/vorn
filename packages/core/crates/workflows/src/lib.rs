@@ -31,6 +31,21 @@ pub const MANIFEST: &str = include_str!("../vorn-extension.toml");
 /// What `describe_workflow_nodes` tells of its node types, by id.
 pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
 
+/// The workflows it ships (`[[contributes.workflows]]`), each with the flag
+/// that records an install was given it once: `(file, flag, text)`.
+pub const SEEDS: &[(&str, &str, &str)] = &[
+    (
+        "workflows/default-task.kdl",
+        "hasSeededDefaultTaskWorkflow",
+        include_str!("../workflows/default-task.kdl"),
+    ),
+    (
+        "workflows/dev-server.kdl",
+        "hasSeededDevServerWorkflow",
+        include_str!("../workflows/dev-server.kdl"),
+    ),
+];
+
 /// The node type a step of a type no extension declares runs as: an agent,
 /// as such a step always ran.
 pub const FALLBACK: &str = "launchAgent";

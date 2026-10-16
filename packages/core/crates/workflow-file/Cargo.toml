@@ -1,0 +1,16 @@
+[package]
+name = "vorn-workflow-file"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Workflows as files: the KDL a workflow is written in (a trigger and steps, needs= as the graph's edges), read with file:line errors, written, and written back keeping a person's comments"
+
+[dependencies]
+# KDL v2 with spans, as templates are read; already in the tree.
+kdl = { version = "6.7", default-features = false, features = ["span"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]

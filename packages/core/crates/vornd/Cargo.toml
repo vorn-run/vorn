@@ -57,6 +57,7 @@ vorn-work = { path = "../work" }
 # The workflow engine, which vornd hosts.
 vorn-workflow = { path = "../workflow" }
 vorn-workflows = { path = "../workflows" }
+vorn-workflow-file = { path = "../workflow-file" }
 # The system's time zone, which a schedule without one fires in.
 jiff = "0.2"
 vorn-worktrees = { path = "../worktrees" }

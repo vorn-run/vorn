@@ -1,0 +1,25 @@
+# An example workflow step from outside Vorn: a node type that says its text
+# louder, and a workflow that uses it, both installed with the extension.
+id = "example.shout"
+name = "Shout"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+description = "A workflow step that repeats its text in capitals, and a workflow to try it."
+
+[service]
+command = ["node", "program.mjs"]
+
+[[contributes.nodes]]
+id = "shout"
+title = "Shout"
+description = "Repeats its text in capitals."
+icon = "megaphone"
+category = "steps"
+config = "nodes/shout.json"
+outputs = [{ field = "output", description = "The text, in capitals" }]
+rules = ["Templates in text expand before it is shouted."]
+
+[[contributes.workflows]]
+id = "try-shout"
+title = "Try Shout"
+file = "workflows/try-shout.kdl"

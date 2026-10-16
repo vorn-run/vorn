@@ -20,3 +20,5 @@ uuid = { version = "1", features = ["v4"] }
 vorn-adapters = { path = "../adapters" }
 vorn-agents = { path = "../agents" }
 tempfile = "3"
+# The seeded workflows are files the Workflows built-in ships.
+vorn-workflow-file = { path = "../workflow-file" }

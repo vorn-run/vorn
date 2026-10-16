@@ -7,18 +7,18 @@ import type {
   WorkflowDefinition
 } from '../packages/shared/src/types'
 
-/** The workflows vornd seeds into a new database, as it ships them. */
+/**
+ * The workflows a new database is seeded with, as vornd answered `workflow:list`
+ * (the replay records it; the Workflows built-in ships them as files).
+ */
 const SEEDS = JSON.parse(
-  fs.readFileSync(
-    path.resolve(__dirname, '../packages/core/crates/vornd/src/serve/seed-workflows.json'),
-    'utf-8'
-  )
-) as Array<{ flag: string; workflow: WorkflowDefinition }>
+  fs.readFileSync(path.resolve(__dirname, 'fixtures/workflows-replay/seeded.json'), 'utf-8')
+) as WorkflowDefinition[]
 
 const seeded = (): WorkflowDefinition => {
-  const seed = SEEDS.find((s) => s.flag === 'hasSeededDefaultTaskWorkflow')
+  const seed = SEEDS.find((s) => s.id === 'system:default-task-workflow')
   expect(seed).toBeDefined()
-  return seed!.workflow
+  return seed!
 }
 
 describe('the seeded default task workflow', () => {
@@ -61,8 +61,7 @@ describe('the seeded default task workflow', () => {
   })
 
   it('seeds the dev server workflow switched off', () => {
-    const seed = SEEDS.find((s) => s.flag === 'hasSeededDevServerWorkflow')
-    expect(seed?.workflow.id).toBe('system:dev-server-on-restore')
-    expect(seed?.workflow.enabled).toBe(false)
+    const seed = SEEDS.find((s) => s.id === 'system:dev-server-on-restore')
+    expect(seed?.enabled).toBe(false)
   })
 })

@@ -56,6 +56,7 @@ Usage
   vorn workflow run <name> [--input k=v]                 Start one
   vorn workflow stop <run>                               Stop a run
   vorn workflow runs [--workflow <name>] [--json]        Their runs
+  vorn workflow check <file.kdl>                         Check a workflow file
   vorn ext install|link|remove|list|pack                 Extensions
   vorn server serve|token                                Run a server, or its tokens
   vorn web [--print]                                     Open the web client in a browser

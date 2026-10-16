@@ -1,0 +1,1721 @@
+[
+  {
+    "id": "shape-daily-note",
+    "name": "w0 w1 w2 w3",
+    "icon": "Globe",
+    "iconColor": "#6b7280",
+    "enabled": true,
+    "nodes": [
+      {
+        "id": "trigger-1",
+        "type": "trigger",
+        "label": "w4 w5 w6 w7:w8",
+        "config": {
+          "triggerType": "recurring",
+          "cron": "0 11 * * *",
+          "timezone": "America/El_Salvador"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "day-1",
+        "type": "script",
+        "label": "w9 w10'w11 w3 w12",
+        "slug": "day",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w18.w19"
+        },
+        "position": {
+          "x": 0,
+          "y": 110
+        }
+      },
+      {
+        "id": "feeds-1",
+        "type": "callConnectorAction",
+        "label": "w20 w21 w22 w5'w11 w23",
+        "slug": "feeds",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector0",
+          "action": "action1",
+          "actionLabel": "w20 w23",
+          "args": {
+            "path": "{{steps.day.output}}/w25.w26",
+            "sinceHours": "w27",
+            "perFeed": "w28",
+            "minFeedsOk": "w29"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 220
+        }
+      },
+      {
+        "id": "recent-1",
+        "type": "callConnectorAction",
+        "label": "w30 w21 w31 w32",
+        "slug": "recent_notes",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action3",
+          "actionLabel": "w30 w34",
+          "args": {
+            "limit": "w35"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 330
+        }
+      },
+      {
+        "id": "edition-1",
+        "type": "callConnectorAction",
+        "label": "w36 w21 w37 w38",
+        "slug": "edition",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action4",
+          "actionLabel": "w40 w41",
+          "args": {
+            "limit": "w42"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 440
+        }
+      },
+      {
+        "id": "write-1",
+        "type": "launchAgent",
+        "label": "w43 w10'w11 w3",
+        "slug": "write",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w43 w10'w11 w44 w3 w45 w0 w1.\n\nw46 w47'w11 w12 w48 {{steps.day.output}}; w10'w11 w25 w49 w25.w26 w50. w30 w51.w52 w53, w54 w55 w56/w2-w57.w52.\n\nw58 w59'w11 w31 w32, w60 w53:\n{{steps.recent_notes.notes}}\n\nw58 w37 w61 w38:\n{{steps.edition.posts}}\n\nw43 w21 w3 w62 w57.w52 w63 w21 w47'w11 w12, w54 w64 w21 w65 w66 w21 w67 w68.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string",
+                "description": "w58 w3, w69 w70 w62 w57.w52"
+              },
+              "format": {
+                "type": "string",
+                "enum": ["w71", "w72", "w38"],
+                "description": "w73 w74 w21 w75 w76"
+              },
+              "topic": {
+                "type": "string",
+                "description": "w77 w78 w79 w80 w81 w82 w48 w83"
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w58 w84 w82 w85"
+              },
+              "shape": {
+                "type": "string",
+                "description": "w86 w21 w3 w48 w87, w63 w88 w78 w79"
+              },
+              "people": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w4 w89 w82 w90, w69 w70"
+              }
+            },
+            "required": ["note", "format", "topic", "sources", "shape", "people"]
+          },
+          "timeoutMs": 900000
+        },
+        "position": {
+          "x": 0,
+          "y": 660
+        }
+      },
+      {
+        "id": "humanize-1",
+        "type": "launchAgent",
+        "label": "w91 w82 w92 w93 w88 w89",
+        "slug": "humanize",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w94-w95 w10'w11 w44 w3 w45 w0 w1. w46 w47'w11 w12 w48 {{steps.day.output}} w96 w21 w3 w48 w57.w52 w50.\n\nw30 w51.w52, w54 w55 w56/w97-w57.w52. w98 w99 w82 w100, w101 w81 w82 w102, w103 w104'w11 w105 w106 w107 w45 w108: w109, w110, w21 w111 w96 w21 w112 w113.\n\nw104'w11 w105 w74 w21 w22 w114, w115 w116 w53 (w117 w118 w21 w53 w119):\n{{steps.approve.feedback}}\n\nw120 w121 w122 w123 w118 w124 w3 w125 w126:\n{{steps.approve.feedbackAll}}",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "changed": {
+                "type": "boolean",
+                "description": "w127 w21 w3 w128 w129"
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w58 w130 w131, w132 w133 w134 w135"
+              }
+            },
+            "required": ["changed", "notes"]
+          },
+          "timeoutMs": 600000
+        },
+        "position": {
+          "x": 0,
+          "y": 770
+        }
+      },
+      {
+        "id": "check-1",
+        "type": "script",
+        "label": "w136 w21 w3 (w137 w138 w48 w124 w139'w11 w140)",
+        "slug": "check",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w141.w19 \"$w42\" >&w142\nw16 w17/w143.w19 \"$w42\" w144",
+          "args": ["{{steps.day.output}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 880
+        }
+      },
+      {
+        "id": "note-link",
+        "type": "script",
+        "label": "w58 w3'w11 w111, w145 w69 w88 w146 w147",
+        "slug": "note_link",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w143.w19 \"$w42\" w111",
+          "args": ["{{steps.day.output}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 990
+        }
+      },
+      {
+        "id": "review-page",
+        "type": "script",
+        "label": "w148 w21 w105 w149",
+        "slug": "review_page",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w150.w19 \"$w42\" \"$w142\" \"$w151\" \"$w28\"\n",
+          "args": [
+            "{{steps.day.output}}",
+            "{{steps.write.format}}",
+            "{{steps.approve.round}}",
+            "{{steps.approve.feedbackAll}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 1210
+        },
+        "onError": "continue"
+      },
+      {
+        "id": "approve-1",
+        "type": "approval",
+        "label": "w104 w152 w21 w3",
+        "slug": "approve",
+        "config": {
+          "message": "{{steps.check.output}}\n\n{{steps.note_link.output}}",
+          "view": "{{steps.review_page.output}}",
+          "feedback": {
+            "from": "humanize-1",
+            "maxRounds": 3
+          },
+          "timeoutMs": 36000000
+        },
+        "position": {
+          "x": 0,
+          "y": 1320
+        }
+      },
+      {
+        "id": "post-1",
+        "type": "callConnectorAction",
+        "label": "w153 w21 w3",
+        "slug": "post",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action5",
+          "actionLabel": "w153 w88 w57",
+          "args": {
+            "body": "{{steps.check.output}}",
+            "link": "{{steps.note_link.output}}"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 1430
+        }
+      },
+      {
+        "id": "record-1",
+        "type": "script",
+        "label": "w155 w21 w3",
+        "slug": "record",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w156.w19 \"$w42\" \"$w142\" \"$w151\" \"$w28\" \"$w157\" \"$w158\" \"$w159\" \"$w160\" \"$w161\"\nw162 w163 \"$w42\" >&w142 && w162 w164 -w165 -w166 \"w57 $(w167 \"$w42\"): w145\" >&w142 || w168\n",
+          "args": [
+            "{{steps.day.output}}",
+            "{{steps.post.id}}",
+            "{{steps.post.url}}",
+            "{{steps.write.format}}",
+            "{{steps.write.topic}}",
+            "{{steps.write.people}}",
+            "{{steps.write.shape}}",
+            "{{steps.write.sources}}",
+            "{{steps.approve.feedbackAll}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 1540
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger-1",
+        "target": "day-1"
+      },
+      {
+        "id": "e2",
+        "source": "day-1",
+        "target": "feeds-1"
+      },
+      {
+        "id": "e3",
+        "source": "feeds-1",
+        "target": "recent-1"
+      },
+      {
+        "id": "e4",
+        "source": "recent-1",
+        "target": "edition-1"
+      },
+      {
+        "id": "e7",
+        "source": "write-1",
+        "target": "humanize-1"
+      },
+      {
+        "id": "e8",
+        "source": "humanize-1",
+        "target": "check-1"
+      },
+      {
+        "id": "e9",
+        "source": "check-1",
+        "target": "note-link"
+      },
+      {
+        "id": "e12",
+        "source": "review-page",
+        "target": "approve-1"
+      },
+      {
+        "id": "e13",
+        "source": "approve-1",
+        "target": "post-1"
+      },
+      {
+        "id": "e14",
+        "source": "post-1",
+        "target": "record-1"
+      },
+      {
+        "id": "e-edition-write",
+        "source": "edition-1",
+        "target": "write-1"
+      },
+      {
+        "id": "e-link-review",
+        "source": "note-link",
+        "target": "review-page"
+      }
+    ]
+  },
+  {
+    "id": "shape-engagement",
+    "name": "w0 w1 w169",
+    "icon": "MessageCircle",
+    "iconColor": "#c9a227",
+    "enabled": true,
+    "nodes": [
+      {
+        "id": "trigger-1",
+        "type": "trigger",
+        "label": "w170, w171 w96 w172 w6 w173:w8",
+        "config": {
+          "triggerType": "recurring",
+          "cron": "0 15 * * 1,3,5",
+          "timezone": "America/El_Salvador"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "day-1",
+        "type": "script",
+        "label": "w9 w10'w11 w169 w12",
+        "slug": "day",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w174.w19\n",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}"
+        },
+        "position": {
+          "x": 0,
+          "y": 110
+        }
+      },
+      {
+        "id": "candidates-1",
+        "type": "script",
+        "label": "w36 w41 w175 w176",
+        "slug": "candidates",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w177.w19 \"$w42\"\n",
+          "args": ["{{steps.day.output}}"],
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}"
+        },
+        "position": {
+          "x": 0,
+          "y": 220
+        }
+      },
+      {
+        "id": "pick-1",
+        "type": "launchAgent",
+        "label": "w178 w81 w62 w66 w96 w179",
+        "slug": "pick",
+        "config": {
+          "agentType": "claude",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "prompt": "w180 w10'w11 w169 w181 w45 w0 w1.\n\nw46 w47'w11 w12 w48 {{steps.day.output}}; w21 w182 w49 w182.w26 w50 w96 w21 w22 w183 w184 w74 w185 w49 w186.w26 w50. w30 w51.w52 w53, w54 w55 w56/w169.w52.\n\nw187 w188 w48 w88 w189 w190: w191 w192 w63 w193 w194 w195 w196 w88 w197 w198.\n\nw104'w11 w105 w74 w21 w22 w114, w115 w116 w53 (w117 w118 w21 w53 w119):\n{{steps.approve.feedback}}\n\nw120 w121 w122 w123 w63 w124 w181 w125 w126:\n{{steps.approve.feedbackAll}}",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "replyPostId": {
+                "type": "string",
+                "description": "w58 w199 w200'w11 w201; w117 w202 w176 w188"
+              },
+              "replyUrl": {
+                "type": "string",
+                "description": "w58 w199 w200'w11 w203; w117 w202 w176 w188"
+              },
+              "replyAuthor": {
+                "type": "string",
+                "description": "w204 w205'w11 w206; w117 w202 w176 w188"
+              },
+              "replyBody": {
+                "type": "string",
+                "description": "w58 w207, w208 w62 w209 w79; w117 w202 w176 w188"
+              },
+              "restackPostId": {
+                "type": "string",
+                "description": "w58 w210 w200'w11 w201; w117 w45 w211"
+              },
+              "restackUrl": {
+                "type": "string",
+                "description": "w58 w210 w200'w11 w203; w117 w45 w211"
+              },
+              "restackAuthor": {
+                "type": "string",
+                "description": "w204 w205'w11 w206; w117 w45 w211"
+              },
+              "restackReason": {
+                "type": "string",
+                "description": "w212 w134 w118 w192 w82 w213 w88 w179; w117 w45 w211"
+              },
+              "skipReason": {
+                "type": "string",
+                "description": "w212 w134, w214 w202 w188 w128 w199 w215 w210"
+              }
+            },
+            "required": [
+              "replyPostId",
+              "replyUrl",
+              "replyAuthor",
+              "replyBody",
+              "restackPostId",
+              "restackUrl",
+              "restackAuthor",
+              "restackReason",
+              "skipReason"
+            ]
+          },
+          "model": "opus",
+          "headless": true,
+          "timeoutMs": 900000
+        },
+        "position": {
+          "x": 0,
+          "y": 330
+        }
+      },
+      {
+        "id": "review-page",
+        "type": "script",
+        "label": "w148 w21 w105 w149",
+        "slug": "review_page",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w216.w19 \"$w42\" \"$w142\" \"$w151\" \"$w28\" \"$w157\" \"$w158\" \"$w159\" \"$w160\" \"$w161\"\n",
+          "args": [
+            "{{steps.day.output}}",
+            "{{steps.pick.replyUrl}}",
+            "{{steps.pick.replyAuthor}}",
+            "{{steps.pick.replyBody}}",
+            "{{steps.pick.restackUrl}}",
+            "{{steps.pick.restackAuthor}}",
+            "{{steps.pick.restackReason}}",
+            "{{steps.approve.round}}",
+            "{{steps.approve.feedbackAll}}"
+          ],
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}"
+        },
+        "position": {
+          "x": 0,
+          "y": 440
+        }
+      },
+      {
+        "id": "approve-1",
+        "type": "approval",
+        "label": "w104 w152 w21 w207",
+        "slug": "approve",
+        "config": {
+          "message": "{{steps.pick.replyBody}}\n\n{{steps.pick.replyUrl}}",
+          "edit": "{{steps.pick.replyBody}}",
+          "view": "{{steps.review_page.output}}",
+          "feedback": {
+            "from": "pick-1",
+            "maxRounds": 3
+          },
+          "timeoutMs": 36000000
+        },
+        "position": {
+          "x": 0,
+          "y": 550
+        }
+      },
+      {
+        "id": "has-reply",
+        "type": "condition",
+        "label": "w217 w88 w200 w218 w62 w66?",
+        "slug": "has_reply",
+        "config": {
+          "variable": "{{steps.pick.replyPostId}}",
+          "operator": "isNotEmpty",
+          "value": ""
+        },
+        "position": {
+          "x": -220,
+          "y": 660
+        }
+      },
+      {
+        "id": "reply-1",
+        "type": "callConnectorAction",
+        "label": "w153 w21 w207",
+        "slug": "reply",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action6",
+          "actionLabel": "w220 w118 w200",
+          "args": {
+            "postId": "{{steps.pick.replyPostId}}",
+            "body": "{{steps.approve.text}}"
+          }
+        },
+        "position": {
+          "x": -220,
+          "y": 770
+        }
+      },
+      {
+        "id": "has-restack",
+        "type": "condition",
+        "label": "w217 w88 w200 w218 w62 w179?",
+        "slug": "has_restack",
+        "config": {
+          "variable": "{{steps.pick.restackPostId}}",
+          "operator": "isNotEmpty",
+          "value": ""
+        },
+        "position": {
+          "x": 220,
+          "y": 660
+        }
+      },
+      {
+        "id": "restack-1",
+        "type": "callConnectorAction",
+        "label": "w221 w21 w200",
+        "slug": "restack",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action7",
+          "actionLabel": "w221 w215 w223 w179 w200",
+          "args": {
+            "postId": "{{steps.pick.restackPostId}}",
+            "restacked": "w168"
+          }
+        },
+        "position": {
+          "x": 220,
+          "y": 770
+        }
+      },
+      {
+        "id": "record-1",
+        "type": "script",
+        "label": "w155 w21 w181",
+        "slug": "record",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w224.w19 \"$w42\" \"$w142\" \"$w151\" \"$w28\" \"$w157\" \"$w158\" \"$w159\"\nw162 w163 \"$w42\" >&w142 && w162 w164 -w165 -w166 \"w169 $(w167 \"$w42\")\" >&w142 || w168\n",
+          "args": [
+            "{{steps.day.output}}",
+            "{{steps.pick.restackUrl}}",
+            "{{steps.pick.restackAuthor}}",
+            "{{steps.pick.replyUrl}}",
+            "{{steps.pick.replyAuthor}}",
+            "{{steps.approve.text}}",
+            "{{steps.approve.feedbackAll}}"
+          ],
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}"
+        },
+        "position": {
+          "x": 0,
+          "y": 880
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger-1",
+        "target": "day-1"
+      },
+      {
+        "id": "e2",
+        "source": "day-1",
+        "target": "candidates-1"
+      },
+      {
+        "id": "e3",
+        "source": "candidates-1",
+        "target": "pick-1"
+      },
+      {
+        "id": "e4",
+        "source": "pick-1",
+        "target": "review-page"
+      },
+      {
+        "id": "e5",
+        "source": "review-page",
+        "target": "approve-1"
+      },
+      {
+        "id": "e6",
+        "source": "approve-1",
+        "target": "has-reply"
+      },
+      {
+        "id": "e7",
+        "source": "has-reply",
+        "target": "reply-1"
+      },
+      {
+        "id": "e8",
+        "source": "approve-1",
+        "target": "has-restack"
+      },
+      {
+        "id": "e9",
+        "source": "has-restack",
+        "target": "restack-1"
+      },
+      {
+        "id": "e10",
+        "source": "approve-1",
+        "target": "record-1"
+      }
+    ]
+  },
+  {
+    "id": "shape-weekly",
+    "name": "w0 w1 w225 w38",
+    "icon": "Newspaper",
+    "iconColor": "#c9a227",
+    "enabled": true,
+    "nodes": [
+      {
+        "id": "trigger-1",
+        "type": "trigger",
+        "label": "w4 w226 w6 w227:w8",
+        "config": {
+          "triggerType": "recurring",
+          "cron": "0 10 * * 1",
+          "timezone": "America/El_Salvador"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "week-1",
+        "type": "script",
+        "label": "w9 w124 w228'w11 w12",
+        "slug": "week",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w229.w19"
+        },
+        "position": {
+          "x": 0,
+          "y": 110
+        }
+      },
+      {
+        "id": "feeds-1",
+        "type": "callConnectorAction",
+        "label": "w20 w124 w228'w11 w23",
+        "slug": "feeds",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector0",
+          "action": "action1",
+          "actionLabel": "w20 w23",
+          "args": {
+            "path": "{{steps.week.output}}/w25.w26",
+            "sinceHours": "w230",
+            "perFeed": "w160",
+            "minFeedsOk": "w173"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 220
+        }
+      },
+      {
+        "id": "latam-1",
+        "type": "callConnectorAction",
+        "label": "w20 w124 w228'w11 w231 w1 w232",
+        "slug": "latam_feeds",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector0",
+          "action": "action1",
+          "actionLabel": "w20 w23",
+          "args": {
+            "urls": "w233://w234.w235/w236/w237/\nw233://w238.w235.w239/w237/\nw233://w240.w235/w237/\nw233://w23.w241.w235/w242-w11/w243/w244/w245/w241.w235/w246/w247/w248\nw233://w249.w250/w237/w37",
+            "keywords": "w1, w251, w252 w253, w254 w253, w253 w255, w256, w257, w258, w259, w260, w261, w262 w263, w264 w265, w266 w267 w268, w269, w270 w271, w272 w267 w273, w274, w275",
+            "path": "{{steps.week.output}}/w25-w276.w26",
+            "sinceHours": "w230",
+            "perFeed": "w158",
+            "minFeedsOk": "w151"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 330
+        },
+        "onError": "continue"
+      },
+      {
+        "id": "history-1",
+        "type": "callConnectorAction",
+        "label": "w30 w21 w277 w278 w279",
+        "slug": "history",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action4",
+          "actionLabel": "w40 w41",
+          "args": {
+            "limit": "w29"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 440
+        }
+      },
+      {
+        "id": "tools-1",
+        "type": "script",
+        "label": "w280 w281 w96 w282 w283",
+        "slug": "tools",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w284.w19 \"$w42\"",
+          "args": ["{{steps.week.output}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 550
+        },
+        "onError": "continue"
+      },
+      {
+        "id": "topics-1",
+        "type": "launchAgent",
+        "label": "w285 w21 w228'w11 w286 w96 w287",
+        "slug": "topics",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w285 w124 w228'w11 w288 w289 w96 w58 w290'w11 w291 w45 w0 w1, w45 w104 w62 w292 w293. w30 w51.w52 w53.\n\nw46 w47'w11 w12 w48 {{steps.week.output}}. w25.w26 w96 w25-w276.w26 w50 w49 w124 w228'w11 w23, w294 w21 w1 w295' w296 w297, w125 w298 w299 w21 w300 w45 w81 w301 w63 w1 w302 w303 w124 w228: w21 w304 w305 w306 w149, w307, w308 w309 w310 w311, w312-w313 w314, w315 w232.\n\nw287.w26 w316 w281 w317 w318 w63 w21 w22 w319 w320 w96 w282 w283 w321, w293 w322 w323 w74 w324, w325 w326 w327 w96 w328 w329.\n\nw58 w277 w278 w279, w60 w53, w293 w44:\n{{steps.history.posts}}\n\nw285 w330 w182 w45 w58 w0, w331 \"w289\": w332 w333, w6 w334 w132 w83 w335 w336 w337 w215 w338, w211 w339 w340 w88 w31 w38'w11 w288 w289, w96 w6 w341 w319 w339 w49 w342 w88 w338'w11 w296 w343. w344 w75 w182 w45 w58 w290, w331 \"w291\", w345 w293 w287.w26: w312 w135 w346, w96 w347 w63 w21 w348 w21 w349 w350 w351 w47 w62 w352 w82. w4 w353 w354 w355 w356 w313 w111 w357 w358 w359: w21 w337'w11 w215 w338'w11 w296 w149, w88 w360, w88 w361 w215 w88 w362 w149, w101 w363 w205'w11 w200, w364, w3, w365, w366 w367 w215 w368 w200 w118 w369.\n\nw104'w11 w198 w118 w21 w22 w13, w370 w121 w123 w45 w371 w372 (w117 w21 w53 w373):\n{{steps.pick_topic.feedback}}",
+          "outputSchema": {
+            "type": "object",
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "array",
+                "minItems": 5,
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "required": ["kind", "topic", "angle", "source", "why_now"],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["w289", "w291"],
+                      "description": "w289 w45 w58 w0, w291 w45 w58 w290"
+                    },
+                    "topic": {
+                      "type": "string",
+                      "description": "w77 w78 w79 w80 w82"
+                    },
+                    "angle": {
+                      "type": "string",
+                      "description": "w58 w374 w21 w246 w351 w375, w215 w45 w88 w291 w81 w82 w376 w96 w21 w349 w62 w352 w82"
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "w58 w111 w82 w377 w118"
+                    },
+                    "why_now": {
+                      "type": "string",
+                      "description": "w378 w82 w379 w124 w228, w63 w88 w133 w380"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "timeoutMs": 900000
+        },
+        "position": {
+          "x": 0,
+          "y": 660
+        }
+      },
+      {
+        "id": "pick-1",
+        "type": "approval",
+        "label": "w104 w381 w21 w289 w96 w21 w291",
+        "slug": "pick_topic",
+        "config": {
+          "message": "w178 w124 w228'w11 w288 w289 w96 w58 w290'w11 w291: w382 w132 w289 w383 w96 w132 w291 w383, w384 w21 w385. w386 w355 w348 w370 w357 w387 w88 w333 w71, w215 w388 w389 w390 w88 w198 w45 w371 w372.",
+          "edit": "{{steps.topics.options}}",
+          "feedback": {
+            "from": "topics-1",
+            "maxRounds": 4
+          },
+          "timeoutMs": 86400000
+        },
+        "position": {
+          "x": 0,
+          "y": 770
+        }
+      },
+      {
+        "id": "loop-1",
+        "type": "loop",
+        "label": "w391 w392 w21 w393 w152",
+        "slug": "revise",
+        "config": {
+          "nodeType": "loop",
+          "bodyNodeIds": ["write-1", "commit-write", "humanize-1", "review-1", "commit-review"],
+          "maxIterations": 2,
+          "until": {
+            "variable": "{{steps.review.approved}}",
+            "operator": "equals",
+            "value": "w168"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 880
+        }
+      },
+      {
+        "id": "write-1",
+        "type": "launchAgent",
+        "label": "w43 w21 w38",
+        "slug": "write",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w43 w124 w228'w11 w38 w74 w0 w1.\n\nw104 w218 w124 w228'w11 w288 w289 w96 w58 w290'w11 w291. w58 w289 w383 w48 w58 w0 w96 w21 w291 w383 w48 w58 w290; w394 w395 w396 w96 w397:\n{{steps.pick_topic.items}}\n\nw46 w47'w11 w12 w48 {{steps.week.output}}. w30 w51.w52 w53, w54 w55 w56/w398-w38.w52, w115 w48 w21 w399. w400 w397 w49 w25.w26 w63 w339 w12, w96 w25-w276.w26 w401 w82 w45 w402 w403. w404 w105.w26 w48 w50 w405, w124 w48 w88 w406 w119: w82 w407 w81 w21 w408 w409.\n\nw58 w277 w278 w279, w60 w53, w293 w44:\n{{steps.history.posts}}\n\nw43 w21 w38 w62 w410.w52 w63 w21 w47'w11 w12, w54 w64 w21 w65 w66 w21 w399 w68.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "main_story": {
+                "type": "string",
+                "description": "w212 w134 w80 w58 w0"
+              },
+              "titles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w411 w412 w372, w413 w333, w6 w341 w132 w88 w72",
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "recommended_title": {
+                "type": "string",
+                "description": "w58 w412 w63 w21 w306 w414, w415 w69 w70 w50"
+              },
+              "subtitle": {
+                "type": "string",
+                "description": "w58 w306 w414 w416"
+              },
+              "paragraph_topic": {
+                "type": "string",
+                "description": "w58 w417 w418 w45 w104'w11 w368 w419"
+              }
+            },
+            "required": ["main_story", "titles", "recommended_title", "subtitle", "paragraph_topic"]
+          },
+          "timeoutMs": 2400000
+        },
+        "position": {
+          "x": 0,
+          "y": 990
+        }
+      },
+      {
+        "id": "commit-write",
+        "type": "script",
+        "label": "w420 w21 w410",
+        "slug": "commit_write",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw421 w17/w422.w423 w398"
+        },
+        "position": {
+          "x": 0,
+          "y": 1100
+        }
+      },
+      {
+        "id": "humanize-1",
+        "type": "launchAgent",
+        "label": "w91 w82 w92 w70",
+        "slug": "humanize",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w94-w95 w124 w228'w11 w0 w1 w410. w46 w47'w11 w12 w48 {{steps.week.output}} w96 w21 w410 w48 w410.w52 w50.\n\nw30 w51.w52 w53, w54 w55 w56/w97-w38.w52. w98 w99 w82 w424, w101 w81 w82 w102: w425 w426, w111 w96 w246 w427.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "changed": {
+                "type": "boolean",
+                "description": "w127 w21 w410 w128 w129"
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w58 w428 w74 w429 w430, w132 w133 w134 w135"
+              }
+            },
+            "required": ["changed", "notes"]
+          },
+          "timeoutMs": 1200000
+        },
+        "position": {
+          "x": 0,
+          "y": 1210
+        }
+      },
+      {
+        "id": "review-1",
+        "type": "launchAgent",
+        "label": "w431 w21 w410",
+        "slug": "review",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w386 w124 w228'w11 w0 w1 w410.\n\nw46 w47'w11 w12 w48 {{steps.week.output}}. w58 w410 w48 w410.w52 w50 w96 w137 w397 w49 w25.w26 w96 w25-w276.w26 w401 w82. w30 w51.w52 w45 w21 w432 w357 w49 w433, w54 w55 w56/w105-w38.w52.\n\nw58 w277 w278 w279, w60 w53, w293 w44:\n{{steps.history.posts}}\n\nw434 w49 w21 w408, w342 w21 w205: w435 w397, w436, w437 w96 w21 w438 w439-w440, w441 w442 w342 w443 w21 w444. w404 w21 w410 w48 w445 w446 (w88 w447 w215 w448 w449, w88 w288 w289 w278 w450, w88 w451 w452 w246), w453 w82 w69 w454.\n\nw43 w455 w456 w389 w62 w410.w52, w398 w21 w457 w62 w105.w26, w96 w64 w21 w458 w457 w69 w65.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "approved": {
+                "type": "boolean",
+                "description": "w459 w214 w202 w188 w454 w460"
+              },
+              "blocking": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w461 w339 w462 w342 w463: w448 w215 w447 w464, w88 w465 w288 w289, w88 w451 w246"
+              },
+              "fixed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w466 w21 w393 w467"
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w468 w469 w45 w104 w62 w470"
+              },
+              "main_story": {
+                "type": "string",
+                "description": "w212 w134 w80 w58 w0"
+              },
+              "title": {
+                "type": "string",
+                "description": "w58 w306 w414 w412 w471 w21 w105"
+              },
+              "subtitle": {
+                "type": "string",
+                "description": "w58 w306 w414 w416 w471 w21 w105"
+              }
+            },
+            "required": [
+              "approved",
+              "blocking",
+              "fixed",
+              "notes",
+              "main_story",
+              "title",
+              "subtitle"
+            ]
+          },
+          "timeoutMs": 2400000
+        },
+        "position": {
+          "x": 0,
+          "y": 1320
+        }
+      },
+      {
+        "id": "commit-review",
+        "type": "script",
+        "label": "w420 w21 w105",
+        "slug": "commit_review",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw421 w17/w422.w423 w105"
+        },
+        "position": {
+          "x": 0,
+          "y": 1430
+        }
+      },
+      {
+        "id": "apply-1",
+        "type": "launchAgent",
+        "label": "w472 w104'w11 w473",
+        "slug": "apply_changes",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w472 w104'w11 w105 w62 w124 w228'w11 w0 w1 w410.\n\nw46 w47'w11 w12 w48 {{steps.week.output}} w96 w21 w410 w48 w410.w52 w50. w30 w51.w52 w53.\n\nw474 w37 w198, w115 w116 w53:\n{{steps.my_review.feedback}}\n\nw120 w121 w122 w123 w118 w124 w410 w125 w126:\n{{steps.my_review.feedbackAll}}\n\nw475 w50 w48 w476 w198 w477, w124 w48 w21 w53 w119: w429 w188. w478 w95 w410.w52 w62 w442 w81 w121 w107, w96 w382 w425 w449 w479 w293 w25.w26 w215 w25-w276.w26.\n\nw58 w412 w48 {{steps.review.title}} w96 w21 w416 {{steps.review.subtitle}}. w480 w481 w69 w482 w483 w484, w467 w214 w202 w121 w123, w96 w398 w335 w429 w62 w21 w306 w414 w405.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "changed": {
+                "type": "boolean",
+                "description": "w127 w21 w410 w128 w129"
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w466 w467, w132 w133 w134 w135"
+              },
+              "title": {
+                "type": "string",
+                "description": "w58 w412 w471 w485 w473"
+              },
+              "subtitle": {
+                "type": "string",
+                "description": "w58 w416 w471 w485 w473"
+              }
+            },
+            "required": ["changed", "notes", "title", "subtitle"]
+          },
+          "timeoutMs": 1200000
+        },
+        "position": {
+          "x": 0,
+          "y": 1540
+        }
+      },
+      {
+        "id": "lint-1",
+        "type": "script",
+        "label": "w136 w21 w486 w487",
+        "slug": "lint",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w488.w19 \"$w42\"",
+          "args": ["{{steps.week.output}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 1650
+        }
+      },
+      {
+        "id": "render-text",
+        "type": "script",
+        "label": "w148 w21 w410 w144",
+        "slug": "render_text",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w489.w19 \"$@\"",
+          "args": [
+            "{{steps.week.output}}",
+            "{{steps.write.titles}}",
+            "{{steps.apply_changes.title}}",
+            "{{steps.write.paragraph_topic}}",
+            "{{steps.review.approved}}",
+            "{{steps.review.blocking}}",
+            "{{steps.review.notes}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 1760
+        }
+      },
+      {
+        "id": "review-page",
+        "type": "script",
+        "label": "w148 w104'w11 w105 w149",
+        "slug": "review_page",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w490.w19 \"$@\"",
+          "args": [
+            "{{steps.week.output}}",
+            "{{steps.apply_changes.title}}",
+            "{{steps.apply_changes.subtitle}}",
+            "{{steps.my_review.round}}",
+            "{{steps.my_review.feedbackAll}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 1870
+        }
+      },
+      {
+        "id": "my-review",
+        "type": "approval",
+        "label": "w104 w491 w21 w410",
+        "slug": "my_review",
+        "config": {
+          "message": "{{steps.apply_changes.title}}\n{{steps.apply_changes.subtitle}}\n\nw58 w408 w492 w82: {{steps.review.approved}}. w493 w62 w494 w82 w69 w21 w44 w410, w215 w495 w473 w96 w482 w49 w496 w497 w357 w498 w82 w499.",
+          "view": "{{steps.review_page.output}}",
+          "feedback": {
+            "from": "apply-1",
+            "maxRounds": 4
+          },
+          "timeoutMs": 86400000
+        },
+        "position": {
+          "x": 0,
+          "y": 1980
+        }
+      },
+      {
+        "id": "find-draft",
+        "type": "script",
+        "label": "w36 w124 w228'w11 w44 w410",
+        "slug": "find_draft",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw500=\"$w42/w410-w501.w502\"\nw370 [ -w11 \"$w500\" ]; w54 w503 -w504 '\\w505' < \"$w500\"; w506",
+          "args": ["{{steps.week.output}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 2090
+        }
+      },
+      {
+        "id": "save-text",
+        "type": "callConnectorAction",
+        "label": "w20 w21 w44 w410",
+        "slug": "save_text",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action8",
+          "actionLabel": "w20 w410",
+          "args": {
+            "draftId": "{{steps.find_draft.output}}",
+            "title": "{{steps.apply_changes.title}}",
+            "subtitle": "{{steps.apply_changes.subtitle}}",
+            "body": "{{steps.render_text.output}}"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 2200
+        }
+      },
+      {
+        "id": "record-1",
+        "type": "script",
+        "label": "w508 w21 w410",
+        "slug": "record",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw509 \"$w142\" w63 ''|*[!w510-w161]*) w511 \"w20 w410 w512 w21 w501 '$w142'\" >&w142; w513 w42 ;; w514\nw515 '%w11' \"$w142\" > \"$w42/w410-w501.w502\"\nw421 w17/w422.w423 w410 >&w142\nw515 '%w11' \"$w142\"",
+          "args": ["{{steps.week.output}}", "{{steps.save_text.id}}"]
+        },
+        "position": {
+          "x": 0,
+          "y": 2310
+        }
+      },
+      {
+        "id": "hero-prompt",
+        "type": "launchAgent",
+        "label": "w43 w21 w516 w517 w67",
+        "slug": "hero_prompt",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w43 w21 w518 w67 w45 w124 w228'w11 w0 w1 w516 w517.\n\nw46 w47'w11 w12 w48 {{steps.week.output}}; w21 w38 w48 w410.w52 w50. w519 w288 w289: {{steps.review.main_story}}\n\nw30 w21 w520 w246 w74 w51.w52, w54 w55 w56/w516-w517.w52.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "w58 w518 w67, w521 --w522"
+              },
+              "alt": {
+                "type": "string",
+                "description": "w212 w523 w524 w525 w21 w517, w526 w527 w528"
+              },
+              "styles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "w58 w529, w69 w530 w63 w21 w67",
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "medium": {
+                "type": "string",
+                "description": "w58 w531 w63 w88 w78 w79"
+              }
+            },
+            "required": ["prompt", "alt", "styles", "medium"]
+          },
+          "timeoutMs": 600000
+        },
+        "position": {
+          "x": 0,
+          "y": 2420
+        }
+      },
+      {
+        "id": "imagine-1",
+        "type": "callConnectorAction",
+        "label": "w532 w21 w516",
+        "slug": "imagine",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector9",
+          "action": "action10",
+          "actionLabel": "w534",
+          "args": {
+            "prompt": "{{steps.hero_prompt.prompt}}",
+            "aspectRatio": "w535:w161",
+            "speed": "w536"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 2530
+        }
+      },
+      {
+        "id": "wait-loop",
+        "type": "loop",
+        "label": "w537 w45 w21 w330 w538",
+        "slug": "wait_loop",
+        "config": {
+          "nodeType": "loop",
+          "bodyNodeIds": ["wait-1"],
+          "maxIterations": 5,
+          "until": {
+            "variable": "{{steps.wait.status}}",
+            "operator": "equals",
+            "value": "w539"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 2640
+        }
+      },
+      {
+        "id": "wait-1",
+        "type": "callConnectorAction",
+        "label": "w537 w45 w538",
+        "slug": "wait",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector9",
+          "action": "action11",
+          "actionLabel": "w537 w45 w538",
+          "args": {
+            "jobId": "{{steps.imagine.jobId}}",
+            "timeoutSeconds": "w541"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 2750
+        },
+        "onError": "continue"
+      },
+      {
+        "id": "download-1",
+        "type": "callConnectorAction",
+        "label": "w542 w21 w538",
+        "slug": "download",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector9",
+          "action": "action12",
+          "actionLabel": "w542 w538",
+          "args": {
+            "jobId": "{{steps.imagine.jobId}}",
+            "folder": "{{steps.week.output}}/w538"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 2860
+        }
+      },
+      {
+        "id": "pick-hero",
+        "type": "launchAgent",
+        "label": "w178 w21 w516",
+        "slug": "pick_hero",
+        "config": {
+          "agentType": "claude",
+          "model": "opus",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "headless": true,
+          "prompt": "w178 w124 w228'w11 w0 w1 w516 w517.\n\nw58 w330 w538 w49 w544.w545 w62 w546.w545 w63 {{steps.download.folder}}. w58 w38 w48 w410.w52 w63 {{steps.week.output}}.\n\nw30 w21 w520 w246 w74 w51.w52, w54 w55 w56/w547-w516.w52.",
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "description": "w58 w548 w517, w69 w63 w549<w550>.w545"
+              },
+              "reason": {
+                "type": "string",
+                "description": "w378 w124 w132, w63 w132 w215 w319 w551"
+              }
+            },
+            "required": ["index", "reason"]
+          },
+          "timeoutMs": 600000
+        },
+        "position": {
+          "x": 0,
+          "y": 2970
+        }
+      },
+      {
+        "id": "hero-jpeg",
+        "type": "script",
+        "label": "w91 w21 w516 w552",
+        "slug": "hero_jpeg",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw509 \"$w142\" w63 [w510-w151]) ;; *) w511 \"w178 w21 w516 w553 '$w142', w342 w510 w62 w151\" >&w142; w513 w42 ;; w514\nw554=\"$w42/w549$w142.w545\"\nw555=\"$w151/w516.w556\"\n[ -w500 \"$w554\" ] || { w511 \"$w554 w376 w342 w557\" >&w142; w513 w42; }\nw558 -w11 w112 w559 -w11 w560 w561 -w562 w563 \"$w554\" --w555 \"$w555\" >/w564/w565\nw566=$(w567 -w500 %w568 \"$w555\")\n[ \"$w566\" -w569 w570 ] || { w511 \"w516.w556 w48 $w566 w571, w572 w21 w573 w574 w355 w575 w576\" >&w142; w513 w42; }\nw16 w17/w577.w19 \"$w151\" \"$w142\" \"$w28\" \"$w157\" \"$w158\" \"$w159\" \"$w160\" \"$w161\"\nw421 w17/w422.w423 w516 >&w142\nw515 '%w11' \"$w555\"",
+          "args": [
+            "{{steps.download.folder}}",
+            "{{steps.pick_hero.index}}",
+            "{{steps.week.output}}",
+            "{{steps.hero_prompt.prompt}}",
+            "{{steps.hero_prompt.alt}}",
+            "{{steps.hero_prompt.styles}}",
+            "{{steps.hero_prompt.medium}}",
+            "{{steps.pick_hero.reason}}",
+            "{{steps.imagine.jobId}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 3080
+        }
+      },
+      {
+        "id": "upload-1",
+        "type": "callConnectorAction",
+        "label": "w578 w21 w516 w62 w44",
+        "slug": "upload",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action13",
+          "actionLabel": "w578 w517",
+          "args": {
+            "file": "{{steps.hero_jpeg.output}}"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 3190
+        }
+      },
+      {
+        "id": "render-final",
+        "type": "script",
+        "label": "w148 w21 w144 w390 w21 w516",
+        "slug": "render_final",
+        "config": {
+          "scriptType": "bash",
+          "projectName": "{{project.name}}",
+          "projectPath": "{{project.path}}",
+          "scriptContent": "w13 -w14 w15\nw16 w17/w489.w19 \"$@\"",
+          "args": [
+            "{{steps.week.output}}",
+            "{{steps.write.titles}}",
+            "{{steps.apply_changes.title}}",
+            "{{steps.write.paragraph_topic}}",
+            "{{steps.review.approved}}",
+            "{{steps.review.blocking}}",
+            "{{steps.review.notes}}",
+            "{{steps.upload.url}}",
+            "{{steps.hero_prompt.alt}}"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 3300
+        }
+      },
+      {
+        "id": "save-final",
+        "type": "callConnectorAction",
+        "label": "w20 w21 w410 w390 w137 w516",
+        "slug": "save_final",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "",
+          "connectorId": "connector2",
+          "action": "action8",
+          "actionLabel": "w20 w410",
+          "args": {
+            "draftId": "{{steps.save_text.id}}",
+            "title": "{{steps.apply_changes.title}}",
+            "subtitle": "{{steps.apply_changes.subtitle}}",
+            "body": "{{steps.render_final.output}}",
+            "coverImage": "{{steps.upload.url}}"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 3410
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger-1",
+        "target": "week-1"
+      },
+      {
+        "id": "e2",
+        "source": "week-1",
+        "target": "feeds-1"
+      },
+      {
+        "id": "e3",
+        "source": "feeds-1",
+        "target": "latam-1"
+      },
+      {
+        "id": "e4",
+        "source": "latam-1",
+        "target": "tools-1"
+      },
+      {
+        "id": "e5",
+        "source": "tools-1",
+        "target": "history-1"
+      },
+      {
+        "id": "e6",
+        "source": "history-1",
+        "target": "topics-1"
+      },
+      {
+        "id": "e7",
+        "source": "topics-1",
+        "target": "pick-1"
+      },
+      {
+        "id": "e8",
+        "source": "pick-1",
+        "target": "loop-1"
+      },
+      {
+        "id": "e9",
+        "source": "loop-1",
+        "target": "write-1"
+      },
+      {
+        "id": "e10",
+        "source": "write-1",
+        "target": "commit-write"
+      },
+      {
+        "id": "e11",
+        "source": "commit-write",
+        "target": "humanize-1"
+      },
+      {
+        "id": "e12",
+        "source": "humanize-1",
+        "target": "review-1"
+      },
+      {
+        "id": "e13",
+        "source": "review-1",
+        "target": "commit-review"
+      },
+      {
+        "id": "e14",
+        "source": "commit-review",
+        "target": "apply-1"
+      },
+      {
+        "id": "e15",
+        "source": "apply-1",
+        "target": "lint-1"
+      },
+      {
+        "id": "e16",
+        "source": "lint-1",
+        "target": "render-text"
+      },
+      {
+        "id": "e17",
+        "source": "render-text",
+        "target": "review-page"
+      },
+      {
+        "id": "e18",
+        "source": "review-page",
+        "target": "my-review"
+      },
+      {
+        "id": "e19",
+        "source": "my-review",
+        "target": "find-draft"
+      },
+      {
+        "id": "e20",
+        "source": "find-draft",
+        "target": "save-text"
+      },
+      {
+        "id": "e21",
+        "source": "save-text",
+        "target": "record-1"
+      },
+      {
+        "id": "e22",
+        "source": "record-1",
+        "target": "hero-prompt"
+      },
+      {
+        "id": "e23",
+        "source": "hero-prompt",
+        "target": "imagine-1"
+      },
+      {
+        "id": "e24",
+        "source": "imagine-1",
+        "target": "wait-loop"
+      },
+      {
+        "id": "e25",
+        "source": "wait-loop",
+        "target": "wait-1"
+      },
+      {
+        "id": "e26",
+        "source": "wait-1",
+        "target": "download-1"
+      },
+      {
+        "id": "e27",
+        "source": "download-1",
+        "target": "pick-hero"
+      },
+      {
+        "id": "e28",
+        "source": "pick-hero",
+        "target": "hero-jpeg"
+      },
+      {
+        "id": "e29",
+        "source": "hero-jpeg",
+        "target": "upload-1"
+      },
+      {
+        "id": "e30",
+        "source": "upload-1",
+        "target": "render-final"
+      },
+      {
+        "id": "e31",
+        "source": "render-final",
+        "target": "save-final"
+      }
+    ]
+  }
+]

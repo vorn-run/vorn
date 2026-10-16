@@ -174,3 +174,27 @@ pub fn listed(registry: &Registry<VorndHost>) -> Value {
         .collect();
     serde_json::json!({ "nodes": nodes, "triggers": triggers })
 }
+
+/// The workflows installed extensions ship (`[[contributes.workflows]]`):
+/// each one's extension, id and file text. The built-ins' are seeded with
+/// the database.
+pub fn contributed_workflows(native: &Native) -> Vec<(String, String, String)> {
+    let Some(ext) = native.extensions() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (manifest, dir) in ext.workflow_providers() {
+        let Some(c) = &manifest.contributes else {
+            continue;
+        };
+        for w in c.workflows() {
+            match std::fs::read_to_string(dir.join(&w.file)) {
+                Ok(text) => out.push((manifest.id.clone(), w.base.id.clone(), text)),
+                Err(err) => {
+                    warn!(%err, extension = %manifest.id, file = %w.file, "a shipped workflow cannot be read")
+                }
+            }
+        }
+    }
+    out
+}

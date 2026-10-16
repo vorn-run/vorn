@@ -11,6 +11,7 @@
 //! client; what it no longer does is run any of this.
 
 pub mod db;
+pub mod files;
 pub mod host;
 pub mod routes;
 pub mod schedule;
@@ -75,6 +76,8 @@ pub const METHODS: &[&str] = &[
     "workflow:executionComplete",
     "workflow:describe",
     "workflow:nodeTypes",
+    "workflow:saveToFile",
+    "workflow:files",
     "workflowRun:save",
     "workflowRun:list",
     "workflowRun:listByTask",
@@ -120,6 +123,8 @@ pub struct Work {
     pub(crate) rearm: Notify,
     /// Review batches waiting for their agent's prompt.
     queue: Mutex<Queue>,
+    /// The workflows that are files in a project.
+    pub(crate) files: files::Files,
 }
 
 fn param<'a>(params: &'a Value, key: &str) -> Option<&'a Value> {
@@ -150,6 +155,7 @@ impl Work {
             .parent()
             .map_or_else(|| PathBuf::from("."), PathBuf::from);
         let drain = Arc::new(Notify::new());
+        let workflow_files = files::Files::new(&data_dir);
         let host = VorndHost::new(
             db.clone(),
             data_dir,
@@ -164,6 +170,7 @@ impl Work {
             drain,
             rearm: Notify::new(),
             queue: Mutex::default(),
+            files: workflow_files,
         })
     }
 
@@ -173,10 +180,15 @@ impl Work {
 
     /// Fills the engine's registry from the extensions that are on, and marks
     /// the types of those that are off unavailable.
-    pub fn sync_types(&self) {
+    pub fn sync_types(self: &Arc<Self>) {
         if let Some(native) = self.native.upgrade() {
             types::sync(&native, self.engine.registry());
             self.rearm.notify_one();
+            let shipped = types::contributed_workflows(&native);
+            if !shipped.is_empty() {
+                let work = Arc::clone(self);
+                tokio::spawn(async move { work.seed_contributed(shipped).await });
+            }
         }
     }
 
@@ -188,6 +200,7 @@ impl Work {
         tokio::spawn(Arc::clone(self).listen());
         tokio::spawn(Arc::clone(self).schedule());
         tokio::spawn(Arc::clone(self).deliver_inbox());
+        tokio::spawn(Arc::clone(self).watch_files());
         let work = Arc::clone(self);
         tokio::spawn(async move { work.resume().await });
     }
@@ -431,6 +444,7 @@ impl Work {
                 else {
                     return Answer::Error("workflow:update needs an id and updates".into());
                 };
+                let written = id.clone();
                 let changed = self
                     .db
                     .run(move |s| {
@@ -449,6 +463,7 @@ impl Work {
                     Some(Ok((changed, there))) => {
                         if changed {
                             self.workflows_changed();
+                            self.write_back(&written).await;
                         }
                         Answer::Result(json!({ "ok": there }))
                     }
@@ -460,6 +475,7 @@ impl Work {
                 let Some(id) = text(params, "id") else {
                     return Answer::Error("workflow:delete needs an id".into());
                 };
+                let removed = id.clone();
                 let gone = self
                     .db
                     .run(move |s| {
@@ -475,6 +491,7 @@ impl Work {
                 match gone {
                     Some(Ok(had)) => {
                         if had {
+                            self.forget_file(&removed);
                             self.workflows_changed();
                         }
                         Answer::Result(json!({ "ok": had }))
@@ -485,6 +502,7 @@ impl Work {
             }
             "workflow:setEnabled" => {
                 let id = text(params, "id").unwrap_or_default();
+                let written = id.clone();
                 let enabled = params.get("enabled").cloned().unwrap_or(Value::Null);
                 let changed = self
                     .db
@@ -496,6 +514,7 @@ impl Work {
                 match changed {
                     Some(Ok(n)) if n.as_f64().unwrap_or(0.0) > 0.0 => {
                         self.workflows_changed();
+                        self.write_back(&written).await;
                         Answer::Result(json!({ "ok": true }))
                     }
                     Some(Ok(_)) => Answer::Result(json!({ "ok": false })),
@@ -557,6 +576,22 @@ impl Work {
             }
             "workflow:resolveGate" => self.resolve_gate(params).await,
             "workflow:describe" => Answer::Result(self.engine.registry().describe()),
+            "workflow:saveToFile" => {
+                let (Some(id), Some(project)) = (text(params, "id"), text(params, "projectName"))
+                else {
+                    return Answer::Error(
+                        "workflow:saveToFile needs an id and a projectName".into(),
+                    );
+                };
+                match self.save_to_file(&id, &project).await {
+                    Ok(v) => {
+                        self.workflows_changed();
+                        Answer::Result(v)
+                    }
+                    Err(e) => Answer::Error(e),
+                }
+            }
+            "workflow:files" => Answer::Result(self.files.listed()),
             "workflow:nodeTypes" => Answer::Result(types::listed(self.engine.registry())),
             "workflow:sessionRestored" => {
                 let id = text(params, "sessionId").unwrap_or_default();

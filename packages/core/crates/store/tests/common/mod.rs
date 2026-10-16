@@ -6,8 +6,17 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use vorn_store::{Opened, SeedWorkflow, Store, StoreOptions};
 
-/// The workflows vornd seeds, as it seeds them.
-const SEED_WORKFLOWS: &str = include_str!("../../../vornd/src/serve/seed-workflows.json");
+/// The workflows vornd seeds, as the Workflows built-in ships them: `(flag, file)`.
+const SEED_WORKFLOWS: [(&str, &str); 2] = [
+    (
+        "hasSeededDefaultTaskWorkflow",
+        include_str!("../../../workflows/workflows/default-task.kdl"),
+    ),
+    (
+        "hasSeededDevServerWorkflow",
+        include_str!("../../../workflows/workflows/dev-server.kdl"),
+    ),
+];
 
 /// Seeded workflows' ids, as `default-workflows.ts` named them.
 pub const DEFAULT_TASK_WORKFLOW_ID: &str = "system:default-task-workflow";
@@ -44,17 +53,14 @@ pub fn default_agent_commands() -> Map<String, Value> {
 }
 
 fn seed_workflows() -> Vec<SeedWorkflow> {
-    #[derive(serde::Deserialize)]
-    struct Seed {
-        flag: String,
-        workflow: vorn_protocol::WorkflowDefinition,
-    }
-    let seeds: Vec<Seed> = serde_json::from_str(SEED_WORKFLOWS).expect("seeded workflows parse");
-    seeds
-        .into_iter()
-        .map(|s| SeedWorkflow {
-            flag: s.flag,
-            workflow: s.workflow,
+    SEED_WORKFLOWS
+        .iter()
+        .map(|(flag, text)| {
+            let read = vorn_workflow_file::read(text, &Default::default()).expect("a seed reads");
+            SeedWorkflow {
+                flag: (*flag).to_owned(),
+                workflow: serde_json::from_value(read.workflow).expect("a seed is a workflow"),
+            }
         })
         .collect()
 }

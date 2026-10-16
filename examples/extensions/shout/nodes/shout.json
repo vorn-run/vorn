@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "text": { "type": "string", "description": "What to shout" },
+    "times": { "type": "integer", "minimum": 1, "maximum": 3, "description": "How many times" }
+  },
+  "required": ["text"]
+}
