@@ -211,7 +211,12 @@ impl Work {
                     .get("exitCode")
                     .cloned()
                     .unwrap_or(Value::Null);
-                super::tasks::log_event(&native, &id, "exited", Some(json!({ "exitCode": code })));
+                super::session_log::log_event(
+                    &native,
+                    &id,
+                    "exited",
+                    Some(json!({ "exitCode": code })),
+                );
             }
         }
         match frame["method"].as_str() {

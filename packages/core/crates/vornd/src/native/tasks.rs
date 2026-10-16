@@ -1,5 +1,4 @@
-//! The task board, the projects and the session-event log: `task:*`,
-//! `project:*` and `sessionEvent:*`, read and written in `vorn.db`. A write
+//! The task board: `task:*`, read and written in `vorn.db`. A write
 //! that changes the board tells every client the configuration changed, as
 //! the board reads it from there.
 //!
@@ -36,10 +35,6 @@ pub const METHODS: &[&str] = &[
     "task:imageGetPath",
     "task:imageCleanup",
     "task:imageUpload",
-    "project:list",
-    "project:detectMobile",
-    "sessionEvent:list",
-    "sessionEvent:listBySession",
 ];
 
 fn now_iso() -> String {
@@ -62,15 +57,6 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer
     }
     if method.starts_with("task:image") {
         return images(native, method, &params);
-    }
-    if method == "project:detectMobile" {
-        let path = text(&params, "projectPath");
-        return match tokio::task::spawn_blocking(move || vorn_worktrees::mobile::detect(&path))
-            .await
-        {
-            Ok(found) => Answer::Result(found),
-            Err(err) => Answer::Error(err.to_string()),
-        };
     }
     let n = Arc::clone(native);
     let m = method.to_owned();
@@ -150,37 +136,6 @@ fn call(
         "task:delete" => answered(tasks::delete(store, params)?),
         "task:reorder" => answered(tasks::reorder(store, params, &now)?),
         "task:archive" => answered(tasks::archive(store, params, &now)?),
-        "project:list" => {
-            let config = store.load_config()?;
-            (
-                Some(config.get("projects").cloned().unwrap_or_else(|| json!([]))),
-                false,
-            )
-        }
-        "sessionEvent:list" => {
-            let limit = params
-                .get("limit")
-                .filter(|l| !l.is_null())
-                .cloned()
-                .unwrap_or(json!(100));
-            let kind = params.get("eventType").cloned().unwrap_or(Value::Null);
-            (
-                Some(store.call("listSessionEvents", json!([kind, limit]))?),
-                false,
-            )
-        }
-        "sessionEvent:listBySession" => {
-            let limit = params
-                .get("limit")
-                .filter(|l| !l.is_null())
-                .cloned()
-                .unwrap_or(json!(100));
-            let id = params.get("sessionId").cloned().unwrap_or(Value::Null);
-            (
-                Some(store.call("listSessionEventsBySession", json!([id, limit]))?),
-                false,
-            )
-        }
         _ => (None, false),
     })
 }
@@ -268,25 +223,6 @@ async fn keep_conversation(native: &Weak<Native>, terminal: String, conversation
         Ok(false) => {}
         Err(err) => warn!(%err, "could not keep the conversation on the task"),
     }
-}
-
-/// Logs a session's lifecycle event (`logSessionEvent`): best effort, as the server's was.
-pub fn log_event(native: &Native, session: &str, kind: &str, metadata: Option<Value>) {
-    let Some(db) = native.database().map(std::path::Path::to_path_buf) else {
-        return;
-    };
-    let mut event = json!({ "sessionId": session, "eventType": kind, "timestamp": now_iso() });
-    if let Some(meta) = metadata {
-        event["metadata"] = meta;
-    }
-    std::thread::spawn(move || {
-        let Ok(Some(mut store)) = Store::open_beside(&db) else {
-            return;
-        };
-        if let Err(err) = store.call("insertSessionEvent", json!([event])) {
-            tracing::warn!(%err, "could not log a session event");
-        }
-    });
 }
 
 #[cfg(test)]

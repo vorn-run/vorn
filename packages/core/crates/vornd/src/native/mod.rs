@@ -24,12 +24,14 @@ pub mod headless;
 pub mod hooks;
 pub mod ide;
 pub mod layout;
+pub mod projects;
 pub mod reach;
 pub mod remote;
 pub mod script;
 pub mod secrets;
 #[cfg(feature = "engine")]
 pub mod session_events;
+pub mod session_log;
 pub mod sessions;
 pub mod shell;
 pub mod signin;
@@ -145,6 +147,8 @@ pub enum Route {
     Identify,
     Config,
     Tasks,
+    Projects,
+    SessionLog,
     About,
     Script,
     Credential,
@@ -161,6 +165,8 @@ pub enum Route {
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
     (tasks::METHODS, Route::Tasks),
+    (projects::METHODS, Route::Projects),
+    (session_log::METHODS, Route::SessionLog),
     (about::METHODS, Route::About),
     (&[script::METHOD], Route::Script),
     (credential::METHODS, Route::Credential),
@@ -674,6 +680,8 @@ impl Native {
             }
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
             Some(Route::Tasks) => return tasks::answer(self, &method, params).await,
+            Some(Route::Projects) => return projects::answer(self, &method, params).await,
+            Some(Route::SessionLog) => return session_log::answer(self, &method, params).await,
             Some(Route::About) => return about::answer(self, &method, params).await,
             Some(Route::Script) => return script::execute(self, params).await,
             Some(Route::Credential) => return credential::answer(self, &method, params).await,
@@ -1281,6 +1289,12 @@ mod tests {
         assert_eq!(route("extension:install"), Some(Route::Extensions));
         assert_eq!(route("connector:inboxRenew"), Some(Route::Work));
         assert_eq!(route("browser:readPage"), Some(Route::Desktop));
+        for method in projects::METHODS {
+            assert_eq!(route(method), Some(Route::Projects), "{method}");
+        }
+        for method in session_log::METHODS {
+            assert_eq!(route(method), Some(Route::SessionLog), "{method}");
+        }
         assert_eq!(group_of("git:status"), "git");
         assert_eq!(group_of("ping"), "ping");
     }
