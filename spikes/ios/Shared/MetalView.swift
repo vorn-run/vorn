@@ -49,7 +49,7 @@ final class MetalView: UIView, UITextInput {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let scale = traitCollection.displayScale
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         layer.contentsScale = scale
@@ -66,7 +66,7 @@ final class MetalView: UIView, UITextInput {
     }
 
     private func resize() {
-        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let scale = traitCollection.displayScale
         let s = terminalOnly ? .zero : safeAreaInsets
         let kb = terminalOnly ? 0 : keyboard
         vp_resize(core.handle, Float(bounds.width), Float(bounds.height), Float(scale),

@@ -1,20 +1,17 @@
 import Foundation
 
-/// With `-vornBench 1`, scrolls the list and terminal and types, timing each part the same in both apps.
+/// With `-vornBench 1`, opens a session, scrolls the terminal and types, timing each part.
 final class Bench {
     private let core: Core
     private let label: String
     private let open: (String) -> Void
-    /// Whether the list is drawn and so can be scrolled with synthetic touches.
-    private let drawnList: Bool
     private var results: [String: Any] = [:]
 
     static var wanted: Bool { UserDefaults.standard.bool(forKey: "vornBench") }
 
-    init(core: Core, label: String, drawnList: Bool, open: @escaping (String) -> Void) {
+    init(core: Core, label: String, open: @escaping (String) -> Void) {
         self.core = core
         self.label = label
-        self.drawnList = drawnList
         self.open = open
     }
 
@@ -32,10 +29,6 @@ final class Bench {
             return
         }
         try? await Task.sleep(for: .seconds(1))
-        if drawnList {
-            await drag(from: 620, to: 220)
-            snap("list")
-        }
         open(session)
         try? await Task.sleep(for: .seconds(2))
         await drag(from: 200, to: 600)

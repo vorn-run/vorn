@@ -5,7 +5,7 @@ import SwiftUI
 struct NativeApp: App {
     var body: some Scene {
         WindowGroup {
-            Paired { core in Root(core: core) }
+            Paired { core, forget in Root(core: core, forget: forget) }
                 .preferredColorScheme(.dark)
                 .tint(Palette.ink)
         }
@@ -29,8 +29,10 @@ enum Palette {
 
 struct Root: View {
     @ObservedObject var core: Core
+    let forget: () -> Void
     @State private var sessions: [String] = []
     @State private var settings = false
+    @State private var forgetting = false
 
     var body: some View {
         TabView {
@@ -52,7 +54,16 @@ struct Root: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         .sheet(isPresented: $settings) {
             NavigationStack {
-                Screen(core: core, name: "settings")
+                Screen(core: core, name: "settings", extra: AnyView(
+                    Section {
+                        Button("Forget this computer", role: .destructive) { forgetting = true }
+                            .confirmationDialog("Forget this computer?", isPresented: $forgetting, titleVisibility: .visible) {
+                                Button("Forget", role: .destructive) { settings = false; forget() }
+                            } message: {
+                                Text("You'll need a new pairing code from Settings › Devices to connect again.")
+                            }
+                    }
+                ))
                     .navigationTitle("Settings")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { Button("Done") { settings = false } }
@@ -68,7 +79,7 @@ struct Root: View {
         .onAppear {
             Report.start(core, label: "native")
             if Bench.wanted {
-                Bench(core: core, label: "native", drawnList: false) { sessions = [$0] }.start()
+                Bench(core: core, label: "native") { sessions = [$0] }.start()
             }
         }
     }
@@ -85,12 +96,14 @@ struct Root: View {
 struct Screen: View {
     @ObservedObject var core: Core
     let name: String
+    var extra: AnyView?
 
     var body: some View {
         let _ = core.revision
         let root = core.tree(name)
         List {
             if let root { Rows(core: core, screen: name, nodes: root.kids) }
+            if let extra { extra }
         }
         .listStyle(.insetGrouped)
         .overlay {
@@ -293,7 +306,7 @@ struct SessionScreen: View {
     }
 }
 
-/// The keys a phone keyboard lacks, as on the drawn app's bar.
+/// The keys a phone keyboard lacks.
 struct KeyBar: View {
     let core: Core
     @Binding var ctrl: Bool

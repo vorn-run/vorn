@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Asks for the computer to connect to until one is saved, then shows `content`.
+/// Asks for the computer to connect to until one is saved, then shows `content`, which can forget it.
 struct Paired<Content: View>: View {
     @AppStorage("vornHost") private var host = ""
     @AppStorage("vornToken") private var token = ""
     @State private var core: Core?
-    let content: (Core) -> Content
+    let content: (Core, @escaping () -> Void) -> Content
 
     var body: some View {
         if let core {
-            content(core)
+            content(core) { self.core = nil; host = ""; token = "" }
         } else if host.isEmpty {
             PairForm { h, t in host = h; token = t; core = Core(host: h, token: t) }
         } else {
@@ -82,7 +82,10 @@ struct PairForm: View {
 /// Writes the metrics to Documents/metrics.json and the log every few seconds.
 enum Report {
     static func start(_ core: Core, label: String) {
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in write(core, label: label) }
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak core] timer in
+            guard let core else { return timer.invalidate() }
+            write(core, label: label)
+        }
     }
 
     static func write(_ core: Core, label: String, extra: [String: Any] = [:]) {

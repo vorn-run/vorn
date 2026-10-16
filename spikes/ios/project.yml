@@ -40,13 +40,6 @@ targetTemplates:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
 targets:
-  Drawn:
-    templates: [Phone]
-    sources: [Shared, Drawn]
-    settings:
-      base:
-        PRODUCT_NAME: Vorn Drawn
-        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.drawn
   Native:
     templates: [Phone]
     sources: [Shared, Native]

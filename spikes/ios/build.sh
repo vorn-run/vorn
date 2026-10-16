@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds both apps; PROFILE=<.mobileprovision> signs them and a device id installs them.
+# Builds the app; PROFILE=<.mobileprovision> signs them and a device id installs them.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 core="$here/../../packages/core"
@@ -7,10 +7,8 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 (cd "$core" && IPHONEOS_DEPLOYMENT_TARGET=26.0 nice -n 10 cargo build --profile release -j 3 -p vorn-phone --target aarch64-apple-ios)
 cd "$here"
 xcodegen generate --quiet
-for t in Drawn Native; do
-  nice -n 10 xcodebuild -quiet -project VornPhone.xcodeproj -scheme "$t" -configuration Release \
-    -destination generic/platform=iOS -derivedDataPath build VORN_HOST="${VORN_HOST:-}" build
-done
+nice -n 10 xcodebuild -quiet -project VornPhone.xcodeproj -scheme Native -configuration Release \
+  -destination generic/platform=iOS -derivedDataPath build VORN_HOST="${VORN_HOST:-}" build
 if [ -n "${PROFILE:-}" ]; then
   security cms -D -i "$PROFILE" > build/profile.plist
   /usr/libexec/PlistBuddy -x -c "Print :Entitlements" build/profile.plist > build/entitlements.plist
