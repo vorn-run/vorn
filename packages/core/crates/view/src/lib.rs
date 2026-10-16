@@ -1233,7 +1233,10 @@ impl Parser {
             }
         };
         if by != "id" && self.field_type(Some(rows), &by).is_none() {
-            self.err(&format!("{path}.by"), format!("'{rows}' has no field '{by}'"));
+            self.err(
+                &format!("{path}.by"),
+                format!("'{rows}' has no field '{by}'"),
+            );
             return None;
         }
         let inner = Scope {

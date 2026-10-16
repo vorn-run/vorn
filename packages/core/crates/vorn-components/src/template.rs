@@ -301,12 +301,7 @@ impl Cx<'_> {
                     words(&fill(value), *role)
                 };
                 if *role == TextRole::Number {
-                    div()
-                        .row()
-                        .justify_end()
-                        .w(NUMBER_WIDTH)
-                        .shrink0()
-                        .child(t)
+                    div().row().justify_end().w(NUMBER_WIDTH).shrink0().child(t)
                 } else if *grow {
                     div().grow().min_w0().child(t)
                 } else {

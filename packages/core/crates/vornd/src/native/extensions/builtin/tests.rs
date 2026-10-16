@@ -199,15 +199,26 @@ async fn lists_every_worktree_for_settings() {
         .await
         .unwrap()
         .unwrap();
+    // The main checkout is not one to clean up, so only the worktree is listed.
     let rows = s.router.rows("vorn.worktrees", "worktrees");
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[1]["size"], "2 KB");
+    assert_eq!(rows.len(), 1);
+    let fix = &rows[0];
     assert_eq!(
-        (
-            rows[0]["remove_clean"].clone(),
-            rows[1]["remove_dirty"].clone()
-        ),
-        (json!(false), json!(true))
+        (&fix["name"], &fix["size"], &fix["detail"]),
+        (&json!("fix"), &json!("2 KB"), &json!("dirty"))
+    );
+    assert_eq!(
+        (&fix["project"], &fix["project_path"], &fix["project_size"]),
+        (&json!("p"), &json!("/p"), &json!("2 KB"))
+    );
+    assert_eq!(
+        (&fix["remove_clean"], &fix["remove_dirty"]),
+        (&json!(false), &json!(true))
+    );
+    let scan = s.router.rows("vorn.worktrees", "scan");
+    assert_eq!(
+        (&scan[0]["busy"], &scan[0]["error"]),
+        (&json!(false), &json!(""))
     );
 }
 
