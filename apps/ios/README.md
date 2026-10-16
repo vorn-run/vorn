@@ -32,7 +32,7 @@ A screen is named by a route; the part after the first `:` is its argument.
 
 | Kind | Shows |
 | --- | --- |
-| `list`, `section`, `column`, `row`, `divider` | Structure |
+| `list`, `section`, `column`, `row`, `divider` | Structure; a `section` whose first kid is an `icon` wears it in its header |
 | `bar` | The navigation title, and its buttons in the toolbar |
 | `empty` | An empty state: title, a line saying why, and its buttons |
 | `link` | A row that opens the route in `value`; style `sheet` presents it |
@@ -43,8 +43,9 @@ A screen is named by a route; the part after the first `:` is its argument.
 | `choice`, `option` | A picker; segmented without a label, a menu with one. An option's `text` kid is a line under it |
 | `toggle` | A switch |
 | `field` | A text field, `multiline` or `secret` |
+| `prose`, `key` | A Markdown editor: its `field`, a Write/Preview switch, and its `key` kids in the keyboard bar (`vp_markdown_key` applies one) |
 | `copy` | A button that copies `value` |
-| `text` | Text in a role: `title`, `body`, `secondary`, `mono`, `error` |
+| `text` | Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown` |
 | `icon` | A glyph: `value` is the vornui name (`agent:<key>` for a mark), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
 | `status`, `badge` | Small marks |
 | `drawn` | A drawn vornui view (a terminal) |

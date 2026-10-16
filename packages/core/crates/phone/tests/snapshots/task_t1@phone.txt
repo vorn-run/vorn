@@ -18,6 +18,7 @@ column
     section label="Details"
       row
         text label="Project" style="body"
+        icon value="folder"
         text label="vorn" style="secondary"
       row
         text label="Agent" style="body"
@@ -26,6 +27,6 @@ column
         text label="Branch" style="body"
         text label="feature/my-task" style="secondary"
     section label="Description"
-      text label="It fails on CI." style="body"
+      text label="It fails on CI." style="markdown"
     section label="Runs"
       text label="Loading runs." style="secondary"

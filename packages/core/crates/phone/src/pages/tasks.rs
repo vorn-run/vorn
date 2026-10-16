@@ -142,7 +142,11 @@ pub fn board(cx: &Cx) -> El {
                 None => groups.push((&t.project_name, vec![el])),
             }
         }
-        rows.extend(groups.into_iter().map(|(name, kids)| section(name, kids)));
+        rows.extend(
+            groups.into_iter().map(|(name, kids)| {
+                super::marked_section(name, super::project_mark(cx, name), kids)
+            }),
+        );
     } else {
         rows.extend(shown.iter().map(|t| task_row(cx, t)));
     }
@@ -273,12 +277,15 @@ pub fn scope(cx: &Cx) -> El {
         if !find.is_empty() && !p.to_lowercase().contains(&find) {
             continue;
         }
-        rows.push(cx.option(
-            Id::new("tasks-scope").child(p),
-            &format!("{p} · {n}"),
-            current == Some(p),
-            Do::TasksScope(Some(p.to_owned())),
-        ));
+        rows.push(
+            cx.option(
+                Id::new("tasks-scope").child(p),
+                &format!("{p} · {n}"),
+                current == Some(p),
+                Do::TasksScope(Some(p.to_owned())),
+            )
+            .child(super::project_mark(cx, p)),
+        );
     }
     col(vec![bar("Show tasks from", vec![]), listing(rows)])
 }
@@ -328,7 +335,11 @@ pub fn task(cx: &Cx, id: &str) -> El {
         section(
             "Details",
             vec![
-                detail("Project", &t.project_name),
+                row(vec![
+                    say("Project", "body"),
+                    super::project_mark(cx, &t.project_name),
+                    say(&t.project_name, "secondary"),
+                ]),
                 detail("Agent", &agent),
                 detail("Branch", branch.unwrap_or("feature/my-task")),
             ],
@@ -338,7 +349,7 @@ pub fn task(cx: &Cx, id: &str) -> El {
             vec![if t.description.trim().is_empty() {
                 say("Nothing written yet.", "secondary")
             } else {
-                say(t.description.trim(), "body")
+                say(t.description.trim(), "markdown")
             }],
         ),
     ];
@@ -457,7 +468,7 @@ pub fn new(cx: &Cx) -> El {
             .collect();
     let mut rows = vec![
         cx.field(Id::new(NEW_TITLE), "Title", false),
-        cx.field(Id::new(NEW_BODY), "What needs to be done", true),
+        cx.prose(Id::new(NEW_BODY), "What needs to be done"),
         choice("Project", projects),
         say(
             format!("Goes in {}.", tasks::status(cx.view().column).label),
@@ -519,7 +530,7 @@ pub fn edit(cx: &Cx, id: &str) -> El {
         ),
         listing(vec![
             cx.field(title_id(id), "Untitled", false),
-            cx.field(body_id(id), "Nothing written yet.", true),
+            cx.prose(body_id(id), "Nothing written yet."),
         ]),
     ])
 }

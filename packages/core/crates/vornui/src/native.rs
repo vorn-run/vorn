@@ -59,7 +59,11 @@ pub enum Sem {
     },
     /// A button that puts its text on the clipboard, saying so once it has.
     Copy(String),
-    /// Text in a role: `title`, `body`, `secondary`, `mono`, `error`.
+    /// A field that writes Markdown, its key bar's [`Sem::Key`]s after it.
+    Prose,
+    /// A key on a field's key bar: its label shows, `value` names what it applies.
+    Key(&'static str),
+    /// Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown`.
     Text(&'static str),
     /// A box the platform leaves to the drawn surface (a terminal).
     Drawn(String),
@@ -227,6 +231,15 @@ impl Ui {
                 Sem::Row => Node::of("row"),
                 Sem::List => Node::of("list"),
                 Sem::Divider => Node::of("divider"),
+                Sem::Prose => Node::of("prose"),
+                Sem::Key(key) => {
+                    out.push(Node {
+                        label,
+                        value: (*key).to_owned(),
+                        ..Node::of("key")
+                    });
+                    return;
+                }
                 Sem::More => Node::of("more"),
                 Sem::Choice => Node {
                     label: label.clone(),

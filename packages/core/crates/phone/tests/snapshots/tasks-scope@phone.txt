@@ -4,4 +4,6 @@ column
     field label="Find a project"
     option label="All projects · #" on=true
     option label="site · #" on=false
+      icon value="folder"
     option label="vorn · #" on=false
+      icon value="folder"

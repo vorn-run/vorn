@@ -5,6 +5,9 @@ column
     option label="All sessions · #" on=true
     section label="Projects"
       option label="site · #" on=false
+        icon value="folder"
       option label="vorn · #" on=false
+        icon value="folder"
     section label="Branches"
       option label="main · #" on=false
+        icon value="git-branch"

@@ -3,7 +3,16 @@ column
     button label="Add" style="primary"
   list
     field label="Title"
-    field label="What needs to be done" style="multiline"
+    prose
+      field label="What needs to be done" style="multiline"
+      key label="H#" value="h#"
+      key label="B" value="bold"
+      key label="I" value="italic"
+      key label="</>" value="code"
+      key label="• list" value="bullet"
+      key label="☐ task" value="checkbox"
+      key label="link" value="link"
+      key label="“" value="quote"
     choice label="Project"
       option label="vorn" on=true
       option label="site" on=false

@@ -184,10 +184,10 @@ fn workflows(cx: &Cx) -> El {
         } else {
             w.name.as_str()
         };
-        let mut kids = vec![col(vec![
-            say(name, "title"),
-            say(meta.join(" · "), "secondary"),
-        ])];
+        let mut kids = vec![
+            super::mark(Some(&w.icon), Some(&w.icon_color), "workflow"),
+            col(vec![say(name, "title"), say(meta.join(" · "), "secondary")]),
+        ];
         if let Some(st) = w.last_run_status.as_deref() {
             kids.push(badge(runs::label(st), run_tone(st)));
         }

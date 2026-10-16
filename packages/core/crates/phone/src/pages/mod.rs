@@ -248,6 +248,18 @@ impl Cx<'_> {
         }
     }
 
+    /// A multiline field that writes Markdown, with the keys a phone keyboard lacks.
+    fn prose(&self, id: Id, placeholder: &str) -> El {
+        div()
+            .sem(Sem::Prose)
+            .child(self.field(id, placeholder, true))
+            .children(
+                crate::markdown::KEYS
+                    .iter()
+                    .map(|(label, key)| div().sem(Sem::Key(key)).role(Role::Button, *label)),
+            )
+    }
+
     /// "Show more" under a list cut at its limit.
     fn more(&self, key: &str, shown: usize, total: usize) -> Option<El> {
         (shown < total).then(|| {
@@ -359,6 +371,35 @@ fn filter(id: Id, label: &str, route: String, lit: bool) -> El {
         svg: None,
     });
     present_with(id, label, route, Some(icon))
+}
+
+/// A project's or workflow's mark as the desktop draws it: its stored glyph in its stored colour, else `fallback`.
+fn mark(icon: Option<&str>, color: Option<&str>, fallback: &str) -> El {
+    let glyph = icon.and_then(vorn_app::look::icon_map).unwrap_or(fallback);
+    let hex = color.filter(|c| {
+        c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit())
+    });
+    let svg = hex.and_then(|c| Some(vornui::icons::lucide(glyph, 1.9)?.replace("#ffffff", c)));
+    div().sem(Sem::Icon {
+        name: glyph.to_owned(),
+        tone: "",
+        svg,
+    })
+}
+
+/// The mark of the project called `name`.
+fn project_mark(cx: &Cx, name: &str) -> El {
+    let p = cx.p.model.store.projects.iter().find(|p| p.name == name);
+    mark(
+        p.and_then(|p| p.icon.as_deref()),
+        p.and_then(|p| p.icon_color.as_deref()),
+        "folder",
+    )
+}
+
+/// A section headed by `mark` beside its title.
+fn marked_section(title: &str, mark: El, rows: Vec<El>) -> El {
+    section(title, std::iter::once(mark).chain(rows).collect())
 }
 
 fn icon(name: &str) -> El {

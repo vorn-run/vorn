@@ -231,6 +231,12 @@ struct Rows: View {
             case "section":
                 if (n.label ?? "").isEmpty {
                     Section { Rows(screen: screen, nodes: n.kids) }
+                } else if let mark = n.kids.first, mark.k == "icon" {
+                    Section {
+                        Rows(screen: screen, nodes: Array(n.kids.dropFirst()))
+                    } header: {
+                        HStack(spacing: 6) { VornIcon(mark, ink: .secondary).scaleEffect(0.8); Text(n.label ?? "") }
+                    }
                 } else {
                     Section(n.label ?? "") { Rows(screen: screen, nodes: n.kids) }
                 }
@@ -253,7 +259,7 @@ struct Rows: View {
     }
 
     static func isRow(_ n: Node) -> Bool {
-        ["section", "list", "link", "toggle", "choice", "field", "row", "empty", "option", "button"].contains(n.k)
+        ["section", "list", "link", "toggle", "choice", "field", "prose", "row", "empty", "option", "button"].contains(n.k)
     }
 }
 
@@ -405,6 +411,8 @@ struct Control: View {
             .confirmationDialog(node.confirm ?? "", isPresented: $asking, titleVisibility: .visible) {
                 Button(node.label ?? "OK", role: .destructive) { act(["confirmed": true]) }
             }
+        case "prose":
+            Prose(screen: screen, node: node)
         case "copy":
             Button {
                 UIPasteboard.general.string = node.value
@@ -486,6 +494,7 @@ enum Leaf {
         case "secondary": Text(s).font(.footnote).foregroundStyle(.secondary).lineLimit(row ? 1 : nil)
         case "mono": Text(s).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
         case "error": Text(s).font(.footnote).foregroundStyle(.red)
+        case "markdown": Markdown(source: s)
         default: Text(s).textSelection(.enabled)
         }
     }

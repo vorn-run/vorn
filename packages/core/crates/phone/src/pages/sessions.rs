@@ -183,12 +183,20 @@ pub fn list(cx: &Cx) -> El {
             let limit = cx.view().limit(&key);
             let mut kids: Vec<El> = ss.iter().take(limit).map(|s| session_row(cx, s)).collect();
             kids.extend(cx.more(&key, ss.len().min(limit), ss.len()));
-            let title = if label.is_empty() && cx.view().pick(&SESSION_GROUP) == "project" {
+            let by = cx.view().pick(&SESSION_GROUP);
+            let title = if label.is_empty() && by == "project" {
                 "Other".to_owned()
             } else {
                 label
             };
-            rows.push(section(&title, kids));
+            rows.push(match (by, ss.first()) {
+                ("project" | "worktree", Some(s)) => super::marked_section(
+                    &title,
+                    super::project_mark(cx, &s.info.project_name),
+                    kids,
+                ),
+                _ => section(&title, kids),
+            });
         }
         listing(rows)
     };
@@ -289,12 +297,16 @@ pub fn scope(cx: &Cx) -> El {
             Scope::Project(p) => (&mut projects, ("p", p.clone())),
             Scope::Branch(b) => (&mut branches, ("b", b.clone())),
         };
-        into.push(cx.option(
+        let el = cx.option(
             Id::new("sessions-scope").child(&key),
             &format!("{} · {n}", sc.name()),
             current == Some(&sc),
             Do::SessionsScope(Some(sc.clone())),
-        ));
+        );
+        into.push(match &sc {
+            Scope::Project(p) => el.child(super::project_mark(cx, p)),
+            Scope::Branch(_) => el.child(super::icon("git-branch")),
+        });
     }
     let mut rows = vec![
         cx.field(search, "Find a project or branch", false),

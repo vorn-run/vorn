@@ -449,6 +449,19 @@ pub extern "C" fn vp_native_action(h: *mut Handle, screen: *const c_char, action
     });
 }
 
+/// `key` (see [`crate::markdown::KEYS`]) applied to `text` with chars `start..end` selected: `{"text", "start", "end"}`.
+#[no_mangle]
+pub extern "C" fn vp_markdown_key(
+    text: *const c_char,
+    key: *const c_char,
+    start: u32,
+    end: u32,
+) -> *mut c_char {
+    let (text, start, end) =
+        crate::markdown::key(str_in(text), start as usize, end as usize, str_in(key));
+    str_out(json!({ "text": text, "start": start, "end": end }).to_string())
+}
+
 /// The view options worth keeping across launches, as JSON.
 #[no_mangle]
 pub extern "C" fn vp_prefs(h: *mut Handle) -> *mut c_char {

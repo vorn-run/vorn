@@ -1,6 +1,7 @@
 //! Vorn on a phone: screens a host either draws whole or reads as native views around a drawn terminal.
 
 pub mod ffi;
+pub mod markdown;
 pub mod model;
 pub mod pages;
 pub mod phone;

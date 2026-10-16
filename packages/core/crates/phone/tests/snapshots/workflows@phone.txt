@@ -9,6 +9,7 @@ column
     option label="Review #" on=false
   list
     link value="workflow:w#"
+      icon value="workflow"
       column
         text label="Draft notes" style="title"
         text label="Manual" style="secondary"

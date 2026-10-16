@@ -30,6 +30,7 @@ char *vp_native_tree(VpHandle *h, const char *screen);
 void vp_native_action(VpHandle *h, const char *screen, const char *action_json);
 char *vp_take_go(VpHandle *h);
 char *vp_prefs(VpHandle *h);
+char *vp_markdown_key(const char *text, const char *key, uint32_t start, uint32_t end);
 void vp_set_prefs(VpHandle *h, const char *json);
 
 char *vp_metrics(VpHandle *h);

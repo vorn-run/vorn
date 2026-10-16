@@ -249,6 +249,19 @@ fn sessions_show_each_agents_mark() {
 }
 
 #[test]
+fn a_projects_mark_wears_its_colour() {
+    let mut p = phone(PHONE);
+    p.model.store.projects[0].icon = Some("FolderGit2".into());
+    p.model.store.projects[0].icon_color = Some("#3b82f6".into());
+    let mut ui = Ui::native(&config(3.0));
+    let t = tree(&mut p, &mut ui, "sessions-scope", PHONE);
+    assert!(t
+        .walk()
+        .iter()
+        .any(|n| n.kind == "icon" && n.value == "folder-git-2" && n.label.contains("#3b82f6")));
+}
+
+#[test]
 fn sessions_group_by_status_waiting_first_and_show_requests() {
     let mut p = phone(PHONE);
     let mut ui = Ui::native(&config(3.0));
