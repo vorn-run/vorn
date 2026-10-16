@@ -52,7 +52,7 @@ const PROMPT_NAME_LEN: usize = 60;
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
         // A remote host named runs the agent here, as the server ran it.
-        "headless:create" => match CreateRequest::read(params) {
+        "headless:create" => match CreateRequest::read(params, &native.agents()) {
             Some(req) => create(
                 native,
                 &CreateRequest {
@@ -83,8 +83,8 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
     let Some(settings) = agent::settings(native) else {
         return agent::no_settings();
     };
-    let Some(config) = agent::command_of(&settings, req.agent) else {
-        return agent::unreadable_command(req.agent);
+    let Some(config) = agent::command_of(&settings, &req.agent) else {
+        return agent::unreadable_command(&req.agent);
     };
     let mut holds = Holds::new(native);
     // Held from here until the record is in, so a worktree action in between
@@ -125,10 +125,16 @@ fn prepare(
     let resume = given(req.resume_session_id.as_deref());
     // Pinned before the arguments are built, so a fresh launch carries the
     // id it will resume by.
-    let mut agent_session_id = match req.agent {
-        vorn_agents::Agent::Codex => req.resume_session_id.clone(),
-        _ => None,
-    };
+    // An agent resumed headless by a subcommand runs on the conversation it names.
+    let resumes_by_tail = req
+        .agent
+        .spec()
+        .headless
+        .as_ref()
+        .is_some_and(|h| !h.resume_tail.is_empty());
+    let mut agent_session_id = resumes_by_tail
+        .then(|| req.resume_session_id.clone())
+        .flatten();
     let mut session_id = req.session_id.clone();
     if req.agent.pins_session_ids() {
         agent_session_id = Some(resume.map_or_else(
@@ -141,7 +147,7 @@ fn prepare(
         ));
     }
     let launch = LaunchRequest {
-        agent: req.agent,
+        agent: req.agent.clone(),
         args: req.args.clone(),
         model: req.model.clone(),
         remote_host_id: None,
@@ -256,6 +262,7 @@ fn register(native: &Native, launch: Launch) -> Answer {
         stdin,
     } = launch;
     let id = record.id.clone();
+    let agent_type = record.agent_type.clone();
     let answer = serde_json::to_value(&record).unwrap_or(Value::Null);
     let created = json!({
         "agentType": record.agent_type,
@@ -294,10 +301,11 @@ fn register(native: &Native, launch: Launch) -> Answer {
         output: output_tx,
         ended: ended_tx,
     };
+    let reader = stream_reader(native, &agent_type, &id);
     if let (Some(notifier), Ok(runtime)) =
         (native.notifier(), tokio::runtime::Handle::try_current())
     {
-        runtime.spawn(tell_output(notifier, id.clone(), output));
+        runtime.spawn(tell_output(notifier, id.clone(), output, reader));
     }
     host.start_watched(
         spec,
@@ -336,17 +344,133 @@ async fn tell_output(
     notifier: super::Notifier,
     id: String,
     mut output: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    reader: Option<tokio::sync::mpsc::Sender<String>>,
 ) {
     let mut text = super::script::Utf8::default();
+    let mut lines = String::new();
     while let Some(bytes) = output.recv().await {
         let data = text.push(&bytes);
-        if !data.is_empty() {
-            notifier.tell(
-                "headless:data",
-                json!({ "id": id, "data": data }),
-                Some(&id),
-            );
+        if data.is_empty() {
+            continue;
         }
+        if let Some(reader) = &reader {
+            lines.push_str(&data);
+            while let Some(end) = lines.find('\n') {
+                let line: String = lines.drain(..=end).collect();
+                // A reader that falls behind loses lines rather than holding the output up.
+                let _ = reader.try_send(line.trim_end_matches(['\r', '\n']).to_owned());
+            }
+        }
+        notifier.tell(
+            "headless:data",
+            json!({ "id": id, "data": data }),
+            Some(&id),
+        );
+    }
+}
+
+/// How many lines a headless run's reader holds before it drops new ones.
+const STREAM_BACKLOG: usize = 1024;
+/// The most lines one `agent.stream` call carries.
+const STREAM_BATCH: usize = 256;
+
+/// The reader of headless session `id`'s output, when its agent's adapter
+/// reads its stream with a program (`[agent.headless] stream`).
+fn stream_reader(
+    native: &Native,
+    agent: &str,
+    id: &str,
+) -> Option<tokio::sync::mpsc::Sender<String>> {
+    let adapters = native.adapters();
+    let streams = adapters
+        .get(agent)?
+        .spec()
+        .headless
+        .as_ref()
+        .is_some_and(|h| h.stream);
+    if !streams {
+        return None;
+    }
+    let around = Around {
+        extension: adapters.extension_of(agent)?,
+        extensions: Arc::clone(native.extensions()?),
+        registry: Arc::clone(native.registry.get()?),
+        events: Arc::clone(native.events()),
+    };
+    let runtime = tokio::runtime::Handle::try_current().ok()?;
+    let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BACKLOG);
+    runtime.spawn(read_stream(around, id.to_owned(), rx));
+    Some(tx)
+}
+
+/// What a stream's reader reaches: the program that reads it, and where
+/// what it read goes.
+struct Around {
+    extension: String,
+    extensions: Arc<super::extensions::Extensions>,
+    registry: Arc<crate::registry::SessionRegistry>,
+    events: Arc<vorn_extensions::events::Bus>,
+}
+
+/// Hands what a headless run prints to its adapter's program, a batch of
+/// lines at a time, and takes in what it reads there: the conversation the
+/// run took, and hook events as the agent's hooks would post them.
+async fn read_stream(around: Around, id: String, mut rx: tokio::sync::mpsc::Receiver<String>) {
+    use vorn_extensions::api::types::CallCtx;
+    while let Some(first) = rx.recv().await {
+        let mut lines = vec![first];
+        while lines.len() < STREAM_BATCH {
+            match rx.try_recv() {
+                Ok(line) => lines.push(line),
+                Err(_) => break,
+            }
+        }
+        let ctx = CallCtx {
+            caller: "vornd".to_owned(),
+            project: None,
+        };
+        let args = json!({ "session": id, "lines": lines });
+        let extension = &around.extension;
+        match around
+            .extensions
+            .router()
+            .call(extension, "agent.stream", args, ctx)
+            .await
+        {
+            Ok(read) => took(&around.registry, &around.events, &id, &read),
+            Err(err) => warn!(%extension, %err, "an adapter did not read a headless stream"),
+        }
+    }
+}
+
+/// Applies what an adapter's program read from session `id`'s stream.
+fn took(
+    registry: &crate::registry::SessionRegistry,
+    events: &vorn_extensions::events::Bus,
+    id: &str,
+    read: &Value,
+) {
+    if let Some(conversation) = read
+        .get("conversation")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty())
+    {
+        registry.headless_conversation(id, conversation);
+    }
+    for event in read
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(name) = event.get("event").and_then(Value::as_str) else {
+            continue;
+        };
+        let tool = event.get("tool").and_then(Value::as_str);
+        events.emit(
+            vorn_extensions::events::AGENT_HOOK,
+            || json!({ "sessionId": id, "event": name, "tool": tool }),
+        );
     }
 }
 
@@ -388,7 +512,6 @@ mod tests {
     use super::super::sessions::tests::{fed, Fed};
     use super::*;
     use serde_json::json;
-    use vorn_agents::Agent;
 
     /// A project path that is absolute where the test runs.
     fn project() -> &'static str {
@@ -424,7 +547,8 @@ mod tests {
     #[test]
     fn starts_every_agent_on_pipes_with_its_prompt_on_stdin() {
         let fed = ready();
-        for agent in Agent::ALL {
+        let agents = fed.native.agents();
+        for agent in agents.iter() {
             let params = request(
                 agent.id(),
                 json!({ "origin": { "extension": "vorn.workflows", "id": "wf", "label": "w" } }),
@@ -469,14 +593,14 @@ mod tests {
         }
         assert_eq!(
             fed.registry.read(|r| r.headless().count()),
-            Some(Agent::ALL.len())
+            Some(agents.len())
         );
     }
 
     #[test]
     fn an_agent_without_a_prompt_has_its_stdin_closed_at_once() {
         let fed = ready();
-        let params = json!({ "agentType": "claude", "projectName": "p", "projectPath": project() });
+        let params = json!({ "agentType": "acme", "projectName": "p", "projectPath": project() });
         let Answer::Result(record) = call(&fed.native, "headless:create", &params) else {
             panic!("not started");
         };
@@ -492,12 +616,49 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn takes_the_conversation_and_hook_events_an_adapter_read() {
+        use vorn_extensions::events::{Owner, Queue};
+        let fed = ready();
+        let Answer::Result(record) =
+            call(&fed.native, "headless:create", &request("gamma", json!({})))
+        else {
+            panic!("not started");
+        };
+        let id = record["id"].as_str().unwrap().to_owned();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        fed.native.events().subscribe_with(
+            Owner::Core("test".into()),
+            &[vorn_extensions::events::AGENT_HOOK.to_owned()],
+            Queue { tx, tally: None },
+        );
+        let read = json!({ "conversation": "conv-1", "events": [{ "event": "PreToolUse", "tool": "edit" }, { "nope": 1 }] });
+        took(&fed.registry, fed.native.events(), &id, &read);
+        assert_eq!(
+            fed.registry
+                .read(|r| r
+                    .headless_record(&id)
+                    .and_then(|h| h.agent_session_id.clone()))
+                .flatten()
+                .as_deref(),
+            Some("conv-1")
+        );
+        let event = rx.recv().await.unwrap();
+        assert_eq!(
+            event.data,
+            json!({ "sessionId": id, "event": "PreToolUse", "tool": "edit" })
+        );
+        assert!(rx.try_recv().is_err());
+        // An adapter that does not read streams gets no reader.
+        assert!(stream_reader(&fed.native, "gamma", &id).is_none());
+    }
+
     #[test]
     fn tells_the_start_and_the_failure_as_native_notes() {
         let fed = ready();
         let mut notes = fed.registry.subscribe();
         let Answer::Result(record) =
-            call(&fed.native, "headless:create", &request("codex", json!({})))
+            call(&fed.native, "headless:create", &request("beta", json!({})))
         else {
             panic!("not started");
         };
@@ -516,11 +677,7 @@ mod tests {
             Some(Some(77))
         );
 
-        call(
-            &fed.native,
-            "headless:create",
-            &request("gemini", json!({})),
-        );
+        call(&fed.native, "headless:create", &request("gamma", json!({})));
         notes.try_recv().unwrap();
         fed.host.down("no such program");
         let failed = notes.try_recv().unwrap();
@@ -532,11 +689,9 @@ mod tests {
     #[test]
     fn stops_an_agent_with_term_then_kill_and_one_still_starting_once_it_is_up() {
         let fed = ready();
-        let Answer::Result(record) = call(
-            &fed.native,
-            "headless:create",
-            &request("claude", json!({})),
-        ) else {
+        let Answer::Result(record) =
+            call(&fed.native, "headless:create", &request("acme", json!({})))
+        else {
             panic!("not started");
         };
         let id = record["id"].as_str().unwrap().to_owned();
@@ -586,10 +741,7 @@ mod tests {
             &fed.native,
             "headless:create",
             // A remote project is a POSIX path whatever this host is.
-            &request(
-                "claude",
-                json!({ "remoteHostId": "h", "projectPath": "/p" }),
-            ),
+            &request("acme", json!({ "remoteHostId": "h", "projectPath": "/p" })),
         );
         assert!(matches!(made, Answer::Result(_)), "{made:?}");
         assert_eq!(fed.host.starts.lock().unwrap().len(), 1);

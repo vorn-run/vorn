@@ -103,9 +103,10 @@ impl fmt::Display for RuleError {
 
 impl std::error::Error for RuleError {}
 
+/// Whether a rule wants the cursor shown or hidden.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum CursorWant {
+pub enum CursorWant {
     Visible,
     Hidden,
 }
@@ -185,23 +186,29 @@ pub struct Rules {
 struct RawFile {
     agent: String,
     #[serde(default, rename = "rule")]
-    rules: Vec<RawRule>,
+    rules: Vec<RuleSpec>,
 }
 
-#[derive(Deserialize)]
+/// One rule as written, in a rule file's `[[rule]]` or an agent adapter's
+/// `[[agent.status]]`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawRule {
-    status: ScreenStatus,
-    rows: Option<[i32; 2]>,
-    cursor_rows: Option<[i32; 2]>,
+pub struct RuleSpec {
+    pub status: ScreenStatus,
     #[serde(default)]
-    any: Vec<String>,
+    pub rows: Option<[i32; 2]>,
     #[serde(default)]
-    all: Vec<String>,
+    pub cursor_rows: Option<[i32; 2]>,
     #[serde(default)]
-    none: Vec<String>,
-    cursor: Option<CursorWant>,
-    title: Option<String>,
+    pub any: Vec<String>,
+    #[serde(default)]
+    pub all: Vec<String>,
+    #[serde(default)]
+    pub none: Vec<String>,
+    #[serde(default)]
+    pub cursor: Option<CursorWant>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 fn compile(n: usize, patterns: &[String]) -> Result<Vec<Regex>, RuleError> {
@@ -215,12 +222,17 @@ impl Rules {
     /// Reads a rule file.
     pub fn parse(toml_text: &str) -> Result<Rules, RuleError> {
         let raw: RawFile = toml::from_str(toml_text).map_err(|e| RuleError(e.to_string()))?;
-        if raw.rules.is_empty() {
-            return Err(RuleError(format!("{}: no rules", raw.agent)));
+        Rules::new(&raw.agent, &raw.rules)
+    }
+
+    /// Compiles `specs` for `agent`, in their order.
+    pub fn new(agent: &str, specs: &[RuleSpec]) -> Result<Rules, RuleError> {
+        if specs.is_empty() {
+            return Err(RuleError(format!("{agent}: no rules")));
         }
-        let rules = raw
-            .rules
-            .into_iter()
+        let rules = specs
+            .iter()
+            .cloned()
             .enumerate()
             .map(|(i, r)| {
                 let n = i + 1;
@@ -256,7 +268,7 @@ impl Rules {
             })
             .collect::<Result<_, _>>()?;
         Ok(Rules {
-            agent: raw.agent,
+            agent: agent.to_owned(),
             rules,
         })
     }

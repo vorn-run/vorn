@@ -22,6 +22,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 
+use crate::spec::{At, ID, PROMPT};
 use crate::{js, paths, Agent, AgentCommand};
 
 pub mod env;
@@ -181,21 +182,23 @@ fn given(value: &Option<String>) -> Option<&str> {
 /// Why a launch cannot be built. Each reads as the server's message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchError {
-    /// A model was asked of an agent that has no model choice.
-    ModelUnsupported(Agent),
+    /// A model was asked of an agent that has no model choice; its id.
+    ModelUnsupported(String),
     /// The model id is empty, dash-led, or has spaces or control characters.
     ModelId,
     /// A model flag in the arguments has no value.
     IncompleteModelFlag,
     /// A model was asked with a command that is a wrapper.
     Wrapper,
+    /// The agent's adapter says nothing of running it headless; its id.
+    NoHeadless(String),
 }
 
 impl fmt::Display for LaunchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LaunchError::ModelUnsupported(agent) => {
-                write!(f, "Model selection is not supported for {}.", agent.id())
+                write!(f, "Model selection is not supported for {agent}.")
             }
             LaunchError::ModelId => f.write_str(
                 "Enter a model id without spaces, control characters, or a leading dash.",
@@ -206,6 +209,7 @@ impl fmt::Display for LaunchError {
             LaunchError::Wrapper => f.write_str(
                 "A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default.",
             ),
+            LaunchError::NoHeadless(agent) => write!(f, "{agent} cannot run headless."),
         }
     }
 }
@@ -296,7 +300,7 @@ fn with_model(
         None => Ok(args.to_vec()),
         Some(model) => {
             model::check_model_command(command, !req.remote())?;
-            apply_model_arguments(req.agent, args, model)
+            apply_model_arguments(&req.agent, args, model)
         }
     }
 }
@@ -327,7 +331,7 @@ pub fn launch_line(
         machine.quoting
     };
     let args = with_model(req, cmd.command, req.args.as_deref().unwrap_or(cmd.args))?;
-    // Only a path with spaces that names one file is quoted: `~/bin/claude`
+    // Only a path with spaces that names one file is quoted: `~/bin/agent`
     // keeps its expansion, and a wrapper is read as written.
     let command_line = if cmd.command.chars().any(js::is_space)
         && command_shape(cmd.command, !remote) == CommandShape::Executable
@@ -345,8 +349,9 @@ pub fn launch_line(
     // just composed here.
     let args_from = command_line.len();
 
-    let agent = req.agent;
-    let resume = given(&req.resume_session_id).filter(|_| agent.resumes_exactly());
+    let agent = &req.agent;
+    let resume_spec = agent.spec().resume.as_ref();
+    let resume = given(&req.resume_session_id).filter(|_| resume_spec.is_some());
     let pin = given(&req.session_id)
         .filter(|_| given(&req.resume_session_id).is_none() && agent.pins_session_ids());
 
@@ -356,14 +361,11 @@ pub fn launch_line(
         line = strip_session_selectors(&line, agent, args_from);
     }
 
-    if let Some(id) = resume {
-        let id = quoting.quote(id);
-        match agent {
-            Agent::Claude | Agent::Copilot => {
-                line.push_str(" --resume ");
-                line.push_str(&id);
-            }
-            Agent::Codex => {
+    if let (Some(id), Some(spec)) = (resume, resume_spec) {
+        let words = words(&spec.args, ID, id, quoting);
+        match spec.at {
+            At::End => line.push_str(&words),
+            At::Start => {
                 // Spliced in as the first argument, keeping every configured
                 // one. The line may have lost blanks at the splice point, so
                 // the cut is clamped to it.
@@ -371,32 +373,40 @@ pub fn launch_line(
                 while !line.is_char_boundary(at) {
                     at -= 1;
                 }
-                line.insert_str(at, &format!(" resume {id}"));
+                line.insert_str(at, &words);
             }
-            Agent::OpenCode => {
-                line.push_str(" --session ");
-                line.push_str(&id);
-            }
-            Agent::Gemini => {}
         }
     }
 
-    if let Some(id) = pin {
-        line.push_str(" --session-id ");
-        line.push_str(&quoting.quote(id));
+    if let (Some(id), Some(spec)) = (pin, resume_spec) {
+        line.push_str(&words(&spec.pin, ID, id, quoting));
     }
 
     if let Some(prompt) = given(&req.initial_prompt) {
-        let prompt = quoting.quote(prompt);
-        match agent {
-            Agent::Copilot | Agent::Gemini => line.push_str(" -i "),
-            Agent::OpenCode => line.push_str(" --prompt "),
-            Agent::Claude | Agent::Codex => line.push(' '),
-        }
-        line.push_str(&prompt);
+        line.push_str(&words(&agent.spec().launch.prompt, PROMPT, prompt, quoting));
     }
 
     Ok(line)
+}
+
+/// `template` as words for the line, each after a space: `placeholder`
+/// becomes `value`, and every word is quoted for the shell.
+fn words(template: &[String], placeholder: &str, value: &str, quoting: Quoting) -> String {
+    let mut out = String::new();
+    for word in template {
+        out.push(' ');
+        let word = if word == placeholder { value } else { word };
+        out.push_str(&quoting.quote(word));
+    }
+    out
+}
+
+/// `template` as arguments: `placeholder` becomes `value`.
+fn filled(template: &[String], placeholder: &str, value: &str) -> Vec<String> {
+    template
+        .iter()
+        .map(|w| if w == placeholder { value } else { w }.to_owned())
+        .collect()
 }
 
 /// A headless agent's process (`HeadlessSpawnArgs`).
@@ -435,22 +445,31 @@ pub fn headless_spawn(
         .or(config.headless_args.as_deref())
         .unwrap_or(cmd.args);
     let mut args = with_model(req, cmd.command, base)?;
-    let agent = req.agent;
+    let agent = &req.agent;
+    let spec = agent.spec();
+    let Some(headless) = &spec.headless else {
+        return Err(LaunchError::NoHeadless(agent.id().to_owned()));
+    };
     let resume = given(&req.resume_session_id);
 
     match (resume, given(&req.session_id)) {
-        (Some(id), _) if matches!(agent, Agent::Claude | Agent::Copilot) => {
-            args.extend(["--resume".to_owned(), id.to_owned()]);
+        (Some(id), _) if !headless.resume.is_empty() => {
+            args.extend(filled(&headless.resume, ID, id));
         }
         (_, Some(id)) if agent.pins_session_ids() => {
-            args.extend(["--session-id".to_owned(), id.to_owned()]);
+            let pin = spec
+                .resume
+                .as_ref()
+                .map(|r| r.pin.as_slice())
+                .unwrap_or_default();
+            args.extend(filled(pin, ID, id));
         }
         _ => {}
     }
 
     let prompt = given(&req.initial_prompt);
-    let spawn = |mut args: Vec<String>, tail: &[&str], stdin: Option<&str>| {
-        args.extend(tail.iter().map(|s| (*s).to_owned()));
+    let spawn = |mut args: Vec<String>, tail: Vec<String>, stdin: Option<&str>| {
+        args.extend(tail);
         HeadlessSpawn {
             command: cmd.path.clone(),
             args,
@@ -459,19 +478,13 @@ pub fn headless_spawn(
     };
     // Each agent reads its prompt from stdin when none is on its command
     // line; with no prompt it is given an empty one so it does not wait there.
-    if let (Agent::Codex, Some(id)) = (agent, resume) {
-        let tail = ["exec", "resume", id, "-"];
-        return Ok(spawn(args, &tail, Some(prompt.unwrap_or(""))));
+    if let (false, Some(id)) = (headless.resume_tail.is_empty(), resume) {
+        let tail = filled(&headless.resume_tail, ID, id);
+        return Ok(spawn(args, tail, Some(prompt.unwrap_or(""))));
     }
-    Ok(match (agent, prompt) {
-        (Agent::Claude, Some(p)) => spawn(args, &["-p"], Some(p)),
-        (Agent::Claude, None) => spawn(args, &["-p", ""], None),
-        (Agent::Codex, Some(p)) => spawn(args, &["exec"], Some(p)),
-        (Agent::Codex, None) => spawn(args, &["exec", ""], None),
-        (Agent::OpenCode, Some(p)) => spawn(args, &["run"], Some(p)),
-        (Agent::OpenCode, None) => spawn(args, &["run", ""], None),
-        (Agent::Copilot | Agent::Gemini, Some(p)) => spawn(args, &[], Some(p)),
-        (Agent::Copilot | Agent::Gemini, None) => spawn(args, &["-p", ""], None),
+    Ok(match prompt {
+        Some(p) => spawn(args, headless.prompt.clone(), Some(p)),
+        None => spawn(args, headless.no_prompt.clone(), None),
     })
 }
 
@@ -563,18 +576,32 @@ mod tests {
     }
 
     #[test]
-    fn splices_codex_resume_where_blanks_were_taken() {
-        let mut req = LaunchRequest::new(Agent::Codex);
+    fn splices_a_resume_subcommand_where_blanks_were_taken() {
+        let agent = crate::testing::agent(
+            "[agent]\nid = \"sub\"\nname = \"S\"\n[agent.launch]\ncommand = \"sub\"\n\
+             [agent.resume]\nargs = [\"resume\", \"{id}\"]\nat = \"start\"\n\
+             selectors = { subcommand = \"resume\" }\n",
+        );
+        let mut req = LaunchRequest::new(agent.clone());
         req.resume_session_id = Some("id".into());
         // The configured resume and its blanks go, taking the line to before
         // where the command ended.
         let config = AgentCommand {
-            command: "npx codex  ".into(),
+            command: "npx sub  ".into(),
             args: vec!["resume".into(), "old".into()],
-            ..Agent::Codex.default_command()
+            ..agent.default_command()
         };
         let line = launch_line(&req, Some(&config), &[], &POSIX).unwrap();
-        assert_eq!(line, "npx codex resume id");
+        assert_eq!(line, "npx sub resume id");
+    }
+
+    #[test]
+    fn an_agent_without_headless_words_cannot_run_headless() {
+        let req = LaunchRequest::new(crate::testing::bare("plain"));
+        assert_eq!(
+            headless_spawn(&req, None, &[], &POSIX),
+            Err(LaunchError::NoHeadless("plain".into()))
+        );
     }
 
     #[test]

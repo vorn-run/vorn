@@ -5,7 +5,7 @@
 
 use serde_json::{Map, Value};
 
-/// The header Claude's hook fills with the terminal's id (`VORN_SESSION_ID`).
+/// The header an HTTP hook fills with the terminal's id (`VORN_SESSION_ID`).
 pub const TERMINAL_HEADER: &str = "x-vorn-terminal";
 
 /// A posted event whose name, conversation and directory are there.
@@ -45,7 +45,7 @@ impl Event {
             };
             return Err(Malformed(format!("not an object ({kind})")));
         };
-        // An empty cwd is a Copilot event's, which is linked without one.
+        // An empty cwd is a hooks file's event, which is linked without one.
         let has_cwd = map.get("cwd").is_some_and(Value::is_string);
         if !nonempty(&map, "hook_event_name") || !nonempty(&map, "session_id") || !has_cwd {
             let mut missing: Vec<&str> = ["hook_event_name", "session_id"]

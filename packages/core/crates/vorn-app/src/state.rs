@@ -699,8 +699,8 @@ mod tests {
 
     #[test]
     fn recent_entries_need_an_id() {
-        let r = Recent::from_value(&json!({ "sessionId": "s", "agentType": "claude" }));
-        assert_eq!(r.map(|r| r.agent), Some("claude".to_owned()));
-        assert!(Recent::from_value(&json!({ "agentType": "claude" })).is_none());
+        let r = Recent::from_value(&json!({ "sessionId": "s", "agentType": "acme" }));
+        assert_eq!(r.map(|r| r.agent), Some("acme".to_owned()));
+        assert!(Recent::from_value(&json!({ "agentType": "acme" })).is_none());
     }
 }

@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use super::data::{self, Update};
-use super::{failed, object, pretty, text, Args, Cx, Outcome};
+use super::{agents_off, failed, items, object, pretty, text, Args, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
 
@@ -23,7 +23,18 @@ pub async fn list_projects<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     Ok(pretty(&Value::Array(projects)))
 }
 
+/// The agent ids a project names as preferred.
+fn preferred(args: &Args) -> Vec<&str> {
+    items(args.get("preferred_agents"))
+        .iter()
+        .filter_map(Value::as_str)
+        .collect()
+}
+
 pub async fn create_project<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    if let Some(off) = agents_off(cx, &preferred(args)).await {
+        return Ok(off);
+    }
     let name = args.str("name").unwrap_or_default();
     if data::find(cx, "projects", "name", name).await?.is_some() {
         return Ok(failed(format!("Error: project \"{name}\" already exists")));
@@ -47,6 +58,9 @@ pub async fn create_project<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 }
 
 pub async fn update_project<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    if let Some(off) = agents_off(cx, &preferred(args)).await {
+        return Ok(off);
+    }
     let name = args.str("name").unwrap_or_default();
     if data::find(cx, "projects", "name", name).await?.is_none() {
         return Ok(failed(format!("Error: project \"{name}\" not found")));

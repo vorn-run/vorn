@@ -1,7 +1,7 @@
-//! What a session's agent has spent, read from the conversation it writes.
-//!
-//! Only Claude Code publishes one where it can be found: under
-//! `~/.claude/projects/<its cwd with every other character a dash>/<id>.jsonl`.
+//! What a session's agent has spent, read from the conversation it writes,
+//! where its adapter's `[agent.usage]` says: a JSON-lines transcript under a
+//! directory named for the session's cwd, each character but letters and
+//! digits a dash.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::Value;
+use vorn_agents::spec::{at, Places, Usage as Spec};
 
 /// Read from the end, so a long conversation costs no more than its last turns.
 const TAIL_BYTES: u64 = 256 * 1024;
@@ -50,7 +51,7 @@ fn transcript_dir(cwd: &str) -> String {
         .collect()
 }
 
-fn transcript(of: Conversation<'_>, home: &Path) -> Option<PathBuf> {
+fn transcript(of: Conversation<'_>, spec: &Spec, places: &Places) -> Option<PathBuf> {
     let id = of.agent_session_id?;
     let named = !id.is_empty()
         && id
@@ -64,10 +65,12 @@ fn transcript(of: Conversation<'_>, home: &Path) -> Option<PathBuf> {
         .flatten()
         .filter(|cwd| !cwd.is_empty())
         .map(|cwd| {
-            home.join(".claude")
-                .join("projects")
-                .join(transcript_dir(cwd))
-                .join(format!("{id}.jsonl"))
+            places.path(
+                &spec
+                    .transcript
+                    .replace("{cwd}", &transcript_dir(cwd))
+                    .replace("{id}", id),
+            )
         })
         .find(|path| path.exists())
 }
@@ -82,24 +85,24 @@ fn read_tail(path: &Path) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-fn last_usage(contents: &str) -> Option<serde_json::Map<String, Value>> {
+fn last_usage(contents: &str, path: &str) -> Option<serde_json::Map<String, Value>> {
     contents.split('\n').rev().find_map(|line| {
         let parsed: Value = serde_json::from_str(line.trim()).ok()?;
-        parsed.get("message")?.get("usage")?.as_object().cloned()
+        at(&parsed, path)?.as_object().cloned()
     })
 }
 
-/// The newest turn's usage in `of`'s conversation under `home`.
-pub fn usage_for(of: Conversation<'_>, home: &Path) -> Usage {
-    let Some(usage) = transcript(of, home)
+/// The newest turn's usage in `of`'s conversation, read where `spec` says.
+pub fn usage_for(of: Conversation<'_>, spec: &Spec, places: &Places) -> Usage {
+    let Some(usage) = transcript(of, spec, places)
         .and_then(|path| read_tail(&path).ok())
-        .and_then(|text| last_usage(&text))
+        .and_then(|text| last_usage(&text, &spec.at))
     else {
         return Usage::default();
     };
     let count = |name: &str| usage.get(name).and_then(Value::as_f64).unwrap_or(0.0);
-    let cache_read = count("cache_read_input_tokens");
-    let context = count("input_tokens") + count("cache_creation_input_tokens") + cache_read;
+    let cache_read = count(&spec.cached);
+    let context: f64 = spec.context.iter().map(|n| count(n)).sum();
     if context == 0.0 {
         return Usage::default();
     }
@@ -114,8 +117,29 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn spec() -> Spec {
+        Spec {
+            transcript: "~/.agent/projects/{cwd}/{id}.jsonl".into(),
+            at: "message.usage".into(),
+            context: vec![
+                "input_tokens".into(),
+                "cache_creation_input_tokens".into(),
+                "cache_read_input_tokens".into(),
+            ],
+            cached: "cache_read_input_tokens".into(),
+        }
+    }
+
+    fn read(of: Conversation<'_>, home: &Path) -> Usage {
+        let places = Places {
+            home: home.to_path_buf(),
+            data: home.join("data"),
+        };
+        usage_for(of, &spec(), &places)
+    }
+
     fn write(home: &Path, cwd: &str, id: &str, lines: &[&str]) {
-        let dir = home.join(".claude/projects").join(transcript_dir(cwd));
+        let dir = home.join(".agent/projects").join(transcript_dir(cwd));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(format!("{id}.jsonl")), lines.join("\n")).unwrap();
     }
@@ -142,7 +166,7 @@ mod tests {
                 r#"{"half"#,
             ],
         );
-        let u = usage_for(of("abc", None), home.path());
+        let u = read(of("abc", None), home.path());
         assert_eq!(u.context_tokens, Some(100.0));
         assert_eq!(u.cache_hit_rate, Some(0.6));
         assert_eq!(serde_json::to_value(&u).unwrap()["contextTokens"], 100.0);
@@ -164,7 +188,7 @@ mod tests {
             &[r#"{"message":{"usage":{"input_tokens":2}}}"#],
         );
         assert_eq!(
-            usage_for(of("a", Some("/w")), home.path()).context_tokens,
+            read(of("a", Some("/w")), home.path()).context_tokens,
             Some(2.0)
         );
     }
@@ -178,22 +202,19 @@ mod tests {
             "z",
             &[r#"{"message":{"usage":{"input_tokens":0}}}"#],
         );
-        assert_eq!(usage_for(of("z", None), home.path()), Usage::default());
-        assert_eq!(usage_for(of("../z", None), home.path()), Usage::default());
-        assert_eq!(
-            usage_for(of("missing", None), home.path()),
-            Usage::default()
-        );
+        assert_eq!(read(of("z", None), home.path()), Usage::default());
+        assert_eq!(read(of("../z", None), home.path()), Usage::default());
+        assert_eq!(read(of("missing", None), home.path()), Usage::default());
         let none = Conversation {
             agent_session_id: None,
             worktree: None,
             project: "/p",
         };
-        assert_eq!(usage_for(none, home.path()), Usage::default());
+        assert_eq!(read(none, home.path()), Usage::default());
     }
 
     #[test]
-    fn names_the_directory_as_claude_code_does() {
+    fn names_the_directory_with_dashes_for_all_but_letters_and_digits() {
         assert_eq!(transcript_dir("/Users/a.b/x😀"), "-Users-a-b-x--");
     }
 }

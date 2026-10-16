@@ -65,6 +65,7 @@ mod tests {
 
     #[test]
     fn offers_the_handlers_whose_pattern_matches() {
+        crate::testing::agents();
         let root = tempfile::tempdir().unwrap();
         install(
             root.path(),
@@ -72,13 +73,13 @@ mod tests {
             "1.0.0",
             &json!({ "id": "jira", "name": "Jira", "kind": "extension", "contributes": { "linkHandlers": [
                 { "id": "issue", "title": "Open issue", "pattern": "\\b[A-Z]+-\\d+\\b" },
-                { "id": "codex", "pattern": "x", "when": { "agent": ["codex"] } }
+                { "id": "beta", "pattern": "x", "when": { "agent": ["beta"] } }
             ] } }),
         );
         let packs = PackStore::new(root.path()).extensions();
         let subject = Subject {
             worktree: Path::new("/"),
-            agent: "claude",
+            agent: "alpha",
             platform: "linux",
             remote_host: None,
         };

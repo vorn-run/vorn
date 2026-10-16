@@ -16,4 +16,7 @@ vorn-protocol = { path = "../protocol" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# The recorded answers name the agents Vorn ships; their ids and defaults come from the adapters.
+vorn-adapters = { path = "../adapters" }
+vorn-agents = { path = "../agents" }
 tempfile = "3"

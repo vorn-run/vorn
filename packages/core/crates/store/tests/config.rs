@@ -268,7 +268,7 @@ mod session_groups {
 
     fn session(id: &str, group: Option<&str>) -> Value {
         let mut session = json!({
-            "id": id, "agentType": "claude", "projectName": "vorn",
+            "id": id, "agentType": "acme", "projectName": "vorn",
             "projectPath": "/tmp/vorn", "status": "idle", "createdAt": 1, "pid": 1
         });
         if let Some(group) = group {
@@ -373,16 +373,17 @@ mod headless_args {
     #[test]
     fn headless_args_are_saved_and_loaded() {
         let mut store = memory();
+        let first = common::agent(0);
         save_config(
             &mut store,
             make_config(|c| {
-                c["claude"]["headlessArgs"] =
+                c[first.as_str()]["headlessArgs"] =
                     json!(["--dangerously-skip-permissions", "--verbose"]);
             }),
             &[],
         );
         assert_eq!(
-            load_config(&mut store)["agentCommands"]["claude"]["headlessArgs"],
+            load_config(&mut store)["agentCommands"][first.as_str()]["headlessArgs"],
             json!(["--dangerously-skip-permissions", "--verbose"])
         );
     }
@@ -390,15 +391,16 @@ mod headless_args {
     #[test]
     fn headless_args_load_as_absent_when_not_set() {
         let mut store = memory();
+        let bare = common::agent(3);
         save_config(
             &mut store,
             make_config(|c| {
-                c["opencode"] = json!({ "command": "opencode", "args": [] });
+                c[bare.as_str()] = json!({ "command": bare, "args": [] });
             }),
             &[],
         );
         assert!(lacks(
-            &load_config(&mut store)["agentCommands"]["opencode"],
+            &load_config(&mut store)["agentCommands"][bare.as_str()],
             "headlessArgs"
         ));
     }
@@ -409,18 +411,19 @@ mod headless_args {
         save_config(&mut store, make_config(|_| {}), &[]);
 
         let mut loaded = load_config(&mut store);
-        let mut gemini = default_agent_commands()["gemini"].clone();
-        gemini["headlessArgs"] = json!(["-y", "--no-confirm"]);
-        loaded["agentCommands"]["gemini"] = gemini;
+        let (first, last) = (common::agent(0), common::agent(4));
+        let mut changed = default_agent_commands()[last.as_str()].clone();
+        changed["headlessArgs"] = json!(["-y", "--no-confirm"]);
+        loaded["agentCommands"][last.as_str()] = changed;
         save_config(&mut store, loaded, &[]);
 
         let reloaded = load_config(&mut store);
         assert_eq!(
-            reloaded["agentCommands"]["gemini"]["headlessArgs"],
+            reloaded["agentCommands"][last.as_str()]["headlessArgs"],
             json!(["-y", "--no-confirm"])
         );
         assert_eq!(
-            reloaded["agentCommands"]["claude"]["headlessArgs"],
+            reloaded["agentCommands"][first.as_str()]["headlessArgs"],
             json!(["--dangerously-skip-permissions"])
         );
     }

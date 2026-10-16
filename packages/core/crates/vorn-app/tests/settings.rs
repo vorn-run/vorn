@@ -245,11 +245,14 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         (!app.st.settings.detecting).then_some(())
     });
     assert_eq!(app.st.installed.clone().unwrap_or_default(), first);
-    if let Some(agent) = vorn_app::settings::AGENTS
+    if let Some(agent) = app
+        .store
+        .agents
         .iter()
-        .find(|a| first.iter().any(|k| k == a.key))
+        .find(|a| first.contains(&a.key))
+        .cloned()
     {
-        let id = vorn_app::screen::settings::agent_field_id(agent.key, AgentField::Args);
+        let id = vorn_app::screen::settings::agent_field_id(&agent.key, AgentField::Args);
         shot.click(&mut app, id);
         shot.type_text(&mut app, "--verbose");
         let k = agent.key;

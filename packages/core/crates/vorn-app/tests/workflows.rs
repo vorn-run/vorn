@@ -639,7 +639,7 @@ fn shapes(web: &std::path::Path) -> Value {
             n("l", "loop", "Each item", json!({ "nodeType": "loop", "mode": "forEach", "items": "{{steps.a.output}}", "bodyNodeIds": ["b1"], "maxIterations": 3 })),
             n("b1", "script", "Per item", sc("echo item")),
             n("h", "httpRequest", "Notify", json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://example.com/hook", "headers": {}, "body": "" })),
-            n("ag", "launchAgent", "Draft", json!({ "agentType": "claude", "projectName": "web", "projectPath": web, "headless": true, "prompt": "Write it up" }))
+            n("ag", "launchAgent", "Draft", json!({ "agentType": "acme", "projectName": "web", "projectPath": web, "headless": true, "prompt": "Write it up" }))
         ],
         "edges": [
             { "id": "e1", "source": "t", "target": "a" },

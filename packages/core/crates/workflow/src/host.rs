@@ -101,6 +101,12 @@ pub trait Host: Send + Sync + 'static {
     /// What sessions and scripts say from now on.
     fn notes(&self) -> broadcast::Receiver<Note>;
 
+    /// The agent a step runs when it names none and nothing assigns one:
+    /// the first whose adapter is on; `None` runs a shell.
+    fn first_agent(&self) -> Option<String> {
+        None
+    }
+
     /// Marks a task in progress for a step's session.
     fn take_task(
         &self,

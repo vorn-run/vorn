@@ -1,22 +1,21 @@
 //! The conversations each agent has had, read from the agent's own files
 //! (`agent-history`), for offering one to resume.
 //!
-//! Every agent keeps its sessions differently:
+//! Every agent keeps its sessions differently, and its adapter's
+//! `[agent.history]` says how, as one of three shapes:
 //!
-//! - **Claude Code**: `~/.claude/history.jsonl`, one line per prompt.
-//! - **Gemini CLI**: `~/.gemini/tmp/<project>/chats/session-*.json`, the
-//!   project named by a `.project_root` file or `~/.gemini/projects.json`.
-//! - **Codex**: the `threads` table of `~/.codex/state_5.sqlite`, with the
-//!   prompt counts in `~/.codex/history.jsonl`.
-//! - **Copilot CLI**: `sessions` and `turns` in `~/.copilot/session-store.db`.
-//! - **OpenCode**: `session` and `message` in `opencode.db` under the XDG data
-//!   directory (`%LOCALAPPDATA%` on Windows).
+//! - **`jsonl`**: one JSON object per line, one line per prompt, folded into
+//!   conversations by their id.
+//! - **`sqlite`**: a query over the agent's own SQLite file, with the
+//!   project's directories matched in SQL.
+//! - **`json_files`**: one JSON file per conversation, in a directory per
+//!   project, the projects named by marker files or a map.
 //!
 //! A file that is missing or unreadable lists nothing for its agent, as a
 //! malformed line or session file lists nothing for itself. One departure from
-//! the server, on input no agent writes: a Claude line or Gemini file whose
-//! fields are not the types the agent writes (a numeric session id, a missing
-//! timestamp) is skipped here, where the server may list it half-filled.
+//! the server, on input no agent writes: a line or file whose fields are not
+//! the types the agent writes (a numeric session id, a missing timestamp) is
+//! skipped here, where the server may list it half-filled.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -26,37 +25,14 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 
-use crate::{js, paths, Agent};
+use crate::spec::{History, JsonFilesHistory, JsonlHistory, Places, SqliteHistory, TimeUnit};
+use crate::{js, paths, Agent, Agents};
 
 /// How many sessions an agent lists, and how many the merged list keeps.
 pub const DEFAULT_LIMIT: usize = 20;
 
-/// The longest title a session is listed with, in UTF-16 units.
-const DISPLAY_UNITS: usize = 80;
-
-/// Where the agents keep their files: the home directory, and the data
-/// directory OpenCode uses.
-#[derive(Clone, Debug)]
-pub struct Homes {
-    pub home: PathBuf,
-    pub data: PathBuf,
-}
-
-impl Homes {
-    /// As the server finds them: `os.homedir()`, and `$XDG_DATA_HOME` or
-    /// `~/.local/share` (`%LOCALAPPDATA%` or `~\AppData\Local` on Windows).
-    /// `None` when there is no home directory to look in.
-    pub fn from_env() -> Option<Homes> {
-        let var = |name| std::env::var(name).ok().filter(|v| !v.is_empty());
-        let home = PathBuf::from(var(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?);
-        let data = if cfg!(windows) {
-            var("LOCALAPPDATA").map_or_else(|| home.join("AppData").join("Local"), PathBuf::from)
-        } else {
-            var("XDG_DATA_HOME").map_or_else(|| home.join(".local").join("share"), PathBuf::from)
-        };
-        Some(Homes { home, data })
-    }
-}
+/// Where the agents keep their files.
+pub type Homes = Places;
 
 /// A project and its worktrees: the directories an agent may have recorded
 /// one of the project's sessions under.
@@ -132,20 +108,16 @@ impl RecentSession {
 
 /// Every agent's sessions, newest first, at most `limit` (`getRecentSessions`).
 /// With a scope, only the sessions recorded in one of its directories.
+/// Sessions at the same moment keep their agents' history rank, then `agents`' order.
 pub fn recent_sessions(
+    agents: &Agents,
     homes: &Homes,
     scope: Option<&ProjectScope>,
     limit: usize,
 ) -> Vec<RecentSession> {
-    // The server's provider order, which decides the order of equal times.
-    let order = [
-        Agent::Claude,
-        Agent::Gemini,
-        Agent::Codex,
-        Agent::Copilot,
-        Agent::OpenCode,
-    ];
-    let mut all: Vec<RecentSession> = order
+    let mut ranked: Vec<&Agent> = agents.iter().collect();
+    ranked.sort_by_key(|a| a.spec().history.as_ref().map_or(0, |h| h.rank));
+    let mut all: Vec<RecentSession> = ranked
         .into_iter()
         .flat_map(|agent| provider(agent, homes, scope, limit))
         .collect();
@@ -157,7 +129,7 @@ pub fn recent_sessions(
 /// One agent's sessions, newest first, so a busy agent cannot crowd out a
 /// quiet one (`getRecentSessionsFor`).
 pub fn recent_sessions_for(
-    agent: Agent,
+    agent: &Agent,
     homes: &Homes,
     scope: Option<&ProjectScope>,
     limit: usize,
@@ -168,19 +140,32 @@ pub fn recent_sessions_for(
 }
 
 fn provider(
-    agent: Agent,
+    agent: &Agent,
     homes: &Homes,
     scope: Option<&ProjectScope>,
     limit: usize,
 ) -> Vec<RecentSession> {
-    let found = match agent {
-        Agent::Claude => claude(&homes.home, scope, limit),
-        Agent::Gemini => gemini(&homes.home, scope, limit),
-        Agent::Codex => codex(&homes.home, scope, limit),
-        Agent::Copilot => copilot(&homes.home, scope, limit),
-        Agent::OpenCode => opencode(&homes.data, scope, limit),
+    let Some(history) = &agent.spec().history else {
+        return Vec::new();
+    };
+    let found = if let Some(j) = &history.jsonl {
+        jsonl(agent, j, homes, scope, limit)
+    } else if let Some(q) = &history.sqlite {
+        sqlite(agent, history, q, homes, scope, limit)
+    } else if let Some(f) = &history.json_files {
+        json_files(agent, history, f, homes, scope, limit)
+    } else {
+        None
     };
     found.unwrap_or_default()
+}
+
+/// A title cut to the adapter's limit.
+fn titled(history: &History, text: &str) -> String {
+    match history.title_limit {
+        Some(n) => js::slice_utf16(text, n),
+        None => text.to_owned(),
+    }
 }
 
 /// `normalizePath` once per distinct path: history repeats them.
@@ -206,7 +191,13 @@ fn lines(raw: &str) -> impl Iterator<Item = &str> {
     js::trim(raw).split('\n').filter(|l| !l.is_empty())
 }
 
-fn claude(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec<RecentSession>> {
+fn jsonl(
+    agent: &Agent,
+    spec: &JsonlHistory,
+    homes: &Homes,
+    scope: Option<&ProjectScope>,
+    limit: usize,
+) -> Option<Vec<RecentSession>> {
     struct Seen {
         id: String,
         display: String,
@@ -214,7 +205,7 @@ fn claude(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
         last: f64,
         count: f64,
     }
-    let raw = read_text(&home.join(".claude").join("history.jsonl"))?;
+    let raw = read_text(&homes.path(&spec.file))?;
     let mut normalized = Normalized::default();
     let mut sessions: Vec<Seen> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -222,13 +213,14 @@ fn claude(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let (Some(id), Some(project)) = (text(&entry, "sessionId"), text(&entry, "project")) else {
+        let (Some(id), Some(project)) = (text(&entry, &spec.session), text(&entry, &spec.project))
+        else {
             continue;
         };
         if id.is_empty() || project.is_empty() {
             continue;
         }
-        let Some(timestamp) = entry.get("timestamp").and_then(Value::as_f64) else {
+        let Some(timestamp) = entry.get(&spec.time).and_then(Value::as_f64) else {
             continue;
         };
         if scope.is_some_and(|s| !s.contains(normalized.of(project))) {
@@ -241,7 +233,7 @@ fn claude(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
                 seen.count += 1.0;
             }
             None => {
-                let display = match entry.get("display") {
+                let display = match entry.get(&spec.title) {
                     Some(Value::String(s)) => s.clone(),
                     None | Some(Value::Null) | Some(Value::Bool(false)) => String::new(),
                     Some(_) => continue,
@@ -261,7 +253,7 @@ fn claude(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
         .into_iter()
         .map(|s| RecentSession {
             session_id: s.id,
-            agent: Agent::Claude,
+            agent: agent.clone(),
             display: s.display,
             project_path: s.project,
             timestamp: s.last,
@@ -299,14 +291,13 @@ fn mtime_ms(t: std::time::SystemTime) -> f64 {
     }
 }
 
-/// A Gemini project's path and the directory its chats are in.
-struct GeminiSource {
+/// A project's path and the directory its conversations are in.
+struct Source {
     project: String,
     chats: PathBuf,
 }
 
-fn gemini_sources(gemini: &Path) -> std::io::Result<Vec<GeminiSource>> {
-    let tmp = gemini.join("tmp");
+fn json_sources(spec: &JsonFilesHistory, homes: &Homes) -> std::io::Result<Vec<Source>> {
     let mut sources = Vec::new();
     let mut seen = HashSet::new();
     let mut add = |project: String, chats: PathBuf| {
@@ -318,43 +309,49 @@ fn gemini_sources(gemini: &Path) -> std::io::Result<Vec<GeminiSource>> {
             paths::normalize(&project),
             chats.display()
         )) {
-            sources.push(GeminiSource { project, chats });
+            sources.push(Source { project, chats });
         }
     };
-    if tmp.exists() {
-        for name in read_dir_sorted(&tmp)? {
-            let dir = tmp.join(&name);
-            let marker = dir.join(".project_root");
-            if !marker.exists() {
-                continue;
-            }
-            if let Some(root) = read_text(&marker) {
-                add(js::trim(&root).to_owned(), dir.join("chats"));
+    if let Some(markers) = &spec.markers {
+        let root = homes.path(&markers.dir);
+        if root.exists() {
+            for name in read_dir_sorted(&root)? {
+                let dir = root.join(&name);
+                let marker = dir.join(&markers.file);
+                if !marker.exists() {
+                    continue;
+                }
+                if let Some(project) = read_text(&marker) {
+                    add(js::trim(&project).to_owned(), dir.join(&markers.sessions));
+                }
             }
         }
     }
-    let projects = gemini.join("projects.json");
-    if projects.exists() {
-        let listed = read_text(&projects)
-            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .and_then(|v| v.get("projects").and_then(Value::as_object).cloned());
-        for (project, name) in listed.into_iter().flatten() {
-            if let Value::String(name) = name {
-                add(project, tmp.join(name).join("chats"));
+    if let Some(map) = &spec.map {
+        let file = homes.path(&map.file);
+        if file.exists() {
+            let listed = read_text(&file)
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                .and_then(|v| v.get(&map.key).and_then(Value::as_object).cloned());
+            for (project, name) in listed.into_iter().flatten() {
+                if let Value::String(name) = name {
+                    add(project, homes.path(&map.sessions.replace("{name}", &name)));
+                }
             }
         }
     }
     Ok(sources)
 }
 
-/// The text of a Gemini message's content, however it is nested.
-fn gemini_text(value: &Value) -> String {
+/// The text of a message's content, however it is nested: a string, a list
+/// of parts, or an object with `text`, `content` or `parts`.
+fn nested_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         Value::Array(parts) => {
             let joined: Vec<String> = parts
                 .iter()
-                .map(gemini_text)
+                .map(nested_text)
                 .filter(|s| !s.is_empty())
                 .collect();
             js::trim(&joined.join(" ")).to_owned()
@@ -363,9 +360,9 @@ fn gemini_text(value: &Value) -> String {
             if let Some(Value::String(text)) = record.get("text") {
                 text.clone()
             } else if let Some(content) = record.get("content") {
-                gemini_text(content)
+                nested_text(content)
             } else if let Some(parts) = record.get("parts") {
-                gemini_text(parts)
+                nested_text(parts)
             } else {
                 String::new()
             }
@@ -374,8 +371,16 @@ fn gemini_text(value: &Value) -> String {
     }
 }
 
-fn gemini(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec<RecentSession>> {
-    let sources: Vec<GeminiSource> = gemini_sources(&home.join(".gemini"))
+fn json_files(
+    agent: &Agent,
+    history: &History,
+    spec: &JsonFilesHistory,
+    homes: &Homes,
+    scope: Option<&ProjectScope>,
+    limit: usize,
+) -> Option<Vec<RecentSession>> {
+    let (prefix, suffix) = spec.files.split_once('*')?;
+    let sources: Vec<Source> = json_sources(spec, homes)
         .ok()?
         .into_iter()
         .filter(|s| scope.is_none_or(|scope| scope.contains(&paths::normalize(&s.project))))
@@ -384,7 +389,7 @@ fn gemini(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
     for source in &sources {
         let mut files = Vec::new();
         for name in read_dir_sorted(&source.chats).ok()? {
-            if !(name.starts_with("session-") && name.ends_with(".json")) {
+            if !(name.starts_with(prefix) && name.ends_with(suffix)) {
                 continue;
             }
             let modified = fs::metadata(source.chats.join(&name))
@@ -396,7 +401,8 @@ fn gemini(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
         files.sort_by(|a, b| js::newest_first(a.1, b.1));
         files.truncate(limit);
         for (name, _) in files {
-            if let Some(session) = gemini_session(&source.chats.join(name), &source.project) {
+            let file = source.chats.join(name);
+            if let Some(session) = json_session(agent, history, spec, &file, &source.project) {
                 sessions.push(session);
             }
         }
@@ -406,25 +412,32 @@ fn gemini(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec
     Some(sessions)
 }
 
-fn gemini_session(file: &Path, project: &str) -> Option<RecentSession> {
+fn json_session(
+    agent: &Agent,
+    history: &History,
+    spec: &JsonFilesHistory,
+    file: &Path,
+    project: &str,
+) -> Option<RecentSession> {
     let Value::Object(session) = serde_json::from_str(&read_text(file)?).ok()? else {
         return None;
     };
-    let id = text(&session, "sessionId")?;
-    let updated = text(&session, "lastUpdated")?;
-    let messages = session.get("messages")?.as_array()?;
+    let id = text(&session, &spec.id)?;
+    let updated = text(&session, &spec.time)?;
+    let messages = session.get(&spec.messages)?.as_array()?;
+    let [field, value] = &spec.user;
     let users: Vec<&Value> = messages
         .iter()
-        .filter(|m| m.get("type").and_then(Value::as_str) == Some("user"))
+        .filter(|m| m.get(field).and_then(Value::as_str) == Some(value.as_str()))
         .collect();
     let first = users
         .first()
-        .and_then(|m| m.get("content"))
-        .map_or_else(String::new, gemini_text);
+        .and_then(|m| m.get(&spec.text))
+        .map_or_else(String::new, nested_text);
     Some(RecentSession {
         session_id: id.to_owned(),
-        agent: Agent::Gemini,
-        display: js::slice_utf16(&first, DISPLAY_UNITS),
+        agent: agent.clone(),
+        display: titled(history, &first),
         project_path: project.to_owned(),
         timestamp: js::date_ms(updated),
         activity_count: users.len() as f64,
@@ -555,102 +568,66 @@ fn scoped_rows(
     sessions
 }
 
-fn codex(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec<RecentSession>> {
-    let db = home.join(".codex").join("state_5.sqlite");
+fn sqlite(
+    agent: &Agent,
+    history: &History,
+    spec: &SqliteHistory,
+    homes: &Homes,
+    scope: Option<&ProjectScope>,
+    limit: usize,
+) -> Option<Vec<RecentSession>> {
+    let db = homes.path(&spec.db);
     if !db.exists() {
         return None;
     }
-    // Counted by the id as written: a numeric one never matches a thread's.
-    let mut prompts: HashMap<String, f64> = HashMap::new();
-    let history = home.join(".codex").join("history.jsonl");
-    if history.exists() {
-        for line in lines(&read_text(&history)?) {
-            let entry = serde_json::from_str::<Value>(line).ok();
-            match entry.as_ref().and_then(|v| v.get("session_id")) {
-                Some(Value::String(id)) if !id.is_empty() => {
-                    *prompts.entry(id.clone()).or_insert(0.0) += 1.0;
+    // Counted by the id as written: a numeric one never matches a row's.
+    let mut lines_named: HashMap<String, f64> = HashMap::new();
+    if let Some(counted) = &spec.count_lines {
+        let file = homes.path(&counted.file);
+        if file.exists() {
+            for line in lines(&read_text(&file)?) {
+                let entry = serde_json::from_str::<Value>(line).ok();
+                match entry.as_ref().and_then(|v| v.get(&counted.key)) {
+                    Some(Value::String(id)) if !id.is_empty() => {
+                        *lines_named.entry(id.clone()).or_insert(0.0) += 1.0;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
-    let base =
-        "SELECT id, cwd, title, updated_at, first_user_message FROM threads WHERE archived = 0";
-    let order = "ORDER BY updated_at DESC";
+    let title: Vec<&str> = spec.title.iter().map(String::as_str).collect();
     Some(scoped_rows(
         &db,
         scope,
-        |s| format!("{base} AND {} {order} LIMIT {limit}", s.where_clause("cwd")),
-        &format!("{base} {order}"),
+        |s| {
+            format!(
+                "{} LIMIT {limit}",
+                spec.query.replace("{scope}", &s.where_clause(&spec.scope))
+            )
+        },
+        &spec.query.replace("{scope}", "1"),
         |row| {
-            let id = js_string(row.get("id"));
-            let display = first_truthy(row, &["title", "first_user_message"]);
+            let id = js_string(row.get(&spec.id));
+            let activity_count = match (&spec.count_lines, &spec.count) {
+                (Some(counted), _) => lines_named.get(&id).copied().unwrap_or(counted.missing),
+                (None, Some(column)) => count(row.get(column)),
+                (None, None) => 1.0,
+            };
+            let at = row.get(&spec.time);
+            let timestamp = match spec.unit {
+                TimeUnit::Seconds => js_number(at) * 1000.0,
+                TimeUnit::Milliseconds => count(at),
+                TimeUnit::Date => js::date_ms(&js_string(at)),
+            };
             RecentSession {
-                activity_count: prompts.get(&id).copied().unwrap_or(1.0),
+                activity_count,
                 session_id: id,
-                agent: Agent::Codex,
-                display: js::slice_utf16(&display, DISPLAY_UNITS),
-                project_path: first_truthy(row, &["cwd"]),
-                timestamp: js_number(row.get("updated_at")) * 1000.0,
+                agent: agent.clone(),
+                display: titled(history, &first_truthy(row, &title)),
+                project_path: first_truthy(row, &[spec.project.as_str()]),
+                timestamp,
             }
-        },
-        limit,
-    ))
-}
-
-fn copilot(home: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec<RecentSession>> {
-    let db = home.join(".copilot").join("session-store.db");
-    if !db.exists() {
-        return None;
-    }
-    let base = "SELECT s.id, s.cwd, s.summary, s.updated_at, COUNT(t.id) as turn_count FROM sessions s LEFT JOIN turns t ON s.id = t.session_id";
-    let tail = "GROUP BY s.id ORDER BY s.updated_at DESC";
-    Some(scoped_rows(
-        &db,
-        scope,
-        |s| {
-            format!(
-                "{base} WHERE {} {tail} LIMIT {limit}",
-                s.where_clause("s.cwd")
-            )
-        },
-        &format!("{base} {tail}"),
-        |row| RecentSession {
-            session_id: js_string(row.get("id")),
-            agent: Agent::Copilot,
-            display: js::slice_utf16(&first_truthy(row, &["summary"]), DISPLAY_UNITS),
-            project_path: first_truthy(row, &["cwd"]),
-            timestamp: js::date_ms(&js_string(row.get("updated_at"))),
-            activity_count: count(row.get("turn_count")),
-        },
-        limit,
-    ))
-}
-
-fn opencode(data: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<Vec<RecentSession>> {
-    let db = data.join("opencode").join("opencode.db");
-    if !db.exists() {
-        return None;
-    }
-    let base = "SELECT s.id, s.directory, s.title, s.time_updated, COUNT(m.id) as message_count FROM session s LEFT JOIN message m ON s.id = m.session_id WHERE s.time_archived IS NULL";
-    let tail = "GROUP BY s.id ORDER BY s.time_updated DESC";
-    Some(scoped_rows(
-        &db,
-        scope,
-        |s| {
-            format!(
-                "{base} AND {} {tail} LIMIT {limit}",
-                s.where_clause("s.directory")
-            )
-        },
-        &format!("{base} {tail}"),
-        |row| RecentSession {
-            session_id: js_string(row.get("id")),
-            agent: Agent::OpenCode,
-            display: js::slice_utf16(&first_truthy(row, &["title"]), DISPLAY_UNITS),
-            project_path: first_truthy(row, &["directory"]),
-            timestamp: count(row.get("time_updated")),
-            activity_count: count(row.get("message_count")),
         },
         limit,
     ))
@@ -659,6 +636,7 @@ fn opencode(data: &Path, scope: Option<&ProjectScope>, limit: usize) -> Option<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::agent;
 
     fn homes(dir: &Path) -> Homes {
         Homes {
@@ -676,17 +654,89 @@ mod tests {
         list.iter().map(|s| s.session_id.as_str()).collect()
     }
 
-    #[test]
-    fn lists_nothing_without_any_history() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(recent_sessions(&homes(dir.path()), None, DEFAULT_LIMIT).is_empty());
+    fn adapter(id: &str, history: &str) -> Agent {
+        agent(&format!(
+            "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{id}\"\n\
+             [agent.resume]\nargs = [\"--resume\", \"{{id}}\"]\n{history}"
+        ))
+    }
+
+    /// One line per prompt.
+    fn folded() -> Agent {
+        adapter(
+            "folded",
+            "[agent.history]\nactivity = \"entry\"\n[agent.history.jsonl]\n\
+             file = \"~/.folded/history.jsonl\"\nsession = \"sessionId\"\nproject = \"project\"\n\
+             time = \"timestamp\"\ntitle = \"display\"\n",
+        )
+    }
+
+    /// One file per chat, in a directory per project.
+    fn chats() -> Agent {
+        agent(
+            "[agent]\nid = \"chats\"\nname = \"Chats\"\n[agent.launch]\ncommand = \"chats\"\n\
+             [agent.history]\nactivity = \"prompt\"\ntitle_limit = 80\n[agent.history.json_files]\n\
+             markers = { dir = \"~/.chats/tmp\", file = \".project_root\", sessions = \"chats\" }\n\
+             map = { file = \"~/.chats/projects.json\", key = \"projects\", sessions = \"~/.chats/tmp/{name}/chats\" }\n\
+             files = \"session-*.json\"\nid = \"sessionId\"\ntime = \"lastUpdated\"\nmessages = \"messages\"\n\
+             user = [\"type\", \"user\"]\ntext = \"content\"\n",
+        )
+    }
+
+    /// A table of threads, counted from a file of prompts.
+    fn threads() -> Agent {
+        adapter(
+            "threads",
+            "[agent.history]\nactivity = \"entry\"\ntitle_limit = 80\n[agent.history.sqlite]\n\
+             db = \"~/.threads/state.sqlite\"\n\
+             query = \"SELECT id, cwd, title, updated_at, first_user_message FROM threads WHERE archived = 0 AND {scope} ORDER BY updated_at DESC\"\n\
+             scope = \"cwd\"\nid = \"id\"\nproject = \"cwd\"\ntitle = [\"title\", \"first_user_message\"]\n\
+             time = \"updated_at\"\nunit = \"seconds\"\n\
+             count_lines = { file = \"~/.threads/history.jsonl\", key = \"session_id\", missing = 1 }\n",
+        )
+    }
+
+    /// Sessions and turns, the time as text.
+    fn turns() -> Agent {
+        adapter(
+            "turns",
+            "[agent.history]\nactivity = \"turn\"\ntitle_limit = 80\n[agent.history.sqlite]\n\
+             db = \"~/.turns/store.db\"\n\
+             query = \"SELECT s.id, s.cwd, s.summary, s.updated_at, COUNT(t.id) as turn_count FROM sessions s LEFT JOIN turns t ON s.id = t.session_id WHERE {scope} GROUP BY s.id ORDER BY s.updated_at DESC\"\n\
+             scope = \"s.cwd\"\nid = \"id\"\nproject = \"cwd\"\ntitle = [\"summary\"]\n\
+             time = \"updated_at\"\nunit = \"date\"\ncount = \"turn_count\"\n",
+        )
+    }
+
+    /// Sessions and messages under the data directory, the time in milliseconds.
+    fn messages() -> Agent {
+        adapter(
+            "messages",
+            "[agent.history]\nactivity = \"message\"\ntitle_limit = 80\n[agent.history.sqlite]\n\
+             db = \"{data}/messages/messages.db\"\n\
+             query = \"SELECT s.id, s.directory, s.title, s.time_updated, COUNT(m.id) as message_count FROM session s LEFT JOIN message m ON s.id = m.session_id WHERE s.time_archived IS NULL AND {scope} GROUP BY s.id ORDER BY s.time_updated DESC\"\n\
+             scope = \"s.directory\"\nid = \"id\"\nproject = \"directory\"\ntitle = [\"title\"]\n\
+             time = \"time_updated\"\nunit = \"milliseconds\"\ncount = \"message_count\"\n",
+        )
+    }
+
+    fn all() -> Agents {
+        Agents::new([folded(), chats(), threads(), turns(), messages()])
     }
 
     #[test]
-    fn folds_claude_prompts_into_sessions_by_their_latest_time() {
+    fn lists_nothing_without_any_history() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(recent_sessions(&all(), &homes(dir.path()), None, DEFAULT_LIMIT).is_empty());
+        let none = crate::testing::bare("none");
+        assert!(recent_sessions_for(&none, &homes(dir.path()), None, 20).is_empty());
+    }
+
+    #[test]
+    fn folds_prompts_into_sessions_by_their_latest_time() {
         let dir = tempfile::tempdir().unwrap();
         write(
-            &dir.path().join(".claude/history.jsonl"),
+            &dir.path().join(".folded/history.jsonl"),
             concat!(
                 "\u{FEFF}{\"sessionId\":\"s1\",\"display\":\"Fix bug\",\"project\":\"/app\",\"timestamp\":1000}\n",
                 "not json\n",
@@ -695,13 +745,13 @@ mod tests {
                 "{\"sessionId\":\"\",\"project\":\"/app\",\"timestamp\":9000}\n",
             ),
         );
-        let all = recent_sessions_for(Agent::Claude, &homes(dir.path()), None, 20);
+        let all = recent_sessions_for(&folded(), &homes(dir.path()), None, 20);
         assert_eq!(ids(&all), ["s1", "s2"]);
         assert_eq!(all[0].timestamp, 2000.0);
         assert_eq!(all[0].activity_count, 2.0);
         assert_eq!(all[0].display, "Fix bug");
         let scoped = recent_sessions_for(
-            Agent::Claude,
+            &folded(),
             &homes(dir.path()),
             Some(&ProjectScope::new("/app/", ["/no/such/worktree"])),
             20,
@@ -710,19 +760,19 @@ mod tests {
     }
 
     #[test]
-    fn reads_gemini_chats_by_project_newest_file_first() {
+    fn reads_chat_files_by_project_newest_file_first() {
         let dir = tempfile::tempdir().unwrap();
-        let chats = dir.path().join(".gemini/tmp/abc/chats");
-        write(&dir.path().join(".gemini/tmp/abc/.project_root"), "/proj\n");
+        let chats_dir = dir.path().join(".chats/tmp/abc/chats");
+        write(&dir.path().join(".chats/tmp/abc/.project_root"), "/proj\n");
         write(
-            &chats.join("session-1.json"),
+            &chats_dir.join("session-1.json"),
             r#"{"sessionId":"g1","lastUpdated":"2025-01-02T03:04:05.678Z","messages":[
                 {"type":"user","content":[{"text":"hello"},{"parts":[{"text":"world"}]}]},
-                {"type":"gemini","content":"hi"},{"type":"user","content":"again"}]}"#,
+                {"type":"model","content":"hi"},{"type":"user","content":"again"}]}"#,
         );
-        write(&chats.join("session-2.json"), "{broken");
-        write(&chats.join("other.json"), r#"{"sessionId":"x"}"#);
-        let list = recent_sessions_for(Agent::Gemini, &homes(dir.path()), None, 20);
+        write(&chats_dir.join("session-2.json"), "{broken");
+        write(&chats_dir.join("other.json"), r#"{"sessionId":"x"}"#);
+        let list = recent_sessions_for(&chats(), &homes(dir.path()), None, 20);
         assert_eq!(ids(&list), ["g1"]);
         assert_eq!(list[0].display, "hello world");
         assert_eq!(list[0].activity_count, 2.0);
@@ -730,9 +780,24 @@ mod tests {
         assert_eq!(list[0].project_path, "/proj");
         assert!(!list[0].agent.resumes_exactly());
         let elsewhere = ProjectScope::new("/elsewhere", []);
-        assert!(
-            recent_sessions_for(Agent::Gemini, &homes(dir.path()), Some(&elsewhere), 20).is_empty()
+        assert!(recent_sessions_for(&chats(), &homes(dir.path()), Some(&elsewhere), 20).is_empty());
+    }
+
+    #[test]
+    fn finds_chat_directories_through_the_project_map() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join(".chats/projects.json"),
+            r#"{"projects":{"/mapped":"named"}}"#,
         );
+        write(
+            &dir.path().join(".chats/tmp/named/chats/session-a.json"),
+            r#"{"sessionId":"m1","lastUpdated":"2025-01-02","messages":[]}"#,
+        );
+        let list = recent_sessions_for(&chats(), &homes(dir.path()), None, 20);
+        assert_eq!(ids(&list), ["m1"]);
+        assert_eq!(list[0].project_path, "/mapped");
+        assert_eq!(list[0].display, "");
     }
 
     fn sqlite(path: &Path, sql: &str) {
@@ -741,20 +806,20 @@ mod tests {
     }
 
     #[test]
-    fn reads_codex_threads_with_their_prompt_counts() {
+    fn reads_threads_with_their_prompt_counts() {
         let dir = tempfile::tempdir().unwrap();
         sqlite(
-            &dir.path().join(".codex/state_5.sqlite"),
+            &dir.path().join(".threads/state.sqlite"),
             "CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, updated_at INTEGER, first_user_message TEXT, archived INTEGER);
              INSERT INTO threads VALUES ('c1', '/proj/', '', 100, 'first message', 0);
              INSERT INTO threads VALUES ('c2', '/PROJ', 'Title', 200, NULL, 0);
              INSERT INTO threads VALUES ('c3', '/proj', 'gone', 300, NULL, 1);",
         );
         write(
-            &dir.path().join(".codex/history.jsonl"),
+            &dir.path().join(".threads/history.jsonl"),
             "{\"session_id\":\"c1\"}\n{\"session_id\":\"c1\"}\n{}\n",
         );
-        let list = recent_sessions_for(Agent::Codex, &homes(dir.path()), None, 20);
+        let list = recent_sessions_for(&threads(), &homes(dir.path()), None, 20);
         assert_eq!(ids(&list), ["c2", "c1"]);
         assert_eq!(list[1].display, "first message");
         assert_eq!(list[1].activity_count, 2.0);
@@ -764,7 +829,7 @@ mod tests {
         // whose path normalizes to the project's, which ignores case on
         // Windows.
         let scoped = recent_sessions_for(
-            Agent::Codex,
+            &threads(),
             &homes(dir.path()),
             Some(&ProjectScope::new("/proj", [])),
             20,
@@ -777,23 +842,23 @@ mod tests {
     }
 
     #[test]
-    fn reads_copilot_and_opencode_sessions_with_their_counts() {
+    fn reads_turns_and_messages_with_their_counts() {
         let dir = tempfile::tempdir().unwrap();
         sqlite(
-            &dir.path().join(".copilot/session-store.db"),
+            &dir.path().join(".turns/store.db"),
             "CREATE TABLE sessions (id TEXT, cwd TEXT, summary TEXT, updated_at TEXT);
              CREATE TABLE turns (id INTEGER, session_id TEXT);
              INSERT INTO sessions VALUES ('p1', '/proj', 'Summary', '2025-01-02T03:04:05Z');
              INSERT INTO turns VALUES (1, 'p1'), (2, 'p1');",
         );
         sqlite(
-            &dir.path().join(".local/share/opencode/opencode.db"),
+            &dir.path().join(".local/share/messages/messages.db"),
             "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_updated INTEGER, time_archived INTEGER);
              CREATE TABLE message (id TEXT, session_id TEXT);
              INSERT INTO session VALUES ('o1', '/proj', 'Open', 1735787046000, NULL);
              INSERT INTO message VALUES ('m1', 'o1');",
         );
-        let list = recent_sessions(&homes(dir.path()), None, 20);
+        let list = recent_sessions(&all(), &homes(dir.path()), None, 20);
         assert_eq!(ids(&list), ["o1", "p1"]);
         assert_eq!(list[1].activity_count, 2.0);
         assert_eq!(list[1].timestamp, 1_735_787_045_000.0);
@@ -801,11 +866,18 @@ mod tests {
         assert_eq!(
             list[0].to_json(),
             json!({
-                "sessionId": "o1", "agentType": "opencode", "display": "Open",
+                "sessionId": "o1", "agentType": "messages", "display": "Open",
                 "projectPath": "/proj", "timestamp": 1_735_787_046_000_i64,
                 "activityCount": 1, "activityLabel": "message", "canResumeExact": true
             })
         );
+        let scoped = recent_sessions_for(
+            &turns(),
+            &homes(dir.path()),
+            Some(&ProjectScope::new("/proj", [])),
+            20,
+        );
+        assert_eq!(ids(&scoped), ["p1"]);
     }
 
     #[test]
@@ -814,8 +886,8 @@ mod tests {
         let lines: String = (0..30)
             .map(|i| format!("{{\"sessionId\":\"s{i}\",\"project\":\"/p\",\"timestamp\":{i}}}\n"))
             .collect();
-        write(&dir.path().join(".claude/history.jsonl"), &lines);
-        let list = recent_sessions(&homes(dir.path()), None, 5);
+        write(&dir.path().join(".folded/history.jsonl"), &lines);
+        let list = recent_sessions(&all(), &homes(dir.path()), None, 5);
         assert_eq!(ids(&list), ["s29", "s28", "s27", "s26", "s25"]);
     }
 

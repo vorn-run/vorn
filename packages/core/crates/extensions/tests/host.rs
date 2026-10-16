@@ -79,7 +79,7 @@ fn key(world: &World, id: &str) -> HostKey {
 const ASKED: Asked<'static> = Asked {
     session_id: "s1",
     worktree_path: "/w",
-    agent: "claude",
+    agent: "alpha",
 };
 
 fn value_of(items: &[vorn_extensions::footer::Item], label: &str) -> String {

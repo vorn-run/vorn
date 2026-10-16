@@ -4,6 +4,7 @@
 //! as a program. Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
+pub mod agents;
 pub mod connectors;
 pub mod widget;
 pub mod worktrees;
@@ -56,7 +57,7 @@ pub trait Builtin: Send + Sync + 'static {
     /// Its `vorn-extension.toml`.
     fn manifest(&self) -> &'static str;
     /// Its templates, as `("views/x.kdl", text)`.
-    fn views(&self) -> &'static [(&'static str, &'static str)];
+    fn views(&self) -> &[(&'static str, &'static str)];
     /// The public events it subscribes to.
     fn events(&self) -> &'static [&'static str];
     /// Whether it is on before the person switches it.

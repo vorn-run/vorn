@@ -8,27 +8,29 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{Agent, AgentCommand};
+use crate::{Agent, AgentCommand, Agents};
 
-/// Whether each agent is installed, in [`Agent::ALL`]'s order. `command_of`
-/// gives the agent's configured command; `path_env` is the PATH to search.
+/// Whether each agent is installed, in `agents`' order. `command_of` gives
+/// the agent's configured command; `path_env` is the PATH to search.
 pub fn installed(
-    command_of: impl FnMut(Agent) -> AgentCommand,
+    agents: &Agents,
+    command_of: impl FnMut(&Agent) -> AgentCommand,
     path_env: Option<&str>,
 ) -> Vec<(Agent, bool)> {
-    locate(command_of, path_env)
+    locate(agents, command_of, path_env)
         .into_iter()
         .map(|(agent, at)| (agent, at.is_some()))
         .collect()
 }
 
-/// Where each agent's command, or else its fallback, is, in [`Agent::ALL`]'s order.
+/// Where each agent's command, or else its fallback, is, in `agents`' order.
 pub fn locate(
-    mut command_of: impl FnMut(Agent) -> AgentCommand,
+    agents: &Agents,
+    mut command_of: impl FnMut(&Agent) -> AgentCommand,
     path_env: Option<&str>,
 ) -> Vec<(Agent, Option<PathBuf>)> {
-    Agent::ALL
-        .into_iter()
+    agents
+        .iter()
         .map(|agent| {
             let config = command_of(agent);
             let at = command_path(&config.command, path_env).or_else(|| {
@@ -37,7 +39,7 @@ pub fn locate(
                     .as_deref()
                     .and_then(|fallback| command_path(fallback, path_env))
             });
-            (agent, at)
+            (agent.clone(), at)
         })
         .collect()
 }
@@ -90,6 +92,11 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::testing::bare;
+
+    fn agents() -> Agents {
+        Agents::new(["one", "two", "three", "four", "five"].map(bare))
+    }
 
     fn tool(dir: &Path, name: &str, mode: u32) {
         let path = dir.join(name);
@@ -100,32 +107,36 @@ mod tests {
     #[test]
     fn finds_a_command_or_its_fallback_on_path() {
         let dir = tempfile::tempdir().unwrap();
-        tool(dir.path(), "claude", 0o755);
-        tool(dir.path(), "codex", 0o644);
-        tool(dir.path(), "gem-fallback", 0o755);
-        std::fs::create_dir(dir.path().join("copilot")).unwrap();
+        tool(dir.path(), "one", 0o755);
+        tool(dir.path(), "three", 0o644);
+        tool(dir.path(), "five-fallback", 0o755);
+        std::fs::create_dir(dir.path().join("two")).unwrap();
         let path = format!("/nonexistent::{}", dir.path().display());
-        let found = installed(
+        let agents = agents();
+        let found: Vec<(String, bool)> = installed(
+            &agents,
             |agent| {
                 let mut config = agent.default_command();
-                if agent == Agent::Gemini {
-                    config.command = "gemini-missing".into();
-                    config.fallback_command = Some("gem-fallback".into());
+                if agent.id() == "five" {
+                    config.command = "five-missing".into();
+                    config.fallback_command = Some("five-fallback".into());
                 }
                 config
             },
             Some(&path),
-        );
-        assert_eq!(
-            found,
-            [
-                (Agent::Claude, true),
-                (Agent::Copilot, false),
-                (Agent::Codex, false),
-                (Agent::OpenCode, false),
-                (Agent::Gemini, true),
-            ]
-        );
+        )
+        .into_iter()
+        .map(|(a, at)| (a.id().to_owned(), at))
+        .collect();
+        let want = [
+            ("one", true),
+            ("two", false),
+            ("three", false),
+            ("four", false),
+            ("five", true),
+        ]
+        .map(|(id, at)| (id.to_owned(), at));
+        assert_eq!(found, want);
     }
 
     #[test]
@@ -134,18 +145,18 @@ mod tests {
         tool(dir.path(), "agent", 0o755);
         let full = dir.path().join("agent");
         assert!(command_exists(full.to_str().unwrap(), None));
-        assert!(!command_exists("npx claude", Some("/usr/bin")));
+        assert!(!command_exists("npx agent", Some("/usr/bin")));
         assert!(!command_exists("", Some("/usr/bin")));
     }
 
     #[test]
     fn locates_the_first_directory_holding_the_command() {
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        tool(a.path(), "claude", 0o644);
-        tool(b.path(), "claude", 0o755);
+        tool(a.path(), "one", 0o644);
+        tool(b.path(), "one", 0o755);
         let path = format!("{}:{}", a.path().display(), b.path().display());
-        let found = locate(|agent| agent.default_command(), Some(&path));
-        assert_eq!(found[0], (Agent::Claude, Some(b.path().join("claude"))));
+        let found = locate(&agents(), Agent::default_command, Some(&path));
+        assert_eq!(found[0], (bare("one"), Some(b.path().join("one"))));
         assert!(found[1..].iter().all(|(_, at)| at.is_none()));
     }
 }

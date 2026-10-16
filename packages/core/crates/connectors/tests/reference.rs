@@ -7,7 +7,16 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 use vorn_connectors::{auth, catalog, connections as conns, http};
 
+/// The recordings name the agents Vorn ships, whose adapters say which ids
+/// exist and which variables an agent sets in its sessions.
+fn read_shipped_adapters() {
+    for s in vorn_adapters::shipped() {
+        vorn_agents::from_manifest_text(s.manifest).expect("a shipped adapter reads");
+    }
+}
+
 fn recorded() -> Map<String, Value> {
+    read_shipped_adapters();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../tests/fixtures/js-reference/connector-functions.json");
     let text = std::fs::read_to_string(path).expect("the recorded cases");

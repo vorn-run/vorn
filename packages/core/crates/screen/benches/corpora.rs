@@ -165,7 +165,7 @@ fn bench(c: &mut Criterion) {
         ("build-log", build_log()),
         ("vim", transcript_corpus("vim")),
         ("htop", transcript_corpus("htop")),
-        ("agent", transcript_corpus("claude")),
+        ("agent", transcript_corpus("agent")),
         ("seeded", seeded()),
     ];
     for (name, corpus) in &corpora {

@@ -8,7 +8,7 @@ resize as a Resize record, each with the time since the one before.
 
     python3 scripts/record.py vim transcripts/vim.rec
     python3 scripts/record.py htop transcripts/htop.rec
-    python3 scripts/record.py claude transcripts/claude.rec
+    python3 scripts/record.py claude transcripts/agent.rec
 
 Linux or macOS. Re-recording changes the bytes; the tests that use the
 transcripts compare a run against another run of the same file, never against

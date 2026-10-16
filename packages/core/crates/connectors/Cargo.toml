@@ -29,5 +29,7 @@ tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time",
 tracing = "0.1"
 
 [dev-dependencies]
+# The recorded answers name the agents Vorn ships.
+vorn-adapters = { path = "../adapters" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }

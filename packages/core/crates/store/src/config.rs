@@ -632,8 +632,8 @@ mod tests {
         let mut config = json!({
             "version": 1,
             "defaults": { "shell": "/bin/bash", "fontSize": 14, "theme": "light" },
-            "projects": [{ "name": "p", "path": "/p", "preferredAgents": ["claude"], "hostIds": ["h"] }],
-            "agentCommands": { "claude": { "command": "claude", "args": ["--x"], "fallbackCommand": "c2" } },
+            "projects": [{ "name": "p", "path": "/p", "preferredAgents": ["acme"], "hostIds": ["h"] }],
+            "agentCommands": { "acme": { "command": "acme", "args": ["--x"], "fallbackCommand": "c2" } },
             "workflows": [{
                 "id": "w", "name": "W", "icon": "Zap", "iconColor": "#fff",
                 "nodes": [], "edges": [], "enabled": false, "staggerDelayMs": 250
@@ -699,7 +699,7 @@ mod tests {
         );
         assert_eq!(
             config["agentCommands"],
-            json!({ "claude": { "command": "claude", "args": [] } })
+            json!({ "acme": { "command": "acme", "args": [] } })
         );
         assert_eq!(config["workspaces"][0]["id"], json!("personal"));
     }
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(loaded["defaults"]["fontSize"], json!(14));
         assert_eq!(
             loaded["projects"],
-            json!([{ "name": "p", "path": "/p", "preferredAgents": ["claude"], "hostIds": ["h"], "workspaceId": "personal" }])
+            json!([{ "name": "p", "path": "/p", "preferredAgents": ["acme"], "hostIds": ["h"], "workspaceId": "personal" }])
         );
         assert_eq!(loaded["agentCommands"], saved["agentCommands"]);
         assert_eq!(
@@ -848,11 +848,11 @@ mod tests {
         store.save_config(&snapshot(None), &[]).unwrap();
         let mut config = snapshot(None);
         config["agentCommands"] =
-            json!({ "claude": null, "codex": { "command": "codex", "args": [] } });
+            json!({ "acme": null, "beta": { "command": "beta", "args": [] } });
         store.save_config(&config, &[]).unwrap();
         let commands = &store.load_config().unwrap()["agentCommands"];
-        assert_eq!(commands["claude"]["command"], json!("claude"));
-        assert_eq!(commands["codex"]["command"], json!("codex"));
+        assert_eq!(commands["acme"]["command"], json!("acme"));
+        assert_eq!(commands["beta"]["command"], json!("beta"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ fn now_ms() -> i64 {
 
 fn make_session(overrides: Value) -> Value {
     let mut session = json!({
-        "id": "test-id-1", "agentType": "claude", "projectName": "test-project",
+        "id": "test-id-1", "agentType": "acme", "projectName": "test-project",
         "projectPath": "/test/project", "status": "running", "createdAt": now_ms(),
         "pid": 12345
     });
@@ -57,7 +57,7 @@ mod persistence {
         let s = &loaded[0];
         for (key, value) in [
             ("id", json!("test-id-1")),
-            ("agentType", json!("claude")),
+            ("agentType", json!("acme")),
             ("projectName", json!("test-project")),
             ("projectPath", json!("/test/project")),
             ("displayName", json!("my session")),
@@ -218,7 +218,7 @@ mod groups {
 
     fn session(id: &str, group: Option<&str>) -> Value {
         let mut session = json!({
-            "id": id, "agentType": "claude", "projectName": "vorn",
+            "id": id, "agentType": "acme", "projectName": "vorn",
             "projectPath": "/tmp/vorn", "status": "idle", "createdAt": 1, "pid": 1
         });
         if let Some(group) = group {

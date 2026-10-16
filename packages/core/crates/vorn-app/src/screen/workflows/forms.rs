@@ -731,9 +731,11 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             out
         }
         "config.agentType" => {
-            let mut list: Vec<(&str, &str)> = ["claude", "copilot", "codex", "opencode", "gemini"]
+            let mut list: Vec<(&str, &str)> = s
+                .store
+                .agents
                 .iter()
-                .map(|a| (*a, agent_label(a)))
+                .map(|a| (a.key.as_str(), a.short_name.as_str()))
                 .collect();
             let trig = s.st.wf.editor.as_ref().and_then(|d| {
                 wf::trigger(d.nodes())
@@ -1321,17 +1323,12 @@ fn block(children: Vec<El>) -> El {
     div().col().w_full().children(children)
 }
 
-/// `AGENT_LABELS` of the form's agent picker.
-fn agent_label(agent: &str) -> &str {
+/// `AGENT_LABELS` of the form's agent picker: each agent's short name.
+fn agent_label<'a>(s: &'a Screen<'_>, agent: &'a str) -> &'a str {
     match agent {
         "fromTask" => "From Task",
-        "claude" => "Claude",
-        "copilot" => "Copilot",
-        "codex" => "Codex",
-        "opencode" => "OpenCode",
-        "gemini" => "Gemini",
         "" => "Unassigned",
-        other => other,
+        other => s.store.agents.short_name(other),
     }
 }
 
@@ -2375,7 +2372,7 @@ fn script_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
 fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
     let cfg = n.get("config").cloned().unwrap_or_default();
     let agent = cfg_str(n, "agentType");
-    let agent_label = agent_label(agent).to_owned();
+    let agent_label = agent_label(s, agent).to_owned();
     let agent_glyph = if agent == "fromTask" {
         ico("clipboard-list", 14.0, 2.0, c(look::BLUE_400))
     } else {

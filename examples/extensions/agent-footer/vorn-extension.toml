@@ -1,0 +1,18 @@
+# An example extension: a footer on each agent's card with the model the
+# session was started with and the tool calls its hooks report.
+id = "example.agent-footer"
+name = "Agent footer"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+description = "Shows each agent's model and its last tool call under its card."
+
+[declares]
+uses = ["sessions.read"]
+
+[service]
+command = ["node", "program.mjs"]
+events = ["session.created", "session.exited", "agent.hook"]
+
+[[contributes.card_footers]]
+id = "tools"
+view = "views/footer.kdl"

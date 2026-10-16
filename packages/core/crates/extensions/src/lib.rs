@@ -38,3 +38,18 @@ pub mod signin;
 pub mod token;
 pub mod usage;
 pub mod views;
+
+#[cfg(test)]
+pub(crate) mod testing {
+    //! Agents this crate's tests name, read as an adapter's are, so their ids are known.
+
+    /// Reads adapters for `alpha` and `beta`.
+    pub fn agents() {
+        for id in ["alpha", "beta"] {
+            let text = format!(
+                "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{id}\"\n"
+            );
+            vorn_agents::from_manifest_text(&text).expect("a test adapter reads");
+        }
+    }
+}

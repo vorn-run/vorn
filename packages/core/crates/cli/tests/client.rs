@@ -128,11 +128,11 @@ async fn says_when_nothing_listens_on_the_announced_port() {
 async fn sends_input_with_enter_and_kills_by_prefix() {
     let port = ws_server(|method, params| match method {
         "terminal:listActive" => Answer::Result(json!([
-            {"id": "c3f1a2e8-1111-2222-3333-444455556666", "agentType": "claude",
+            {"id": "c3f1a2e8-1111-2222-3333-444455556666", "agentType": "acme",
              "projectName": "vorn", "status": "running"}
         ])),
         "headless:list" => Answer::Result(json!([
-            {"id": "9b4d0117-1111-2222-3333-444455556666", "agentType": "codex",
+            {"id": "9b4d0117-1111-2222-3333-444455556666", "agentType": "beta",
              "projectName": "web", "status": "running"}
         ])),
         "headless:kill" => {
@@ -147,7 +147,7 @@ async fn sends_input_with_enter_and_kills_by_prefix() {
     assert_eq!((code, err.as_str()), (0, ""));
     assert_eq!(
         out,
-        "ID        AGENT   PROJECT  BRANCH  STATUS\nc3f1a2e8  claude  vorn     -       running\n9b4d0117  codex   web      -       running\n"
+        "ID        AGENT  PROJECT  BRANCH  STATUS\nc3f1a2e8  acme   vorn     -       running\n9b4d0117  beta   web      -       running\n"
     );
 
     let (code, out, err) = vorn(port, &["session", "kill", "9b4d"]).await;

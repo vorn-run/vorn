@@ -1,66 +1,62 @@
-//! Each agent's screen rules: what its screen shows when it is working,
-//! waiting for input or idle, as one TOML file per agent in `status/`.
+//! An agent's screen rules: what its screen shows when it is working,
+//! waiting for input or idle, as its adapter's `[[agent.status]]` entries.
 //!
-//! Adding or fixing an agent is an edit to its file plus fixtures under
-//! `tests/fixtures/status/<agent>/` that show the screens it reads. Where no
-//! rule holds, the generic output patterns decide (errors come only from
-//! them), and hooks, where an agent has them, decide over both.
+//! Where no rule holds, the generic output patterns decide (errors come only
+//! from them), hooks decide over both, and an agent reporting its own status
+//! (OSC 7501) over everything.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
-use vorn_analysis::rules::Rules;
+use vorn_analysis::rules::{RuleError, RuleSpec, Rules};
 
-use crate::Agent;
-
-/// The shipped rule file's text for `agent`.
-pub fn source(agent: Agent) -> &'static str {
-    match agent {
-        Agent::Claude => include_str!("../status/claude.toml"),
-        Agent::Copilot => include_str!("../status/copilot.toml"),
-        Agent::Codex => include_str!("../status/codex.toml"),
-        Agent::OpenCode => include_str!("../status/opencode.toml"),
-        Agent::Gemini => include_str!("../status/gemini.toml"),
+/// The rules `specs` compile to for `agent`, kept for the life of the
+/// process: a session holds them by reference while it runs, and an
+/// adapter read again with the same rules gets the same ones back, so a
+/// reload costs nothing new.
+pub fn intern(agent: &str, specs: &[RuleSpec]) -> Result<&'static Rules, RuleError> {
+    static KEPT: OnceLock<Mutex<HashMap<String, &'static Rules>>> = OnceLock::new();
+    let key = format!("{agent}\0{specs:?}");
+    let kept = KEPT.get_or_init(Mutex::default);
+    if let Some(rules) = kept.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return Ok(rules);
     }
-}
-
-impl Agent {
-    /// The rules this agent's status is read from its screen with.
-    pub fn screen_rules(self) -> &'static Rules {
-        static RULES: OnceLock<Vec<Rules>> = OnceLock::new();
-        let all = RULES.get_or_init(|| {
-            Agent::ALL
-                .iter()
-                .map(|a| {
-                    Rules::parse(source(*a))
-                        .unwrap_or_else(|e| panic!("status/{}.toml: {e}", a.id()))
-                })
-                .collect()
-        });
-        let i = Agent::ALL.iter().position(|a| *a == self).expect("in ALL");
-        &all[i]
-    }
-}
-
-/// The screen rules for an `AiAgentType` name, or `None` for a shell or an
-/// agent Vorn does not know.
-pub fn rules(agent_type: &str) -> Option<&'static Rules> {
-    Agent::from_id(agent_type).map(Agent::screen_rules)
+    let rules: &'static Rules = Box::leak(Box::new(Rules::new(agent, specs)?));
+    Ok(*kept
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_insert(rules))
 }
 
 #[cfg(test)]
 mod tests {
+    use vorn_analysis::rules::ScreenStatus;
+
     use super::*;
 
-    #[test]
-    fn every_agent_has_a_rule_file_naming_it() {
-        for agent in Agent::ALL {
-            assert_eq!(agent.screen_rules().agent(), agent.id());
-            assert!(std::ptr::eq(
-                rules(agent.id()).unwrap(),
-                agent.screen_rules()
-            ));
+    fn spec(pattern: &str) -> RuleSpec {
+        RuleSpec {
+            status: ScreenStatus::Idle,
+            rows: None,
+            cursor_rows: None,
+            any: vec![pattern.to_owned()],
+            all: Vec::new(),
+            none: Vec::new(),
+            cursor: None,
+            title: None,
         }
-        assert!(rules("shell").is_none());
-        assert!(rules("").is_none());
+    }
+
+    #[test]
+    fn the_same_rules_are_kept_once() {
+        let a = intern("x", &[spec(">")]).unwrap();
+        let b = intern("x", &[spec(">")]).unwrap();
+        assert!(std::ptr::eq(a, b));
+        let c = intern("x", &[spec("<")]).unwrap();
+        assert!(!std::ptr::eq(a, c));
+        assert_eq!(c.agent(), "x");
+        assert!(intern("x", &[spec("(")]).is_err());
+        assert!(intern("x", &[]).is_err());
     }
 }

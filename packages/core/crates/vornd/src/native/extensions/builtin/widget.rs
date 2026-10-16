@@ -274,7 +274,7 @@ impl Builtin for Widget {
         include_str!("widget.toml")
     }
 
-    fn views(&self) -> &'static [(&'static str, &'static str)] {
+    fn views(&self) -> &[(&'static str, &'static str)] {
         &[
             ("views/widget.kdl", include_str!("views/widget.kdl")),
             ("views/compact.kdl", include_str!("views/compact.kdl")),

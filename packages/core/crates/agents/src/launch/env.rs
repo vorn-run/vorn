@@ -3,11 +3,32 @@
 //! environment comes from (the login shell's answer, or the host's own until
 //! it has one) is the host's business.
 
-/// Names stripped whatever the configuration says: the markers an agent CLI
-/// leaves to describe the session it is inside (`NEVER_BORROWED_ENV`), and
-/// the desktop's launch credential (`BOOTSTRAP_ENV_VAR`).
-pub const STRIP_KEYS: &[&str] = &["CLAUDECODE"];
-pub const STRIP_PREFIXES: &[&str] = &["CLAUDE_CODE_", "SECRET_VORN_BOOTSTRAP_TOKEN"];
+use std::sync::{PoisonError, RwLock};
+
+/// The desktop's launch credential (`BOOTSTRAP_ENV_VAR`), stripped whatever
+/// the configuration says.
+pub const STRIP_PREFIXES: &[&str] = &["SECRET_VORN_BOOTSTRAP_TOKEN"];
+
+/// The markers agent CLIs leave to describe the session they are inside
+/// (`NEVER_BORROWED_ENV`), as their adapters declare them (`[agent.env]`):
+/// whole names, and prefixes.
+static MARKERS: RwLock<(Vec<String>, Vec<String>)> = RwLock::new((Vec::new(), Vec::new()));
+
+/// Strips `names` and every name starting with one of `prefixes` from now on,
+/// for every process: a marker of an adapter that is switched off still
+/// describes a session Vorn may itself be running inside.
+pub fn add_markers(names: &[String], prefixes: &[String]) {
+    let mut markers = MARKERS.write().unwrap_or_else(PoisonError::into_inner);
+    let (keys, starts) = &mut *markers;
+    for (have, add) in [(keys, names), (starts, prefixes)] {
+        for name in add {
+            let upper = name.to_uppercase();
+            if !upper.is_empty() && !have.contains(&upper) {
+                have.push(upper);
+            }
+        }
+    }
+}
 
 /// Credential-shaped names (`SENSITIVE_ENV_PREFIXES`), dropped unless the
 /// person passed one through by name.
@@ -45,7 +66,11 @@ pub fn normalize_passthrough<S: AsRef<str>>(names: &[S]) -> Vec<String> {
 /// case-insensitive, and this list is meant to be absolute.
 pub fn is_stripped(name: &str) -> bool {
     let upper = name.to_uppercase();
-    STRIP_KEYS.contains(&upper.as_str()) || STRIP_PREFIXES.iter().any(|p| upper.starts_with(p))
+    if STRIP_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+        return true;
+    }
+    let markers = MARKERS.read().unwrap_or_else(PoisonError::into_inner);
+    markers.0.contains(&upper) || markers.1.iter().any(|p| upper.starts_with(p.as_str()))
 }
 
 /// `filterEnv`: `passthrough`, normalized names, lets those credential-shaped
@@ -114,13 +139,19 @@ mod tests {
     }
 
     #[test]
+    fn markers() {
+        add_markers(&["AGENTMARK".to_owned()], &["agent_mark_".to_owned()]);
+    }
+
+    #[test]
     fn drops_credentials_and_agent_markers_whatever_their_case() {
+        markers();
         let kept = safe_env(pairs(&[
             ("PATH", "/bin"),
             ("github_token_extra", "x"),
             ("SECRET_VORN_BOOTSTRAP_TOKEN", "x"),
-            ("ClaudeCode", "1"),
-            ("CLAUDE_CODE_SSE_PORT", "1"),
+            ("AgentMark", "1"),
+            ("AGENT_MARK_PORT", "1"),
             ("ANTHROPIC_BASE_URL", "u"),
             ("ANTHROPIC_API_KEY", "k"),
         ]));
@@ -129,13 +160,14 @@ mod tests {
 
     #[test]
     fn launches_with_what_was_passed_through_and_the_data_dir() {
+        markers();
         let source = pairs(&[
             ("VORN_DATA_DIR", "old"),
             ("anthropic_api_key", "k"),
-            ("CLAUDECODE", "1"),
+            ("AGENTMARK", "1"),
             ("PATH", "/bin"),
         ]);
-        let passthrough = [" anthropic_api_key ".to_owned(), "claudecode".to_owned()];
+        let passthrough = [" anthropic_api_key ".to_owned(), "agentmark".to_owned()];
         let env = launch_env(source, &passthrough, Some("/data"));
         assert_eq!(
             env,

@@ -93,6 +93,10 @@ impl TestVornd {
             .env("VORND_KEYCHAIN", "0")
             .env("VORN_SESSIOND_IDLE_EXIT", "2")
             .env_remove("VORN_DATA_DIR")
+            // An agent's own home would be the person's, not the test's.
+            .env_remove("COPILOT_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("HERMES_HOME")
             .env_remove("VORN_ALLOW_DEFAULT_DATA_DIR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -259,7 +263,24 @@ pub fn connect(v: &TestVornd) -> App {
     let mut config = rpc.call("config:load", Value::Null).expect("config");
     config["defaults"]["hasSeenOnboarding"] = json!(2);
     rpc.call("config:save", config).expect("saved");
-    first_run(v)
+    let mut app = first_run(v);
+    link_test_agent(&mut app);
+    app
+}
+
+/// Links the test agent's adapter (`fixtures/acme-adapter`), as a person
+/// links a folder, so the tests run an agent without naming a real CLI.
+pub fn link_test_agent(app: &mut App) {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/acme-adapter");
+    if app.store.agents.get("acme").is_none() {
+        app.rpc()
+            .call("extension:link", json!({ "path": folder }))
+            .expect("the test agent's adapter links");
+    }
+    wait_for("the test agent's adapter", || {
+        app.pump();
+        app.store.agents.get("acme").map(|_| ())
+    });
 }
 
 /// The app over `v` as it opens on a first run.
@@ -288,8 +309,8 @@ pub fn add_project(app: &mut App, v: &TestVornd, name: &str, defaults: Value) ->
     std::fs::create_dir_all(&path).expect("project dir");
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     config["projects"] = json!([{ "name": name, "path": path, "preferredAgents": [] }]);
-    config["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
-    config["defaults"]["defaultAgent"] = json!("claude");
+    config["agentCommands"]["acme"] = json!({ "command": "/bin/sh", "args": [] });
+    config["defaults"]["defaultAgent"] = json!("acme");
     if let (Some(d), Value::Object(more)) = (config["defaults"].as_object_mut(), defaults) {
         d.extend(more);
     }
@@ -549,7 +570,7 @@ pub fn seed_acme(app: &mut App, v: &TestVornd) -> PathBuf {
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
     let projects = config["projects"].as_array().cloned().unwrap_or_default();
     let mut projects = projects;
-    projects.push(json!({ "name": "acme", "path": repo, "preferredAgents": ["claude"], "icon": "Code", "iconColor": "#6F8FAF", "workspaceId": "personal" }));
+    projects.push(json!({ "name": "acme", "path": repo, "preferredAgents": ["acme"], "icon": "Code", "iconColor": "#6F8FAF", "workspaceId": "personal" }));
     config["projects"] = json!(projects);
     config["remoteHosts"] = json!([{ "id": "host-1", "label": "Build box", "hostname": "build.example.com", "user": "ci", "port": 2222, "authMethod": "agent" }]);
     app.rpc().call("config:save", config).expect("saved");

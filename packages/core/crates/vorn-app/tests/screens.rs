@@ -88,8 +88,8 @@ fn seed(v: &TestVornd, shot: &mut Shot, app: &mut App) {
     let path = dir.to_string_lossy();
     let mut c = app.rpc().call("config:load", Value::Null).expect("config");
     c["projects"] = json!([{ "name": "demo", "path": path, "preferredAgents": [] }]);
-    c["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
-    c["defaults"]["defaultAgent"] = json!("claude");
+    c["agentCommands"]["acme"] = json!({ "command": "/bin/sh", "args": [] });
+    c["defaults"]["defaultAgent"] = json!("acme");
     let tasks = [
         task("t1", "Fix login", "todo"),
         task("t2", "Add dark mode", "in_progress"),
@@ -235,7 +235,7 @@ fn the_sessions_screens() {
     // The model picker: the project's listing is asked for, a bad id is
     // refused, a typed id is taken.
     let path = app.store.projects[0].path.clone();
-    let models = ("claude".to_owned(), path);
+    let models = ("acme".to_owned(), path);
     shot.until(&mut app, "the models answered", |app, _| {
         app.st
             .models
@@ -255,7 +255,7 @@ fn the_sessions_screens() {
     shot.type_line(&mut app, "my-model");
     assert_eq!(menu(&app), None);
     assert_eq!(
-        app.st.models.picked.get("claude").map(String::as_str),
+        app.st.models.picked.get("acme").map(String::as_str),
         Some("my-model")
     );
     app.st.models.lists.insert(
@@ -278,7 +278,7 @@ fn the_sessions_screens() {
     shot.save(&mut app, "launcher-model");
     shot.click(&mut app, control("model-pick", Act::PickModel(None)));
     assert_eq!(menu(&app), None);
-    assert!(!app.st.models.picked.contains_key("claude"));
+    assert!(!app.st.models.picked.contains_key("acme"));
 }
 
 #[test]

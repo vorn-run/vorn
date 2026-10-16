@@ -495,7 +495,7 @@ impl App {
         let session = t
             .agent_session_id
             .as_ref()
-            .filter(|_| tasks::resumable(&agent))?;
+            .filter(|_| tasks::resumable(&self.store.agents, &agent))?;
         let mut params = json!({
             "agentType": agent,
             "projectName": t.project_name,
@@ -1006,7 +1006,9 @@ impl App {
                     .iter()
                     .filter_map(|t| serde_json::to_value(t).ok())
                     .collect();
-                if let Some(params) = runs::resume_params(&run, &nodes, &nid, &tasks) {
+                if let Some(params) =
+                    runs::resume_params(&self.store.agents, &run, &nodes, &nid, &tasks)
+                {
                     let call = TaskCall::Session {
                         task: None,
                         toast: None,

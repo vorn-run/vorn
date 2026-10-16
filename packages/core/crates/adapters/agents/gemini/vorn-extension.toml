@@ -1,0 +1,70 @@
+# Gemini CLI, run from its adapter.
+id = "vorn.agents.gemini"
+name = "Gemini CLI"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "Runs Gemini CLI: launches it, lists its past sessions and reads its status."
+
+[agent]
+id = "gemini"
+name = "Gemini CLI"
+label = "Gemini"
+short_name = "Gemini"
+description = "Google Gemini CLI"
+icon = "icon.svg"
+mark = "✦"
+color = "#3186ff"
+tint = "#3186ff20"
+url = "https://github.com/google-gemini/gemini-cli"
+install = "npm install -g @google/gemini-cli"
+
+[agent.launch]
+command = "gemini"
+headless_args = ["-y"]
+prompt = ["-i", "{prompt}"]
+
+[agent.headless]
+prompt = []
+no_prompt = ["-p", ""]
+
+[agent.history]
+rank = 1
+activity = "prompt"
+title_limit = 80
+
+[agent.history.json_files]
+markers = { dir = "~/.gemini/tmp", file = ".project_root", sessions = "chats" }
+map = { file = "~/.gemini/projects.json", key = "projects", sessions = "~/.gemini/tmp/{name}/chats" }
+files = "session-*.json"
+id = "sessionId"
+time = "lastUpdated"
+messages = "messages"
+user = ["type", "user"]
+text = "content"
+
+[agent.mcp]
+commands = ["gemini extensions install https://github.com/vorn-run/plugin"]
+note = "Gemini disables MCP servers in a folder it does not trust, user-level ones included."
+
+# A confirmation: a shell command, an edit, a tool or a URL to fetch.
+[[agent.status]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  'Allow execution',
+  'Apply this change\?',
+  'Do you want to proceed\?',
+  'Yes, allow once',
+]
+
+# A turn in progress: the spinner's line offers to cancel it.
+[[agent.status]]
+status = "working"
+rows = [-12, -1]
+any = ['(?i)\besc to cancel\b']
+
+# The input box and its placeholder or typed text.
+[[agent.status]]
+status = "idle"
+rows = [-8, -1]
+any = ['Type your message', '^[\s│]*>(\s|$)']

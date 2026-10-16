@@ -15,7 +15,7 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 use vorn_agents::launch::shell as launch_shell;
 use vorn_agents::launch::Platform;
-use vorn_agents::Agent;
+use vorn_agents::Agents;
 use vorn_store::{Store, StoreOptions};
 use vorn_vault::Kind;
 
@@ -57,11 +57,11 @@ impl Viewer {
     }
 }
 
-/// The app's defaults a configuration falls back on.
-pub fn options() -> StoreOptions {
+/// The app's defaults a configuration falls back on, `agents` among them.
+pub fn options(agents: &Agents) -> StoreOptions {
     let var = |name: &str| std::env::var(name).ok();
-    let default_agent_commands = Agent::ALL
-        .into_iter()
+    let default_agent_commands = agents
+        .iter()
         .map(|agent| {
             let command = agent.default_command();
             let mut entry = Map::new();
@@ -118,6 +118,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
         "config:save" => {
             let mut sent = params;
             let passwords = super::credential::take_host_passwords(&mut sent);
+            let _order = native.config_order.lock().await;
             let saved = blocking(method, move || {
                 for (id, password) in &passwords {
                     n.secrets.put_item(Kind::HostPassword, id, password)?;
@@ -147,6 +148,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
 /// workflows (`workflow:changed`), each whole.
 pub(crate) async fn announce(native: &Arc<Native>) {
     let n = Arc::clone(native);
+    let _order = native.config_order.lock().await;
     let loaded = blocking("config:changed", move || {
         with_store(&n, |s| {
             let config = s.load_config()?;
@@ -186,7 +188,7 @@ pub(crate) fn with_store<T>(
     let store = Store::open_beside(db)
         .map_err(|e| e.to_string())?
         .ok_or("the database does not exist yet")?;
-    let mut store = store.with_defaults(options());
+    let mut store = store.with_defaults(options(&native.agents()));
     f(&mut store).map_err(|e| e.to_string())
 }
 
@@ -225,17 +227,17 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_name_every_agent_as_the_app_does() {
-        let options = options();
-        let claude = &options.default_agent_commands["claude"];
+    fn the_defaults_name_every_agent_that_is_on() {
+        let agents = crate::adapters::testing::adapters().agents();
+        let options = options(&agents);
         assert_eq!(
-            claude,
-            &json!({ "command": "claude", "args": [], "headlessArgs": ["--dangerously-skip-permissions"] })
+            &options.default_agent_commands["acme"],
+            &json!({ "command": "acme", "args": [], "headlessArgs": ["--yes"] })
         );
-        assert!(options.default_agent_commands["opencode"]
+        assert!(options.default_agent_commands["beta"]
             .get("headlessArgs")
             .is_none());
-        assert_eq!(options.default_agent_commands.len(), Agent::ALL.len());
+        assert_eq!(options.default_agent_commands.len(), agents.len());
         assert!(!options.default_shell.is_empty());
     }
 }

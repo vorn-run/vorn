@@ -5,7 +5,7 @@ use super::{label, set};
 use crate::act::Act;
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
-use crate::settings::{args_text, command_of, modified, AgentField, SetAct, AGENTS};
+use crate::settings::{args_text, command_of, modified, AgentField, SetAct};
 use crate::ui::{div, field, text, Action, El, Id, Rgba, Role, TextStyle};
 
 /// The text field for an agent's `field`.
@@ -43,7 +43,7 @@ fn input(s: &Screen<'_>, agent: &str, f: AgentField, value: String, placeholder:
         )
 }
 
-fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
+fn installed_card(s: &Screen<'_>, a: &crate::settings::Agent) -> El {
     let cmd = command_of(&s.store.config, a);
     let typed = |f: AgentField, headless: bool| {
         s.st.settings
@@ -52,7 +52,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
             .cloned()
             .unwrap_or_else(|| args_text(&cmd, headless))
     };
-    let card_id = Id::new("agent-card").child(a.key);
+    let card_id = Id::new("agent-card").child(a.key.as_str());
     let hot = s.ui.hover(card_id) > 0.0;
     let mut head = div()
         .row()
@@ -68,7 +68,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                 .shrink0()
                 .rounded(8.0)
                 .bg(Rgba::hexa(a.color, a.bg_alpha))
-                .child(agent_icon(s, a.key, 18.0)),
+                .child(agent_icon(s, a.key.as_str(), 18.0)),
         )
         .child(
             div()
@@ -81,7 +81,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                         .items_center()
                         .gap(8.0)
                         .child(
-                            text(a.name, 14.0, c(look::GRAY_100))
+                            text(a.name.as_str(), 14.0, c(look::GRAY_100))
                                 .weight(500)
                                 .line_height(20.0)
                                 .silent(),
@@ -105,11 +105,11 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                         ),
                 )
                 .child(
-                    text(a.description, 11.0, c(look::GRAY_500))
+                    text(a.description.as_str(), 11.0, c(look::GRAY_500))
                         .line_height(16.5)
                         .silent(),
                 )
-                .child_if(s.st.agent_paths.get(a.key).map(|p| {
+                .child_if(s.st.agent_paths.get(a.key.as_str()).map(|p| {
                     let shown = crate::settings::home_relative(p);
                     text(shown.as_str(), 11.0, c(look::GRAY_600))
                         .mono()
@@ -166,7 +166,13 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                         .w(140.0)
                         .shrink0()
                         .child(label("Command", 4.0))
-                        .child(input(s, a.key, AgentField::Command, command, "Command")),
+                        .child(input(
+                            s,
+                            a.key.as_str(),
+                            AgentField::Command,
+                            command,
+                            "Command",
+                        )),
                 )
                 .child(
                     div()
@@ -176,7 +182,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                         .child(label("Arguments", 4.0))
                         .child(input(
                             s,
-                            a.key,
+                            a.key.as_str(),
                             AgentField::Args,
                             typed(AgentField::Args, false),
                             "e.g. --dangerously-skip-permissions",
@@ -189,7 +195,7 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                 .child(label("Headless Arguments", 4.0))
                 .child(input(
                     s,
-                    a.key,
+                    a.key.as_str(),
                     AgentField::Headless,
                     typed(AgentField::Headless, true),
                     "e.g. --dangerously-skip-permissions (used for headless/workflow runs)",
@@ -203,13 +209,13 @@ fn installed_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
         .clip()
         .bg(c(look::SURFACE_SUNKEN))
         .border(1.0, if hot { white(0.1) } else { white(0.06) })
-        .role(Role::Group, a.name)
+        .role(Role::Group, a.name.as_str())
         .child(head)
         .child(body)
 }
 
-fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
-    let open = s.st.settings.agents_open.contains(a.key);
+fn available_card(s: &Screen<'_>, a: &crate::settings::Agent) -> El {
+    let open = s.st.settings.agents_open.contains(a.key.as_str());
     let toggle = s
         .acts
         .on("agent-expand", set(SetAct::ExpandAgent(a.key.to_owned())));
@@ -221,7 +227,7 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
         .gap(12.0)
         .px(16.0)
         .py(12.0)
-        .role(Role::Button, a.name)
+        .role(Role::Button, a.name.as_str())
         .expanded(open)
         .child(
             div()
@@ -231,7 +237,7 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                 .rounded(8.0)
                 .bg(white(0.03))
                 .opacity(0.5)
-                .child(agent_icon(s, a.key, 18.0)),
+                .child(agent_icon(s, a.key.as_str(), 18.0)),
         )
         .child(
             div()
@@ -240,13 +246,13 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                 .grow()
                 .min_w0()
                 .child(
-                    text(a.name, 14.0, c(look::GRAY_400))
+                    text(a.name.as_str(), 14.0, c(look::GRAY_400))
                         .weight(500)
                         .line_height(20.0)
                         .silent(),
                 )
                 .child(
-                    text(a.description, 11.0, c(look::GRAY_600))
+                    text(a.description.as_str(), 11.0, c(look::GRAY_600))
                         .line_height(18.0)
                         .ml(8.0)
                         .silent(),
@@ -279,7 +285,7 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
             s.st.settings
                 .copied
                 .as_ref()
-                .is_some_and(|(k, _)| k == a.key);
+                .is_some_and(|(k, _)| k == a.key.as_str());
         let square = |id: Id, el: El, label: &str| {
             let h = s.ui.hover(id);
             let b = div()
@@ -345,7 +351,7 @@ fn available_card(s: &Screen<'_>, a: &'static crate::settings::Agent) -> El {
                                             .silent(),
                                     )
                                     .child(
-                                        text(a.install, 12.0, c(look::GRAY_300))
+                                        text(a.install.as_str(), 12.0, c(look::GRAY_300))
                                             .mono()
                                             .line_height(16.0)
                                             .silent(),
@@ -380,8 +386,18 @@ pub(super) fn page(s: &Screen<'_>) -> El {
             .as_ref()
             .is_none_or(|l| l.iter().any(|x| x == k))
     };
-    let have: Vec<_> = AGENTS.iter().filter(|a| installed(a.key)).collect();
-    let missing: Vec<_> = AGENTS.iter().filter(|a| !installed(a.key)).collect();
+    let have: Vec<_> = s
+        .store
+        .agents
+        .iter()
+        .filter(|a| installed(a.key.as_str()))
+        .collect();
+    let missing: Vec<_> = s
+        .store
+        .agents
+        .iter()
+        .filter(|a| !installed(a.key.as_str()))
+        .collect();
     let busy = s.st.settings.detecting;
     let re = s.acts.on("agents-redetect", set(SetAct::Redetect));
     let h = s.ui.hover(re);
@@ -466,10 +482,14 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         );
     }
     status = status.child(div().grow()).child(
-        text(format!("{} AGENTS", AGENTS.len()), 10.0, c(look::GRAY_600))
-            .tracking(0.05)
-            .line_height(15.0)
-            .silent(),
+        text(
+            format!("{} AGENTS", s.store.agents.len()),
+            10.0,
+            c(look::GRAY_600),
+        )
+        .tracking(0.05)
+        .line_height(15.0)
+        .silent(),
     );
     let mut col = div()
         .col()

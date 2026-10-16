@@ -93,6 +93,7 @@ pub const METHODS: &[&str] = &[
     "pairing:deny",
     "pairing:cancel",
     "agent:detectInstalled",
+    "agent:list",
     "agent:locate",
     "agent:listModels",
     "sessions:getRecent",
@@ -268,11 +269,19 @@ pub struct Native {
     clients: OnceLock<Arc<crate::serve::clients::Clients>>,
     /// Raised when vornd itself changed the configuration.
     config_changed: tokio::sync::Notify,
+    /// Held from a configuration write or read to its `config:changed`, so
+    /// clients hear the configurations in the order they were stored.
+    pub(crate) config_order: tokio::sync::Mutex<()>,
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
     secrets: secrets::Secrets,
     /// The agents' model lists, kept as the server keeps them.
     catalog: vorn_agents::models::Catalog,
+    /// The agents vornd runs, from their adapters; the engine's when it runs one.
+    adapters: OnceLock<Arc<crate::adapters::Adapters>>,
+    /// The model each running session was started with, when one was chosen,
+    /// which `session.created` tells.
+    models: Mutex<HashMap<String, String>>,
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
@@ -338,9 +347,12 @@ impl Native {
             link: OnceLock::new(),
             clients: OnceLock::new(),
             config_changed: tokio::sync::Notify::new(),
+            config_order: tokio::sync::Mutex::new(()),
             desktop: OnceLock::new(),
             secrets,
             catalog: vorn_agents::models::Catalog::default(),
+            adapters: OnceLock::new(),
+            models: Mutex::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
             hooks: OnceLock::new(),
@@ -363,6 +375,41 @@ impl Native {
     /// kept; without one, the server creates them.
     pub fn set_host(&self, host: Arc<dyn sessions::Host>) {
         let _ = self.host.set(host);
+    }
+
+    /// The agents to run, shared with the engine. Only the first one given
+    /// is kept, and only before the first call reads them.
+    pub fn set_adapters(&self, adapters: Arc<crate::adapters::Adapters>) {
+        let _ = self.adapters.set(adapters);
+    }
+
+    /// The agents vornd runs, from their adapters.
+    pub fn adapters(&self) -> &Arc<crate::adapters::Adapters> {
+        self.adapters
+            .get_or_init(crate::adapters::Adapters::standard)
+    }
+
+    /// Keeps the model session `id` is started with.
+    pub(crate) fn remember_model(&self, id: &str, model: &str) {
+        self.models
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_owned(), model.to_owned());
+    }
+
+    /// The model session `id` was started with; `forget` drops it.
+    pub(crate) fn model_of(&self, id: &str, forget: bool) -> Option<String> {
+        let mut models = self.models.lock().unwrap_or_else(|e| e.into_inner());
+        if forget {
+            models.remove(id)
+        } else {
+            models.get(id).cloned()
+        }
+    }
+
+    /// A snapshot of the agents that are on.
+    pub fn agents(&self) -> Arc<vorn_agents::Agents> {
+        self.adapters().agents()
     }
 
     /// The copy of the server's session records to answer from, which this
@@ -556,6 +603,8 @@ impl Native {
     pub fn set_database(&self, db: PathBuf) {
         if let Some(dir) = db.parent() {
             self.secrets.settle(dir);
+            // The shipped adapters' switches, kept beside the database by the extension host.
+            self.adapters().load_switches(&dir.join("builtins.json"));
         }
         let _ = self.db.set(db);
     }
@@ -1250,7 +1299,7 @@ mod tests {
         assert_eq!(native.call("headless:list", &Value::Null), not_ready());
 
         let terminal = json!({
-            "id": "t", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": "t", "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "running", "createdAt": 5, "pid": 9, "worktreePath": "/w",
         });
         registry

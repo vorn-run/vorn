@@ -75,9 +75,9 @@ pub fn is_terminal(status: &str) -> bool {
     status == "done" || status == "cancelled"
 }
 
-/// `supportsExactSessionResume`.
-pub fn resumable(agent: &str) -> bool {
-    agent != "gemini" && agent != "shell"
+/// `supportsExactSessionResume`, as `agent`'s adapter says.
+pub fn resumable(agents: &crate::agents::Agents, agent: &str) -> bool {
+    agents.resumes(agent)
 }
 
 /// `TASK_TEMPLATE`: what a new task's description starts as.
@@ -1070,7 +1070,7 @@ mod tests {
     #[test]
     fn status_changes_stamp_and_clear_as_the_slice_does() {
         let mut config = json!({ "tasks": [{ "id": "a", "status": "in_progress",
-            "assignedSessionId": "s", "assignedAgent": "claude" }] });
+            "assignedSessionId": "s", "assignedAgent": "acme" }] });
         assert!(set_status(&mut config, "a", "done", "T1"));
         let t = &config["tasks"][0];
         assert_eq!(
@@ -1101,7 +1101,7 @@ mod tests {
             id: "n".into(),
             status: "todo".into(),
             project: "web".into(),
-            agent: Some("codex".into()),
+            agent: Some("beta".into()),
             branch: " feat ".into(),
             ..TaskForm::default()
         };
@@ -1111,7 +1111,7 @@ mod tests {
         assert_eq!(t["title"], json!("Title"));
         assert_eq!(t["description"], json!("Body"));
         assert_eq!(t["branch"], json!("feat"));
-        assert_eq!(t["assignedAgent"], json!("codex"));
+        assert_eq!(t["assignedAgent"], json!("beta"));
         assert!(t.get("useWorktree").is_none() && t.get("images").is_none());
     }
 

@@ -6,7 +6,6 @@ use serde_json::Value;
 
 use crate::act::Act;
 use crate::client::Store;
-use crate::screen::menus::AGENTS;
 use crate::screen::MainView;
 use crate::state::{basename, now_ms, time_ago, Filter, LayoutMode, Sort, State};
 use crate::tasks::TaskAct;
@@ -315,7 +314,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
         let kind = if s.is_shell() {
             "Shell"
         } else {
-            crate::screen::menus::agent_name(s.info.agent_type.as_str())
+            store.agents.label(s.info.agent_type.as_str())
         };
         out.push(
             Entry::new(
@@ -581,15 +580,14 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
                 toast: String::new(),
             },
         )
-        .keys(&[
-            "mcp",
-            "api",
-            "integration",
-            "claude",
-            "cursor",
-            "server",
-            "url",
-        ]),
+        .keys(&["mcp", "api", "integration", "cursor", "server", "url"])
+        .keys(
+            &store
+                .agents
+                .iter()
+                .map(|a| a.key.as_str())
+                .collect::<Vec<_>>(),
+        ),
         Entry::new(
             Cat::Actions,
             "SSH & Hosts",
@@ -632,12 +630,12 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Entry>) {
             format!("Branch: {}", w.branch)
         }
     };
-    let installed = AGENTS.iter().filter(|(k, _)| {
-        st.installed
-            .as_ref()
-            .is_some_and(|i| i.iter().any(|a| a == k))
-    });
-    for &(agent, name) in installed {
+    let installed = store
+        .agents
+        .iter()
+        .filter(|a| st.installed.as_ref().is_some_and(|i| i.contains(&a.key)));
+    for a in installed {
+        let (agent, name) = (a.key.as_str(), a.label.as_str());
         for p in &local {
             let launch = |worktree: Option<String>| Act::NewSessionIn {
                 project: p.name.clone(),
@@ -767,7 +765,7 @@ mod tests {
 
     #[test]
     fn an_empty_query_groups_by_category_without_quick_launch() {
-        let mut quick = cmd("Claude Code on p", &[]);
+        let mut quick = cmd("Acme Code on p", &[]);
         quick.cat = Cat::QuickLaunch;
         let mut filter = cmd("Show All", &[]);
         filter.cat = Cat::Filter;
@@ -780,8 +778,8 @@ mod tests {
         let labels: Vec<_> = list.iter().map(|c| c.label.as_str()).collect();
         assert_eq!(labels, ["New Session", "All Projects", "Show All"]);
         // Typed, quick launch takes part and the best match comes first.
-        let list = shown(vec![cmd("Add Claude", &[]), quick], "claude");
-        assert_eq!(list[0].label, "Claude Code on p");
+        let list = shown(vec![cmd("Add Acme", &[]), quick], "acme");
+        assert_eq!(list[0].label, "Acme Code on p");
     }
 
     #[test]

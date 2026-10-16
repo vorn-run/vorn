@@ -4,20 +4,23 @@
 //! It listens on loopback, on a fixed port when it is free so the agents'
 //! settings stay the same across restarts, and answers only requests that
 //! carry its token. One running Vorn registers it ([`vorn_hooks::owner`]):
-//! that one writes the port and token beside the owner record in `~/.vorn`
-//! and its entries in Claude Code's settings; another waits for the
-//! registration to come free. An event sets the status of the terminal it
+//! that one writes the port and token beside the owner record in `~/.vorn`;
+//! another waits for the registration to come free. That one also merges hooks into the settings
+//! of every agent whose adapter asks for them ([`vorn_hooks::settings`]),
+//! and takes them out again when the agent is switched off or vornd stops.
+//! An event sets the status of the terminal it
 //! is about, from then on taken from hooks rather than the screen, and links
 //! the terminal to the agent's conversation. A permission request is held
 //! open until a client answers it (`permission:resolve`), the agent moves
 //! on, or the agent stops waiting.
 //!
-//! Each new terminal is also followed from the registry's notes: a Copilot
-//! terminal gets the hooks file Copilot reads, and an agent that cannot be
-//! told its conversation has it read from the agent's own database a few
-//! times over its first forty seconds ([`vorn_hooks::capture`]).
+//! Each new terminal is also followed from the registry's notes: a terminal
+//! whose adapter keeps a hooks file gets it written ([`vorn_hooks::file`]),
+//! and an agent that cannot be told its conversation has it read from the
+//! agent's own database a few times over its first forty seconds
+//! ([`vorn_hooks::capture`]).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,12 +37,14 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
+use vorn_agents::spec::{Places, SettingsHooks};
+use vorn_agents::Agent;
 use vorn_extensions::events::{
     AGENT_CONVERSATION, AGENT_HOOK, AGENT_PERMISSION, AGENT_PERMISSION_CLOSED,
 };
 use vorn_hooks::mapper::{normalize, Status};
 use vorn_hooks::owner::{may_claim, may_release, Owner};
-use vorn_hooks::{claude, copilot, permission, Event, Mapper, Terminal};
+use vorn_hooks::{file, permission, settings, Event, Mapper, Terminal};
 
 use super::{Answer, Native};
 use crate::endpoint::{full, Body};
@@ -53,8 +58,8 @@ const PREFERRED_PORT: u16 = 56432;
 const MAX_BODY: usize = 1024 * 1024;
 /// How often a Vorn that found the registration held looks again.
 const OWNER_POLL: Duration = Duration::from_secs(1);
-/// How long the Claude probe waits for the login shell's PATH.
-const CLAUDE_PROBE_WAIT: Duration = Duration::from_secs(30);
+/// How long the version probe waits for the login shell's PATH.
+const VERSION_PROBE_WAIT: Duration = Duration::from_secs(30);
 /// When an agent's own database is read for its conversation, after the last read.
 const CAPTURE_LADDER: [u64; 4] = [5, 5, 10, 20];
 
@@ -76,29 +81,34 @@ struct Pending {
 pub struct Homes {
     /// `~/.vorn`: the port, token and owner record.
     pub vorn: PathBuf,
-    /// `~/.claude/settings.json`.
-    pub claude_settings: PathBuf,
-    /// Copilot's hooks file.
-    pub copilot_hooks: PathBuf,
-    /// The user's home, for the agents' databases.
-    pub home: PathBuf,
+    /// Where the agents' adapters name their files from.
+    pub places: Places,
 }
 
 impl Homes {
-    /// From `HOME` (`USERPROFILE` on Windows) and `COPILOT_HOME`.
+    /// From `HOME` (`USERPROFILE` on Windows).
     pub fn from_env() -> Option<Homes> {
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .filter(|h| !h.is_empty())
             .map(PathBuf::from)?;
-        let copilot_home = std::env::var("COPILOT_HOME").ok();
+        let data = Places::from_env().map_or_else(|| home.join(".local").join("share"), |p| p.data);
         Some(Homes {
             vorn: home.join(".vorn"),
-            claude_settings: home.join(".claude").join("settings.json"),
-            copilot_hooks: copilot::hooks_file(copilot_home.as_deref(), &home),
-            home,
+            places: Places {
+                home: home.clone(),
+                data,
+            },
         })
     }
+}
+
+/// Settings hooks Vorn merged into an agent's settings, to take out again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Merged {
+    file: PathBuf,
+    /// Every event the adapter names, so each is cleaned.
+    all: Vec<String>,
 }
 
 /// The hook endpoint and everything it keeps.
@@ -110,11 +120,13 @@ pub struct Hooks {
     port: u16,
     /// Whether this vornd holds the registration.
     owner: AtomicBool,
-    /// Whether it wrote Copilot's hooks file.
-    copilot: AtomicBool,
-    /// Whether the Claude Code on PATH reports its own status (OSC 7501):
-    /// then only the hooks it needs answered are installed.
-    claude_reports: AtomicBool,
+    /// The hooks files it wrote, to remove when it stops.
+    files: Mutex<HashSet<PathBuf>>,
+    /// The settings it merged hooks into, by agent.
+    merged: Mutex<BTreeMap<String, Merged>>,
+    /// The agents whose CLI on PATH reports its own status (OSC 7501): they
+    /// get only the hooks they need answered.
+    own_status: Mutex<HashSet<String>>,
     /// Set once vornd stops: a registration that comes free then is not taken.
     stopped: AtomicBool,
     pending: Mutex<Vec<Pending>>,
@@ -152,15 +164,20 @@ impl Hooks {
             token: uuid::Uuid::new_v4().to_string(),
             port: listener.local_addr()?.port(),
             owner: AtomicBool::new(false),
-            copilot: AtomicBool::new(false),
-            claude_reports: AtomicBool::new(false),
+            files: Mutex::default(),
+            merged: Mutex::default(),
+            own_status: Mutex::default(),
             stopped: AtomicBool::new(false),
             pending: Mutex::default(),
             mapper: Mutex::default(),
             last_activity: Mutex::new(Instant::now()),
         });
         tokio::spawn(serve(Arc::downgrade(&hooks), listener));
-        hooks.probe_claude(native);
+        hooks.probe_versions(native);
+        tokio::spawn(follow_adapters(
+            Arc::downgrade(&hooks),
+            native.adapters().subscribe(),
+        ));
         if !hooks.try_claim() {
             let owner = Owner::read(&hooks.owner_file());
             info!(
@@ -235,52 +252,140 @@ impl Hooks {
                 .to_json(),
             )?;
             std::fs::write(self.homes.vorn.join("port"), self.port.to_string())?;
-            write_private(&self.homes.vorn.join("token"), &self.token)?;
-            self.install_claude()
+            write_private(&self.homes.vorn.join("token"), &self.token)
         })();
         if let Err(err) = written {
             warn!(%err, "could not register the hook endpoint");
             return false;
         }
         self.owner.store(true, Ordering::SeqCst);
+        self.sync_settings();
         true
     }
 
-    fn install_claude(&self) -> std::io::Result<()> {
-        let events = claude::events(self.claude_reports.load(Ordering::SeqCst));
-        claude::install_file(&self.homes.claude_settings, self.port, &self.token, events)
+    /// Merges hooks into the settings of each agent that is on and asks for
+    /// them, and takes them out of an agent's that was switched off. Only
+    /// while this vornd holds the registration.
+    fn sync_settings(&self) {
+        if !self.owns_registration() || self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(native) = self.native.upgrade() else {
+            return;
+        };
+        let wanted: Vec<(Agent, SettingsHooks)> = native
+            .agents()
+            .iter()
+            .filter_map(|a| {
+                let spec = a.spec().hooks.as_ref()?.settings.clone()?;
+                Some((a.clone(), spec))
+            })
+            .collect();
+        // Held throughout: `stop` takes it after marking itself stopped, so
+        // nothing is merged back in once it has taken the hooks out.
+        let mut merged = lock(&self.merged);
+        if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        let gone: Vec<Merged> = {
+            let keep: HashSet<&str> = wanted.iter().map(|(a, _)| a.id()).collect();
+            let gone: Vec<String> = merged
+                .keys()
+                .filter(|id| !keep.contains(id.as_str()))
+                .cloned()
+                .collect();
+            gone.iter().filter_map(|id| merged.remove(id)).collect()
+        };
+        for m in gone {
+            let all: Vec<&str> = m.all.iter().map(String::as_str).collect();
+            if let Err(err) = settings::uninstall_file(&m.file, &all) {
+                debug!(%err, file = %m.file.display(), "could not take hooks out of an agent's settings");
+            }
+        }
+        for (agent, spec) in wanted {
+            let file = self.homes.places.path(&spec.file);
+            let reports = lock(&self.own_status).contains(agent.id());
+            let mut all: Vec<&str> = spec.events.iter().map(String::as_str).collect();
+            let events: Vec<&str> = match (&spec.own_status, reports) {
+                (Some(own), true) => {
+                    for e in &own.events {
+                        if !all.contains(&e.as_str()) {
+                            all.push(e);
+                        }
+                    }
+                    own.events.iter().map(String::as_str).collect()
+                }
+                _ => all.clone(),
+            };
+            match settings::install_file(&file, self.port, &self.token, &all, &events) {
+                Ok(()) => {
+                    let all = all.iter().map(|e| (*e).to_owned()).collect();
+                    merged.insert(agent.id().to_owned(), Merged { file, all });
+                }
+                Err(err) => {
+                    warn!(%err, agent = agent.id(), "could not merge hooks into an agent's settings")
+                }
+            }
+        }
     }
 
-    /// Asks the Claude Code on PATH its version once the login shell's PATH
-    /// is known; one that reports its own status gets only the hooks it needs.
-    fn probe_claude(self: &Arc<Self>, native: &Arc<Native>) {
+    /// Asks each agent CLI whose adapter names a version it reports its own
+    /// status from for its version, once the login shell's PATH is known;
+    /// one that does gets only the hooks it needs answered.
+    fn probe_versions(self: &Arc<Self>, native: &Arc<Native>) {
+        let wanted: Vec<(String, String, String)> = native
+            .adapters()
+            .agents()
+            .iter()
+            .filter_map(|a| {
+                let own = a
+                    .spec()
+                    .hooks
+                    .as_ref()?
+                    .settings
+                    .as_ref()?
+                    .own_status
+                    .as_ref()?;
+                Some((
+                    a.id().to_owned(),
+                    a.spec().launch.command.clone(),
+                    own.since.clone(),
+                ))
+            })
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
         let (weak, env) = (Arc::downgrade(self), Arc::clone(&native.env));
         // A thread of its own, so a slow probe never holds vornd's shutdown.
         let spawned = std::thread::Builder::new()
-            .name("claude-probe".into())
+            .name("version-probe".into())
             .spawn(move || {
                 env.prime();
-                let deadline = Instant::now() + CLAUDE_PROBE_WAIT;
+                let deadline = Instant::now() + VERSION_PROBE_WAIT;
                 while !env.resolved() && Instant::now() < deadline {
                     std::thread::sleep(Duration::from_millis(250));
                 }
-                let version = env
-                    .find("claude")
-                    .and_then(|bin| super::shell::version_of(&bin, Duration::from_secs(5)));
-                let Some(hooks) = weak.upgrade() else { return };
-                let reports = version.as_deref().is_some_and(claude::reports_status);
-                info!(?version, reports, "the Claude Code on PATH");
-                if !reports || hooks.claude_reports.swap(true, Ordering::SeqCst) {
-                    return;
-                }
-                if hooks.owns_registration() && !hooks.stopped.load(Ordering::SeqCst) {
-                    if let Err(err) = hooks.install_claude() {
-                        warn!(%err, "could not trim the hooks in Claude's settings");
+                let mut changed = false;
+                for (id, command, since) in wanted {
+                    let version = env
+                        .find(&command)
+                        .and_then(|bin| super::shell::version_of(&bin, Duration::from_secs(5)));
+                    let Some(hooks) = weak.upgrade() else { return };
+                    let reports = version
+                        .as_deref()
+                        .is_some_and(|v| settings::reports_status(v, &since));
+                    info!(agent = %id, ?version, reports, "an agent CLI on PATH");
+                    if reports {
+                        changed |= lock(&hooks.own_status).insert(id);
                     }
+                }
+                if let (true, Some(hooks)) = (changed, weak.upgrade()) {
+                    hooks.sync_settings();
                 }
             });
         if let Err(err) = spawned {
-            warn!(%err, "could not probe Claude's version");
+            warn!(%err, "could not probe the agents' versions");
         }
     }
 
@@ -290,9 +395,9 @@ impl Hooks {
         for p in lock(&self.pending).drain(..) {
             let _ = p.reply.send(permission::decision(false, None, None));
         }
-        if self.copilot.swap(false, Ordering::SeqCst) {
-            if let Err(err) = copilot::uninstall(&self.homes.copilot_hooks) {
-                debug!(%err, "could not remove Copilot's hooks file");
+        for written in lock(&self.files).drain() {
+            if let Err(err) = file::uninstall(&written) {
+                debug!(%err, file = %written.display(), "could not remove a hooks file");
             }
         }
         if !self.owner.swap(false, Ordering::SeqCst) {
@@ -309,8 +414,12 @@ impl Hooks {
         for name in ["port", "token", "hook-owner"] {
             let _ = std::fs::remove_file(self.homes.vorn.join(name));
         }
-        if let Err(err) = claude::uninstall_file(&self.homes.claude_settings) {
-            debug!(%err, "could not remove the hooks from Claude's settings");
+        let merged = std::mem::take(&mut *lock(&self.merged));
+        for m in merged.into_values() {
+            let all: Vec<&str> = m.all.iter().map(String::as_str).collect();
+            if let Err(err) = settings::uninstall_file(&m.file, &all) {
+                debug!(%err, file = %m.file.display(), "could not remove the hooks from an agent's settings");
+            }
         }
     }
 
@@ -507,18 +616,27 @@ impl Hooks {
         let _ = p.reply.send(body);
     }
 
-    /// Writes Copilot's hooks file for a Copilot terminal, and links the terminal to the
-    /// conversation id its hooks post.
-    fn copilot_terminal(&self, native: &Native, id: &str) {
-        let file = &self.homes.copilot_hooks;
-        match copilot::install(file, &self.homes.vorn) {
-            Ok(copilot::Installed::NotOurs) => {
-                warn!(file = %file.display(), "Copilot's hooks file is not Vorn's; left it alone");
+    /// Writes the hooks file `agent`'s adapter keeps for its terminal `id`,
+    /// and links the terminal to the conversation id its hooks post.
+    fn file_terminal(&self, native: &Native, agent: &Agent, id: &str) {
+        let Some(spec) = agent.spec().hooks.as_ref().and_then(|h| h.file.as_ref()) else {
+            return;
+        };
+        let path = self.homes.places.path(&spec.path);
+        let hooks = file::Spec {
+            session: &spec.session,
+            events: &spec.events,
+        };
+        match file::install(hooks, &path, &self.homes.vorn) {
+            Ok(file::Installed::NotOurs) => {
+                warn!(file = %path.display(), agent = agent.id(), "the agent's hooks file is not Vorn's; left it alone");
             }
-            Ok(_) => self.copilot.store(true, Ordering::SeqCst),
-            Err(err) => warn!(%err, "could not write Copilot's hooks file"),
+            Ok(_) => {
+                lock(&self.files).insert(path);
+            }
+            Err(err) => warn!(%err, agent = agent.id(), "could not write the agent's hooks file"),
         }
-        let session = copilot::session_id(id);
+        let session = hooks.session_id(id);
         lock(&self.mapper).force_link(&session, id);
         patch(native, id, json!({ "hookSessionId": session }));
     }
@@ -739,7 +857,7 @@ async fn handle(hooks: Weak<Hooks>, req: Request<Incoming>) -> Result<Response<B
     Ok(reply(StatusCode::OK, body))
 }
 
-/// Acts on each terminal new to the registry: a Copilot terminal's hooks,
+/// Acts on each terminal new to the registry: a hooks file its adapter keeps,
 /// and the conversation of an agent that cannot be told one.
 async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<Value>) {
     use tokio::sync::broadcast::error::RecvError;
@@ -789,24 +907,31 @@ async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<
             } else if blocked.remove(id) {
                 hooks.cancel(&native, |p| p.terminal == id);
             }
-            let agent = text("agentType").unwrap_or_default();
-            if agent == "copilot" && text("hookSessionId").is_none() {
-                hooks.copilot_terminal(&native, id);
+            let Some(agent) = native.adapters().get(text("agentType").unwrap_or_default()) else {
+                seen.insert(id.to_owned());
+                continue;
+            };
+            let has_file = agent
+                .spec()
+                .hooks
+                .as_ref()
+                .is_some_and(|h| h.file.is_some());
+            if has_file && text("hookSessionId").is_none() {
+                hooks.file_terminal(&native, &agent, id);
             }
             if !seen.insert(id.to_owned()) {
                 continue;
             }
-            let wants_capture = vorn_agents::Agent::from_id(agent)
-                .is_some_and(|a| a.resumes_exactly() && !a.pins_session_ids())
+            let wants_capture = agent.resumes_exactly()
+                && !agent.pins_session_ids()
                 && text("agentSessionId").is_none()
                 && text("remoteHostId").is_none();
-            if let (true, Some(db_agent)) =
-                (wants_capture, vorn_hooks::capture::Agent::from_id(agent))
-            {
+            let capture_spec = agent.spec().resume.as_ref().and_then(|r| r.capture.clone());
+            if let (true, Some(spec)) = (wants_capture, capture_spec) {
                 tokio::spawn(capture(
                     Arc::downgrade(&native),
-                    hooks.homes.home.clone(),
-                    db_agent,
+                    hooks.homes.places.path(&spec.db),
+                    spec.query,
                     id.to_owned(),
                 ));
             }
@@ -814,24 +939,17 @@ async fn follow(hooks: Weak<Hooks>, mut notes: tokio::sync::broadcast::Receiver<
     }
 }
 
-/// Reads the conversation `id`'s agent took, a few times over its first
-/// forty seconds, and keeps it on the record.
-async fn capture(
-    native: Weak<Native>,
-    home: PathBuf,
-    agent: vorn_hooks::capture::Agent,
-    id: String,
-) {
-    // Where OpenCode keeps its data: LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere.
-    let data_home = if cfg!(windows) {
-        Some(
-            std::env::var_os("LOCALAPPDATA")
-                .map_or_else(|| home.join("AppData").join("Local"), PathBuf::from),
-        )
-    } else {
-        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from)
-    };
-    let db = agent.database(&home, data_home.as_deref());
+/// Merges or takes out settings hooks whenever which agents are on changes.
+async fn follow_adapters(hooks: Weak<Hooks>, mut changed: tokio::sync::watch::Receiver<u64>) {
+    while changed.changed().await.is_ok() {
+        let Some(hooks) = hooks.upgrade() else { return };
+        tokio::task::spawn_blocking(move || hooks.sync_settings());
+    }
+}
+
+/// Reads the conversation `id`'s agent took from `db` with `query`, a few
+/// times over its first forty seconds, and keeps it on the record.
+async fn capture(native: Weak<Native>, db: PathBuf, query: String, id: String) {
     for secs in CAPTURE_LADDER {
         tokio::time::sleep(Duration::from_secs(secs)).await;
         let Some(native) = native.upgrade() else {
@@ -864,9 +982,9 @@ async fn capture(
         if taken.is_some() {
             return;
         }
-        let db2 = db.clone();
+        let (db2, query2) = (db.clone(), query.clone());
         let found =
-            tokio::task::spawn_blocking(move || vorn_hooks::capture::capture(agent, &cwd, &db2))
+            tokio::task::spawn_blocking(move || vorn_hooks::capture::capture(&query2, &cwd, &db2))
                 .await
                 .ok()
                 .flatten();

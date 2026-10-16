@@ -306,7 +306,7 @@ pub(crate) mod test_support {
         StoreOptions {
             default_shell: "/bin/zsh".into(),
             default_agent_commands: serde_json::from_str(
-                r#"{"claude":{"command":"claude","args":[]}}"#,
+                r#"{"acme":{"command":"acme","args":[]}}"#,
             )
             .expect("valid JSON"),
             default_workspace: serde_json::from_value(serde_json::json!({

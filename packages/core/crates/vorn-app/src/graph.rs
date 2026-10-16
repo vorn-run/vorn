@@ -891,14 +891,14 @@ fn unique(mut n: Value, taken: &HashSet<String>) -> Value {
     n
 }
 
-/// `createLaunchAgentNode`, in `project`.
-pub fn agent_node(project: Option<(&str, &str)>, taken: &HashSet<String>) -> Value {
+/// `createLaunchAgentNode`, in `project`, running `agent`.
+pub fn agent_node(project: Option<(&str, &str)>, agent: &str, taken: &HashSet<String>) -> Value {
     let (name, path) = project.unwrap_or(("", ""));
     unique(
         node(
             "launchAgent",
             "Launch Agent",
-            json!({ "agentType": "claude", "projectName": name, "projectPath": path, "headless": true }),
+            json!({ "agentType": agent, "projectName": name, "projectPath": path, "headless": true }),
         ),
         taken,
     )

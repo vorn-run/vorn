@@ -9,24 +9,8 @@ import type {
   SessionEvent
 } from '@vornrun/shared/types'
 import { V } from '../validation'
+import { agentsOff } from './agents'
 import { rpcCall, rpcNotify } from '../rpc-client'
-
-/**
- * Deliberately `AiAgentType`, not `AgentType`.
- *
- * `AgentType` also admits `'shell'`, which is a plain PTY and not something a
- * task or project can be assigned to — the config types have always said so. The
- * list below never contained it either, so the wider annotation only ever
- * described these values incorrectly, and every use of it needed a cast that
- * quietly disagreed with the field being assigned.
- */
-const AGENT_TYPES: [AiAgentType, ...AiAgentType[]] = [
-  'claude',
-  'copilot',
-  'codex',
-  'opencode',
-  'gemini'
-]
 
 export function registerSessionTools(server: McpServer): void {
   server.tool(
@@ -74,7 +58,7 @@ export function registerSessionTools(server: McpServer): void {
     'launch_session',
     'Launch an AI agent session (interactive terminal or headless). Requires the Vorn app to be running.',
     {
-      agent_type: z.enum(AGENT_TYPES).describe('Agent type to launch'),
+      agent_type: V.agentId.describe('Agent type to launch'),
       project_name: V.name.describe('Project name'),
       project_path: V.absolutePath.describe('Absolute path to project directory'),
       prompt: V.prompt.optional().describe('Initial prompt to send to the agent'),
@@ -84,6 +68,8 @@ export function registerSessionTools(server: McpServer): void {
       headless: z.boolean().optional().describe('Launch as headless (no UI) session')
     },
     async (args) => {
+      const off = await agentsOff([args.agent_type])
+      if (off) return off
       const payload: CreateTerminalPayload = {
         agentType: args.agent_type as AiAgentType,
         projectName: args.project_name,

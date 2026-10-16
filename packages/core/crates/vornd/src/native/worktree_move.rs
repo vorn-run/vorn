@@ -183,12 +183,12 @@ mod tests {
         let snapshot = json!({
             "op": "snapshot", "order": ["t"],
             "terminals": [{
-                "id": "t", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+                "id": "t", "agentType": "acme", "projectName": "p", "projectPath": "/p",
                 "status": "running", "createdAt": 1, "pid": 9,
                 "worktreePath": worktree, "worktreeName": "old", "branch": "feature",
             }],
             "headless": [{
-                "id": "h", "pid": 7, "agentType": "claude", "projectName": "p",
+                "id": "h", "pid": 7, "agentType": "acme", "projectName": "p",
                 "projectPath": "/p", "status": "running", "startedAt": 1,
                 "worktreePath": worktree,
             }],

@@ -416,7 +416,7 @@ mod tests {
         );
 
         let set = json!({ "id": "mine", "set": {
-            "status": "in_progress", "assignedSessionId": "s1", "assignedAgent": "claude", "bogus": 1
+            "status": "in_progress", "assignedSessionId": "s1", "assignedAgent": "acme", "bogus": 1
         } });
         let (patched, changed) = patch(&mut s, &set, "2026-01-02T00:00:00.000Z").unwrap();
         assert!(changed);
@@ -433,7 +433,7 @@ mod tests {
         let t = &patched["task"];
         assert_eq!(t["completedAt"], "2026-01-03T00:00:00.000Z");
         assert!(t.get("assignedSessionId").is_none_or(Value::is_null));
-        assert_eq!(t["assignedAgent"], "claude");
+        assert_eq!(t["assignedAgent"], "acme");
 
         let elsewhere = json!({ "id": "mine", "set": { "projectName": "nowhere" } });
         assert_eq!(

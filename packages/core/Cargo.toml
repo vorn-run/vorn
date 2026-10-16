@@ -23,6 +23,7 @@ members = [
   "crates/protocol",
   "crates/store",
   "crates/agents",
+  "crates/adapters",
   "crates/mcp",
   "crates/cli",
   "crates/reach",

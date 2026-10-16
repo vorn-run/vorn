@@ -395,15 +395,15 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
     let mut app = connect(&v);
     let project = add_project(&mut app, &v, "demo", json!({ "reopenSessions": false }));
     // A conversation the agent's own history lists.
-    let claude = v.home.join(".claude");
-    std::fs::create_dir_all(&claude).expect("dir");
+    let acme_dir = v.home.join(".acme");
+    std::fs::create_dir_all(&acme_dir).expect("dir");
     let line = json!({
         "sessionId": "c0ffee",
         "display": "Fix the flaky test",
         "project": project,
         "timestamp": vorn_app::state::now_ms(),
     });
-    std::fs::write(claude.join("history.jsonl"), format!("{line}\n")).expect("history");
+    std::fs::write(acme_dir.join("history.jsonl"), format!("{line}\n")).expect("history");
 
     let mut shot = Shot::new();
     shot.frame(&mut app);
@@ -448,7 +448,7 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
 
     // A headless agent shows the pill, and its menu lists it.
     let params = json!({
-        "agentType": "claude",
+        "agentType": "acme",
         "projectName": "demo",
         "projectPath": project,
         "initialPrompt": "sleep 30",

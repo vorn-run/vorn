@@ -1,6 +1,8 @@
 //! `vorn session start|list|logs|send|kill`: agent sessions in the running
 //! server, terminal and headless alike.
 
+use std::sync::LazyLock;
+
 use serde_json::{json, Map, Value};
 
 use crate::client::{CommandError, Context};
@@ -12,9 +14,7 @@ use crate::render;
 use crate::status;
 use crate::target::{self, Candidate, Miss};
 
-pub const AGENTS: [&str; 5] = ["claude", "copilot", "codex", "opencode", "gemini"];
-
-pub const SESSION_USAGE: &str = "Usage
+const USAGE: &str = "Usage
   vorn session start --agent <agent> [--prompt <text>] [options]
   vorn session list [--recent] [--project <name>] [--json]
   vorn session read <target> [--lines <n>] [--scrollback] [--unwrap] [--trim]
@@ -50,7 +50,7 @@ Waiting
   waits instead for the program's status (as the app shows it) and exits 0.
 
 Agents
-  claude, copilot, codex, opencode, gemini
+  {agents}
 
 Options for start
   --prompt <text>     First thing the agent is told
@@ -62,6 +62,22 @@ Options for start
   --wait              With --headless, stay until it ends and show it to the terminal
   --name <label>      Display name for the session
 ";
+
+/// The agents Vorn ships switched on, by id.
+pub fn shipped_agents() -> Vec<&'static str> {
+    vorn_adapters::shipped()
+        .iter()
+        .filter(|s| s.on_by_default)
+        .map(|s| s.name)
+        .collect()
+}
+
+/// The session usage, naming the agents Vorn ships switched on.
+pub fn session_usage() -> &'static str {
+    static TEXT: LazyLock<String> =
+        LazyLock::new(|| USAGE.replace("{agents}", &shipped_agents().join(", ")));
+    &TEXT
+}
 
 /// A list the server answered with; anything else reads as empty.
 fn items(value: Value) -> Vec<Value> {
@@ -189,12 +205,25 @@ fn no_terminal(ctx: &mut Context<'_>, id: &str, verb: &str) -> ExitCode {
 
 async fn start(ctx: &mut Context<'_>) -> ExitCode {
     let Some(agent) = ctx.args.agent.clone() else {
-        return ctx.usage("session start needs --agent", SESSION_USAGE);
+        return ctx.usage("session start needs --agent", session_usage());
     };
-    if !AGENTS.contains(&agent.as_str()) {
+    // The agents vornd runs come from their adapters; it names those that are on.
+    let known: Vec<String> = match ctx.call("agent:list", None).await {
+        Ok(listed) => items(listed)
+            .iter()
+            .filter_map(|a| field(a, "id").and_then(Value::as_str).map(str::to_owned))
+            .collect(),
+        Err(err) => return ctx.failed("could not start the session", CommandError::from(err)),
+    };
+    if !known.contains(&agent) {
+        let names = if known.is_empty() {
+            "none is on; switch one on in Settings".to_owned()
+        } else {
+            known.join(", ")
+        };
         return ctx.usage(
-            &format!("unknown agent \"{agent}\". Try: {}", AGENTS.join(", ")),
-            SESSION_USAGE,
+            &format!("unknown agent \"{agent}\". Try: {names}"),
+            session_usage(),
         );
     }
     match start_session(ctx, &agent).await {
@@ -406,7 +435,7 @@ async fn list_sessions(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> 
 
 async fn logs(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
     let Some(given) = given.filter(|g| !g.is_empty()) else {
-        return ctx.usage("session read needs a session", SESSION_USAGE);
+        return ctx.usage("session read needs a session", session_usage());
     };
     match read_logs(ctx, given).await {
         Ok(code) => code,
@@ -525,7 +554,7 @@ fn exit_of(code: Option<i64>) -> ExitCode {
 
 async fn wait(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
     let Some(given) = given.filter(|g| !g.is_empty()) else {
-        return ctx.usage("session wait needs a session", SESSION_USAGE);
+        return ctx.usage("session wait needs a session", session_usage());
     };
     match wait_for(ctx, given).await {
         Ok(code) => code,
@@ -680,7 +709,7 @@ fn reported(ctx: &mut Context<'_>, target: &Addressed, record: Value, code: Exit
 
 async fn send(ctx: &mut Context<'_>, given: Option<&str>, input: Option<String>) -> ExitCode {
     let (Some(given), Some(input)) = (given.filter(|g| !g.is_empty()), input) else {
-        return ctx.usage("session send needs a session and text", SESSION_USAGE);
+        return ctx.usage("session send needs a session and text", session_usage());
     };
     match send_input(ctx, given, &input).await {
         Ok(code) => code,
@@ -716,7 +745,7 @@ async fn send_input(
 
 async fn kill(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
     let Some(given) = given.filter(|g| !g.is_empty()) else {
-        return ctx.usage("session kill needs a session", SESSION_USAGE);
+        return ctx.usage("session kill needs a session", session_usage());
     };
     match kill_session(ctx, given).await {
         Ok(code) => code,
@@ -746,17 +775,17 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
     let rest = positionals.get(2..).unwrap_or_default();
 
     if ctx.args.help {
-        ctx.io.write(SESSION_USAGE);
+        ctx.io.write(session_usage());
         return ExitCode::Ok;
     }
     let Some(verb) = verb.filter(|v| !v.is_empty()) else {
-        ctx.io.write_err(SESSION_USAGE);
+        ctx.io.write_err(session_usage());
         return ExitCode::Usage;
     };
     if !["start", "list", "logs", "read", "wait", "send", "kill"].contains(&verb) {
         return ctx.usage(
             &format!("unknown session command \"{verb}\""),
-            SESSION_USAGE,
+            session_usage(),
         );
     }
     if !ctx.server().await {

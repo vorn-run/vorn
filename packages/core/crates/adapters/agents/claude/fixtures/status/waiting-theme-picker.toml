@@ -1,0 +1,32 @@
+# The last screen of the recorded session in vorn-recovery (transcripts/agent.rec), 100x30.
+status = "waiting"
+screen = '''
+                                            ▒▒      ██   ▒
+       █████████                          ▒▒░░▒▒      ▒ ▒▒
+      ██▄█████▄██                           ▒▒         ▒▒
+       █████████                           ░          ▒
+.......█ █   █ █..........................░..........▒....
+
+ Let's get started.
+
+ Choose the text style that looks best with your terminal
+ To change this later, run /theme
+
+     Auto (match terminal)
+   ✔ Dark mode
+ ❯   Light mode
+     Dark mode (colorblind-friendly)
+     Light mode (colorblind-friendly)
+     Dark mode (ANSI colors only)
+     Light mode (ANSI colors only)
+
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1  function greet() {
+  2 -  console.log("Hello, World!");
+  2 +  console.log("Hello, Claude!");
+  3  }
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  Syntax theme: GitHub (ctrl+t to disable)
+
+ Press Ctrl-C again to exit
+'''

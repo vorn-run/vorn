@@ -233,6 +233,8 @@ enum Call {
     Headless,
     Restored,
     Installed,
+    /// `agent:list` after an adapter was switched, installed or removed.
+    Agents,
     Worktrees(String),
     Branches(String),
     /// `agent:listModels` for an agent in a project.
@@ -801,6 +803,9 @@ impl App {
                         continue;
                     }
                     if method.starts_with("extension:") {
+                        if method == "extension:contributionsChanged" {
+                            self.call(Call::Agents, "agent:list", Value::Null);
+                        }
                         self.points_notified(&method, &params);
                     }
                     let store = &self.store;
@@ -813,7 +818,7 @@ impl App {
                                 agent: if s.is_shell() {
                                     "Shell"
                                 } else {
-                                    crate::screen::menus::agent_name(s.info.agent_type.as_str())
+                                    store.agents.label(s.info.agent_type.as_str())
                                 },
                                 name: s.title(),
                             })
@@ -1014,6 +1019,13 @@ impl App {
                         .toast(format!("Could not list the sessions: {e}"), true);
                 }
             },
+            Call::Agents => {
+                if let Ok(v) = answer {
+                    self.store.agents = crate::agents::Agents::from_json(&v);
+                    // A new agent may be installed where none was.
+                    self.call(Call::Installed, "agent:locate", Value::Null);
+                }
+            }
             Call::Installed => {
                 if let Some((found, paths)) =
                     answer.ok().as_ref().and_then(crate::settings::located)
@@ -1546,7 +1558,7 @@ impl App {
         let Some((_, path)) = self.composer_project() else {
             return;
         };
-        if !crate::models::selects_models(&agent) {
+        if !self.store.agents.selects_models(&agent) {
             return;
         }
         let listing = self
@@ -1908,7 +1920,7 @@ impl App {
                         "projectName": name,
                         "projectPath": path,
                     });
-                    self.call(Call::Created, "terminal:create", params);
+                    self.create_session(Call::Created, params);
                 }
                 None => self.run(ui, Act::NewSession, src),
             },
@@ -1930,7 +1942,7 @@ impl App {
                     Some(path) if path != p.path => params["existingWorktreePath"] = json!(path),
                     _ => {}
                 }
-                self.call(Call::Created, "terminal:create", params);
+                self.create_session(Call::Created, params);
             }
             Act::NewShellIn(dir) => {
                 let cwd = if dir.is_empty() {
@@ -2407,8 +2419,9 @@ impl App {
                 .toast(format!("A project named \"{name}\" already exists"), true);
             return;
         }
+        let first = self.store.agents.iter().next().map(|a| a.key.clone());
         let mut project = old.map_or_else(
-            || json!({ "preferredAgents": ["claude"] }),
+            || json!({ "preferredAgents": first.into_iter().collect::<Vec<_>>() }),
             |i| list[i].clone(),
         );
         let form = &self.st.form;
@@ -3012,6 +3025,21 @@ impl App {
         claim
     }
 
+    /// `terminal:create` with `params`; with every agent off the session is
+    /// a plain shell, started where the agent would have been.
+    fn create_session(&mut self, call: Call, params: Value) {
+        if params["agentType"] != "shell" {
+            self.call(call, "terminal:create", params);
+            return;
+        }
+        let cwd = params
+            .get("existingWorktreePath")
+            .filter(|w| w.is_string())
+            .unwrap_or(&params["projectPath"])
+            .clone();
+        self.call(call, "shell:create", cwd);
+    }
+
     /// PromptLauncher's launch: the chosen agent in the chosen project (or
     /// its worktree), with what was typed as its first prompt.
     fn launch(&mut self) {
@@ -3042,7 +3070,7 @@ impl App {
         if !prompt.is_empty() {
             params["initialPrompt"] = json!(prompt);
         }
-        self.call(Call::Launch, "terminal:create", params);
+        self.create_session(Call::Launch, params);
         self.st.composer.launching = true;
         self.st.composer.error = None;
     }
@@ -3134,7 +3162,13 @@ impl App {
             .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
         ui.text.set_term_size(font);
         self.size = size;
-        self.agents.load(ui);
+        self.agents.load(
+            ui,
+            self.store
+                .agents
+                .iter()
+                .filter_map(|a| Some((a.key.as_str(), a.icon.as_deref()?, a.mark.as_deref()))),
+        );
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
             self.logo = decode_png(look::LOGO_PNG)

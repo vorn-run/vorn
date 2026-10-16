@@ -64,7 +64,7 @@ async fn a_tool_call_comes_back_through_vornds_own_socket() {
     .await;
     let mut config = next(&mut desktop).await["result"].take();
     config["projects"] =
-        json!([{ "name": "app", "path": "/work/app", "preferredAgents": ["claude"] }]);
+        json!([{ "name": "app", "path": "/work/app", "preferredAgents": ["acme"] }]);
     send(
         &mut desktop,
         json!({ "jsonrpc": "2.0", "id": 2, "method": "config:save", "params": config }),

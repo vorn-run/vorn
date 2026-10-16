@@ -27,6 +27,56 @@
 // runs as an extension, and the first message it is sent, `guest.init` or
 // `vorn/hello`, says which role a process plays. Templates are files in their
 // own format, `vorn:view@1`, not an API.
+//
+// An `[agent]` section makes the package an agent adapter: everything Vorn
+// needs to run one agent CLI, as data, with no program. Its fields (checked
+// against `vorn_agents::AgentSpec`; docs/adding-an-agent.md walks through
+// them):
+//
+//   id, name, label, short_name   the agent type sessions carry, and its names
+//   description, url, install     what Settings shows
+//   icon, mark, color, tint       its SVG mark in the package, one character
+//                                 for text surfaces, its accent and tint
+//   [agent.launch]                command, args, headless_args, and how a first
+//                                 prompt rides the line: prompt = ["{prompt}"]
+//   [agent.resume]                args that resume conversation {id}, `at` the
+//                                 end or the start (a subcommand), `pin` to
+//                                 start one under an id chosen beforehand,
+//                                 the `selectors` a configured line may carry,
+//                                 and `capture`: a query that reads the
+//                                 conversation from the agent's own database
+//   [agent.headless]              the arguments that end a headless run with
+//                                 and without a prompt (which goes to stdin),
+//                                 `resume` or `resume_tail` for a resumed run,
+//                                 and `stream`: the package's service reads
+//                                 what the run prints (see `guest.handle`)
+//   [agent.models]                the model `flag`, the `selectors` and
+//                                 `config` overrides it replaces, `group` by
+//                                 provider, and `list`: a JSON-lines exchange
+//                                 (`steps` of send, reply, fail, require,
+//                                 models, next and cursor) or `lines` printed
+//                                 by one run, read through `choice`
+//   [agent.history]               where past conversations are: `jsonl`,
+//                                 `sqlite` or `json_files`, with `activity`,
+//                                 `title_limit`, and `rank` for sessions of
+//                                 different agents at the same moment
+//   [[agent.status]]              screen rules, first match wins: status,
+//                                 rows or cursor_rows, any, all, none,
+//                                 cursor, title
+//   [agent.hooks]                 `settings`: HTTP hooks merged into the
+//                                 agent's JSON settings, `own_status` from
+//                                 the version that reports OSC 7501; or
+//                                 `file`: a hooks file of Vorn's own
+//   [agent.env]                   variables the agent sets in its sessions,
+//                                 stripped from every process Vorn starts
+//   [agent.usage], [agent.mcp]    where context use is recorded, and how the
+//                                 agent connects to Vorn's tools
+//
+// Paths start with `~`, `{data}`, `{env:NAME|fallback}` or `/`, and never
+// hold `..`; the hook files Vorn writes are `.json`. A session's status is
+// read in this order: what the agent reports itself (OSC 7501), then its
+// hooks, then its screen rules. An adapter may add templates beside the
+// section and fill them as any extension does (examples/extensions/agent-footer).
 
 package vorn:extension@0.9.0;
 
@@ -136,6 +186,10 @@ interface guest {
   init: func(ctx: init-ctx) -> result<_, ext-error>;
   /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
   /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
+  /// An agent adapter whose `[agent.headless]` says `stream = true` is called
+  /// `agent.stream` with `{session, lines}`, what a headless run printed, and
+  /// answers `{conversation?, events?: [{event, tool?}]}`: the conversation
+  /// the run took, and hook events by Vorn's names (`PreToolUse`, `Stop`, ...).
   handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
   on-event: func(batch: list<event>);
 }

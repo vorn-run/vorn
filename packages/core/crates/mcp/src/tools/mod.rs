@@ -120,6 +120,29 @@ pub fn error_of(err: impl Into<String>) -> Value {
     failed(format!("Error: {}", err.into()))
 }
 
+/// The error a tool answers when one of `agents` is no agent that is on in
+/// Vorn (`agent:list`), or `None` when every one is. A vornd that cannot
+/// list its agents lets the call through, and vornd decides.
+pub async fn agents_off<R: Rpc>(cx: &Cx<'_, R>, agents: &[&str]) -> Option<Value> {
+    if agents.is_empty() {
+        return None;
+    }
+    let listed = cx.call("agent:list", None).await.ok()?;
+    let on: Vec<&str> = items(Some(&listed))
+        .iter()
+        .filter_map(|a| a.get("id").and_then(Value::as_str))
+        .collect();
+    let off = agents.iter().find(|a| !on.contains(a))?;
+    let which = if on.is_empty() {
+        "No agent is on; switch one on in Settings › Extensions.".to_owned()
+    } else {
+        format!("Agents that are on: {}.", on.join(", "))
+    };
+    Some(failed(format!(
+        "Error: agent \"{off}\" is not on in Vorn. {which}"
+    )))
+}
+
 /// `value ?? []` as an array to walk: anything that is not one walks as empty.
 pub fn items(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map_or(&[], Vec::as_slice)

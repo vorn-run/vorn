@@ -189,6 +189,9 @@ interface Scripted {
 /** Answers a call the scripted way: a result, an error message, or a close code. */
 type Script = (call: Call) => { result: unknown } | { error: string } | { close: number } | null
 
+/** The agents vornd lists as on, as its shipped adapters start. */
+const AGENTS_ON = ['claude', 'copilot', 'codex', 'opencode', 'gemini']
+
 const script: Script = ({ method, params }) => {
   const p = (params ?? {}) as Record<string, unknown>
   switch (method) {
@@ -196,6 +199,8 @@ const script: Script = ({ method, params }) => {
       return { result: CONFIG }
     case 'config:save':
       return { result: null }
+    case 'agent:list':
+      return { result: AGENTS_ON.map((id) => ({ id })) }
     case 'terminal:listActive':
       return { result: TERMINALS }
     case 'headless:list':

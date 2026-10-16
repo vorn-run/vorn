@@ -93,7 +93,7 @@ record  = "D" delta_us:u32 len:u32 bytes[len]     one read of output
 ```
 
 Re-record one on Linux or macOS with `python3 scripts/record.py vim
-transcripts/vim.rec` (also `htop`, `claude`). The script runs the program on a
+transcripts/vim.rec` (also `htop`, and `agent`, recorded from an agent CLI). The script runs the program on a
 fresh PTY with only `TERM`, `LANG`, `PATH` and an empty `HOME` set, types a
 fixed script of keys and resizes, and shows htop only the processes it started.
 Before committing a recording, check its bytes for anything about the machine

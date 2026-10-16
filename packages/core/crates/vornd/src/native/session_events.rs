@@ -295,16 +295,25 @@ fn created_event(native: &Native, kind: &str, record: &Value) {
     native.events().emit(SESSION_CREATED, || {
         let text = |k: &str| record.get(k).cloned().unwrap_or(Value::Null);
         let (project, worktree) = place_in(record);
-        json!({
+        let mut data = json!({
             "sessionId": text("id"), "kind": kind, "projectPath": project,
             "worktreePath": worktree, "agent": text("agentType"),
-        })
+        });
+        let model = record
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| native.model_of(id, false));
+        if let Some(model) = model {
+            data["model"] = json!(model);
+        }
+        data
     });
 }
 
 impl Told {
     /// `session.exited` for terminal `id`, once, whether it ended or was closed first.
     fn terminal_exited(&mut self, native: &Native, id: &str, code: Value) {
+        native.model_of(id, true);
         let Some((project, worktree)) = self.places.remove(id) else {
             return;
         };
@@ -548,7 +557,7 @@ mod tests {
             ],
         );
         let mut t = Told::default();
-        let record = |status: &str| json!({ "id": "t", "status": status, "projectPath": "/p", "agentType": "claude" });
+        let record = |status: &str| json!({ "id": "t", "status": status, "projectPath": "/p", "agentType": "acme" });
         let upsert =
             |status: &str| json!({ "op": "upsert", "kind": "terminal", "record": record(status) });
         t.note(&fed.native, &fed.registry, &upsert("running"));
@@ -582,7 +591,7 @@ mod tests {
         );
         assert_eq!(
             seen[0].1,
-            json!({ "sessionId": "t", "kind": "terminal", "projectPath": "/p", "worktreePath": "/p", "agent": "claude" })
+            json!({ "sessionId": "t", "kind": "terminal", "projectPath": "/p", "worktreePath": "/p", "agent": "acme" })
         );
         assert_eq!(seen[4].1["exitCode"], 2);
         assert_eq!(seen[5].1["sessionId"], "sh");

@@ -467,7 +467,7 @@ mod tests {
     fn counts_real_bells_only() {
         let mut s = Screen::new(80, 24).unwrap();
         // BEL ending an OSC is a terminator, not a bell.
-        assert_eq!(s.feed(b"\x1b]0;\xe2\x9c\xb3 claude\x07working").bells, 0);
+        assert_eq!(s.feed(b"\x1b]0;\xe2\x9c\xb3 agent\x07working").bells, 0);
         assert_eq!(s.feed(b"done\x07\x07").bells, 2);
         assert_eq!(s.feed(b"quiet").bells, 0);
     }

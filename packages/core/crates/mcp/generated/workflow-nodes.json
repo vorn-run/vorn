@@ -332,15 +332,8 @@
         "properties": {
           "agentType": {
             "type": "string",
-            "enum": [
-              "claude",
-              "copilot",
-              "codex",
-              "opencode",
-              "gemini",
-              "fromTask"
-            ],
-            "description": "Which agent CLI runs. fromTask uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
+            "pattern": "^([a-z][a-z0-9-]{0,31}|fromTask)$",
+            "description": "Which agent CLI runs: an agent's id (as claude or codex), or fromTask, which uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
           },
           "model": {
             "description": "Model passed to the CLI as written, e.g. \"opus\". Needs a concrete agentType",

@@ -5,6 +5,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { isTerminalTaskStatus } from '@vornrun/shared/types'
 import type { TaskConfig, TaskStatus, AiAgentType } from '@vornrun/shared/types'
 import { V } from '../validation'
+import { agentsOff } from './agents'
 import {
   dbListTasks,
   dbGetTask,
@@ -19,23 +20,6 @@ import {
 import type { ProjectConfig } from '@vornrun/shared/types'
 
 const TASK_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
-/**
- * Deliberately `AiAgentType`, not `AgentType`.
- *
- * `AgentType` also admits `'shell'`, which is a plain PTY and not something a
- * task or project can be assigned to — the config types have always said so. The
- * list below never contained it either, so the wider annotation only ever
- * described these values incorrectly, and every use of it needed a cast that
- * quietly disagreed with the field being assigned.
- */
-const AGENT_TYPES: [AiAgentType, ...AiAgentType[]] = [
-  'claude',
-  'copilot',
-  'codex',
-  'opencode',
-  'gemini'
-]
-
 export function registerTaskTools(server: McpServer): void {
   server.tool(
     'list_tasks',
@@ -46,7 +30,7 @@ export function registerTaskTools(server: McpServer): void {
         .enum(TASK_STATUSES as [string, ...string[]])
         .optional()
         .describe('Filter by status'),
-      assigned_agent: z.enum(AGENT_TYPES).optional().describe('Filter by assigned agent type'),
+      assigned_agent: V.agentId.optional().describe('Filter by assigned agent type'),
       workspace_id: V.id
         .optional()
         .describe('Filter by workspace ID (returns tasks from all projects in that workspace)'),
@@ -93,9 +77,11 @@ export function registerTaskTools(server: McpServer): void {
         .describe('Task status (default: todo)'),
       branch: V.shortText.optional().describe('Git branch for this task'),
       use_worktree: z.boolean().optional().describe('Create a git worktree for this task'),
-      assigned_agent: z.enum(AGENT_TYPES).optional().describe('Assign to an agent type')
+      assigned_agent: V.agentId.optional().describe('Assign to an agent type')
     },
     async (args) => {
+      const off = await agentsOff(args.assigned_agent ? [args.assigned_agent] : [])
+      if (off) return off
       const project = await dbGetProject(args.project_name)
       if (!project) {
         return {
@@ -154,10 +140,12 @@ export function registerTaskTools(server: McpServer): void {
         .describe('New status'),
       branch: V.shortText.optional().describe('Git branch'),
       use_worktree: z.boolean().optional().describe('Use git worktree'),
-      assigned_agent: z.enum(AGENT_TYPES).optional().describe('Assigned agent type'),
+      assigned_agent: V.agentId.optional().describe('Assigned agent type'),
       order: z.number().optional().describe('Queue order')
     },
     async (args) => {
+      const off = await agentsOff(args.assigned_agent ? [args.assigned_agent] : [])
+      if (off) return off
       const task = await dbGetTask(args.id)
       if (!task) {
         return {

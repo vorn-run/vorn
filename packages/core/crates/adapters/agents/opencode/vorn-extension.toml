@@ -1,0 +1,85 @@
+# OpenCode, run from its adapter.
+id = "vorn.agents.opencode"
+name = "OpenCode"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "Runs OpenCode: launches and resumes it, lists its models and reads its status."
+
+[agent]
+id = "opencode"
+name = "OpenCode"
+label = "OpenCode"
+short_name = "OpenCode"
+description = "OpenCode CLI"
+icon = "icon.svg"
+mark = "▣"
+color = "#ffffff"
+tint = "#ffffff15"
+url = "https://opencode.ai"
+install = "npm install -g opencode-ai"
+
+[agent.launch]
+command = "opencode"
+prompt = ["--prompt", "{prompt}"]
+
+[agent.resume]
+args = ["--session", "{id}"]
+selectors = { with_value = ["--session", "-s"] }
+
+[agent.resume.capture]
+db = "{data}/opencode/opencode.db"
+query = "SELECT id FROM session WHERE time_archived IS NULL AND rtrim(lower(replace(directory, '\\', '/')), '/') = ?1 ORDER BY time_updated DESC LIMIT 1"
+
+[agent.headless]
+prompt = ["run"]
+no_prompt = ["run", ""]
+
+[agent.models]
+selectors = ["-m"]
+group = true
+
+[agent.models.list]
+args = ["models"]
+lines = '^[^\s/]+/\S+$'
+
+[agent.history]
+rank = 4
+activity = "message"
+title_limit = 80
+
+[agent.history.sqlite]
+db = "{data}/opencode/opencode.db"
+query = "SELECT s.id, s.directory, s.title, s.time_updated, COUNT(m.id) as message_count FROM session s LEFT JOIN message m ON s.id = m.session_id WHERE s.time_archived IS NULL AND {scope} GROUP BY s.id ORDER BY s.time_updated DESC"
+scope = "s.directory"
+id = "id"
+project = "directory"
+title = ["title"]
+time = "time_updated"
+unit = "milliseconds"
+count = "message_count"
+
+[agent.mcp]
+commands = ["opencode mcp add vorn -- npx -y @vornrun/mcp@latest", "git clone https://github.com/vorn-run/plugin ~/.config/opencode/vorn"]
+note = 'Then add "skills": { "paths": ["~/.config/opencode/vorn/skills"] } to ~/.config/opencode/opencode.jsonc'
+
+# A permission request over the prompt.
+[[agent.status]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  'Permission required',
+  'Allow (once|always)',
+  '\baccept always\b',
+]
+
+# A turn in progress: the footer offers to interrupt it.
+[[agent.status]]
+status = "working"
+rows = [-6, -1]
+any = ['(?i)\besc (to )?interrupt\b']
+
+# The prompt with its key hints, nothing running.
+[[agent.status]]
+status = "idle"
+rows = [-6, -1]
+any = ['\benter send\b', '\bctrl\+p commands\b', '\btab (switch )?agent\b']

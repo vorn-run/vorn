@@ -103,6 +103,10 @@ fn a_misspelt_field_is_reported_by_name_and_line() {
 /// keeps these in step with it) reads here, every key kept.
 #[test]
 fn reads_every_manifest_the_sdk_writes() {
+    // The SDK's card names an agent Vorn ships; its adapter says the id exists.
+    for s in vorn_adapters::shipped() {
+        vorn_agents::from_manifest_text(s.manifest).expect("a shipped adapter reads");
+    }
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sdk-manifests");
     let read = |name: &str| {
         let text = std::fs::read_to_string(dir.join(format!("{name}.toml"))).unwrap();

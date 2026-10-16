@@ -5,6 +5,7 @@
 
 use web_time::Instant;
 
+use crate::agents::{AgentInfo, Agents};
 use serde_json::{json, Value};
 
 /// `ONBOARDING_VERSION`: a `defaults.hasSeenOnboarding` below it opens
@@ -137,112 +138,6 @@ pub const STEPS: [Step; 7] = [
     },
 ];
 
-/// An agent as the guide lists it (`AGENT_DEFINITIONS`).
-#[derive(Debug, PartialEq)]
-pub struct AgentDef {
-    pub agent: &'static str,
-    pub name: &'static str,
-    /// The tile behind its mark: colour and alpha (`bgColor`).
-    pub bg: (u32, f32),
-    pub install: &'static str,
-}
-
-/// `AGENT_LIST`, in its order.
-pub const AGENTS: [AgentDef; 5] = [
-    AgentDef {
-        agent: "claude",
-        name: "Claude Code",
-        bg: (0xd97757, 0x20 as f32 / 255.0),
-        install: "npm install -g @anthropic-ai/claude-code",
-    },
-    AgentDef {
-        agent: "copilot",
-        name: "GitHub Copilot",
-        bg: (0x6cc644, 0x20 as f32 / 255.0),
-        install: "brew install copilot-cli",
-    },
-    AgentDef {
-        agent: "codex",
-        name: "Codex CLI",
-        bg: (0x7a9dff, 0x20 as f32 / 255.0),
-        install: "npm install -g @openai/codex",
-    },
-    AgentDef {
-        agent: "opencode",
-        name: "OpenCode",
-        bg: (0xffffff, 0x15 as f32 / 255.0),
-        install: "npm install -g opencode-ai",
-    },
-    AgentDef {
-        agent: "gemini",
-        name: "Gemini CLI",
-        bg: (0x3186ff, 0x20 as f32 / 255.0),
-        install: "npm install -g @google/gemini-cli",
-    },
-];
-
-/// The definition of `agent`.
-pub fn agent_def(agent: &str) -> Option<&'static AgentDef> {
-    AGENTS.iter().find(|a| a.agent == agent)
-}
-
-/// How one agent gets Vorn's skills and MCP server (`AgentMcpSetup`).
-#[derive(Debug, PartialEq, Eq)]
-pub struct McpSetup {
-    pub agent: &'static str,
-    /// In order: some agents want a marketplace added first.
-    pub commands: &'static [&'static str],
-    /// Typed inside the agent, not in a shell.
-    pub in_agent: bool,
-    pub note: Option<&'static str>,
-}
-
-/// `AGENT_MCP_SETUPS`.
-pub const MCP_SETUPS: [McpSetup; 5] = [
-    McpSetup {
-        agent: "claude",
-        commands: &[
-            "/plugin marketplace add vorn-run/plugin",
-            "/plugin install vorn",
-        ],
-        in_agent: true,
-        note: None,
-    },
-    McpSetup {
-        agent: "copilot",
-        commands: &[
-            "copilot plugin marketplace add vorn-run/plugin",
-            "copilot plugin install vorn@vorn",
-        ],
-        in_agent: false,
-        note: None,
-    },
-    McpSetup {
-        agent: "codex",
-        commands: &[
-            "codex plugin marketplace add vorn-run/plugin",
-            "codex plugin add vorn@vorn",
-        ],
-        in_agent: false,
-        note: Some("Restart, or start a fresh session \u{2014} skills load at session start."),
-    },
-    McpSetup {
-        agent: "opencode",
-        commands: &[
-            "opencode mcp add vorn -- npx -y @vornrun/mcp@latest",
-            "git clone https://github.com/vorn-run/plugin ~/.config/opencode/vorn",
-        ],
-        in_agent: false,
-        note: Some("Then add \"skills\": { \"paths\": [\"~/.config/opencode/vorn/skills\"] } to ~/.config/opencode/opencode.jsonc"),
-    },
-    McpSetup {
-        agent: "gemini",
-        commands: &["gemini extensions install https://github.com/vorn-run/plugin"],
-        in_agent: false,
-        note: Some("Gemini disables MCP servers in a folder it does not trust, user-level ones included."),
-    },
-];
-
 /// What the MCP setup says the tools let an agent do.
 pub const MCP_CAPS: [&str; 4] = [
     "Launch sessions",
@@ -257,14 +152,15 @@ pub fn is_installed(installed: Option<&[String]>, agent: &str) -> bool {
     installed.is_none_or(|i| i.iter().any(|a| a == agent))
 }
 
-/// The setups for installed agents, or the first two when none is.
-pub fn mcp_to_show(installed: Option<&[String]>) -> Vec<&'static McpSetup> {
-    let found: Vec<_> = MCP_SETUPS
-        .iter()
-        .filter(|m| is_installed(installed, m.agent))
+/// The agents whose setups show: those installed, or the first two when
+/// none is.
+pub fn mcp_to_show<'a>(agents: &'a Agents, installed: Option<&[String]>) -> Vec<&'a AgentInfo> {
+    let with_setup = || agents.iter().filter(|a| a.mcp.is_some());
+    let found: Vec<_> = with_setup()
+        .filter(|a| is_installed(installed, &a.key))
         .collect();
     if found.is_empty() {
-        MCP_SETUPS.iter().take(2).collect()
+        with_setup().take(2).collect()
     } else {
         found
     }
@@ -364,20 +260,11 @@ mod tests {
 
     #[test]
     fn mcp_setups_follow_what_is_installed() {
-        let all: Vec<_> = mcp_to_show(None).iter().map(|m| m.agent).collect();
-        assert_eq!(all.len(), 5);
-        let codex = ["codex".to_owned()];
-        let one: Vec<_> = mcp_to_show(Some(&codex)).iter().map(|m| m.agent).collect();
-        assert_eq!(one, ["codex"]);
-        let none: Vec<_> = mcp_to_show(Some(&[])).iter().map(|m| m.agent).collect();
-        assert_eq!(none, ["claude", "copilot"]);
-    }
-
-    #[test]
-    fn every_agent_has_a_setup() {
-        for a in &AGENTS {
-            assert!(MCP_SETUPS.iter().any(|m| m.agent == a.agent), "{}", a.agent);
-        }
-        assert_eq!(agent_def("codex").map(|a| a.name), Some("Codex CLI"));
+        let agents = crate::agents::testing::agents();
+        let keys = |l: Vec<&AgentInfo>| l.iter().map(|a| a.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(mcp_to_show(&agents, None)), ["acme", "beta"]);
+        let beta = ["beta".to_owned()];
+        assert_eq!(keys(mcp_to_show(&agents, Some(&beta))), ["beta"]);
+        assert_eq!(keys(mcp_to_show(&agents, Some(&[]))), ["acme", "beta"]);
     }
 }

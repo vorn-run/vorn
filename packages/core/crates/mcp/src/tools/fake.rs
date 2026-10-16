@@ -159,7 +159,7 @@ pub fn sample_config() -> Value {
     json!({
         "version": 1,
         "projects": [
-            { "name": "app", "path": "/work/app", "preferredAgents": ["claude"], "workspaceId": "personal" }
+            { "name": "app", "path": "/work/app", "preferredAgents": ["acme"], "workspaceId": "personal" }
         ],
         "tasks": [
             { "id": "t1", "projectName": "app", "title": "First", "description": "", "status": "in_progress",

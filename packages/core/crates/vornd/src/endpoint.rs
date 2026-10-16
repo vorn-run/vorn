@@ -81,6 +81,7 @@ impl Daemon {
             // server's records, which the server feeds only when asked.
             #[cfg(feature = "engine")]
             if let Some(engine) = holder.as_ref().and_then(|h| h.engine()) {
+                native.set_adapters(Arc::clone(engine.adapters()));
                 native.set_registry(Arc::clone(engine.registry()));
                 // The copy decides every terminal's status; the server takes them from it.
                 engine.decide_statuses();
@@ -95,6 +96,8 @@ impl Daemon {
                     ));
                 }
             }
+            // Read now: the adapters say which variables no process inherits.
+            native.adapters();
             native
         };
         Arc::new(Daemon {

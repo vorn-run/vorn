@@ -1772,6 +1772,17 @@ impl Registry {
         self.native_upsert_headless(id, json!({ "started": { "pid": pid, "epoch": epoch } }))
     }
 
+    /// Headless agent `id` took `conversation`, as its adapter read it from
+    /// what it printed: the conversation it is resumed by.
+    pub fn headless_conversation(&mut self, id: &str, conversation: &str) -> Option<Value> {
+        let row = self.headless.get_mut(id)?;
+        if row.record.agent_session_id.as_deref() == Some(conversation) {
+            return None;
+        }
+        row.record.agent_session_id = Some(conversation.to_owned());
+        self.native_upsert_headless(id, json!({}))
+    }
+
     /// Headless agent `id`'s program could not be started, and why: it
     /// ended with exit code 1, as the server ends one whose spawn failed.
     pub fn headless_failed(&mut self, id: &str, why: &str) -> Option<Value> {
@@ -2587,6 +2598,13 @@ impl SessionRegistry {
         self.lock().registry.session_closed(id);
     }
 
+    /// [`Registry::headless_conversation`].
+    pub fn headless_conversation(&self, id: &str, conversation: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.headless_conversation(id, conversation);
+        self.tell(note);
+    }
+
     /// [`Registry::headless_exit`].
     pub fn headless_exit(&self, id: &str, code: i32, at: Stamp) {
         let mut fed = self.lock();
@@ -2777,7 +2795,7 @@ mod tests {
 
     fn headless(id: &str) -> Value {
         json!({
-            "id": id, "pid": 7, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": id, "pid": 7, "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "running", "startedAt": 1,
         })
     }
@@ -3095,12 +3113,12 @@ mod tests {
             "op": "snapshot", "terminals": [agent("a"), terminal("sh")], "headless": [],
         });
         shared.feed(1, &snapshot).unwrap();
-        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+        assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
         assert_eq!(shared.agent_type("sh").as_deref(), Some("shell"));
         assert_eq!(shared.agent_type("gone"), None);
         // The server leaving does not forget what each session runs.
         shared.left(1);
-        assert_eq!(shared.agent_type("a").as_deref(), Some("claude"));
+        assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
     }
 
     #[test]
@@ -3145,7 +3163,7 @@ mod tests {
 
     fn agent(id: &str) -> Value {
         let mut t = terminal(id);
-        t["agentType"] = json!("claude");
+        t["agentType"] = json!("acme");
         t
     }
 

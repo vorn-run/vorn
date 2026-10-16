@@ -47,7 +47,7 @@ use vorn_agents::launch::ssh as login;
 use vorn_agents::launch::{
     display_name_from_prompt, launch_line, LaunchRequest, Machine, Platform, Quoting,
 };
-use vorn_agents::{paths, Agent};
+use vorn_agents::{paths, Agent, Agents};
 use vorn_git::repo::{extract_worktree_name, node_basename, Git};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
@@ -245,7 +245,7 @@ pub fn starts(method: &str) -> bool {
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
-        "terminal:create" => match CreateRequest::read(params) {
+        "terminal:create" => match CreateRequest::read(params, &native.agents()) {
             Some(req) => create(native, &req),
             None => bad_params(method),
         },
@@ -561,12 +561,13 @@ fn failed(message: String) -> Answer {
 /// (`buildRestorePayload`), on `transcript` when it has one. `None` for an
 /// agent this build does not know.
 fn restore_request(
+    agents: &Agents,
     previous: &TerminalSession,
     transcript: Option<String>,
 ) -> Option<CreateRequest> {
     let in_worktree = previous.is_worktree == Some(true);
     Some(CreateRequest {
-        agent: Agent::from_id(&previous.agent_type)?,
+        agent: agents.get(&previous.agent_type)?.clone(),
         model: None,
         project_name: previous.project_name.clone(),
         project_path: previous.project_path.clone(),
@@ -625,7 +626,7 @@ fn resume_agent(native: &Native, id: &str, previous: &TerminalSession) -> Answer
         free_transcript_for(native, &previous, scope.as_ref())
     };
     let transcript = free.filter(|t| claims.claim(t, id, now).is_none());
-    let Some(req) = restore_request(&previous, transcript.clone()) else {
+    let Some(req) = restore_request(&native.agents(), &previous, transcript.clone()) else {
         claims.prepared(id, Instant::now());
         return failed(format!(
             "{} is not an agent this build can start",
@@ -702,7 +703,7 @@ fn free_transcript_for(
     session: &TerminalSession,
     scope: Option<&ProjectScope>,
 ) -> Option<String> {
-    let agent = Agent::from_id(&session.agent_type)?;
+    let agent = native.adapters().get(&session.agent_type)?;
     if !agent.resumes_exactly() {
         return None;
     }
@@ -730,7 +731,7 @@ fn free_transcript_for(
                 .map(|c| c.session_id.clone())
         })
     };
-    let scoped = recent_sessions_for(agent, &homes, scope, RECENT_LIMIT);
+    let scoped = recent_sessions_for(&agent, &homes, scope, RECENT_LIMIT);
     if let Some(found) = at_preferred(&scoped).or_else(|| {
         scoped
             .iter()
@@ -740,12 +741,12 @@ fn free_transcript_for(
         return Some(found);
     }
     // Unscoped matches by path only: a loose match here would cross projects.
-    at_preferred(&recent_sessions_for(agent, &homes, None, RECENT_LIMIT))
+    at_preferred(&recent_sessions_for(&agent, &homes, None, RECENT_LIMIT))
 }
 
 /// The conversation a remote session's record names, when nothing holds it: this machine has no history of the host's.
 fn pinned_free(native: &Native, session: &TerminalSession) -> Option<String> {
-    let agent = Agent::from_id(&session.agent_type)?;
+    let agent = native.adapters().get(&session.agent_type)?;
     let pinned = given(session.agent_session_id.as_deref()).filter(|_| agent.resumes_exactly())?;
     (!held_transcripts(native).iter().any(|h| h == pinned)).then(|| pinned.to_owned())
 }
@@ -832,9 +833,9 @@ pub struct CreateRequest {
 
 impl CreateRequest {
     /// Reads `params` as the server's handler does. `None` for a call that
-    /// is the server's: an agent this build does not know,
+    /// is the server's: an agent none of `agents` is,
     /// a param it does not read or one of a shape it would not expect.
-    pub fn read(params: &Value) -> Option<CreateRequest> {
+    pub fn read(params: &Value, agents: &Agents) -> Option<CreateRequest> {
         let p = params.as_object()?;
         if p.keys().any(|k| !CREATE_KEYS.contains(&k.as_str())) {
             return None;
@@ -874,7 +875,7 @@ impl CreateRequest {
             return None;
         }
         Some(CreateRequest {
-            agent: Agent::from_id(&text("agentType")??)?,
+            agent: agents.get(&text("agentType")??)?.clone(),
             model: text("model")?,
             project_name: text("projectName")??,
             project_path,
@@ -1121,14 +1122,17 @@ fn start_agent(
     group_id: Option<String>,
     made: Made,
 ) -> Answer {
+    if let Some(model) = req.model.as_deref().filter(|m| !m.is_empty()) {
+        native.remember_model(id, model);
+    }
     if let Some(answer) = unheld(native) {
         return answer;
     }
     let Some(settings) = agent::settings(native) else {
         return agent::no_settings();
     };
-    let Some(config) = agent::command_of(&settings, req.agent) else {
-        return agent::unreadable_command(req.agent);
+    let Some(config) = agent::command_of(&settings, &req.agent) else {
+        return agent::unreadable_command(&req.agent);
     };
     if req.remote().is_some() {
         return match prepare_remote(native, req, &config, &settings, id, group_id) {
@@ -1256,7 +1260,7 @@ fn prepare_remote(
     let host = remote_host(native, host_id)?.ok_or_else(not_ready)?;
     let env = native.env.get();
     let launch = LaunchRequest {
-        agent: req.agent,
+        agent: req.agent.clone(),
         args: req.args.clone(),
         model: req.model.clone(),
         remote_host_id: Some(host_id.to_owned()),
@@ -1451,7 +1455,7 @@ fn prepare(
         }));
     }
     let launch = LaunchRequest {
-        agent: req.agent,
+        agent: req.agent.clone(),
         args: req.args.clone(),
         model: req.model.clone(),
         remote_host_id: None,
@@ -1798,6 +1802,11 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
 pub(super) mod tests {
     use super::*;
 
+    /// A create read against the test adapters.
+    fn read_req(params: &Value) -> Option<CreateRequest> {
+        CreateRequest::read(params, &crate::adapters::testing::adapters().agents())
+    }
+
     /// A project path that is absolute where the test runs.
     fn project() -> &'static str {
         if cfg!(windows) {
@@ -1810,8 +1819,8 @@ pub(super) mod tests {
     #[test]
     fn reads_a_remote_project_as_a_posix_path_on_any_host() {
         let read = |path: &str| {
-            CreateRequest::read(&json!({
-                "agentType": "claude", "projectName": "far", "projectPath": path,
+            read_req(&json!({
+                "agentType": "acme", "projectName": "far", "projectPath": path,
                 "remoteHostId": "h",
             }))
         };
@@ -1822,31 +1831,31 @@ pub(super) mod tests {
 
     #[test]
     fn reads_a_local_create_and_leaves_the_rest_to_the_server() {
-        let req = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": project(),
+        let req = read_req(&json!({
+            "agentType": "acme", "projectName": "p", "projectPath": project(),
             "useWorktree": true, "branch": "b", "args": ["--x"], "promptDelayMs": 5,
         }))
         .unwrap();
-        assert_eq!(req.agent, Agent::Claude);
+        assert_eq!(req.agent.id(), "acme");
         assert!(req.use_worktree);
         assert_eq!(req.args.as_deref(), Some(&["--x".to_owned()][..]));
         for theirs in [
             // A param the handler does not read.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "extra": 1 }),
+            json!({ "agentType": "acme", "projectName": "p", "projectPath": project(), "extra": 1 }),
             // Shapes it would not expect.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "useWorktree": "yes" }),
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": "rel" }),
+            json!({ "agentType": "acme", "projectName": "p", "projectPath": project(), "useWorktree": "yes" }),
+            json!({ "agentType": "acme", "projectName": "p", "projectPath": "rel" }),
             json!({ "agentType": "shell", "projectName": "p", "projectPath": project() }),
-            json!({ "agentType": "claude", "projectPath": project() }),
-            json!("claude"),
+            json!({ "agentType": "acme", "projectPath": project() }),
+            json!("acme"),
         ] {
-            assert_eq!(CreateRequest::read(&theirs), None, "{theirs}");
+            assert_eq!(read_req(&theirs), None, "{theirs}");
         }
         // An empty remote host is none, as the handler reads it.
         let read = |host: &str| {
             let path = if host.is_empty() { project() } else { "/srv/p" };
-            CreateRequest::read(&json!({
-                "agentType": "codex", "projectName": "p", "projectPath": path, "remoteHostId": host,
+            read_req(&json!({
+                "agentType": "beta", "projectName": "p", "projectPath": path, "remoteHostId": host,
             }))
             .unwrap()
         };
@@ -1857,7 +1866,7 @@ pub(super) mod tests {
     #[test]
     fn names_a_conversation_only_for_an_agent_that_can_be_sent_back_to_one() {
         let named = |agent: &str, resume: Value| {
-            CreateRequest::read(&json!({
+            read_req(&json!({
                 "agentType": agent, "projectName": "p", "projectPath": project(),
                 "resumeSessionId": resume,
             }))
@@ -1865,11 +1874,11 @@ pub(super) mod tests {
             .named()
             .map(str::to_owned)
         };
-        assert_eq!(named("claude", json!("c1")).as_deref(), Some("c1"));
-        assert_eq!(named("codex", json!("c2")).as_deref(), Some("c2"));
-        assert_eq!(named("gemini", json!("c3")), None);
-        assert_eq!(named("claude", json!("")), None);
-        assert_eq!(named("claude", Value::Null), None);
+        assert_eq!(named("acme", json!("c1")).as_deref(), Some("c1"));
+        assert_eq!(named("beta", json!("c2")).as_deref(), Some("c2"));
+        assert_eq!(named("gamma", json!("c3")), None);
+        assert_eq!(named("acme", json!("")), None);
+        assert_eq!(named("acme", Value::Null), None);
     }
 
     /// A host that starts nothing until told, and keeps the signals sent.
@@ -1989,7 +1998,7 @@ pub(super) mod tests {
         registry.decide_statuses();
         let agent = |id: &str, status: &str| {
             json!({
-                "id": id, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+                "id": id, "agentType": "acme", "projectName": "p", "projectPath": "/p",
                 "status": status, "createdAt": 1, "pid": 9, "worktreePath": "/w",
             })
         };
@@ -2210,8 +2219,8 @@ pub(super) mod tests {
         fields.insert("agentSessionId".into(), json!("conv"));
         fed.registry
             .change(|r| ((), r.set_fields("a", fields).unwrap().into_iter().collect()));
-        let named = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": project(),
+        let named = read_req(&json!({
+            "agentType": "acme", "projectName": "p", "projectPath": project(),
             "resumeSessionId": "conv",
         }))
         .unwrap();
@@ -2233,7 +2242,7 @@ pub(super) mod tests {
 
     fn carried_agent(id: &str, dir: &Path, extra: Value) -> TerminalSession {
         let mut v = json!({
-            "id": id, "agentType": "claude", "projectName": "proj", "projectPath": dir,
+            "id": id, "agentType": "acme", "projectName": "proj", "projectPath": dir,
             "status": "idle", "createdAt": 1, "pid": 9, "groupId": "g", "savedAt": 5,
         });
         if let (Value::Object(v), Value::Object(extra)) = (&mut v, extra) {
@@ -2277,7 +2286,7 @@ pub(super) mod tests {
         let session = &answer["session"];
         assert_eq!(
             (session["id"].clone(), session["agentType"].clone()),
-            (json!("r"), json!("claude"))
+            (json!("r"), json!("acme"))
         );
         assert_eq!(
             (
@@ -2364,7 +2373,7 @@ pub(super) mod tests {
         assert!(fed.host.starts.lock().unwrap().is_empty());
         // An ended terminal on the same conversation is let go of quietly.
         let mut ended = json!({
-            "id": "b", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "id": "b", "agentType": "acme", "projectName": "p", "projectPath": "/p",
             "status": "idle", "createdAt": 1, "pid": 9, "agentSessionId": "conv",
         });
         ended["worktreePath"] = json!("/w");
@@ -2469,7 +2478,7 @@ pub(super) mod tests {
 
     fn remote_create(extra: Value) -> Value {
         let mut params = json!({
-            "agentType": "claude", "projectName": "far", "projectPath": "/srv/far",
+            "agentType": "acme", "projectName": "far", "projectPath": "/srv/far",
             "remoteHostId": "h", "initialPrompt": "fix the build",
         });
         if let (Value::Object(p), Value::Object(extra)) = (&mut params, extra) {
@@ -2522,7 +2531,7 @@ pub(super) mod tests {
             "{}",
             remote.line
         );
-        assert!(remote.command.starts_with("cd /srv/far && claude"));
+        assert!(remote.command.starts_with("cd /srv/far && acme"));
         assert!(remote.command.contains("'fix the build'"));
         assert_eq!(remote.password.as_ref().map(Secret::expose), Some(PASSWORD));
         // A key goes with a stored-key login only.
@@ -2623,7 +2632,7 @@ pub(super) mod tests {
                 seen.push(format!("{answer:?}"));
                 let (spec, input) = fed.host.last_start();
                 seen.push(format!("{spec:?} {input:?}"));
-                seen.push(format!("{:?}", CreateRequest::read(&params)));
+                seen.push(format!("{:?}", read_req(&params)));
                 // A failed start is logged with its reason.
                 fed.host.down("no holder");
                 fed.registry.read(|r| {
@@ -2685,7 +2694,7 @@ pub(super) mod tests {
         assert_eq!(spec.cwd, shell::home_dir());
         let remote = remote_of(&input);
         assert!(remote.line.starts_with("ssh -t -p 2222 -A me@box.example"));
-        assert!(remote.command.starts_with("cd /srv/far-not-here && claude"));
+        assert!(remote.command.starts_with("cd /srv/far-not-here && acme"));
         assert!(remote.command.contains("--resume conv-rr"));
         assert_eq!(
             (remote.password.as_ref(), remote.key.as_ref()),

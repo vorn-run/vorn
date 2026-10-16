@@ -5,7 +5,7 @@
 use super::{agent_icon, alt_label, c, ico, mod_label, white, Screen};
 use crate::act::Act;
 use crate::look;
-use crate::onboarding::{self, OnbAct, Then, AGENTS, EXPLORE, MCP_CAPS, STEPS};
+use crate::onboarding::{self, OnbAct, Then, EXPLORE, MCP_CAPS, STEPS};
 use crate::ui::{div, text, Action, El, Id, Rgba, Role};
 
 /// Tailwind v4's `emerald-400`, `cyan-400` and `violet-400`: the guide's
@@ -185,9 +185,11 @@ fn step_agents(s: &Screen<'_>) -> El {
         s.st.installed
             .as_deref()
             .or(s.st.onboard.detected.as_deref());
-    let (ready, missing): (Vec<_>, Vec<_>) = AGENTS
+    let (ready, missing): (Vec<_>, Vec<_>) = s
+        .store
+        .agents
         .iter()
-        .partition(|a| onboarding::is_installed(known, a.agent));
+        .partition(|a| onboarding::is_installed(known, &a.key));
     let mut body = div().col().gap(12.0).child(lead(&[Seg::P(
         "Vorn works with multiple AI coding agents. We detected which ones you have installed.",
     )]));
@@ -206,13 +208,13 @@ fn step_agents(s: &Screen<'_>) -> El {
                     .bg(c(look::SURFACE_SUNKEN))
                     .child(tile(
                         s,
-                        a.agent,
+                        &a.key,
                         28.0,
                         14.0,
                         6.0,
-                        Rgba::hexa(a.bg.0, a.bg.1),
+                        Rgba::hexa(a.color, a.bg_alpha),
                     ))
-                    .child(t(a.name, 14.0, 20.0, c(look::GRAY_200)).grow())
+                    .child(t(&a.name, 14.0, 20.0, c(look::GRAY_200)).grow())
                     .child(
                         div()
                             .row()
@@ -238,11 +240,11 @@ fn step_agents(s: &Screen<'_>) -> El {
                     .rounded(8.0)
                     .border(1.0, white(0.04))
                     .bg(c(look::SURFACE_SUNKEN))
-                    .child(tile(s, a.agent, 28.0, 14.0, 6.0, white(0.03)).opacity(0.4))
-                    .child(t(a.name, 14.0, 20.0, c(look::GRAY_500)).grow().min_w0())
+                    .child(tile(s, &a.key, 28.0, 14.0, 6.0, white(0.03)).opacity(0.4))
+                    .child(t(&a.name, 14.0, 20.0, c(look::GRAY_500)).grow().min_w0())
                     .child(
                         div().max_w(180.0).min_w0().child(
-                            t(a.install, 10.0, 14.0, c(look::GRAY_600))
+                            t(&a.install, 10.0, 14.0, c(look::GRAY_600))
                                 .mono()
                                 .truncate(),
                         ),
@@ -327,8 +329,8 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
         );
     }
     let mut setups = div().col().gap(10.0);
-    for m in onboarding::mcp_to_show(known) {
-        let Some(def) = onboarding::agent_def(m.agent) else {
+    for def in onboarding::mcp_to_show(&s.store.agents, known) {
+        let Some(m) = &def.mcp else {
             continue;
         };
         let title = if m.in_agent {
@@ -343,15 +345,15 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
                 .gap(8.0)
                 .child(tile(
                     s,
-                    m.agent,
+                    &def.key,
                     20.0,
                     10.0,
                     4.0,
-                    Rgba::hexa(def.bg.0, def.bg.1),
+                    Rgba::hexa(def.color, def.bg_alpha),
                 ))
                 .child(caps_label(&title, 10.0)),
         );
-        for command in m.commands {
+        for command in &m.commands {
             one = one.child(
                 div()
                     .row()
@@ -362,12 +364,12 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
                         div()
                             .grow()
                             .min_w0()
-                            .child(t(*command, 11.0, 16.0, c(look::GRAY_400)).mono().truncate()),
+                            .child(t(command, 11.0, 16.0, c(look::GRAY_400)).mono().truncate()),
                     )
                     .child(copy_btn(s, command)),
             );
         }
-        if let Some(note) = m.note {
+        if let Some(note) = &m.note {
             one = one.child(
                 div()
                     .pl(28.0)

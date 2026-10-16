@@ -17,6 +17,10 @@ jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# An adapter's [agent] section is TOML read into typed specs; its model listing lines are patterns. All already in the tree.
+serde = { version = "1", features = ["derive"] }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
 # PowerShell's integration rides its command line in base64.
 data-encoding = "2"
 
@@ -29,8 +33,6 @@ libc = "0.2"
 sha2 = { version = "0.10", default-features = false }
 tempfile = "3"
 # Status fixtures: rule files read against recorded screens.
-serde = { version = "1", features = ["derive"] }
-toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 vorn-recovery = { path = "../recovery" }
 vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto" }

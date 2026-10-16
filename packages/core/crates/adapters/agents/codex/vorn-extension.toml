@@ -1,0 +1,107 @@
+# Codex CLI, run from its adapter.
+id = "vorn.agents.codex"
+name = "Codex CLI"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+description = "Runs Codex CLI: launches and resumes it, lists its models and reads its status."
+
+[agent]
+id = "codex"
+name = "Codex CLI"
+label = "Codex"
+short_name = "Codex"
+description = "OpenAI Codex CLI"
+icon = "icon.svg"
+mark = "◎"
+color = "#7a9dff"
+tint = "#7a9dff20"
+url = "https://github.com/openai/codex"
+install = "npm install -g @openai/codex"
+
+[agent.launch]
+command = "codex"
+headless_args = ["-a", "never"]
+
+[agent.resume]
+args = ["resume", "{id}"]
+at = "start"
+selectors = { subcommand = "resume" }
+
+[agent.resume.capture]
+db = "~/.codex/state_5.sqlite"
+query = "SELECT id FROM threads WHERE archived = 0 AND rtrim(lower(replace(cwd, '\\', '/')), '/') = ?1 ORDER BY updated_at DESC LIMIT 1"
+
+[agent.headless]
+prompt = ["exec"]
+no_prompt = ["exec", ""]
+resume_tail = ["exec", "resume", "{id}", "-"]
+
+[agent.models]
+selectors = ["-m"]
+config = { flags = ["-c", "--config"], key = "model" }
+
+[agent.models.list]
+args = ["app-server", "--stdio"]
+keep = { paired = ["-c", "--config", "-p", "--profile", "--local-provider"], flags = ["--oss"] }
+
+[[agent.models.list.steps]]
+send = [{ id = 1, method = "initialize", params = { clientInfo = { name = "vorn_model_catalog", version = "1.0.0" } } }]
+reply = { id = "{id}" }
+fail = "error"
+
+[[agent.models.list.steps]]
+send = [{ method = "initialized" }, { id = 2, method = "model/list", params = { limit = 100, includeHidden = false } }]
+reply = { id = "{id}" }
+fail = "error"
+models = "result.data"
+next = "result.nextCursor"
+cursor = "params.cursor"
+
+[agent.models.list.choice]
+id = ["model", "id"]
+skip = [
+  { path = "hidden", is = true },
+  { path = "policy.state", is = "disabled" },
+]
+
+[agent.history]
+rank = 2
+activity = "entry"
+title_limit = 80
+
+[agent.history.sqlite]
+db = "~/.codex/state_5.sqlite"
+query = "SELECT id, cwd, title, updated_at, first_user_message FROM threads WHERE archived = 0 AND {scope} ORDER BY updated_at DESC"
+scope = "cwd"
+id = "id"
+project = "cwd"
+title = ["title", "first_user_message"]
+time = "updated_at"
+unit = "seconds"
+count_lines = { file = "~/.codex/history.jsonl", key = "session_id", missing = 1 }
+
+[agent.mcp]
+commands = ["codex plugin marketplace add vorn-run/plugin", "codex plugin add vorn@vorn"]
+note = "Restart, or start a fresh session — skills load at session start."
+
+# An approval: a command to run, edits to apply, a network request.
+[[agent.status]]
+status = "waiting"
+rows = [-24, -1]
+any = [
+  'Would you like to (run|make|apply|allow)',
+  '^[\s│]*[›▌]\s*\d+\.\s+Yes',
+  'Allow command\?',
+]
+
+# A turn in progress: the status line counts up and offers to interrupt.
+[[agent.status]]
+status = "working"
+rows = [-10, -1]
+any = ['(?i)\besc to interrupt\b']
+
+# The composer, with its context and shortcuts line under it.
+[[agent.status]]
+status = "idle"
+rows = [-8, -1]
+any = ['\d+% context left', '\? for shortcuts', '^[\s│]*›(\s|$)']

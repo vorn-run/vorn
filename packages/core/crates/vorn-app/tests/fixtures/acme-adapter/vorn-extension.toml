@@ -1,0 +1,44 @@
+# An agent adapter the app's end-to-end tests link, as any person could:
+# it names no real CLI, and the tests point its command at /bin/sh.
+id = "test.acme"
+name = "Acme"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+description = "Runs the Acme test agent."
+
+[agent]
+id = "acme"
+name = "Acme Code"
+label = "Acme"
+icon = "icon.svg"
+mark = "*"
+color = "#d97757"
+tint = "#d9775720"
+
+[agent.launch]
+command = "acme"
+
+[agent.resume]
+args = ["--resume", "{id}"]
+pin = ["--session-id", "{id}"]
+
+[agent.headless]
+prompt = ["-p"]
+no_prompt = ["-p", ""]
+resume = ["--resume", "{id}"]
+
+[agent.models]
+
+[agent.models.list]
+args = ["models"]
+lines = '^\S+$'
+
+[agent.history]
+activity = "entry"
+
+[agent.history.jsonl]
+file = "~/.acme/history.jsonl"
+session = "sessionId"
+project = "project"
+time = "timestamp"
+title = "display"

@@ -128,39 +128,12 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     }
 }
 
-/// The agents a session can start, in `AGENT_LIST`'s order.
-pub const AGENTS: [(&str, &str); 5] = [
-    ("claude", "Claude Code"),
-    ("copilot", "GitHub Copilot"),
-    ("codex", "Codex"),
-    ("opencode", "OpenCode"),
-    ("gemini", "Gemini"),
-];
-
-/// The launcher's name for an agent (`AGENT_LIST`'s `displayName`).
-pub fn launch_name(agent: &str) -> &str {
-    match agent {
-        "codex" => "Codex CLI",
-        "gemini" => "Gemini CLI",
-        _ => agent_name(agent),
-    }
-}
-
-pub fn agent_name(agent: &str) -> &str {
-    AGENTS
+/// The agents that are on and installed (all of them before detection answers).
+fn installed<'a>(s: &'a Screen<'_>) -> impl Iterator<Item = &'a crate::agents::AgentInfo> + 'a {
+    s.store
+        .agents
         .iter()
-        .find(|(k, _)| *k == agent)
-        .map_or(agent, |(_, n)| n)
-}
-
-fn installed<'a>(
-    s: &'a Screen<'_>,
-) -> impl Iterator<Item = &'static (&'static str, &'static str)> + 'a {
-    AGENTS.iter().filter(|(k, _)| {
-        s.st.installed
-            .as_ref()
-            .is_none_or(|i| i.iter().any(|a| a == k))
-    })
+        .filter(|a| s.st.installed.as_ref().is_none_or(|i| i.contains(&a.key)))
 }
 
 /// `workflow-menu-items`: the workflows a menu offers, contextual ones only
@@ -377,20 +350,20 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         ),
     ]);
     let agents: Vec<Item> = installed(s)
-        .map(|(k, name)| {
+        .map(|a| {
             Item::new(
                 "bot",
-                *name,
+                a.label.as_str(),
                 Act::NewSessionIn {
                     project: info.project_name.clone(),
                     worktree: info
                         .worktree_path
                         .clone()
                         .filter(|_| info.is_worktree == Some(true)),
-                    agent: Some((*k).to_owned()),
+                    agent: Some(a.key.clone()),
                 },
             )
-            .mark(super::agent_icon(s, k, 12.0))
+            .mark(super::agent_icon(s, &a.key, 12.0))
         })
         .collect();
     if agents.len() > 1 {
@@ -678,21 +651,19 @@ fn launch_agents(s: &Screen<'_>) -> Vec<Item> {
             .agent
             .as_deref()
             .unwrap_or(s.store.default_agent());
-    AGENTS
+    s.store
+        .agents
         .iter()
-        .map(|(k, _)| {
+        .map(|a| {
+            let k = a.key.as_str();
             let ok =
                 s.st.installed
                     .as_ref()
                     .is_none_or(|i| i.iter().any(|a| a == k));
-            let mut it = Item::option(
-                launch_name(k),
-                current == *k,
-                Act::PickAgent((*k).to_owned()),
-            )
-            .plain()
-            .mark(super::agent_icon(s, k, 14.0))
-            .disabled(!ok);
+            let mut it = Item::option(a.name.as_str(), current == k, Act::PickAgent(k.to_owned()))
+                .plain()
+                .mark(super::agent_icon(s, k, 14.0))
+                .disabled(!ok);
             if !ok {
                 it.detail = Some("Not installed".to_owned());
             }

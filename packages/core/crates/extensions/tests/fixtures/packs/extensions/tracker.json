@@ -7,7 +7,7 @@
   "permissions": ["git.read", "terminal.selection", "card.rename"],
   "activates": {
     "remoteHost": ["github.com"],
-    "agent": ["claude", "copilot"],
+    "agent": ["acme", "beta"],
     "platform": ["darwin", "linux"]
   },
   "contributes": {
@@ -17,7 +17,7 @@
         "title": "Open the issue",
         "pattern": "PROJ-\\d+",
         "example": "PROJ-12",
-        "when": { "agent": ["claude"] }
+        "when": { "agent": ["acme"] }
       }
     ],
     "panes": [

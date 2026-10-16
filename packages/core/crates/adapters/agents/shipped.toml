@@ -1,0 +1,4 @@
+# The agent adapters Vorn ships, in the order the launcher lists them.
+# An adapter in `off` ships switched off until the person switches it on.
+order = ["claude", "copilot", "codex", "opencode", "gemini", "hermes"]
+off = ["hermes"]

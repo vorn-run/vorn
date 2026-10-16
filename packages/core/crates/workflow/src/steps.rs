@@ -969,7 +969,15 @@ impl<H: Host> Engine<H> {
             }
         }
 
-        let agent = self.effective_agent(config, context, resolved_task.as_ref(), cfg)?;
+        // With nothing assigned and no default, a task's step runs the first agent that is on.
+        let first_on = self.inner.host.first_agent();
+        let agent = self.effective_agent(
+            config,
+            context,
+            resolved_task.as_ref(),
+            cfg,
+            first_on.as_deref().unwrap_or("shell"),
+        )?;
 
         let mut project_name = resolve(node.text("projectName").unwrap_or(""), context, None);
         let mut project_path = resolve(node.text("projectPath").unwrap_or(""), context, None);
@@ -1406,13 +1414,14 @@ impl<H: Host> Engine<H> {
     }
 
     /// `resolveEffectiveAgent`: a concrete agent as it is; `fromTask` reads
-    /// the trigger's task, then the step's, then the default.
+    /// the trigger's task, then the step's, then the default, then `first_on`.
     fn effective_agent(
         &self,
         config: &Value,
         context: Option<&Context>,
         task: Option<&Value>,
         cfg: &Value,
+        first_on: &str,
     ) -> Result<Option<String>, String> {
         let agent = config.get("agentType");
         if agent.and_then(Value::as_str) != Some("fromTask") {
@@ -1438,7 +1447,7 @@ impl<H: Host> Engine<H> {
                         .filter(|a| !a.is_null())
                         .map(js::to_string)
                 })
-                .unwrap_or_else(|| "claude".into()),
+                .unwrap_or_else(|| first_on.to_owned()),
         ))
     }
 

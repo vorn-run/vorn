@@ -17,7 +17,7 @@ use tracing::warn;
 
 use crate::api::types::Event;
 
-/// A session started: `{sessionId, kind, projectPath, worktreePath, agent}`.
+/// A session started: `{sessionId, kind, projectPath, worktreePath, agent, model?}`; `model` when one was chosen.
 pub const SESSION_CREATED: &str = "session.created";
 /// A session's status changed: `{sessionId, status}`; only the latest per session in a batch.
 pub const SESSION_STATUS: &str = "session.status";

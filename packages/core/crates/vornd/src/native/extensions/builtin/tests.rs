@@ -32,7 +32,7 @@ impl World for Core {
             ]),
             "worktrees.remove" => json!({ "removed": true }),
             "sessions.list" => json!([
-                { "id": "t1", "name": "api", "agent": "claude", "status": "waiting" }
+                { "id": "t1", "name": "api", "agent": "acme", "status": "waiting" }
             ]),
             _ => Value::Null,
         };

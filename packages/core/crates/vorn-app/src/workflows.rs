@@ -1252,11 +1252,12 @@ pub fn new_step(
     kind: &str,
     nodes: &[Value],
     project: Option<(&str, &str)>,
+    agent: &str,
     except: Option<&str>,
 ) -> Option<Value> {
     let taken = slugs(nodes, except);
     Some(match kind {
-        "agent" | "launchAgent" => graph::agent_node(project, &taken),
+        "agent" | "launchAgent" => graph::agent_node(project, agent, &taken),
         "script" => graph::script_node(&taken),
         "approval" => graph::approval_node(&taken),
         "loop" => graph::loop_node(&taken),
@@ -1285,7 +1286,13 @@ fn with_config(mut n: Value, preset: &Value) -> Value {
 
 /// `handleLibraryPick`: what was picked, where the open anchor says; the
 /// node to select after.
-pub fn pick(d: &mut Draft, at: &Anchor, p: &Pick, project: Option<(&str, &str)>) -> Option<String> {
+pub fn pick(
+    d: &mut Draft,
+    at: &Anchor,
+    p: &Pick,
+    project: Option<(&str, &str)>,
+    agent: &str,
+) -> Option<String> {
     let nodes = d.nodes().to_vec();
     let edges = d.edges().to_vec();
     if let Pick::TriggerType(_) | Pick::ConnectorTrigger { .. } = p {
@@ -1358,14 +1365,14 @@ pub fn pick(d: &mut Draft, at: &Anchor, p: &Pick, project: Option<(&str, &str)>)
                 action,
                 label,
             } => {
-                let n = new_step("connectorAction", &nodes, project, Some(r))?;
+                let n = new_step("connectorAction", &nodes, project, agent, Some(r))?;
                 with_config(
                     n,
                     &json!({ "connectionId": connection, "action": action, "actionLabel": label }),
                 )
             }
             Pick::Type(t) if t != "condition" && t != "loop" => {
-                new_step(t, &nodes, project, Some(r))?
+                new_step(t, &nodes, project, agent, Some(r))?
             }
             _ => return None,
         };
@@ -1399,7 +1406,7 @@ pub fn pick(d: &mut Draft, at: &Anchor, p: &Pick, project: Option<(&str, &str)>)
         }
     }
     if *p == Pick::Parallel {
-        let n = new_step("agent", &nodes, project, None)?;
+        let n = new_step("agent", &nodes, project, agent, None)?;
         let nid = s(&n, "id").unwrap_or("").to_owned();
         let (nn, ne) = graph::add_parallel_branch(&nodes, &edges, &after, n);
         d.set_graph(nn, ne);
@@ -1414,9 +1421,18 @@ pub fn pick(d: &mut Draft, at: &Anchor, p: &Pick, project: Option<(&str, &str)>)
             &preset,
             (pos.0 as f64, pos.1 as f64),
             project,
+            agent,
         );
     }
-    insert(d, &after, at.before.as_deref(), kind, &preset, project)
+    insert(
+        d,
+        &after,
+        at.before.as_deref(),
+        kind,
+        &preset,
+        project,
+        agent,
+    )
 }
 
 /// `handleInsertNode`.
@@ -1427,6 +1443,7 @@ fn insert(
     kind: &str,
     preset: &Value,
     project: Option<(&str, &str)>,
+    agent: &str,
 ) -> Option<String> {
     let nodes = d.nodes().to_vec();
     let edges = d.edges().to_vec();
@@ -1444,7 +1461,7 @@ fn insert(
         d.set_graph(nn, ne);
         return cid;
     }
-    let n = with_config(new_step(kind, &nodes, project, None)?, preset);
+    let n = with_config(new_step(kind, &nodes, project, agent, None)?, preset);
     let nid = s(&n, "id").unwrap_or("").to_owned();
     let result = match before {
         Some(graph::LOOP_BODY) => {
@@ -1482,6 +1499,7 @@ fn palette_insert(
     preset: &Value,
     pos: (f64, f64),
     project: Option<(&str, &str)>,
+    agent: &str,
 ) -> Option<String> {
     let nodes = d.nodes().to_vec();
     let edges = d.edges().to_vec();
@@ -1523,7 +1541,7 @@ fn palette_insert(
         d.set_graph(placed, ne);
         return cid;
     }
-    let n = with_config(new_step(kind, &nodes, project, None)?, preset);
+    let n = with_config(new_step(kind, &nodes, project, agent, None)?, preset);
     let nid = s(&n, "id").unwrap_or("").to_owned();
     let (nn, ne) = graph::append_after(&nodes, &edges, after, n);
     let placed = place(nn, &ne, Some(&nid));
@@ -2118,6 +2136,7 @@ mod tests {
             &after("t", Some("b")),
             &Pick::Type("condition".into()),
             None,
+            "acme",
         )
         .unwrap();
         assert_eq!(d.nodes().len(), 5);
@@ -2139,6 +2158,7 @@ mod tests {
             &after("t", Some("b")),
             &Pick::Type("approval".into()),
             None,
+            "acme",
         )
         .unwrap();
         assert_eq!(
@@ -2150,6 +2170,7 @@ mod tests {
             &after("b", None),
             &Pick::Type("script".into()),
             None,
+            "acme",
         )
         .unwrap();
         assert_eq!(s(d.node(&end).unwrap(), "slug"), Some("execute_script"));
@@ -2159,13 +2180,14 @@ mod tests {
             replace: Some("b".into()),
             ..after("b", None)
         };
-        pick(&mut d, &r, &Pick::Type("httpRequest".into()), None);
+        pick(&mut d, &r, &Pick::Type("httpRequest".into()), None, "acme");
         assert_eq!(s(d.node("b").unwrap(), "type"), Some("httpRequest"));
         let p = pick(
             &mut d,
             &after("t", None),
             &Pick::Parallel,
             Some(("web", "/w")),
+            "acme",
         )
         .unwrap();
         assert_eq!(d.node(&p).unwrap()["config"]["projectName"], "web");
@@ -2178,7 +2200,14 @@ mod tests {
             trigger: true,
             ..Anchor::default()
         };
-        let t = pick(&mut d, &at, &Pick::TriggerType("recurring".into()), None).unwrap();
+        let t = pick(
+            &mut d,
+            &at,
+            &Pick::TriggerType("recurring".into()),
+            None,
+            "acme",
+        )
+        .unwrap();
         assert_eq!(
             s(d.node(&t).unwrap(), "label"),
             Some("Schedule (Recurring)")
@@ -2186,10 +2215,23 @@ mod tests {
         assert!(d.edges().iter().any(|e| s(e, "source") == Some(t.as_str())));
         assert_eq!(subtitle(d.node(&t).unwrap()), "Cron: 0 9 * * *");
         assert_eq!(
-            pick(&mut d, &at, &Pick::TriggerType("recurring".into()), None),
+            pick(
+                &mut d,
+                &at,
+                &Pick::TriggerType("recurring".into()),
+                None,
+                "acme"
+            ),
             None
         );
-        let again = pick(&mut d, &at, &Pick::TriggerType("manual".into()), None).unwrap();
+        let again = pick(
+            &mut d,
+            &at,
+            &Pick::TriggerType("manual".into()),
+            None,
+            "acme",
+        )
+        .unwrap();
         assert_eq!(again, t, "the same node, its edges kept");
         assert_eq!(s(d.node(&t).unwrap(), "label"), Some("Manual Trigger"));
     }
@@ -2201,7 +2243,7 @@ mod tests {
             position: Some((400, 320)),
             ..after("t", None)
         };
-        let id = pick(&mut d, &at, &Pick::Type("script".into()), None).unwrap();
+        let id = pick(&mut d, &at, &Pick::Type("script".into()), None, "acme").unwrap();
         assert_eq!(graph::position(d.node(&id).unwrap()), (400.0, 320.0));
         assert_ne!(
             graph::position(d.node("t").unwrap()).0,

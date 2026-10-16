@@ -493,14 +493,15 @@ mod tests {
 
     #[test]
     fn drops_credentials_and_agent_markers_whatever_their_case() {
+        crate::adapters::testing::adapters();
         let kept = filter(pairs(&[
             ("PATH", "/bin"),
             ("HOME", "/h"),
             ("GITHUB_TOKEN", "x"),
             ("github_token_extra", "x"),
             ("SECRET_VORN_BOOTSTRAP_TOKEN", "x"),
-            ("ClaudeCode", "1"),
-            ("CLAUDE_CODE_SSE_PORT", "1"),
+            ("AcmeCode", "1"),
+            ("ACME_CODE_SSE_PORT", "1"),
             ("ANTHROPIC_BASE_URL", "u"),
             ("ANTHROPIC_API_KEY", "k"),
         ]));
@@ -510,12 +511,13 @@ mod tests {
 
     #[test]
     fn passes_through_only_what_was_named_and_never_the_stripped() {
-        let passthrough = vec!["ANTHROPIC_API_KEY".to_owned(), "CLAUDECODE".to_owned()];
+        crate::adapters::testing::adapters();
+        let passthrough = vec!["ANTHROPIC_API_KEY".to_owned(), "ACMECODE".to_owned()];
         let kept = filter_env(
             pairs(&[
                 ("anthropic_api_key", "k"),
                 ("GITHUB_TOKEN", "x"),
-                ("CLAUDECODE", "1"),
+                ("ACMECODE", "1"),
                 ("PATH", "/bin"),
             ]),
             &passthrough,

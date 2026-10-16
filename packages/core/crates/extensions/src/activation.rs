@@ -166,7 +166,7 @@ mod tests {
     fn subject<'a>(worktree: &'a Path, remote: Option<&'a str>) -> Subject<'a> {
         Subject {
             worktree,
-            agent: "claude",
+            agent: "alpha",
             platform: "linux",
             remote_host: remote,
         }
@@ -192,13 +192,14 @@ mod tests {
 
     #[test]
     fn matches_agent_platform_and_remote() {
+        crate::testing::agents();
         let dir = Path::new("/");
         let s = subject(dir, Some("github.com"));
         assert!(matches(
-            Some(&rule(json!({ "agent": ["codex", "claude"] }))),
+            Some(&rule(json!({ "agent": ["beta", "alpha"] }))),
             &s
         ));
-        assert!(!matches(Some(&rule(json!({ "agent": ["codex"] }))), &s));
+        assert!(!matches(Some(&rule(json!({ "agent": ["beta"] }))), &s));
         assert!(!matches(Some(&rule(json!({ "platform": ["darwin"] }))), &s));
         assert!(matches(
             Some(&rule(json!({ "remoteHost": ["GitHub.com"] }))),
@@ -217,13 +218,14 @@ mod tests {
 
     #[test]
     fn shows_what_each_rule_lets_through() {
+        crate::testing::agents();
         let root = tempfile::tempdir().unwrap();
         install(
             root.path(),
             "x",
             "1.0.0",
             &json!({ "id": "x", "name": "X", "kind": "extension", "contributes": {
-                "panes": [{ "id": "p", "web": "web/a.html" }, { "id": "q", "command": ["q"], "when": { "agent": ["codex"] } }],
+                "panes": [{ "id": "p", "web": "web/a.html" }, { "id": "q", "command": ["q"], "when": { "agent": ["beta"] } }],
                 "footers": [{ "id": "f", "every": 5, "when": { "remoteHost": ["github.com"] } }],
                 "linkHandlers": [{ "id": "l", "pattern": "a" }]
             } }),
@@ -232,7 +234,7 @@ mod tests {
             root.path(),
             "y",
             "1.0.0",
-            &json!({ "id": "y", "name": "Y", "kind": "extension", "activates": { "agent": ["codex"] },
+            &json!({ "id": "y", "name": "Y", "kind": "extension", "activates": { "agent": ["beta"] },
                      "contributes": { "panes": [{ "id": "p", "web": "web/a.html" }] } }),
         );
         install(

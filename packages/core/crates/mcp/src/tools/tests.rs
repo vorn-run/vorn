@@ -320,10 +320,10 @@ fn workflows_are_checked_stored_and_run() {
     let made = parsed(&run(
         &rpc,
         "create_workflow",
-        json!({ "name": "Flat", "actions": [{ "agentType": "claude", "projectName": "app", "projectPath": "/work/app" }] }),
+        json!({ "name": "Flat", "actions": [{ "agentType": "acme", "projectName": "app", "projectPath": "/work/app" }] }),
     ));
     assert_eq!(made["nodes"][0]["label"], "Manual Trigger");
-    assert_eq!(made["nodes"][1]["label"], "Launch claude");
+    assert_eq!(made["nodes"][1]["label"], "Launch acme");
     assert_eq!(made["nodes"][1]["position"], json!({ "x": 0, "y": 140 }));
     assert_eq!(made["edges"][0]["source"], made["nodes"][0]["id"]);
     let id = made["id"].as_str().unwrap().to_owned();
@@ -519,4 +519,42 @@ fn describes_only_the_node_types_asked_for() {
     );
     let all = parsed(&run(&rpc, "describe_workflow_nodes", json!({})));
     assert_eq!(all, *crate::workflow_nodes());
+}
+
+#[test]
+fn an_agent_id_must_name_an_agent_that_is_on() {
+    let rpc = FakeRpc::new(sample_config());
+    rpc.answer("agent:list", json!([{ "id": "acme" }, { "id": "beta" }]));
+    let launch = |agent: &str| {
+        run(
+            &rpc,
+            "launch_session",
+            json!({ "agent_type": agent, "project_name": "app", "project_path": "/work/app" }),
+        )
+    };
+    let off = launch("gamma");
+    assert_eq!(off["isError"], true);
+    assert_eq!(
+        text(&off),
+        "Error: agent \"gamma\" is not on in Vorn. Agents that are on: acme, beta."
+    );
+    assert!(rpc.last("terminal:create").is_none());
+    launch("beta");
+    assert_eq!(rpc.last("terminal:create").unwrap()["agentType"], "beta");
+    let task = run(
+        &rpc,
+        "create_task",
+        json!({ "project_name": "app", "title": "T", "assigned_agent": "gamma" }),
+    );
+    assert!(text(&task).contains("agent \"gamma\" is not on"));
+    let project = run(
+        &rpc,
+        "create_project",
+        json!({ "name": "new", "path": "/new", "preferred_agents": ["acme", "zeta"] }),
+    );
+    assert!(text(&project).contains("agent \"zeta\" is not on"));
+    rpc.answer("agent:list", json!([]));
+    assert!(
+        text(&launch("acme")).ends_with("No agent is on; switch one on in Settings › Extensions.")
+    );
 }

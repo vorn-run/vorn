@@ -429,13 +429,14 @@
     "out": "",
     "err": "vorn: unknown agent \"hal\". Try: claude, copilot, codex, opencode, gemini\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session read <target> [--lines <n>] [--scrollback] [--unwrap] [--trim]\n                             [--format text|vt|html] [--json]\n  vorn session send <target> <text> [--raw]\n  vorn session wait <target> [--timeout <dur>] [--status idle|done|blocked] [--json]\n  vorn session kill <target>\n\nTargets\n  Every command that takes a <target> reads it the same way. The first rule that\n  matches decides:\n    1. a whole session id\n    2. a label (the session's name), exactly, then ignoring case\n    3. a position: 3 is the third session in `vorn session list`\n    4. the start or the end of an id\n  A rule that matches more than one session is ambiguous: the candidates are\n  listed on stderr (and on stdout as data with --json) and the exit code is 3.\n\nExit codes\n  0 ok   1 failed   2 usage   3 ambiguous target   4 no server\n  wait: the session's own exit code; 124 when --timeout passes first\n\nReading\n  `read` prints the output the server kept. --scrollback, --unwrap and any\n  --format but text read the terminal instead: its screen and scrollback, with\n  soft-wrapped rows joined. --trim drops trailing spaces and trailing blank\n  lines. vt keeps colours as SGR escapes; html draws them as spans in a <pre>.\n  `logs` is the same command.\n\nWaiting\n  `wait` blocks until the session's program exits, then exits with its code.\n  --timeout takes 30s, 5m, 1500ms or a bare number of seconds. --status\n  waits instead for the program's status (as the app shows it) and exits 0.\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --wait              With --headless, stay until it ends and show it to the terminal\n  --name <label>      Display name for the session\n"
   },
-  "scripted calls [\"session\",\"start\",\"--agent\",\"hal\"]": [],
+  "scripted calls [\"session\",\"start\",\"--agent\",\"hal\"]": ["{\"method\":\"agent:list\"}"],
   "scripted [\"session\",\"start\",\"--agent\",\"claude\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
     "out": "session  d00dd00d-1111-2222-3333-444455556666\nagent    claude\nproject  website\npath     /work/website\n",
     "err": ""
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"claude\",\"--project\",\"website\"]": [
+    "{\"method\":\"agent:list\"}",
     "{\"method\":\"config:load\"}",
     "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"claude\",\"projectName\":\"website\",\"projectPath\":\"/work/website\"}}"
   ],
@@ -445,6 +446,7 @@
     "err": ""
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"codex\",\"--path\",\"/work/vorn/\"]": [
+    "{\"method\":\"agent:list\"}",
     "{\"method\":\"config:load\"}",
     "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"codex\",\"projectName\":\"vorn\",\"projectPath\":\"/work/vorn\"}}"
   ],
@@ -454,6 +456,7 @@
     "err": ""
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"gemini\",\"--path\",\"<project>\",\"--prompt\",\"fix it\",\"--branch\",\"feature\",\"--worktree\",\"--name\",\"Fixer\"]": [
+    "{\"method\":\"agent:list\"}",
     "{\"method\":\"config:load\"}",
     "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"outside\",\"path\":\"<project>\",\"preferredAgents\":[\"gemini\"]}],\"workflows\":[]}}",
     "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"gemini\",\"projectName\":\"outside\",\"projectPath\":\"<project>\",\"initialPrompt\":\"fix it\",\"branch\":\"feature\",\"useWorktree\":true,\"displayName\":\"Fixer\"}}"
@@ -464,6 +467,7 @@
     "err": ""
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"claude\",\"--headless\",\"--json\"]": [
+    "{\"method\":\"agent:list\"}",
     "{\"method\":\"config:load\"}",
     "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"project\",\"path\":\"<home>/project\",\"preferredAgents\":[\"claude\"]}],\"workflows\":[]}}",
     "{\"method\":\"headless:create\",\"params\":{\"agentType\":\"claude\",\"projectName\":\"project\",\"projectPath\":\"<home>/project\"}}"
@@ -474,6 +478,7 @@
     "err": ""
   },
   "scripted calls [\"session\",\"start\",\"--agent\",\"opencode\",\"--project\",\"brand-new\"]": [
+    "{\"method\":\"agent:list\"}",
     "{\"method\":\"config:load\"}",
     "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"brand-new\",\"path\":\"<home>/project\",\"preferredAgents\":[\"opencode\"]}],\"workflows\":[]}}",
     "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"opencode\",\"projectName\":\"brand-new\",\"projectPath\":\"<home>/project\"}}"

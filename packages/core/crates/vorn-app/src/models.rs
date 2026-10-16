@@ -4,17 +4,9 @@
 
 use serde_json::Value;
 
-/// The agents whose CLI takes a model (`supportsModelSelection`).
-const MODEL_AGENTS: [&str; 4] = ["claude", "copilot", "opencode", "codex"];
-
 /// Shown under the id field when a typed id cannot be passed to the CLI.
 pub const INVALID_ID: &str =
     "Enter a model id without spaces, control characters, or a leading dash.";
-
-/// Whether the launcher offers a model for `agent`.
-pub fn selects_models(agent: &str) -> bool {
-    MODEL_AGENTS.contains(&agent)
-}
 
 /// A model id goes on a command line as one argument, so it must read as
 /// one (`validateModelId`).
@@ -148,7 +140,7 @@ pub enum Row<'a> {
     Asking,
     /// "Agent default", picked when no model is set.
     Default,
-    /// An OpenCode provider's header.
+    /// A provider's header, for an agent whose ids are `provider/model`.
     Provider(&'a str),
     Model {
         id: &'a str,
@@ -159,14 +151,15 @@ pub enum Row<'a> {
     NoMatch,
 }
 
-/// OpenCode ids are `provider/model`; the provider becomes a header.
+/// A `provider/model` id's provider, which becomes a header.
 fn provider_of(id: &str) -> Option<&str> {
     id.find('/').filter(|&i| i > 0).map(|i| &id[..i])
 }
 
-/// The menu's rows for `agent`, the model set (`value`) and what is typed.
+/// The menu's rows for the model set (`value`) and what is typed; `group`
+/// heads each provider's models when the agent's ids are `provider/model`.
 pub fn rows<'a>(
-    agent: &str,
+    group: bool,
     listing: &'a Listing,
     value: Option<&'a str>,
     query: &str,
@@ -189,7 +182,7 @@ pub fn rows<'a>(
     }
     let mut last = None;
     for c in &shown {
-        let provider = (agent == "opencode").then(|| provider_of(&c.id)).flatten();
+        let provider = group.then(|| provider_of(&c.id)).flatten();
         if provider.is_some() && provider != last {
             out.push(Row::Provider(provider.unwrap_or_default()));
             last = provider;
@@ -282,26 +275,26 @@ mod tests {
     }
 
     #[test]
-    fn rows_put_default_and_an_unlisted_value_first_and_group_opencode() {
+    fn rows_put_default_and_an_unlisted_value_first_and_group_providers() {
         let l = listing(json!({
             "status": "ready",
             "choices": [{"id": "openai/gpt-5", "label": "GPT-5"}, {"id": "openai/o3", "label": "o3"},
                         {"id": "anthropic/sonnet", "label": "Sonnet"}]
         }));
-        let rows = rows("opencode", &l, Some("mine"), "");
+        let rows = rows(true, &l, Some("mine"), "");
         assert_eq!(rows[0], Row::Default);
         assert!(matches!(rows[1], Row::Model { id: "mine", .. }));
         assert_eq!(rows[2], Row::Provider("openai"));
         assert_eq!(rows[5], Row::Provider("anthropic"));
         assert_eq!(rows.len(), 7);
-        assert_eq!(super::rows("opencode", &l, None, "zzz"), [Row::NoMatch]);
-        assert!(!super::rows("claude", &l, None, "").contains(&Row::Provider("openai")));
+        assert_eq!(super::rows(true, &l, None, "zzz"), [Row::NoMatch]);
+        assert!(!super::rows(false, &l, None, "").contains(&Row::Provider("openai")));
         let asking = Listing {
             catalog: None,
             loading: true,
         };
         assert_eq!(
-            super::rows("claude", &asking, None, ""),
+            super::rows(false, &asking, None, ""),
             [Row::Asking, Row::Default]
         );
     }
@@ -311,24 +304,24 @@ mod tests {
         let at = 10 * 60_000;
         let ready = listing(json!({"status": "ready", "choices": [], "fetchedAt": at}));
         assert_eq!(
-            footer("claude", &ready, at + 20_000).0,
-            "From claude \u{b7} just now"
+            footer("acme", &ready, at + 20_000).0,
+            "From acme \u{b7} just now"
         );
         assert_eq!(
-            footer("claude", &ready, at + 3 * 60_000).0,
-            "From claude \u{b7} 3 min ago"
+            footer("acme", &ready, at + 3 * 60_000).0,
+            "From acme \u{b7} 3 min ago"
         );
         let stale = listing(json!({"status": "stale", "choices": [], "fetchedAt": at}));
-        assert!(footer("codex", &stale, at)
+        assert!(footer("beta", &stale, at)
             .0
             .ends_with("just now \u{b7} refreshing failed"));
         let gone = listing(
-            json!({"status": "unavailable", "choices": [], "error": "codex is not installed"}),
+            json!({"status": "unavailable", "choices": [], "error": "beta is not installed"}),
         );
-        assert_eq!(footer("codex", &gone, 0).0, "codex is not installed");
+        assert_eq!(footer("beta", &gone, 0).0, "beta is not installed");
         let bare = listing(json!({"status": "unavailable", "choices": []}));
         assert_eq!(
-            footer("codex", &bare, 0).0,
+            footer("beta", &bare, 0).0,
             "Could not list models \u{2014} type an id"
         );
         let refreshing = Listing {
@@ -336,11 +329,11 @@ mod tests {
             ..ready
         };
         assert_eq!(
-            footer("claude", &refreshing, 0),
-            ("Asking claude\u{2026}".to_owned(), true)
+            footer("acme", &refreshing, 0),
+            ("Asking acme\u{2026}".to_owned(), true)
         );
         assert_eq!(
-            footer("claude", &Listing::default(), 0),
+            footer("acme", &Listing::default(), 0),
             (String::new(), false)
         );
     }

@@ -193,6 +193,10 @@ pub trait Around: Send + Sync + 'static {
     fn started_builtins(&self) -> Vec<Arc<dyn builtin::Builtin>> {
         Vec::new()
     }
+    /// The agents vornd runs, which installed adapters join.
+    fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {
+        None
+    }
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
@@ -352,6 +356,7 @@ impl Extensions {
     /// and the installed packs, until vornd stops.
     pub fn start(self: &Arc<Self>) {
         self.router.reindex();
+        self.sync_adapters();
         self.builtins.start();
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -361,6 +366,41 @@ impl Extensions {
     /// The extensions Vorn ships with.
     pub fn builtins(&self) -> &Builtins {
         &self.builtins
+    }
+
+    /// Tells the agents' registry which installed packages adapt an agent.
+    fn sync_adapters(&self) {
+        let Some(adapters) = self.around.adapters() else {
+            return;
+        };
+        let store = self.router.store();
+        let mut installed = Vec::new();
+        for id in store.ids() {
+            let Ok(pack) = store.inspect_unmeasured(&id) else {
+                continue;
+            };
+            let Some(section) = pack.manifest.agent.clone() else {
+                continue;
+            };
+            let agent = match vorn_agents::AgentSpec::from_toml(section)
+                .and_then(vorn_agents::Agent::new)
+            {
+                Ok(agent) => agent,
+                Err(err) => {
+                    warn!("[extensions] the agent adapter in {id} does not read: {err}");
+                    continue;
+                }
+            };
+            let icon = crate::adapters::icon_path(&agent)
+                .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
+                .and_then(|p| fs::read_to_string(pack.path.join(p)).ok());
+            installed.push(crate::adapters::Installed {
+                extension: id.clone(),
+                agent,
+                icon,
+            });
+        }
+        adapters.set_installed(installed);
     }
 
     /// Every contribution drawn from a template, of the installed packages
@@ -698,6 +738,7 @@ impl Extensions {
         self.router.forget(id).await;
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
+        self.sync_adapters();
         self.around.pack_removed(id).await;
         self.contributions_changed(id);
         Ok(json!({ "removed": id }))
@@ -706,6 +747,7 @@ impl Extensions {
     /// After an install or a link, nothing runs its old files and its connector, if any, appears.
     async fn package_changed(&self, id: &str) {
         self.pack_changed(id).await;
+        self.sync_adapters();
         self.router.lifecycle().stop_extension(id).await;
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
@@ -1429,11 +1471,20 @@ impl Around for Wired {
     }
 
     fn started_builtins(&self) -> Vec<Arc<dyn builtin::Builtin>> {
-        self.native
-            .upgrade()
-            .and_then(|n| n.connectors().map(builtin::connectors::entry))
+        let Some(native) = self.native.upgrade() else {
+            return Vec::new();
+        };
+        let mut started: Vec<Arc<dyn builtin::Builtin>> = native
+            .connectors()
+            .map(builtin::connectors::entry)
             .into_iter()
-            .collect()
+            .collect();
+        started.extend(builtin::agents::entries(native.adapters()));
+        started
+    }
+
+    fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {
+        self.native.upgrade().map(|n| Arc::clone(n.adapters()))
     }
 
     fn pack_changed(&self, id: &str) -> BoxFuture<'static, ()> {

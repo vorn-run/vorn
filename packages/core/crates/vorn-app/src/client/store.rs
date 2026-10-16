@@ -38,10 +38,6 @@ pub const TOPICS: &[&str] = &[
     "terminal:command",
 ];
 
-/// The agent a new composer session starts when the config names none, as
-/// the renderer defaults it.
-pub const DEFAULT_AGENT: &str = "claude";
-
 /// One terminal session and what is known about how it ended.
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -124,6 +120,8 @@ pub struct Store {
     /// Whether vornd has said which sessions run: asked after connecting, since
     /// it waits for the session holder while vornd starts.
     pub sessions_known: bool,
+    /// The agents a session can start, from their adapters.
+    pub agents: crate::agents::Agents,
 }
 
 fn subscription() -> Value {
@@ -131,13 +129,14 @@ fn subscription() -> Value {
 }
 
 /// The loads [`Store::load`] waits on, sent together.
-fn load_calls(rpc: &Rpc) -> [Pending; 5] {
+fn load_calls(rpc: &Rpc) -> [Pending; 6] {
     [
         rpc.request("config:load", Value::Null),
         rpc.request("project:list", Value::Null),
         rpc.request("task:list", json!({ "includeDescription": true })),
         rpc.request("workflow:list", Value::Null),
         rpc.request("workflowRun:listWaiting", Value::Null),
+        rpc.request("agent:list", Value::Null),
     ]
 }
 
@@ -160,14 +159,14 @@ impl Store {
         for p in load_calls(rpc) {
             answers.push(p.answer(CALL_TIMEOUT).await);
         }
-        let answers: [Result<Value, RpcError>; 5] = answers
+        let answers: [Result<Value, RpcError>; 6] = answers
             .try_into()
             .map_err(|_| RpcError::Decode("missing answers".into()))?;
         Store::from_answers(answers)
     }
 
-    fn from_answers(answers: [Result<Value, RpcError>; 5]) -> Result<Store, RpcError> {
-        let [config, projects, tasks, workflows, waiting] = answers;
+    fn from_answers(answers: [Result<Value, RpcError>; 6]) -> Result<Store, RpcError> {
+        let [config, projects, tasks, workflows, waiting, agents] = answers;
         let (mut config, tasks, workflows) = (config?, tasks?, workflows?);
         let mut store = Store {
             tasks: records_in(Some(&tasks)),
@@ -181,6 +180,9 @@ impl Store {
         }
         store.config = config;
         store.groups = groups(&store.config);
+        if let Ok(agents) = agents {
+            store.agents = crate::agents::Agents::from_json(&agents);
+        }
         // Runs are optional to the screen: a vornd without them still shows it.
         if let Ok(Value::Array(runs)) = waiting {
             for run in runs {
@@ -198,14 +200,15 @@ impl Store {
         self.sessions_known = true;
     }
 
-    /// The agent the composer starts: `defaults.defaultAgent`, as the
-    /// renderer reads it.
+    /// The agent the composer starts: `defaults.defaultAgent` while it is on,
+    /// else the first agent that is, else a shell.
     pub fn default_agent(&self) -> &str {
         self.config
             .pointer("/defaults/defaultAgent")
             .and_then(Value::as_str)
             .filter(|a| !a.is_empty())
-            .unwrap_or(DEFAULT_AGENT)
+            .filter(|a| *a == "shell" || self.agents.get(a).is_some())
+            .unwrap_or_else(|| self.agents.default_key())
     }
 
     /// The workspace the screen shows: `defaults.activeWorkspace`, which
@@ -669,13 +672,17 @@ mod tests {
     #[test]
     fn config_brings_projects_and_the_default_agent() {
         let mut s = Store::default();
-        assert_eq!(s.default_agent(), DEFAULT_AGENT);
+        assert_eq!(s.default_agent(), "shell");
+        s.agents = crate::agents::testing::agents();
+        assert_eq!(s.default_agent(), "acme");
         let config = json!({
-            "defaults": { "defaultAgent": "codex" },
+            "defaults": { "defaultAgent": "beta" },
             "projects": [{ "name": "web", "path": "/w", "preferredAgents": [] }, { "bad": 1 }],
         });
         assert_eq!(s.apply("config:changed", config), Change::Config);
-        assert_eq!(s.default_agent(), "codex");
+        assert_eq!(s.default_agent(), "beta");
+        s.agents = crate::agents::Agents::new(Vec::new());
+        assert_eq!(s.default_agent(), "shell");
         assert_eq!(s.projects.len(), 1);
         assert_eq!(s.projects[0].name, "web");
     }

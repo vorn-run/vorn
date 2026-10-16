@@ -251,6 +251,12 @@ impl Host for VorndHost {
             .map_err(|e| e.0)
     }
 
+    fn first_agent(&self) -> Option<String> {
+        let native = self.native.upgrade()?;
+        let agents = native.agents();
+        agents.first().map(|a| a.id().to_owned())
+    }
+
     fn notes(&self) -> broadcast::Receiver<Note> {
         self.notes.subscribe()
     }

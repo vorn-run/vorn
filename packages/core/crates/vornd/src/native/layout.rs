@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use vorn_agents::launch::{Platform, Quoting};
-use vorn_agents::Agent;
 use vorn_layout::{Direction, Launch, Layout, Leaf, Node, Pane, Session};
 
 use super::config::Viewer;
@@ -30,8 +29,14 @@ fn dir(native: &Native) -> Option<PathBuf> {
     native.db.get()?.parent().map(|d| d.join("layouts"))
 }
 
-fn agents() -> Vec<&'static str> {
-    Agent::ALL.iter().map(|a| a.id()).collect()
+/// The ids of the agents that are on, which a layout may name.
+fn agents(native: &Native) -> Vec<String> {
+    native
+        .adapters()
+        .agents()
+        .iter()
+        .map(|a| a.id().to_owned())
+        .collect()
 }
 
 /// A layout found, with where it came from.
@@ -107,11 +112,13 @@ fn pick(native: &Native, params: &Value) -> Result<Found, String> {
     }
 }
 
-fn read(found: &Found) -> Result<(String, Layout), String> {
+fn read(native: &Native, found: &Found) -> Result<(String, Layout), String> {
     let text = std::fs::read_to_string(&found.path)
         .map_err(|e| format!("could not read {}: {e}", found.path.display()))?;
     let file = found.path.display().to_string();
-    let layout = vorn_layout::parse(&text, &agents()).map_err(|problems| {
+    let agents = agents(native);
+    let ids: Vec<&str> = agents.iter().map(String::as_str).collect();
+    let layout = vorn_layout::parse(&text, &ids).map_err(|problems| {
         problems
             .iter()
             .map(|p| p.at(&file))
@@ -141,7 +148,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
         "layout:get" => {
             let n = Arc::clone(native);
             let got = blocking(move || {
-                pick(&n, &params).and_then(|f| read(&f).map(|(text, _)| (f, text)))
+                pick(&n, &params).and_then(|f| read(&n, &f).map(|(text, _)| (f, text)))
             })
             .await
             .and_then(|r| r);
@@ -161,7 +168,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
 fn list(native: &Native) -> Answer {
     let rows = found(native)
         .into_iter()
-        .map(|f| match read(&f) {
+        .map(|f| match read(native, &f) {
             Ok((_, l)) => json!({
                 "name": f.name, "source": f.source, "title": f.title, "project": l.project,
                 "sessions": l.leaves().iter().filter(|l| matches!(l, Leaf::Session(_))).count(),
@@ -231,7 +238,7 @@ fn command_line(words: &[String]) -> String {
 
 async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     let (n, ask) = (Arc::clone(native), params.clone());
-    let read = blocking(move || pick(&n, &ask).and_then(|f| read(&f).map(|(_, l)| (f, l))))
+    let read = blocking(move || pick(&n, &ask).and_then(|f| read(&n, &f).map(|(_, l)| (f, l))))
         .await
         .and_then(|r| r);
     let (found, layout) = match read {
@@ -408,9 +415,10 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     let leaves: Vec<Node> = open
         .into_iter()
         .map(|(agent, label, cwd)| {
-            let launch = match Agent::from_id(&agent) {
-                Some(a) => Launch::Agent(a.id().to_owned()),
-                None => Launch::Shell,
+            let launch = if vorn_agents::is_known(&agent) {
+                Launch::Agent(agent)
+            } else {
+                Launch::Shell
             };
             // Under the project, a path relative to it keeps the layout movable.
             let cwd = cwd.filter(|c| c != &project_path).map(|c| {
