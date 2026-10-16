@@ -294,3 +294,38 @@ fn a_gate_offers_its_answers_and_the_review_tab_counts_it() {
     let t = tree(&mut p, &mut ui, "run:r1", PHONE);
     assert!(has(&t, "Better text") && has(&t, "Approving sends your edited text."));
 }
+
+/// How long a screen takes to build and send at the sizes the budgets name; `--ignored --nocapture` prints them.
+#[test]
+#[ignore = "timing, read by hand"]
+fn screens_build_within_budget_at_ten_thousand_tasks() {
+    let mut p = phone(PHONE);
+    let s = &mut p.model.store;
+    let tasks: Vec<Value> = (0..10_000)
+        .map(|i| {
+            let status = ["todo", "in_progress", "done"][i % 3];
+            json!({ "id": format!("t{i}"), "projectName": "vorn", "title": format!("Task {i}"),
+                    "description": "", "status": status, "order": i,
+                    "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-02T00:00:00Z" })
+        })
+        .collect();
+    s.tasks = tasks.iter().cloned().map(de).collect();
+    s.config["tasks"] = Value::Array(tasks);
+    for i in 0..1_000 {
+        s.upsert(de(json!({
+            "id": format!("x{i}"), "agentType": "claude", "projectName": "vorn",
+            "projectPath": "/src/vorn", "status": "running", "createdAt": 1_700_000_000_000_i64, "pid": 1,
+        })));
+    }
+    for route in ["sessions", "tasks", "task:t9999", "workflows", "run:r1"] {
+        let mut ui = Ui::native(&config(3.0));
+        let _ = tree(&mut p, &mut ui, route, PHONE);
+        let at = std::time::Instant::now();
+        let n = 5;
+        let mut nodes = 0;
+        for _ in 0..n {
+            nodes = tree(&mut p, &mut ui, route, PHONE).walk().len();
+        }
+        println!("{route}: {:?} per tree, {nodes} nodes", at.elapsed() / n);
+    }
+}

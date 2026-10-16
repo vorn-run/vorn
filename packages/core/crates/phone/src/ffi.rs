@@ -314,6 +314,12 @@ pub extern "C" fn vp_pump(h: *mut Handle) -> bool {
     })
 }
 
+/// Moves whenever a native screen would read differently; terminal output leaves it.
+#[no_mangle]
+pub extern "C" fn vp_revision(h: *mut Handle) -> u64 {
+    with(h, |h| h.phone.model.revision)
+}
+
 /// A touch at (`x`, `y`) points: 0 began, 1 moved, 2 ended, 3 cancelled.
 #[no_mangle]
 pub extern "C" fn vp_touch(h: *mut Handle, phase: i32, x: f32, y: f32) {

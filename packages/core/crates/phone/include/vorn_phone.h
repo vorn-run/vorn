@@ -14,6 +14,7 @@ void vp_detach_layer(VpHandle *h);
 void vp_resize(VpHandle *h, float w, float h_pt, float scale, float top, float bottom, float left, float right, float keyboard);
 bool vp_frame(VpHandle *h);
 bool vp_pump(VpHandle *h);
+uint64_t vp_revision(VpHandle *h);
 
 void vp_touch(VpHandle *h, int32_t phase, float x, float y);
 void vp_text(VpHandle *h, const char *s);

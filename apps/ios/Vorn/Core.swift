@@ -10,22 +10,34 @@ final class Core: ObservableObject {
     weak var front: Nav?
 
     private let box = WakeBox()
+    /// The core's screen revision `revision` last caught up with.
+    private var seen: UInt64 = 0
+    private var trees: [String: (revision: Int, node: Node?)] = [:]
+    private var tick: Timer?
 
     init(host: String, token: String) {
         let wake: VpWake = { ctx in
             guard let ctx else { return }
-            let box = Unmanaged<WakeBox>.fromOpaque(ctx).takeUnretainedValue()
-            DispatchQueue.main.async { box.core?.woke() }
+            Unmanaged<WakeBox>.fromOpaque(ctx).takeUnretainedValue().ring()
         }
         handle = vp_new(host, token, wake, Unmanaged.passRetained(box).toOpaque())
         box.core = self
+        // Relative times ("2m ago") move on without vornd saying anything.
+        tick = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.revision += 1 }
     }
 
-    deinit { vp_free(handle) }
+    deinit {
+        tick?.invalidate()
+        vp_free(handle)
+    }
 
     func woke() {
         _ = vp_pump(handle)
-        revision += 1
+        let r = vp_revision(handle)
+        if r != seen {
+            seen = r
+            revision += 1
+        }
         if let go = takeGo() { front?.apply(go) }
     }
 
@@ -36,7 +48,17 @@ final class Core: ObservableObject {
         return String(cString: p)
     }
 
+    /// `screen`'s tree, built once per revision however many views read it.
     func tree(_ screen: String) -> Node? {
+        if let t = trees[screen], t.revision == revision { return t.node }
+        let node = build(screen)
+        trees[screen] = (revision, node)
+        if trees.count > 64 { trees = trees.filter { $0.value.revision == revision } }
+        return node
+    }
+
+    /// `screen`'s tree fresh from the core, decoded.
+    func build(_ screen: String) -> Node? {
         guard let p = vp_native_tree(handle, screen) else { return nil }
         defer { vp_free_string(p) }
         return try? JSONDecoder().decode(Node.self, from: Data(String(cString: p).utf8))
@@ -61,6 +83,23 @@ final class Core: ObservableObject {
 /// What the wake callback points at: lives as long as the core and finds it once it exists.
 final class WakeBox {
     weak var core: Core?
+    private let lock = NSLock()
+    private var queued = false
+
+    /// Wakes the core on the main thread, once however many times vornd rings before it runs.
+    func ring() {
+        lock.lock()
+        let first = !queued
+        queued = true
+        lock.unlock()
+        guard first else { return }
+        DispatchQueue.main.async {
+            self.lock.lock()
+            self.queued = false
+            self.lock.unlock()
+            self.core?.woke()
+        }
+    }
 }
 
 /// One node of a screen's semantic tree.

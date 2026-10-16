@@ -74,6 +74,8 @@ pub struct Model {
     pub views: HashMap<String, PaneView>,
     /// Counts the terminal updates folded in, for keystroke latency.
     pub grid_updates: u64,
+    /// Bumped when anything a native screen reads changes; terminal output does not.
+    pub revision: u64,
     pub points: Points,
     /// What each template control does, rebound every frame it is drawn.
     pub acts: Acts,
@@ -102,6 +104,7 @@ impl Model {
             grid: None,
             views: HashMap::new(),
             grid_updates: 0,
+            revision: 0,
             points: Points::default(),
             acts: Acts::default(),
             permissions: Vec::new(),
@@ -289,6 +292,9 @@ impl Model {
         if stale {
             self.reload_points();
         }
+        if changed {
+            self.revision += 1;
+        }
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
                 if let Some(v) = g.view(&id) {
@@ -299,6 +305,7 @@ impl Model {
             }
             if g.closed() && self.link == Link::Online {
                 self.link = Link::Offline("The connection closed".into());
+                self.revision += 1;
                 changed = true;
             }
         }

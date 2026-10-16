@@ -107,10 +107,11 @@ pub fn list(cx: &Cx) -> El {
         for (project, mut ss) in groups {
             ss.sort_by(order);
             let title = if project.is_empty() { "Other" } else { project };
-            rows.push(section(
-                title,
-                ss.into_iter().map(|s| session_row(cx, s)).collect(),
-            ));
+            let key = format!("sessions:{project}");
+            let limit = cx.view().limit(&key);
+            let mut kids: Vec<El> = ss.iter().take(limit).map(|s| session_row(cx, s)).collect();
+            kids.extend(cx.more(&key, ss.len().min(limit), ss.len()));
+            rows.push(section(title, kids));
         }
         listing(rows)
     };

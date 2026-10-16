@@ -8,7 +8,11 @@ The Rust core (`packages/core/crates/phone`) talks to vornd and builds each scre
 VORN_HOST=192.168.0.14:56097 sh apps/ios/build.sh
 ```
 
-The script builds `libvorn_phone.a` for the device and the simulator, generates the project with XcodeGen and builds `Vorn.app`. Set `PROFILE` to sign for a device.
+The script builds `libvorn_phone.a` for the device and the simulator, writes `Vorn/Icons.xcassets` with `icons.py`, generates the project with XcodeGen and builds `Vorn.app`. Set `PROFILE` to sign for a device.
+
+## Icons
+
+`icons.py` turns vornui's own SVGs (`packages/core/crates/vornui/icons`) into template images and the agent marks into full-colour images named `agent-<key>`, so the app draws the same glyphs as the desktop. An extension's mark, unknown at build time, arrives as SVG in the node and is drawn by the core's renderer (`vp_svg_rgba`).
 
 ## Routes
 
@@ -40,7 +44,8 @@ A screen is named by a route; the part after the first `:` is its argument.
 | `field` | A text field, `multiline` or `secret` |
 | `copy` | A button that copies `value` |
 | `text` | Text in a role: `title`, `body`, `secondary`, `mono`, `error` |
-| `icon`, `status`, `badge` | Small marks |
+| `icon` | A glyph: `value` is the vornui name (`agent:<key>` for a mark), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
+| `status`, `badge` | Small marks |
 | `drawn` | A drawn vornui view (a terminal) |
 
-Every control acts by id through `vp_native_action`, and the core says where to go next through `vp_take_go`.
+Every control acts by id through `vp_native_action`, and the core says where to go next through `vp_take_go`. `vp_call` sends one request to vornd outside any screen (revoking a token, say).

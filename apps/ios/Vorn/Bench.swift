@@ -28,6 +28,8 @@ final class Bench {
             Report.write(core, label: label, extra: ["bench": "no session to open"])
             return
         }
+        screens(["sessions", "tasks", "workflows", "launch", "session:\(session)"])
+        await idle()
         try? await Task.sleep(for: .seconds(1))
         open(session)
         try? await Task.sleep(for: .seconds(2))
@@ -55,6 +57,33 @@ final class Bench {
         }
         vp_touch(core.handle, 2, 200, y1)
         try? await Task.sleep(for: .milliseconds(1500))
+    }
+
+    /// Building and decoding each screen's tree, best of five: what opening it costs before SwiftUI draws.
+    private func screens(_ routes: [String]) {
+        var out: [String: Double] = [:]
+        for r in routes {
+            var best = Double.infinity
+            for _ in 0..<5 {
+                let t = ProcessInfo.processInfo.systemUptime
+                _ = core.build(r)
+                best = min(best, (ProcessInfo.processInfo.systemUptime - t) * 1000)
+            }
+            out[r.split(separator: ":").first.map(String.init) ?? r] = best
+        }
+        results["screenMs"] = out
+    }
+
+    /// The share of one core the app uses over five seconds of nothing happening.
+    @MainActor private func idle() async {
+        func cpu() -> Double {
+            var u = rusage()
+            getrusage(RUSAGE_SELF, &u)
+            return Double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + Double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6
+        }
+        let c0 = cpu(), t0 = ProcessInfo.processInfo.systemUptime
+        try? await Task.sleep(for: .seconds(5))
+        results["idleCpuPct"] = (cpu() - c0) / (ProcessInfo.processInfo.systemUptime - t0) * 100
     }
 
     private func snap(_ name: String) {
