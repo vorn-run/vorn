@@ -1,0 +1,20 @@
+[package]
+name = "ext-tiers-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "E9.4: a host that starts extension services, built with and without the Wasm tier to weigh it"
+
+[[bin]]
+name = "ext-tiers-probe"
+path = "src/main.rs"
+
+[features]
+wasm = ["vorn-extensions/wasm"]
+# The compiler too, so it could load a plain .wasm.
+wasm-compile = ["vorn-extensions/wasm-compile"]
+
+[dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+vorn-extensions = { path = "../../../crates/extensions" }

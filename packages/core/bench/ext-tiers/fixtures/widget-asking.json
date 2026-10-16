@@ -1,0 +1,287 @@
+{
+  "agents": [
+    {
+      "agent": "claude",
+      "id": "s0",
+      "name": "agent 0",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s1",
+      "name": "agent 1",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s2",
+      "name": "agent 2",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s3",
+      "name": "agent 3",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s4",
+      "name": "agent 4",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s5",
+      "name": "agent 5",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s6",
+      "name": "agent 6",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s7",
+      "name": "agent 7",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s8",
+      "name": "agent 8",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s9",
+      "name": "agent 9",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s10",
+      "name": "agent 10",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s11",
+      "name": "agent 11",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s12",
+      "name": "agent 12",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s13",
+      "name": "agent 13",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s14",
+      "name": "agent 14",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s15",
+      "name": "agent 15",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s16",
+      "name": "agent 16",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s17",
+      "name": "agent 17",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s18",
+      "name": "agent 18",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s19",
+      "name": "agent 19",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s20",
+      "name": "agent 20",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s21",
+      "name": "agent 21",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s22",
+      "name": "agent 22",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s23",
+      "name": "agent 23",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s24",
+      "name": "agent 24",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s25",
+      "name": "agent 25",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s26",
+      "name": "agent 26",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s27",
+      "name": "agent 27",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s28",
+      "name": "agent 28",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s29",
+      "name": "agent 29",
+      "status": "working"
+    },
+    {
+      "agent": "claude",
+      "id": "s30",
+      "name": "agent 30",
+      "status": "working"
+    },
+    {
+      "agent": "codex",
+      "id": "s31",
+      "name": "agent 31",
+      "status": "working"
+    }
+  ],
+  "permissions": [
+    {
+      "agent": "agent 1",
+      "description": "npm test",
+      "id": "p1",
+      "question": false,
+      "ready": false,
+      "tool": "Bash"
+    },
+    {
+      "agent": "agent 2",
+      "description": "null",
+      "id": "p2",
+      "question": true,
+      "ready": false,
+      "tool": "AskUserQuestion"
+    },
+    {
+      "agent": "agent 3",
+      "description": "Edit src/main.rs",
+      "id": "p3",
+      "question": false,
+      "ready": false,
+      "tool": "Edit"
+    },
+    {
+      "agent": "agent 4",
+      "description": "npm test",
+      "id": "p4",
+      "question": false,
+      "ready": false,
+      "tool": "Bash"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "p1:0",
+      "label": "Always allow `npm test`",
+      "request": "p1"
+    },
+    {
+      "id": "p1:1",
+      "label": "Allow Bash in src/",
+      "request": "p1"
+    },
+    {
+      "id": "p3:0",
+      "label": "Auto-accept edits",
+      "request": "p3"
+    },
+    {
+      "id": "p4:0",
+      "label": "Always allow `npm test`",
+      "request": "p4"
+    },
+    {
+      "id": "p4:1",
+      "label": "Allow Bash in src/",
+      "request": "p4"
+    }
+  ],
+  "options": [
+    {
+      "ask": "COLOUR: Which theme?",
+      "id": "p2:0:0",
+      "label": "Dark",
+      "picked": false,
+      "request": "p2"
+    },
+    {
+      "ask": "",
+      "id": "p2:0:1",
+      "label": "Light",
+      "picked": false,
+      "request": "p2"
+    },
+    {
+      "ask": "Ship it?",
+      "id": "p2:1:0",
+      "label": "Yes",
+      "picked": false,
+      "request": "p2"
+    },
+    {
+      "ask": "",
+      "id": "p2:1:1",
+      "label": "No",
+      "picked": false,
+      "request": "p2"
+    }
+  ]
+}

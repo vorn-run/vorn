@@ -1,0 +1,11 @@
+[package]
+name = "ext-tiers-tasks-shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "What the Tasks built-in's own code reaches in vorn-store and vorn-work, for a guest: the table calls over the bridge, and the JavaScript helpers"
+
+[dependencies]
+# `js.rs` dates with it; it builds for wasm32-wasip2.
+jiff = "0.2"
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -12,10 +12,13 @@ name = "vornd"
 path = "src/main.rs"
 
 [features]
-default = ["engine"]
+default = ["engine", "wasm-extensions"]
 # The session engine parses every session's output with libghostty-vt, which
 # Zig 0.16.0 builds from source. Without it vornd only keeps the holder.
 engine = ["dep:vorn-engine"]
+# Extension services that are Wasm components (`service.component`), run in
+# Wasmtime from the `.cwasm` beside them. Without it such a service does not start.
+wasm-extensions = ["vorn-extensions/wasm"]
 
 [dependencies]
 vorn-spawn = { path = "../spawn", features = ["tokio"] }

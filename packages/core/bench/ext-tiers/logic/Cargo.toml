@@ -1,0 +1,9 @@
+[package]
+name = "ext-tiers-logic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Worktree cleanup and the Widget, written once against the extension API, for the program and Wasm tiers of the E9.4 spike"
+
+[dependencies]
+serde_json = "1"

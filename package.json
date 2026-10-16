@@ -13,6 +13,7 @@
     "bench:panes": "sh packages/core/scripts/many-pane-bench.sh",
     "bench:board": "sh packages/core/scripts/board-bench.sh",
     "bench:startup": "bash packages/core/scripts/startup-bench.sh",
+    "bench:ext-tiers": "sh packages/core/scripts/ext-tiers-bench.sh",
     "lint": "eslint .",
     "lint:lockfile": "node scripts/check-lockfile.mjs",
     "format": "prettier --write .",

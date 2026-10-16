@@ -60,15 +60,83 @@ const MAX_ROWS: usize = 10_000;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
-/// A service speaking the extension API.
+/// A service speaking the extension API: a program, or a Wasm component in its place.
 #[derive(Debug)]
-pub struct Program {
-    child: Child,
+pub enum Program {
+    Child(Child),
+    #[cfg(feature = "wasm")]
+    Component(crate::wasm::Service),
 }
 
 impl Running for Program {
-    fn child(&self) -> &Child {
-        &self.child
+    fn name(&self) -> &str {
+        match self {
+            Program::Child(c) => c.name(),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.name(),
+        }
+    }
+
+    fn exited(&self) -> bool {
+        match self {
+            Program::Child(c) => c.exited(),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.exited(),
+        }
+    }
+
+    fn close(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        match self {
+            Program::Child(c) => Box::pin(c.close()),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.close(),
+        }
+    }
+}
+
+impl Program {
+    async fn handle(
+        &self,
+        params: params::GuestHandle,
+        timeout: Duration,
+    ) -> Result<Value, CallError> {
+        match self {
+            Program::Child(c) => {
+                c.request(Method::GuestHandle.name(), json!(params), timeout)
+                    .await
+            }
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => {
+                c.handle(params.method, params.args, params.ctx, timeout)
+                    .await
+            }
+        }
+    }
+
+    async fn on_event(&self, params: params::GuestOnEvent) -> Result<(), CallError> {
+        match self {
+            Program::Child(c) => c.notify(Method::GuestOnEvent.name(), json!(params)).await,
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.on_event(params.batch).await,
+        }
+    }
+
+    /// The process id of a program; `None` for a component, which runs in vornd.
+    pub fn pid(&self) -> Option<u32> {
+        match self {
+            Program::Child(c) => c.pid(),
+            #[cfg(feature = "wasm")]
+            Program::Component(_) => None,
+        }
+    }
+
+    /// The linear memory a component's instance holds; `None` for a program.
+    pub fn component_memory(&self) -> Option<usize> {
+        match self {
+            Program::Child(_) => None,
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => Some(c.memory()),
+        }
     }
 }
 
@@ -291,14 +359,7 @@ impl Router {
             args,
             ctx,
         };
-        let answer = lease
-            .child
-            .request(
-                Method::GuestHandle.name(),
-                json!(params),
-                self.settings.call_timeout,
-            )
-            .await;
+        let answer = lease.handle(params, self.settings.call_timeout).await;
         drop(lease);
         match answer {
             Ok(value) => Ok(value),
@@ -373,20 +434,21 @@ impl Router {
     }
 
     async fn start_service(&self, pack: &InstalledPack) -> Result<Program, String> {
-        let argv = pack
+        let service = pack
             .manifest
             .service
             .as_ref()
-            .map(|s| s.command.clone())
             .ok_or_else(|| format!("{} has no service", pack.name()))?;
-        let child = self.spawn_program(pack, &argv)?;
-        let init = params::GuestInit {
-            ctx: InitCtx {
-                id: pack.id.clone(),
-                version: pack.version.clone(),
-                vorn: self.settings.version.clone(),
-            },
+        let ctx = InitCtx {
+            id: pack.id.clone(),
+            version: pack.version.clone(),
+            vorn: self.settings.version.clone(),
         };
+        if let Some(component) = &service.component {
+            return self.start_component(pack, component, ctx).await;
+        }
+        let child = self.spawn_program(pack, &service.command)?;
+        let init = params::GuestInit { ctx };
         let answered = child
             .request(
                 Method::GuestInit.name(),
@@ -399,7 +461,51 @@ impl Router {
             return Err(format!("{} did not start: {}", pack.name(), ext_error(err)));
         }
         info!("[extensions] {} started", pack.name());
-        Ok(Program { child })
+        Ok(Program::Child(child))
+    }
+
+    #[cfg(feature = "wasm")]
+    async fn start_component(
+        &self,
+        pack: &InstalledPack,
+        component: &str,
+        init: InitCtx,
+    ) -> Result<Program, String> {
+        let start = crate::wasm::Start {
+            wasm: PathBuf::from(&pack.path).join(component),
+            cache: self.store.root().join(crate::wasm::COMPILED),
+            name: format!("[extensions] {}", pack.name()),
+            init,
+            start_timeout: self.settings.start_timeout,
+            router: self.me.clone(),
+            manifest: Arc::new(pack.manifest.clone()),
+            caller: Caller {
+                extension: pack.id.clone(),
+                project: None,
+            },
+        };
+        let service = crate::wasm::Service::start(start).await?;
+        info!("[extensions] {} started as a component", pack.name());
+        Ok(Program::Component(service))
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[allow(clippy::unused_async)]
+    async fn start_component(
+        &self,
+        pack: &InstalledPack,
+        _component: &str,
+        _init: InitCtx,
+    ) -> Result<Program, String> {
+        Err(format!(
+            "{} is a Wasm component, and this Vorn runs none",
+            pack.name()
+        ))
+    }
+
+    /// The running service of extension `id`, without starting it.
+    pub fn running(&self, id: &str) -> Option<crate::lifecycle::Lease<Program>> {
+        self.lifecycle.get(&ServiceKey::new(id, ""))
     }
 
     async fn one_shot(
@@ -514,11 +620,7 @@ impl Router {
         let params = params::GuestOnEvent {
             batch: batch.iter().map(|e| Event::clone(e)).collect(),
         };
-        if let Err(err) = lease
-            .child
-            .notify(Method::GuestOnEvent.name(), json!(params))
-            .await
-        {
+        if let Err(err) = lease.on_event(params).await {
             warn!(
                 "[extensions] {id} missed {} events: {}",
                 batch.len(),
@@ -603,7 +705,7 @@ fn from_ext(result: Result<Value, ExtError>) -> Option<Reply> {
 }
 
 /// One request a program made; `None` for one that is not answered.
-async fn answer(
+pub(crate) async fn answer(
     router: &Router,
     manifest: &Manifest,
     caller: &Caller,

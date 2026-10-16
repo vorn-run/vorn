@@ -1,0 +1,12 @@
+{
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "cores": 10,
+    "os": "macos"
+  },
+  "reps": 5,
+  "tiers": [100, 1000, 10000],
+  "writes": 60,
+  "lists": 20,
+  "restarts": 10
+}

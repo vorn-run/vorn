@@ -790,3 +790,59 @@ fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
     shot.frame(&mut app);
     assert!(!app.st.points.windows.iter().any(|k| k.starts_with(W)));
 }
+
+/// What the Widget published as a Wasm component (the ext-tiers bench's
+/// "asking" step, where every tier publishes the same rows), drawn by the
+/// built-in's own templates on every surface.
+const WASM_WIDGET_ROWS: &str = include_str!("../../../bench/ext-tiers/fixtures/widget-asking.json");
+
+#[test]
+fn the_widget_draws_what_its_wasm_component_published_on_every_surface() {
+    let rows: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(WASM_WIDGET_ROWS).expect("the fixture");
+    for c in ["agents", "permissions", "suggestions", "options"] {
+        assert!(
+            rows[c].as_array().is_some_and(|r| !r.is_empty()),
+            "{c} rows"
+        );
+    }
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    const W: &str = "vorn.widget";
+    let mut app = connect(&v);
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": W, "on": true }))
+        .expect("the widget on");
+    let full = format!("{W}/windows/widget");
+    let mut shot = Shot::new();
+    shot.until(&mut app, "the widget's window", |a, _| {
+        let drawn = a.st.points.get(&full).is_some_and(|p| p.template.is_ok());
+        let read = rows.keys().all(|c| a.st.points.rows_of(W).contains_key(c));
+        (drawn && read).then_some(())
+    });
+    for (collection, published) in &rows {
+        let ops: Vec<serde_json::Value> = published
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|row| json!({ "op": "upsert", "row": row }))
+            .collect();
+        app.st.points.changed(W, collection, &ops);
+    }
+
+    shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
+    shot.until(&mut app, "the widget", |a, _| {
+        a.st.points.windows.contains(&full).then_some(())
+    });
+    let asks = [
+        "npm test",
+        "Always allow `npm test`",
+        "Allow Bash in src/",
+        "COLOUR: Which theme?",
+        "Dark",
+    ];
+    every_surface(&mut shot, &mut app, "w-wasm", &asks, &asks[..3]);
+    shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
+    shot.frame(&mut app);
+}
