@@ -121,14 +121,20 @@ pub struct DeviceToken {
     pub last_seen_at: Option<String>,
     #[serde(default)]
     pub revoked_at: Option<String>,
+    #[serde(default)]
+    pub last_address: Option<String>,
 }
 
 impl DeviceToken {
     /// The line under the device's name.
     pub fn seen(&self) -> String {
-        match self.last_seen_at.as_deref().filter(|s| !s.is_empty()) {
-            Some(at) => format!("Last seen {}", crate::tasks::locale_string(at)),
-            None => "Never connected".to_owned(),
+        let Some(at) = self.last_seen_at.as_deref().filter(|s| !s.is_empty()) else {
+            return "Never connected".to_owned();
+        };
+        let at = crate::tasks::locale_string(at);
+        match self.last_address.as_deref().filter(|s| !s.is_empty()) {
+            Some(from) => format!("Last seen {at} from {from}"),
+            None => format!("Last seen {at}"),
         }
     }
 }
@@ -413,6 +419,7 @@ mod tests {
             name: "Phone".into(),
             last_seen_at: None,
             revoked_at: None,
+            last_address: None,
         };
         assert_eq!(never.seen(), "Never connected");
         let seen = DeviceToken {
@@ -420,6 +427,11 @@ mod tests {
             ..never
         };
         assert_eq!(seen.seen(), "Last seen 1/1/2030, 9:00:00 AM");
+        let from = DeviceToken {
+            last_address: Some("192.168.1.7".into()),
+            ..seen
+        };
+        assert_eq!(from.seen(), "Last seen 1/1/2030, 9:00:00 AM from 192.168.1.7");
     }
 
     #[test]
@@ -453,6 +465,7 @@ mod tests {
             name: id.into(),
             last_seen_at: None,
             revoked_at: revoked.then(|| "2030-01-01T00:00:00Z".into()),
+            last_address: None,
         };
         let n = Network {
             tokens: Some(vec![t("a", false), t("b", true), t("c", false)]),

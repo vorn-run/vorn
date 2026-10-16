@@ -337,7 +337,7 @@ impl Store {
     }
 
     pub fn db_touch_device_token(&self, id: &str, seen_at: &str) -> Result<()> {
-        tokens::touch(self.conn(), id, seen_at)
+        tokens::touch(self.conn(), id, seen_at, None)
     }
 }
 

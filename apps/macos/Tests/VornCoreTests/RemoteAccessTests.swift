@@ -80,6 +80,9 @@ struct RemoteAccessTests {
             "lastSeenAt": .null, "revokedAt": .null,
         ]]).decode([DeviceToken].self)
         #expect(tokens.first?.lastSeenAt == nil)
+        #expect(tokens.first?.seen == "Never connected")
+        let seen = DeviceToken(id: "t2", name: "Phone", createdAt: "", lastSeenAt: "2030-01-01T09:00:00.000Z", lastAddress: "192.168.1.7")
+        #expect(seen.seen.hasSuffix(" from 192.168.1.7"))
         let request = try JSONValue.object([
             "requestId": "r", "deviceName": "iPhone", "address": "192.168.1.31", "askedAt": 1_760_000_000_000, "status": "pending",
         ]).decode(PairingRequest.self)

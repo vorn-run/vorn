@@ -77,6 +77,7 @@ pub async fn run<C>(
         out: out.clone(),
         serving: Arc::clone(&serving),
         calls: Arc::clone(&calls),
+        peer: peer.ip(),
         topics,
         admitted: false,
         waiting: false,
@@ -87,7 +88,7 @@ pub async fn run<C>(
         Some(raw) => {
             let n = Arc::clone(&native);
             let presented = raw.clone();
-            let who = tokio::task::spawn_blocking(move || n.authenticate(&presented))
+            let who = tokio::task::spawn_blocking(move || n.authenticate(&presented, peer.ip()))
                 .await
                 .ok()
                 .flatten();
@@ -153,6 +154,7 @@ struct Session {
     out: Forwarder,
     serving: Arc<Serving>,
     calls: Arc<Conn>,
+    peer: std::net::IpAddr,
     /// What it asked for on the upgrade, until it is admitted.
     topics: Option<Topics>,
     admitted: bool,
@@ -231,10 +233,11 @@ impl Session {
             }
             let token = frame["params"]["token"].as_str().unwrap_or("").to_owned();
             let n = Arc::clone(native);
+            let peer = self.peer;
             let presented = token.clone();
             let who = tokio::task::spawn_blocking(move || {
                 (!presented.is_empty())
-                    .then(|| n.authenticate(&presented))
+                    .then(|| n.authenticate(&presented, peer))
                     .flatten()
             })
             .await

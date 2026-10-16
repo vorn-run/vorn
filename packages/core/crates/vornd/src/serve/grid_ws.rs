@@ -9,6 +9,7 @@
 //! both ways, a frame possibly split across messages; text is ignored. The
 //! socket ends with [`CLOSE_CREDENTIAL_REJECTED`] when its token is revoked.
 
+use std::net::IpAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -46,11 +47,12 @@ pub async fn run<C>(
     client: WebSocketStream<C>,
     desktop: bool,
     credential: Option<String>,
+    peer: IpAddr,
 ) where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (mut sink, mut source) = client.split();
-    let Some(who) = authenticate(&native, &serving, &mut sink, &mut source, credential).await
+    let Some(who) = authenticate(&native, &serving, &mut sink, &mut source, credential, peer).await
     else {
         let _ = sink.close().await;
         return;
@@ -68,12 +70,13 @@ async fn authenticate<C>(
     sink: &mut Sink<C>,
     source: &mut Source<C>,
     credential: Option<String>,
+    peer: IpAddr,
 ) -> Option<Authenticated>
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     if let Some(raw) = credential {
-        let who = check(native, raw).await;
+        let who = check(native, raw, peer).await;
         if who.is_none() {
             refuse(sink, CLOSE_CREDENTIAL_REJECTED, "credential rejected").await;
         }
@@ -117,7 +120,7 @@ where
     let who = if token.is_empty() {
         None
     } else {
-        check(native, token).await
+        check(native, token, peer).await
     };
     let Some(who) = who else {
         reply(sink, &id, Err("Authentication failed")).await;
@@ -132,9 +135,9 @@ where
     Some(who)
 }
 
-async fn check(native: &Arc<Native>, raw: String) -> Option<Authenticated> {
+async fn check(native: &Arc<Native>, raw: String, peer: IpAddr) -> Option<Authenticated> {
     let n = Arc::clone(native);
-    tokio::task::spawn_blocking(move || n.authenticate(&raw))
+    tokio::task::spawn_blocking(move || n.authenticate(&raw, peer))
         .await
         .ok()
         .flatten()

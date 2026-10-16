@@ -283,6 +283,8 @@ export interface DeviceToken {
   name: string
   createdAt: string
   lastSeenAt: string | null
+  /** Where the device last connected from. */
+  lastAddress?: string | null
   revokedAt: string | null
 }
 

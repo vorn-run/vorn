@@ -194,7 +194,7 @@ struct DeviceTokenList: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(token.name).font(.ui(14)).foregroundStyle(Theme.gray200).lineHeight(20, size: 14).lineLimit(1)
-                Text(token.lastSeenAt.map { "Last seen \(RemoteAccess.localeString($0))" } ?? "Never connected")
+                Text(token.seen)
                     .font(.ui(10)).foregroundStyle(Theme.gray600).lineHeight(15, size: 10)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

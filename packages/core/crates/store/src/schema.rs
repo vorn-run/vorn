@@ -53,6 +53,7 @@ const BASE_DDL: &str = r#"
       token_hash TEXT NOT NULL,
       created_at TEXT NOT NULL,
       last_seen_at TEXT,
+      last_address TEXT,
       revoked_at TEXT
     );
 
@@ -1097,6 +1098,13 @@ fn verify(conn: &mut Connection) -> Result<()> {
                     "ALTER TABLE tasks ADD COLUMN archived_at TEXT",
                 ),
             ],
+        ),
+        (
+            "device_tokens",
+            vec![col(
+                "last_address",
+                "ALTER TABLE device_tokens ADD COLUMN last_address TEXT",
+            )],
         ),
     ];
     // Migration 15, appended to each table's list as database.ts does.

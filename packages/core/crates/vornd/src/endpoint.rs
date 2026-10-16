@@ -386,6 +386,7 @@ impl Daemon {
         client: WebSocketStream<C>,
         desktop: bool,
         credential: Option<String>,
+        peer: std::net::IpAddr,
     ) where
         C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -398,11 +399,12 @@ impl Daemon {
                 client,
                 desktop,
                 credential,
+                peer,
             )
             .await;
         }
         #[cfg(not(feature = "engine"))]
-        let _ = (serving, client, desktop, credential);
+        let _ = (serving, client, desktop, credential, peer);
     }
 }
 
@@ -562,7 +564,7 @@ async fn serve_websocket(
         daemon.served.fetch_add(1, Ordering::Relaxed);
         if grid {
             daemon
-                .serve_grid(serving, client, desktop, credential)
+                .serve_grid(serving, client, desktop, credential, peer.ip())
                 .await;
             daemon.open.fetch_sub(1, Ordering::Relaxed);
             return;

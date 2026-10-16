@@ -8,15 +8,26 @@ public struct DeviceToken: Codable, Hashable, Sendable, Identifiable {
     public var createdAt: String
     public var lastSeenAt: String?
     public var revokedAt: String?
+    /// Where it last connected from.
+    public var lastAddress: String?
 
     public init(id: String, userId: String = "owner", name: String, createdAt: String,
-                lastSeenAt: String? = nil, revokedAt: String? = nil) {
+                lastSeenAt: String? = nil, revokedAt: String? = nil, lastAddress: String? = nil) {
         self.id = id
         self.userId = userId
         self.name = name
         self.createdAt = createdAt
         self.lastSeenAt = lastSeenAt
         self.revokedAt = revokedAt
+        self.lastAddress = lastAddress
+    }
+
+    /// The line under its name.
+    public var seen: String {
+        guard let at = lastSeenAt else { return "Never connected" }
+        let when = "Last seen \(RemoteAccess.localeString(at))"
+        guard let from = lastAddress, !from.isEmpty else { return when }
+        return "\(when) from \(from)"
     }
 }
 
