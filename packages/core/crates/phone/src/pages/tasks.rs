@@ -24,7 +24,7 @@ pub fn body_id(task: &str) -> Id {
 }
 
 const NEW_TITLE: &str = "new-task-title";
-const NEW_BODY: &str = "new-task-body";
+pub(super) const NEW_BODY: &str = "new-task-body";
 
 fn live(t: &TaskConfig) -> bool {
     t.archived_at.as_ref().is_none_or(String::is_empty)
@@ -513,7 +513,7 @@ pub fn add(p: &mut Phone, ui: &mut Ui) {
         true
     });
     ui.set_edit_text(Id::new(NEW_TITLE), "");
-    ui.set_edit_text(Id::new(NEW_BODY), "");
+    ui.set_edit_text(Id::new(NEW_BODY), vorn_app::tasks::TEMPLATE);
     p.model.go = Some("back".into());
 }
 

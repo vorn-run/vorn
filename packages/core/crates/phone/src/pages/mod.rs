@@ -138,6 +138,8 @@ pub struct View {
     pub archived: bool,
     /// The terminal's text size, points.
     pub font: f32,
+    /// Which launcher tip shows; moves on with each launch.
+    pub tip: usize,
 }
 
 impl View {
@@ -488,6 +490,7 @@ fn seeds(p: &mut Phone, ui: &mut Ui, route: &str, arg: &str) {
             seed(p, ui, tasks::title_id(arg), &title);
             seed(p, ui, tasks::body_id(arg), &body);
         }
+        "task-new" => seed(p, ui, Id::new(tasks::NEW_BODY), vorn_app::tasks::TEMPLATE),
         "gate-edit" => {
             let Some((run, node)) = arg.split_once(':') else {
                 return;

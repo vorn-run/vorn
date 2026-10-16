@@ -4,7 +4,7 @@ column
   list
     field label="Title"
     prose
-      field label="What needs to be done" style="multiline"
+      field label="What needs to be done" value="## Description\nDescribe what needs to be done...\n\n## Acceptance Criteria\n- [ ] Criterion #\n- [ ] Criterion #\n\n## Notes\nAny additional context or references.\n" style="multiline"
       key label="H#" value="h#"
       key label="B" value="bold"
       key label="I" value="italic"

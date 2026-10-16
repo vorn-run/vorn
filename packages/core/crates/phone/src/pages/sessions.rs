@@ -345,6 +345,17 @@ fn launch_agent(p: &Phone) -> String {
         .unwrap_or_else(|| p.model.store.default_agent().to_owned())
 }
 
+/// What the launcher says under its button; each line names something the app does.
+const TIPS: &[&str] = &[
+    "Create a worktree to give each agent an isolated working directory",
+    "Leave the prompt empty to open the agent without a task",
+    "A shell opens straight into the project directory, and takes no prompt",
+    "Swipe a task on the board to archive it, or to move it along",
+    "Open a run to see what each step was configured to do, and what it said",
+    "A run can be stopped from its own screen while it is still going",
+    "Approve a workflow waiting on you without getting to a desk",
+];
+
 pub fn launch(cx: &Cx) -> El {
     let project = launch_project(cx.p);
     let agent = launch_agent(cx.p);
@@ -431,6 +442,7 @@ pub fn launch(cx: &Cx) -> El {
     if project.is_some() {
         rows.push(cx.button(Id::new("launch-start"), label, "primary", Do::Launch));
     }
+    rows.push(say(TIPS[cx.view().tip % TIPS.len()], "secondary"));
     col(vec![bar("New session", vec![]), listing(rows)])
 }
 
@@ -447,6 +459,7 @@ pub fn launch_now(p: &mut Phone, ui: &mut Ui) {
     let text = ui.edit_text(prompt).trim().to_owned();
     p.model.errors.remove("launch");
     p.model.busy.insert("launch".into());
+    p.view.tip += 1;
     if agent == SHELL {
         p.model.call(For::Launch, "shell:create", json!(path));
         return;

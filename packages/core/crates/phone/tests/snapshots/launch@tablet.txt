@@ -26,3 +26,4 @@ column
     section label="Prompt"
       field label="What should it work on?" style="multiline"
     button label="Start" style="primary"
+    text label="Create a worktree to give each agent an isolated working directory" style="secondary"
