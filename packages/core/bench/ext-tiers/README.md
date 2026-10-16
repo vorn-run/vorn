@@ -16,13 +16,13 @@ medians of the runs) and `fixtures/widget-asking.json`. The fixture holds the
 rows the Widget component published; vorn-app's templates test draws them on
 every surface.
 
-| crate | what it is |
-|---|---|
-| `logic` (`ext-tiers-logic`) | Both extensions written once, synchronously, against a small `Host`: ported from `crates/vornd/src/native/extensions/builtin`, with their tests |
-| `program` (`ext-tiers-program`) | That logic behind stdio JSON-RPC |
-| `component` (`ext-tiers-component`) | That logic behind `crates/extensions/wit/extension.wit` (wit-bindgen), built for `wasm32-wasip2` |
-| `probe` (`ext-tiers-probe`) | A host that starts services and does nothing else. It is built without the Wasm tier, with its runtime and with its compiler, to weigh each |
-| `.` (`vorn-bench-ext-tiers`) | The harness. The built-in tier runs the logic in process, with calls through the same gate. The others run through vornd's router, lifecycle and gate |
+| crate                               | what it is                                                                                                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `logic` (`ext-tiers-logic`)         | Both extensions written once, synchronously, against a small `Host`: ported from `crates/vornd/src/native/extensions/builtin`, with their tests       |
+| `program` (`ext-tiers-program`)     | That logic behind stdio JSON-RPC                                                                                                                      |
+| `component` (`ext-tiers-component`) | That logic behind `crates/extensions/wit/extension.wit` (wit-bindgen), built for `wasm32-wasip2`                                                      |
+| `probe` (`ext-tiers-probe`)         | A host that starts services and does nothing else. It is built without the Wasm tier, with its runtime and with its compiler, to weigh each           |
+| `.` (`vorn-bench-ext-tiers`)        | The harness. The built-in tier runs the logic in process, with calls through the same gate. The others run through vornd's router, lifecycle and gate |
 
 Each measurement runs in a process of its own. The program and component
 each serve both extensions, chosen by the id in `guest.init`. `bench.*`

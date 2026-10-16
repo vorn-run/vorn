@@ -32,4 +32,6 @@ bench="$target/release/ext-tiers"
   --probe-compile "$target/release/ext-tiers-probe-compile" \
   "$@"
 node bench/ext-tiers/summary.mjs bench/ext-tiers/results/results.json > bench/ext-tiers/results/summary.md
+prettier=../../node_modules/.bin/prettier
+[ ! -x "$prettier" ] || "$prettier" --log-level warn --write bench/ext-tiers/results bench/ext-tiers/fixtures
 cat bench/ext-tiers/results/summary.md
