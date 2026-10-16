@@ -324,3 +324,129 @@ impl Host for Wired {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::native::config::Viewer;
+
+    async fn ask(native: &Arc<Native>, method: &str, params: Value) -> Answer {
+        native
+            .answer(method.to_owned(), params, &Viewer::Local)
+            .await
+    }
+
+    fn native() -> (tempfile::TempDir, Arc<Native>) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vorn.db");
+        let mut store = crate::native::work::test_store(&db);
+        store
+            .call(
+                "dbInsertProject",
+                json!([{ "name": "app", "path": "/app", "preferredAgents": [] }]),
+            )
+            .unwrap();
+        let native = Native::new();
+        native.set_database(db);
+        native.set_tasks(TasksBuiltin::new(&native, true));
+        (dir, native)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn off_it_refuses_task_writes_and_the_core_still_lists_them() {
+        let (_dir, native) = native();
+        let made = ask(
+            &native,
+            "task:create",
+            json!({ "id": "t1", "projectName": "app", "title": "T" }),
+        )
+        .await;
+        assert!(matches!(made, Answer::Result(_)), "{made:?}");
+        let tasks = native.tasks().cloned().unwrap();
+        assert_eq!(tasks.mcp_tools().len(), 7);
+        entry(&tasks).switched(false);
+        assert_eq!(
+            ask(
+                &native,
+                "task:setStatus",
+                json!({ "id": "t1", "status": "done" })
+            )
+            .await,
+            Answer::Error(builtin::OFF.to_owned())
+        );
+        assert!(tasks.mcp_tools().is_empty());
+        assert!(tasks.mcp_call("list_tasks", json!({})).await.is_none());
+        let refused = tasks.api("task.importItems", json!({})).await.unwrap_err();
+        assert_eq!(refused.code, "off");
+        let Answer::Result(listed) = ask(&native, "task:list", json!({})).await else {
+            panic!("the core lists the board");
+        };
+        assert_eq!(listed[0]["id"], "t1");
+        assert_eq!(listed[0]["status"], "todo");
+        entry(&tasks).switched(true);
+        assert!(matches!(
+            ask(
+                &native,
+                "task:setStatus",
+                json!({ "id": "t1", "status": "done" })
+            )
+            .await,
+            Answer::Result(_)
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_conversation_an_agent_starts_is_kept_on_its_terminals_task() {
+        let (dir, native) = native();
+        let mut store = crate::native::work::test_store(&dir.path().join("vorn.db"));
+        let t = json!({
+            "id": "doing", "projectName": "app", "title": "D", "description": "", "status": "in_progress",
+            "order": 0, "assignedSessionId": "t1", "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z",
+        });
+        store.call("dbInsertTask", json!([t])).unwrap();
+        let reached = native.events().emit(
+            AGENT_CONVERSATION,
+            || json!({ "sessionId": "t1", "conversationId": "c1" }),
+        );
+        assert_eq!(reached, 1);
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while store.call("dbGetTask", json!(["doing"])).unwrap()["agentSessionId"].is_null() {
+            assert!(std::time::Instant::now() < deadline, "never kept");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_extension_reads_the_board_a_page_at_a_time() {
+        let (_dir, native) = native();
+        for id in ["a", "b", "c"] {
+            ask(
+                &native,
+                "task:create",
+                json!({ "id": id, "projectName": "app", "title": id }),
+            )
+            .await;
+        }
+        let world = crate::native::extensions::world::Wired {
+            native: Arc::downgrade(&native),
+        };
+        let caller = Caller {
+            extension: "x".into(),
+            project: None,
+        };
+        let page = world
+            .call(&caller, "task.list", json!({ "limit": 2 }))
+            .await
+            .unwrap();
+        assert_eq!(page["tasks"].as_array().unwrap().len(), 2);
+        assert_eq!(page["next"], 2);
+        assert_eq!(page["tasks"][0]["description"], "");
+        let agents = world.call(&caller, "agents.list", json!({})).await.unwrap();
+        assert!(agents.is_array());
+    }
+}

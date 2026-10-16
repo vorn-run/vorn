@@ -239,14 +239,24 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
     shot.save(&mut app, "tasks-board");
 
     shot.hover(&mut app, card_id(&id));
-    shot.click(
-        &mut app,
-        control("task-card-menu", Act::Open(MenuKind::TaskCard(id.clone()))),
-    );
-    assert_eq!(app.menu_labels(&shot.ui), ["Edit", "Cancel task", "Delete"]);
+    let more = shot.button(&mut app, "More").expect("the card's menu");
+    shot.click(&mut app, more);
+    assert!(app.st.points.more.is_some());
+    for label in ["Edit", "Cancel task", "Delete"] {
+        assert!(
+            shot.labelled(&mut app, "MenuItem", label).is_some(),
+            "{label} in the menu"
+        );
+    }
+    for label in ["Archive", "Reopen task", "Review diff"] {
+        assert!(
+            shot.labelled(&mut app, "MenuItem", label).is_none(),
+            "{label} not in the menu"
+        );
+    }
     shot.save(&mut app, "task-card-menu");
     shot.send(&mut app, key("Escape", 0, None));
-    assert!(app.st.menu.is_none());
+    assert!(app.st.points.more.is_none());
 
     shot.frame(&mut app);
     let from = shot.ui.rect_of(card_id(&id)).expect("the card");

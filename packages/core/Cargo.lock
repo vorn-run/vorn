@@ -6578,6 +6578,7 @@ dependencies = [
 name = "vorn-components"
 version = "0.8.0-beta.13"
 dependencies = [
+ "serde_json",
  "vorn-view",
  "vornui",
 ]

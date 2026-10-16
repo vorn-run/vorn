@@ -66,7 +66,15 @@ fn grouped(b: &Board, rows: &[Row]) -> Vec<Vec<usize>> {
 }
 
 /// The board, its columns side by side.
-pub(crate) fn view(cx: &Cx<'_>, b: &Board, slot: u64) -> El {
+pub(crate) fn view(outer: &Cx<'_>, b: &Board, slot: u64) -> El {
+    let cx = &Cx {
+        ui: outer.ui,
+        src: outer.src,
+        bind: outer.bind,
+        column: None,
+        soft: true,
+        reveal: None,
+    };
     let rows = cx.src.rows(&b.rows);
     let groups = grouped(b, rows);
     let dragging = cx.bind.dragging(&b.rows);
@@ -362,4 +370,159 @@ pub fn ghost_of(
         reveal: None,
     };
     ghost(&cx, b, row, grab)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    use serde_json::json;
+    use vorn_view::{parse_value, Kind, Options, Source, Template};
+    use vornui::{Ui, UiConfig};
+
+    use super::*;
+    use crate::template::{view as draw, Bind};
+
+    fn template() -> Template {
+        let t = json!({
+            "schema": "vorn:view@1",
+            "rows": { "cards": { "title": "string", "state": ["todo", "done"] } },
+            "view": { "board": {
+                "rows": "cards", "by": "state", "open": "open", "add": "add",
+                "empty": "Nothing here", "label": "{row.title}",
+                "columns": [
+                    { "value": "todo", "label": "To do", "icon": "circle", "tone": "idle" },
+                    { "value": "done", "label": "Done", "icon": "circle-check", "tone": "good" }
+                ],
+                "card": { "column": { "children": [
+                    { "row": { "children": [
+                        { "icon": { "value": "{column.icon}", "tone": "column" } },
+                        { "text": { "value": "{row.title}", "role": "title", "wrap": true } }
+                    ] } }
+                ] } }
+            } }
+        });
+        parse_value(&t, Options::default()).unwrap()
+    }
+
+    #[derive(Default)]
+    struct Binds {
+        dragging: Option<(String, Option<String>)>,
+        pressed: RefCell<Vec<Press>>,
+    }
+
+    impl Bind for Binds {
+        fn press(&self, slot: u64, press: Press) -> Id {
+            self.pressed.borrow_mut().push(press);
+            Id::new("press").child(slot)
+        }
+        fn field(&self, slot: u64, _: Option<&str>, _: &str, _: &str) -> Id {
+            Id::new("field").child(slot)
+        }
+        fn confirming(&self, _: Id) -> Option<(Id, Id)> {
+            None
+        }
+        fn menu(&self, slot: u64, _: Option<&str>) -> Id {
+            Id::new("menu").child(slot)
+        }
+        fn menu_open(&self, _: Id) -> bool {
+            false
+        }
+        fn dragging(&self, _: &str) -> Option<(String, Option<String>)> {
+            self.dragging.clone()
+        }
+    }
+
+    fn rows(n: usize) -> BTreeMap<String, Vec<Row>> {
+        let all = (0..n)
+            .map(|i| {
+                Row::from_value(&json!({
+                    "id": format!("c{i}"), "title": format!("Card {i}"),
+                    "state": if i % 3 == 0 { "done" } else { "todo" },
+                }))
+                .unwrap()
+            })
+            .collect();
+        BTreeMap::from([("cards".to_owned(), all)])
+    }
+
+    fn frame(ui: &mut Ui, t: &Template, src: &BTreeMap<String, Vec<Row>>, bind: &Binds) {
+        ui.begin(color::SURFACE_BASE);
+        let root = div()
+            .col()
+            .w(180.0)
+            .h(40.0)
+            .child(draw(ui, t, None, src, bind));
+        ui.layout(root, (180.0, 40.0));
+    }
+
+    #[test]
+    fn builds_only_the_cards_in_view_in_each_column() {
+        let mut ui = Ui::cells(&UiConfig::system(1.0, 13.0));
+        let (t, src, bind) = (template(), rows(600), Binds::default());
+        for _ in 0..3 {
+            frame(&mut ui, &t, &src, &bind);
+        }
+        let built = |ui: &Ui, from: std::ops::Range<usize>| {
+            from.filter(|i| ui.rect_of(card_id("cards", &format!("c{i}"))).is_some())
+                .count()
+        };
+        assert!(
+            ui.rect_of(card_id("cards", "c1")).is_some(),
+            "the first To do card"
+        );
+        assert!(
+            ui.rect_of(card_id("cards", "c0")).is_some(),
+            "the first Done card"
+        );
+        assert!(built(&ui, 0..600) < 60, "{} built", built(&ui, 0..600));
+        assert!(ui.rect_of(card_id("cards", "c599")).is_none());
+        assert!(ui.rect_of(column_id("cards", "done")).is_some());
+        // Both columns' add buttons press with the column they add to.
+        let added: Vec<Option<String>> = bind
+            .pressed
+            .borrow()
+            .iter()
+            .filter(|p| p.call.as_deref() == Some("add"))
+            .map(|p| p.row.clone())
+            .collect();
+        assert!(added.contains(&Some("todo".into())) && added.contains(&Some("done".into())));
+    }
+
+    #[test]
+    fn an_empty_column_says_so_and_a_point_finds_its_column() {
+        let mut ui = Ui::cells(&UiConfig::system(1.0, 13.0));
+        let (t, bind) = (template(), Binds::default());
+        let src = rows(2);
+        frame(&mut ui, &t, &src, &bind);
+        frame(&mut ui, &t, &src, &bind);
+        let Kind::Board(b) = &t.view.kind else {
+            panic!("a board")
+        };
+        let done = ui.rect_of(column_id("cards", "done")).unwrap();
+        assert_eq!(
+            column_at(&ui, b, done.x + done.w / 2.0, done.y + done.h / 2.0),
+            Some("done")
+        );
+        assert_eq!(column_at(&ui, b, -10.0, -10.0), None);
+        assert_eq!(grouped(b, src.rows("cards")), vec![vec![1], vec![0]]);
+    }
+
+    #[test]
+    fn a_dragged_card_stays_built_and_its_column_lights() {
+        let mut ui = Ui::cells(&UiConfig::system(1.0, 13.0));
+        let t = template();
+        let src = rows(600);
+        let bind = Binds {
+            dragging: Some(("c598".into(), Some("todo".into()))),
+            ..Binds::default()
+        };
+        frame(&mut ui, &t, &src, &bind);
+        frame(&mut ui, &t, &src, &bind);
+        assert!(
+            ui.rect_of(card_id("cards", "c598")).is_some(),
+            "kept while dragged, far below the fold"
+        );
+    }
 }
