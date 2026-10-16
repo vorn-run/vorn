@@ -1437,6 +1437,12 @@ export interface ServerNotifications {
   'headless:data': { id: string; data: string }
   'headless:exit': { id: string; exitCode: number }
   'config:changed': AppConfig
+  /**
+   * The tasks a write changed, whole, and the ids of those it removed; or
+   * `reload` when tasks were written without saying which, so the list is
+   * read again a page at a time.
+   */
+  'task:rows': { upsert?: TaskConfig[]; remove?: string[]; reload?: true }
   /** How far a connector pack install has got, while it runs. */
   'connector:installProgress': ConnectorInstallProgress
   'connector:catalogChanged': ConnectorCatalogSnapshot

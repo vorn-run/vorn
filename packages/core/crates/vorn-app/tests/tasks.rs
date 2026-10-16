@@ -687,3 +687,87 @@ fn a_long_board_builds_only_the_cards_in_view() {
 fn a_long_board_on_cells_builds_only_the_cards_in_view() {
     long_board(true);
 }
+
+/// What a cells frame of the app shows, row after row.
+fn cells_text(app: &mut App) -> String {
+    use vorn_app::ui::backend::{Backend, Cells};
+    let mut ui = Ui::cells(&ui_config(1.0));
+    let size = vorn_app::ui::cells::units::px(160, 40);
+    app.frame(&mut ui, size);
+    app.frame(&mut ui, size);
+    let mut target = Cells::offscreen(160, 40);
+    target.present(&mut ui).expect("present");
+    (0..40)
+        .map(|r| target.buffer.row_text(r))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let project = add_project(&mut app, &v, "web", json!({}));
+    let info = app
+        .rpc()
+        .call(
+            "terminal:create",
+            json!({ "agentType": "shell", "projectName": "web", "projectPath": project }),
+        )
+        .expect("a shell");
+    let sid = info["id"].as_str().expect("id").to_owned();
+    let made = app
+        .rpc()
+        .call(
+            "task:create",
+            json!({ "projectName": "web", "title": "Badge me", "status": "in_progress" }),
+        )
+        .expect("a task");
+    let id = made["task"]["id"].as_str().expect("id").to_owned();
+    app.rpc()
+        .call(
+            "task:patch",
+            json!({ "id": id, "set": { "assignedSessionId": sid } }),
+        )
+        .expect("assigned");
+    app.st.view = MainView::Sessions;
+    support::wait_for("the badge's row", || {
+        let mut ui = Ui::cells(&ui_config(1.0));
+        app.frame(&mut ui, (1200.0, 800.0));
+        let rows = app.st.points.rows_of("vorn.tasks");
+        rows.get("working")?
+            .iter()
+            .any(|r| r.id == sid && r.text("title") == "Badge me")
+            .then_some(())
+    });
+    let shown = cells_text(&mut app);
+    assert!(shown.contains("Badge me"), "the card's badge:\n{shown}");
+
+    // Switched off, the board says so, the tasks stay, and writes are refused.
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": "vorn.tasks", "on": false }))
+        .expect("switched off");
+    app.st.view = MainView::Tasks;
+    support::wait_for("the board gone", || {
+        let mut ui = Ui::cells(&ui_config(1.0));
+        app.frame(&mut ui, (1200.0, 800.0));
+        (app.st.points.loaded && app.st.points.find("vorn.tasks", "views", "board").is_none())
+            .then_some(())
+    });
+    let off = cells_text(&mut app);
+    assert!(off.contains("Tasks is off"), "{off}");
+    let refused = app
+        .rpc()
+        .call("task:setStatus", json!({ "id": id, "status": "done" }));
+    assert!(refused.is_err());
+    let listed = app
+        .rpc()
+        .call("task:list", json!({}))
+        .expect("the core lists");
+    assert_eq!(listed[0]["title"], "Badge me");
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": "vorn.tasks", "on": true }))
+        .expect("switched on");
+}
