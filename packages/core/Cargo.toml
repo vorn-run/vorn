@@ -20,6 +20,7 @@ members = [
   "crates/size",
   "crates/vornui",
   "crates/vorn-components",
+  "crates/phone",
   "crates/protocol",
   "crates/store",
   "crates/agents",

@@ -72,9 +72,8 @@ impl Layer {
     /// caller hands [`Ui::take_events`] to the app after each input.
     pub fn frame<A: App>(&mut self, app: &mut A) -> Result<Option<Laid>, String> {
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                t
-            }
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.reconfigure();
                 return Ok(None);

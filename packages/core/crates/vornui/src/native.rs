@@ -30,8 +30,14 @@ pub enum Sem {
     /// An icon by its name in the app's set.
     Icon(String),
     /// A dot whose tone says the state `value`.
-    Status { value: String, tone: &'static str },
-    Badge { value: String, tone: &'static str },
+    Status {
+        value: String,
+        tone: &'static str,
+    },
+    Badge {
+        value: String,
+        tone: &'static str,
+    },
     /// A button with a style (`plain`, `primary`, `danger`), asking `confirm` before it runs.
     Button {
         style: &'static str,
@@ -373,7 +379,14 @@ mod tests {
         assert_eq!(section.children[0].on, Some(true));
         assert!(section.children[1].secret);
         assert_eq!(section.children[2].id, Some(Id::new("b")));
-        assert!(b.json.contains(r#""label":"Account \"main\"""#), "{}", b.json);
-        assert!(!b.present(&mut ui).unwrap(), "the same frame twice is no change");
+        assert!(
+            b.json.contains(r#""label":"Account \"main\"""#),
+            "{}",
+            b.json
+        );
+        assert!(
+            !b.present(&mut ui).unwrap(),
+            "the same frame twice is no change"
+        );
     }
 }
