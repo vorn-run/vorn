@@ -5,6 +5,8 @@ import SwiftUI
 final class Core: ObservableObject {
     let handle: OpaquePointer
     @Published var revision = 0
+    /// Ctrl latched on the key bar: the next key or letter typed goes with it.
+    @Published var ctrl = false
     let launched = ProcessInfo.processInfo.systemUptime
     /// The stack that acted last: where an answer that arrives later goes.
     weak var front: Nav?

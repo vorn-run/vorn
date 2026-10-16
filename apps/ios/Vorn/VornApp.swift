@@ -238,7 +238,6 @@ struct SessionScreen: View {
     @EnvironmentObject var nav: Nav
     let id: String
     @State private var draft = ""
-    @State private var ctrl = false
     @FocusState private var composing: Bool
 
     private var screen: String { "session:\(id)" }
@@ -252,7 +251,7 @@ struct SessionScreen: View {
             ForEach(asks) { Ask(screen: screen, node: $0) }
             Metal(core: core, terminalOnly: true)
                 .background(Palette.bg)
-            KeyBar(core: core, ctrl: $ctrl)
+            KeyBar(core: core) { composing = false }
             HStack(spacing: 8) {
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
@@ -324,31 +323,47 @@ struct Ask: View {
     }
 }
 
-/// The keys a phone keyboard lacks.
+/// The keys a phone keyboard lacks; Ctrl latches for the next key, and hiding the keyboard stays in reach.
 struct KeyBar: View {
-    let core: Core
-    @Binding var ctrl: Bool
+    @ObservedObject var core: Core
+    let hide: () -> Void
 
-    private let keys: [(String, String, String)] = [
-        ("esc", "Escape", ""), ("tab", "Tab", ""), ("^C", "KeyC", "c"), ("^D", "KeyD", "d"), ("^L", "KeyL", "l"),
-        ("↑", "ArrowUp", ""), ("↓", "ArrowDown", ""), ("←", "ArrowLeft", ""), ("→", "ArrowRight", ""),
+    /// Label, key code, whether Ctrl goes with it, and the icon drawn instead of the label.
+    private let keys: [(String, String, Bool, String?)] = [
+        ("esc", "Escape", false, nil), ("tab", "Tab", false, nil),
+        ("^C", "KeyC", true, nil), ("^D", "KeyD", true, nil), ("^L", "KeyL", true, nil),
+        ("Up", "ArrowUp", false, "arrow-up"), ("Down", "ArrowDown", false, "arrow-down"),
+        ("Left", "ArrowLeft", false, "arrow-left"), ("Right", "ArrowRight", false, "arrow-right"),
+        ("home", "Home", false, nil), ("end", "End", false, nil),
     ]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Button("ctrl") { ctrl.toggle() }
-                    .buttonStyle(KeyStyle(on: ctrl))
-                ForEach(keys, id: \.0) { k in
-                    Button(k.0) {
-                        let mods: UInt16 = k.2.isEmpty ? (ctrl ? 4 : 0) : 4
-                        vp_key(core.handle, k.1, mods)
-                        ctrl = false
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Button("ctrl") { core.ctrl.toggle() }
+                        .buttonStyle(KeyStyle(on: core.ctrl))
+                        .accessibilityAddTraits(core.ctrl ? .isSelected : [])
+                    ForEach(keys, id: \.0) { k in
+                        Button {
+                            vp_key(core.handle, k.1, k.2 || core.ctrl ? 4 : 0)
+                            core.ctrl = false
+                        } label: {
+                            if let icon = k.3 { VornIcon(name: icon).accessibilityLabel(k.0) } else { Text(k.0) }
+                        }
+                        .buttonStyle(KeyStyle(on: false))
                     }
-                    .buttonStyle(KeyStyle(on: false))
                 }
+                .padding(.leading, 12).padding(.vertical, 6)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            Button {
+                hide()
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            } label: {
+                VornIcon(name: "keyboard").frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Hide keyboard")
+            .padding(.trailing, 4)
         }
     }
 }

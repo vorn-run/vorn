@@ -128,6 +128,11 @@ final class MetalView: UIView, UITextInput {
     var hasText: Bool { !typed.isEmpty }
 
     func insertText(_ text: String) {
+        if core.ctrl, marked == nil, text.count == 1, let c = text.uppercased().first, c.isASCII, c.isLetter {
+            core.ctrl = false
+            vp_key(core.handle, "Key\(c)", 4)
+            return
+        }
         if let m = marked {
             typed = (typed as NSString).replacingCharacters(in: m, with: "")
             marked = nil
