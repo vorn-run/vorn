@@ -6509,7 +6509,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-app"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "embed-resource",
  "futures-util",
@@ -6549,7 +6549,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-cli"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -6576,7 +6576,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-components"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "serde_json",
  "vorn-view",
@@ -6699,7 +6699,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-logfile"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "tempfile",
 ]
@@ -6778,7 +6778,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-scale-bench"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "futures-util",
  "libc",
@@ -6805,7 +6805,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-sessiond"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "crc32fast",
  "libc",
@@ -6892,7 +6892,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-vault"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -6913,7 +6913,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-web"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -6957,7 +6957,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-workflow-bench"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "futures-util",
  "libc",
@@ -6982,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "vornd"
-version = "0.8.0-beta.13"
+version = "0.8.0-beta.14"
 dependencies = [
  "bytes",
  "chrono",
