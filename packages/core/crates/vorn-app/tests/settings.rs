@@ -16,6 +16,16 @@ use vorn_app::settings::{AgentField, Category, HostField, KeyField, SetAct};
 use vorn_app::state::MenuKind;
 use vorn_app::App;
 
+/// The id of the entry in `tree` titled `title`.
+fn entry_titled(tree: &vorn_tree::Node, title: &str) -> Option<String> {
+    if let vorn_tree::Kind::Entry(e) = &tree.kind {
+        if e.title == title {
+            return tree.id.clone();
+        }
+    }
+    tree.children.iter().find_map(|c| entry_titled(c, title))
+}
+
 fn control(place: &str, act: Act) -> vorn_app::ui::Id {
     App::control(place, &act)
 }
@@ -202,36 +212,22 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         ),
     );
     let wt = shot.until(&mut app, "the inventory", |a, _| {
-        a.st.points
-            .rows_of("vorn.worktrees")
-            .get("worktrees")?
-            .iter()
-            .find(|r| r.fields.get("name").and_then(|n| n.as_str()) == Some("feature-greet"))
-            .map(|r| r.id.clone())
+        entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "feature-greet")
     });
     shot.save(&mut app, "set-worktrees");
     // The main checkout is not one to clean up, so the page leaves it out.
-    let rows = app.st.points.rows_of("vorn.worktrees");
-    assert!(
-        rows["worktrees"]
-            .iter()
-            .all(|r| r.fields.get("name").and_then(|n| n.as_str()) != Some("acme")),
-        "no main checkout"
-    );
-    // Remove is destructive, so it waits in the row's more menu.
-    let more = shot
-        .row_more(&mut app, page, &wt)
-        .expect("the worktree's more menu");
-    shot.click(&mut app, more);
-    let remove = shot
-        .row_item(&mut app, page, &wt, "Remove")
-        .expect("the worktree's Remove");
+    let tree = app.st.points.trees[page].as_ref().expect("a tree");
+    assert_eq!(entry_titled(tree, "acme"), None, "no main checkout");
+    // Remove is destructive, so it waits in the worktree's more menu and asks first.
+    let base = vorn_app::ui::Id::new(page).child("tree");
+    shot.click(&mut app, base.child("more").child(&wt));
+    let remove = base.child(format!("remove:{wt}")).child("");
     shot.click(&mut app, remove);
     shot.save(&mut app, "set-worktrees-confirm");
     shot.click(&mut app, remove.child("ok"));
     shot.until(&mut app, "the worktree gone", |a, _| {
-        let rows = a.st.points.rows_of("vorn.worktrees").get("worktrees")?;
-        (!rows.iter().any(|r| r.id == wt)).then_some(())
+        let tree = a.st.points.trees.get(page)?.as_ref().ok()?;
+        entry_titled(tree, "feature-greet").is_none().then_some(())
     });
     assert!(
         !std::path::Path::new(&wt).exists(),

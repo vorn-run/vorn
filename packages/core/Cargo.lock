@@ -6661,6 +6661,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-mirror",
  "vorn-term-proto",
+ "vorn-tree",
  "vorn-view",
  "vornui",
  "wasm-bindgen",

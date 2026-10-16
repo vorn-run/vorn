@@ -28,6 +28,10 @@ pub(super) enum PointCall {
     Rows(String, String),
     /// A press or a choice; `holder` closes when the press asked it to.
     Called,
+    /// Tree point `key`'s `ui.render`.
+    Render(String),
+    /// What an event in tree point `key` did.
+    Told(String),
     Builtins,
     /// A sign-in action's window target, asked of the extension; the key it opens for.
     SignIn(String),
@@ -162,6 +166,32 @@ impl App {
                 self.st.settings.ext_page = Some(key);
                 self.st.settings.open = true;
             }
+            PointAct::Tree { key, event } => {
+                self.st.points.asking = None;
+                if self.st.points.more.take().is_some() {
+                    ui.close_menu();
+                }
+                self.tell(&key, &event);
+            }
+            PointAct::TreeField { key, node } => {
+                let text = ui
+                    .focus()
+                    .map(|id| ui.edit_text(id).to_owned())
+                    .unwrap_or_default();
+                let event = vorn_tree::Event {
+                    id: node,
+                    kind: vorn_tree::EventKind::Submit,
+                    value: text,
+                    selected: Vec::new(),
+                };
+                self.tell(&key, &event);
+            }
+            PointAct::TreeCheck {
+                key,
+                list,
+                rows,
+                on,
+            } => self.st.points.check(&key, &list, &rows, on),
             PointAct::Builtin { id, on } => {
                 let pts = &mut self.st.points;
                 if pts.switching.is_some() {
@@ -220,6 +250,23 @@ impl App {
         }
     }
 
+    /// Tells tree point `key`'s extension what happened; a bulk button's checks go with it.
+    fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
+        let Some(p) = self.st.points.get(key) else {
+            return;
+        };
+        let params = points::tree_event_params(p, event);
+        if !event.selected.is_empty() {
+            let pts = &mut self.st.points;
+            pts.checked.retain(|(k, _), _| k != key);
+        }
+        self.call(
+            Call::Point(PointCall::Told(key.to_owned())),
+            "extension:call",
+            params,
+        );
+    }
+
     /// A one-line field's Return, with what it holds.
     pub(super) fn point_field(
         &mut self,
@@ -263,6 +310,24 @@ impl App {
                     _ => None,
                 };
                 self.st.points.fill(&ext, &coll, rows);
+            }
+            PointCall::Render(key) => {
+                let answer = answer.as_ref().map_err(ToString::to_string);
+                self.st.points.rendered(&key, answer);
+            }
+            PointCall::Told(key) => {
+                let patched = answer.as_ref().ok().and_then(|v| v.get("patch")).map(|p| {
+                    let pts = &mut self.st.points;
+                    let patches = serde_json::from_value::<Vec<vorn_tree::Patch>>(p.clone());
+                    match (pts.trees.get_mut(&key), patches) {
+                        (Some(Ok(tree)), Ok(patches)) => vorn_tree::patch(tree, &patches).is_ok(),
+                        _ => false,
+                    }
+                });
+                if patched != Some(true) {
+                    self.st.points.stale_trees.insert(key);
+                }
+                self.point_answered(PointCall::Called, answer);
             }
             PointCall::Called => match answer {
                 Ok(v) => {
@@ -337,6 +402,7 @@ impl App {
                 let ops = params["ops"].as_array().cloned().unwrap_or_default();
                 let raised = self.st.points.changed(ext, coll, &ops);
                 self.raised.extend(raised);
+                self.st.points.trees_changed(ext);
             }
             "extension:contributionsChanged" => {
                 self.st.points.stale = true;
@@ -391,6 +457,7 @@ impl App {
             }
         }
         self.show_calls();
+        self.render_trees(ui.is_cells());
         self.window_tick(ui);
     }
 
@@ -412,11 +479,41 @@ impl App {
             let Some(p) = self.st.points.get(&key).cloned() else {
                 continue;
             };
+            self.st.points.stale_trees.insert(key.clone());
             self.st.points.shown.insert(key);
             if let Some(params) = points::choose_params(&p, "{}") {
                 self.call(Call::Point(PointCall::Called), "extension:call", params);
             }
         }
+    }
+
+    /// Asks for the tree of the settings page showing, when it has none or its rows changed.
+    fn render_trees(&mut self, cells: bool) {
+        let Some(key) = self
+            .st
+            .settings
+            .open
+            .then(|| self.st.settings.ext_page.clone())
+            .flatten()
+        else {
+            return;
+        };
+        let Some(p) = self.st.points.get(&key).filter(|p| p.tree) else {
+            return;
+        };
+        let pts = &self.st.points;
+        let want = !pts.trees.contains_key(&key) || pts.stale_trees.contains(&key);
+        let asking = |c: &Call| matches!(c, Call::Point(PointCall::Render(k)) if *k == key);
+        if !want || self.calls.iter().any(|(c, _)| asking(c)) {
+            return;
+        }
+        let params = points::tree_render_params(p, cells);
+        self.st.points.stale_trees.remove(&key);
+        self.call(
+            Call::Point(PointCall::Render(key)),
+            "extension:call",
+            params,
+        );
     }
 
     /// The template panes open on cards, by point key.

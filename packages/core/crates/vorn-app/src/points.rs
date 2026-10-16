@@ -51,6 +51,8 @@ pub struct Point {
     pub rows: Option<String>,
     /// Attention: the method a deny calls.
     pub deny: Option<String>,
+    /// Drawn from the element tree its extension answers `ui.render` with.
+    pub tree: bool,
     /// `Ok(None)` for a point with no template (a command, a menu item).
     pub template: Result<Option<Template>, Vec<String>>,
 }
@@ -110,6 +112,7 @@ impl Point {
             raise: text("raise"),
             rows: text("rows"),
             deny: text("deny"),
+            tree: v.get("tree").and_then(Value::as_bool) == Some(true),
             template,
         })
     }
@@ -207,6 +210,23 @@ pub enum PointAct {
         id: String,
         on: bool,
     },
+    /// Tells tree point `key`'s extension `event` happened.
+    Tree {
+        key: String,
+        event: vorn_tree::Event,
+    },
+    /// A tree field's Return sends what it holds.
+    TreeField {
+        key: String,
+        node: String,
+    },
+    /// Checks or unchecks `rows` of list `list` in tree point `key`.
+    TreeCheck {
+        key: String,
+        list: String,
+        rows: Vec<String>,
+        on: bool,
+    },
 }
 
 /// The dialog or window a template is drawn in.
@@ -252,6 +272,12 @@ pub struct Points {
     pub floating: bool,
     /// `workflow:nodeTypes`' node types, read with the list.
     pub node_types: Vec<Value>,
+    /// Tree points' last `ui.render`, by point key, or why it cannot be drawn.
+    pub trees: HashMap<String, Result<vorn_tree::Node, Vec<String>>>,
+    /// Tree points to render again, as their extension's rows changed.
+    pub stale_trees: BTreeSet<String>,
+    /// Rows checked in a tree's lists, by point key and list id.
+    pub checked: HashMap<(String, String), BTreeSet<String>>,
 }
 
 static NONE: BTreeMap<String, Vec<Row>> = BTreeMap::new();
@@ -320,6 +346,56 @@ impl Points {
         out
     }
 
+    /// Whether row `row` of list `list` in tree point `key` is checked.
+    pub fn is_checked(&self, key: &str, list: &str, row: &str) -> bool {
+        self.checked
+            .get(&(key.to_owned(), list.to_owned()))
+            .is_some_and(|rows| rows.contains(row))
+    }
+
+    /// Checks `rows` of list `list` in tree point `key`, or unchecks them.
+    pub fn check(&mut self, key: &str, list: &str, rows: &[String], on: bool) {
+        let set = self
+            .checked
+            .entry((key.to_owned(), list.to_owned()))
+            .or_default();
+        for r in rows {
+            if on {
+                set.insert(r.clone());
+            } else {
+                set.remove(r);
+            }
+        }
+    }
+
+    /// `ui.render`'s answer for tree point `key`; checks on rows it no longer lists go.
+    pub fn rendered(&mut self, key: &str, answer: Result<&Value, String>) {
+        let tree = match answer {
+            Ok(v) => vorn_tree::read(v).map(|r| r.tree),
+            Err(e) => Err(vec![e]),
+        };
+        if let Ok(t) = &tree {
+            let ids = node_ids(t);
+            for ((k, _), rows) in &mut self.checked {
+                if k == key {
+                    rows.retain(|r| ids.contains(r.as_str()));
+                }
+            }
+        }
+        self.trees.insert(key.to_owned(), tree);
+    }
+
+    /// Marks the tree points of `extension` to render again.
+    pub fn trees_changed(&mut self, extension: &str) {
+        let keys: Vec<String> = self
+            .all
+            .iter()
+            .filter(|p| p.tree && p.extension == extension)
+            .map(Point::key)
+            .collect();
+        self.stale_trees.extend(keys);
+    }
+
     /// A fresh list: rows of collections no template draws any more go.
     pub fn listed(&mut self, list: &[Value]) {
         self.all = list.iter().filter_map(Point::from_value).collect();
@@ -330,6 +406,9 @@ impl Points {
             .retain(|ext, _| all.iter().any(|p| &p.extension == ext));
         let keys: BTreeSet<String> = self.all.iter().map(Point::key).collect();
         self.windows.retain(|k| keys.contains(k));
+        self.trees.retain(|k, _| keys.contains(k));
+        self.checked.retain(|(k, _), _| keys.contains(k));
+        self.stale_trees.extend(self.trees.keys().cloned());
         if self.dialog.as_ref().is_some_and(|d| !keys.contains(d)) {
             self.dialog = None;
         }
@@ -433,6 +512,39 @@ pub fn key_hit(spec: &str, code: &str, m: u16, primary: u16) -> bool {
         _ => key.to_owned(),
     };
     held == want && named == code
+}
+
+/// Every id in `tree`.
+fn node_ids(tree: &vorn_tree::Node) -> BTreeSet<&str> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![tree];
+    while let Some(n) = stack.pop() {
+        out.extend(n.id.as_deref());
+        stack.extend(&n.children);
+    }
+    out
+}
+
+/// What telling tree point `p` about `event` asks of vornd.
+pub fn tree_event_params(p: &Point, event: &vorn_tree::Event) -> Value {
+    json!({
+        "id": p.extension,
+        "action": vorn_tree::EVENT,
+        "args": { "point": p.id, "event": event },
+    })
+}
+
+/// What asking tree point `p` for its tree asks of vornd.
+pub fn tree_render_params(p: &Point, cells: bool) -> Value {
+    let surface = vorn_tree::Surface {
+        cells,
+        ..vorn_tree::Surface::default()
+    };
+    json!({
+        "id": p.extension,
+        "action": vorn_tree::RENDER,
+        "args": { "point": p.id, "surface": surface },
+    })
 }
 
 /// What a press asks of vornd: `extension:call`'s params, when it calls.
