@@ -222,6 +222,7 @@ impl Rpc {
         let link = link::Socket {
             url: ep.ws_url(),
             token: ep.token.clone(),
+            pin: None,
         };
         #[cfg(target_arch = "wasm32")]
         let link = link::PageSocket {

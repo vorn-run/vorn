@@ -91,6 +91,7 @@ final class RemoteAccessModel {
     /// A phone cannot reach a server bound to loopback.
     var canScan: Bool { reachable?.remote == true && !(reachable?.urls.isEmpty ?? true) }
     var urls: [String] { reachable?.urls ?? [] }
+    var fingerprint: String? { reachable?.fingerprint.flatMap { $0.isEmpty ? nil : $0 } }
     var pairUrl: String? {
         if let chosenUrl, urls.contains(chosenUrl) { return chosenUrl }
         return urls.first

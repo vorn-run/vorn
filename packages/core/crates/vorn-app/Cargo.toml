@@ -19,6 +19,8 @@ webview = ["dep:wry", "dep:gtk"]
 [dev-dependencies]
 # The board bench writes its tasks straight into vornd's database.
 vorn-store = { path = "../store" }
+# A certificate for the pinned socket's test to be served with.
+vorn-reach = { path = "../reach", features = ["mint"] }
 
 [build-dependencies]
 # The app icon in vorn-app.exe, for Explorer, the taskbar and the installer.
@@ -54,6 +56,9 @@ web-time = "1"
 vorn-spawn = { path = "../spawn" }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
 tokio-tungstenite = "0.28"
+# A phone's socket to vornd over TLS, pinned to the certificate it paired with.
+vorn-reach = { path = "../reach", features = ["tls"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 # The browser pane: the OS web view (WKWebView, WebView2, WebKitGTK).
 wry = { version = "0.57", optional = true }
 # The updater: the release feed, the download and its checksum.

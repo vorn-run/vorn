@@ -70,10 +70,24 @@ struct DeviceTokenList: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(Color.black.opacity(0.3)))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.hairline, lineWidth: 1))
+            fingerprintView
             NetButton.small("Done", color: Theme.gray500) { net.minted = nil }
                 .padding(.leading, -8).padding(.top, 10)
         }
         .netCallout(border: Theme.bronzo.opacity(0.3))
+    }
+
+    /// The certificate a phone will trust, for typing when pairing by hand.
+    @ViewBuilder private var fingerprintView: some View {
+        if let fingerprint = net.fingerprint {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("CERTIFICATE FINGERPRINT").font(.ui(10)).tracking(0.5).foregroundStyle(Theme.gray600).lineHeight(15, size: 10)
+                Text(RemoteAccess.grouped(fingerprint)).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.gray400)
+                    .lineHeight(16, size: 11).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .accessibilityLabel("Certificate fingerprint")
+            }
+            .padding(.top, 12)
+        }
     }
 
     private func askingPanel(_ asking: PairingRequest) -> some View {
@@ -111,7 +125,7 @@ struct DeviceTokenList: View {
 
     private func scanPanel(pairUrl: String, code: String) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            ScannableQRCode(url: RemoteAccess.pairingLink(url: pairUrl, code: code))
+            ScannableQRCode(url: RemoteAccess.pairingLink(url: pairUrl, code: code, fingerprint: net.fingerprint))
             VStack(alignment: .leading, spacing: 0) {
                 Text("Scan this in the Vorn app.").font(.ui(14)).foregroundStyle(Theme.gray200).lineHeight(20, size: 14)
                 Text("Then approve the phone here. It will ask by name.")
@@ -124,6 +138,7 @@ struct DeviceTokenList: View {
                     .lineHeight(24, size: 16).padding(.top, 2)
                 Text("Expires in \(RemoteAccess.formatRemaining(net.remaining))")
                     .font(.ui(11).monospacedDigit()).foregroundStyle(Theme.gray500).lineHeight(16.5, size: 11).padding(.top, 4)
+                fingerprintView
                 VStack(alignment: .leading, spacing: 4) {
                     NetButton.small("Pair manually instead") { net.pairManually() }
                     NetButton.small("Cancel", color: Theme.gray500) { net.closeAdding() }
@@ -160,8 +175,8 @@ struct DeviceTokenList: View {
                 }
             }
             Text(RemoteAccess.addressKind(pairUrl) == .tailnet
-                 ? "Encrypted. The phone must be on your tailnet."
-                 : "Unencrypted. The phone must be able to reach this address.")
+                 ? "The phone must be on your tailnet."
+                 : "The phone must be able to reach this address.")
                 .font(.ui(11)).foregroundStyle(Theme.gray600).lineHeight(16.5, size: 11).padding(.top, 6)
                 .fixedSize(horizontal: false, vertical: true)
         }

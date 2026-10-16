@@ -71,11 +71,14 @@ public struct ReachableUrls: Codable, Hashable, Sendable {
     public var urls: [String]
     public var port: Int
     public var remote: Bool
+    /// SHA-256 of the certificate the urls are served with, which a phone pins.
+    public var fingerprint: String?
 
-    public init(urls: [String], port: Int, remote: Bool) {
+    public init(urls: [String], port: Int, remote: Bool, fingerprint: String? = nil) {
         self.urls = urls
         self.port = port
         self.remote = remote
+        self.fingerprint = fingerprint
     }
 }
 
@@ -160,8 +163,19 @@ public enum RemoteAccess {
     }
 
     /// The QR's payload: `vorn://pair?url=…&code=…`, the URL as `encodeURIComponent` writes it.
-    public static func pairingLink(url: String, code: String) -> String {
-        "vorn://pair?url=\(encodeURIComponent(url))&code=\(code)"
+    public static func pairingLink(url: String, code: String, fingerprint: String? = nil) -> String {
+        let link = "vorn://pair?url=\(encodeURIComponent(url))&code=\(code)"
+        guard let fingerprint, !fingerprint.isEmpty else { return link }
+        return "\(link)&fp=\(fingerprint)"
+    }
+
+    /// A fingerprint in groups of four, to compare by eye or type.
+    public static func grouped(_ fingerprint: String) -> String {
+        stride(from: 0, to: fingerprint.count, by: 4).map { i -> String in
+            let start = fingerprint.index(fingerprint.startIndex, offsetBy: i)
+            let end = fingerprint.index(start, offsetBy: 4, limitedBy: fingerprint.endIndex) ?? fingerprint.endIndex
+            return String(fingerprint[start..<end])
+        }.joined(separator: " ")
     }
 
     private static let uriUnreserved = CharacterSet(charactersIn:
