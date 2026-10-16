@@ -1,4 +1,4 @@
-//! The Connections page, drawn from a template (`views/connectors.kdl`):
+//! The Connections page, drawn as an element tree (`page/tree.rs`):
 //! every connection with what it triggers and when it last synced, Test,
 //! Import now, Sign in when its window is signed out, Roll back and Remove;
 //! and adding one, from picking an installed connector to its settings.
@@ -13,11 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::builtin::{Answer, Connectors};
 use crate::connections::{self as conns};
 
-/// The page's templates, by the path its manifest names them.
-pub const VIEWS: &[(&str, &str)] = &[(
-    "views/connectors.kdl",
-    include_str!("../views/connectors.kdl"),
-)];
+mod tree;
 
 /// The collections the page draws.
 pub const CONNECTIONS: &str = "connections";
@@ -26,6 +22,20 @@ pub const CHOICES: &str = "connectors";
 pub const TRIGGERS: &str = "triggers";
 pub const PROJECTS: &str = "projects";
 pub const SETTINGS: &str = "settings";
+pub const FILTERS: &str = "filters";
+
+/// Filters a connection's chips leave out: how it ties to its package,
+/// which its group already says, and the tools an MCP server reported.
+const UNSHOWN: &[&str] = &[
+    conns::filter::CONNECTOR_ID,
+    conns::filter::VERSION,
+    conns::filter::ICON,
+    conns::filter::IMPLICIT,
+    conns::filter::TRIGGER,
+    "discoveredTools",
+];
+const MASK: &str = "••••••";
+const CHIP_CHARS: usize = 60;
 
 /// A connection being added: the connector picked, its manifest as it
 /// reports it, and what has been entered so far.
@@ -134,9 +144,19 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
         .filter(|p| text(p, "kind") != "extension")
         .collect();
     let builtins = list(ask(c, "connector:list", Value::Null).await);
-    let connections = list(ask(c, "connection:list", json!({})).await)
-        .iter()
+    let listed: Vec<Value> = list(ask(c, "connection:list", json!({})).await)
+        .into_iter()
         .filter(|conn| !conns::is_implicit(conn))
+        .collect();
+    let mut filters = Vec::new();
+    for conn in &listed {
+        let id = text(conn, "id");
+        for (n, chip) in chips(conn).into_iter().enumerate() {
+            filters.push(json!({ "id": format!("{id}/{n}"), "parent": id, "text": chip }));
+        }
+    }
+    let connections = listed
+        .iter()
         .map(|conn| {
             let id = conns::connector_id_of(conn);
             let pack = packs.iter().find(|p| text(p, "id") == id);
@@ -180,9 +200,25 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
                 .filter(|s| !s.is_empty())
                 .collect();
             let previous = pack.map_or("", |p| text(p, "previousVersion"));
+            let count = listed
+                .iter()
+                .filter(|o| conns::connector_id_of(o) == id)
+                .count();
+            let mut group = vec![if count == 1 {
+                "1 connection".to_owned()
+            } else {
+                format!("{count} connections")
+            }];
+            if let Some(v) = pack.map(|p| text(p, "version")).filter(|v| !v.is_empty()) {
+                group.push(format!("v{v}"));
+            }
             json!({
                 "id": conn.get("id"),
                 "name": text(conn, "name"),
+                "connector": id,
+                "connector_name": service,
+                "connector_line": group.join(" · "),
+                "can_add": pack.is_some(),
                 "icon": format!("connector:{id}"),
                 "line": line.join(" · "),
                 "state": state,
@@ -196,6 +232,7 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
     let Some(d) = held else {
         return vec![
             (CONNECTIONS, connections),
+            (FILTERS, filters),
             (FORM, Vec::new()),
             (CHOICES, Vec::new()),
             (TRIGGERS, Vec::new()),
@@ -270,12 +307,66 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
     })];
     vec![
         (CONNECTIONS, connections),
+        (FILTERS, filters),
         (FORM, form),
         (CHOICES, choices),
         (TRIGGERS, triggers),
         (PROJECTS, projects),
         (SETTINGS, settings),
     ]
+}
+
+/// A connection's filters as "key: value" chips, in key order: a package's
+/// settings one by one, secrets masked and long values cut.
+fn chips(conn: &Value) -> Vec<String> {
+    let secret: Vec<String> = conns::password_fields(text(conn, "connectorId"))
+        .iter()
+        .map(|f| text(f, "key").to_owned())
+        .collect();
+    let parsed = |v: &Value| {
+        v.as_str()
+            .and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
+    };
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for (key, value) in conns::filters_of(conn) {
+        let set = parsed(&value).filter(|_| key == "env" || key == conns::SECRET_ENV);
+        let masked = key == conns::SECRET_ENV || secret.contains(&key);
+        match set {
+            _ if UNSHOWN.contains(&key.as_str()) || blank(&value) => {}
+            Some(set) => out.extend(set.into_iter().filter(|(_, v)| !blank(v)).map(|(k, v)| {
+                let v = if masked { MASK.to_owned() } else { shown(&v) };
+                (k, v)
+            })),
+            None => {
+                let v = if masked {
+                    MASK.to_owned()
+                } else {
+                    shown(&value)
+                };
+                out.insert(key, v);
+            }
+        }
+    }
+    out.into_iter().map(|(k, v)| format!("{k}: {v}")).collect()
+}
+
+fn blank(v: &Value) -> bool {
+    v.is_null() || v.as_str().is_some_and(str::is_empty)
+}
+
+/// A filter's value as a chip says it, cut past 60 characters.
+fn shown(v: &Value) -> String {
+    let s = match v {
+        Value::String(s) if s == conns::IN_VAULT => return MASK.to_owned(),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if s.chars().count() > CHIP_CHARS {
+        let cut: String = s.chars().take(CHIP_CHARS - 3).collect();
+        format!("{cut}…")
+    } else {
+        s
+    }
 }
 
 /// The first required setting not yet entered.
@@ -404,10 +495,44 @@ fn create_params(d: &Draft) -> Option<Value> {
     Some(params)
 }
 
+/// Picks connector `id` for the connection being added, with what its
+/// program reports about itself.
+async fn pick(c: &Arc<Connectors>, id: String) -> Result<Value, String> {
+    let manifest = probe(c, &id).await;
+    let mut held = draft(c);
+    let project = held.as_ref().and_then(|d| d.project.clone());
+    let mut d = Draft {
+        connector: Some(id),
+        project,
+        ..Draft::default()
+    };
+    match manifest {
+        Ok(m) => {
+            d.trigger = m
+                .pointer("/triggers/0/type")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            d.manifest = Some(m);
+        }
+        Err(e) => d.error = Some(e),
+    }
+    *held = Some(d);
+    Ok(Value::Null)
+}
+
 /// What a control of the page asked: `refresh` reads the rows again; the
 /// others act on the row `args.id` names, and answer a toast or the sign-in
 /// a window opens on.
 pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Value, String> {
+    if action == vorn_tree::RENDER {
+        return Ok(tree::render(&rows(c).await));
+    }
+    if action == vorn_tree::EVENT {
+        let event: vorn_tree::Event = serde_json::from_value(args["event"].clone())
+            .map_err(|e| format!("a page event reads as {e}"))?;
+        let (does, args) = tree::event(&event)?;
+        return Box::pin(act(c, does, &args)).await;
+    }
     let id = text(args, "id").to_owned();
     let toast = |t: String| Ok(json!({ "toast": t }));
     match action {
@@ -472,28 +597,11 @@ pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Valu
             *draft(c) = None;
             Ok(Value::Null)
         }
-        "pick" => {
-            let manifest = probe(c, &id).await;
-            let mut held = draft(c);
-            let project = held.as_ref().and_then(|d| d.project.clone());
-            let mut d = Draft {
-                connector: Some(id),
-                project,
-                ..Draft::default()
-            };
-            match manifest {
-                Ok(m) => {
-                    d.trigger = m
-                        .pointer("/triggers/0/type")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    d.manifest = Some(m);
-                }
-                Err(e) => d.error = Some(e),
-            }
-            *held = Some(d);
-            Ok(Value::Null)
+        "add_to" => {
+            *draft(c) = Some(Draft::default());
+            pick(c, id).await
         }
+        "pick" => pick(c, id).await,
         "trigger" | "project" => {
             let mut held = draft(c);
             let d = held.as_mut().ok_or("Nothing is being added")?;
@@ -544,27 +652,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_page_template_reads_without_an_error() {
-        let manifest =
-            vorn_extensions::manifest::file::parse_builtin(crate::builtin::MANIFEST).unwrap();
-        let load = |path: &str, place| {
-            let text = VIEWS
-                .iter()
-                .find(|(p, _)| *p == path)
-                .map_or("", |(_, t)| *t);
-            vorn_extensions::views::read(path, text, place)
-        };
-        let listed = vorn_extensions::views::listed(&manifest, &load);
-        assert_eq!(listed.len(), 1, "{listed:?}");
-        assert!(
-            listed[0]
-                .get("errors")
-                .is_none_or(|e| e.as_array().is_some_and(Vec::is_empty)),
-            "{}",
-            listed[0]
+    fn shows_a_connections_filters_as_chips_with_secrets_masked() {
+        let long = "x".repeat(70);
+        let sdk = json!({ "connectorId": "sdk", "filters": {
+            "env": "{\"OWNER\":\"acme\",\"EMPTY\":\"\"}",
+            "secretEnv": "{\"TOKEN\":\"vorn-vault\"}",
+            "sdkConnectorId": "acme", "sdkVersion": "1.0.0", "sdkIcon": "{}",
+            "discoveredTools": ["a"], "repo": long } });
+        let cut = format!("repo: {}…", "x".repeat(57));
+        assert_eq!(chips(&sdk), ["OWNER: acme", "TOKEN: ••••••", cut.as_str()]);
+        let http = json!({ "connectorId": "http", "filters": {
+            "baseUrl": "https://api.acme.dev", "secret": "s3cret", "authQuery": "" } });
+        assert_eq!(
+            chips(&http),
+            ["baseUrl: https://api.acme.dev", "secret: ••••••"]
         );
-        assert!(listed[0]["view"].is_object(), "{}", listed[0]);
-        assert_eq!(listed[0]["title"], "Connections");
     }
 
     #[test]

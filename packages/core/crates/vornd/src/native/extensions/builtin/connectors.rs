@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use vorn_connectors::builtin::{self, Answer as BuiltinAnswer, Connectors};
 use vorn_connectors::host::{Fields, Host, Pending, Services, TableWork};
 use vorn_connectors::page;
-use vorn_extensions::api::types::{Event, RowOp};
+use vorn_extensions::api::types::Event;
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{self, Caller, World};
 use vorn_extensions::manifest::{file, Manifest};
@@ -155,24 +155,13 @@ pub fn entry(connectors: &Arc<ConnectorsBuiltin>) -> Arc<dyn Builtin> {
 
 struct Entry(Arc<ConnectorsBuiltin>);
 
-impl Entry {
-    /// Its page's rows again, as the built-in reads them now.
-    async fn publish(&self, api: &Api) {
-        for (collection, rows) in page::rows(&self.0.inner).await {
-            let mut ops = vec![RowOp::Clear];
-            ops.extend(rows.into_iter().map(RowOp::Upsert));
-            api.publish(collection, ops);
-        }
-    }
-}
-
 impl Builtin for Entry {
     fn manifest(&self) -> &'static str {
         builtin::MANIFEST
     }
 
     fn views(&self) -> &[(&'static str, &'static str)] {
-        page::VIEWS
+        &[]
     }
 
     fn events(&self) -> &'static [&'static str] {
@@ -183,24 +172,20 @@ impl Builtin for Entry {
         true
     }
 
-    fn start<'a>(&'a self, api: &'a Api) -> BoxFuture<'a, ()> {
-        async move {
-            self.0.set_on(true).await;
-            self.publish(api).await;
-        }
-        .boxed()
+    fn start<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
+        self.0.set_on(true).boxed()
     }
 
     fn handle<'a>(
         &'a self,
-        api: &'a Api,
+        _api: &'a Api,
         action: &'a str,
         args: Value,
     ) -> BoxFuture<'a, Result<Value, ExtError>> {
         async move {
-            let answered = page::act(&self.0.inner, action, &args).await;
-            self.publish(api).await;
-            answered.map_err(|e| ExtError::new("failed", e))
+            page::act(&self.0.inner, action, &args)
+                .await
+                .map_err(|e| ExtError::new("failed", e))
         }
         .boxed()
     }
