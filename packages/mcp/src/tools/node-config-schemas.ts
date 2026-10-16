@@ -236,9 +236,10 @@ export const triggerConfigSchema = z.discriminatedUnion('triggerType', [
 const launchAgentNodeConfigSchema = z
   .object({
     agentType: z
-      .enum(['claude', 'copilot', 'codex', 'opencode', 'gemini', 'fromTask'])
+      .string()
+      .regex(/^([a-z][a-z0-9-]{0,31}|fromTask)$/, 'Must be an agent id or fromTask')
       .describe(
-        "Which agent CLI runs. fromTask uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
+        "Which agent CLI runs: an agent's id (as claude or codex), or fromTask, which uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
       ),
     model: V.shortText
       .optional()

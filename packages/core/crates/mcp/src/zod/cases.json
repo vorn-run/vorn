@@ -42,7 +42,7 @@
       "icon_color": "blue",
       "preferred_agents": ["claude", "shell"]
     },
-    "error": "Name must not contain path traversal characters (.. / \\) at name\nPath must be absolute (start with /) at path\nInvalid option: expected one of \"claude\"|\"copilot\"|\"codex\"|\"opencode\"|\"gemini\" at preferred_agents[1]\nMust be a valid hex color (e.g. #6366f1) at icon_color"
+    "error": "Name must not contain path traversal characters (.. / \\) at name\nPath must be absolute (start with /) at path\nMust be a valid hex color (e.g. #6366f1) at icon_color"
   },
   {
     "tool": "create_project",
@@ -165,7 +165,7 @@
       "status": "nope",
       "assigned_agent": 3
     },
-    "error": "Invalid option: expected one of \"todo\"|\"in_progress\"|\"in_review\"|\"done\"|\"cancelled\" at status\nInvalid option: expected one of \"claude\"|\"copilot\"|\"codex\"|\"opencode\"|\"gemini\" at assigned_agent"
+    "error": "Invalid option: expected one of \"todo\"|\"in_progress\"|\"in_review\"|\"done\"|\"cancelled\" at status\nInvalid input: expected string, received number at assigned_agent"
   },
   {
     "tool": "create_workflow",

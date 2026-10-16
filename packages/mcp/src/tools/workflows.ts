@@ -57,7 +57,7 @@ import {
 
 const launchAgentConfigSchema = z
   .object({
-    agentType: z.enum(['claude', 'copilot', 'codex', 'opencode', 'gemini']),
+    agentType: V.agentId,
     projectName: V.name,
     projectPath: V.absolutePath,
     args: z.array(V.shortText).optional(),

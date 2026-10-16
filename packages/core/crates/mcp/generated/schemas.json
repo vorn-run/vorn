@@ -79,13 +79,14 @@
         [
           "agent_type",
           {
-            "t": "enum",
-            "values": [
-              "claude",
-              "copilot",
-              "codex",
-              "opencode",
-              "gemini"
+            "t": "string",
+            "checks": [
+              {
+                "k": "regex",
+                "source": "^[a-z][a-z0-9-]{0,31}$",
+                "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                "message": "Must be an agent id (e.g. claude, codex)"
+              }
             ]
           }
         ],
@@ -1982,13 +1983,14 @@
             "inner": {
               "t": "array",
               "item": {
-                "t": "enum",
-                "values": [
-                  "claude",
-                  "copilot",
-                  "codex",
-                  "opencode",
-                  "gemini"
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "regex",
+                    "source": "^[a-z][a-z0-9-]{0,31}$",
+                    "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                    "message": "Must be an agent id (e.g. claude, codex)"
+                  }
                 ]
               }
             }
@@ -2089,13 +2091,14 @@
             "inner": {
               "t": "array",
               "item": {
-                "t": "enum",
-                "values": [
-                  "claude",
-                  "copilot",
-                  "codex",
-                  "opencode",
-                  "gemini"
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "regex",
+                    "source": "^[a-z][a-z0-9-]{0,31}$",
+                    "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                    "message": "Must be an agent id (e.g. claude, codex)"
+                  }
                 ]
               }
             }
@@ -2216,13 +2219,14 @@
           {
             "t": "optional",
             "inner": {
-              "t": "enum",
-              "values": [
-                "claude",
-                "copilot",
-                "codex",
-                "opencode",
-                "gemini"
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^[a-z][a-z0-9-]{0,31}$",
+                  "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                  "message": "Must be an agent id (e.g. claude, codex)"
+                }
               ]
             }
           }
@@ -2366,13 +2370,14 @@
           {
             "t": "optional",
             "inner": {
-              "t": "enum",
-              "values": [
-                "claude",
-                "copilot",
-                "codex",
-                "opencode",
-                "gemini"
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^[a-z][a-z0-9-]{0,31}$",
+                  "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                  "message": "Must be an agent id (e.g. claude, codex)"
+                }
               ]
             }
           }
@@ -2508,13 +2513,14 @@
           {
             "t": "optional",
             "inner": {
-              "t": "enum",
-              "values": [
-                "claude",
-                "copilot",
-                "codex",
-                "opencode",
-                "gemini"
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^[a-z][a-z0-9-]{0,31}$",
+                  "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                  "message": "Must be an agent id (e.g. claude, codex)"
+                }
               ]
             }
           }
@@ -2727,13 +2733,14 @@
                   [
                     "agentType",
                     {
-                      "t": "enum",
-                      "values": [
-                        "claude",
-                        "copilot",
-                        "codex",
-                        "opencode",
-                        "gemini"
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "regex",
+                          "source": "^[a-z][a-z0-9-]{0,31}$",
+                          "shown": "/^[a-z][a-z0-9-]{0,31}$/",
+                          "message": "Must be an agent id (e.g. claude, codex)"
+                        }
                       ]
                     }
                   ],
@@ -4497,14 +4504,14 @@
         [
           "agentType",
           {
-            "t": "enum",
-            "values": [
-              "claude",
-              "copilot",
-              "codex",
-              "opencode",
-              "gemini",
-              "fromTask"
+            "t": "string",
+            "checks": [
+              {
+                "k": "regex",
+                "source": "^([a-z][a-z0-9-]{0,31}|fromTask)$",
+                "shown": "/^([a-z][a-z0-9-]{0,31}|fromTask)$/",
+                "message": "Must be an agent id or fromTask"
+              }
             ]
           }
         ],

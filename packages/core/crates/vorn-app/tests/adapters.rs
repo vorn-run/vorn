@@ -1,7 +1,8 @@
-//! Agents from their adapters, end to end against a real vornd: an adapter
-//! that draws a card footer shows its agent's model and tool calls, from
-//! the agent's hooks, on the window (Pixels) and the terminal (Cells); and
-//! with every adapter switched off the launcher opens a plain shell.
+//! Agents from their adapters, end to end against a real vornd: the example
+//! card footer (examples/extensions/agent-footer) shows an adapter's agent's
+//! model and tool calls, from the agent's hooks, on the window (Pixels) and
+//! the terminal (Cells); and with every adapter switched off the launcher
+//! opens a plain shell.
 //! `VORN_APP_SHOT=<prefix>` saves each state.
 
 #![cfg(unix)]
@@ -61,37 +62,44 @@ fn post_hook(home: &Path, body: &Value) {
     assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
 }
 
+const FOOTER: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../../examples/extensions/agent-footer"
+);
+const FOOTER_ID: &str = "example.agent-footer";
+
+fn has_node() -> bool {
+    std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
 #[test]
-fn an_adapters_card_footer_draws_its_agents_tool_calls_on_every_surface() {
+fn a_card_footer_draws_an_adapters_agents_tool_calls_on_every_surface() {
     let Some(v) = TestVornd::start() else {
         return;
     };
+    if !has_node() {
+        eprintln!("skipped: no node for the example's program");
+        return;
+    }
     let mut app = connect(&v);
     let project = add_project(&mut app, &v, "api", json!({}));
+    let linked = app
+        .rpc()
+        .call("extension:link", json!({ "path": FOOTER }))
+        .expect("linked");
+    assert_eq!(linked["id"], FOOTER_ID, "{linked}");
     let mut shot = Shot::new();
-    // The shipped adapter that draws a card footer, and the agent it runs.
-    let footer = shot.until(&mut app, "an adapter's card footer", |a, _| {
+    shot.until(&mut app, "the example's card footer", |a, _| {
         a.st.points
             .at("cardFooters")
-            .find(|p| {
-                a.store
-                    .agents
-                    .iter()
-                    .any(|g| g.builtin && g.extension == p.extension)
-            })
-            .map(|p| p.extension.clone())
+            .any(|p| p.extension == FOOTER_ID)
+            .then_some(())
     });
-    let agent = app
-        .store
-        .agents
-        .iter()
-        .find(|a| a.extension == footer)
-        .map(|a| a.key.clone())
-        .expect("the footer's agent");
-    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
-    config["agentCommands"][&agent] = json!({ "command": "/bin/sh", "args": [] });
-    app.rpc().call("config:save", config).expect("saved");
-
+    // The linked test adapter's agent, run by a shell.
+    let agent = "acme";
     let info = app
         .rpc()
         .call(
@@ -107,7 +115,7 @@ fn an_adapters_card_footer_draws_its_agents_tool_calls_on_every_surface() {
     );
     shot.until(&mut app, "the session's row", |a, _| {
         a.st.points
-            .rows_of(&footer)
+            .rows_of(FOOTER_ID)
             .get("sessions")?
             .iter()
             .any(|r| r.id == sid && r.fields.get("tools").and_then(Value::as_f64) == Some(1.0))

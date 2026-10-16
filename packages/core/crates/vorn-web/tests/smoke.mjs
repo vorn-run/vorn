@@ -4,8 +4,9 @@
 // `templates` opens the example extension's settings page and works its
 // choice, secret field, Sign in button and more menu, then Settings ›
 // Extensions and the Connectors built-in's Connections page. `adapters`
-// starts a session of the agent whose shipped adapter draws a card footer,
-// posts a hook event as the agent would, and waits for the footer to show it.
+// links a test agent's adapter and the example card footer, starts a session
+// of that agent, posts a hook event as the agent would, and waits for the
+// footer to show it.
 //   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
@@ -60,7 +61,8 @@ async function startVornd() {
   writeFileSync(join(home, '.zshrc'), '')
   const env = { ...process.env, HOME: home, VORN_HOME: data, ZDOTDIR: home }
   // An agent's own home would be the person's, not the test's.
-  for (const name of ['COPILOT_HOME', 'XDG_DATA_HOME', 'HERMES_HOME', 'VORN_DATA_DIR']) delete env[name]
+  for (const name of ['COPILOT_HOME', 'XDG_DATA_HOME', 'HERMES_HOME', 'VORN_DATA_DIR'])
+    delete env[name]
   const args = ['--data-dir', data, '--port', '0', '--host', '127.0.0.1', '--web', dist]
   args.push('--sessiond', join(bin, 'vorn-sessiond'), '--exit-with-stdin')
   const proc = spawn(join(bin, 'vornd'), args, { env, stdio: ['pipe', 'pipe', 'inherit'] })
@@ -240,16 +242,17 @@ async function postHook(vornd, body) {
   if (status !== 200) throw new Error(`the hook answered ${status}`)
 }
 
-/** A session of the agent whose shipped adapter draws a card footer; answers how to post its tool call. */
+const footerExample = join(core, '../../examples/extensions/agent-footer')
+const testAgent = join(core, 'crates/vorn-app/tests/fixtures/acme-adapter')
+
+/** A session of a linked test agent under the example card footer; answers how to post its tool call. */
 async function adapterSession(vornd, server) {
-  const points = await server.call('extension:contributions')
-  const agents = await server.call('agent:list')
-  const footers = new Set(points.filter((p) => p.kind === 'cardFooters').map((p) => p.extension))
-  const agent = agents.find((a) => a.builtin && footers.has(a.extension))
-  if (!agent) throw new Error('no shipped adapter draws a card footer')
+  await server.call('extension:link', { path: testAgent })
+  await server.call('extension:link', { path: footerExample })
   const cfg = await server.call('config:load')
-  cfg.agentCommands = { ...cfg.agentCommands, [agent.id]: { command: '/bin/sh', args: [] } }
+  cfg.agentCommands = { ...cfg.agentCommands, acme: { command: '/bin/sh', args: [] } }
   await server.call('config:save', cfg)
+  const agent = { id: 'acme' }
   const session = await server.call('terminal:create', {
     agentType: agent.id,
     projectName: 'smoke',

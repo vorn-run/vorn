@@ -52,13 +52,7 @@
       "properties": {
         "agent_type": {
           "type": "string",
-          "enum": [
-            "claude",
-            "copilot",
-            "codex",
-            "opencode",
-            "gemini"
-          ],
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
           "description": "Agent type to launch"
         },
         "project_name": {
@@ -1088,13 +1082,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": [
-              "claude",
-              "copilot",
-              "codex",
-              "opencode",
-              "gemini"
-            ]
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
           }
         },
         "icon": {
@@ -1141,13 +1129,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": [
-              "claude",
-              "copilot",
-              "codex",
-              "opencode",
-              "gemini"
-            ]
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
           }
         },
         "icon": {
@@ -1218,13 +1200,7 @@
         "assigned_agent": {
           "description": "Filter by assigned agent type",
           "type": "string",
-          "enum": [
-            "claude",
-            "copilot",
-            "codex",
-            "opencode",
-            "gemini"
-          ]
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
         },
         "workspace_id": {
           "description": "Filter by workspace ID (returns tasks from all projects in that workspace)",
@@ -1289,13 +1265,7 @@
         "assigned_agent": {
           "description": "Assign to an agent type",
           "type": "string",
-          "enum": [
-            "claude",
-            "copilot",
-            "codex",
-            "opencode",
-            "gemini"
-          ]
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
         }
       },
       "required": [
@@ -1376,13 +1346,7 @@
         "assigned_agent": {
           "description": "Assigned agent type",
           "type": "string",
-          "enum": [
-            "claude",
-            "copilot",
-            "codex",
-            "opencode",
-            "gemini"
-          ]
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
         },
         "order": {
           "description": "Queue order",
@@ -1843,13 +1807,7 @@
             "properties": {
               "agentType": {
                 "type": "string",
-                "enum": [
-                  "claude",
-                  "copilot",
-                  "codex",
-                  "opencode",
-                  "gemini"
-                ]
+                "pattern": "^[a-z][a-z0-9-]{0,31}$"
               },
               "projectName": {
                 "type": "string",

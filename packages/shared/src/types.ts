@@ -1,9 +1,11 @@
 // Type-only, so the portability module can keep importing values from here.
 import type { PortableWorkflow } from './workflow-portability'
 
-/** AI agents only. Use this for icon maps, install status, command configs, and
- *  anything else that applies exclusively to an AI CLI — not to plain shells. */
-export type AiAgentType = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini'
+/** An AI agent's id, as its adapter names it: one Vorn ships (`claude`,
+ *  `copilot`, `codex`, `opencode`, `gemini`, `hermes`) or an installed
+ *  adapter's. Use this for anything that applies exclusively to an AI CLI,
+ *  not to plain shells; `agent:list` names the agents that are on. */
+export type AiAgentType = string
 
 /** Any session type that can back a terminal tab. `'shell'` is a plain PTY
  *  (zsh/bash), everything else is an AI agent. */
@@ -61,6 +63,8 @@ export function getRecentSessionActivityLabel(agentType: AgentType): string {
       return 'message'
     case 'shell':
       return 'line'
+    default:
+      return 'session'
   }
 }
 
@@ -2504,8 +2508,9 @@ export interface SdkAction {
  */
 export type ConnectorKind = 'connector' | 'extension'
 
-/** Session types an extension can name; `shell` is a plain terminal. */
-export type ExtensionAgent = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini' | 'shell'
+/** Session types an extension can name: an agent's id (as `claude` or
+ *  `codex`), or `shell` for a plain terminal. */
+export type ExtensionAgent = string
 
 export type ExtensionPlatform = 'darwin' | 'linux' | 'win32'
 

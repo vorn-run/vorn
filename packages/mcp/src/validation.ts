@@ -54,7 +54,14 @@ const safeHexColor = z
   .string()
   .regex(/^#[0-9a-fA-F]{3,8}$/, 'Must be a valid hex color (e.g. #6366f1)')
 
+/** An agent's id, as its adapter names it (claude, codex, an installed
+ *  adapter's); checked against the agents that are on when it is used. */
+const safeAgentId = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,31}$/, 'Must be an agent id (e.g. claude, codex)')
+
 export const V = {
+  agentId: safeAgentId,
   name: safeName,
   id: safeId,
   title: safeTitle,

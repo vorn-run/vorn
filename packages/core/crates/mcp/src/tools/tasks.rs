@@ -5,7 +5,7 @@
 use serde_json::{json, Map, Value};
 
 use super::data;
-use super::{failed, object, pretty, text, Args, Cx, Outcome};
+use super::{agents_off, failed, object, pretty, text, Args, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
 
@@ -92,6 +92,10 @@ pub async fn list_tasks<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 }
 
 pub async fn create_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    let assigned: Vec<&str> = args.nonempty("assigned_agent").into_iter().collect();
+    if let Some(off) = agents_off(cx, &assigned).await {
+        return Ok(off);
+    }
     let params = object(
         [
             ("projectName", "project_name"),
@@ -122,6 +126,10 @@ pub async fn get_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 }
 
 pub async fn update_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    let assigned: Vec<&str> = args.nonempty("assigned_agent").into_iter().collect();
+    if let Some(off) = agents_off(cx, &assigned).await {
+        return Ok(off);
+    }
     let id = args.str("id").unwrap_or_default();
     let params = object(
         [

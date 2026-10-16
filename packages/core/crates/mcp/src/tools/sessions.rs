@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 
-use super::{error_of, failed, items, object, pretty, text, Args, Cx, Outcome};
+use super::{agents_off, error_of, failed, items, object, pretty, text, Args, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
 
@@ -51,6 +51,10 @@ pub async fn list_sessions<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 }
 
 pub async fn launch_session<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    if let Some(off) = agents_off(cx, &args.str("agent_type").into_iter().collect::<Vec<_>>()).await
+    {
+        return Ok(off);
+    }
     let payload = object([
         ("agentType", args.get("agent_type").cloned()),
         ("projectName", args.get("project_name").cloned()),
