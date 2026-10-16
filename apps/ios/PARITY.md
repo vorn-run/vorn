@@ -73,10 +73,10 @@ Every screen and feature of the React Native phone app, and where it stands in t
 
 ## Performance
 
-| Budget | Target | Measured | Method |
-| --- | --- | --- | --- |
-| Screen open | < 100 ms | Mac, 10k tasks and 1k sessions: sessions 2.0 ms (18.5 before paging), tasks 3.7 ms, task 0.13 ms, workflows 0.05 ms, run 0.13 ms | `screens_build_within_budget_at_ten_thousand_tasks`; on the device, launch with `-vornBench 1` |
-| Status update | < 16 ms | Only screens whose revision changed are rebuilt and re-sent | Revision per screen; `vp_revision` gate in `Core.swift` |
-| List scroll | 120 Hz | Lazy `List` with stable node ids, 100-row pages | Instruments, Animation Hitches, on iPhone 15 Pro Max |
-| Keystroke to glyph | < 30 ms over Wi-Fi | Pending on the device | Instruments signpost from key to drawn frame |
-| Idle CPU | ~0 | The terminal draws only when its output or scroll changes | Xcode CPU gauge, idle session |
+| Budget             | Target             | Measured                                                                                                                         | Method                                                                                         |
+| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Screen open        | < 100 ms           | Mac, 10k tasks and 1k sessions: sessions 2.0 ms (18.5 before paging), tasks 3.7 ms, task 0.13 ms, workflows 0.05 ms, run 0.13 ms | `screens_build_within_budget_at_ten_thousand_tasks`; on the device, launch with `-vornBench 1` |
+| Status update      | < 16 ms            | Only screens whose revision changed are rebuilt and re-sent                                                                      | Revision per screen; `vp_revision` gate in `Core.swift`                                        |
+| List scroll        | 120 Hz             | Lazy `List` with stable node ids, 100-row pages                                                                                  | Instruments, Animation Hitches, on iPhone 15 Pro Max                                           |
+| Keystroke to glyph | < 30 ms over Wi-Fi | Pending on the device                                                                                                            | Instruments signpost from key to drawn frame                                                   |
+| Idle CPU           | ~0                 | The terminal draws only when its output or scroll changes                                                                        | Xcode CPU gauge, idle session                                                                  |

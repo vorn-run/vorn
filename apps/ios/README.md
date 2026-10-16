@@ -18,36 +18,36 @@ The script builds `libvorn_phone.a` for the device and the simulator, writes `Vo
 
 A screen is named by a route; the part after the first `:` is its argument.
 
-| Route | Screen |
-| --- | --- |
-| `sessions`, `tasks`, `workflows` | The tabs |
+| Route                                                                      | Screen                                                         |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `sessions`, `tasks`, `workflows`                                           | The tabs                                                       |
 | `sessions-scope`, `tasks-scope`, `sessions-view`, `tasks-view`, `task-new` | Sheets; the view options are kept across launches (`vp_prefs`) |
-| `launch` | A new session |
-| `session:<id>` | A terminal |
-| `task:<id>`, `workflow:<id>`, `workflow-run:<id>`, `run:<id>` | Details |
-| `run-log:<run>[:<node>]`, `review:<run>:<node>` | A run's log, a gate's review |
-| `settings`, `settings:<key>` | Settings |
+| `launch`                                                                   | A new session                                                  |
+| `session:<id>`                                                             | A terminal                                                     |
+| `task:<id>`, `workflow:<id>`, `workflow-run:<id>`, `run:<id>`              | Details                                                        |
+| `run-log:<run>[:<node>]`, `review:<run>:<node>`                            | A run's log, a gate's review                                   |
+| `settings`, `settings:<key>`                                               | Settings                                                       |
 
 ## Node kinds
 
-| Kind | Shows |
-| --- | --- |
-| `list`, `section`, `column`, `row`, `divider` | Structure; a `section` whose first kid is an `icon` wears it in its header |
-| `bar` | The navigation title, and its buttons in the toolbar |
-| `empty` | An empty state: title, a line saying why, and its buttons |
-| `link` | A row that opens the route in `value`; style `sheet` presents it |
-| `sheet` | A titled page over the screen |
-| `button` | A button, style `plain`, `primary` or `danger`, asking `confirm` first; `value` names its icon |
-| `swipe` | Inside a `link`: the buttons shown when the row is swiped from its `style` edge, `leading` or `trailing` |
-| `more` | A menu of the buttons inside |
-| `choice`, `option` | A picker; segmented without a label, a menu with one. An option's `text` kid is a line under it |
-| `toggle` | A switch |
-| `field` | A text field, `multiline` or `secret` |
-| `prose`, `key` | A Markdown editor: its `field`, a Write/Preview switch, and its `key` kids in the keyboard bar (`vp_markdown_key` applies one) |
-| `copy` | A button that copies `value` |
-| `text` | Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown` |
-| `icon` | A glyph: `value` is the vornui name (`agent:<key>` for an agent's mark, drawn from `label`), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
-| `status`, `badge` | Small marks |
-| `drawn` | A drawn vornui view (a terminal) |
+| Kind                                          | Shows                                                                                                                                                                             |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`, `section`, `column`, `row`, `divider` | Structure; a `section` whose first kid is an `icon` wears it in its header                                                                                                        |
+| `bar`                                         | The navigation title, and its buttons in the toolbar                                                                                                                              |
+| `empty`                                       | An empty state: title, a line saying why, and its buttons                                                                                                                         |
+| `link`                                        | A row that opens the route in `value`; style `sheet` presents it                                                                                                                  |
+| `sheet`                                       | A titled page over the screen                                                                                                                                                     |
+| `button`                                      | A button, style `plain`, `primary` or `danger`, asking `confirm` first; `value` names its icon                                                                                    |
+| `swipe`                                       | Inside a `link`: the buttons shown when the row is swiped from its `style` edge, `leading` or `trailing`                                                                          |
+| `more`                                        | A menu of the buttons inside                                                                                                                                                      |
+| `choice`, `option`                            | A picker; segmented without a label, a menu with one. An option's `text` kid is a line under it                                                                                   |
+| `toggle`                                      | A switch                                                                                                                                                                          |
+| `field`                                       | A text field, `multiline` or `secret`                                                                                                                                             |
+| `prose`, `key`                                | A Markdown editor: its `field`, a Write/Preview switch, and its `key` kids in the keyboard bar (`vp_markdown_key` applies one)                                                    |
+| `copy`                                        | A button that copies `value`                                                                                                                                                      |
+| `text`                                        | Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown`                                                                                                         |
+| `icon`                                        | A glyph: `value` is the vornui name (`agent:<key>` for an agent's mark, drawn from `label`), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
+| `status`, `badge`                             | Small marks                                                                                                                                                                       |
+| `drawn`                                       | A drawn vornui view (a terminal)                                                                                                                                                  |
 
 Every control acts by id through `vp_native_action`, and the core says where to go next through `vp_take_go`. `vp_call` sends one request to vornd outside any screen (revoking a token, say).

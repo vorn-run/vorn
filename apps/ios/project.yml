@@ -1,18 +1,18 @@
 name: Vorn
 options:
   deploymentTarget:
-    iOS: "26.0"
+    iOS: '26.0'
   createIntermediateGroups: true
 settings:
   base:
     # build.sh signs with a development profile after the build.
     CODE_SIGNING_ALLOWED: NO
-    SWIFT_VERSION: "5.0"
+    SWIFT_VERSION: '5.0'
     SWIFT_STRICT_CONCURRENCY: minimal
     SWIFT_OBJC_BRIDGING_HEADER: Vorn/Bridge.h
     LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/../../packages/core/target/aarch64-apple-ios/release
     OTHER_LDFLAGS: [-lvorn_phone]
-    TARGETED_DEVICE_FAMILY: "1,2"
+    TARGETED_DEVICE_FAMILY: '1,2'
     SUPPORTED_PLATFORMS: iphoneos
     ENABLE_BITCODE: NO
     DEAD_CODE_STRIPPING: YES
@@ -30,7 +30,7 @@ targets:
       base:
         PRODUCT_NAME: Vorn
         PRODUCT_BUNDLE_IDENTIFIER: run.vorn.ios
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: ''
     info:
       path: Vorn/Info.plist
       properties:

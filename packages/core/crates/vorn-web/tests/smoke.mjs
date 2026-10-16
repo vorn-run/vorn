@@ -295,7 +295,10 @@ async function fitsPhone(page) {
       .filter((e) => roles.includes(e.getAttribute('role')))
       .map((e) => [e, e.getBoundingClientRect()])
       .filter(([, r]) => r.width > 0 && r.height > 0 && (r.left < -0.5 || r.right > width + 0.5))
-      .map(([e, r]) => `${e.getAttribute('role')}:${e.getAttribute('aria-label')} ${r.left}..${r.right}`)
+      .map(
+        ([e, r]) =>
+          `${e.getAttribute('role')}:${e.getAttribute('aria-label')} ${r.left}..${r.right}`
+      )
   }, PHONE.width)
   if (outside.length) throw new Error(`outside the phone's width: ${outside.join(', ')}`)
 }
