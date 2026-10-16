@@ -663,6 +663,8 @@ fn main() {
         let t = Instant::now();
         let comp = wasm::UiC::new(&engine, &uic_c);
         let init = t.elapsed().as_secs_f64() * 1e3;
+        // From the client's construction, as A's first frame is.
+        let t = Instant::now();
         let mut c = tree::CClient::new(mode, comp, &cfg(if cells { 1.0 } else { SCALE }));
         {
             let (be, vd) = (backend.clone(), vornd.clone());
@@ -673,7 +675,6 @@ fn main() {
                 Ok(format!("{m}: {}", summary(&r)))
             });
         }
-        let t = Instant::now();
         c.data(&rows_json);
         c.frame();
         c.frame();

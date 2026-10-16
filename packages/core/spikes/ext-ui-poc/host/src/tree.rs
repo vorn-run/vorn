@@ -95,7 +95,8 @@ impl Draw {
             Kind::Shape((svg, ink)) => div().content(Content::Svg {
                 svg: svg.clone(),
                 color: paint(*ink),
-            }),
+            })
+            .shrink0(),
             Kind::Button(label) => widgets::button(ui, id.unwrap_or(anon), label),
             Kind::Field((name, ph)) => widgets::text_input(ui, id.unwrap_or(anon), name, ph),
             Kind::Badge((v, t)) => {
