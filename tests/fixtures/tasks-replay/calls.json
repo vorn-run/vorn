@@ -1,0 +1,920 @@
+[
+  {
+    "step": {
+      "call": "project:list"
+    },
+    "answer": [
+      {
+        "name": "board",
+        "path": "<work>",
+        "preferredAgents": [
+          "claude"
+        ],
+        "workspaceId": "personal"
+      },
+      {
+        "name": "other",
+        "path": "<work>",
+        "preferredAgents": [
+          "claude"
+        ],
+        "workspaceId": "work"
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:create",
+      "params": {
+        "projectName": "board",
+        "title": "A",
+        "description": "Why it matters."
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "id": "<id1>",
+        "projectName": "board",
+        "title": "A",
+        "description": "Why it matters.",
+        "status": "todo",
+        "order": 0,
+        "createdAt": "<time>",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:create",
+      "params": {
+        "projectName": "board",
+        "title": "B",
+        "status": "done"
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "id": "<id2>",
+        "projectName": "board",
+        "title": "B",
+        "description": "",
+        "status": "done",
+        "order": 1,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "completedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:create",
+      "params": {
+        "projectName": "board",
+        "title": "C",
+        "status": "in_progress",
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "useWorktree": true
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "id": "<id3>",
+        "projectName": "board",
+        "title": "C",
+        "description": "",
+        "status": "in_progress",
+        "order": 2,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "branch": "c-branch",
+        "useWorktree": true,
+        "assignedAgent": "claude"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:create",
+      "params": {
+        "projectName": "nowhere",
+        "title": "Orphan"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:create",
+      "params": {
+        "projectName": "board",
+        "title": "Dup",
+        "id": "$1"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "projectName": "board"
+      }
+    },
+    "answer": [
+      {
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id1>",
+        "order": 0,
+        "projectName": "board",
+        "status": "todo",
+        "title": "A",
+        "updatedAt": "<time>"
+      },
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "done",
+        "title": "B",
+        "updatedAt": "<time>"
+      },
+      {
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id3>",
+        "order": 2,
+        "projectName": "board",
+        "status": "in_progress",
+        "title": "C",
+        "updatedAt": "<time>",
+        "useWorktree": true
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "includeDescription": true
+      }
+    },
+    "answer": [
+      {
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 0,
+        "projectName": "board",
+        "status": "todo",
+        "title": "A",
+        "updatedAt": "<time>"
+      },
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "done",
+        "title": "B",
+        "updatedAt": "<time>"
+      },
+      {
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id3>",
+        "order": 2,
+        "projectName": "board",
+        "status": "in_progress",
+        "title": "C",
+        "updatedAt": "<time>",
+        "useWorktree": true
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "status": "done"
+      }
+    },
+    "answer": [
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "done",
+        "title": "B",
+        "updatedAt": "<time>"
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "projectName": "board",
+        "offset": 1,
+        "limit": 1
+      }
+    },
+    "answer": [
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "done",
+        "title": "B",
+        "updatedAt": "<time>"
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "projectName": "",
+        "status": ""
+      }
+    },
+    "answer": [
+      {
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id1>",
+        "order": 0,
+        "projectName": "board",
+        "status": "todo",
+        "title": "A",
+        "updatedAt": "<time>"
+      },
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "done",
+        "title": "B",
+        "updatedAt": "<time>"
+      },
+      {
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id3>",
+        "order": 2,
+        "projectName": "board",
+        "status": "in_progress",
+        "title": "C",
+        "updatedAt": "<time>",
+        "useWorktree": true
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:get",
+      "params": {
+        "id": "$1"
+      }
+    },
+    "answer": {
+      "createdAt": "<time>",
+      "description": "Why it matters.",
+      "id": "<id1>",
+      "order": 0,
+      "projectName": "board",
+      "status": "todo",
+      "title": "A",
+      "updatedAt": "<time>"
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:get",
+      "params": {
+        "id": "ghost"
+      }
+    },
+    "answer": null,
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:update",
+      "params": {
+        "id": "$1",
+        "title": "Renamed",
+        "archivedAt": "2026-01-01T00:00:00.000Z",
+        "completedAt": "2026-01-01T00:00:00.000Z",
+        "order": 999
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 0,
+        "projectName": "board",
+        "status": "todo",
+        "title": "Renamed",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:update",
+      "params": {
+        "id": "$1",
+        "projectName": "other"
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 0,
+        "projectName": "other",
+        "status": "todo",
+        "title": "Renamed",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:update",
+      "params": {
+        "id": "$1",
+        "projectName": "nowhere"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:update",
+      "params": {
+        "id": "ghost",
+        "title": "x"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:update",
+      "params": {
+        "id": "$1",
+        "projectName": "board",
+        "status": "in_review"
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 3,
+        "projectName": "board",
+        "status": "in_review",
+        "title": "Renamed",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:patch",
+      "params": {
+        "id": "$1",
+        "set": {
+          "title": "Patched",
+          "branch": "p",
+          "assignedAgent": null
+        }
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "branch": "p",
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 3,
+        "projectName": "board",
+        "status": "in_review",
+        "title": "Patched",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:patch",
+      "params": {
+        "id": "$1",
+        "set": {
+          "status": "done"
+        }
+      }
+    },
+    "answer": {
+      "ok": true,
+      "task": {
+        "branch": "p",
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 3,
+        "projectName": "board",
+        "status": "done",
+        "title": "Patched",
+        "updatedAt": "<time>"
+      }
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:patch",
+      "params": {
+        "id": "$1",
+        "set": {
+          "projectName": "nowhere"
+        }
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:patch",
+      "params": {
+        "id": "$1"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:patch",
+      "params": {
+        "id": "ghost",
+        "set": {
+          "title": "x"
+        }
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:setStatus",
+      "params": {
+        "id": "$2",
+        "status": "todo"
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:setStatus",
+      "params": {
+        "id": "$2",
+        "status": "cancelled"
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:setStatus",
+      "params": {
+        "id": "ghost",
+        "status": "done"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:archive",
+      "params": {
+        "id": "$2",
+        "archived": true
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:archive",
+      "params": {
+        "id": "$2",
+        "archived": true
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:archive",
+      "params": {
+        "id": "$3",
+        "archived": true
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:archive",
+      "params": {
+        "id": "$2",
+        "archived": false
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:reorder",
+      "params": {
+        "ids": [
+          "$3",
+          "$1"
+        ]
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:reorder",
+      "params": {
+        "ids": [
+          "$2",
+          "ghost",
+          "$2"
+        ]
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:reorder",
+      "params": {
+        "ids": [
+          "ghost"
+        ]
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "includeDescription": true
+      }
+    },
+    "answer": [
+      {
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id2>",
+        "order": 1,
+        "projectName": "board",
+        "status": "cancelled",
+        "title": "B",
+        "updatedAt": "<time>"
+      },
+      {
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id3>",
+        "order": 2,
+        "projectName": "board",
+        "status": "in_progress",
+        "title": "C",
+        "updatedAt": "<time>",
+        "useWorktree": true
+      },
+      {
+        "branch": "p",
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 3,
+        "projectName": "board",
+        "status": "done",
+        "title": "Patched",
+        "updatedAt": "<time>"
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageUpload",
+      "params": {
+        "taskId": "$1",
+        "base64": "cG5nIGJ5dGVz",
+        "filename": "shot.PNG"
+      }
+    },
+    "answer": "<id4>.png",
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageUpload",
+      "params": {
+        "taskId": "$1",
+        "base64": "",
+        "filename": "a.svg"
+      }
+    },
+    "answer": {
+      "error": "Unsupported image type: .svg"
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageGetPath",
+      "params": {
+        "taskId": "../x",
+        "filename": "a.png"
+      }
+    },
+    "answer": {
+      "error": "Invalid taskId: ../x"
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageGetPath",
+      "params": {
+        "taskId": "$1",
+        "filename": "kept.png"
+      }
+    },
+    "answer": "<data>/task-images/<id1>/kept.png",
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageSave",
+      "params": {
+        "taskId": "$1",
+        "sourcePath": "<work>/pic.jpg"
+      }
+    },
+    "answer": "<id5>.jpg",
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageDelete",
+      "params": {
+        "taskId": "$1",
+        "filename": "missing.jpg"
+      }
+    },
+    "answer": null,
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:imageCleanup",
+      "params": "$1"
+    },
+    "answer": null,
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:delete",
+      "params": {
+        "id": "$2"
+      }
+    },
+    "answer": {
+      "ok": true
+    },
+    "changed": 1
+  },
+  {
+    "step": {
+      "call": "task:delete",
+      "params": {
+        "id": "$2"
+      }
+    },
+    "answer": {
+      "ok": false
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "task:list",
+      "params": {
+        "includeDescription": true
+      }
+    },
+    "answer": [
+      {
+        "assignedAgent": "claude",
+        "branch": "c-branch",
+        "createdAt": "<time>",
+        "description": "",
+        "id": "<id3>",
+        "order": 2,
+        "projectName": "board",
+        "status": "in_progress",
+        "title": "C",
+        "updatedAt": "<time>",
+        "useWorktree": true
+      },
+      {
+        "branch": "p",
+        "completedAt": "<time>",
+        "createdAt": "<time>",
+        "description": "Why it matters.",
+        "id": "<id1>",
+        "order": 3,
+        "projectName": "board",
+        "status": "done",
+        "title": "Patched",
+        "updatedAt": "<time>"
+      }
+    ],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "sessionEvent:list",
+      "params": {
+        "limit": 5
+      }
+    },
+    "answer": [],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "sessionEvent:list",
+      "params": {
+        "eventType": "renamed"
+      }
+    },
+    "answer": [],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "sessionEvent:listBySession",
+      "params": {
+        "sessionId": "ghost"
+      }
+    },
+    "answer": [],
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "project:detectMobile",
+      "params": {
+        "projectPath": "<work>/app"
+      }
+    },
+    "answer": {
+      "isMobile": true,
+      "framework": "expo",
+      "needsDevClient": true
+    },
+    "changed": 0
+  },
+  {
+    "step": {
+      "call": "project:detectMobile",
+      "params": {
+        "projectPath": "<home>"
+      }
+    },
+    "answer": {
+      "isMobile": false,
+      "framework": null,
+      "needsDevClient": false
+    },
+    "changed": 0
+  }
+]
