@@ -118,6 +118,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
         "config:save" => {
             let mut sent = params;
             let passwords = super::credential::take_host_passwords(&mut sent);
+            let _order = native.config_order.lock().await;
             let saved = blocking(method, move || {
                 for (id, password) in &passwords {
                     n.secrets.put_item(Kind::HostPassword, id, password)?;
@@ -147,6 +148,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
 /// workflows (`workflow:changed`), each whole.
 pub(crate) async fn announce(native: &Arc<Native>) {
     let n = Arc::clone(native);
+    let _order = native.config_order.lock().await;
     let loaded = blocking("config:changed", move || {
         with_store(&n, |s| {
             let config = s.load_config()?;

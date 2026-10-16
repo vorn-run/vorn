@@ -26,6 +26,8 @@ tokio = { version = "1", default-features = false, features = ["rt", "net", "io-
 tokio-tungstenite = "0.28"
 uuid = { version = "1", features = ["v4"] }
 vorn-protocol = { path = "../protocol" }
+# The usage names the agents Vorn ships switched on.
+vorn-adapters = { path = "../adapters" }
 vorn-store = { path = "../store" }
 # `vorn ext pack` reads and checks a manifest where the author works, without a server.
 vorn-extensions = { path = "../extensions" }

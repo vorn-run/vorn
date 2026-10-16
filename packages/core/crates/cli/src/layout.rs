@@ -7,7 +7,7 @@ use crate::exit::ExitCode;
 use crate::js::{self, field};
 use crate::output::table;
 use crate::paths;
-use crate::session::AGENTS;
+use crate::session::shipped_agents;
 
 pub const LAYOUT_USAGE: &str = "Usage
   vorn layout list [--json]
@@ -253,7 +253,7 @@ fn check(ctx: &mut Context<'_>, file: Option<&str>) -> ExitCode {
             return ExitCode::Failure;
         }
     };
-    match vorn_layout::parse(&text, &AGENTS) {
+    match vorn_layout::parse(&text, &shipped_agents()) {
         Ok(layout) => {
             let sessions = layout
                 .leaves()

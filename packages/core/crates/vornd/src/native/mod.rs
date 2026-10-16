@@ -269,6 +269,9 @@ pub struct Native {
     clients: OnceLock<Arc<crate::serve::clients::Clients>>,
     /// Raised when vornd itself changed the configuration.
     config_changed: tokio::sync::Notify,
+    /// Held from a configuration write or read to its `config:changed`, so
+    /// clients hear the configurations in the order they were stored.
+    pub(crate) config_order: tokio::sync::Mutex<()>,
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
     secrets: secrets::Secrets,
@@ -344,6 +347,7 @@ impl Native {
             link: OnceLock::new(),
             clients: OnceLock::new(),
             config_changed: tokio::sync::Notify::new(),
+            config_order: tokio::sync::Mutex::new(()),
             desktop: OnceLock::new(),
             secrets,
             catalog: vorn_agents::models::Catalog::default(),
