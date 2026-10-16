@@ -104,6 +104,20 @@ import type {
  */
 export const RUNTIME_PROTOCOL_VERSION = 1
 
+/** A tool an agent waits to use until a client answers `permission:resolve`. */
+export interface PermissionRequest {
+  requestId: string
+  sessionId: string
+  terminalId: string
+  toolName: string
+  toolInput: Record<string, unknown>
+  description?: string
+  agentType?: string
+  projectName?: string
+  permissionSuggestions?: unknown[]
+  questions?: unknown[]
+}
+
 export interface ServerHello {
   protocolVersion: number
   /**
@@ -859,6 +873,8 @@ export interface RequestMethods {
     }
     result: void
   }
+  /** The permission requests agents hold open, as `permission:requested` told them. */
+  'permission:list': { params: void; result: PermissionRequest[] }
   'server:shutdown': { params: void; result: void }
   /** Hand every running terminal to the replacement described, and exit. Unix endpoint only. */
   /** Where clients reach this server through vornd, or why they cannot; waits for a start in flight. */
@@ -1434,6 +1450,8 @@ export interface ServerNotifications {
   'session:created': TerminalSession
   'session:updated': TerminalSession
   'session:reordered': string[]
+  'permission:requested': PermissionRequest
+  'permission:closed': { requestId: string; terminalId: string }
   'headless:data': { id: string; data: string }
   'headless:exit': { id: string; exitCode: number }
   'config:changed': AppConfig
