@@ -8,8 +8,6 @@ use serde_json::Value;
 
 use super::act;
 use vorn_components::graph as kit;
-use vorn_components::template::{self as tpl, Bind, Press};
-use vorn_view::{Kind, Row, Source};
 
 use crate::app::canvas::{card_id, mini_id, pane_id, panel_width, port_id};
 use crate::canvas::{self, Card, Element, Elements, LOOP_HEADER};
@@ -316,85 +314,50 @@ fn status_dot_color(st: &str) -> Option<Rgba> {
     })
 }
 
-/// What a step's card says, as the Workflow editor's template draws it: its
-/// glyph, label and kind, and the start of what it runs or says.
+/// What a step's card says: its glyph, label and kind, and the start of what it runs or says.
 fn card_content(s: &Screen<'_>, n: &Value) -> El {
-    let Some(card) = super::editor_point(s).and_then(|p| match &p.template {
-        Ok(Some(t)) => match &t.view.kind {
-            Kind::Graph(g) => Some(&g.card),
-            _ => None,
-        },
-        _ => None,
-    }) else {
-        return div();
-    };
-    let id = sv(n, "id").unwrap_or("");
-    let footer = wf::footer(n);
-    let code = matches!(
-        sv(n, "type").unwrap_or(""),
-        "script" | "condition" | "httpRequest" | "callConnectorAction"
+    let label = sv(n, "label").unwrap_or("");
+    let kind = sv(n, "type").unwrap_or("");
+    let mut body = div().col().child(
+        div()
+            .row()
+            .items_center()
+            .gap(12.0)
+            .child(super::node_glyph(s, n, 18.0))
+            .child(
+                div()
+                    .col()
+                    .grow()
+                    .min_w0()
+                    .child(
+                        text(label, 13.0, c(look::WHITE))
+                            .weight(500)
+                            .line_height(19.5)
+                            .truncate()
+                            .silent(),
+                    )
+                    .child(
+                        text(wf::subtitle(n), 11.0, c(look::GRAY_500))
+                            .line_height(16.5)
+                            .truncate()
+                            .silent(),
+                    ),
+            ),
     );
-    let mut fields = serde_json::Map::new();
-    fields.insert("title".into(), sv(n, "label").unwrap_or("").into());
-    fields.insert("subtitle".into(), wf::subtitle(n).into());
-    fields.insert("icon".into(), format!("node:{id}").into());
-    match footer {
-        Some(f) if code => {
-            fields.insert("code".into(), f.into());
+    if let Some(foot) = wf::footer(n) {
+        let mono = matches!(
+            kind,
+            "script" | "condition" | "httpRequest" | "callConnectorAction"
+        );
+        let mut t = text(foot, 11.0, c(look::GRAY_600))
+            .line_height(16.5)
+            .truncate();
+        if mono {
+            t = t.mono();
         }
-        Some(f) => {
-            fields.insert("note".into(), f.into());
-        }
-        None => {}
+        body = body.child(div().mt(8.0).pt(8.0).border_top(1.0, white(0.06)).child(t));
     }
-    let row = Row {
-        id: id.to_owned(),
-        fields,
-    };
-    let bind = CardBind { s, n };
-    tpl::node_view(s.ui, card, Some(&row), &NoRows, &bind, 1)
-}
-
-/// The rows a card draws from: only its own, given it directly.
-struct NoRows;
-
-impl Source for NoRows {
-    fn rows(&self, _collection: &str) -> &[Row] {
-        &[]
-    }
-}
-
-/// A card's bindings: it has no controls; `node:<id>` is the step's own glyph.
-struct CardBind<'a, 'b> {
-    s: &'a Screen<'b>,
-    n: &'a Value,
-}
-
-impl Bind for CardBind<'_, '_> {
-    fn press(&self, slot: u64, _press: Press) -> Id {
-        Id::new("wf-card-press").child(slot)
-    }
-
-    fn field(&self, slot: u64, _row: Option<&str>, _call: &str, _value: &str) -> Id {
-        Id::new("wf-card-field").child(slot)
-    }
-
-    fn confirming(&self, _id: Id) -> Option<(Id, Id)> {
-        None
-    }
-
-    fn menu(&self, slot: u64, _row: Option<&str>) -> Id {
-        Id::new("wf-card-menu").child(slot)
-    }
-
-    fn menu_open(&self, _id: Id) -> bool {
-        false
-    }
-
-    fn icon(&self, name: &str, size: f32) -> Option<El> {
-        name.strip_prefix("node:")
-            .map(|_| super::node_glyph(self.s, self.n, size.max(18.0)))
-    }
+    body
 }
 
 /// `StepNode`: the card (`NodeShell`) with its ports and hover toolbar.

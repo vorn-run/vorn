@@ -330,10 +330,10 @@ fn with_the_editor_off_the_view_says_so_and_run_workflow_is_gone() {
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
     let mut shot = Shot::new();
-    shot.until(&mut app, "the editor's view", |app, _| {
+    shot.until(&mut app, "the editor's menus", |app, _| {
         app.st
             .points
-            .find(wf::EDITOR, vorn_app::points::kind::VIEWS, "workflows")
+            .find(wf::EDITOR, vorn_app::points::kind::MENUS, "run")
             .map(|_| ())
     });
     app.rpc()
@@ -343,21 +343,23 @@ fn with_the_editor_off_the_view_says_so_and_run_workflow_is_gone() {
         )
         .expect("switched off");
     app.st.points.stale = true;
-    shot.until(&mut app, "the view to go", |app, _| {
-        app.st
-            .points
-            .find(wf::EDITOR, vorn_app::points::kind::VIEWS, "workflows")
-            .is_none()
-            .then_some(())
-    });
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    shot.until(&mut app, "the editor off and its menus gone", |app, _| {
+        let off = app
+            .st
+            .points
+            .builtins
+            .iter()
+            .any(|b| b["id"] == wf::EDITOR && b["on"] == Value::Bool(false));
+        let menus = app
+            .st
+            .points
+            .at(vorn_app::points::kind::MENUS)
+            .any(|p| p.extension == wf::EDITOR);
+        (off && !menus).then_some(())
+    });
     shot.frame(&mut app);
     shot.save(&mut app, "x-editor-off");
-    assert!(app
-        .st
-        .points
-        .at(vorn_app::points::kind::MENUS)
-        .all(|p| p.extension != wf::EDITOR));
     app.rpc()
         .call(
             "extension:setBuiltin",

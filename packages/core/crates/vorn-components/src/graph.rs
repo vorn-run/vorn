@@ -1,24 +1,16 @@
 //! A graph drawn by the kit: cards on a canvas joined by edges, under a pan
-//! and zoom, over a dot grid, with zoom controls and a minimap. A template's
-//! `graph` node draws on it ([`view`]): a card per row of one collection,
-//! drawn from the template's card, an edge per row of another, each card
-//! where its row says or in layers when it says nothing. The workflow
-//! editor draws on the same pieces, with its own layout and its own
-//! controls beside the cards.
+//! and zoom, over a dot grid, with zoom controls and a minimap. The workflow
+//! editor draws on these pieces, with its own layout and its own controls
+//! beside the cards.
 //!
 //! What a click, a drag or a wheel does is the client's: the kit gives each
 //! control an [`Id`] and draws what the client's state says.
 
-use std::collections::{BTreeMap, HashMap};
-
-use vorn_view::{Graph, Row};
 use vornui::theme::{color, rgb};
 use vornui::widgets::{tooltip, tooltip_at};
 use vornui::{div, shape, text, Action, Cursor, El, Id, Place, Rgba, Sense};
 
 use vornui::accesskit::Role;
-
-use crate::template::{child_slot, Cx};
 
 /// The farthest a canvas zooms out.
 pub const MIN_ZOOM: f64 = 0.2;
@@ -30,10 +22,6 @@ pub const PLUS: f64 = 22.0;
 pub const CARD_WIDTH: f64 = 280.0;
 /// The minimap's size.
 pub const MINI: (f64, f64) = (96.0, 64.0);
-/// How far apart layers of an unplaced graph sit.
-const LAYER_GAP: f64 = 56.0;
-/// A card's height before it is measured, for an unplaced graph's layers.
-const CARD_GUESS: f64 = 64.0;
 /// An edge this close to vertical is drawn straight.
 const STRAIGHT: f64 = 16.0;
 
@@ -448,196 +436,6 @@ pub fn surface(id: Id, size: (f32, f32), view: Viewport, world: Vec<El>, over: V
     pane
 }
 
-/// The pane of a template's graph of `rows`, which pans on a drag and zooms on a wheel.
-pub fn pane_id(rows: &str) -> Id {
-    Id::new("graph-pane").child(rows)
-}
-
-/// The card of row `row` on a template's graph of `rows`.
-pub fn card_id(rows: &str, row: &str) -> Id {
-    Id::new("graph-card").child(rows).child(row)
-}
-
-/// A zoom control of a template's graph: `in`, `out` or `fit`.
-pub fn control_id(rows: &str, which: &str) -> Id {
-    Id::new("graph-control").child(rows).child(which)
-}
-
-/// The minimap of a template's graph.
-pub fn mini_id(rows: &str) -> Id {
-    Id::new("graph-mini").child(rows)
-}
-
-/// Where each card of an unplaced graph goes: in layers by its longest path
-/// from a card nothing points at, side by side in a layer, in row order.
-pub fn layers(ids: &[&str], edges: &[(&str, &str)]) -> HashMap<String, (f64, f64)> {
-    let mut depth: BTreeMap<&str, usize> = ids.iter().map(|i| (*i, 0)).collect();
-    // Longest path, bounded by the cards, so a cycle cannot spin.
-    for _ in 0..ids.len() {
-        let mut moved = false;
-        for (s, t) in edges {
-            let (Some(&ds), Some(&dt)) = (depth.get(s), depth.get(t)) else {
-                continue;
-            };
-            if dt < ds + 1 && ds + 1 < ids.len().max(1) {
-                depth.insert(t, ds + 1);
-                moved = true;
-            }
-        }
-        if !moved {
-            break;
-        }
-    }
-    let mut out = HashMap::new();
-    let mut across: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
-    for id in ids {
-        across.entry(depth[id]).or_default().push(id);
-    }
-    for (layer, row) in &across {
-        let n = row.len() as f64;
-        for (i, id) in row.iter().enumerate() {
-            let x = (i as f64 - (n - 1.0) / 2.0) * (CARD_WIDTH + LAYER_GAP) - CARD_WIDTH / 2.0;
-            let y = *layer as f64 * (CARD_GUESS + LAYER_GAP);
-            out.insert((*id).to_owned(), (x, y));
-        }
-    }
-    out
-}
-
-/// A template's graph: a card per row of `g.rows`, drawn from its card,
-/// where the row's `x` and `y` put it or in layers; an edge per row of
-/// `g.edges`; the client's pan and zoom.
-pub(crate) fn view(cx: &Cx<'_>, g: &Graph, slot: u64) -> El {
-    let rows = cx.src.rows(&g.rows);
-    let edge_rows = cx.src.rows(&g.edges);
-    if rows.is_empty() {
-        let empty = g
-            .empty
-            .as_ref()
-            .map(|t| t.fill(None, cx.src))
-            .unwrap_or_default();
-        return div().grow().center().child(
-            text(empty, 12.0, color::INK_FAINT)
-                .line_height(18.0)
-                .silent(),
-        );
-    }
-    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-    let edges: Vec<(&str, &str)> = edge_rows
-        .iter()
-        .map(|e| (e.str("source").unwrap_or(""), e.str("target").unwrap_or("")))
-        .collect();
-    let placed = rows
-        .iter()
-        .all(|r| r.num("x").is_some() && r.num("y").is_some());
-    let auto = if placed {
-        HashMap::new()
-    } else {
-        layers(&ids, &edges)
-    };
-    let at = |r: &Row| -> (f64, f64) {
-        match (r.num("x"), r.num("y")) {
-            (Some(x), Some(y)) if placed => (x, y),
-            _ => auto.get(&r.id).copied().unwrap_or_default(),
-        }
-    };
-    let view = cx.bind.graph_view(&g.rows).unwrap_or_default();
-    let card_slot = child_slot(slot, 0);
-    let mut world = Vec::new();
-    let mut boxes: HashMap<&str, (f64, f64, f64, f64)> = HashMap::new();
-    for r in rows {
-        let (x, y) = at(r);
-        let h = cx
-            .ui
-            .rect_of(card_id(&g.rows, &r.id))
-            .map_or(CARD_GUESS, |b| f64::from(b.h) / view.zoom.max(MIN_ZOOM));
-        boxes.insert(r.id.as_str(), (x, y, CARD_WIDTH, h));
-    }
-    for e in edge_rows {
-        let (Some(s), Some(t)) = (e.str("source"), e.str("target")) else {
-            continue;
-        };
-        let (Some(a), Some(b)) = (boxes.get(s), boxes.get(t)) else {
-            continue;
-        };
-        let from = (a.0 + a.2 / 2.0, a.1 + a.3);
-        let to = (b.0 + b.2 / 2.0, b.1);
-        if let Some(line) = edge(from, to) {
-            world.push(line);
-        }
-        if let Some(label) = e.str("label").filter(|l| !l.is_empty()) {
-            let (_, mid) = edge_curve(from, to);
-            world.push(
-                div()
-                    .absolute(f(mid.0) - 30.0, f(mid.1) - 11.0)
-                    .w(60.0)
-                    .row()
-                    .justify_center()
-                    .child(edge_label(label)),
-            );
-        }
-    }
-    for r in rows {
-        let (x, y) = at(r);
-        let id = cx.bind.card(&g.rows, &r.id, g.open.as_deref());
-        let content = cx.node(&g.card, Some(r), card_slot).unwrap_or_else(div);
-        let label = g
-            .label
-            .as_ref()
-            .map(|t| t.fill(Some(r), cx.src))
-            .unwrap_or_else(|| r.id.clone());
-        let look = CardLook {
-            selected: cx.bind.selected(&g.rows, &r.id),
-            failed: false,
-            hover: cx.ui.hover(id),
-        };
-        world.push(
-            div()
-                .absolute(f(x), f(y))
-                .child(card(id, &label, look, content).sense(Sense::MOVE)),
-        );
-    }
-    let cards: Vec<(f64, f64, f64, f64)> = boxes.values().copied().collect();
-    let size = cx
-        .ui
-        .rect_of(pane_id(&g.rows))
-        .map_or((800.0, 500.0), |r| (r.w, r.h));
-    let controls_el = controls(
-        cx.ui,
-        &[
-            Control {
-                id: control_id(&g.rows, "in"),
-                icon: "plus",
-                label: "Zoom in",
-                hot: cx.ui.hover(control_id(&g.rows, "in")),
-            },
-            Control {
-                id: control_id(&g.rows, "out"),
-                icon: "minus",
-                label: "Zoom out",
-                hot: cx.ui.hover(control_id(&g.rows, "out")),
-            },
-            Control {
-                id: control_id(&g.rows, "fit"),
-                icon: "maximize",
-                label: "Fit",
-                hot: cx.ui.hover(control_id(&g.rows, "fit")),
-            },
-        ],
-        size.1,
-    );
-    let m = minimap(&cards, view, (f64::from(size.0), f64::from(size.1)));
-    surface(
-        pane_id(&g.rows),
-        size,
-        view,
-        world,
-        vec![controls_el, minimap_view(mini_id(&g.rows), &m, size.1)],
-    )
-    .w_full()
-    .min_h(240.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,21 +455,6 @@ mod tests {
             visible(Viewport::default(), (400.0, 300.0), 10.0),
             (-10.0, -10.0, 410.0, 310.0)
         );
-    }
-
-    #[test]
-    fn an_unplaced_graph_goes_in_layers_by_its_longest_path() {
-        let at = layers(
-            &["a", "b", "c", "d"],
-            &[("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")],
-        );
-        assert_eq!(at["a"].1, 0.0);
-        assert_eq!(at["b"].1, at["c"].1);
-        assert!(at["d"].1 > at["b"].1);
-        assert!(at["b"].0 < at["c"].0, "side by side, in row order");
-        // A cycle does not spin.
-        let looped = layers(&["x", "y"], &[("x", "y"), ("y", "x")]);
-        assert_eq!(looped.len(), 2);
     }
 
     #[test]

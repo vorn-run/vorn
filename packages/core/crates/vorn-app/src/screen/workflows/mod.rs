@@ -298,21 +298,12 @@ fn dot_status(run: &Value) -> &str {
     }
 }
 
-/// The view under the top bar: the run list and the selected run.
-/// The Workflow editor's view, while it is on and its template checks.
-pub fn editor_point<'a>(s: &Screen<'a>) -> Option<&'a crate::points::Point> {
-    s.st.points
-        .find(crate::workflows::EDITOR, crate::points::kind::VIEWS, "workflows")
-        .filter(|p| matches!(&p.template, Ok(Some(t)) if matches!(t.view.kind, vorn_view::Kind::Graph(_))))
-}
-
 /// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
 pub fn is_off(s: &Screen<'_>) -> bool {
-    editor_point(s).is_none()
-        && s.st.points.builtins.iter().any(|b| {
-            b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
-                && b.get("on") == Some(&Value::Bool(false))
-        })
+    s.st.points.builtins.iter().any(|b| {
+        b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
+            && b.get("on") == Some(&Value::Bool(false))
+    })
 }
 
 /// What the view says while the Workflow editor is switched off: the
@@ -344,6 +335,7 @@ pub fn off() -> El {
         )
 }
 
+/// The view under the top bar: the run list and the selected run.
 pub fn landing(s: &Screen<'_>) -> El {
     let visible = s.st.wf.visible(&s.store.runs);
     let current = s.st.wf.current(&visible);

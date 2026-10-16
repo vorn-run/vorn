@@ -62,16 +62,6 @@ pub trait Bind {
         let _ = rows;
         None
     }
-    /// The pan and zoom a template's graph of `rows` is drawn at; `None` at 100% from the origin.
-    fn graph_view(&self, rows: &str) -> Option<crate::graph::Viewport> {
-        let _ = rows;
-        None
-    }
-    /// Whether row `row`'s card on a graph of `rows` is the chosen one.
-    fn selected(&self, rows: &str, row: &str) -> bool {
-        let _ = (rows, row);
-        false
-    }
     /// An icon the client draws for a name not in the kit's set, as
     /// `agent:<key>` for an agent's mark; `None` draws the kit's.
     fn icon(&self, name: &str, size: f32) -> Option<El> {
@@ -154,28 +144,6 @@ fn column() -> El {
     div().col().gap(6.0).min_w0()
 }
 
-/// Node `n` of a template drawn alone, with `row` in scope: a graph's card
-/// in a client that lays the graph out itself. `slot` tells its controls
-/// apart from the rest of the template's.
-pub fn node_view(
-    ui: &Ui,
-    n: &Node,
-    row: Option<&Row>,
-    src: &dyn Source,
-    bind: &dyn Bind,
-    slot: u64,
-) -> El {
-    let cx = Cx {
-        ui,
-        src,
-        bind,
-        column: None,
-        soft: false,
-        reveal: None,
-    };
-    cx.node(n, row, slot).unwrap_or_else(div)
-}
-
 /// The box drawn in place of a template with errors: which place, and each error with its line.
 pub fn invalid(place: &str, errors: &[String]) -> El {
     let mut b = div()
@@ -245,7 +213,6 @@ pub fn slots(t: &Template) -> Vec<u64> {
                     out.push(child_slot(slot, i + 1));
                 }
             }
-            Kind::Graph(g) => walk(&g.card, child_slot(slot, 0), out),
             Kind::Choice { .. } => {
                 for i in 0..vorn_view::MAX_LIST {
                     out.push(child_slot(slot, i));
@@ -465,7 +432,6 @@ impl Cx<'_> {
             }
             Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
             Kind::Board(b) => crate::board::view(self, b, slot),
-            Kind::Graph(g) => crate::graph::view(self, g, slot),
         })
     }
 

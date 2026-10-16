@@ -8,12 +8,6 @@ description = "The Workflows view: its runs and the editor, where each step is a
 [declares]
 uses = ["workflows.read", "workflows.write"]
 
-[[contributes.views]]
-id = "workflows"
-title = "Workflows"
-icon = "workflow"
-view = "views/workflows.kdl"
-
 [[contributes.menus]]
 id = "run"
 title = "Run workflow"

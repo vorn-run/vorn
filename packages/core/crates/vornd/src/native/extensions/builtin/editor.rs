@@ -1,5 +1,5 @@
-//! The Workflow editor built-in: the Workflows view (its template draws the
-//! workflow being edited on the kit's graph), Run workflow in the grid's, a
+//! The Workflow editor built-in: the Workflows view (the client draws it,
+//! on the kit's graph, while this is on), Run workflow in the grid's, a
 //! card's and a terminal's menus (`[[contributes.menus]]` with the rows of
 //! the workflows each offers), and the approval gates waiting for a person
 //! (`[[contributes.attention]]`), which the waiting pill counts and the
@@ -359,7 +359,7 @@ impl Builtin for Entry {
     }
 
     fn views(&self) -> &[(&'static str, &'static str)] {
-        &[("views/workflows.kdl", include_str!("views/workflows.kdl"))]
+        &[]
     }
 
     fn events(&self) -> &'static [&'static str] {
