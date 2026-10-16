@@ -2335,6 +2335,11 @@ impl App {
                 let Some(r) = self.st.recent.get(i).cloned() else {
                     return;
                 };
+                // Running already: show its card instead of starting a second agent.
+                if let Some(id) = r.running_in {
+                    self.go_to(id);
+                    return;
+                }
                 let name = self
                     .store
                     .projects

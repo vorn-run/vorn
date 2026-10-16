@@ -328,9 +328,27 @@ fn recent_sessions(native: &Native, params: &Value) -> Answer {
         scope.as_ref(),
         history::DEFAULT_LIMIT,
     );
-    Answer::Result(Value::Array(
-        list.iter().map(history::RecentSession::to_json).collect(),
-    ))
+    Answer::Result(Value::Array(with_running(&list, |id| {
+        super::sessions::running_terminal(native, id)
+    })))
+}
+
+/// The recent sessions as JSON, each with `runningIn`, the terminal writing
+/// it, when `running` names one: a conversation a terminal is writing is
+/// running, not past, and resuming it shows that terminal.
+fn with_running(
+    list: &[history::RecentSession],
+    running: impl Fn(&str) -> Option<String>,
+) -> Vec<Value> {
+    list.iter()
+        .map(|r| {
+            let mut json = r.to_json();
+            if let Some(id) = running(&r.session_id) {
+                json["runningIn"] = Value::String(id);
+            }
+            json
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -344,6 +362,27 @@ mod tests {
             commands: commands.as_object().cloned().unwrap_or_default(),
             ..AgentSettings::default()
         }
+    }
+
+    #[test]
+    fn a_conversation_a_terminal_writes_is_marked_running() {
+        let recent = |id: &str| history::RecentSession {
+            session_id: id.to_owned(),
+            agent: crate::adapters::testing::adapters()
+                .agents()
+                .get("acme")
+                .unwrap()
+                .clone(),
+            display: id.to_owned(),
+            project_path: "/p".into(),
+            timestamp: 1.0,
+            activity_count: 1.0,
+        };
+        let listed = with_running(&[recent("live"), recent("past")], |id| {
+            (id == "live").then(|| "term-1".to_owned())
+        });
+        assert_eq!(listed[0]["runningIn"], "term-1");
+        assert!(listed[1].get("runningIn").is_none());
     }
 
     #[test]

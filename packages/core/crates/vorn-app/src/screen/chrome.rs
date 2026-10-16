@@ -615,7 +615,13 @@ pub(super) fn recent_panel(s: &Screen<'_>) -> El {
             time_ago(r.timestamp, now),
             r.activity_text()
         );
-        let side = if r.can_resume {
+        let side = if r.running_in.is_some() {
+            Some(
+                text("running", 10.0, c(look::GREEN_400))
+                    .line_height(14.0)
+                    .silent(),
+            )
+        } else if r.can_resume {
             (hot > 0.5).then(|| {
                 text("resume", 10.0, c(look::GRAY_400))
                     .line_height(14.0)
