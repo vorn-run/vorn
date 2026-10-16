@@ -246,17 +246,20 @@ impl Work {
         };
         for (id, path) in gone {
             info!(file = %path.display(), workflow = %id, "a workflow's file is gone; so is the workflow");
+            {
+                let mut s = self.files.lock();
+                s.by_id.remove(&id);
+                s.stamps.remove(&path);
+                s.errors.remove(&path);
+                s.base.remove(&path);
+                self.files.keep(&s);
+            }
             let w = id.clone();
             self.db
                 .run(move |s| {
                     let _ = s.call("dbDeleteWorkflow", json!([w]));
                 })
                 .await;
-            let mut s = self.files.lock();
-            s.by_id.remove(&id);
-            s.stamps.remove(&path);
-            s.errors.remove(&path);
-            self.files.keep(&s);
             any = true;
         }
         if any {
