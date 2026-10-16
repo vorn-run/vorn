@@ -81,6 +81,11 @@ jobs:
           VORN_SHOT_DIR: ${{ runner.temp }}/renders
         run: swift test -c release -Xswiftc -enable-testing --skip-build
 
+      # Every vornd, session holder and terminal the Swift tests started has ended with them.
+      - name: No processes left behind
+        if: ${{ !cancelled() }}
+        run: node scripts/check-leftover-processes.mjs --wait 15 "$TMPDIR" "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+
       - name: Offscreen renders
         run: apps/macos/scripts/render-all.sh "$RUNNER_TEMP/renders"
 

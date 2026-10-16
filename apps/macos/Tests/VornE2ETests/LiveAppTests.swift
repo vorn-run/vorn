@@ -155,9 +155,49 @@ struct TestVornd {
         return name
     }
 
+    /// Ends vornd and the session holder it started, with every program the holder runs.
     func stop() {
+        let holders = sessionHolders()
         process.terminate()
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning && Date() < deadline { usleep(20_000) }
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         process.waitUntilExit()
+        // The holder outlives vornd by design. Told to end with this run, SIGTERM ends its programs too.
+        for pid in holders { kill(pid, SIGTERM) }
+        let ended = Date().addingTimeInterval(5)
+        while holders.contains(where: { isAlive($0) }) && Date() < ended { usleep(20_000) }
+        for pid in holders where isAlive(pid) { kill(pid, SIGKILL) }
         try? FileManager.default.removeItem(at: root)
+    }
+
+    /// The pids announced under the data directory that still run a vorn-sessiond of this root: a
+    /// pid left by a crash may belong to something else by now, and that is never touched.
+    private func sessionHolders() -> [pid_t] {
+        let run = dataDir.appendingPathComponent("run")
+        let files = (try? FileManager.default.contentsOfDirectory(at: run, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "info" }.compactMap { file in
+            guard let text = try? String(contentsOf: file, encoding: .utf8),
+                  let line = text.split(separator: "\n").first(where: { $0.hasPrefix("pid=") }),
+                  let pid = pid_t(line.dropFirst(4)),
+                  commandLine(of: pid)?.contains(root.path) == true
+            else { return nil }
+            return pid
+        }
+    }
+
+    private func isAlive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 }
+
+    private func commandLine(of pid: pid_t) -> String? {
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-ww", "-o", "command=", "-p", "\(pid)"]
+        let out = Pipe()
+        ps.standardOutput = out
+        ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
     }
 }

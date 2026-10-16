@@ -50,6 +50,12 @@ jobs:
           mkdir -p shots
           VORN_APP_SHOT="$PWD/shots/windows" cargo test --profile ci --locked -p vorn-app
 
+      # Every vornd, session holder and terminal the tests started has ended with them.
+      - name: No processes left behind
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: node scripts/check-leftover-processes.mjs --wait 15 "$RUNNER_TEMP" "$TEMP" "$GITHUB_WORKSPACE"
+
       - uses: actions/upload-artifact@v7
         if: always()
         with:

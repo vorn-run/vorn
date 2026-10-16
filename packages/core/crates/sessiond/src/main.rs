@@ -14,6 +14,7 @@
 //!
 //! It ends every session and stops when its home is removed, or when the
 //! process `VORN_EXIT_WITH` names ends (a test run's, so it leaves none behind).
+//! With `VORN_EXIT_WITH` set, SIGTERM ends its sessions too.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -76,7 +77,9 @@ fn main() {
         idle_exit: Duration::from_secs(idle),
         spool_cap: 512 << 20,
     });
-    if let Some(pid) = vorn_spawn::watch::exit_with() {
+    // One tied to a test run is stopped by the test with SIGTERM, and a stop leaves nothing of it running.
+    let tied = vorn_spawn::watch::exit_with();
+    if let Some(pid) = tied {
         let d = std::sync::Arc::clone(&d);
         vorn_spawn::watch::on_exit(pid, move || d.end());
     }
@@ -99,7 +102,11 @@ fn main() {
         let stopper = std::sync::Arc::clone(&d);
         tokio::spawn(async move {
             terminated().await;
-            stopper.shut_down();
+            if tied.is_some() {
+                stopper.end();
+            } else {
+                stopper.shut_down();
+            }
         });
         server::serve(d, listener).await
     });
