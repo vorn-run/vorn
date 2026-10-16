@@ -50,12 +50,14 @@
 //! workflow's changes into an existing file, keeping the comments and
 //! layout of whatever did not change.
 
+mod meet;
 mod merge;
 mod read;
 mod write;
 
 use std::fmt;
 
+pub use meet::meet;
 pub use merge::update;
 pub use read::{outline, read, Outlined, Read};
 pub use write::write;

@@ -135,6 +135,25 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect((await workflow('file-review'))!.name).toBe('File review, renamed')
     })
 
+    it('lets an edit in the editor and an edit of the file meet without loss', async () => {
+      const file = path.join(folder, 'review.kdl')
+      const text = fs.readFileSync(file, 'utf-8')
+      // The file is edited by hand, and before vornd has read it the editor renames the workflow.
+      fs.writeFileSync(file, text.replace('echo edited', 'echo by hand'))
+      await client.result('workflow:update', {
+        id: 'file-review',
+        updates: { name: 'Renamed in the editor' }
+      })
+      await until('both edits to be in the workflow', async () => {
+        const wf = JSON.stringify(await workflow('file-review'))
+        return wf.includes('echo by hand') && wf.includes('Renamed in the editor')
+      })
+      const now = fs.readFileSync(file, 'utf-8')
+      expect(now).toContain('echo by hand')
+      expect(now).toContain('workflow "Renamed in the editor" {')
+      expect(now).toContain('// The check itself.')
+    })
+
     it('saves a workflow made in Vorn to a file in one call', async () => {
       const made = {
         id: 'made-here',

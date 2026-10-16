@@ -38,6 +38,9 @@ struct State {
     errors: BTreeMap<PathBuf, Vec<String>>,
     /// Extension workflows added once, as `extension/id`.
     seeded: BTreeSet<String>,
+    /// Each file's workflow as last read or written: what an edit of the
+    /// file and an edit in the editor made apart both started from.
+    base: HashMap<PathBuf, Value>,
 }
 
 /// The workflow files vornd knows.
@@ -320,15 +323,43 @@ impl Work {
             }
             return false;
         }
-        let stored = wf.clone();
+        // An edit in the editor not yet in the file meets the file's edit.
+        let base = self.files.lock().base.get(file).cloned();
+        let theirs = vorn_work::js_numbers(wf);
+        let met = match base {
+            Some(base) => {
+                let w = id.clone();
+                let ours = self
+                    .db
+                    .run(move |s| s.call("dbGetWorkflow", json!([w])).ok())
+                    .await
+                    .flatten()
+                    .filter(Value::is_object)
+                    .map(as_file);
+                match ours {
+                    Some(ours) if ours != base => vorn_workflow_file::meet(&base, &ours, &theirs),
+                    _ => theirs.clone(),
+                }
+            }
+            None => theirs.clone(),
+        };
+        let stored = met.clone();
         let changed = self
             .db
             .run(move |s| upsert(s, &stored))
             .await
             .flatten()
             .unwrap_or(false);
+        let mut at = at;
+        if met != theirs {
+            let text = vorn_workflow_file::update(&text, &met, &bindings);
+            if std::fs::write(file, text).is_ok() {
+                at = stamp(file);
+            }
+        }
         let mut s = self.files.lock();
         s.by_id.insert(id.clone(), file.to_owned());
+        s.base.insert(file.to_owned(), met);
         if let Some(at) = at {
             s.stamps.insert(file.to_owned(), at);
         }
@@ -366,18 +397,39 @@ impl Work {
             project: project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
         };
         let old = std::fs::read_to_string(&file).unwrap_or_default();
-        let text = vorn_workflow_file::update(&old, &as_file(row), &bindings);
-        if text == old {
-            return;
+        let ours = as_file(row);
+        // The file changed since it was last read: both edits meet.
+        let (known, base) = {
+            let s = self.files.lock();
+            (s.stamps.get(&file).copied(), s.base.get(&file).cloned())
+        };
+        let mut next = ours.clone();
+        if known != stamp(&file) {
+            if let (Some(base), Ok(theirs)) = (base, vorn_workflow_file::read(&old, &bindings)) {
+                let mut theirs = vorn_work::js_numbers(theirs.workflow);
+                if theirs.get("id").is_none() {
+                    theirs["id"] = json!(id);
+                }
+                next = vorn_workflow_file::meet(&base, &ours, &theirs);
+                if next != ours {
+                    let stored = next.clone();
+                    self.db.run(move |s| upsert(s, &stored)).await;
+                    self.workflows_changed();
+                }
+            }
         }
-        if let Err(err) = std::fs::write(&file, &text) {
-            warn!(%err, file = %file.display(), "could not write a workflow back to its file");
-            return;
+        let text = vorn_workflow_file::update(&old, &next, &bindings);
+        if text != old {
+            if let Err(err) = std::fs::write(&file, &text) {
+                warn!(%err, file = %file.display(), "could not write a workflow back to its file");
+                return;
+            }
         }
         let mut s = self.files.lock();
         if let Some(at) = stamp(&file) {
-            s.stamps.insert(file, at);
+            s.stamps.insert(file.clone(), at);
         }
+        s.base.insert(file, next);
     }
 
     /// Removes the file of workflow `id`, as the workflow was deleted.
@@ -435,6 +487,13 @@ impl Work {
         s.by_id.insert(id.to_owned(), file.clone());
         if let Some(at) = stamp(&file) {
             s.stamps.insert(file.clone(), at);
+        }
+        if let Ok(read) = vorn_workflow_file::read(
+            &std::fs::read_to_string(&file).unwrap_or_default(),
+            &bindings,
+        ) {
+            s.base
+                .insert(file.clone(), vorn_work::js_numbers(read.workflow));
         }
         self.files.keep(&s);
         info!(file = %file.display(), workflow = %id, "a workflow was saved to a file");
