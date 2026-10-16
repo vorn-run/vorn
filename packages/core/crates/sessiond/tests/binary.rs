@@ -483,6 +483,46 @@ async fn it_ends_its_sessions_with_the_process_it_ends_with() {
     );
 }
 
+/// Stopping a test's sessiond with SIGTERM ends its sessions too, so a test
+/// that stops its holder leaves no program running.
+#[cfg(unix)]
+#[tokio::test]
+async fn sigterm_ends_the_sessions_of_one_tied_to_a_test_run() {
+    let home = tempfile::tempdir().unwrap();
+    let mut run = vorn_spawn::command(LONG[0])
+        .args(&LONG[1..])
+        .spawn()
+        .expect("a stand-in test run");
+    let mut d = Direct::start(
+        home.path(),
+        &[(vorn_spawn::watch::EXIT_WITH, run.id().to_string())],
+    );
+    let mut v = V::hello(&d.i).await;
+    // Its own process group, and ignoring the hangup its terminal closing sends.
+    let ToVornd::Spawned(s) = v
+        .spawn(
+            &["sh", "-c", "trap '' HUP; sleep 100"],
+            Io::Pty { cols: 80, rows: 24 },
+        )
+        .await
+    else {
+        panic!("spawn failed");
+    };
+    assert!(launch::alive(s.pid));
+    // SAFETY: kill(2) on the sessiond this test started.
+    assert_eq!(
+        unsafe { libc::kill(d.i.pid as libc::pid_t, libc::SIGTERM) },
+        0
+    );
+    assert!(d.ended_within(Duration::from_secs(5)), "sessiond ended");
+    assert!(
+        gone_within(s.pid, Duration::from_secs(5)),
+        "its session ended"
+    );
+    run.kill().unwrap();
+    run.wait().unwrap();
+}
+
 /// A sessiond whose home is removed, as a test's temporary one is, ends its
 /// sessions and stops.
 #[cfg(unix)]
