@@ -73,6 +73,8 @@ pub struct Phone {
     /// Whether the keyboard should be up: a field or the terminal was tapped.
     pub typing: bool,
     pub dirty: bool,
+    /// What the native screens remember.
+    pub view: crate::pages::View,
 }
 
 impl Phone {
@@ -96,6 +98,7 @@ impl Phone {
             fling: None,
             typing: false,
             dirty: true,
+            view: crate::pages::View::new(),
         }
     }
 

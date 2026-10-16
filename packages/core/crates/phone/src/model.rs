@@ -38,8 +38,8 @@ pub enum For {
     Fetch(String),
     /// A new session, opened once it exists.
     Launch,
-    /// A manual run of a workflow, by id.
-    Run(String),
+    /// A manual run of a workflow, by id; `true` goes back once it starts.
+    Run(String, bool),
     /// A gate's answer, by `run|node`; `true` goes back once it is taken.
     Gate(String, bool),
     /// An answer nothing waits on; a failure shows as the screen's error.
@@ -117,7 +117,9 @@ impl Model {
     /// Calls `method`; its answer is folded in by [`Model::pump`] for `what`.
     pub fn call(&self, what: For, method: &str, params: Value) {
         let Some(rpc) = &self.rpc else { return };
-        self.calls.borrow_mut().push((what, rpc.request(method, params)));
+        self.calls
+            .borrow_mut()
+            .push((what, rpc.request(method, params)));
     }
 
     /// `method`'s answer, asked once and kept until [`Model::refetch`].
@@ -129,7 +131,9 @@ impl Model {
         if self.rpc.is_none() {
             return Fetched::Loading;
         }
-        self.fetched.borrow_mut().insert(key.clone(), Fetched::Loading);
+        self.fetched
+            .borrow_mut()
+            .insert(key.clone(), Fetched::Loading);
         self.call(For::Fetch(key), method, params);
         Fetched::Loading
     }
@@ -171,9 +175,11 @@ impl Model {
                     self.go = Some(format!("replace:session:{id}"));
                 }
             }
-            (For::Run(wf), Ok(_)) => {
+            (For::Run(wf, back), Ok(_)) => {
                 self.busy.remove(&format!("run:{wf}"));
-                self.go = Some("back".into());
+                if back {
+                    self.go = Some("back".into());
+                }
             }
             (For::Gate(key, back), Ok(_)) => {
                 self.busy.remove(&format!("gate:{key}"));
@@ -185,7 +191,7 @@ impl Model {
             (what, Err(e)) => {
                 let key = match what {
                     For::Launch => "launch".to_owned(),
-                    For::Run(wf) => format!("run:{wf}"),
+                    For::Run(wf, _) => format!("run:{wf}"),
                     For::Gate(key, _) => format!("gate:{key}"),
                     _ => "quiet".to_owned(),
                 };

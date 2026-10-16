@@ -294,7 +294,7 @@ fn session_row(p: &Phone, ui: &Ui, s: &Session) -> El {
         .child(lucide("chevron-right", 16.0, 2.0, INK_FAINT).sem(Sem::Hidden))
 }
 
-fn tone(s: Status) -> &'static str {
+pub(crate) fn tone(s: Status) -> &'static str {
     match s {
         Status::Running => "busy",
         Status::Waiting => "warn",

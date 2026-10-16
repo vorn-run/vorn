@@ -6721,9 +6721,11 @@ dependencies = [
 name = "vorn-phone"
 version = "0.8.0-beta.12"
 dependencies = [
+ "serde",
  "serde_json",
  "vorn-app",
  "vorn-components",
+ "vorn-protocol",
  "vorn-view",
  "vornui",
  "web-time",

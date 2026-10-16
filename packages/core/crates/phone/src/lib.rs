@@ -2,6 +2,7 @@
 
 pub mod ffi;
 pub mod model;
+pub mod pages;
 pub mod phone;
 pub mod screens;
 

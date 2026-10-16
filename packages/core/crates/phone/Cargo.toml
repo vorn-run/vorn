@@ -14,8 +14,10 @@ crate-type = ["staticlib", "rlib"]
 vornui = { path = "../vornui" }
 vorn-components = { path = "../vorn-components" }
 vorn-app = { path = "../vorn-app", default-features = false }
+vorn-protocol = { path = "../protocol" }
 serde_json = "1"
 web-time = "1"
 
 [dev-dependencies]
+serde = "1"
 vorn-view = { path = "../view", features = ["kdl"] }

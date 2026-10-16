@@ -12,8 +12,8 @@ use vornui::{Id, Ui};
 use web_time::Instant;
 
 use crate::model::{Model, Target};
+use crate::pages;
 use crate::phone::{Insets, Phone};
-use crate::screens;
 
 /// What the host is told when vornd sends something: call `vp_frame` or pull trees again.
 pub type WakeFn = extern "C" fn(ctx: *mut c_void);
@@ -114,7 +114,7 @@ impl Handle {
             .entry(screen.to_owned())
             .or_insert_with(|| Ui::native(&crate::config(scale)));
         self.phone.model.pump();
-        let el = screens::native(&self.phone, ui, screen);
+        let el = pages::screen(&mut self.phone, ui, screen);
         ui.begin(vornui::Rgba::TRANSPARENT);
         ui.layout(el, (w, h));
         let mut out = Native::default();
@@ -123,25 +123,41 @@ impl Handle {
     }
 
     fn act(&mut self, screen: &str, a: &Value) {
+        if a["refresh"].as_bool() == Some(true) {
+            self.phone.model.refetch();
+            return;
+        }
         let Some(id) = a["id"].as_str().and_then(|s| s.parse().ok()).map(Id) else {
             return;
         };
-        // The template's bindings are the last screen read's; this screen's first.
+        // Bindings are the last screen read's; this screen's first.
         let _ = self.tree(screen);
+        let submit = a["submit"].as_bool() == Some(true);
+        let value = a["value"].as_str();
+        if let Some(v) = value {
+            if let Some(ui) = self.natives.get_mut(screen) {
+                ui.set_edit_text(id, v);
+            }
+            if !submit {
+                return;
+            }
+        }
+        if let Some(d) = self.phone.view.act(id) {
+            if let Some(ui) = self.natives.get_mut(screen) {
+                pages::run(&mut self.phone, ui, d);
+            }
+            return;
+        }
+        if value.is_some() {
+            if let Some(ui) = self.natives.get_mut(screen) {
+                self.phone.model.submit(ui, id);
+            }
+            return;
+        }
         if a["confirmed"].as_bool() == Some(true) {
             self.phone.model.points.asking = Some(id.0);
             let _ = self.tree(screen);
             self.phone.model.click(id.child("ok"));
-            return;
-        }
-        if let Some(v) = a["value"].as_str() {
-            let Some(ui) = self.natives.get_mut(screen) else {
-                return;
-            };
-            ui.set_edit_text(id, v);
-            if a["submit"].as_bool() == Some(true) {
-                self.phone.model.submit(ui, id);
-            }
             return;
         }
         self.phone.model.click(id);
@@ -387,7 +403,7 @@ pub extern "C" fn vp_native_tree(h: *mut Handle, screen: *const c_char) -> *mut 
     with(h, |h| str_out(h.tree(str_in(screen))))
 }
 
-/// A native control acted on `screen`: `{"id", "value"?, "submit"?, "confirmed"?}`.
+/// A native control acted on `screen`: `{"id", "value"?, "submit"?, "confirmed"?}`, or `{"refresh": true}`.
 #[no_mangle]
 pub extern "C" fn vp_native_action(h: *mut Handle, screen: *const c_char, action: *const c_char) {
     with(h, |h| {
@@ -395,6 +411,18 @@ pub extern "C" fn vp_native_action(h: *mut Handle, screen: *const c_char, action
             h.act(str_in(screen), &a);
         }
     });
+}
+
+/// Where the host goes next, once: a route, `replace:<route>` or `back`; null when nowhere.
+#[no_mangle]
+pub extern "C" fn vp_take_go(h: *mut Handle) -> *mut c_char {
+    with(h, |h| {
+        h.phone
+            .model
+            .go
+            .take()
+            .map_or(std::ptr::null_mut(), str_out)
+    })
 }
 
 /// How the app has run: first frame, frame times, keystroke latency, as JSON.
