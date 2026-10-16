@@ -5,7 +5,9 @@
 //! nothing and contributes nothing.
 
 pub mod agents;
+pub mod artifacts;
 pub mod connectors;
+pub mod editor;
 pub mod tasks;
 pub mod widget;
 pub mod workflows;
@@ -36,6 +38,7 @@ pub const SHIPPED: &[&str] = &[
     vorn_connectors::builtin::ID,
     vorn_tasks::ID,
     vorn_workflows::ID,
+    editor::ID,
 ];
 
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
@@ -149,6 +152,7 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
         Arc::new(worktrees::Cleanup::default()),
         Arc::new(widget::Widget),
         Arc::new(workflows::Workflows),
+        Arc::new(artifacts::Artifacts),
     ];
     all.extend(started);
     all

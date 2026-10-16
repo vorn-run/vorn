@@ -21,7 +21,7 @@ pub const SCHEMA: &str = "vorn:view@1";
 /// The node kinds, for the error that lists them.
 pub const NODES: &[&str] = &[
     "column", "row", "section", "text", "icon", "status", "badge", "button", "toggle", "field",
-    "choice", "list", "divider", "more", "board", "entry", "toolbar", "notice",
+    "choice", "list", "divider", "more", "board", "entry", "toolbar", "notice", "graph",
 ];
 
 /// The name of a template's first row collection, whatever it is called.
@@ -204,6 +204,33 @@ pub enum Kind {
     /// enum field `by`, in the order published; the client windows the
     /// cards, drags them between columns and opens them.
     Board(Box<Board>),
+    /// The rows of `rows` as cards on a canvas, joined by the rows of
+    /// `edges`; the client pans, zooms and drags it, and places cards where
+    /// their rows say or in layers when they say nothing.
+    Graph(Box<Graph>),
+}
+
+/// A graph: its cards' collection, its edges' collection and its card.
+///
+/// A card's row may hold `x` and `y`, where it sits, and `parent`, the card
+/// it is drawn inside (a group whose row says `frame`). An edge's row holds
+/// `source` and `target`, card ids, and may hold a `label`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graph {
+    pub rows: String,
+    pub edges: String,
+    /// One card per row, with `{row.*}` in scope.
+    pub card: Node,
+    /// Called with the row's id when a card is clicked.
+    pub open: Option<String>,
+    /// Called with `{ id, x, y }` when a card is dropped somewhere else.
+    pub moved: Option<String>,
+    /// Called with `{ source, target }` when a person draws an edge.
+    pub connect: Option<String>,
+    /// Shown when there are no cards.
+    pub empty: Option<Text>,
+    /// What a screen reader says a card is.
+    pub label: Option<Text>,
 }
 
 /// How a list groups its rows: one group per value of `by`, in the order
@@ -344,6 +371,11 @@ impl Row {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         Some(Row { id, fields })
+    }
+
+    /// A number field, as a graph's `x` and `y` are.
+    pub fn num(&self, field: &str) -> Option<f64> {
+        self.fields.get(field).and_then(Value::as_f64)
     }
 
     /// A string field as it is held, without a copy; `None` for any other.
@@ -574,6 +606,9 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
         "board" => &[
             "rows", "by", "columns", "card", "move", "open", "add", "empty", "dim", "label", "when",
         ],
+        "graph" => &[
+            "rows", "edges", "card", "move", "open", "connect", "empty", "label", "when",
+        ],
         _ => &["when"],
     }
 }
@@ -588,6 +623,7 @@ fn required_of(kind: &str) -> &'static [&'static str] {
         "choice" => &["rows", "label", "call"],
         "list" => &["item"],
         "board" => &["rows", "by", "columns", "card"],
+        "graph" => &["rows", "edges", "card"],
         _ => &[],
     }
 }
@@ -1083,6 +1119,7 @@ impl Parser {
                     .get("tone")
                     .and_then(|t| self.tone(t, &format!("{path}.tone"))),
             },
+            "graph" => Kind::Graph(Box::new(self.graph(body, &path, scope)?)),
             _ => Kind::Divider,
         };
         Some(Node { kind, when })
@@ -1253,6 +1290,72 @@ impl Parser {
             .get("aside")
             .and_then(|v| self.text(v, &format!("{path}.aside"), inner));
         Some(Box::new(Group { by, heading, aside }))
+    }
+
+    /// A graph: a collection of cards, one of edges and a card; never
+    /// inside a list's item, a card or another graph.
+    fn graph(&mut self, body: &Map<String, Value>, path: &str, scope: Scope<'_>) -> Option<Graph> {
+        if scope.in_item || scope.card {
+            self.err(
+                path,
+                "a graph draws whole collections; it cannot sit in an item or a card",
+            );
+        }
+        let collection = |p: &mut Self, key: &str, what: &str| match body.get(key) {
+            Some(Value::String(c)) => p.collection(c, &format!("{path}.{key}")),
+            _ => {
+                p.err(
+                    &format!("{path}.{key}"),
+                    format!("a graph names the collection its {what} are"),
+                );
+                None
+            }
+        };
+        let rows = collection(self, "rows", "cards")?;
+        let edges = collection(self, "edges", "edges")?;
+        for field in ["source", "target"] {
+            if !matches!(
+                self.field_type(Some(&edges), field),
+                Some(FieldType::String)
+            ) {
+                self.err(
+                    &format!("{path}.edges"),
+                    format!("'{edges}' holds an edge per row, so it has a string field '{field}'"),
+                );
+            }
+        }
+        let inner = Scope {
+            row: Some(&rows),
+            in_item: true,
+            nested: false,
+            card: true,
+        };
+        let card = self.node(body.get("card")?, &format!("{path}.card"), inner)?;
+        let method = |p: &mut Self, key: &str| {
+            body.get(key)
+                .and_then(|v| p.method(v, &format!("{path}.{key}")))
+        };
+        let (moved, open, connect) = (
+            method(self, "move"),
+            method(self, "open"),
+            method(self, "connect"),
+        );
+        let empty = body
+            .get("empty")
+            .and_then(|v| self.text(v, &format!("{path}.empty"), scope));
+        let label = body
+            .get("label")
+            .and_then(|v| self.text(v, &format!("{path}.label"), inner));
+        Some(Graph {
+            rows,
+            edges,
+            card,
+            open,
+            moved,
+            connect,
+            empty,
+            label,
+        })
     }
 
     fn children(&mut self, v: Option<&Value>, path: &str, scope: Scope<'_>) -> Vec<Node> {

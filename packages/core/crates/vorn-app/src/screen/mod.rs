@@ -95,7 +95,10 @@ impl Screen<'_> {
             main.child(cards::tabs(self))
         } else if self.st.view == MainView::Sessions && self.st.focused.is_some() {
             main.child(cards::focused(self))
-        } else if self.st.view == MainView::Workflows && self.st.wf.editor.is_some() {
+        } else if self.st.view == MainView::Workflows
+            && self.st.wf.editor.is_some()
+            && workflows::editor_point(self).is_some()
+        {
             main.child(workflows::editor(self))
         } else {
             main.child(chrome::top_bar(self))
@@ -189,6 +192,9 @@ impl Screen<'_> {
             MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
+            MainView::Workflows if workflows::editor_point(self).is_none() && st.points.loaded => {
+                workflows::off()
+            }
             MainView::Workflows => workflows::landing(self),
         };
         let mut col = div().col().grow().min_h(0.0);

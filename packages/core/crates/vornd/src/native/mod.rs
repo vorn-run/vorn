@@ -307,6 +307,8 @@ pub struct Native {
     connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
     /// The Tasks built-in, once vornd has a database.
     tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
+    /// The Workflow editor built-in, which follows the workflows and their gates.
+    editor: OnceLock<Arc<extensions::builtin::editor::Editor>>,
     /// Installing and removing packages, one store for every kind.
     installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
     /// The sign-in windows programs call through ([`signin`]).
@@ -372,6 +374,7 @@ impl Native {
             work: OnceLock::new(),
             connectors: OnceLock::new(),
             tasks: OnceLock::new(),
+            editor: OnceLock::new(),
             installs: OnceLock::new(),
             windows: Arc::default(),
             polls: Arc::default(),
@@ -518,6 +521,14 @@ impl Native {
 
     pub fn tasks(&self) -> Option<&Arc<extensions::builtin::tasks::TasksBuiltin>> {
         self.tasks.get()
+    }
+
+    pub fn set_editor(&self, editor: Arc<extensions::builtin::editor::Editor>) {
+        let _ = self.editor.set(editor);
+    }
+
+    pub fn editor(&self) -> Option<&Arc<extensions::builtin::editor::Editor>> {
+        self.editor.get()
     }
 
     /// The one installer of packages, kept in `<data_dir>/connectors`; the first call makes it.

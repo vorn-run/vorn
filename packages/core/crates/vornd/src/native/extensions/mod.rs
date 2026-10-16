@@ -1506,6 +1506,7 @@ impl Around for Wired {
             .into_iter()
             .collect();
         started.extend(native.tasks().map(builtin::tasks::entry));
+        started.extend(native.editor().map(builtin::editor::entry));
         started.extend(builtin::agents::entries(native.adapters()));
         started
     }

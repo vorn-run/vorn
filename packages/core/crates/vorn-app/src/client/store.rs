@@ -95,8 +95,8 @@ pub enum Change {
     /// The session with this id ended.
     Exited(String),
     Config,
-    /// The number of steps waiting on an approval changed.
-    Approvals,
+    /// A workflow run moved.
+    Runs,
     /// Tasks were written without saying which: the list is read again.
     TasksStale,
 }
@@ -131,8 +131,6 @@ pub struct Store {
     pub workflows: Vec<WorkflowDefinition>,
     /// The active workspace's session groups, in their order.
     pub groups: Vec<SessionGroupConfig>,
-    /// Steps waiting on an approval, by run id: what the session dock counts.
-    pub approvals: HashMap<String, usize>,
     /// The latest of every run vornd reported since loading, by run id.
     pub runs: HashMap<String, Value>,
     /// Whether vornd has said which sessions run: asked after connecting, since
@@ -317,34 +315,14 @@ impl Store {
         self.sessions.iter().find(|s| s.info.id == id)
     }
 
-    /// Steps waiting on an approval, which the session dock counts.
-    pub fn approvals(&self) -> usize {
-        self.approvals.values().sum()
-    }
-
-    /// Counts a run's steps waiting on an approval; a step parked until its
-    /// connection signs in again is not one (`isSignInWait`).
+    /// Keeps a run as it stands now. What waits on a person is not counted
+    /// here: the extensions that own it say so as attention items.
     fn run_updated(&mut self, run: &Value) -> bool {
         let Some(id) = run.get("runId").and_then(Value::as_str) else {
             return false;
         };
         self.runs.insert(id.to_owned(), run.clone());
-        let waiting = run
-            .get("nodeStates")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|n| {
-                n.get("status").and_then(Value::as_str) == Some("waiting")
-                    && n.get("waitingFor").and_then(Value::as_str) != Some("signIn")
-            })
-            .count();
-        let before = if waiting == 0 {
-            self.approvals.remove(id)
-        } else {
-            self.approvals.insert(id.to_owned(), waiting)
-        };
-        before.unwrap_or(0) != waiting
+        true
     }
 
     /// Adds a session, or replaces the one with its id in place; a record
@@ -407,7 +385,7 @@ impl Store {
             }
             "workflow:runUpdated" => {
                 if self.run_updated(&params) {
-                    Change::Approvals
+                    Change::Runs
                 } else {
                     Change::Nothing
                 }
@@ -688,18 +666,16 @@ mod tests {
     }
 
     #[test]
-    fn the_dock_counts_approvals_not_sign_ins() {
+    fn a_run_is_kept_as_it_stands() {
         let mut s = Store::default();
         let run = |states: Value| json!({ "runId": "r", "nodeStates": states });
         let gate = json!({ "nodeId": "a", "status": "waiting" });
-        let sign_in = json!({ "nodeId": "b", "status": "waiting", "waitingFor": "signIn" });
-        let changed = s.apply("workflow:runUpdated", run(json!([gate, sign_in])));
-        assert_eq!((changed, s.approvals()), (Change::Approvals, 1));
-        let same = s.apply("workflow:runUpdated", run(json!([gate])));
-        assert_eq!(same, Change::Nothing);
-        let done = json!([{ "nodeId": "a", "status": "completed" }]);
-        assert_eq!(s.apply("workflow:runUpdated", run(done)), Change::Approvals);
-        assert_eq!(s.approvals(), 0);
+        assert_eq!(
+            s.apply("workflow:runUpdated", run(json!([gate]))),
+            Change::Runs
+        );
+        assert_eq!(s.runs["r"]["nodeStates"][0]["status"], "waiting");
+        assert_eq!(s.apply("workflow:runUpdated", json!({})), Change::Nothing);
     }
 
     fn task(id: &str, title: &str) -> Value {

@@ -1321,13 +1321,7 @@ impl App {
             }
             Shortcut::Fullscreen => ui.request(WindowRequest::ToggleFullscreen),
             Shortcut::Palette => self.toggle_palette(ui),
-            Shortcut::Permission(allow) => {
-                self.call(
-                    Call::Quiet,
-                    "permission:resolve-top",
-                    json!({ "allow": allow }),
-                );
-            }
+            Shortcut::Permission(allow) => self.answer_oldest(ui, allow),
             Shortcut::Prompt(up) => self.jump_to_command(ui, up),
         }
     }
@@ -1359,11 +1353,35 @@ impl App {
         }
     }
 
-    /// Holds Mod+Shift+A and D system-wide once an agent has asked, as the
-    /// desktop does, and answers their presses.
-    fn hotkeys_tick(&mut self) {
+    /// Mod+Shift+A or D: an agent asking is answered first, as always;
+    /// with none asking, the oldest thing an extension says waits for a
+    /// person (a workflow's gate), approved or denied.
+    fn answer_oldest(&mut self, ui: &mut Ui, allow: bool) {
+        let agent_asking = self.store.sessions.iter().any(|s| s.status() == "waiting");
+        let oldest = self
+            .st
+            .points
+            .attention(self.store.workspace())
+            .first()
+            .map(|(p, r)| (p.key(), r.id.clone()));
+        match (agent_asking, oldest) {
+            (false, Some((key, row))) => {
+                self.run_point(ui, crate::points::PointAct::Answer { key, row, allow });
+            }
+            _ => self.call(
+                Call::Quiet,
+                "permission:resolve-top",
+                json!({ "allow": allow }),
+            ),
+        }
+    }
+
+    /// Holds Mod+Shift+A and D system-wide once an agent has asked or a
+    /// gate waits, as the desktop does, and answers their presses.
+    fn hotkeys_tick(&mut self, ui: &mut Ui) {
         if !self.st.permission_keys {
-            self.st.permission_keys = self.store.sessions.iter().any(|s| s.status() == "waiting");
+            self.st.permission_keys = self.store.sessions.iter().any(|s| s.status() == "waiting")
+                || !self.st.points.attention(self.store.workspace()).is_empty();
         }
         if self.hotkeys.is_none() && self.st.permission_keys && self.windowed {
             self.hotkeys = Some(crate::hotkeys::register(Arc::clone(&self.wake)));
@@ -1373,11 +1391,7 @@ impl App {
             _ => return,
         };
         for allow in presses {
-            self.call(
-                Call::Quiet,
-                "permission:resolve-top",
-                json!({ "allow": allow }),
-            );
+            self.answer_oldest(ui, allow);
         }
     }
 
@@ -3145,7 +3159,7 @@ impl App {
         if self.st.signin.is_some() && self.st.dialog != Some(Dialog::SignIn) {
             self.finish_signin(Err(crate::signin::CLOSED.to_owned()));
         }
-        self.hotkeys_tick();
+        self.hotkeys_tick(ui);
         self.ext_tick();
         self.points_tick(ui);
         if let Some(at) = self.session_tick(now) {

@@ -27,6 +27,7 @@ pub mod kind {
     pub const MENUS: &str = "menus";
     pub const DIALOGS: &str = "dialogs";
     pub const VIEWS: &str = "views";
+    pub const ATTENTION: &str = "attention";
 }
 
 /// One contribution and its template, or why the template does not check.
@@ -46,6 +47,10 @@ pub struct Point {
     pub window: Option<String>,
     pub size: Option<(f32, f32)>,
     pub raise: Option<String>,
+    /// A menu item's submenu, one entry per row; attention's items.
+    pub rows: Option<String>,
+    /// Attention: the method a deny calls.
+    pub deny: Option<String>,
     /// `Ok(None)` for a point with no template (a command, a menu item).
     pub template: Result<Option<Template>, Vec<String>>,
 }
@@ -103,6 +108,8 @@ impl Point {
             window: text("window"),
             size,
             raise: text("raise"),
+            rows: text("rows"),
+            deny: text("deny"),
             template,
         })
     }
@@ -122,12 +129,16 @@ impl Point {
         format!("{} › {}", self.extension_name, title)
     }
 
-    /// The collections its template draws.
+    /// The collections its template draws, and the rows a menu item or attention lists.
     pub fn collections(&self) -> Vec<String> {
-        match &self.template {
+        let mut out: Vec<String> = match &self.template {
             Ok(Some(t)) => t.collections.iter().map(|(n, _)| n.clone()).collect(),
             _ => Vec::new(),
+        };
+        if let Some(r) = self.rows.as_ref().filter(|r| !out.contains(r)) {
+            out.push(r.clone());
         }
+        out
     }
 }
 
@@ -177,6 +188,13 @@ pub enum PointAct {
     Choose {
         key: String,
         args: String,
+    },
+    /// Answers attention item `row` of point `key`: its `call` when
+    /// `allow`, else its `deny`.
+    Answer {
+        key: String,
+        row: String,
+        allow: bool,
     },
     /// Opens or closes a window point.
     Window {
@@ -232,6 +250,8 @@ pub struct Points {
     pub shown: BTreeSet<String>,
     /// Window points draw inside the app, which cannot open windows of their own.
     pub floating: bool,
+    /// `workflow:nodeTypes`' node types, read with the list.
+    pub node_types: Vec<Value>,
 }
 
 static NONE: BTreeMap<String, Vec<Row>> = BTreeMap::new();
@@ -265,6 +285,39 @@ impl Points {
     /// An extension's rows, as its templates read them.
     pub fn rows_of(&self, extension: &str) -> &BTreeMap<String, Vec<Row>> {
         self.rows.get(extension).unwrap_or(&NONE)
+    }
+
+    /// The rows a point lists (a menu item's entries, attention's items),
+    /// those of `workspace` or of none.
+    pub fn listed_rows<'a>(&'a self, p: &Point, workspace: &str) -> Vec<&'a Row> {
+        let Some(collection) = &p.rows else {
+            return Vec::new();
+        };
+        self.rows_of(&p.extension)
+            .get(collection)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.str("workspace").is_none_or(|w| w == workspace))
+            .collect()
+    }
+
+    /// Everything waiting for a person, oldest first: each attention
+    /// point's rows, with the point they belong to.
+    pub fn attention<'a>(&'a self, workspace: &str) -> Vec<(&'a Point, &'a Row)> {
+        let mut out: Vec<(&Point, &Row)> = self
+            .at(kind::ATTENTION)
+            .flat_map(|p| {
+                self.listed_rows(p, workspace)
+                    .into_iter()
+                    .map(move |r| (p, r))
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            a.1.text("at")
+                .cmp(&b.1.text("at"))
+                .then_with(|| a.1.id.cmp(&b.1.id))
+        });
+        out
     }
 
     /// A fresh list: rows of collections no template draws any more go.

@@ -612,6 +612,7 @@ impl App {
             catalog: &lib.catalog,
             packs: &lib.packs,
             connectors: &lib.connectors,
+            node_types: &self.st.points.node_types,
         };
         crate::library::entries(&src, at.into(), &self.st.wf.search, &lib.recent, &lib.open)
     }

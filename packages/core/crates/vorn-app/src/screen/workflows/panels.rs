@@ -144,6 +144,7 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
         catalog: &lib.catalog,
         packs: &lib.packs,
         connectors: &lib.connectors,
+        node_types: &s.st.points.node_types,
     };
     let entries = crate::library::entries(&src, at.into(), &s.st.wf.search, &lib.recent, &lib.open);
     let reach = entries.iter().filter(|e| e.reachable()).count();

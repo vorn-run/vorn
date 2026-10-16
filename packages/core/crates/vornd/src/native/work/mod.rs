@@ -332,9 +332,19 @@ impl Work {
         }
     }
 
+    /// Whether Artifacts is on.
+    fn artifacts_on(&self) -> bool {
+        self.native
+            .upgrade()
+            .is_none_or(|n| super::extensions::builtin::artifacts::on(&n))
+    }
+
     /// Answers one of the work model's own calls.
     pub async fn call(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
         match crate::native::group_of(method) {
+            "artifact" if !self.artifacts_on() => {
+                Answer::Error(super::extensions::builtin::artifacts::OFF.to_owned())
+            }
             "artifact" => self.artifact(method, params).await,
             _ => self.workflow(method, params).await,
         }
@@ -403,6 +413,9 @@ impl Work {
     fn workflows_changed(&self) {
         self.host().signal_change();
         self.rearm.notify_one();
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            tokio::spawn(async move { editor.workflows_changed().await });
+        }
     }
 
     async fn workflow(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
@@ -1180,8 +1193,11 @@ impl Work {
         }
     }
 
-    /// The page of an artifact version, for whoever holds its token.
+    /// The page of an artifact version, for whoever holds its token, while Artifacts is on.
     pub async fn artifact_page(&self, id: &str, version: u32, token: &str) -> Option<String> {
+        if !self.artifacts_on() {
+            return None;
+        }
         let (data_dir, id, token) = (
             self.host().data_dir.clone(),
             id.to_owned(),
@@ -1295,6 +1311,9 @@ impl Work {
     /// The workflows changed elsewhere: the scheduler reads them again.
     pub fn workflows_changed_elsewhere(&self) {
         self.rearm.notify_one();
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            tokio::spawn(async move { editor.workflows_changed().await });
+        }
     }
 
     /// How many schedules are armed, which keeps an idle server up.

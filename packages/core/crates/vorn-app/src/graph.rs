@@ -891,6 +891,11 @@ fn unique(mut n: Value, taken: &HashSet<String>) -> Value {
     n
 }
 
+/// A step of node type `kind` an extension declares, its config empty until its form fills it.
+pub fn contributed_node(kind: &str, taken: &HashSet<String>) -> Value {
+    unique(node(kind, kind, json!({})), taken)
+}
+
 /// `createLaunchAgentNode`, in `project`, running `agent`.
 pub fn agent_node(project: Option<(&str, &str)>, agent: &str, taken: &HashSet<String>) -> Value {
     let (name, path) = project.unwrap_or(("", ""));

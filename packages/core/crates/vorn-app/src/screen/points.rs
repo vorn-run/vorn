@@ -261,7 +261,7 @@ pub(super) fn menu_items<'a>(
 ) -> Vec<(Act, &'a str, &'a str, f32)> {
     s.st.points
         .at(kind::MENUS)
-        .filter(|p| p.menu.as_deref() == Some(menu))
+        .filter(|p| p.menu.as_deref() == Some(menu) && p.rows.is_none())
         .map(|p| {
             let act = Act::Point(PointAct::Choose {
                 key: p.key(),

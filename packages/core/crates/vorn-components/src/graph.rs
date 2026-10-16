@@ -1,0 +1,660 @@
+//! A graph drawn by the kit: cards on a canvas joined by edges, under a pan
+//! and zoom, over a dot grid, with zoom controls and a minimap. A template's
+//! `graph` node draws on it ([`view`]): a card per row of one collection,
+//! drawn from the template's card, an edge per row of another, each card
+//! where its row says or in layers when it says nothing. The workflow
+//! editor draws on the same pieces, with its own layout and its own
+//! controls beside the cards.
+//!
+//! What a click, a drag or a wheel does is the client's: the kit gives each
+//! control an [`Id`] and draws what the client's state says.
+
+use std::collections::{BTreeMap, HashMap};
+
+use vorn_view::{Graph, Row};
+use vornui::theme::{color, rgb};
+use vornui::widgets::{tooltip, tooltip_at};
+use vornui::{div, shape, text, Action, Cursor, El, Id, Place, Rgba, Sense};
+
+use vornui::accesskit::Role;
+
+use crate::template::{child_slot, Cx};
+
+/// The farthest a canvas zooms out.
+pub const MIN_ZOOM: f64 = 0.2;
+/// The farthest a canvas zooms in.
+pub const MAX_ZOOM: f64 = 1.75;
+/// The round + button's size.
+pub const PLUS: f64 = 22.0;
+/// A card's width.
+pub const CARD_WIDTH: f64 = 280.0;
+/// The minimap's size.
+pub const MINI: (f64, f64) = (96.0, 64.0);
+/// How far apart layers of an unplaced graph sit.
+const LAYER_GAP: f64 = 56.0;
+/// A card's height before it is measured, for an unplaced graph's layers.
+const CARD_GUESS: f64 = 64.0;
+/// An edge this close to vertical is drawn straight.
+const STRAIGHT: f64 = 16.0;
+
+fn white(a: f32) -> Rgba {
+    Rgba::white(a)
+}
+
+fn f(v: f64) -> f32 {
+    v as f32
+}
+
+/// A pan and zoom: flow point `p` draws at `p * zoom + (x, y)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Viewport {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+/// A zoom step by `factor` about `center`, held between the canvas's limits.
+pub fn zoom_by(v: Viewport, factor: f64, center: (f64, f64)) -> Viewport {
+    let zoom = (v.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    let k = zoom / v.zoom;
+    Viewport {
+        x: center.0 - (center.0 - v.x) * k,
+        y: center.1 - (center.1 - v.y) * k,
+        zoom,
+    }
+}
+
+/// The view that shows `bounds` (`x, y, w, h` in flow units) in a pane of
+/// `size`, with `pad` around it, no closer than 100%.
+pub fn fit((bx, by, bw, bh): (f64, f64, f64, f64), size: (f64, f64), pad: f64) -> Viewport {
+    let zoom = ((size.0 - 2.0 * pad) / bw.max(1.0))
+        .min((size.1 - 2.0 * pad) / bh.max(1.0))
+        .clamp(MIN_ZOOM, 1.0);
+    Viewport {
+        x: (size.0 - bw * zoom) / 2.0 - bx * zoom,
+        y: (size.1 - bh * zoom) / 2.0 - by * zoom,
+        zoom,
+    }
+}
+
+/// The control offset of a bezier at React Flow's default curvature.
+fn control_offset(distance: f64) -> f64 {
+    if distance >= 0.0 {
+        0.5 * distance
+    } else {
+        0.25 * 25.0 * (-distance).sqrt()
+    }
+}
+
+/// An edge from `from` to `to`: straight down a column, a bezier only for a
+/// real fork. Its four control points (equal to the ends when straight) and
+/// where its label sits.
+pub fn edge_curve(from: (f64, f64), to: (f64, f64)) -> ([(f64, f64); 4], (f64, f64)) {
+    if (from.0 - to.0).abs() < STRAIGHT {
+        return (
+            [from, from, to, to],
+            ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0),
+        );
+    }
+    let off = control_offset(to.1 - from.1);
+    let c1 = (from.0, from.1 + off);
+    let c2 = (to.0, to.1 - off);
+    let label = (
+        from.0 * 0.125 + c1.0 * 0.375 + c2.0 * 0.375 + to.0 * 0.125,
+        from.1 * 0.125 + c1.1 * 0.375 + c2.1 * 0.375 + to.1 * 0.125,
+    );
+    ([from, c1, c2, to], label)
+}
+
+/// What the minimap draws, in its own pixels.
+#[derive(Debug, Clone)]
+pub struct Minimap {
+    /// Flow units per minimap pixel.
+    pub scale: f64,
+    pub nodes: Vec<(f64, f64, f64, f64)>,
+    pub view: (f64, f64, f64, f64),
+}
+
+/// Every card (`x, y, w, h`) and the visible area of a pane of `size`,
+/// fitted with a margin into [`MINI`].
+pub fn minimap(cards: &[(f64, f64, f64, f64)], v: Viewport, (w, h): (f64, f64)) -> Minimap {
+    let vr = (-v.x / v.zoom, -v.y / v.zoom, w / v.zoom, h / v.zoom);
+    let mut b = vr;
+    for c in cards {
+        let (x0, y0) = (b.0.min(c.0), b.1.min(c.1));
+        let (x1, y1) = ((b.0 + b.2).max(c.0 + c.2), (b.1 + b.3).max(c.1 + c.3));
+        b = (x0, y0, x1 - x0, y1 - y0);
+    }
+    let scale = (b.2 / MINI.0).max(b.3 / MINI.1);
+    let (vw, vh) = (scale * MINI.0, scale * MINI.1);
+    let offset = 5.0 * scale;
+    let x = b.0 - (vw - b.2) / 2.0 - offset;
+    let y = b.1 - (vh - b.3) / 2.0 - offset;
+    let full = (vw + 2.0 * offset, vh + 2.0 * offset);
+    let k = (MINI.0 / full.0).min(MINI.1 / full.1);
+    let map = |r: (f64, f64, f64, f64)| ((r.0 - x) * k, (r.1 - y) * k, r.2 * k, r.3 * k);
+    Minimap {
+        scale: 1.0 / k,
+        nodes: cards.iter().copied().map(map).collect(),
+        view: map(vr),
+    }
+}
+
+/// The dot grid: 20 apart at 100%, one pixel, faint white.
+pub fn dots(v: Viewport, (w, h): (f32, f32)) -> El {
+    let gap = 20.0 * v.zoom;
+    let mut layer = div().absolute(0.0, 0.0).size(w, h);
+    if gap < 8.0 {
+        return layer;
+    }
+    let size = f((1.0 * v.zoom).max(1.0));
+    let x0 = v.x.rem_euclid(gap);
+    let y0 = v.y.rem_euclid(gap);
+    let mut y = y0;
+    while y < f64::from(h) {
+        let mut x = x0;
+        while x < f64::from(w) {
+            layer = layer.child(
+                div()
+                    .absolute(f(x) - size / 2.0, f(y) - size / 2.0)
+                    .size(size, size)
+                    .rounded(size / 2.0)
+                    .bg(white(0.037)),
+            );
+            x += gap;
+        }
+        y += gap;
+    }
+    layer
+}
+
+/// An edge's line from `from` to `to`, in flow units.
+pub fn edge(from: (f64, f64), to: (f64, f64)) -> Option<El> {
+    let (pts, _) = edge_curve(from, to);
+    let pad = 2.0;
+    let x0 = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min) - pad;
+    let y0 = pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min) - pad;
+    let x1 = pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max) + pad;
+    let y1 = pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max) + pad;
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    if bw <= 0.0 || bh <= 0.0 {
+        return None;
+    }
+    let p = |i: usize| format!("{:.2} {:.2}", pts[i].0 - x0, pts[i].1 - y0);
+    let d = if pts[1] == pts[0] && pts[2] == pts[3] {
+        format!("M {} L {}", p(0), p(3))
+    } else {
+        format!("M {} C {}, {}, {}", p(0), p(1), p(2), p(3))
+    };
+    let svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{bw:.2}\" height=\"{bh:.2}\" viewBox=\"0 0 {bw:.2} {bh:.2}\"><path d=\"{d}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.5\"/></svg>"
+    );
+    Some(shape(svg, f(bw), f(bh), white(0.16)).absolute(f(x0), f(y0)))
+}
+
+/// An edge's label: a small pill, centred on the edge by the caller.
+pub fn edge_label(label: &str) -> El {
+    div()
+        .px(10.0)
+        .py(2.0)
+        .rounded(10.0)
+        .border(1.0, white(0.08))
+        .bg(color::SURFACE_BASE)
+        .child(
+            text(label, 10.0, color::INK_SECONDARY)
+                .weight(600)
+                .line_height(15.0)
+                .silent(),
+        )
+}
+
+/// The round + that adds something where it sits; `active` while what it
+/// opened is open, `hot` while hovered.
+pub fn plus(id: Id, label: &str, active: bool, hot: f32) -> El {
+    let (fg, bg, border) = if active {
+        (color::WHITE, white(0.08), white(0.40))
+    } else {
+        (
+            color::GRAY_500.mix(color::WHITE, hot),
+            color::SURFACE_SUNKEN,
+            white(0.10).mix(white(0.20), hot),
+        )
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .size(f(PLUS), f(PLUS))
+        .rounded(11.0)
+        .center()
+        .bg(bg)
+        .border(1.0, border)
+        .role(Role::Button, label)
+        .child(crate::lucide("plus", 13.0, 2.5, fg))
+}
+
+/// An input port: 7 px, ringed, at `(x, y)` of its card.
+pub fn handle(x: f32, y: f32) -> El {
+    div()
+        .absolute(x - 3.5, y - 3.5)
+        .size(7.0, 7.0)
+        .rounded(3.5)
+        .bg(color::SURFACE_BASE)
+        .border(1.0, white(0.35))
+}
+
+/// An output port a connection is drawn from, at `(x, y)` of its card.
+pub fn port(id: Id, hot: f32, x: f32, y: f32) -> El {
+    div()
+        .id(id)
+        .sense(Sense::MOVE | Sense::HOVER)
+        .cursor(Cursor::Pointer)
+        .absolute(x - 7.5, y - 7.5)
+        .size(15.0, 15.0)
+        .hit_slop(4.0, 4.0)
+        .center()
+        .role(Role::Button, "Connect")
+        .child(
+            div()
+                .size(7.0, 7.0)
+                .rounded(3.5)
+                .bg(color::SURFACE_BASE)
+                .border(1.0, white(0.35).mix(white(0.7), hot)),
+        )
+}
+
+/// How a card looks: chosen, failed, under the pointer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CardLook {
+    pub selected: bool,
+    pub failed: bool,
+    pub hover: f32,
+}
+
+/// A card's frame, `CARD_WIDTH` wide, holding `content`.
+pub fn card(id: Id, label: &str, look: CardLook, content: El) -> El {
+    let border = if look.selected {
+        white(0.40)
+    } else if look.failed {
+        Rgba::hexa(rgb::DANGER, 0.6)
+    } else {
+        white(0.08)
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .col()
+        .w(f(CARD_WIDTH))
+        .px(12.0)
+        .py(10.0)
+        .rounded(6.0)
+        .border(1.0, border)
+        .bg(color::SURFACE_SUNKEN.mix(white(0.02), look.hover))
+        .role(Role::Button, label)
+        .selected(look.selected)
+        .child(content)
+}
+
+/// One control of the canvas's control strip.
+#[derive(Debug, Clone)]
+pub struct Control<'a> {
+    pub id: Id,
+    pub icon: &'a str,
+    pub label: &'a str,
+    pub hot: f32,
+}
+
+/// The control strip, bottom left of a pane `h` tall: zoom in and out, fit,
+/// and whatever else the client adds.
+pub fn controls(ui: &vornui::Ui, controls: &[Control<'_>], h: f32) -> El {
+    let n = controls.len();
+    let mut strip = div()
+        .absolute(15.0, h - 15.0 - (n as f32 * 26.0 + (n as f32 - 1.0) + 2.0))
+        .col()
+        .rounded(6.0)
+        .border(1.0, white(0.12))
+        .bg(color::SURFACE_OVERLAY)
+        .clip()
+        .role(Role::Toolbar, "Canvas controls");
+    for (i, c) in controls.iter().enumerate() {
+        let mut b = div()
+            .id(c.id)
+            .on(Action::Click)
+            .size(26.0, 26.0)
+            .center()
+            .bg(white(0.0).mix(white(0.06), c.hot))
+            .role(Role::Button, c.label)
+            .child(if matches!(c.icon, "plus" | "minus") {
+                crate::lucide(c.icon, 14.0, 2.75, color::GRAY_200.mix(color::WHITE, c.hot))
+            } else {
+                crate::lucide(c.icon, 12.0, 2.0, color::GRAY_400.mix(color::WHITE, c.hot))
+            });
+        if i + 1 < n {
+            b = b.border_bottom(1.0, white(0.08));
+        }
+        strip = strip.child(tooltip(ui, b, c.id, c.label, None));
+    }
+    strip
+}
+
+/// A button beside a card that shows on hover, its tooltip to the right.
+pub fn side_button(ui: &vornui::Ui, id: Id, icon: &str, label: &str, hot: f32) -> El {
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .p(6.0)
+        .rounded(6.0)
+        .bg(color::SURFACE_OVERLAY)
+        .border(1.0, white(0.12).mix(white(0.20), hot))
+        .role(Role::Button, label)
+        .child(crate::lucide(
+            icon,
+            12.0,
+            2.0,
+            color::GRAY_400.mix(color::WHITE, hot),
+        ));
+    tooltip_at(ui, b, id, label, None, Place::Right)
+}
+
+/// The minimap, 96×64, top right of a pane `h` tall: its cards and the visible area.
+pub fn minimap_view(id: Id, m: &Minimap, h: f32) -> El {
+    let (mw, mh) = (f(MINI.0), f(MINI.1));
+    let rects: String = m
+        .nodes
+        .iter()
+        .map(|r| {
+            format!(
+                "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"1\"/>",
+                r.0, r.1, r.2, r.3
+            )
+        })
+        .collect();
+    let nodes = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{mw}\" height=\"{mh}\" viewBox=\"0 0 {mw} {mh}\" fill=\"#ffffff\">{rects}</svg>"
+    );
+    let vr = m.view;
+    let mask = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{mw}\" height=\"{mh}\" viewBox=\"0 0 {mw} {mh}\"><path fill-rule=\"evenodd\" fill=\"#ffffff\" d=\"M0 0 H{mw} V{mh} H0 Z M{:.2} {:.2} h{:.2} v{:.2} h{:.2} Z\"/></svg>",
+        vr.0, vr.1, vr.2, vr.3, -vr.2
+    );
+    div()
+        .id(id)
+        .sense(Sense::MOVE)
+        .absolute_right(15.0, h - mh - 15.0 - 2.0)
+        .size(mw + 2.0, mh + 2.0)
+        .p(1.0)
+        .rounded(4.0)
+        .border(1.0, white(0.12))
+        .bg(color::SURFACE_PANEL)
+        .clip()
+        .role(Role::Image, "Mini map")
+        .child(shape(nodes, mw, mh, white(0.25)).absolute(1.0, 1.0))
+        .child(shape(mask, mw, mh, Rgba::hexa(0x000000, 0.55)).absolute(1.0, 1.0))
+}
+
+/// The canvas pane `size` big at `view`: the dot grid under `world` (cards
+/// and edges in flow units), with what floats over it.
+pub fn surface(id: Id, size: (f32, f32), view: Viewport, world: Vec<El>, over: Vec<El>) -> El {
+    let (w, h) = size;
+    let z = f(view.zoom);
+    let center = (w / 2.0, h / 2.0);
+    let offset = (
+        f(view.x) - center.0 * (1.0 - z),
+        f(view.y) - center.1 * (1.0 - z),
+    );
+    let mut flow = div().absolute(0.0, 0.0).size(w, h).transform(z, offset);
+    for el in world {
+        flow = flow.child(el);
+    }
+    let mut pane = div()
+        .id(id)
+        .on(Action::Click)
+        .sense(Sense::MOVE | Sense::WHEEL)
+        .grow()
+        .min_w0()
+        .min_h(0.0)
+        .h_full()
+        .clip()
+        .bg(color::SURFACE_BASE)
+        .role(Role::Group, "Canvas")
+        .child(dots(view, size))
+        .child(flow);
+    for el in over {
+        pane = pane.child(el);
+    }
+    pane
+}
+
+/// The pane of a template's graph of `rows`, which pans on a drag and zooms on a wheel.
+pub fn pane_id(rows: &str) -> Id {
+    Id::new("graph-pane").child(rows)
+}
+
+/// The card of row `row` on a template's graph of `rows`.
+pub fn card_id(rows: &str, row: &str) -> Id {
+    Id::new("graph-card").child(rows).child(row)
+}
+
+/// A zoom control of a template's graph: `in`, `out` or `fit`.
+pub fn control_id(rows: &str, which: &str) -> Id {
+    Id::new("graph-control").child(rows).child(which)
+}
+
+/// The minimap of a template's graph.
+pub fn mini_id(rows: &str) -> Id {
+    Id::new("graph-mini").child(rows)
+}
+
+/// Where each card of an unplaced graph goes: in layers by its longest path
+/// from a card nothing points at, side by side in a layer, in row order.
+pub fn layers(ids: &[&str], edges: &[(&str, &str)]) -> HashMap<String, (f64, f64)> {
+    let mut depth: BTreeMap<&str, usize> = ids.iter().map(|i| (*i, 0)).collect();
+    // Longest path, bounded by the cards, so a cycle cannot spin.
+    for _ in 0..ids.len() {
+        let mut moved = false;
+        for (s, t) in edges {
+            let (Some(&ds), Some(&dt)) = (depth.get(s), depth.get(t)) else {
+                continue;
+            };
+            if dt < ds + 1 && ds + 1 < ids.len().max(1) {
+                depth.insert(t, ds + 1);
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    let mut out = HashMap::new();
+    let mut across: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
+    for id in ids {
+        across.entry(depth[id]).or_default().push(id);
+    }
+    for (layer, row) in &across {
+        let n = row.len() as f64;
+        for (i, id) in row.iter().enumerate() {
+            let x = (i as f64 - (n - 1.0) / 2.0) * (CARD_WIDTH + LAYER_GAP) - CARD_WIDTH / 2.0;
+            let y = *layer as f64 * (CARD_GUESS + LAYER_GAP);
+            out.insert((*id).to_owned(), (x, y));
+        }
+    }
+    out
+}
+
+/// A template's graph: a card per row of `g.rows`, drawn from its card,
+/// where the row's `x` and `y` put it or in layers; an edge per row of
+/// `g.edges`; the client's pan and zoom.
+pub(crate) fn view(cx: &Cx<'_>, g: &Graph, slot: u64) -> El {
+    let rows = cx.src.rows(&g.rows);
+    let edge_rows = cx.src.rows(&g.edges);
+    if rows.is_empty() {
+        let empty = g
+            .empty
+            .as_ref()
+            .map(|t| t.fill(None, cx.src))
+            .unwrap_or_default();
+        return div().grow().center().child(
+            text(empty, 12.0, color::INK_FAINT)
+                .line_height(18.0)
+                .silent(),
+        );
+    }
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    let edges: Vec<(&str, &str)> = edge_rows
+        .iter()
+        .map(|e| (e.str("source").unwrap_or(""), e.str("target").unwrap_or("")))
+        .collect();
+    let placed = rows
+        .iter()
+        .all(|r| r.num("x").is_some() && r.num("y").is_some());
+    let auto = if placed {
+        HashMap::new()
+    } else {
+        layers(&ids, &edges)
+    };
+    let at = |r: &Row| -> (f64, f64) {
+        match (r.num("x"), r.num("y")) {
+            (Some(x), Some(y)) if placed => (x, y),
+            _ => auto.get(&r.id).copied().unwrap_or_default(),
+        }
+    };
+    let view = cx.bind.graph_view(&g.rows).unwrap_or_default();
+    let card_slot = child_slot(slot, 0);
+    let mut world = Vec::new();
+    let mut boxes: HashMap<&str, (f64, f64, f64, f64)> = HashMap::new();
+    for r in rows {
+        let (x, y) = at(r);
+        let h = cx
+            .ui
+            .rect_of(card_id(&g.rows, &r.id))
+            .map_or(CARD_GUESS, |b| f64::from(b.h) / view.zoom.max(MIN_ZOOM));
+        boxes.insert(r.id.as_str(), (x, y, CARD_WIDTH, h));
+    }
+    for e in edge_rows {
+        let (Some(s), Some(t)) = (e.str("source"), e.str("target")) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (boxes.get(s), boxes.get(t)) else {
+            continue;
+        };
+        let from = (a.0 + a.2 / 2.0, a.1 + a.3);
+        let to = (b.0 + b.2 / 2.0, b.1);
+        if let Some(line) = edge(from, to) {
+            world.push(line);
+        }
+        if let Some(label) = e.str("label").filter(|l| !l.is_empty()) {
+            let (_, mid) = edge_curve(from, to);
+            world.push(
+                div()
+                    .absolute(f(mid.0) - 30.0, f(mid.1) - 11.0)
+                    .w(60.0)
+                    .row()
+                    .justify_center()
+                    .child(edge_label(label)),
+            );
+        }
+    }
+    for r in rows {
+        let (x, y) = at(r);
+        let id = cx.bind.card(&g.rows, &r.id, g.open.as_deref());
+        let content = cx.node(&g.card, Some(r), card_slot).unwrap_or_else(div);
+        let label = g
+            .label
+            .as_ref()
+            .map(|t| t.fill(Some(r), cx.src))
+            .unwrap_or_else(|| r.id.clone());
+        let look = CardLook {
+            selected: cx.bind.selected(&g.rows, &r.id),
+            failed: false,
+            hover: cx.ui.hover(id),
+        };
+        world.push(
+            div()
+                .absolute(f(x), f(y))
+                .child(card(id, &label, look, content).sense(Sense::MOVE)),
+        );
+    }
+    let cards: Vec<(f64, f64, f64, f64)> = boxes.values().copied().collect();
+    let size = cx
+        .ui
+        .rect_of(pane_id(&g.rows))
+        .map_or((800.0, 500.0), |r| (r.w, r.h));
+    let controls_el = controls(
+        cx.ui,
+        &[
+            Control {
+                id: control_id(&g.rows, "in"),
+                icon: "plus",
+                label: "Zoom in",
+                hot: cx.ui.hover(control_id(&g.rows, "in")),
+            },
+            Control {
+                id: control_id(&g.rows, "out"),
+                icon: "minus",
+                label: "Zoom out",
+                hot: cx.ui.hover(control_id(&g.rows, "out")),
+            },
+            Control {
+                id: control_id(&g.rows, "fit"),
+                icon: "maximize",
+                label: "Fit",
+                hot: cx.ui.hover(control_id(&g.rows, "fit")),
+            },
+        ],
+        size.1,
+    );
+    let m = minimap(&cards, view, (f64::from(size.0), f64::from(size.1)));
+    surface(
+        pane_id(&g.rows),
+        size,
+        view,
+        world,
+        vec![controls_el, minimap_view(mini_id(&g.rows), &m, size.1)],
+    )
+    .w_full()
+    .min_h(240.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unplaced_graph_goes_in_layers_by_its_longest_path() {
+        let at = layers(
+            &["a", "b", "c", "d"],
+            &[("a", "b"), ("b", "d"), ("a", "c"), ("c", "d")],
+        );
+        assert_eq!(at["a"].1, 0.0);
+        assert_eq!(at["b"].1, at["c"].1);
+        assert!(at["d"].1 > at["b"].1);
+        assert!(at["b"].0 < at["c"].0, "side by side, in row order");
+        // A cycle does not spin.
+        let looped = layers(&["x", "y"], &[("x", "y"), ("y", "x")]);
+        assert_eq!(looped.len(), 2);
+    }
+
+    #[test]
+    fn a_fit_shows_everything_no_closer_than_full_size() {
+        let v = fit((0.0, 0.0, 280.0, 100.0), (800.0, 600.0), 40.0);
+        assert_eq!(v.zoom, 1.0);
+        let small = fit((0.0, 0.0, 2800.0, 4000.0), (800.0, 600.0), 40.0);
+        assert!(small.zoom < 1.0 && small.zoom >= MIN_ZOOM);
+    }
+
+    #[test]
+    fn a_straight_edge_stays_straight() {
+        let (pts, mid) = edge_curve((0.0, 0.0), (5.0, 100.0));
+        assert_eq!(pts[1], pts[0]);
+        assert_eq!(mid, (2.5, 50.0));
+    }
+}

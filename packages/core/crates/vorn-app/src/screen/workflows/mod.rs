@@ -299,6 +299,42 @@ fn dot_status(run: &Value) -> &str {
 }
 
 /// The view under the top bar: the run list and the selected run.
+/// The Workflow editor's view, while it is on and its template checks.
+pub fn editor_point<'a>(s: &Screen<'a>) -> Option<&'a crate::points::Point> {
+    s.st.points
+        .find(crate::workflows::EDITOR, crate::points::kind::VIEWS, "workflows")
+        .filter(|p| matches!(&p.template, Ok(Some(t)) if matches!(t.view.kind, vorn_view::Kind::Graph(_))))
+}
+
+/// What the view says while the Workflow editor is switched off: the
+/// workflows are kept and still run.
+pub fn off() -> El {
+    let faint = || Rgba::white(0.45);
+    div()
+        .col()
+        .grow()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(div().pb(12.0).child(ico("workflow", 40.0, 1.0, faint())))
+        .child(
+            div().pb(4.0).child(
+                text("The workflow editor is off", 14.0, faint())
+                    .line_height(20.0)
+                    .silent(),
+            ),
+        )
+        .child(
+            text(
+                "Your workflows are kept and still run. Turn the Workflow editor on in Settings \u{203a} Extensions.",
+                12.0,
+                faint(),
+            )
+            .line_height(16.0)
+            .silent(),
+        )
+}
+
 pub fn landing(s: &Screen<'_>) -> El {
     let visible = s.st.wf.visible(&s.store.runs);
     let current = s.st.wf.current(&visible);

@@ -25,18 +25,14 @@ const LOOP_FOOTER: f64 = 18.0 + 22.0 + 40.0;
 const EMPTY_BODY: f64 = 52.0;
 /// Where a loop's body starts, from the top of its frame.
 pub const LOOP_BODY_TOP: f64 = LOOP_HEADER + LOOP_BODY_PAD;
-/// `STRAIGHT_EDGE_TOLERANCE`.
-const STRAIGHT: f64 = 16.0;
 /// `OPENING_TOP`.
 const OPENING_TOP: f64 = 48.0;
-/// `CANVAS_MIN_ZOOM`.
-pub const MIN_ZOOM: f64 = 0.2;
-/// The canvas's `maxZoom`.
-pub const MAX_ZOOM: f64 = 1.75;
+pub use vorn_components::graph::{
+    edge_curve, zoom_by, Minimap, Viewport, MAX_ZOOM, MINI, MIN_ZOOM,
+};
 /// The add-trigger spot's size.
 pub const TRIGGER_SPOT: (f64, f64) = (CARD_WIDTH, 58.0);
-/// The + button.
-pub const PLUS: f64 = 22.0;
+pub use vorn_components::graph::PLUS;
 
 fn id(v: &Value) -> &str {
     s(v, "id").unwrap_or("")
@@ -592,35 +588,6 @@ pub fn elements(nodes: &[Value], edges: &[Value]) -> Elements {
     }
 }
 
-/// `calculateControlOffset` at React Flow's default curvature.
-fn control_offset(distance: f64) -> f64 {
-    if distance >= 0.0 {
-        0.5 * distance
-    } else {
-        0.25 * 25.0 * (-distance).sqrt()
-    }
-}
-
-/// `stepEdgePath`: straight down a column, a bezier only for a real fork.
-/// The control points (equal to the ends when straight) and the label's
-/// point.
-pub fn edge_curve(from: (f64, f64), to: (f64, f64)) -> ([(f64, f64); 4], (f64, f64)) {
-    if (from.0 - to.0).abs() < STRAIGHT {
-        return (
-            [from, from, to, to],
-            ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0),
-        );
-    }
-    let off = control_offset(to.1 - from.1);
-    let c1 = (from.0, from.1 + off);
-    let c2 = (to.0, to.1 - off);
-    let label = (
-        from.0 * 0.125 + c1.0 * 0.375 + c2.0 * 0.375 + to.0 * 0.125,
-        from.1 * 0.125 + c1.1 * 0.375 + c2.1 * 0.375 + to.1 * 0.125,
-    );
-    ([from, c1, c2, to], label)
-}
-
 /// `canConnect`: a hand-drawn edge keeps the graph a DAG the engine runs.
 pub fn can_connect(
     nodes: &[Value],
@@ -657,14 +624,6 @@ pub fn can_connect(
         return false;
     }
     !graph::reachable_from(target, edges).contains(source)
-}
-
-/// A pan and zoom: flow point `p` draws at `p * zoom + (x, y)`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Viewport {
-    pub x: f64,
-    pub y: f64,
-    pub zoom: f64,
 }
 
 /// The bounds of the drawn steps (the add buttons left out unless they
@@ -739,56 +698,11 @@ pub fn fit(els: &Elements, width: f64, height: f64) -> Option<Viewport> {
     Some(place_at_top((min_x, min_y, bw, bh), width, zoom))
 }
 
-/// React Flow's `zoomIn`/`zoomOut` step about the pane's centre.
-pub fn zoom_by(v: Viewport, factor: f64, center: (f64, f64)) -> Viewport {
-    let zoom = (v.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
-    let k = zoom / v.zoom;
-    Viewport {
-        x: center.0 - (center.0 - v.x) * k,
-        y: center.1 - (center.1 - v.y) * k,
-        zoom,
-    }
-}
-
-/// The minimap's size.
-pub const MINI: (f64, f64) = (96.0, 64.0);
-
-/// What the minimap draws, in its own pixels.
-#[derive(Debug, Clone)]
-pub struct Minimap {
-    /// Flow units per minimap pixel.
-    pub scale: f64,
-    pub nodes: Vec<(f64, f64, f64, f64)>,
-    pub view: (f64, f64, f64, f64),
-}
-
 /// React Flow's `MiniMap`: every node and the visible area, fitted with a
-/// margin into 96×64.
-pub fn minimap(els: &Elements, v: Viewport, (w, h): (f64, f64)) -> Minimap {
-    let vr = (-v.x / v.zoom, -v.y / v.zoom, w / v.zoom, h / v.zoom);
-    let mut b = vr;
-    for e in &els.nodes {
-        let (x0, y0) = (b.0.min(e.x), b.1.min(e.y));
-        let (x1, y1) = ((b.0 + b.2).max(e.x + e.w), (b.1 + b.3).max(e.y + e.h));
-        b = (x0, y0, x1 - x0, y1 - y0);
-    }
-    let scale = (b.2 / MINI.0).max(b.3 / MINI.1);
-    let (vw, vh) = (scale * MINI.0, scale * MINI.1);
-    let offset = 5.0 * scale;
-    let x = b.0 - (vw - b.2) / 2.0 - offset;
-    let y = b.1 - (vh - b.3) / 2.0 - offset;
-    let full = (vw + 2.0 * offset, vh + 2.0 * offset);
-    let k = (MINI.0 / full.0).min(MINI.1 / full.1);
-    let map = |r: (f64, f64, f64, f64)| ((r.0 - x) * k, (r.1 - y) * k, r.2 * k, r.3 * k);
-    Minimap {
-        scale: 1.0 / k,
-        nodes: els
-            .nodes
-            .iter()
-            .map(|e| map((e.x, e.y, e.w, e.h)))
-            .collect(),
-        view: map(vr),
-    }
+/// margin into 96×64, as the kit's graph draws it.
+pub fn minimap(els: &Elements, v: Viewport, size: (f64, f64)) -> Minimap {
+    let cards: Vec<(f64, f64, f64, f64)> = els.nodes.iter().map(|e| (e.x, e.y, e.w, e.h)).collect();
+    vorn_components::graph::minimap(&cards, v, size)
 }
 
 #[cfg(test)]

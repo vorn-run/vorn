@@ -101,6 +101,9 @@ pub struct Sources<'a> {
     pub packs: &'a [Value],
     /// `connector:list`, for each connector's trigger events.
     pub connectors: &'a [Value],
+    /// `workflow:nodeTypes`' node types: those an installed extension
+    /// declares are listed beside Vorn's own steps.
+    pub node_types: &'a [Value],
 }
 
 static NO_ACTIONS: std::sync::LazyLock<HashMap<String, Vec<Value>>> =
@@ -114,6 +117,7 @@ impl Default for Sources<'_> {
             catalog: &[],
             packs: &[],
             connectors: &[],
+            node_types: &[],
         }
     }
 }
@@ -369,6 +373,36 @@ pub fn entries(
                 Pick::Type(kind.into()),
                 Some(icon),
             ));
+        }
+        // Steps an installed extension declares; Vorn's own built-ins are listed above.
+        for t in src.node_types {
+            let (Some(kind), Some(ext)) = (s(t, "id"), s(t, "extension")) else {
+                continue;
+            };
+            if ext.starts_with("vorn.") {
+                continue;
+            }
+            let title = t
+                .pointer("/doc/title")
+                .and_then(Value::as_str)
+                .unwrap_or(kind);
+            let from = s(t, "extensionName").unwrap_or(ext);
+            if !matches(&[title, from]) {
+                continue;
+            }
+            let mut r = row(
+                format!("node:{kind}"),
+                title.into(),
+                Pick::Contributed {
+                    kind: kind.into(),
+                    title: title.into(),
+                },
+                Some("puzzle"),
+            );
+            if let Entry::Row { owner, .. } = &mut r {
+                *owner = Some(from.to_owned());
+            }
+            flat.push(r);
         }
         if !scope.body_only
             && !scope.inside_branch

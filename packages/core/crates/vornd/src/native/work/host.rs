@@ -231,6 +231,9 @@ impl Host for VorndHost {
 
     fn publish(&self, run: &WorkflowExecution) {
         self.broadcast("workflow:runUpdated", without_definition(run));
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            editor.run_changed(run);
+        }
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -288,6 +291,14 @@ impl Host for VorndHost {
     }
 
     fn keep_gate_page(&self, run_id: &str, node_id: &str, title: &str, round: u32) {
+        // A gate's page is kept for comments by Artifacts, while it is on.
+        if !self
+            .native
+            .upgrade()
+            .is_none_or(|n| crate::native::extensions::builtin::artifacts::on(&n))
+        {
+            return;
+        }
         let file = vorn_work::gates::file(&self.data_dir, run_id, node_id, round);
         let (data_dir, run, node, title) = (
             self.data_dir.clone(),

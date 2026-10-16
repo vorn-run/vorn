@@ -921,7 +921,8 @@ impl Raw {
             || self.contributes.is_some()
             || !self.mcp.is_empty()
             || self.agent.is_some();
-        if !does_something {
+        // A built-in's program is compiled into vornd: its switch alone may be what it adds.
+        if !does_something && !builtin {
             return Err(at(
                 "",
                 "declares no service, action, connector or contribution".into(),

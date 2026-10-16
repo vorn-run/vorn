@@ -1,0 +1,39 @@
+// The workflow being edited: a card per step, an edge per link between
+// steps. The client lays the canvas out and fills these rows from the
+// workflow it holds.
+schema "vorn:view@1"
+
+rows "steps" {
+    title string
+    // What kind of step it is, or what it is set to do.
+    subtitle string
+    // The start of what it runs, when it is code: a script, a request's body.
+    code string
+    // The start of what it says, when it is prose: a prompt, a gate's message.
+    note string
+    // Its glyph: the client draws node:<id> as the step's own mark.
+    icon string
+    x number
+    y number
+}
+
+rows "edges" {
+    source string
+    target string
+    // A condition's branch.
+    label string
+}
+
+graph "steps" edges="edges" open="open" move="move" connect="connect" empty="No steps yet" label="{row.title}" {
+    card {
+        row {
+            icon "{row.icon}"
+            column {
+                text "{row.title}" role=title
+                text "{row.subtitle}" role=secondary
+            }
+        }
+        text "{row.code}" role=mono when="{row.code}"
+        text "{row.note}" role=secondary when="{row.note}"
+    }
+}

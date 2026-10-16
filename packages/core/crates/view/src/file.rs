@@ -196,7 +196,7 @@ impl Reader<'_> {
         let first = match kind {
             "button" => "label",
             "section" | "entry" => "title",
-            "list" | "choice" | "board" => "rows",
+            "list" | "choice" | "board" | "graph" => "rows",
             _ => "value",
         };
         for (i, e) in node
@@ -239,6 +239,7 @@ impl Reader<'_> {
         }
         match kind {
             "board" => self.board_parts(kids, &path, &mut o),
+            "graph" => self.graph_parts(kids, &path, &mut o),
             "list" => match kids {
                 [item] => {
                     let v = self.node(item, &format!("{path}.item"));
@@ -280,6 +281,38 @@ impl Reader<'_> {
 impl Reader<'_> {
     /// A board's `column` and `card` children: the columns in order, and the
     /// card's nodes as one column.
+    /// A graph's one child: its card, a column of nodes as a board's is.
+    fn graph_parts(&mut self, kids: &[KdlNode], path: &str, o: &mut Map<String, Value>) {
+        for kid in kids {
+            match kid.name().value() {
+                "card" if !o.contains_key("card") => {
+                    let at = format!("{path}.card");
+                    self.mark(&at, kid.span().offset());
+                    let nodes = kid.children().map(KdlDocument::nodes).unwrap_or_default();
+                    let children: Vec<Value> = nodes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let p = format!("{at}.column[{i}]");
+                            self.mark(&p, c.span().offset());
+                            self.node(c, &p)
+                        })
+                        .collect();
+                    let mut column = Map::new();
+                    column.insert("children".into(), Value::Array(children));
+                    let mut wrapped = Map::new();
+                    wrapped.insert("column".into(), Value::Object(column));
+                    o.insert("card".into(), Value::Object(wrapped));
+                }
+                other => self.extra(
+                    kid.span().offset(),
+                    path,
+                    format!("a graph holds one card, not '{other}'"),
+                ),
+            }
+        }
+    }
+
     fn board_parts(&mut self, kids: &[KdlNode], path: &str, o: &mut Map<String, Value>) {
         let mut columns = Vec::new();
         for kid in kids {

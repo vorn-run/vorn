@@ -130,47 +130,38 @@ fn installed<'a>(s: &'a Screen<'_>) -> impl Iterator<Item = &'a crate::agents::A
         .filter(|a| s.st.installed.as_ref().is_none_or(|i| i.contains(&a.key)))
 }
 
-/// `workflow-menu-items`: the workflows a menu offers, contextual ones only
-/// for a session.
-fn workflows(s: &Screen<'_>, source: Option<&str>) -> Vec<Item> {
-    s.store
-        .workflows
-        .iter()
-        .filter(|w| w.enabled)
-        .filter(|w| {
-            w.workspace_id
-                .as_deref()
-                .unwrap_or(crate::client::store::WORKSPACE)
-                == s.store.workspace()
-        })
-        .filter(|w| contextual(&w.nodes) == source.is_some())
-        .map(|w| {
-            Item::new(
-                "workflow",
-                w.name.as_str(),
-                Act::RunWorkflow {
-                    id: w.id.clone(),
-                    source: source.map(str::to_owned),
-                },
-            )
+/// The submenus extensions add to `menu`, one entry per row they publish
+/// (Run workflow's workflows among them); `source` is the session the menu
+/// is about.
+fn row_menus(s: &Screen<'_>, menu: &str, source: Option<&str>) -> Vec<Item> {
+    use crate::points::{kind, PointAct};
+    let workspace = s.store.workspace();
+    s.st.points
+        .at(kind::MENUS)
+        .filter(|p| p.menu.as_deref() == Some(menu) && p.rows.is_some())
+        .filter_map(|p| {
+            let icon = p.icon.as_deref().unwrap_or("puzzle");
+            let entries: Vec<Item> = s
+                .st
+                .points
+                .listed_rows(p, workspace)
+                .into_iter()
+                .map(|r| {
+                    let args = serde_json::json!({ "id": r.id, "sessionId": source }).to_string();
+                    let act = Act::Point(PointAct::Choose { key: p.key(), args });
+                    let mut it = Item::new("puzzle", r.text("title"), act);
+                    it.icon = None;
+                    it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500)))
+                })
+                .collect();
+            if entries.is_empty() {
+                return None;
+            }
+            let mut it = Item::new("puzzle", p.title.as_str(), Act::Nothing).submenu(entries);
+            it.icon = None;
+            Some(it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))))
         })
         .collect()
-}
-
-/// Whether a workflow's manual trigger asks for a session.
-pub fn contextual(nodes: &serde_json::Value) -> bool {
-    nodes.as_array().into_iter().flatten().any(|n| {
-        let cfg = n.pointer("/config");
-        n.get("type").and_then(|t| t.as_str()) == Some("trigger")
-            && cfg
-                .and_then(|c| c.get("triggerType"))
-                .and_then(|t| t.as_str())
-                == Some("manual")
-            && cfg
-                .and_then(|c| c.get("contextual"))
-                .and_then(serde_json::Value::as_bool)
-                == Some(true)
-    })
 }
 
 /// `buildScopedSubmenu`: each of the workspace's projects, under its title
@@ -277,9 +268,7 @@ fn grid(s: &Screen<'_>) -> Vec<Item> {
     new.shortcut = Some(format!("{}N", super::mod_label()));
     new.separator = !items.is_empty();
     items.push(new);
-    let flows = workflows(s, None);
-    if !flows.is_empty() {
-        let mut run = Item::new("workflow", "Run workflow", Act::Nothing).submenu(flows);
+    for mut run in row_menus(s, "grid", None) {
         run.sub_w = Some(SUB_W);
         items.push(run);
     }
@@ -367,10 +356,7 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 .submenu(agents),
         );
     }
-    let flows = workflows(s, Some(id));
-    if !flows.is_empty() {
-        items.push(Item::new("workflow", "Run workflow", Act::Nothing).submenu(flows));
-    }
+    items.extend(row_menus(s, "card", Some(id)));
     items
 }
 
@@ -394,13 +380,8 @@ fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {
         if locked { "Unlock size" } else { "Lock size" },
         Act::LockSize(id.to_owned(), !locked),
     ));
-    let flows = workflows(s, Some(id));
-    if !flows.is_empty() {
-        items.push(
-            Item::new("workflow", "Run workflow", Act::Nothing)
-                .sep()
-                .submenu(flows),
-        );
+    for (i, run) in row_menus(s, "terminal", Some(id)).into_iter().enumerate() {
+        items.push(if i == 0 { run.sep() } else { run });
     }
     items
 }
@@ -749,16 +730,6 @@ fn launch_branches(s: &Screen<'_>) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn contextual_workflows_have_a_manual_contextual_trigger() {
-        let yes = json!([{ "type": "trigger", "config": { "triggerType": "manual", "contextual": true } }]);
-        let no = json!([{ "type": "trigger", "config": { "triggerType": "manual" } }]);
-        assert!(contextual(&yes));
-        assert!(!contextual(&no));
-        assert!(!contextual(&json!(null)));
-    }
 
     #[test]
     fn choosing_skips_headers_and_reaches_submenus() {
