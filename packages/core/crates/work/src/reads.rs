@@ -41,6 +41,8 @@ pub struct Host<'a> {
     pub now_ms: i64,
     /// The zone a date-time without an offset is read in.
     pub zone: &'a TimeZone,
+    /// How each trigger type fires, as the workflow registry says.
+    pub timings: &'a crate::trigger::Timings,
 }
 
 /// What a read came to.
@@ -143,7 +145,7 @@ fn next_run(store: &mut Store, host: &Host<'_>, params: &Value) -> Option<Reply>
     if workflow.is_null() || !is_truthy(workflow.get("enabled")) {
         return null;
     }
-    match Trigger::of(&workflow) {
+    match Trigger::of(&workflow, host.timings) {
         Trigger::Unreadable => None,
         Trigger::Missing | Trigger::Other => null,
         Trigger::Cron { cron: None, .. } => Some(Reply::Void),
@@ -342,11 +344,13 @@ mod tests {
 
     fn ask(f: &mut Fixture, method: &str, params: Value) -> Reply {
         let zone = TimeZone::UTC;
+        let timings = crate::trigger::tests::timings();
         let host = Host {
             data_dir: &f.data,
             server_port: Some(4123),
             now_ms: NOW,
             zone: &zone,
+            timings: &timings,
         };
         read(&mut f.store, &host, method, &params)
     }

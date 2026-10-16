@@ -213,7 +213,7 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Opti
         "execute_workflow" => workflows::execute_workflow(cx, &args).await,
         "export_workflow" => workflows::export_workflow(cx, &args).await,
         "import_workflow" => workflows::import_workflow(cx, &args).await,
-        "describe_workflow_nodes" => Ok(workflows::describe_workflow_nodes(&args)),
+        "describe_workflow_nodes" => workflows::describe_workflow_nodes(cx, &args).await,
 
         "list_workspaces" => workspaces::list_workspaces(cx).await,
         "create_workspace" => workspaces::create_workspace(cx, &args).await,

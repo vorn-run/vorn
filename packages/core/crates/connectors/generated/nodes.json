@@ -1,0 +1,74 @@
+{
+  "callConnectorAction": {
+    "summary": "Runs one action of a connected service (a comment, an issue, a merge...) with arguments built from templates.",
+    "configSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nodeType": {
+          "description": "Always callConnectorAction",
+          "type": "string",
+          "const": "callConnectorAction"
+        },
+        "connectionId": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Connection the action runs against, from list_connections"
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Action type from the connector, e.g. commentOnPullRequest; list_connector_actions lists them with their args"
+        },
+        "actionLabel": {
+          "description": "The action's display name, for the canvas",
+          "type": "string",
+          "maxLength": 200
+        },
+        "connectorId": {
+          "description": "Connector the action belongs to, for a step placed before a connection exists",
+          "type": "string",
+          "maxLength": 200
+        },
+        "args": {
+          "description": "The action's arguments by name, every value a string template; a list or object a template names arrives as JSON text. list_connector_actions gives each action's args",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 200000
+          }
+        }
+      },
+      "required": [
+        "connectionId",
+        "action"
+      ],
+      "additionalProperties": {}
+    },
+    "outputs": [
+      {
+        "field": "output",
+        "description": "The action result as text"
+      },
+      {
+        "field": "<the action's output fields>",
+        "description": "Each field the action declares in its outputSchema; list_connector_actions gives them"
+      },
+      {
+        "field": "status",
+        "description": "success or error"
+      },
+      {
+        "field": "error",
+        "description": "Why it failed, or empty"
+      }
+    ],
+    "rules": [
+      "connectionId comes from list_connections; action and its args from list_connector_actions.",
+      "A step waits, rather than fails, when its connection needs signing in again."
+    ]
+  }
+}

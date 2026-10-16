@@ -11,6 +11,7 @@
 //! follow its wording and its limits.
 
 pub mod file;
+pub mod workflows;
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -352,6 +353,15 @@ pub struct Contributions {
     /// Saved layouts it offers, each a file under `layouts/`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layouts: Option<Vec<LayoutFile>>,
+    /// Node types: steps workflows can use, which it runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nodes: Option<Vec<workflows::NodeDecl>>,
+    /// Trigger types: what starts a workflow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub triggers: Option<Vec<workflows::TriggerDecl>>,
+    /// Workflows it ships, each a file under `workflows/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflows: Option<Vec<workflows::WorkflowDecl>>,
     /// What it draws from templates, by where it shows.
     #[serde(flatten)]
     pub points: BTreeMap<Place, Vec<Point>>,
@@ -372,6 +382,18 @@ impl Contributions {
 
     pub fn layouts(&self) -> &[LayoutFile] {
         self.layouts.as_deref().unwrap_or_default()
+    }
+
+    pub fn nodes(&self) -> &[workflows::NodeDecl] {
+        self.nodes.as_deref().unwrap_or_default()
+    }
+
+    pub fn triggers(&self) -> &[workflows::TriggerDecl] {
+        self.triggers.as_deref().unwrap_or_default()
+    }
+
+    pub fn workflows(&self) -> &[workflows::WorkflowDecl] {
+        self.workflows.as_deref().unwrap_or_default()
     }
 
     pub fn points(&self, place: Place) -> &[Point] {
@@ -413,11 +435,17 @@ impl Contributions {
         let links = self.link_handlers().iter().map(|l| &l.base);
         let layouts = self.layouts().iter().map(|l| &l.base);
         let points = self.points.values().flatten().map(|p| &p.base);
+        let nodes = self.nodes().iter().map(|n| &n.base);
+        let triggers = self.triggers().iter().map(|t| &t.base);
+        let flows = self.workflows().iter().map(|w| &w.base);
         panes
             .chain(footers)
             .chain(links)
             .chain(layouts)
             .chain(points)
+            .chain(nodes)
+            .chain(triggers)
+            .chain(flows)
             .map(|c| c.when.as_ref())
     }
 }
@@ -452,11 +480,15 @@ pub enum Place {
     Dialogs,
     /// A main view beside the sessions, shown as one of the window's views.
     Views,
+    /// Things waiting on a person (a gate asking), each a row of `rows`:
+    /// the waiting pill counts them, and the approve and deny keys answer
+    /// the oldest with `call` or `deny`.
+    Attention,
 }
 
 impl Place {
     /// Every place a `points` entry may be, panes aside (they are `panes` with a view).
-    pub const POINTS: [Place; 12] = [
+    pub const POINTS: [Place; 13] = [
         Place::Sidebar,
         Place::Badges,
         Place::CardFooters,
@@ -469,6 +501,7 @@ impl Place {
         Place::Menus,
         Place::Dialogs,
         Place::Views,
+        Place::Attention,
     ];
 
     /// Its key in `manifest.json`.
@@ -487,6 +520,7 @@ impl Place {
             Place::Menus => "menus",
             Place::Dialogs => "dialogs",
             Place::Views => "views",
+            Place::Attention => "attention",
         }
     }
 
@@ -506,6 +540,7 @@ impl Place {
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
             Place::Views => "Main view",
+            Place::Attention => "Waiting for you",
         }
     }
 
@@ -519,12 +554,15 @@ impl Place {
 
     /// Whether every entry must name a template.
     fn needs_view(self) -> bool {
-        !matches!(self, Place::Commands | Place::Launchers | Place::Menus)
+        !matches!(
+            self,
+            Place::Commands | Place::Launchers | Place::Menus | Place::Attention
+        )
     }
 }
 
 /// The menus an item may join.
-pub const MENUS: [&str; 4] = ["card", "grid", "view", "worktree"];
+pub const MENUS: [&str; 5] = ["card", "grid", "terminal", "view", "worktree"];
 
 /// A template contribution: what it shows, and what choosing it does.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -555,6 +593,13 @@ pub struct Point {
     /// For a window: the collection whose first row brings it forward.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raise: Option<String>,
+    /// For a menu item, a submenu of one entry per row of this collection,
+    /// each calling `call` with the row's `id`; for attention, its items.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<String>,
+    /// For attention: the method denying an item calls, with its `id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deny: Option<String>,
 }
 
 /// The id, title and where-it-shows every contribution carries.
@@ -1431,6 +1476,19 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         })
         .collect();
 
+    let raw_of = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|a| &a[..a.len().min(MAX_CONTRIBUTIONS)])
+            .unwrap_or_default()
+            .iter()
+            .filter_map(Value::as_object)
+    };
+    let nodes = workflows::nodes(raw_of("nodes"));
+    let triggers = workflows::triggers(raw_of("triggers"));
+    let flows = workflows::workflows(raw_of("workflows"));
+
     let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
     let mut ids: Vec<String> = Vec::new();
     for place in Place::POINTS {
@@ -1463,6 +1521,9 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         && link_handlers.is_empty()
         && layouts.is_empty()
         && points.is_empty()
+        && nodes.is_empty()
+        && triggers.is_empty()
+        && flows.is_empty()
     {
         return None;
     }
@@ -1471,6 +1532,9 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         footers: (!footers.is_empty()).then_some(footers),
         link_handlers: (!link_handlers.is_empty()).then_some(link_handlers),
         layouts: (!layouts.is_empty()).then_some(layouts),
+        nodes: (!nodes.is_empty()).then_some(nodes),
+        triggers: (!triggers.is_empty()).then_some(triggers),
+        workflows: (!flows.is_empty()).then_some(flows),
         points,
     })
 }
@@ -1575,6 +1639,8 @@ fn read_point(
     let menu = opt("menu");
     let window = opt("window");
     let raise = opt("raise");
+    let rows = opt("rows");
+    let deny = opt("deny");
     if icon.as_deref().is_some_and(|i| !icon_name(i)) {
         return Err(("icon", "is not an icon name such as trash-2".into()));
     }
@@ -1640,7 +1706,31 @@ fn read_point(
         let field = if size.is_some() { "size" } else { "raise" };
         return Err((field, "belongs to a window".into()));
     }
+    if rows
+        .as_deref()
+        .is_some_and(|r| !js::test(contribution_id(), r))
+    {
+        return Err(("rows", "is not a collection name".into()));
+    }
+    if deny.as_deref().is_some_and(|d| !method_name(d)) {
+        return Err(("deny", "is not a method name".into()));
+    }
+    match place {
+        Place::Attention if rows.is_none() || call.is_none() => {
+            return Err(("", "needs rows and the call that approves one".into()));
+        }
+        Place::Attention | Place::Menus => {}
+        _ if rows.is_some() => {
+            return Err(("rows", "belongs to a menu item or attention".into()));
+        }
+        _ => {}
+    }
+    if place != Place::Attention && deny.is_some() {
+        return Err(("deny", "belongs to attention".into()));
+    }
     Ok(Point {
+        rows,
+        deny,
         base,
         view,
         icon,

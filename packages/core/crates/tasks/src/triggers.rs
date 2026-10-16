@@ -46,6 +46,51 @@ pub fn for_task(prior: Option<&Value>, task: &Value) -> Option<Value> {
     Some(trigger)
 }
 
+/// What a trigger from [`for_task`] is fired with (`workflow.fire`): its
+/// trigger type, the effect id it is received once by, the fields its
+/// workflows filter on (the project, and a move's from and to) and the run's
+/// context. `None` for a move to the status it was already in.
+pub fn fire_args(trigger: &Value) -> Option<Value> {
+    let kind = trigger.get("kind").and_then(Value::as_str)?;
+    let task = trigger.get("task").filter(|t| t.is_object())?;
+    let project = task
+        .get("projectName")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty());
+    let effect = trigger.get("effectId").cloned().unwrap_or(Value::Null);
+    match kind {
+        "taskCreated" => Some(json!({
+            "trigger": kind,
+            "effectId": effect,
+            "fields": { "projectFilter": project },
+            "context": { "task": task, "trigger": { "type": kind } },
+        })),
+        "taskStatusChanged" => {
+            let side = |k: &str| {
+                trigger
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let (from, to) = (side("from"), side("to"));
+            if from == to {
+                return None;
+            }
+            Some(json!({
+                "trigger": kind,
+                "effectId": effect,
+                "fields": { "projectFilter": project, "fromStatus": from, "toStatus": to },
+                "context": {
+                    "task": task,
+                    "trigger": { "type": kind, "fromStatus": from, "toStatus": to },
+                },
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// A value in a template literal.
 fn text(value: Option<&Value>) -> String {
     value.map_or_else(|| "undefined".to_owned(), js::to_string)

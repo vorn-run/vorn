@@ -1,6 +1,6 @@
-//! Workflows started by something happening: a task appearing or moving, a
-//! session coming back (`triggers.ts`), a schedule firing or a connector
-//! item arriving (`dispatch.ts`).
+//! Workflows started by something happening: a trigger an extension fires
+//! (a task appearing or moving, a session coming back), a schedule falling
+//! due or a webhook or connector item arriving at the core.
 
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -10,17 +10,15 @@ use vorn_work::model::{Context, Workflow};
 
 use crate::engine::{workflows_of, Engine, Options};
 use crate::host::{Host, Source};
+use crate::registry::matches;
 
-/// A restore-triggered run waiting for its project's turn.
+/// A run waiting for its turn.
 pub(crate) type Queued = (Workflow, Context);
 
-fn text<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
-    v.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
-}
-
 impl<H: Host> Engine<H> {
-    /// The enabled workflows, and each one's trigger config.
-    async fn armed(&self, kind: &str) -> Vec<(Workflow, Value)> {
+    /// The enabled workflows whose trigger is of type `kind`, each with its
+    /// trigger's config.
+    pub async fn armed(&self, kind: &str) -> Vec<(Workflow, Value)> {
         let Some(config) = self.config().await else {
             return Vec::new();
         };
@@ -35,7 +33,7 @@ impl<H: Host> Engine<H> {
     }
 
     /// Starts `workflow` behind the caller.
-    fn start(&self, workflow: Workflow, context: Option<Context>, source: Option<Source>) {
+    pub fn start(&self, workflow: Workflow, context: Option<Context>, source: Option<Source>) {
         let engine = self.clone();
         tokio::spawn(async move {
             let options = Options {
@@ -48,99 +46,44 @@ impl<H: Host> Engine<H> {
         });
     }
 
-    /// `fireTaskCreatedTrigger`.
-    pub async fn fire_task_created(&self, task: &Value) {
-        let project = text(task, "projectName");
-        for (workflow, trigger) in self.armed("taskCreated").await {
-            if text(&trigger, "projectFilter").is_some_and(|f| Some(f) != project) {
+    /// Fires trigger type `kind`: every enabled workflow it arms whose
+    /// trigger config takes these `fields` ([`matches`]) starts with
+    /// `context`. Answers how many started.
+    pub async fn fire(&self, kind: &str, fields: &Map<String, Value>, context: Context) -> usize {
+        let mut started = 0;
+        for (workflow, trigger) in self.armed(kind).await {
+            if !matches(&trigger, fields) {
                 continue;
             }
-            let mut t = Map::new();
-            t.insert("type".into(), "taskCreated".into());
-            let context = Context {
-                task: Some(task.clone()),
-                trigger: Some(Value::Object(t)),
-                ..Context::default()
-            };
-            self.start(workflow, Some(context), None);
+            self.start(workflow, Some(context.clone()), None);
+            started += 1;
         }
+        started
     }
 
-    /// `fireTaskStatusChangedTrigger`.
-    pub async fn fire_task_status_changed(&self, task: &Value, from: &str, to: &str) {
-        if from == to {
-            return;
-        }
-        let project = text(task, "projectName");
-        for (workflow, trigger) in self.armed("taskStatusChanged").await {
-            if text(&trigger, "projectFilter").is_some_and(|f| Some(f) != project)
-                || text(&trigger, "fromStatus").is_some_and(|f| f != from)
-                || text(&trigger, "toStatus").is_some_and(|f| f != to)
-            {
-                continue;
-            }
-            let context = Context {
-                task: Some(task.clone()),
-                trigger: Some(
-                    serde_json::json!({ "type": "taskStatusChanged", "fromStatus": from, "toStatus": to }),
-                ),
-                ..Context::default()
-            };
-            self.start(workflow, Some(context), None);
-        }
-    }
-
-    /// `fireSessionRestoredTrigger`: cold restores by default, one run at a
-    /// time per project unless the workflow says otherwise.
-    pub async fn fire_session_restored(
-        &self,
-        session: &Value,
-        restore: &str,
-        environment: Option<Value>,
-    ) {
-        let project = text(session, "projectName").unwrap_or_default().to_owned();
-        for (workflow, trigger) in self.armed("sessionRestored").await {
-            if text(&trigger, "projectFilter").is_some_and(|f| f != project) {
-                continue;
-            }
-            if text(&trigger, "restore").unwrap_or("cold") == "cold" && restore == "warm" {
-                continue;
-            }
-            let mut t = Map::new();
-            t.insert("type".into(), "sessionRestored".into());
-            t.insert("restore".into(), restore.into());
-            if let Some(env) = environment.clone().filter(|e| !e.is_null()) {
-                t.insert("environment".into(), env);
-            }
-            let context = Context {
-                source: Some(session.clone()),
-                trigger: Some(Value::Object(t)),
-                ..Context::default()
-            };
-            if text(&trigger, "concurrency") == Some("unbounded") {
-                self.start(workflow, Some(context), None);
-            } else {
-                self.queue_restore(&project, workflow, context);
-            }
-        }
-    }
-
-    fn queue_restore(&self, project: &str, workflow: Workflow, context: Context) {
-        let mut queues = self
+    /// Starts `workflow` once the runs started before it under `key` have
+    /// ended: one at a time per key, in order.
+    pub fn start_in_turn(&self, key: &str, workflow: Workflow, context: Context) {
+        let mut turns = self
             .inner
-            .restore_queues
+            .turns
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let sender = queues.entry(project.to_owned()).or_insert_with(|| {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let sender = turns.entry(key.to_owned()).or_insert_with(|| {
             let (tx, mut rx) = mpsc::unbounded_channel::<Queued>();
             let engine = self.clone();
             tokio::spawn(async move {
                 while let Some((workflow, context)) = rx.recv().await {
-                    match engine.execute(&workflow, Some(context), Options::default()).await {
+                    match engine
+                        .execute(&workflow, Some(context), Options::default())
+                        .await
+                    {
                         Ok(started) => {
                             started.finish().await;
                         }
-                        Err(err) => warn!(workflow = %workflow.name, %err, "a restore workflow did not start"),
+                        Err(err) => {
+                            warn!(workflow = %workflow.name, %err, "a workflow started in turn did not start")
+                        }
                     }
                 }
             });

@@ -6,7 +6,7 @@ publisher = "Vorn"
 description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, and the MCP task tools. Off, the tasks are kept as they are."
 
 [declares]
-uses = ["tasks.read", "tasks.write", "sessions.read"]
+uses = ["tasks.read", "tasks.write", "sessions.read", "workflows.write"]
 
 [[contributes.views]]
 id = "board"
@@ -18,6 +18,22 @@ view = "views/board.kdl"
 id = "task"
 title = "Task in progress"
 view = "views/badge.kdl"
+
+[[contributes.nodes]]
+id = "createTaskFromItem"
+title = "Create task"
+icon = "list-plus"
+category = "connectors"
+
+[[contributes.triggers]]
+id = "taskCreated"
+title = "Task created"
+icon = "list-plus"
+
+[[contributes.triggers]]
+id = "taskStatusChanged"
+title = "Task moved"
+icon = "arrow-right-left"
 
 [mcp.list_tasks]
 description = "List tasks, optionally filtered by project, status, assigned agent, or workspace. Archived tasks are excluded by default; pass include_archived=true to include them."

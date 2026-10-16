@@ -1,8 +1,8 @@
 //! The workflow schedules the server arms, and the occurrences they fire.
 //!
-//! The server arms every enabled workflow whose trigger is `recurring` or
-//! `connectorPoll` with a cron node-cron accepts, and every `once` whose
-//! `runAt` is still ahead. An occurrence is one workflow in one Unix minute:
+//! The server arms every enabled workflow whose trigger type is timed by a
+//! cron (as `recurring` and `connectorPoll` are) with a cron node-cron
+//! accepts, and every one timed once (`once`) whose `runAt` is still ahead. An occurrence is one workflow in one Unix minute:
 //! the server writes one tick lock per workflow per minute, however many
 //! seconds of that minute the cron names, so the minute is the unit both
 //! sides count and the key a receiver deduplicates on.
@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::cron::Cron;
 use crate::is_truthy;
-use crate::trigger::{js_date, zone_of, Trigger};
+use crate::trigger::{js_date, zone_of, Timings, Trigger};
 
 /// How long a server takes to notice a minute it fires in; a planned
 /// occurrence not seen by then is a difference.
@@ -72,14 +72,15 @@ pub fn parse_lock_name(name: &str) -> Option<(&str, i64)> {
 
 impl Schedule {
     /// What a sync at `now_ms` arms for `workflows` (the stored workflow
-    /// rows), with `system` the zone a trigger without one runs in.
-    pub fn arm(workflows: &[Value], system: &TimeZone, now_ms: i64) -> Schedule {
+    /// rows), with `system` the zone a trigger without one runs in and
+    /// `timings` how each trigger type fires.
+    pub fn arm(workflows: &[Value], system: &TimeZone, now_ms: i64, timings: &Timings) -> Schedule {
         let armed = workflows
             .iter()
             .filter(|wf| is_truthy(wf.get("enabled")))
             .filter_map(|wf| {
                 let id = wf.get("id")?.as_str()?;
-                let arm = match Trigger::of(wf) {
+                let arm = match Trigger::of(wf, timings) {
                     Trigger::Cron { cron, timezone } => {
                         let cron = Cron::parse(cron?.as_str()?).ok()?;
                         Arm::Cron(cron, zone_of(timezone, system)?)
@@ -200,7 +201,12 @@ mod tests {
             ),
             json!({ "id": "no-nodes", "enabled": true }),
         ];
-        let schedule = Schedule::arm(&workflows, &TimeZone::UTC, now);
+        let schedule = Schedule::arm(
+            &workflows,
+            &TimeZone::UTC,
+            now,
+            &crate::trigger::tests::timings(),
+        );
         let armed: Vec<&str> = schedule.armed.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(armed, ["every-minute", "ahead", "poll"]);
         assert!(schedule.arms("poll"));
@@ -219,7 +225,12 @@ mod tests {
                 json!({ "triggerType": "once", "runAt": "2030-01-01T00:02:30Z" }),
             ),
         ];
-        let schedule = Schedule::arm(&workflows, &TimeZone::UTC, now);
+        let schedule = Schedule::arm(
+            &workflows,
+            &TimeZone::UTC,
+            now,
+            &crate::trigger::tests::timings(),
+        );
         let due = schedule.due(now, now + 3 * 60_000);
         let got: Vec<(i64, &str, i64)> = due
             .iter()
@@ -252,7 +263,12 @@ mod tests {
     #[test]
     fn a_window_is_open_at_its_start_and_closed_at_its_end() {
         let now = ms("2030-01-01T00:00:00Z");
-        let schedule = Schedule::arm(&[recurring("w", "* * * * *")], &TimeZone::UTC, now);
+        let schedule = Schedule::arm(
+            &[recurring("w", "* * * * *")],
+            &TimeZone::UTC,
+            now,
+            &crate::trigger::tests::timings(),
+        );
         assert!(schedule.due(now, now).is_empty());
         assert_eq!(schedule.due(now - 1, now).len(), 1);
         assert!(schedule.due(now, now + 59_999).is_empty());
@@ -267,7 +283,12 @@ mod tests {
             true,
             json!({ "triggerType": "recurring", "cron": "0 9 * * *", "timezone": "Asia/Tokyo" }),
         );
-        let schedule = Schedule::arm(&[wf], &TimeZone::UTC, now);
+        let schedule = Schedule::arm(
+            &[wf],
+            &TimeZone::UTC,
+            now,
+            &crate::trigger::tests::timings(),
+        );
         let due = schedule.due(now, now + 86_400_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].at_ms, ms("2030-01-02T00:00:00Z"));

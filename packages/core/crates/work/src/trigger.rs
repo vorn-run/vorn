@@ -2,22 +2,40 @@
 //! the first node whose `type` is `"trigger"`, read field by field the way
 //! JavaScript reads an object it has not checked.
 
+use std::collections::BTreeMap;
+
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use serde_json::Value;
+
+/// How a trigger type fires, as the extension that declares it says: the
+/// core's scheduler arms the timed ones and its webhook route the webhooks.
+/// No trigger type is known here by name; the workflow registry answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Timing {
+    /// On the config's `cron`, in its `timezone` or the system's.
+    Cron,
+    /// Once, at the config's `runAt`.
+    Once,
+    /// By a request to the workflow's webhook address, its `method` and `token`.
+    Webhook,
+}
+
+/// The timing of each trigger type that has one, by type id.
+pub type Timings = BTreeMap<String, Timing>;
 
 /// What the scheduler makes of a workflow's trigger.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Trigger<'a> {
     /// No trigger node, or one without a config.
     Missing,
-    /// `recurring` or `connectorPoll`: fires on `cron`, in `timezone` or the
+    /// A [`Timing::Cron`] type: fires on `cron`, in `timezone` or the
     /// system's. The fields are as stored; either may be absent.
     Cron {
         cron: Option<&'a Value>,
         timezone: Option<&'a Value>,
     },
-    /// `once`: fires at `runAt`, as stored.
+    /// A [`Timing::Once`] type: fires at `runAt`, as stored.
     Once { run_at: Option<&'a Value> },
     /// A trigger the scheduler does not arm.
     Other,
@@ -27,8 +45,9 @@ pub enum Trigger<'a> {
 }
 
 impl<'a> Trigger<'a> {
-    /// `getTriggerConfig(workflow)`, from the workflow's `nodes`.
-    pub fn of(workflow: &'a Value) -> Trigger<'a> {
+    /// `getTriggerConfig(workflow)`, from the workflow's `nodes`, its type
+    /// timed as `timings` says.
+    pub fn of(workflow: &'a Value, timings: &Timings) -> Trigger<'a> {
         let Some(nodes) = workflow.get("nodes").and_then(Value::as_array) else {
             return Trigger::Unreadable;
         };
@@ -36,7 +55,7 @@ impl<'a> Trigger<'a> {
             match node {
                 Value::Null => return Trigger::Unreadable,
                 Value::Object(n) if n.get("type").and_then(Value::as_str) == Some("trigger") => {
-                    return Trigger::from_config(n.get("config"));
+                    return Trigger::from_config(n.get("config"), timings);
                 }
                 _ => {}
             }
@@ -44,17 +63,18 @@ impl<'a> Trigger<'a> {
         Trigger::Missing
     }
 
-    fn from_config(config: Option<&'a Value>) -> Trigger<'a> {
+    fn from_config(config: Option<&'a Value>, timings: &Timings) -> Trigger<'a> {
         let config = match config {
             None | Some(Value::Null) => return Trigger::Missing,
             Some(c) => c,
         };
-        match config.get("triggerType").and_then(Value::as_str) {
-            Some("recurring" | "connectorPoll") => Trigger::Cron {
+        let kind = config.get("triggerType").and_then(Value::as_str);
+        match kind.and_then(|k| timings.get(k)) {
+            Some(Timing::Cron) => Trigger::Cron {
                 cron: config.get("cron"),
                 timezone: config.get("timezone"),
             },
-            Some("once") => Trigger::Once {
+            Some(Timing::Once) => Trigger::Once {
                 run_at: config.get("runAt"),
             },
             _ => Trigger::Other,
@@ -165,7 +185,7 @@ fn split_offset(time: &str) -> Option<(&str, Option<i32>)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
@@ -173,11 +193,24 @@ mod tests {
         json!({ "nodes": [{ "id": "a", "type": "step" }, { "id": "t", "type": "trigger", "config": config }] })
     }
 
+    /// The timings Vorn's own trigger types declare.
+    pub(crate) fn timings() -> Timings {
+        [
+            ("recurring", Timing::Cron),
+            ("connectorPoll", Timing::Cron),
+            ("once", Timing::Once),
+            ("webhook", Timing::Webhook),
+        ]
+        .into_iter()
+        .map(|(k, t)| (k.to_owned(), t))
+        .collect()
+    }
+
     #[test]
     fn reads_the_first_trigger_nodes_config() {
         let wf = trigger_config(json!({ "triggerType": "recurring", "cron": "* * * * *" }));
         assert_eq!(
-            Trigger::of(&wf),
+            Trigger::of(&wf, &timings()),
             Trigger::Cron {
                 cron: Some(&json!("* * * * *")),
                 timezone: None
@@ -187,7 +220,7 @@ mod tests {
             json!({ "triggerType": "connectorPoll", "cron": "0 * * * *", "timezone": "UTC" }),
         );
         assert!(matches!(
-            Trigger::of(&wf),
+            Trigger::of(&wf, &timings()),
             Trigger::Cron {
                 timezone: Some(_),
                 ..
@@ -195,22 +228,37 @@ mod tests {
         ));
         let wf = trigger_config(json!({ "triggerType": "once", "runAt": "2030-01-01T00:00:00Z" }));
         assert!(matches!(
-            Trigger::of(&wf),
+            Trigger::of(&wf, &timings()),
             Trigger::Once { run_at: Some(_) }
         ));
         let wf = trigger_config(json!({ "triggerType": "manual" }));
-        assert_eq!(Trigger::of(&wf), Trigger::Other);
-        assert_eq!(Trigger::of(&trigger_config(Value::Null)), Trigger::Missing);
-        assert_eq!(Trigger::of(&json!({ "nodes": [] })), Trigger::Missing);
-        assert_eq!(Trigger::of(&json!({ "nodes": [1, "x"] })), Trigger::Missing);
+        assert_eq!(Trigger::of(&wf, &timings()), Trigger::Other);
+        assert_eq!(
+            Trigger::of(&trigger_config(Value::Null), &timings()),
+            Trigger::Missing
+        );
+        assert_eq!(
+            Trigger::of(&json!({ "nodes": [] }), &timings()),
+            Trigger::Missing
+        );
+        assert_eq!(
+            Trigger::of(&json!({ "nodes": [1, "x"] }), &timings()),
+            Trigger::Missing
+        );
     }
 
     #[test]
     fn nodes_javascript_cannot_search_are_unreadable() {
-        assert_eq!(Trigger::of(&json!({})), Trigger::Unreadable);
-        assert_eq!(Trigger::of(&json!({ "nodes": {} })), Trigger::Unreadable);
+        assert_eq!(Trigger::of(&json!({}), &timings()), Trigger::Unreadable);
         assert_eq!(
-            Trigger::of(&json!({ "nodes": [null, { "type": "trigger" }] })),
+            Trigger::of(&json!({ "nodes": {} }), &timings()),
+            Trigger::Unreadable
+        );
+        assert_eq!(
+            Trigger::of(
+                &json!({ "nodes": [null, { "type": "trigger" }] }),
+                &timings()
+            ),
             Trigger::Unreadable
         );
     }

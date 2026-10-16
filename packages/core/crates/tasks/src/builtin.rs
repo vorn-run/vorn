@@ -207,11 +207,7 @@ impl Tasks {
         match done {
             Ok(done) => {
                 if let Some(trigger) = done.trigger {
-                    let name = match trigger.get("kind").and_then(Value::as_str) {
-                        Some("taskCreated") => TASK_CREATED,
-                        _ => TASK_STATUS_CHANGED,
-                    };
-                    self.host.emit(name, trigger);
+                    self.fire(trigger).await;
                 }
                 if let Some(change) = done.change {
                     let badged = self.touches_badges(&change);
@@ -291,6 +287,89 @@ impl Tasks {
             }
         }
         Ok(Value::Array(answers))
+    }
+
+    /// `task.take`: task `id` in progress for a workflow step's session and
+    /// agent; `task.handBack`: back in the queue, unassigned. Each fires the
+    /// workflows watching for the move, as any write does.
+    pub async fn take_or_hand_back(&self, method: &str, args: &Value) -> Result<Value, String> {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| format!("{method} takes the id of the task"))?
+            .to_owned();
+        let now = now_iso();
+        let mut updates = serde_json::Map::new();
+        match method {
+            "task.take" => {
+                let text = |k: &str| args.get(k).cloned().unwrap_or(Value::Null);
+                updates.insert("status".into(), json!("in_progress"));
+                updates.insert("assignedSessionId".into(), text("sessionId"));
+                updates.insert("assignedAgent".into(), text("agent"));
+                updates.insert("updatedAt".into(), json!(now));
+                updates.insert("archivedAt".into(), Value::Null);
+            }
+            _ => {
+                updates.insert("status".into(), json!("todo"));
+                updates.insert("updatedAt".into(), json!(now));
+                updates.insert("completedAt".into(), Value::Null);
+                updates.insert("archivedAt".into(), Value::Null);
+                updates.insert("assignedSessionId".into(), Value::Null);
+                updates.insert("assignedAgent".into(), Value::Null);
+            }
+        }
+        let moved = self
+            .on_store(move |store| {
+                let Some(before) = row(store, &json!(id))? else {
+                    return Ok(None);
+                };
+                let cleared: Vec<String> = updates
+                    .iter()
+                    .filter(|(_, v)| v.is_null())
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                store.call("dbUpdateTask", json!([id, updates, cleared]))?;
+                Ok(row(store, &json!(id))?.map(|after| (before, after)))
+            })
+            .await?;
+        let Some((before, after)) = moved else {
+            return Ok(Value::Null);
+        };
+        if let Some(trigger) = triggers::for_task(Some(&before), &after) {
+            self.fire(trigger).await;
+        }
+        let change = Change::Rows(vec![after.clone()]);
+        let badged = self.touches_badges(&change);
+        self.host.changed(change).await;
+        if badged {
+            self.badges().await;
+        }
+        Ok(after)
+    }
+
+    /// A trigger a write fired: the public event every subscriber hears,
+    /// and the workflows watching for it started (`workflow.fire`).
+    async fn fire(&self, trigger: Value) {
+        let name = match trigger.get("kind").and_then(Value::as_str) {
+            Some("taskCreated") => TASK_CREATED,
+            _ => TASK_STATUS_CHANGED,
+        };
+        let args = triggers::fire_args(&trigger);
+        self.host.emit(name, trigger);
+        if let Some(args) = args {
+            if let Err(err) = self.host.call("workflow.fire", args).await {
+                info!(%err, "no workflow was started for a task's move");
+            }
+        }
+    }
+
+    /// Runs a step of a node type Tasks declares; `None` for another type.
+    pub async fn run_node(&self, node_type: &str, request: &Value) -> Option<Value> {
+        crate::nodes::run(node_type, request, |method, params| {
+            self.core(method, params)
+        })
+        .await
     }
 
     /// `task.sourceLink`: where task `task_id` was imported from, or null.

@@ -94,7 +94,7 @@ async fn play(case: &Value) -> Value {
         .cloned()
         .unwrap_or_default();
     let fake = Fake::new(config, replies, dir.clone());
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let mut answers: Vec<Value> = Vec::new();
     let mut background: Vec<tokio::task::JoinHandle<Option<Value>>> = Vec::new();
     let run_at = |i: usize| fake.world().order[i].clone();

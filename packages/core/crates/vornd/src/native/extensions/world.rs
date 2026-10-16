@@ -151,7 +151,7 @@ impl World for Wired {
             let native = native.ok_or_else(stopping)?;
             let m = method.as_str();
             if vorn_extensions::gate::BUILTIN_ONLY.contains(&m)
-                && extension != vorn_connectors::builtin::ID
+                && !super::builtin::SHIPPED.contains(&extension.as_str())
             {
                 return Err(ExtError::new(
                     "denied",
@@ -314,6 +314,31 @@ impl World for Wired {
                         text(&args, "field").ok_or_else(|| needs(m, "the field to read"))?;
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
+                }
+                "task.take" | "task.handBack" => {
+                    let tasks = native
+                        .tasks()
+                        .cloned()
+                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
+                    tasks.api(m, args).await
+                }
+                "connection.upsertFromItem" => {
+                    let connectors = native.connectors().cloned().ok_or_else(|| {
+                        ExtError::new("unsupported", "this vornd keeps no connections")
+                    })?;
+                    match connectors.answer("connection:upsertFromItem", args).await {
+                        NativeAnswer::Result(v) => Ok(v),
+                        NativeAnswer::Void | NativeAnswer::Unanswered => Ok(Value::Null),
+                        NativeAnswer::Error(e) => Err(ExtError::new("failed", e)),
+                    }
+                }
+                "workflow.fire" => {
+                    let work = native.work().cloned().ok_or_else(|| {
+                        ExtError::new("unsupported", "this vornd runs no workflows")
+                    })?;
+                    work.fire_api(&extension, &args)
+                        .await
+                        .map_err(|e| ExtError::new("failed", e))
                 }
                 "task.importItems" | "task.sourceLink" => {
                     let tasks = native

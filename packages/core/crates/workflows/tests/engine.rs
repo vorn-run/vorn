@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 use vorn_protocol::WorkflowExecution;
 use vorn_work::model::{Context, Workflow};
-use vorn_workflow::{Engine, Host, Options, Source};
+use vorn_workflow::{Host, Options, Source};
 
 mod common;
 use common::Fake;
@@ -101,13 +101,26 @@ async fn a_task_starts_the_workflows_watching_for_it_and_no_others() {
         ],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let task = json!({ "id": "t1", "title": "Mine", "projectName": "p" });
-    engine.fire_task_created(&task).await;
-    engine
-        .fire_task_status_changed(&task, "todo", "in_progress")
+    let fire = |trigger: serde_json::Value| {
+        let engine = engine.clone();
+        async move {
+            // Tasks fires its triggers through `workflow.fire`, with these arguments.
+            let Some(args) = vorn_tasks::triggers::fire_args(&trigger) else {
+                return;
+            };
+            let context = vorn_work::model::Context::from_json(&args["context"]).unwrap();
+            let fields = args["fields"].as_object().unwrap().clone();
+            engine
+                .fire(args["trigger"].as_str().unwrap(), &fields, context)
+                .await;
+        }
+    };
+    fire(json!({ "kind": "taskCreated", "task": task })).await;
+    fire(json!({ "kind": "taskStatusChanged", "task": task, "from": "todo", "to": "in_progress" }))
         .await;
-    engine.fire_task_status_changed(&task, "todo", "todo").await;
+    fire(json!({ "kind": "taskStatusChanged", "task": task, "from": "todo", "to": "todo" })).await;
     let runs = finished(&fake, 2).await;
     quiet().await;
     let mut started: Vec<String> = fake.runs().iter().map(|r| r.workflow_id.clone()).collect();
@@ -147,15 +160,19 @@ async fn a_session_coming_back_starts_what_asked_for_its_kind_of_return() {
         ],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let session =
         json!({ "id": "sess-9", "projectName": "p", "projectPath": "/p", "displayName": "Card" });
-    engine.fire_session_restored(&session, "warm", None).await;
+    vorn_workflows::triggers::session_restored(&engine, &session, "warm", None).await;
     let warm = finished(&fake, 1).await;
     assert_eq!(warm[0].workflow_id, "any");
-    engine
-        .fire_session_restored(&session, "cold", Some(json!({ "rebooted": true })))
-        .await;
+    vorn_workflows::triggers::session_restored(
+        &engine,
+        &session,
+        "cold",
+        Some(json!({ "rebooted": true })),
+    )
+    .await;
     let runs = finished(&fake, 3).await;
     let cold = runs.iter().find(|r| r.workflow_id == "cold").unwrap();
     assert_eq!(
@@ -178,7 +195,7 @@ async fn a_schedule_runs_with_its_inputs_and_says_so_in_the_log() {
         )],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let mut inputs = Map::new();
     inputs.insert("who".into(), json!("me"));
     engine.run_scheduled("nightly", Some(inputs)).await;
@@ -206,7 +223,7 @@ async fn a_connector_item_runs_once_and_one_whose_workflow_is_gone_waits() {
         )],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let item = json!({ "inboxId": 3, "inboxLeaseToken": "lease-3", "connectionId": "c", "connectorId": "x", "externalId": "e", "title": "Item", "raw": {} });
     engine.run_connector_item("poll", item.clone(), None).await;
     let runs = finished(&fake, 1).await;
@@ -242,7 +259,7 @@ async fn a_redelivered_item_hands_its_new_lease_to_the_run_already_going() {
         )],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let running: WorkflowExecution = serde_json::from_value(json!({
         "runId": "r1", "workflowId": "poll", "startedAt": "2026-01-01T00:00:00.000Z", "status": "running",
         "connectorInboxId": 5, "connectorInboxLeaseToken": "old",
@@ -284,7 +301,7 @@ async fn which_agent_a_step_runs() {
             )],
             json!({}),
         );
-        let engine = Engine::new(fake.clone());
+        let engine = common::engine(fake.clone());
         let wf = Workflow::from_json(&fake.world().config["workflows"][0]).unwrap();
         let context = task.map(|t| Context {
             task: Some(t),
@@ -309,7 +326,7 @@ async fn which_agent_a_step_runs() {
         json!({}),
     );
     fake.world().config["defaults"] = json!({});
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let wf = Workflow::from_json(&fake.world().config["workflows"][0]).unwrap();
     engine
         .execute(&wf, None, Options::default())
@@ -327,7 +344,7 @@ async fn a_gate_left_waiting_by_an_earlier_process_still_times_out() {
         vec![workflow("g", json!({ "triggerType": "manual" }), gate)],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let wf = Workflow::from_json(&fake.world().config["workflows"][0]).unwrap();
     let parked: WorkflowExecution = serde_json::from_value(json!({
         "runId": "r1", "workflowId": "g", "startedAt": "2026-01-01T00:00:00.000Z", "status": "running",
@@ -357,7 +374,7 @@ async fn a_rerun_and_a_retry_carry_the_context_without_the_lease() {
         )],
         json!({}),
     );
-    let engine = Engine::new(fake.clone());
+    let engine = common::engine(fake.clone());
     let earlier: WorkflowExecution = serde_json::from_value(json!({
         "runId": "r0", "workflowId": "w", "startedAt": "2026-01-01T00:00:00.000Z", "status": "error",
         "connectorItem": { "inboxId": 9, "inboxLeaseToken": "l", "connectorId": "webhook", "connectionId": "webhook:w", "externalId": "e", "title": "Hook", "raw": { "body": { "n": 4 } } },
@@ -386,7 +403,7 @@ async fn a_rerun_and_a_retry_carry_the_context_without_the_lease() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn claims_and_releases_through_the_engine() {
-    let engine = Engine::new(host(vec![], json!({})));
+    let engine = common::engine(host(vec![], json!({})));
     let first = engine.claim("w", Some("p"), None);
     assert!(first.granted);
     assert_eq!(engine.claim("w", Some("p"), None).run_id, first.run_id);

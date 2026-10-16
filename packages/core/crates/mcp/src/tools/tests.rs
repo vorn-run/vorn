@@ -370,6 +370,11 @@ fn a_workflow_travels_by_file() {
 #[test]
 fn describes_only_the_node_types_asked_for() {
     let rpc = FakeRpc::new(sample_config());
+    let reference = json!({
+        "nodeTypes": { "trigger": { "summary": "t" }, "loop": { "summary": "l" } },
+        "limits": { "maxGateRounds": 10 }
+    });
+    rpc.answer("workflow:describe", reference.clone());
     let some = parsed(&run(
         &rpc,
         "describe_workflow_nodes",
@@ -384,7 +389,7 @@ fn describes_only_the_node_types_asked_for() {
         ["loop"]
     );
     let all = parsed(&run(&rpc, "describe_workflow_nodes", json!({})));
-    assert_eq!(all, *crate::workflow_nodes());
+    assert_eq!(all, reference);
 }
 
 #[test]

@@ -29,6 +29,7 @@ members = [
   "crates/reach",
   "crates/work",
   "crates/workflow",
+  "crates/workflows",
   "crates/worktrees",
   "crates/vault",
   "crates/connectors",

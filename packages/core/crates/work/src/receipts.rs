@@ -86,7 +86,12 @@ mod tests {
 
     fn every_minute(now: i64) -> Schedule {
         let wf = json!({ "id": "wf", "enabled": true, "nodes": [{ "id": "t", "type": "trigger", "config": { "triggerType": "recurring", "cron": "* * * * *" } }] });
-        Schedule::arm(&[wf], &TimeZone::UTC, now)
+        Schedule::arm(
+            &[wf],
+            &TimeZone::UTC,
+            now,
+            &crate::trigger::tests::timings(),
+        )
     }
 
     #[test]

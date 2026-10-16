@@ -12,12 +12,16 @@ pub mod builtin;
 pub mod calls;
 pub mod host;
 pub mod images;
+pub mod nodes;
 pub mod sources;
 pub mod tools;
 pub mod triggers;
 
 pub use builtin::{Answer, Tasks, ID, MANIFEST, METHODS, OFF};
 pub use host::{Change, Host, Pending, TableWork};
+
+/// What `describe_workflow_nodes` tells of the node types it declares, by id.
+pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
 
 /// The built-in's templates, as `("views/x.kdl", text)`.
 pub const VIEWS: &[(&str, &str)] = &[

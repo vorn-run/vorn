@@ -8,6 +8,7 @@ pub mod agents;
 pub mod connectors;
 pub mod tasks;
 pub mod widget;
+pub mod workflows;
 pub mod worktrees;
 
 use std::collections::BTreeMap;
@@ -28,6 +29,14 @@ use vorn_extensions::router::Router;
 use vorn_extensions::views;
 
 use super::guard;
+
+/// The ids of the extensions Vorn ships, which alone may call the core
+/// methods open only to them ([`vorn_extensions::gate::BUILTIN_ONLY`]).
+pub const SHIPPED: &[&str] = &[
+    vorn_connectors::builtin::ID,
+    vorn_tasks::ID,
+    vorn_workflows::ID,
+];
 
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
 pub struct Api {
@@ -139,6 +148,7 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
         Arc::new(worktrees::Cleanup::default()),
         Arc::new(widget::Widget),
+        Arc::new(workflows::Workflows),
     ];
     all.extend(started);
     all
