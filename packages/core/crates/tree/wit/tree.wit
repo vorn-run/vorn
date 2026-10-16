@@ -22,11 +22,14 @@ world ui {
 
   /// Runs one of the extension's actions on the host, as `rows` or a command.
   import call: func(action: string, args: string) -> result<string, string>;
+  /// Changes `point`'s drawn tree without a render: a JSON list of
+  /// `{id, node?}`, each replacing node `id`, or removing it with no `node`.
+  import patch: func(point: string, patches: string) -> result<_, string>;
 
   /// Rows the host has for this extension, as JSON, before a render.
   export data: func(rows: string);
   /// `{tokens, tree}` for `point` on `surface`.
   export render: func(point: string, surface: surface) -> result<string, string>;
-  /// What `event` on `point` did: `{toast?, open?}`.
+  /// What `event` on `point` did: `{toast?, open?, patch?}`.
   export event: func(point: string, event: string) -> result<string, string>;
 }

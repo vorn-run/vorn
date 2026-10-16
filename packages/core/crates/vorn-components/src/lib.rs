@@ -15,6 +15,7 @@ pub mod graph;
 pub mod sidebar;
 pub mod status;
 pub mod template;
+pub mod tree;
 
 pub use agent::{agent_icon, status_icon, AgentMarks};
 pub use status::{status_dot, Status};

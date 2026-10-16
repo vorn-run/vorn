@@ -5,7 +5,7 @@ use serde_json::json;
 fn page() -> Node {
     col([
         toolbar([button("scan", "Scan").icon("refresh-cw")]),
-        summary([
+        card([
             stat("3", "worktrees"),
             stat("1.2 GB", "build output").tone(Tone::Accent).end(),
         ]),
@@ -139,4 +139,46 @@ fn group_by_keeps_first_seen_order() {
 fn the_page_checks() {
     check(&page()).unwrap();
     assert!(WIT.contains("export render"));
+}
+
+#[test]
+fn a_patch_replaces_or_removes_a_node_by_id() {
+    let mut tree = col([
+        text("Head").id("head"),
+        list("rows", [entry("a", "One"), entry("b", "Two")]),
+    ]);
+    let ok = patch(
+        &mut tree,
+        &[
+            Patch {
+                id: "head".into(),
+                node: Some(text("New head").id("head")),
+            },
+            Patch {
+                id: "a".into(),
+                node: None,
+            },
+        ],
+    );
+    assert_eq!(ok, Ok(()));
+    let json = serde_json::to_string(&tree).unwrap();
+    assert!(json.contains("New head") && !json.contains("One"), "{json}");
+    let was = tree.clone();
+    let bad = patch(
+        &mut tree,
+        &[Patch {
+            id: "b".into(),
+            node: Some(entry("", "Nameless")),
+        }],
+    );
+    assert!(bad.is_err(), "a patch that breaks the tree is refused");
+    assert_eq!(tree, was, "and leaves it as it was");
+    assert!(patch(
+        &mut tree,
+        &[Patch {
+            id: "zz".into(),
+            node: None
+        }]
+    )
+    .is_err());
 }

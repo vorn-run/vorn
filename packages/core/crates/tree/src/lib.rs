@@ -15,7 +15,8 @@ mod tests;
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
 pub const RENDER: &str = "ui.render";
-/// The call that tells an extension what happened: args `{point, event}`, answer `{toast?, open?}`.
+/// The call that tells an extension what happened: args `{point, event}`,
+/// answer `{toast?, open?, patch?}` where `patch` is a list of [`Patch`].
 pub const EVENT: &str = "ui.event";
 /// The colour tokens this build knows; a tree names the set it was made for.
 pub const TOKENS: u32 = 1;
@@ -276,19 +277,24 @@ impl ButtonStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Token {
+    /// The window's ground.
     Base,
-    Overlay,
+    /// Below the ground, as a field or a notice.
     Sunken,
+    /// Just above the ground, as a card.
+    Raised,
+    /// A menu or a popover.
+    Overlay,
+    /// A hairline between things.
+    Line,
     Ink,
     InkSecondary,
     InkFaint,
-    Muted,
     Accent,
     Good,
     Warn,
     Bad,
     Info,
-    Neutral,
     White,
     #[serde(other)]
     Unknown,
@@ -376,7 +382,7 @@ impl Rendered {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     Click,
@@ -385,7 +391,7 @@ pub enum EventKind {
 }
 
 /// Something that happened to node `id`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
     pub kind: EventKind,
@@ -395,6 +401,50 @@ pub struct Event {
     /// A bulk button's list's checked ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
+}
+
+/// A change to a drawn tree: node `id` becomes `node`, or goes when there is none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Patch {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<Node>,
+}
+
+/// Applies `patches` to `tree` in order and checks what comes out; on an
+/// error `tree` is left as it was.
+pub fn patch(tree: &mut Node, patches: &[Patch]) -> Result<(), Vec<String>> {
+    let mut next = tree.clone();
+    for (i, p) in patches.iter().enumerate() {
+        if next.id.as_deref() == Some(p.id.as_str()) {
+            match &p.node {
+                Some(n) => next = n.clone(),
+                None => return Err(vec![format!("patch[{i}]: the root cannot go")]),
+            }
+        } else if !splice(&mut next, p) {
+            return Err(vec![format!("patch[{i}]: no node is '{}'", p.id)]);
+        }
+    }
+    check(&next)?;
+    *tree = next;
+    Ok(())
+}
+
+fn splice(n: &mut Node, p: &Patch) -> bool {
+    let at = n
+        .children
+        .iter()
+        .position(|c| c.id.as_deref() == Some(p.id.as_str()));
+    if let Some(at) = at {
+        match &p.node {
+            Some(new) => n.children[at] = new.clone(),
+            None => {
+                n.children.remove(at);
+            }
+        }
+        return true;
+    }
+    n.children.iter_mut().any(|c| splice(c, p))
 }
 
 fn is_false(b: &bool) -> bool {

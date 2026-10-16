@@ -129,12 +129,13 @@ pub fn stat(value: impl Into<String>, label: impl Into<String>) -> Node {
     })
 }
 
-/// A row of stats on a card, as a page's summary.
-pub fn summary(children: impl IntoIterator<Item = Node>) -> Node {
-    let mut n = row(children);
-    n.props.gap = Some(24.0);
+/// A raised card, as a page's summary of stats, a meter and its action.
+pub fn card(children: impl IntoIterator<Item = Node>) -> Node {
+    let mut n = col(children);
+    n.props.gap = Some(12.0);
     n.props.p = Some(16.0);
-    n.props.border = Some(Paint::Token(crate::Token::Muted));
+    n.props.bg = Some(Paint::Token(crate::Token::Raised));
+    n.props.border = Some(Paint::Token(crate::Token::Line));
     n.props.rounded = true;
     n
 }
