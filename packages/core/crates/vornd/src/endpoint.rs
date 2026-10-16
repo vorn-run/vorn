@@ -408,7 +408,14 @@ impl Daemon {
     }
 }
 
-/// Serves one accepted connection's requests, upgrades included.
+/// How long another machine has to finish the TLS handshake.
+const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The first byte of a TLS handshake record.
+const TLS_HANDSHAKE: u8 = 0x16;
+
+/// Serves one accepted connection's requests, upgrades included: over TLS
+/// from another machine, and from this one over TLS or not, as it opens.
 pub(crate) fn serve_connection(
     daemon: &Arc<Daemon>,
     stream: tokio::net::TcpStream,
@@ -416,14 +423,41 @@ pub(crate) fn serve_connection(
 ) {
     let daemon = daemon.clone();
     tokio::spawn(async move {
-        let service = service_fn(move |req| handle(daemon.clone(), req, peer));
-        let conn = hyper::server::conn::http1::Builder::new()
-            .serve_connection(TokioIo::new(stream), service)
-            .with_upgrades();
-        if let Err(err) = conn.await {
-            debug!(%peer, %err, "connection ended with an error");
+        let tls = must_use_tls(peer.ip()) || {
+            let mut first = [0u8; 1];
+            matches!(stream.peek(&mut first).await, Ok(1) if first[0] == TLS_HANDSHAKE)
+        };
+        if !tls {
+            return serve_http(daemon, stream, peer).await;
+        }
+        let Some(acceptor) = daemon.serving.get().and_then(|s| s.tls()).map(|t| t.acceptor.clone()) else {
+            debug!(%peer, "refused: no certificate to serve another machine with");
+            return;
+        };
+        match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+            Ok(Ok(stream)) => serve_http(daemon, stream, peer).await,
+            Ok(Err(err)) => debug!(%peer, %err, "refused: the TLS handshake failed"),
+            Err(_) => debug!(%peer, "refused: the TLS handshake took too long"),
         }
     });
+}
+
+/// Another machine's connection, which is never served in the clear.
+fn must_use_tls(peer: std::net::IpAddr) -> bool {
+    !peer.to_canonical().is_loopback()
+}
+
+async fn serve_http<S>(daemon: Arc<Daemon>, stream: S, peer: SocketAddr)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let service = service_fn(move |req| handle(daemon.clone(), req, peer));
+    let conn = hyper::server::conn::http1::Builder::new()
+        .serve_connection(TokioIo::new(stream), service)
+        .with_upgrades();
+    if let Err(err) = conn.await {
+        debug!(%peer, %err, "connection ended with an error");
+    }
 }
 
 async fn handle(
@@ -818,6 +852,16 @@ fn plain(status: StatusCode, message: &'static str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_this_machine_may_connect_in_the_clear() {
+        for other in ["192.168.1.20", "100.64.0.1", "::ffff:192.168.1.20", "fe80::1", "0.0.0.0"] {
+            assert!(must_use_tls(other.parse().unwrap()), "{other}");
+        }
+        for this in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
+            assert!(!must_use_tls(this.parse().unwrap()), "{this}");
+        }
+    }
 
     #[test]
     fn knows_a_websocket_upgrade() {

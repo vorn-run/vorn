@@ -493,6 +493,11 @@ impl Native {
         self.reach.set_server_port(port);
     }
 
+    /// The fingerprint of the certificate other machines see, which pairing hands out.
+    pub fn set_tls_fingerprint(&self, fingerprint: String) {
+        self.reach.set_fingerprint(fingerprint);
+    }
+
     /// The work model. Only the first one given is kept.
     pub fn set_work(&self, work: Arc<work::Work>) {
         let _ = self.work.set(work);

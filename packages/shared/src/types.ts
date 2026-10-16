@@ -1430,6 +1430,8 @@ export interface ReachableUrls {
   urls: string[]
   port: number
   remote: boolean
+  /** SHA-256 of the certificate the urls are served with, which a phone pins. */
+  fingerprint?: string | null
 }
 
 export interface TailscaleStatus {

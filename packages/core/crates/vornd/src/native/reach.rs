@@ -39,6 +39,8 @@ pub struct Reach {
     trusted: RwLock<TrustedHosts>,
     /// The server's port, which the URLs a browser uses name.
     server_port: OnceLock<u16>,
+    /// The certificate's fingerprint, which the addresses are shared with.
+    fingerprint: OnceLock<String>,
 }
 
 /// Who a credential authenticates as.
@@ -63,6 +65,10 @@ fn now_iso() -> String {
 impl Reach {
     pub fn set_server_port(&self, port: u16) {
         let _ = self.server_port.set(port);
+    }
+
+    pub fn set_fingerprint(&self, fingerprint: String) {
+        let _ = self.fingerprint.set(fingerprint);
     }
 
     pub(super) fn server_port(&self) -> Option<u16> {
@@ -289,6 +295,7 @@ impl Native {
             remote,
             &tailscale_ips,
             &lan,
+            self.reach.fingerprint.get().map(String::as_str),
         ))
     }
 

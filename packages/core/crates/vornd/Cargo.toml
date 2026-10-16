@@ -51,7 +51,9 @@ vorn-tasks = { path = "../tasks" }
 url = "2"
 vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
-vorn-reach = { path = "../reach" }
+vorn-reach = { path = "../reach", features = ["mint"] }
+# TLS on the listener for other machines, over the rustls already in the tree.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 vorn-term-proto = { path = "../term-proto" }
 vorn-work = { path = "../work" }
 # The workflow engine, which vornd hosts.
