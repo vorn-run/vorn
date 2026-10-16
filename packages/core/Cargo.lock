@@ -7025,6 +7025,7 @@ dependencies = [
  "vorn-size",
  "vorn-spawn",
  "vorn-store",
+ "vorn-tasks",
  "vorn-term-proto",
  "vorn-vault",
  "vorn-work",

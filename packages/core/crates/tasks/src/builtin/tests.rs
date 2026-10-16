@@ -83,20 +83,21 @@ impl Host for Fake {
 
     fn call(&self, method: &str, params: Value) -> Pending<Result<Value, String>> {
         let answer = match method {
-            "agent:list" => Ok(self.agents.clone()),
-            "config:load" => Ok(self.store().load_config().unwrap()),
-            "task:list" => {
+            "agents.list" => Ok(self.agents.clone()),
+            "project.list" => Ok(self.store().call("dbListProjects", json!([])).unwrap()),
+            "task.list" => {
                 let get = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
+                let limit = get("limit").as_u64().unwrap_or(100);
+                let offset = get("offset").as_u64().unwrap_or(0);
                 self.store()
                     .call(
                         "dbListTasks",
-                        json!([
-                            get("projectName"),
-                            get("status"),
-                            get("offset"),
-                            get("limit")
-                        ]),
+                        json!([get("projectName"), get("status"), offset, limit]),
                     )
+                    .map(|tasks| {
+                        let n = tasks.as_array().map_or(0, Vec::len) as u64;
+                        json!({ "tasks": tasks, "next": (n == limit).then_some(offset + n) })
+                    })
                     .map_err(|e| e.to_string())
             }
             other => Err(format!("no {other} here")),

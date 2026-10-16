@@ -1479,6 +1479,7 @@ impl Around for Wired {
             .map(builtin::connectors::entry)
             .into_iter()
             .collect();
+        started.extend(native.tasks().map(builtin::tasks::entry));
         started.extend(builtin::agents::entries(native.adapters()));
         started
     }

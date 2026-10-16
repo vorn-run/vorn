@@ -151,7 +151,13 @@ impl VorndHost {
             })
             .await
             .flatten()?;
-        self.signal_change();
+        if let Some(native) = self.native.upgrade() {
+            let rows = super::super::task_list::Change::Rows(vec![moved.task.clone()]);
+            super::super::task_list::told(&native, rows).await;
+            if let Some(tasks) = native.tasks().filter(|t| t.is_on()) {
+                tasks.inner().badges().await;
+            }
+        }
         Some(moved)
     }
 }
@@ -184,7 +190,6 @@ impl Host for VorndHost {
             .run(|store| {
                 let config = json!({
                     "projects": store.call("dbListProjects", json!([])).ok()?,
-                    "tasks": store.call("dbListTasks", json!([null, null])).ok()?,
                     "workflows": store.call("dbListWorkflows", json!([])).ok()?,
                     "defaults": store.stored_defaults().ok()?,
                 });
@@ -192,6 +197,33 @@ impl Host for VorndHost {
             })
             .await
             .flatten()
+    }
+
+    /// The project's tasks from the core's list, filtered there.
+    async fn tasks(&self, project: &str, status: Option<&str>) -> Vec<Value> {
+        let (name, status) = (project.to_owned(), status.map(str::to_owned));
+        let listed = self
+            .db
+            .run(move |store| store.call("dbListTasks", json!([name, status])).ok())
+            .await
+            .flatten();
+        let Some(Value::Array(all)) = listed.map(vorn_work::js_numbers) else {
+            return Vec::new();
+        };
+        // `dbListTasks` skips an empty name; the configuration's list matched it exactly.
+        all.into_iter()
+            .filter(|t| t.get("projectName").and_then(Value::as_str) == Some(project))
+            .collect()
+    }
+
+    async fn task(&self, id: &str) -> Option<Value> {
+        let id = id.to_owned();
+        self.db
+            .run(move |store| store.call("dbGetTask", json!([id])).ok())
+            .await
+            .flatten()
+            .filter(Value::is_object)
+            .map(vorn_work::js_numbers)
     }
 
     async fn save_run(&self, run: WorkflowExecution) {

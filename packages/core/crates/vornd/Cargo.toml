@@ -47,6 +47,7 @@ vorn-layout = { path = "../layout" }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }
 vorn-connectors = { path = "../connectors" }
+vorn-tasks = { path = "../tasks" }
 url = "2"
 vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }

@@ -27,6 +27,14 @@ pub fn listed() -> &'static [Value] {
     &TOOLS
 }
 
+/// The public API's name for a client's call the shared toolkit makes.
+fn api_name(method: &str) -> &str {
+    match method {
+        "agent:list" => "agents.list",
+        other => other,
+    }
+}
+
 /// The built-in, as its tools call it: its own methods in process, the rest the core's.
 struct Own<'a>(&'a Tasks);
 
@@ -42,9 +50,10 @@ impl Rpc for Own<'_> {
             Answer::Result(v) => Ok(v),
             Answer::Void => Ok(Value::Null),
             Answer::Error(message) => Err(RpcError::answered(&message)),
+            // The toolkit's own check asks as a client would; the built-in asks the API.
             Answer::Unanswered => self
                 .0
-                .core(method, params)
+                .core(api_name(method), params)
                 .await
                 .map_err(|m| RpcError::answered(&m)),
         }
@@ -106,8 +115,9 @@ async fn find<R: Rpc>(cx: &Cx<'_, R>, id: &str) -> Result<Option<Value>, String>
     Ok(task.is_object().then_some(task))
 }
 
-/// The tasks in `project` and `status`, all of them read a page at a time.
-/// The list's filters skip an empty name, which matches no task here.
+/// The tasks in `project` and `status`, all of them read a page at a time
+/// from the core's list (`task.list`). The list's filters skip an empty
+/// name, which matches no task here.
 async fn tasks<R: Rpc>(
     cx: &Cx<'_, R>,
     project: Option<&str>,
@@ -117,8 +127,8 @@ async fn tasks<R: Rpc>(
         return Ok(Vec::new());
     }
     let mut all = Vec::new();
-    let mut offset = 0;
-    loop {
+    let mut offset = Value::from(0);
+    while !offset.is_null() {
         let mut params = json!({ "includeDescription": true, "offset": offset, "limit": PAGE });
         if let Some(p) = project {
             params["projectName"] = json!(p);
@@ -126,14 +136,11 @@ async fn tasks<R: Rpc>(
         if let Some(s) = status {
             params["status"] = json!(s);
         }
-        let page = cx.call("task:list", Some(params)).await?;
-        let n = page.as_array().map_or(0, Vec::len) as u64;
-        all.extend(page.as_array().cloned().unwrap_or_default());
-        if n < PAGE {
-            return Ok(all);
-        }
-        offset += n;
+        let page = cx.call("task.list", Some(params)).await?;
+        all.extend(vorn_mcp::toolkit::items(page.get("tasks")).iter().cloned());
+        offset = page.get("next").cloned().unwrap_or(Value::Null);
     }
+    Ok(all)
 }
 
 /// `{ id, title, status, branch }` of a task, for listing beside another.
@@ -143,8 +150,8 @@ pub async fn list_tasks<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
         tasks.retain(|t| !json::truthy(t.get("archivedAt")));
     }
     if let Some(workspace) = args.nonempty("workspace_id") {
-        let config = cx.call("config:load", None).await?;
-        let projects = vorn_mcp::toolkit::items(json::prop(Some(&config), "projects")?).to_vec();
+        let projects = cx.call("project.list", None).await?;
+        let projects = vorn_mcp::toolkit::items(Some(&projects)).to_vec();
         let names: Vec<&Value> = projects
             .iter()
             .filter(|p| in_workspace(p, workspace))
