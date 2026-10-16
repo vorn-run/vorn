@@ -36,6 +36,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const { id, method, params } = JSON.parse(line)
   if (method === 'guest.init') return send({ id, result: null })
   if (method === 'guest.on-event') return onEvents(params.batch)
+  // It has no actions; a call only starts it, so it hears the next session start.
+  if (method === 'guest.handle') return send({ id, result: null })
   if (id !== undefined) {
     send({
       id,

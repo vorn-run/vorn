@@ -91,6 +91,13 @@ fn a_card_footer_draws_an_adapters_agents_tool_calls_on_every_surface() {
         .call("extension:link", json!({ "path": FOOTER }))
         .expect("linked");
     assert_eq!(linked["id"], FOOTER_ID, "{linked}");
+    // Its program starts on its first call or event; this call starts it.
+    app.rpc()
+        .call(
+            "extension:call",
+            json!({ "id": FOOTER_ID, "action": "start", "args": {} }),
+        )
+        .expect("started");
     let mut shot = Shot::new();
     shot.until(&mut app, "the example's card footer", |a, _| {
         a.st.points

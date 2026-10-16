@@ -20,11 +20,12 @@ use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::plugins::PlugAct;
 use vorn_app::screen::menus::MENU;
+use vorn_app::screen::settings::CONTENT;
 use vorn_app::screen::term_id;
 use vorn_app::settings::{Category, SetAct, CONNECTIONS_PAGE};
 use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::ui::backend::{Backend, Cells};
-use vorn_app::ui::{cells::units, item_id, mods, Ui};
+use vorn_app::ui::{cells::units, item_id, mods, Id, Ui};
 use vorn_app::{ui_config, App};
 
 const EXAMPLE: &str = concat!(
@@ -71,13 +72,16 @@ fn point(kind: &str, id: &str) -> String {
 }
 
 /// This state on a terminal at each size, as text, saved when asked.
-fn cells(app: &mut App, name: &str) -> [String; 2] {
+fn cells(app: &mut App, name: &str, end: Option<Id>) -> [String; 2] {
     let (chrome, traffic) = (app.chrome, app.traffic);
     (app.chrome, app.traffic) = (false, false);
     let out = SIZES.map(|(cols, rows)| {
         let mut ui = Ui::cells(&ui_config(1.0));
         let size = units::px(cols, rows);
         app.frame(&mut ui, size);
+        if let Some(view) = end {
+            ui.set_scroll_offset(view, f32::MAX / 4.0);
+        }
         app.frame(&mut ui, size);
         let mut target = Cells::offscreen(cols, rows);
         target.present(&mut ui).expect("present");
@@ -99,8 +103,21 @@ fn cells(app: &mut App, name: &str) -> [String; 2] {
 /// `wide` at 120x36 and `narrow` at 80x24.
 #[track_caller]
 fn every_surface(shot: &mut Shot, app: &mut App, name: &str, wide: &[&str], narrow: &[&str]) {
+    every_surface_at(shot, app, name, None, wide, narrow);
+}
+
+/// `every_surface` with the terminals scrolled to the end of `end`.
+#[track_caller]
+fn every_surface_at(
+    shot: &mut Shot,
+    app: &mut App,
+    name: &str,
+    end: Option<Id>,
+    wide: &[&str],
+    narrow: &[&str],
+) {
     shot.save(app, name);
-    let [w, n] = cells(app, name);
+    let [w, n] = cells(app, name, end);
     for t in wide {
         assert!(w.contains(t), "{name} 120x36 shows {t:?}:\n{w}");
     }
@@ -327,15 +344,16 @@ fn every_template_kind_draws_on_every_surface() {
         &mut shot,
         &mut app,
         "t-extensions",
-        &[
-            "BUILT IN",
-            "Connectors",
-            "connections",
-            "INSTALLED",
-            "Turns",
-            "Linked from",
-        ],
+        &["BUILT IN", "Connectors", "connections"],
         &["BUILT IN", "Connectors", "Turns"],
+    );
+    every_surface_at(
+        &mut shot,
+        &mut app,
+        "t-extensions-installed",
+        Some(CONTENT),
+        &["INSTALLED", "Turns", "Linked from"],
+        &["INSTALLED", "Turns"],
     );
 
     // Connectors is one built-in; its row opens Settings › Connections, its own page.
@@ -609,7 +627,7 @@ fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
             &Act::Plug(PlugAct::Select(Some(turns.to_owned()))),
         ),
     );
-    let [wide, _] = cells(app, "t-linked");
+    let [wide, _] = cells(app, "t-linked", None);
     assert!(wide.contains("Unlink"), "{wide}");
     shot.click(
         app,
@@ -650,7 +668,7 @@ fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
             now.contains(text).then_some(())
         });
         let took = t.elapsed();
-        let [w, _] = cells(app, "t-live");
+        let [w, _] = cells(app, "t-live", None);
         assert!(w.contains(text), "{what} shows {text:?}:\n{w}");
         took
     };
@@ -665,7 +683,7 @@ fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
     )
     .expect("break");
     redraw(shot, app, "views/settings.kdl:", "the error box");
-    let [w, _] = cells(app, "t-error");
+    let [w, _] = cells(app, "t-error", None);
     assert!(w.contains("sectoin"), "the error names what is wrong:\n{w}");
     shot.save(app, "t-error");
 

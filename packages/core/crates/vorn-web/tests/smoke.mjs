@@ -249,6 +249,8 @@ const testAgent = join(core, 'crates/vorn-app/tests/fixtures/acme-adapter')
 async function adapterSession(vornd, server) {
   await server.call('extension:link', { path: testAgent })
   await server.call('extension:link', { path: footerExample })
+  // Its program starts on its first call or event; this call starts it.
+  await server.call('extension:call', { id: 'example.agent-footer', action: 'start', args: {} })
   const cfg = await server.call('config:load')
   cfg.agentCommands = { ...cfg.agentCommands, acme: { command: '/bin/sh', args: [] } }
   await server.call('config:save', cfg)

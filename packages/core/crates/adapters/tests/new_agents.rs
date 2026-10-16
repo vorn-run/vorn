@@ -39,13 +39,11 @@ fn an_adapter_installs_from_its_folder_as_any_extension_does() {
     let root = tempfile::tempdir().unwrap();
     let store = vorn_extensions::pack::PackStore::new(root.path().join("packages"));
     let installs = vorn_extensions::install::Installs::new(store.clone(), "git", Vec::new());
-    for name in ["hermes"] {
-        let pack = installs.link(&support::package(name)).unwrap();
-        let section = pack.manifest.agent.clone().expect("an [agent] section");
-        let spec = vorn_agents::AgentSpec::from_toml(section).unwrap();
-        assert_eq!(spec.id, name);
-        assert!(pack.path.join(spec.icon.unwrap()).is_file());
-    }
+    let pack = installs.link(&support::package("hermes")).unwrap();
+    let section = pack.manifest.agent.clone().expect("an [agent] section");
+    let spec = vorn_agents::AgentSpec::from_toml(section).unwrap();
+    assert_eq!(spec.id, "hermes");
+    assert!(pack.path.join(spec.icon.unwrap()).is_file());
 }
 
 #[test]
