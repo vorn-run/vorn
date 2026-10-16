@@ -1,13 +1,14 @@
 //! The phone's link to one vornd: sessions, the open terminal and extension settings, kept current.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 use vorn_app::act::{Act, Acts};
 use vorn_app::client::link::Socket;
-use vorn_app::client::rpc::{Event as RpcEvent, Rpc, Wake};
+use vorn_app::client::rpc::{Event as RpcEvent, Pending, Rpc, Wake};
 use vorn_app::client::store::{Store, TOPICS};
 use vorn_app::grid::Grid;
 use vorn_app::points::{self, kind, Point, PointAct, Points, Press};
@@ -30,11 +31,35 @@ pub enum Link {
     Offline(String),
 }
 
+/// What a call's answer is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum For {
+    /// A read kept by its key until asked again; run lists fold into the store's runs.
+    Fetch(String),
+    /// A new session, opened once it exists.
+    Launch,
+    /// A manual run of a workflow, by id.
+    Run(String),
+    /// A gate's answer, by `run|node`; `true` goes back once it is taken.
+    Gate(String, bool),
+    /// An answer nothing waits on; a failure shows as the screen's error.
+    Quiet,
+}
+
+/// A read's answer so far.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fetched {
+    Loading,
+    Ready(Value),
+    Failed(String),
+}
+
 struct Connected {
     rpc: Rpc,
     events: Receiver<RpcEvent>,
     store: Store,
     grid: Arc<Grid>,
+    permissions: Vec<Value>,
 }
 
 /// One vornd, as the phone's screens read it.
@@ -52,6 +77,16 @@ pub struct Model {
     pub points: Points,
     /// What each template control does, rebound every frame it is drawn.
     pub acts: Acts,
+    /// Permission requests agents hold open, oldest first.
+    pub permissions: Vec<Value>,
+    /// What went wrong, by what it was about: `launch`, `run:<workflow>`, `gate:<run|node>`, `quiet`.
+    pub errors: HashMap<String, String>,
+    /// Calls whose button waits, by the same keys.
+    pub busy: HashSet<String>,
+    /// Where the host goes next: a route, `replace:<route>` or `back`.
+    pub go: Option<String>,
+    calls: RefCell<Vec<(For, Pending)>>,
+    fetched: RefCell<HashMap<String, Fetched>>,
     wake: Wake,
 }
 
@@ -69,7 +104,94 @@ impl Model {
             grid_updates: 0,
             points: Points::default(),
             acts: Acts::default(),
+            permissions: Vec::new(),
+            errors: HashMap::new(),
+            busy: HashSet::new(),
+            go: None,
+            calls: RefCell::new(Vec::new()),
+            fetched: RefCell::new(HashMap::new()),
             wake,
+        }
+    }
+
+    /// Calls `method`; its answer is folded in by [`Model::pump`] for `what`.
+    pub fn call(&self, what: For, method: &str, params: Value) {
+        let Some(rpc) = &self.rpc else { return };
+        self.calls.borrow_mut().push((what, rpc.request(method, params)));
+    }
+
+    /// `method`'s answer, asked once and kept until [`Model::refetch`].
+    pub fn fetch(&self, method: &str, params: Value) -> Fetched {
+        let key = format!("{method} {params}");
+        if let Some(f) = self.fetched.borrow().get(&key) {
+            return f.clone();
+        }
+        if self.rpc.is_none() {
+            return Fetched::Loading;
+        }
+        self.fetched.borrow_mut().insert(key.clone(), Fetched::Loading);
+        self.call(For::Fetch(key), method, params);
+        Fetched::Loading
+    }
+
+    /// Asks every read again, keeping what each said until it answers.
+    pub fn refetch(&self) {
+        let keys: Vec<String> = self.fetched.borrow().keys().cloned().collect();
+        for key in keys {
+            let Some((method, params)) = key.split_once(' ') else {
+                continue;
+            };
+            let params = serde_json::from_str(params).unwrap_or(Value::Null);
+            self.call(For::Fetch(key.clone()), method, params);
+        }
+    }
+
+    fn answered(&mut self, what: For, answer: Result<Value, String>) {
+        match (what, answer) {
+            (For::Fetch(key), Ok(v)) => {
+                if key.starts_with("workflowRun:") {
+                    for run in v.as_array().into_iter().flatten() {
+                        self.store.apply("workflow:runUpdated", run.clone());
+                    }
+                }
+                self.fetched.get_mut().insert(key, Fetched::Ready(v));
+            }
+            (For::Fetch(key), Err(e)) => {
+                let keep = matches!(self.fetched.get_mut().get(&key), Some(Fetched::Ready(_)));
+                if !keep {
+                    self.fetched.get_mut().insert(key, Fetched::Failed(e));
+                }
+            }
+            (For::Launch, Ok(v)) => {
+                self.busy.remove("launch");
+                if let Ok(info) = serde_json::from_value(v.clone()) {
+                    self.store.upsert(info);
+                }
+                if let Some(id) = v["id"].as_str() {
+                    self.go = Some(format!("replace:session:{id}"));
+                }
+            }
+            (For::Run(wf), Ok(_)) => {
+                self.busy.remove(&format!("run:{wf}"));
+                self.go = Some("back".into());
+            }
+            (For::Gate(key, back), Ok(_)) => {
+                self.busy.remove(&format!("gate:{key}"));
+                if back {
+                    self.go = Some("back".into());
+                }
+            }
+            (For::Quiet, Ok(_)) => {}
+            (what, Err(e)) => {
+                let key = match what {
+                    For::Launch => "launch".to_owned(),
+                    For::Run(wf) => format!("run:{wf}"),
+                    For::Gate(key, _) => format!("gate:{key}"),
+                    _ => "quiet".to_owned(),
+                };
+                self.busy.remove(&key);
+                self.errors.insert(key, e);
+            }
         }
     }
 
@@ -104,12 +226,29 @@ impl Model {
                         self.rpc = Some(c.rpc);
                         self.events = Some(c.events);
                         self.grid = Some(c.grid);
+                        self.permissions = c.permissions;
                         self.link = Link::Online;
                         self.reload_points();
                     }
                     Err(e) => self.link = Link::Offline(e),
                 }
             }
+        }
+        let answers: Vec<(For, Result<Value, String>)> = {
+            let mut calls = self.calls.borrow_mut();
+            let mut done = Vec::new();
+            calls.retain(|(what, p)| match p.poll() {
+                Some(a) => {
+                    done.push((what.clone(), a.map_err(|e| e.to_string())));
+                    false
+                }
+                None => true,
+            });
+            done
+        };
+        for (what, a) in answers {
+            changed = true;
+            self.answered(what, a);
         }
         let mut stale = false;
         if let Some(events) = &self.events {
@@ -130,6 +269,11 @@ impl Model {
                         self.points.changed(ext, coll, &ops);
                     }
                     "extension:contributionsChanged" => stale = true,
+                    "permission:requested" => self.permissions.push(params),
+                    "permission:closed" => {
+                        let id = &params["requestId"];
+                        self.permissions.retain(|p| &p["requestId"] != id);
+                    }
                     m => {
                         self.store.apply(m, params);
                     }
@@ -247,6 +391,7 @@ fn open(t: &Target, wake: Wake) -> Result<Connected, String> {
     let mut store = Store::load(&rpc).map_err(|e| e.to_string())?;
     let mut topics: Vec<&str> = TOPICS.to_vec();
     topics.push("extension:*");
+    topics.push("permission:*");
     rpc.call(
         "subscribe:set",
         json!({ "topics": topics, "terminalBytes": false }),
@@ -256,11 +401,17 @@ fn open(t: &Target, wake: Wake) -> Result<Connected, String> {
         .call("terminal:listActive", Value::Null)
         .map_err(|e| e.to_string())?;
     store.take_sessions(list);
+    // A vornd from before `permission:list` lists none; its sessions still say they wait.
+    let permissions = match rpc.call("permission:list", Value::Null) {
+        Ok(Value::Array(open)) => open,
+        _ => Vec::new(),
+    };
     let grid = Grid::over(Box::new(socket("grid")), wake).map_err(|e| e.to_string())?;
     Ok(Connected {
         rpc,
         events,
         store,
         grid,
+        permissions,
     })
 }

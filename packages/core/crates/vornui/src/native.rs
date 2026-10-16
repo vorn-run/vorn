@@ -42,7 +42,15 @@ pub enum Sem {
     },
     /// A row that opens the page `to`; its children are what it shows.
     Link(String),
-    /// Text in a role: `title`, `body`, `secondary`, `mono`.
+    /// A row that opens the page `to` over the screen, as a sheet.
+    Present(String),
+    /// The screen's title, and the buttons inside for the platform's navigation bar.
+    Bar(String),
+    /// Nothing to list: a title, a line saying why, and the buttons inside to act on it.
+    Empty { title: String, body: String },
+    /// A button that puts its text on the clipboard, saying so once it has.
+    Copy(String),
+    /// Text in a role: `title`, `body`, `secondary`, `mono`, `error`.
     Text(&'static str),
     /// A box the platform leaves to the drawn surface (a terminal).
     Drawn(String),
@@ -53,7 +61,7 @@ pub enum Sem {
 /// One node of the semantic tree.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Node {
-    /// What the box is, e.g. `list`, `section`, `toggle`, `field`, `link`, `text` or `drawn`.
+    /// What the box is: one of the kinds [`Sem`] and the roles make, listed in `apps/ios/README.md`.
     pub kind: &'static str,
     pub id: Option<Id>,
     pub label: String,
@@ -200,7 +208,10 @@ impl Ui {
                 Sem::List => Node::of("list"),
                 Sem::Divider => Node::of("divider"),
                 Sem::More => Node::of("more"),
-                Sem::Choice => Node::of("choice"),
+                Sem::Choice => Node {
+                    label: label.clone(),
+                    ..Node::of("choice")
+                },
                 Sem::Section(t) => Node {
                     label: t.clone(),
                     ..Node::of("section")
@@ -213,6 +224,29 @@ impl Ui {
                     value: to.clone(),
                     ..Node::of("link")
                 },
+                Sem::Present(to) => Node {
+                    value: to.clone(),
+                    style: "sheet",
+                    ..Node::of("link")
+                },
+                Sem::Bar(title) => Node {
+                    label: title.clone(),
+                    ..Node::of("bar")
+                },
+                Sem::Empty { title, body } => Node {
+                    label: title.clone(),
+                    value: body.clone(),
+                    ..Node::of("empty")
+                },
+                Sem::Copy(what) => {
+                    out.push(Node {
+                        id: el.id,
+                        label,
+                        value: what.clone(),
+                        ..Node::of("copy")
+                    });
+                    return;
+                }
                 Sem::Drawn(what) => Node {
                     value: what.clone(),
                     ..Node::of("drawn")
@@ -286,6 +320,7 @@ impl Ui {
                         value.unwrap_or_default()
                     },
                     secret: look.secure,
+                    style: if look.multiline { "multiline" } else { "" },
                     ..Node::of("field")
                 });
             }
