@@ -1,0 +1,6 @@
+column
+  bar label="Request changes"
+    button label="Send" style="primary"
+  list
+    field label="What should change" style="multiline"
+    text label="Runs again from Write with your comment, then asks you. Round # of #." style="secondary"

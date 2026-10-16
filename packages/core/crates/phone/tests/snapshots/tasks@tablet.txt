@@ -1,0 +1,20 @@
+column
+  bar label="Tasks"
+    link value="tasks-scope" style="sheet"
+      icon value="list-filter"
+      text label="Show tasks from" style="body"
+    link value="task-new" style="sheet"
+      icon value="plus"
+      text label="New task" style="body"
+  choice
+    option label="Todo #" on=true
+    option label="In Progress #" on=false
+    option label="In Review #" on=false
+    option label="Done #" on=false
+    option label="Cancelled #" on=false
+  list
+    link value="task:t#"
+      icon value="circle"
+      column
+        text label="Fix the build" style="title"
+        text label="vorn · VOR-T# · Jan #" style="secondary"

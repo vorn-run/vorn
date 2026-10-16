@@ -206,6 +206,7 @@ struct More: View {
             }
         } label: {
             VornIcon(name: "ellipsis").frame(minWidth: 44, minHeight: 44)
+                .contentShape(.hoverEffect, Circle()).hoverEffect()
         }
         .accessibilityLabel("More")
         .confirmationDialog(asking?.confirm ?? "", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),

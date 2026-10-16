@@ -1,0 +1,16 @@
+column
+  bar label="vorn"
+    more
+      link value="rename:s#" style="sheet"
+        icon value="pencil"
+        text label="Rename" style="body"
+      button label="End session" style="danger" confirm
+  icon value="agent:claude"
+  status value="waiting" style="warn"
+  section label="Permission"
+    text label="Wants to use Bash" style="title"
+    text label="rm -rf build" style="mono"
+    row
+      button label="Allow" style="primary"
+      button label="Deny" style="danger"
+  drawn value="terminal"

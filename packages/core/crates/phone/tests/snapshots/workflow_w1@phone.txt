@@ -1,0 +1,21 @@
+column
+  bar label="Draft notes"
+  list
+    section
+      link value="workflow-run:w#" style="sheet"
+        icon value="play"
+        text label="Run · asks first" style="body"
+    section label="About"
+      row
+        text label="Starts" style="body"
+        text label="Manual" style="secondary"
+      text label="Run manually from the play button" style="secondary"
+    section label="Steps"
+      column
+        text label="Write" style="body"
+        text label="No project" style="secondary"
+      column
+        text label="Check" style="body"
+        text label="Waits for approval" style="secondary"
+    section label="Runs"
+      text label="Loading runs." style="secondary"

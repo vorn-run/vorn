@@ -1,0 +1,10 @@
+column
+  bar label="Show sessions from"
+  list
+    field label="Find a project or branch"
+    option label="All sessions · #" on=true
+    section label="Projects"
+      option label="site · #" on=false
+      option label="vorn · #" on=false
+    section label="Branches"
+      option label="main · #" on=false

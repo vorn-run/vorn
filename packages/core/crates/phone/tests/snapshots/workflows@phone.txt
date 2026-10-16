@@ -1,0 +1,14 @@
+column
+  bar label="Workflows"
+    link value="workflows-trigger" style="sheet"
+      icon value="list-filter"
+      text label="Show workflows" style="body"
+  choice
+    option label="Workflows" on=true
+    option label="Runs" on=false
+    option label="Review #" on=false
+  list
+    link value="workflow:w#"
+      column
+        text label="Draft notes" style="title"
+        text label="Manual" style="secondary"

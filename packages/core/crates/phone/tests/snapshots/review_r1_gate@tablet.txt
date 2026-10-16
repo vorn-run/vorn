@@ -1,0 +1,12 @@
+column
+  bar label="Review"
+    button label="Done" style="plain"
+  list
+    section
+      text label="Draft text" style="body"
+    section
+      button label="Approve" style="primary"
+      link value="gate-changes:r#:gate" style="sheet"
+        icon value="message-square"
+        text label="Request changes" style="body"
+      button label="Reject" style="danger" confirm

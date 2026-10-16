@@ -268,6 +268,7 @@ struct SessionScreen: View {
                         .frame(width: 44, height: 44)
                         .background(draft.isEmpty ? Color(white: 0.2) : Palette.bronze, in: Circle())
                         .foregroundStyle(.black)
+                        .hoverEffect(.lift)
                 }
                 .disabled(draft.isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)

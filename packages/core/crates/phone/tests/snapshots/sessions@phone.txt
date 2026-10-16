@@ -1,0 +1,30 @@
+column
+  bar label="Sessions"
+    link value="sessions-scope" style="sheet"
+      icon value="list-filter"
+      text label="Show sessions from" style="body"
+    link value="launch"
+      icon value="plus"
+      text label="Start a session" style="body"
+  list
+    section label="vorn"
+      link value="session:s#"
+        icon value="agent:claude"
+        status value="waiting" style="warn"
+        column
+          text label="vorn" style="title"
+          text label="main · Claude Code · Nov ##" style="secondary"
+        badge value="Asks" style="warn"
+      link value="session:s#"
+        icon value="agent:claude"
+        status value="running" style="busy"
+        column
+          text label="vorn" style="title"
+          text label="main · Claude Code · Nov ##" style="secondary"
+    section label="site"
+      link value="session:s#"
+        icon value="agent:claude"
+        status value="idle" style="muted"
+        column
+          text label="site" style="title"
+          text label="main · Claude Code · Nov ##" style="secondary"

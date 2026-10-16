@@ -1,0 +1,34 @@
+column
+  bar label="Draft notes"
+    button label="Stop" style="danger" confirm
+  list
+    section
+      row
+        status value="Running" style="busy"
+        text label="Waiting at Check" style="secondary"
+      text label="Started jan # · running..." style="secondary"
+    section label="Waiting at Check"
+      text label="Draft text" style="body"
+      text label="round # of #" style="secondary"
+      button label="Approve" style="primary"
+      link value="review:r#:gate" style="sheet"
+        icon value="file-text"
+        text label="Open review" style="body"
+      link value="gate-edit:r#:gate" style="sheet"
+        icon value="pencil"
+        text label="Edit the text" style="body"
+      link value="gate-changes:r#:gate" style="sheet"
+        icon value="message-square"
+        text label="Request changes" style="body"
+      button label="Reject" style="danger" confirm
+    section label="Steps"
+      link value="run-log:r#:write"
+        status value="Success" style="good"
+        column
+          text label="Write" style="body"
+          text style="secondary"
+      link value="run-log:r#:gate"
+        status value="Waiting for approval" style="warn"
+        column
+          text label="Check" style="body"
+          text style="secondary"

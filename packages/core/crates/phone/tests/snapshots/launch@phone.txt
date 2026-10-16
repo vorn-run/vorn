@@ -1,0 +1,28 @@
+column
+  bar label="New session"
+  list
+    section
+      choice label="Project"
+        option label="vorn" on=true
+        option label="site" on=false
+      choice label="Agent"
+        option label="Claude Code" on=true
+          icon value="agent:claude"
+        option label="GitHub Copilot" on=false
+          icon value="agent:copilot"
+        option label="Codex" on=false
+          icon value="agent:codex"
+        option label="OpenCode" on=false
+          icon value="agent:opencode"
+        option label="Gemini" on=false
+          icon value="agent:gemini"
+        option label="Shell" on=false
+          icon value="terminal"
+    section
+      choice label="Where it works"
+        option label="Main checkout" on=true
+        option label="New worktree" on=false
+      text label="Shares the files you have open" style="secondary"
+    section label="Prompt"
+      field label="What should it work on?" style="multiline"
+    button label="Start" style="primary"

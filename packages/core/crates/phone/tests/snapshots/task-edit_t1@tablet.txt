@@ -1,0 +1,6 @@
+column
+  bar label="Edit task"
+    button label="Save" style="primary"
+  list
+    field label="Untitled" value="Fix the build"
+    field label="Nothing written yet." value="It fails on CI." style="multiline"

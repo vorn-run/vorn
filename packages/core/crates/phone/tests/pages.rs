@@ -139,6 +139,62 @@ fn every_screen_reads_at_phone_and_tablet_sizes() {
     }
 }
 
+/// A tree as indented lines, digits masked so ages and counts that move with the clock do not.
+fn outline(n: &Node, depth: usize, out: &mut String) {
+    let mut line = format!("{}{}", "  ".repeat(depth), n.kind);
+    let svg = n.label.starts_with("<svg");
+    for (k, v) in [
+        ("label", if svg { "<svg>" } else { &n.label }),
+        ("value", &n.value),
+        ("style", n.style),
+    ] {
+        if !v.is_empty() {
+            line.push_str(&format!(" {k}={v:?}"));
+        }
+    }
+    if let Some(on) = n.on {
+        line.push_str(&format!(" on={on}"));
+    }
+    if n.confirm.is_some() {
+        line.push_str(" confirm");
+    }
+    out.extend(
+        line.chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c }),
+    );
+    out.push('\n');
+    for c in &n.children {
+        outline(c, depth + 1, out);
+    }
+}
+
+/// Every screen's tree at both sizes matches `tests/snapshots`; `VORN_SNAPSHOTS=write` rewrites them.
+#[test]
+fn every_screen_matches_its_snapshot() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    let write = std::env::var("VORN_SNAPSHOTS").as_deref() == Ok("write");
+    let mut stale = Vec::new();
+    for (size, name) in [(PHONE, "phone"), (TABLET, "tablet")] {
+        let mut p = phone(size);
+        for (route, _) in ROUTES {
+            let mut ui = Ui::native(&config(3.0));
+            let mut got = String::new();
+            outline(&tree(&mut p, &mut ui, route, size), 0, &mut got);
+            let file = dir.join(format!("{}@{name}.txt", route.replace(':', "_")));
+            if write {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(&file, &got).unwrap();
+            } else if std::fs::read_to_string(&file).ok().as_deref() != Some(got.as_str()) {
+                stale.push(file.display().to_string());
+            }
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "trees changed; check and rewrite with VORN_SNAPSHOTS=write: {stale:#?}"
+    );
+}
+
 /// Whether the app ships `icon`: vornui's set and the agent marks go into its asset catalog at build time, and an extension's own mark comes as SVG.
 fn ships(icon: &Node) -> bool {
     !icon.label.is_empty()

@@ -1,0 +1,10 @@
+column
+  bar label="New task"
+    button label="Add" style="primary"
+  list
+    field label="Title"
+    field label="What needs to be done" style="multiline"
+    choice label="Project"
+      option label="vorn" on=true
+      option label="site" on=false
+    text label="Goes in Todo." style="secondary"

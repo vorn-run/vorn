@@ -1,0 +1,7 @@
+column
+  bar label="Write"
+    copy label="Copy" value="[+#.#s] started\nwrote it\n"
+  list
+    section label="Write"
+      text label="[+#.#s] started" style="secondary"
+      text label="wrote it" style="mono"
