@@ -50,12 +50,26 @@ pub(super) enum WfCall {
     GitRepo(String),
     /// `connector:seedWorkflow`, with the suggestion's name.
     Seed(String),
+    /// `workflow:saveToFile`, with the workflow's name.
+    SavedToFile(String),
 }
 
 impl App {
     pub(super) fn wf_answered(&mut self, call: WfCall, answer: Result<Value, RpcError>) {
         match call {
             WfCall::Runs => self.st.wf.runs = list(answer),
+            WfCall::SavedToFile(name) => match answer {
+                Ok(v) => {
+                    let path = s(&v, "path").unwrap_or("");
+                    let text = if v.get("created").and_then(Value::as_bool) == Some(false) {
+                        format!("\"{name}\" is already in {path}")
+                    } else {
+                        format!("Saved \"{name}\" to {path}")
+                    };
+                    self.st.toast(text, false);
+                }
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
             WfCall::History(id) => {
                 if self.st.wf.editor.as_ref().is_some_and(|d| d.id() == id) {
                     self.st.wf.history = list(answer);
@@ -792,6 +806,18 @@ impl App {
                     self.start_pick(Picked::Export(id), Pick::Save { title, at });
                 }
             }
+            WfAct::SaveToFile(id) => {
+                let Some(w) = self.workflow(&id) else { return };
+                let Some(project) = self.home_project(&w) else {
+                    return self.st.toast("Pick a project first".to_owned(), true);
+                };
+                let name = s(&w, "name").unwrap_or("").to_owned();
+                self.call(
+                    Call::Workflow(WfCall::SavedToFile(name)),
+                    "workflow:saveToFile",
+                    json!({ "id": id, "projectName": project }),
+                );
+            }
             WfAct::Import => {
                 let title = "Import workflow file".to_owned();
                 self.start_pick(Picked::Import, Pick::Workflow(title));
@@ -1079,25 +1105,28 @@ impl App {
         })
     }
 
-    /// `handleExport`.
-    pub(super) fn export(&mut self, id: &str, path: &str) {
-        let Some(w) = self.workflow(id) else { return };
+    /// The project a workflow belongs to: the one its steps name, else the active one.
+    fn home_project(&self, w: &Value) -> Option<String> {
         let named = w
             .get("nodes")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .find_map(|n| n.pointer("/config/projectName").and_then(Value::as_str))
-            .filter(|n| !n.is_empty())
-            .map(str::to_owned);
-        let active = self.st.project.clone();
-        let project = named
+            .filter(|n| !n.is_empty());
+        let known = |n: &&str| self.store.projects.iter().any(|p| p.name == *n);
+        named
+            .filter(known)
+            .or(self.st.project.as_deref().filter(known))
+            .map(str::to_owned)
+    }
+
+    /// `handleExport`.
+    pub(super) fn export(&mut self, id: &str, path: &str) {
+        let Some(w) = self.workflow(id) else { return };
+        let project = self
+            .home_project(&w)
             .and_then(|n| self.store.projects.iter().find(|p| p.name == n))
-            .or_else(|| {
-                active
-                    .as_deref()
-                    .and_then(|a| self.store.projects.iter().find(|p| p.name == a))
-            })
             .map(|p| p.path.clone())
             .unwrap_or_default();
         let connections = self.connections();

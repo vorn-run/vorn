@@ -346,3 +346,49 @@ fn with_the_editor_off_the_view_says_so_and_run_workflow_is_gone() {
         )
         .expect("switched back on");
 }
+
+#[test]
+fn save_to_project_writes_the_workflow_into_its_projects_folder() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let root = add_project(&mut app, &v, "web", json!({}));
+    let mut shot = Shot::new();
+    let mut w = workflow(
+        "wf-keep",
+        "Keep me",
+        vec![
+            manual(),
+            step(
+                "s",
+                "script",
+                json!({ "scriptType": "bash", "scriptContent": "echo hi" }),
+            ),
+        ],
+    );
+    w["nodes"][1]["config"]["projectName"] = json!("web");
+    seed(&mut shot, &mut app, w);
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    shot.right_click(
+        &mut app,
+        App::control("wf-side", &Act::Workflow(WfAct::Edit("wf-keep".into()))),
+    );
+    let labels = app.menu_labels(&shot.ui);
+    let at = labels
+        .iter()
+        .position(|l| l == "Save to project")
+        .unwrap_or_else(|| panic!("Save to project in {labels:?}"));
+    shot.click(&mut app, item_id(MENU, at));
+    let file = root.join(".vorn/workflows/keep-me.kdl");
+    shot.until(&mut app, "the file", |_, _| file.is_file().then_some(()));
+    let text = std::fs::read_to_string(&file).expect("read");
+    assert!(text.starts_with("workflow \"Keep me\""), "{text}");
+    shot.until(&mut app, "the toast", |app, _| {
+        app.st
+            .toasts
+            .iter()
+            .any(|t| t.text.starts_with("Saved \"Keep me\" to "))
+            .then_some(())
+    });
+}

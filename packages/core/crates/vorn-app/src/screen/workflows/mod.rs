@@ -1240,6 +1240,11 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 "Export as file\u{2026}",
                 act(WfAct::Export(id.clone())),
             ));
+            out.push(Item::new(
+                "file-code",
+                "Save to project",
+                act(WfAct::SaveToFile(id.clone())),
+            ));
             out.push(danger(Item::new(
                 "trash-2",
                 "Delete Workflow",
@@ -1262,6 +1267,11 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                     "upload",
                     "Export as file\u{2026}",
                     act(WfAct::Export(id.clone())),
+                ));
+                out.push(Item::new(
+                    "file-code",
+                    "Save to project",
+                    act(WfAct::SaveToFile(id.clone())),
                 ));
                 out.push(
                     danger(Item::new(

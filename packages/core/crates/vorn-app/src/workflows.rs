@@ -1923,6 +1923,8 @@ pub enum WfAct {
     Run(String),
     ToggleSchedule(String),
     Export(String),
+    /// Written to its project's `.vorn/workflows/` and kept there from then on.
+    SaveToFile(String),
     Import,
     Delete(String),
     /// The editor's controls.
