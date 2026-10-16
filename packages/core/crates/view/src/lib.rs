@@ -21,7 +21,7 @@ pub const SCHEMA: &str = "vorn:view@1";
 /// The node kinds, for the error that lists them.
 pub const NODES: &[&str] = &[
     "column", "row", "section", "text", "icon", "status", "badge", "button", "toggle", "field",
-    "choice", "list", "divider", "more", "board",
+    "choice", "list", "divider", "more", "board", "entry", "toolbar", "notice",
 ];
 
 /// The name of a template's first row collection, whatever it is called.
@@ -179,12 +179,41 @@ pub enum Kind {
         empty: Option<Text>,
         /// Only the rows whose field equals the text, read in the enclosing item: a list inside one.
         only: Option<(String, Text)>,
+        /// The rows in groups, each under a quiet heading.
+        group: Option<Box<Group>>,
+        /// While the condition holds, its text instead of the rows or `empty`.
+        loading: Option<Box<(Cond, Text)>>,
+    },
+    /// One row of a list as the kit draws it: a title, an optional detail
+    /// under it, a leading icon or status, trailing text, and actions that
+    /// show on hover. Danger actions go in its `more` menu.
+    Entry {
+        title: Text,
+        detail: Option<Text>,
+        children: Vec<Node>,
+    },
+    /// A page's actions: in a settings page's header, at the right elsewhere.
+    Toolbar(Vec<Node>),
+    /// A line of copy that stands out from the page, as an error.
+    Notice {
+        value: Text,
+        tone: Option<Tone>,
     },
     Divider,
     /// The rows of `rows` as cards in columns, one column per value of the
     /// enum field `by`, in the order published; the client windows the
     /// cards, drags them between columns and opens them.
     Board(Box<Board>),
+}
+
+/// How a list groups its rows: one group per value of `by`, in the order
+/// first published, `heading` and `aside` filled from the group's first row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Group {
+    pub by: String,
+    pub heading: Text,
+    /// Shown at the heading's right, as the group's total.
+    pub aside: Option<Text>,
 }
 
 /// A board: where its cards come from, its columns and its card.
@@ -225,6 +254,8 @@ pub enum Role {
     Body,
     Secondary,
     Mono,
+    /// A figure, right-aligned in a column of its own.
+    Number,
 }
 
 /// Colours named by meaning: each client picks its own colour for each.
@@ -525,7 +556,9 @@ fn hint(word: &str, known: &[&str], otherwise: impl FnOnce() -> String) -> Strin
 
 fn keys_of(kind: &str) -> &'static [&'static str] {
     match kind {
-        "column" | "row" | "more" => &["children", "when"],
+        "column" | "row" | "more" | "toolbar" => &["children", "when"],
+        "entry" => &["title", "detail", "children", "when"],
+        "notice" => &["value", "tone", "when"],
         "section" => &["title", "children", "when"],
         "text" => &["value", "role", "grow", "wrap", "when"],
         "icon" => &["value", "tone", "when"],
@@ -534,7 +567,10 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
         "toggle" => &["value", "label", "call", "when"],
         "field" => &["value", "placeholder", "call", "secret", "when"],
         "choice" => &["rows", "label", "selected", "call", "when"],
-        "list" => &["rows", "item", "empty", "where", "is", "when"],
+        "list" => &[
+            "rows", "item", "empty", "where", "is", "by", "heading", "aside", "busy", "loading",
+            "when",
+        ],
         "board" => &[
             "rows", "by", "columns", "card", "move", "open", "add", "empty", "dim", "label", "when",
         ],
@@ -544,8 +580,8 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
 
 fn required_of(kind: &str) -> &'static [&'static str] {
     match kind {
-        "section" => &["title"],
-        "text" | "icon" | "status" | "badge" => &["value"],
+        "section" | "entry" => &["title"],
+        "text" | "icon" | "status" | "badge" | "notice" => &["value"],
         "button" => &["label", "action"],
         "toggle" => &["value", "call"],
         "field" => &["call"],
@@ -720,7 +756,7 @@ impl Parser {
         for a in body.keys() {
             if !known.contains(&a.as_str()) {
                 let message = if a == "children" {
-                    format!("'{k}' holds no children; only column, row, section, more and list do")
+                    format!("'{k}' holds no children; only column, row, section, more, entry, toolbar and list do")
                 } else {
                     let h = hint(a, known, || format!("{k} takes {}", listed(known)));
                     format!("unknown attribute '{a}' on {k}{h}")
@@ -742,11 +778,12 @@ impl Parser {
                 .and_then(|v| p.text(v, &format!("{path}.{key}"), scope))
         };
         let kind = match k.as_str() {
-            "column" | "row" | "section" | "more" => {
+            "column" | "row" | "section" | "more" | "toolbar" => {
                 let kids = self.children(body.get("children"), &path, scope);
                 match k.as_str() {
                     "column" => Kind::Column(kids),
                     "row" => Kind::Row(kids),
+                    "toolbar" => Kind::Toolbar(kids),
                     "more" => {
                         if kids.is_empty()
                             || kids.iter().any(|n| !matches!(n.kind, Kind::Button { .. }))
@@ -773,11 +810,12 @@ impl Parser {
                         Some("title") => Role::Title,
                         Some("secondary") => Role::Secondary,
                         Some("mono") => Role::Mono,
+                        Some("number") => Role::Number,
                         other => {
                             let h = hint(
                                 other.unwrap_or(""),
-                                &["title", "body", "secondary", "mono"],
-                                || "a role is title, body, secondary or mono".into(),
+                                &["title", "body", "secondary", "mono", "number"],
+                                || "a role is title, body, secondary, mono or number".into(),
                             );
                             self.err(
                                 &format!("{path}.role"),
@@ -980,14 +1018,71 @@ impl Parser {
                     }
                     known.then_some((field, is))
                 });
+                let group = self.group(body, &path, &rows);
+                let loading = match (body.get("busy"), body.get("loading")) {
+                    (None, None) => None,
+                    (Some(b), Some(l)) => {
+                        let busy = self.cond(b, &format!("{path}.busy"), scope);
+                        let copy = self.text(l, &format!("{path}.loading"), scope);
+                        busy.zip(copy).map(Box::new)
+                    }
+                    _ => {
+                        self.err(
+                            &path,
+                            "busy and loading go together: busy=\"{scan.busy}\" loading=\"Measuring…\"",
+                        );
+                        None
+                    }
+                };
                 Kind::List {
                     rows,
                     item: Box::new(item),
                     empty,
                     only,
+                    group,
+                    loading,
                 }
             }
             "board" => Kind::Board(Box::new(self.board(body, &path, scope)?)),
+            "entry" => {
+                let title = text(self, "title")?;
+                let detail = text(self, "detail");
+                let children = self.children(body.get("children"), &path, scope);
+                for (i, c) in children.iter().enumerate() {
+                    let at = format!("{path}[{i}]");
+                    match &c.kind {
+                        Kind::Button {
+                            style: Style::Danger,
+                            ..
+                        } => self.err(
+                            &at,
+                            "a danger button goes in the entry's more menu, not on every row",
+                        ),
+                        Kind::Icon { .. }
+                        | Kind::Status { .. }
+                        | Kind::Text { .. }
+                        | Kind::Badge { .. }
+                        | Kind::Button { .. }
+                        | Kind::Toggle { .. }
+                        | Kind::More(_) => {}
+                        _ => self.err(
+                            &at,
+                            "an entry holds an icon or status, text, badges, buttons, toggles and a more menu",
+                        ),
+                    }
+                }
+                Kind::Entry {
+                    title,
+                    detail,
+                    children,
+                }
+            }
+            "notice" => Kind::Notice {
+                value: text(self, "value")?,
+                tone: body
+                    .get("tone")
+                    .and_then(|t| self.tone(t, &format!("{path}.tone"))),
+            },
             _ => Kind::Divider,
         };
         Some(Node { kind, when })
@@ -1115,6 +1210,46 @@ impl Parser {
             dim,
             label,
         })
+    }
+
+    /// A list's `by` field and the `heading` and `aside` read in its groups' first rows.
+    fn group(&mut self, body: &Map<String, Value>, path: &str, rows: &str) -> Option<Box<Group>> {
+        let by = match body.get("by") {
+            None => {
+                for k in ["heading", "aside"] {
+                    if body.contains_key(k) {
+                        self.err(
+                            &format!("{path}.{k}"),
+                            format!("{k} names a group; group the rows with by=\"<field>\""),
+                        );
+                    }
+                }
+                return None;
+            }
+            Some(Value::String(f)) => f.clone(),
+            Some(_) => {
+                self.err(&format!("{path}.by"), "expected a field's name");
+                return None;
+            }
+        };
+        if by != "id" && self.field_type(Some(rows), &by).is_none() {
+            self.err(&format!("{path}.by"), format!("'{rows}' has no field '{by}'"));
+            return None;
+        }
+        let inner = Scope {
+            row: Some(rows),
+            in_item: true,
+            nested: false,
+            card: false,
+        };
+        let heading = match body.get("heading") {
+            Some(v) => self.text(v, &format!("{path}.heading"), inner)?,
+            None => Text(vec![Piece::Field(by.clone())]),
+        };
+        let aside = body
+            .get("aside")
+            .and_then(|v| self.text(v, &format!("{path}.aside"), inner));
+        Some(Box::new(Group { by, heading, aside }))
     }
 
     fn children(&mut self, v: Option<&Value>, path: &str, scope: Scope<'_>) -> Vec<Node> {
