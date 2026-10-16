@@ -367,6 +367,17 @@ pub extern "C" fn vp_send(h: *mut Handle, text: *const c_char) {
     });
 }
 
+/// Calls `method` with `params` (JSON) and drops the answer: for the host's own requests, such as revoking its token.
+#[no_mangle]
+pub extern "C" fn vp_call(h: *mut Handle, method: *const c_char, params: *const c_char) {
+    with(h, |h| {
+        let params = serde_json::from_str(str_in(params)).unwrap_or(Value::Null);
+        h.phone
+            .model
+            .call(crate::model::For::Quiet, str_in(method), params);
+    });
+}
+
 /// Whether the system keyboard should be up.
 #[no_mangle]
 pub extern "C" fn vp_wants_keyboard(h: *mut Handle) -> bool {

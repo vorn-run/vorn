@@ -15,7 +15,7 @@ use vorn_app::points::{self, kind, Point, PointAct, Points, Press};
 use vorn_app::view::PaneView;
 use vornui::{Id, Ui};
 
-/// Where the phone is pointed: `host:port` and a device token.
+/// Where the phone is pointed: `host:port` (or a `wss://host:port` base) and a device token.
 #[derive(Clone)]
 pub struct Target {
     pub host: String,
@@ -389,7 +389,11 @@ impl Model {
 
 fn open(t: &Target, wake: Wake) -> Result<Connected, String> {
     let socket = |path: &str| Socket {
-        url: format!("ws://{}/{path}", t.host),
+        url: if t.host.contains("://") {
+            format!("{}/{path}", t.host)
+        } else {
+            format!("ws://{}/{path}", t.host)
+        },
         token: t.token.clone(),
     };
     let (rpc, events) =

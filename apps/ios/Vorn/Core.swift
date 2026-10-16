@@ -63,13 +63,6 @@ final class WakeBox {
     weak var core: Core?
 }
 
-extension Core {
-    static func fromSettings() -> Core {
-        let d = UserDefaults.standard
-        return Core(host: d.string(forKey: "vornHost") ?? "", token: d.string(forKey: "vornToken") ?? "")
-    }
-}
-
 /// One node of a screen's semantic tree.
 struct Node: Decodable, Identifiable {
     let k: String

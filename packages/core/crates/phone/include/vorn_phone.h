@@ -20,6 +20,7 @@ void vp_text(VpHandle *h, const char *s);
 void vp_preedit(VpHandle *h, const char *s);
 void vp_key(VpHandle *h, const char *code, uint16_t mods);
 void vp_send(VpHandle *h, const char *text);
+void vp_call(VpHandle *h, const char *method, const char *params);
 bool vp_wants_keyboard(VpHandle *h);
 void vp_keyboard_hidden(VpHandle *h);
 void vp_open_session(VpHandle *h, const char *id);

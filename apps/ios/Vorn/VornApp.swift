@@ -5,7 +5,7 @@ import SwiftUI
 struct NativeApp: App {
     var body: some Scene {
         WindowGroup {
-            Paired { core, forget in Root(core: core, forget: forget) }
+            Paired { core, computers in Root(core: core, computers: computers) }
                 .preferredColorScheme(.dark)
                 .tint(Palette.ink)
         }
@@ -44,7 +44,7 @@ enum Place: String, CaseIterable, Identifiable {
 /// Tabs on a phone, a sidebar, list and detail on a tablet or a wide window.
 struct Root: View {
     @ObservedObject var core: Core
-    let forget: () -> Void
+    let computers: Computers
     @Environment(\.horizontalSizeClass) private var width
     @State private var place: Place = .sessions
     @State private var settings = false
@@ -53,9 +53,9 @@ struct Root: View {
     @StateObject private var detail: Nav
     @StateObject private var prefs: Nav
 
-    init(core: Core, forget: @escaping () -> Void) {
+    init(core: Core, computers: Computers) {
         self.core = core
-        self.forget = forget
+        self.computers = computers
         _tabs = StateObject(wrappedValue: TabNavs(core: core))
         _list = StateObject(wrappedValue: Nav(core: core))
         _detail = StateObject(wrappedValue: Nav(core: core))
@@ -67,7 +67,7 @@ struct Root: View {
             if width == .regular { split } else { phone }
         }
         .sheet(isPresented: $settings) {
-            Settings(core: core, nav: prefs, forget: { settings = false; forget() }, done: { settings = false })
+            Settings(core: core, nav: prefs, computers: computers, done: { settings = false })
         }
         .background { shortcuts }
         .onAppear {
@@ -175,24 +175,59 @@ final class TabNavs: ObservableObject {
 struct Settings: View {
     let core: Core
     @ObservedObject var nav: Nav
-    let forget: () -> Void
+    @ObservedObject var computers: Computers
     let done: () -> Void
-    @State private var forgetting = false
+    @State private var forgetting: Computer?
+    @State private var adding = false
 
     var body: some View {
         Stack(core: core, nav: nav) {
-            Screen(core: core, name: "settings", title: "Settings", extra: AnyView(
-                Section {
-                    Button("Forget this computer", role: .destructive) { forgetting = true }
-                        .confirmationDialog("Forget this computer?", isPresented: $forgetting, titleVisibility: .visible) {
-                            Button("Forget", role: .destructive) { forget() }
-                        } message: {
-                            Text("You'll need a new pairing code from Settings › Devices to connect again.")
+            Screen(core: core, name: "settings", title: "Settings", extra: AnyView(machines))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { Button("Done", action: done) }
+        }
+        .sheet(isPresented: $adding) { PairFlow(computers: computers) { adding = false } }
+    }
+
+    private var machines: some View {
+        Section("Computers") {
+            ForEach(computers.list) { c in
+                Button { computers.select(c.id) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.name).foregroundStyle(Palette.ink)
+                            Text(Pairing.hostOf(c.host)).font(.caption).fontDesign(.monospaced).foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        if c.id == computers.active { Image(systemName: "checkmark").foregroundStyle(Palette.bronze) }
+                    }
                 }
-            ))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Done", action: done) }
+                .swipeActions { Button("Forget", role: .destructive) { forgetting = c } }
+            }
+            Button("Pair another computer") { adding = true }
+            if let c = computers.current {
+                Button("Forget this computer", role: .destructive) { forgetting = c }
+            }
+        }
+        .confirmationDialog("Forget \(forgetting?.name ?? "this computer")?", isPresented: Binding(
+            get: { forgetting != nil }, set: { if !$0 { forgetting = nil } }
+        ), titleVisibility: .visible, presenting: forgetting) { c in
+            Button("Forget", role: .destructive) { forget(c) }
+        } message: { _ in
+            Text("This phone gives up its token. You'll need a new pairing code from Settings › Remote Access to connect again.")
+        }
+    }
+
+    /// Tells the computer in use to revoke this phone's token, then drops it here.
+    private func forget(_ c: Computer) {
+        guard c.id == computers.active, let token = computers.token(c), let id = Computers.tokenId(token),
+              let params = try? JSONSerialization.data(withJSONObject: id, options: .fragmentsAllowed) else {
+            return computers.remove(c.id)
+        }
+        vp_call(core.handle, "token:revoke", String(decoding: params, as: UTF8.self))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [core] in
+            _ = core
+            computers.remove(c.id)
         }
     }
 }
