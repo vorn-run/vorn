@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["host", "backend", "ui-b"]
+members = ["host", "backend", "ui-b", "sdk", "ui-c"]
 
 [profile.release]
 opt-level = 3

@@ -15,19 +15,19 @@ pub mod mods {
     pub const CTRL: u16 = 4;
     pub const SUPER: u16 = 8;
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
     static MAC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     /// Whether shortcuts are the Mac's (Cmd, not Ctrl): a desktop build
     /// knows; a browser build learns it from the page it runs in.
     pub fn mac() -> bool {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
         return MAC.load(std::sync::atomic::Ordering::Relaxed);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_arch = "wasm32", not(target_os = "wasi"))))]
         cfg!(target_os = "macos")
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
     pub(crate) fn set_mac(on: bool) {
         MAC.store(on, std::sync::atomic::Ordering::Relaxed);
     }

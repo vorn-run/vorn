@@ -46,3 +46,104 @@ world ui {
   export data: func(rows: string);
   export frame: func(w: u32, h: u32, inputs: list<input>) -> frame;
 }
+
+/// Model C: an element tree the client lays out and draws with its own vornui.
+interface tree {
+  /// A theme colour by meaning; the client resolves it on every surface.
+  enum token { base, overlay, ink, ink-secondary, ink-faint, muted, accent, good, warn, bad, info, neutral, white }
+  variant paint {
+    token(token),
+    /// A token at an alpha.
+    tint(tuple<token, f32>),
+    clear,
+  }
+  enum text-size { xs, sm, base, lg }
+  enum radius { sm, md, lg, full }
+  enum tone { neutral, good, warn, bad, info }
+  /// What a box is to assistive technology, beyond what its kind says.
+  enum role { group, image, status }
+  record confirm {
+    message: string,
+    ok: string,
+    danger: bool,
+  }
+  variant prop {
+    row,
+    col,
+    gap(f32),
+    pad(f32),
+    pad-x(f32),
+    pad-y(f32),
+    w(f32),
+    h(f32),
+    w-full,
+    h-full,
+    grow,
+    min-h(f32),
+    items-center,
+    justify-between,
+    bg(paint),
+    /// The background while hovered, blended by the client.
+    hover-bg(paint),
+    border(tuple<f32, paint>),
+    rounded(radius),
+    opacity(f32),
+    weight(u16),
+    mono,
+    truncate,
+    /// Reports `click` events.
+    click,
+    /// A press that travels reports `drag-over` with the id under the pointer.
+    drag,
+    disabled,
+    /// What the box shows on a cells surface instead of its content.
+    glyph(string),
+    /// Its role and accessible name.
+    access(tuple<role, string>),
+    /// A button's confirm popover: `<id>.ok` and `<id>.cancel` report clicks.
+    confirm(confirm),
+  }
+  variant kind {
+    %box,
+    text(tuple<string, text-size, paint>),
+    /// An SVG over the whole box in one paint.
+    shape(tuple<string, paint>),
+    button(string),
+    /// A one-line text field: name and placeholder; its text reaches the extension by `change`.
+    field(tuple<string, string>),
+    badge(tuple<string, tone>),
+    /// A scrolling listbox, named.
+    %list(string),
+  }
+  /// One box, depth first: its `children` boxes follow it.
+  record node {
+    kind: kind,
+    id: option<string>,
+    children: u32,
+    props: list<prop>,
+  }
+  record surface {
+    cells: bool,
+    width: f32,
+    height: f32,
+  }
+  enum event-kind { click, change, drag-over, submit }
+}
+
+/// Model C: the extension's UI as code that returns a tree; the client draws it.
+world ui-c {
+  use tree.{node, surface, event-kind};
+  import call: func(method: string, args: string) -> result<string, string>;
+  /// All rows, replacing the ones it had.
+  export data: func(rows: string);
+  /// One row op, as model A's client applies it.
+  export patch: func(op: string);
+  export render: func(surface: surface) -> list<node>;
+  /// Something happened to box `id`; true when the tree should be rendered again.
+  export event: func(id: string, kind: event-kind, data: string) -> bool;
+}
+
+/// The tree's types alone, for the guest SDK.
+world sdk {
+  import tree;
+}

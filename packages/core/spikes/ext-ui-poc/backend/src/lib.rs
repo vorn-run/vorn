@@ -51,6 +51,7 @@ impl Guest for Backend {
                     "branch": e["branch"],
                     "status": status,
                     "size": size(e["sizeBytes"].as_u64().unwrap_or(0)),
+                    "bytes": e["sizeBytes"].as_u64().unwrap_or(0),
                     "removable": matches!(status, "merged" | "stale" | "open"),
                 }));
             }

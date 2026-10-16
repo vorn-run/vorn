@@ -13,7 +13,12 @@ pub mod ui {
     wasmtime::component::bindgen!({ world: "ui", path: "../wit" });
 }
 
+pub mod uic {
+    wasmtime::component::bindgen!({ world: "ui-c", path: "../wit" });
+}
+
 pub use ui::vorn::ext_ui_poc::surface::{Frame, Input, KeyPress};
+pub use uic::vorn::ext_ui_poc::tree;
 
 /// A store's state: WASI, and the most linear memory it asked for.
 pub struct Host {
@@ -51,6 +56,14 @@ impl ResourceLimiter for Host {
 impl ui::vorn::ext_ui_poc::surface::Host for Host {}
 
 impl ui::UiImports for Host {
+    fn call(&mut self, method: String, args: String) -> Result<String, String> {
+        (self.answer)(&method, &args)
+    }
+}
+
+impl uic::vorn::ext_ui_poc::tree::Host for Host {}
+
+impl uic::UiCImports for Host {
     fn call(&mut self, method: String, args: String) -> Result<String, String> {
         (self.answer)(&method, &args)
     }
@@ -154,5 +167,36 @@ impl UiB {
         self.api
             .call_frame(&mut self.store, w, h, inputs)
             .expect("frame")
+    }
+}
+
+/// Model C's UI component: it returns trees and takes events, and needs no fonts.
+pub struct UiC {
+    pub store: Store<Host>,
+    pub api: uic::UiC,
+}
+
+impl UiC {
+    pub fn new(engine: &Engine, c: &Component) -> UiC {
+        let mut linker: Linker<Host> = Linker::new(engine);
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).expect("wasi");
+        uic::UiC::add_to_linker::<_, HasSelf<Host>>(&mut linker, |h| h).expect("imports");
+        let mut store = store(engine, false, false);
+        let api = uic::UiC::instantiate(&mut store, c, &linker).expect("ui-c");
+        UiC { store, api }
+    }
+    pub fn data(&mut self, rows: &str) {
+        self.api.call_data(&mut self.store, rows).expect("data");
+    }
+    pub fn patch(&mut self, op: &str) {
+        self.api.call_patch(&mut self.store, op).expect("patch");
+    }
+    pub fn render(&mut self, s: tree::Surface) -> Vec<tree::Node> {
+        self.api.call_render(&mut self.store, s).expect("render")
+    }
+    pub fn event(&mut self, id: &str, kind: tree::EventKind, data: &str) -> bool {
+        self.api
+            .call_event(&mut self.store, id, kind, data)
+            .expect("event")
     }
 }

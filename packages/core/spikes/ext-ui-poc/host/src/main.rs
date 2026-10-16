@@ -1,6 +1,7 @@
 //! Spike: Worktree cleanup drawn as declarative views (A) and as a vornui component (B); `ext-ui-host <vornd-data-dir> <out-dir> [--remove]`.
 
 mod decl;
+mod tree;
 mod vornd;
 mod wasm;
 
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use vornui::backend::{Backend as _, Cells};
 use vornui::theme::color;
-use vornui::{write_png, Id, Input, RenderMode, Ui, UiConfig};
+use vornui::{write_png, Id, Input, Laid, RenderMode, Ui, UiConfig};
 
 const LOGICAL: (f32, f32) = (900.0, 560.0);
 const SCALE: f32 = 2.0;
@@ -79,6 +80,7 @@ struct AClient {
     target: Option<vornui::Offscreen>,
     cells: Option<Cells>,
     t0: Instant,
+    laid: Option<Laid>,
 }
 
 impl AClient {
@@ -93,6 +95,7 @@ impl AClient {
             target: None,
             cells,
             t0: Instant::now(),
+            laid: None,
         }
     }
 
@@ -124,7 +127,7 @@ impl AClient {
             .begin_at(color::SURFACE_BASE, self.t0 + Duration::from_secs(3600));
         let root = self.view.view(&self.ui);
         let size = self.size();
-        self.ui.layout(root, size);
+        self.laid = Some(self.ui.layout(root, size));
         if let Some(c) = &mut self.cells {
             c.present(&mut self.ui).expect("cells");
         } else {
@@ -189,6 +192,7 @@ fn b_shoot(f: &wasm::Frame, path: &str) {
                     fg: rgb(c.fg),
                     bg: rgb(c.bg),
                     attr: c.attr,
+                    icon: 0,
                 };
             }
             std::fs::write(path, buf.to_html("model B on Cells")).expect("html");
@@ -274,10 +278,12 @@ fn main() {
         .unwrap()
         .join("../wasm32-wasip2/release");
     let (backend_wasm, ui_wasm) = (dir.join("ext_ui_backend.wasm"), dir.join("ext_ui_b.wasm"));
+    let uic_wasm = dir.join("ext_ui_c.wasm");
     let mut report = serde_json::Map::new();
     report.insert("sizes".into(), json!({
         "backend_wasm_kb": std::fs::metadata(&backend_wasm).map(|m| m.len() / 1024).unwrap_or(0),
         "ui_b_wasm_kb": std::fs::metadata(&ui_wasm).map(|m| m.len() / 1024).unwrap_or(0),
+        "ui_c_wasm_kb": std::fs::metadata(&uic_wasm).map(|m| m.len() / 1024).unwrap_or(0),
     }));
 
     let vornd = Arc::new(vornd::Vornd::open(data).expect("test vornd"));
@@ -292,6 +298,7 @@ fn main() {
     let engine = wasm::engine();
     let (backend_c, backend_compile) = wasm::compile(&engine, backend_wasm.to_str().unwrap());
     let (ui_c, ui_compile) = wasm::compile(&engine, ui_wasm.to_str().unwrap());
+    let (uic_c, uic_compile) = wasm::compile(&engine, uic_wasm.to_str().unwrap());
     let t = Instant::now();
     let backend = Arc::new(Mutex::new(wasm::Backend::new(&engine, &backend_c)));
     let backend_init = t.elapsed().as_secs_f64() * 1e3;
@@ -300,7 +307,7 @@ fn main() {
     report.insert(
         "startup".into(),
         json!({
-            "compile_ms": { "backend": round(backend_compile), "ui_b": round(ui_compile) },
+            "compile_ms": { "backend": round(backend_compile), "ui_b": round(ui_compile), "ui_c": round(uic_compile) },
             "backend_instantiate_ms": round(backend_init),
             "template_bytes": template.len(),
             "rows_bytes": rows_json.len(),
@@ -311,6 +318,7 @@ fn main() {
     // Model A on Pixels (GPU, as Vorn Native draws), Pixels on the CPU raster, and Cells.
     let mut spots_px = None;
     let mut spots_cells = None;
+    let mut a_access = None;
     for (name, mode) in [
         ("a_pixels_gpu", Some(RenderMode::Auto)),
         ("a_pixels_cpu", Some(RenderMode::Cpu)),
@@ -322,6 +330,9 @@ fn main() {
         a.frame();
         a.frame();
         let first = t.elapsed().as_secs_f64() * 1e3;
+        if name == "a_pixels_gpu" {
+            a_access = a.laid.as_ref().map(access);
+        }
         let spots = a.spots();
         let row1 = spots.rows[1];
         let ext = if mode.is_none() { "html" } else { "png" };
@@ -636,6 +647,141 @@ fn main() {
         );
     }
 
+    // Model C: the component returns trees; each client lays them out and draws them itself.
+    let mut c_access = None;
+    for (name, mode) in [
+        ("c_pixels_gpu", Some(RenderMode::Auto)),
+        ("c_pixels_cpu", Some(RenderMode::Cpu)),
+        ("c_cells", None),
+    ] {
+        let cells = mode.is_none();
+        let (spots, ok) = if cells {
+            spots_cells.as_ref().unwrap()
+        } else {
+            spots_px.as_ref().unwrap()
+        };
+        let t = Instant::now();
+        let comp = wasm::UiC::new(&engine, &uic_c);
+        let init = t.elapsed().as_secs_f64() * 1e3;
+        let mut c = tree::CClient::new(mode, comp, &cfg(if cells { 1.0 } else { SCALE }));
+        {
+            let (be, vd) = (backend.clone(), vornd.clone());
+            c.comp.store.data_mut().answer = Box::new(move |m, args| {
+                let ids: Vec<String> = serde_json::from_str(args).map_err(|e| e.to_string())?;
+                let plan = be.lock().unwrap().plan(&ids)?;
+                let r = vd.call("worktree:removeMany", serde_json::from_str(&plan).unwrap())?;
+                Ok(format!("{m}: {}", summary(&r)))
+            });
+        }
+        let t = Instant::now();
+        c.data(&rows_json);
+        c.frame();
+        c.frame();
+        let first = t.elapsed().as_secs_f64() * 1e3;
+        let tree13 = (c.nodes.len(), tree::tree_bytes(&c.nodes));
+        if name == "c_pixels_gpu" {
+            c_access = c.laid.as_ref().map(access);
+        }
+        let ext = if cells { "html" } else { "png" };
+        c.shoot(&format!("{out}/{name}-list.{ext}"));
+        let mut log = Vec::new();
+        for (label, steps) in script(spots, cells) {
+            let t = Instant::now();
+            for s in &steps {
+                c.apply(s);
+            }
+            c.frame();
+            log.push((label, t.elapsed().as_secs_f64() * 1e3));
+            if label == "type" && log.iter().filter(|(l, _)| *l == "type").count() == 4 {
+                c.shoot(&format!("{out}/{name}-filter.{ext}"));
+            }
+        }
+        c.shoot(&format!("{out}/{name}-selected.{ext}"));
+        let t = Instant::now();
+        for st in [Step::Move(spots.remove.0, spots.remove.1), Step::Down, Step::Up] {
+            c.apply(&st);
+        }
+        c.frame();
+        log.push(("confirm", t.elapsed().as_secs_f64() * 1e3));
+        c.shoot(&format!("{out}/{name}-confirm.{ext}"));
+        let renders_script = c.renders.clone();
+        // Update: one row changes. The client hands the component the same op model A applies.
+        let mut up = Vec::new();
+        let mut rows: Vec<Value> = serde_json::from_str(&rows_json).unwrap();
+        let mut tree500 = (0, 0);
+        for n in [rows.len(), 500] {
+            if n == 500 {
+                rows = many(&rows_json, 500);
+                c.data(&Value::Array(rows.clone()).to_string());
+                c.frame();
+                tree500 = (c.nodes.len(), tree::tree_bytes(&c.nodes));
+            }
+            let mut changed = rows[n / 2].clone();
+            changed["status"] = json!("merged");
+            let patch = json!({ "op": "upsert", "row": changed }).to_string();
+            let mut ts = Vec::new();
+            let r0 = c.renders.len();
+            for _ in 0..20 {
+                let t = Instant::now();
+                c.patch(&patch);
+                c.frame();
+                ts.push(t.elapsed().as_secs_f64() * 1e3);
+            }
+            up.push(json!({
+                "rows": n,
+                "bytes_sent": patch.len(),
+                "apply_and_frame": stats(ts),
+                "component_render": stats(c.renders[r0..].to_vec()),
+                "tree_nodes": c.nodes.len(),
+                "tree_bytes": tree::tree_bytes(&c.nodes),
+            }));
+        }
+        c.apply(&Step::Move(spots.rows[1].0, spots.rows[1].1));
+        let mut sc = Vec::new();
+        let r0 = c.renders.len();
+        for i in 0..40 {
+            let dy = if cells { 1.0 } else { 24.0 } * if i < 20 { 1.0 } else { -1.0 };
+            let t = Instant::now();
+            c.apply(&Step::Wheel(dy));
+            c.frame();
+            sc.push(t.elapsed().as_secs_f64() * 1e3);
+        }
+        let scroll_renders = c.renders.len() - r0;
+        if remove && name == "c_pixels_gpu" {
+            c.data(&rows_json);
+            c.frame();
+            for p in [spots.rows[5], spots.rows[6], spots.remove, *ok] {
+                for st in [Step::Move(p.0, p.1), Step::Down, Step::Up] {
+                    c.apply(&st);
+                }
+                c.frame();
+            }
+            let fresh = backend.lock().unwrap().rows(&inventory());
+            c.data(&fresh);
+            c.frame();
+            c.shoot(&format!("{out}/{name}-removed.png"));
+        }
+        report.insert(
+            name.into(),
+            json!({
+                "instantiate_ms": round(init),
+                "first_frame_ms": round(first),
+                "interaction": timings(&log),
+                "component_render_during_script": stats(renders_script),
+                "update_one_row": up,
+                "scroll_500_rows": stats(sc),
+                "scroll_component_renders": scroll_renders,
+                "tree_13_rows": { "nodes": tree13.0, "bytes": tree13.1 },
+                "tree_500_rows": { "nodes": tree500.0, "bytes": tree500.1 },
+                "peak_linear_memory_mb": round(c.comp.store.data().peak as f64 / 1048576.0),
+            }),
+        );
+    }
+    report.insert(
+        "accessibility".into(),
+        json!({ "a": a_access, "c": c_access }),
+    );
+
     // Many extensions open: twenty B instances on Pixels, against twenty A templates.
     let before = rss_mb();
     let t = Instant::now();
@@ -650,6 +796,20 @@ fn main() {
     }
     let b20 = t.elapsed().as_secs_f64() * 1e3;
     let after = rss_mb();
+    drop(held);
+    let before_c = rss_mb();
+    let t = Instant::now();
+    let mut held_c = Vec::new();
+    let mut peak_c = 0usize;
+    for _ in 0..20 {
+        let mut c = wasm::UiC::new(&engine, &uic_c);
+        c.data(&rows_json);
+        let nodes = c.render(wasm::tree::Surface { cells: false, width: LOGICAL.0, height: LOGICAL.1 });
+        peak_c += c.store.data().peak;
+        held_c.push((c, nodes));
+    }
+    let c20 = t.elapsed().as_secs_f64() * 1e3;
+    let after_c = rss_mb();
     let t = Instant::now();
     let views: Vec<decl::View> = (0..20).map(|_| decl::View::new(&template)).collect();
     let a20 = t.elapsed().as_secs_f64() * 1e3;
@@ -659,13 +819,16 @@ fn main() {
             "b_init_and_first_frame_ms": round(b20),
             "b_linear_memory_mb": round(peak as f64 / 1048576.0),
             "b_process_rss_growth_mb": round(after - before),
+            "c_init_and_first_tree_ms": round(c20),
+            "c_linear_memory_mb": round(peak_c as f64 / 1048576.0),
+            "c_process_rss_growth_mb": round(after_c - before_c),
             "a_templates_parse_ms": round(a20),
             "a_template_bytes_each": template.len(),
             "process_rss_start_mb": round(rss0),
         }),
     );
     drop(views);
-    drop(held);
+    drop(held_c);
     println!(
         "{}",
         serde_json::to_string_pretty(&Value::Object(report)).unwrap()
@@ -675,4 +838,19 @@ fn main() {
 fn summary(r: &Value) -> String {
     let n = |k: &str| r[k].as_array().map_or(0, Vec::len);
     format!("removed {}, failed {}", n("succeeded"), n("failed"))
+}
+
+/// What a screen reader gets from one frame: nodes by role, and every named node.
+fn access(l: &Laid) -> Value {
+    let mut roles = std::collections::BTreeMap::<String, usize>::new();
+    let mut named = Vec::new();
+    for (_, n) in &l.tree.nodes {
+        let role = format!("{:?}", n.role());
+        *roles.entry(role.clone()).or_default() += 1;
+        if let Some(label) = n.label() {
+            named.push(format!("{role}: {label}"));
+        }
+    }
+    named.sort();
+    json!({ "roles": roles, "named": named })
 }
