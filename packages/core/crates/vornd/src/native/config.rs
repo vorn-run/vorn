@@ -142,27 +142,30 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
     }
 }
 
-/// Tells every client what changed after a write elsewhere in vornd (a
-/// task, a workflow, a project), as the server's `notifyChanged` did: the
-/// configuration (`config:changed`), the tasks (`task:changed`) and the
-/// workflows (`workflow:changed`), each whole.
+/// Tells every client what changed after a write elsewhere (a workflow, a
+/// project, or tasks written without saying which), as the server's
+/// `notifyChanged` did: the configuration (`config:changed`) and the
+/// workflows (`workflow:changed`) whole, and that the task list is to be
+/// read again (`task:rows`), a page at a time.
 pub(crate) async fn announce(native: &Arc<Native>) {
     let n = Arc::clone(native);
     let _order = native.config_order.lock().await;
     let loaded = blocking("config:changed", move || {
         with_store(&n, |s| {
             let config = s.load_config()?;
-            let tasks = s.call("dbListTasks", json!([]))?;
             let workflows = s.call("dbListWorkflows", json!([]))?;
-            Ok((config, tasks, workflows))
+            Ok((config, workflows))
         })
     })
     .await;
     match loaded {
-        Ok((config, tasks, workflows)) => {
+        Ok((config, workflows)) => {
             native.broadcast("config:changed", config);
-            native.broadcast("task:changed", tasks);
+            native.broadcast("task:rows", super::task_list::Change::Reload.note());
             native.broadcast("workflow:changed", workflows);
+            if let Some(tasks) = native.tasks().filter(|t| t.is_on()) {
+                tasks.inner().badges().await;
+            }
             native.config_changed();
         }
         Err(err) => warn!(%err, "could not read the configuration to announce it"),

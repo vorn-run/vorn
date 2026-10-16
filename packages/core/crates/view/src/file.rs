@@ -196,7 +196,7 @@ impl Reader<'_> {
         let first = match kind {
             "button" => "label",
             "section" => "title",
-            "list" | "choice" => "rows",
+            "list" | "choice" | "board" => "rows",
             _ => "value",
         };
         for (i, e) in node
@@ -238,6 +238,7 @@ impl Reader<'_> {
             o.insert("action".into(), Value::Object(action));
         }
         match kind {
+            "board" => self.board_parts(kids, &path, &mut o),
             "list" => match kids {
                 [item] => {
                     let v = self.node(item, &format!("{path}.item"));
@@ -273,6 +274,62 @@ impl Reader<'_> {
         let mut wrapped = Map::new();
         wrapped.insert(kind.to_owned(), Value::Object(o));
         Value::Object(wrapped)
+    }
+}
+
+impl Reader<'_> {
+    /// A board's `column` and `card` children: the columns in order, and the
+    /// card's nodes as one column.
+    fn board_parts(&mut self, kids: &[KdlNode], path: &str, o: &mut Map<String, Value>) {
+        let mut columns = Vec::new();
+        for kid in kids {
+            match kid.name().value() {
+                "column" => {
+                    let at = format!("{path}.columns[{}]", columns.len());
+                    self.mark(&at, kid.span().offset());
+                    let mut c = Map::new();
+                    if let Some(v) = first_arg(kid) {
+                        c.insert("value".into(), v);
+                    }
+                    for e in kid.entries() {
+                        if let Some(name) = e.name() {
+                            self.mark(&format!("{at}.{}", name.value()), name.span().offset());
+                            c.insert(name.value().to_owned(), value(e.value()));
+                        }
+                    }
+                    columns.push(Value::Object(c));
+                }
+                "card" if !o.contains_key("card") => {
+                    let at = format!("{path}.card");
+                    self.mark(&at, kid.span().offset());
+                    let nodes = kid.children().map(KdlDocument::nodes).unwrap_or_default();
+                    let children: Vec<Value> = nodes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let p = format!("{at}.column[{i}]");
+                            self.mark(&p, c.span().offset());
+                            self.node(c, &p)
+                        })
+                        .collect();
+                    let mut column = Map::new();
+                    column.insert("children".into(), Value::Array(children));
+                    let mut wrapped = Map::new();
+                    wrapped.insert("column".into(), Value::Object(column));
+                    o.insert("card".into(), Value::Object(wrapped));
+                }
+                other => self.extra(
+                    kid.span().offset(),
+                    path,
+                    format!("a board holds columns and one card, not '{other}'"),
+                ),
+            }
+        }
+        self.mark(
+            &format!("{path}.columns"),
+            kids.first().map_or(0, |k| k.span().offset()),
+        );
+        o.insert("columns".into(), Value::Array(columns));
     }
 }
 

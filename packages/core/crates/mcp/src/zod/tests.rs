@@ -19,7 +19,7 @@ fn every_tool_has_a_schema_entry_and_every_ref_resolves() {
         );
     }
     // The rest are the tools built-in extensions add, checked here before they get them.
-    assert_eq!(registry().tools.len(), listed.len() + 7);
+    assert_eq!(registry().tools.len(), listed.len() + 14);
 }
 
 #[test]

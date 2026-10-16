@@ -16,7 +16,7 @@ pub fn control_id(key: &str, scope: Option<&str>, slot: u64, row: Option<&str>) 
 }
 
 /// Binds a template's controls in one point to the app's acts.
-struct Binder<'a> {
+pub(crate) struct Binder<'a> {
     acts: &'a Acts,
     point: &'a Point,
     /// The session or row the template is drawn for, to tell copies apart.
@@ -26,7 +26,19 @@ struct Binder<'a> {
     more: Option<u64>,
 }
 
-impl Binder<'_> {
+impl<'a> Binder<'a> {
+    /// Point `p`'s controls, drawn once, outside any session.
+    pub(crate) fn whole(acts: &'a Acts, points: &'a Points, point: &'a Point) -> Binder<'a> {
+        Binder {
+            acts,
+            point,
+            scope: None,
+            holder: None,
+            asking: points.asking,
+            more: points.more,
+        }
+    }
+
     fn base(&self, slot: u64, row: Option<&str>) -> Id {
         control_id(&self.point.key(), self.scope, slot, row)
     }

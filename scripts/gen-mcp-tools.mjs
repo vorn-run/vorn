@@ -27,7 +27,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(root, 'packages/core/crates/mcp/generated')
 
 /** The built-ins that add tools: the crate each lives in, whose manifest names them. */
-const BUILTINS = ['packages/core/crates/connectors']
+const BUILTINS = ['packages/core/crates/connectors', 'packages/core/crates/tasks']
 
 /** The tool names a built-in's `vorn-extension.toml` declares under `[mcp.<name>]`. */
 function contributedBy(crate) {

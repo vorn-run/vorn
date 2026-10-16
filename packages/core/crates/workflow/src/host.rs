@@ -68,6 +68,37 @@ pub trait Host: Send + Sync + 'static {
     /// defaults. `None` when it cannot be read.
     fn config(&self) -> impl Future<Output = Option<Value>> + Send;
 
+    /// The tasks of `project`, of `status` when given, in the board's order:
+    /// what a step working from the board reads. The configuration's by default.
+    fn tasks(
+        &self,
+        project: &str,
+        status: Option<&str>,
+    ) -> impl Future<Output = Vec<Value>> + Send {
+        async move {
+            let config = self.config().await.unwrap_or_default();
+            crate::engine::tasks_of(&config)
+                .iter()
+                .filter(|t| {
+                    t.get("projectName").and_then(Value::as_str) == Some(project)
+                        && status.is_none_or(|s| t.get("status").and_then(Value::as_str) == Some(s))
+                })
+                .cloned()
+                .collect()
+        }
+    }
+
+    /// Task `id` as it is now. The configuration's by default.
+    fn task(&self, id: &str) -> impl Future<Output = Option<Value>> + Send {
+        async move {
+            let config = self.config().await?;
+            crate::engine::tasks_of(&config)
+                .iter()
+                .find(|t| t.get("id").and_then(Value::as_str) == Some(id))
+                .cloned()
+        }
+    }
+
     /// Writes a run. Called in order; the engine never waits on two.
     fn save_run(&self, run: WorkflowExecution) -> impl Future<Output = ()> + Send;
 

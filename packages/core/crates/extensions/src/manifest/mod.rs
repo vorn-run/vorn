@@ -450,11 +450,13 @@ pub enum Place {
     Menus,
     /// A dialog a call opens by answering `{"open": "<id>"}`.
     Dialogs,
+    /// A main view beside the sessions, shown as one of the window's views.
+    Views,
 }
 
 impl Place {
     /// Every place a `points` entry may be, panes aside (they are `panes` with a view).
-    pub const POINTS: [Place; 11] = [
+    pub const POINTS: [Place; 12] = [
         Place::Sidebar,
         Place::Badges,
         Place::CardFooters,
@@ -466,6 +468,7 @@ impl Place {
         Place::Windows,
         Place::Menus,
         Place::Dialogs,
+        Place::Views,
     ];
 
     /// Its key in `manifest.json`.
@@ -483,6 +486,7 @@ impl Place {
             Place::Windows => "windows",
             Place::Menus => "menus",
             Place::Dialogs => "dialogs",
+            Place::Views => "views",
         }
     }
 
@@ -501,6 +505,7 @@ impl Place {
             Place::Windows => "Window",
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
+            Place::Views => "Main view",
         }
     }
 

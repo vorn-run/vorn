@@ -1,4 +1,4 @@
-//! `task_triggers::for_task` against what the TypeScript it replaced
+//! `triggers::for_task` against what the TypeScript it replaced
 //! answered for the same seeded saves (`tests/fixtures/js-reference/task-triggers.json`):
 //! each recorded save, taken a task at a time as vornd now writes them,
 //! fires the same triggers in the same order.
@@ -34,7 +34,7 @@ fn every_recorded_save_fires_what_the_server_fired() {
             .collect();
         let fired: Vec<Value> = tasks(&case["after"])
             .filter_map(|t| {
-                vorn_work::task_triggers::for_task(before.get(&key(t.get("id"))).copied(), t)
+                vorn_tasks::triggers::for_task(before.get(&key(t.get("id"))).copied(), t)
             })
             .collect();
         assert_eq!(Value::Array(fired), case["triggers"], "case {i}");

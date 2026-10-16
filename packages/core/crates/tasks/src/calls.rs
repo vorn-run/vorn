@@ -1,5 +1,5 @@
-//! The task board's calls (`task:*`): list, read, create, update, move,
-//! reorder, archive and delete, with the rules the server kept. A task in a
+//! The task board's calls (`task:*`): read, create, update, move, reorder,
+//! archive and delete, with the rules the server kept. Listing is the core's. A task in a
 //! project that does not exist is refused; finishing one stamps
 //! `completedAt` and reopening one clears it and `archivedAt`; a reorder
 //! permutes the places the named tasks already hold rather than numbering
@@ -57,38 +57,6 @@ fn num(n: f64) -> Value {
     } else {
         json!(n)
     }
-}
-
-/// `task:list`: the board, without descriptions unless asked for, and
-/// from `offset` at most `limit` tasks when given.
-pub fn list(store: &mut Store, params: &Value) -> Result<Value> {
-    let get = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
-    let page = |k: &str| get(k).as_f64().filter(|n| n.is_finite() && *n >= 0.0);
-    let tasks = store.call(
-        "dbListTasks",
-        json!([
-            get("projectName"),
-            get("status"),
-            page("offset"),
-            page("limit")
-        ]),
-    )?;
-    if params
-        .get("includeDescription")
-        .is_some_and(crate::js::truthy)
-    {
-        return Ok(tasks);
-    }
-    let mut tasks = tasks;
-    for task in tasks.as_array_mut().into_iter().flatten() {
-        task["description"] = json!("");
-    }
-    Ok(tasks)
-}
-
-/// `task:get`.
-pub fn get(store: &mut Store, params: &Value) -> Result<Value> {
-    store.call("dbGetTask", json!([params.get("id")]))
 }
 
 /// `task:setStatus`; whether anything changed is the second value.
@@ -157,7 +125,7 @@ pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Resul
     task.insert("createdAt".into(), json!(now));
     task.insert("updatedAt".into(), json!(now));
     for key in ["branch", "useWorktree", "assignedAgent"] {
-        if let Some(v) = params.get(key).filter(|v| crate::js::truthy(v)) {
+        if let Some(v) = params.get(key).filter(|v| vorn_work::js::truthy(v)) {
             task.insert(key.into(), v.clone());
         }
     }
@@ -364,7 +332,7 @@ pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
     let Some(task) = task(store, &id)? else {
         return Ok((ok(false), false));
     };
-    let archived = params.get("archived").is_some_and(crate::js::truthy);
+    let archived = params.get("archived").is_some_and(vorn_work::js::truthy);
     if archived && !is_terminal(task.get("status").and_then(Value::as_str)) {
         return Ok((ok(false), false));
     }
@@ -383,6 +351,11 @@ pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A task as the core reads it.
+    fn get(s: &mut Store, params: &Value) -> Result<Value> {
+        s.call("dbGetTask", json!([params.get("id")]))
+    }
     use vorn_store::StoreOptions;
 
     fn store() -> Store {
@@ -445,27 +418,6 @@ mod tests {
                 .unwrap()
                 .1
         );
-    }
-
-    #[test]
-    fn lists_a_page_of_the_board() {
-        let mut s = store();
-        for id in ["a", "b", "c"] {
-            let params = json!({ "projectName": "app", "title": id, "description": "long" });
-            create(&mut s, &params, id.into(), "t0").unwrap();
-        }
-        let ids = |v: Value| -> Vec<String> {
-            let list = v.as_array().unwrap().iter();
-            list.map(|t| t["id"].as_str().unwrap().to_owned()).collect()
-        };
-        assert_eq!(ids(list(&mut s, &json!({})).unwrap()), ["a", "b", "c"]);
-        let page = list(&mut s, &json!({ "offset": 1, "limit": 1 })).unwrap();
-        assert_eq!(page[0]["description"], "");
-        assert_eq!(ids(page), ["b"]);
-        assert_eq!(ids(list(&mut s, &json!({ "offset": 2 })).unwrap()), ["c"]);
-        // What is not a count is no page.
-        let odd = json!({ "offset": "x", "limit": -1 });
-        assert_eq!(ids(list(&mut s, &odd).unwrap()).len(), 3);
     }
 
     #[test]
@@ -533,7 +485,8 @@ mod tests {
             reorder(&mut s, &json!({ "ids": ["c", "a", "c", "ghost"] }), "t1").unwrap();
         assert_eq!(answer, ok(true));
         assert!(moved);
-        let orders: Vec<(String, i64)> = list(&mut s, &json!({}))
+        let orders: Vec<(String, i64)> = s
+            .call("dbListTasks", json!([]))
             .unwrap()
             .as_array()
             .unwrap()
@@ -560,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn lists_without_descriptions_unless_asked_and_deletes() {
+    fn deletes_a_task_once() {
         let mut s = store();
         create(
             &mut s,
@@ -569,9 +522,8 @@ mod tests {
             "t",
         )
         .unwrap();
-        assert_eq!(list(&mut s, &json!(null)).unwrap()[0]["description"], "");
         assert_eq!(
-            list(&mut s, &json!({ "includeDescription": true })).unwrap()[0]["description"],
+            get(&mut s, &json!({ "id": "a" })).unwrap()["description"],
             "long"
         );
         assert_eq!(delete(&mut s, &json!({ "id": "a" })).unwrap().0, ok(true));

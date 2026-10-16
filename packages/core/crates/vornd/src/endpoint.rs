@@ -126,8 +126,11 @@ impl Daemon {
     pub fn start_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
-        if native.database().is_some() {
-            crate::native::tasks::follow(native);
+        if let Some(dir) = native.database().and_then(std::path::Path::parent) {
+            use crate::native::extensions::builtin::{switched_on, tasks::TasksBuiltin};
+            // The extension host's registry keeps the switch; until it starts, the file says.
+            let on = switched_on(&dir.join("builtins.json"), vorn_tasks::ID, true);
+            native.set_tasks(TasksBuiltin::new(native, on));
         }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),

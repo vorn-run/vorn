@@ -91,6 +91,12 @@ impl FakeRpc {
                 Ok(Value::Null)
             }
             "task:list" => Ok(config.get("tasks").cloned().unwrap_or(json!([]))),
+            "task:get" => Ok(config
+                .get("tasks")
+                .and_then(Value::as_array)
+                .and_then(|ts| ts.iter().find(|t| t.get("id") == params.get("id")))
+                .cloned()
+                .unwrap_or(Value::Null)),
             "workflow:list" => Ok(config.get("workflows").cloned().unwrap_or(json!([]))),
             "workflow:create" => {
                 let workflow = params["workflow"].clone();

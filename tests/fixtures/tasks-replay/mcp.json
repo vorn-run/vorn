@@ -1,0 +1,802 @@
+{
+  "names": [
+    "get_config",
+    "list_sessions",
+    "launch_session",
+    "kill_session",
+    "rename_session",
+    "reorder_sessions",
+    "read_session_output",
+    "write_to_terminal",
+    "send_key",
+    "list_session_events",
+    "list_connectors",
+    "list_connections",
+    "list_connector_actions",
+    "inspect_connector_package",
+    "install_connector",
+    "run_connector_action",
+    "backfill_connection",
+    "read_page",
+    "get_page_text",
+    "read_console_messages",
+    "read_network_requests",
+    "browser_screenshot",
+    "browser_find",
+    "browser_interact",
+    "open_browser_pane",
+    "browser_tabs",
+    "browser_navigate",
+    "browser_history",
+    "device_list",
+    "device_claim",
+    "device_release",
+    "read_screen",
+    "device_find",
+    "device_interact",
+    "device_screenshot",
+    "device_launch",
+    "device_terminate",
+    "device_install",
+    "device_open_url",
+    "device_logs",
+    "open_device_pane",
+    "publish_artifact",
+    "list_artifacts",
+    "read_artifact_comments",
+    "read_artifact",
+    "list_projects",
+    "create_project",
+    "update_project",
+    "delete_project",
+    "list_tasks",
+    "create_task",
+    "get_task",
+    "update_task",
+    "delete_task",
+    "archive_task",
+    "unarchive_task",
+    "get_my_context",
+    "list_workflows",
+    "create_workflow",
+    "update_workflow",
+    "delete_workflow",
+    "list_workflow_runs",
+    "stop_workflow_run",
+    "resolve_gate",
+    "get_workflow_schedule",
+    "execute_workflow",
+    "export_workflow",
+    "import_workflow",
+    "describe_workflow_nodes",
+    "list_workspaces",
+    "create_workspace",
+    "update_workspace",
+    "delete_workspace"
+  ],
+  "tools": [
+    {
+      "name": "list_tasks",
+      "description": "List tasks, optionally filtered by project, status, assigned agent, or workspace. Archived tasks are excluded by default; pass include_archived=true to include them.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "description": "Filter by project name",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "description": "Filter by status",
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ]
+          },
+          "assigned_agent": {
+            "description": "Filter by assigned agent type",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          },
+          "workspace_id": {
+            "description": "Filter by workspace ID (returns tasks from all projects in that workspace)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "include_archived": {
+            "description": "Include archived tasks in the result (default: false)",
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "create_task",
+      "description": "Create a new task in a project",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Project name (must match existing project)"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Task title"
+          },
+          "description": {
+            "description": "Task description (markdown)",
+            "type": "string",
+            "maxLength": 5000
+          },
+          "status": {
+            "description": "Task status (default: todo)",
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ]
+          },
+          "branch": {
+            "description": "Git branch for this task",
+            "type": "string",
+            "maxLength": 200
+          },
+          "use_worktree": {
+            "description": "Create a git worktree for this task",
+            "type": "boolean"
+          },
+          "assigned_agent": {
+            "description": "Assign to an agent type",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          }
+        },
+        "required": [
+          "project_name",
+          "title"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Get a task by ID",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "update_task",
+      "description": "Update a task's properties",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Task ID"
+          },
+          "title": {
+            "description": "New title",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": {
+            "description": "New description",
+            "type": "string",
+            "maxLength": 5000
+          },
+          "status": {
+            "description": "New status",
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ]
+          },
+          "branch": {
+            "description": "Git branch",
+            "type": "string",
+            "maxLength": 200
+          },
+          "use_worktree": {
+            "description": "Use git worktree",
+            "type": "boolean"
+          },
+          "assigned_agent": {
+            "description": "Assigned agent type",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          },
+          "order": {
+            "description": "Queue order",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "delete_task",
+      "description": "Delete a task by ID",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "archive_task",
+      "description": "Archive a finished task (status must be done or cancelled). Archived tasks are hidden from default views but preserved and restorable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "unarchive_task",
+      "description": "Restore an archived task so it shows in default views again.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Task ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
+      "name": "get_my_context",
+      "description": "Get your current task and project context. Auto-detects based on your working directory. Call this at the start of a session to understand what you are working on.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "description": "Your current working directory (auto-detected if omitted). Used to match against known projects and task worktrees.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "task_id": {
+            "description": "Specific task ID to get context for (overrides auto-detection)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    }
+  ],
+  "calls": [
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {}
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "create_task",
+        "arguments": {
+          "project_name": "board",
+          "title": "From an agent"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"id\": \"<id1>\",\n  \"projectName\": \"board\",\n  \"title\": \"From an agent\",\n  \"description\": \"\",\n  \"status\": \"todo\",\n  \"order\": 0,\n  \"createdAt\": \"<time>\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "create_task",
+        "arguments": {
+          "project_name": "board",
+          "title": "Full",
+          "description": "All of it",
+          "status": "in_progress",
+          "branch": "full",
+          "use_worktree": true,
+          "assigned_agent": "claude"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"id\": \"<id2>\",\n  \"projectName\": \"board\",\n  \"title\": \"Full\",\n  \"description\": \"All of it\",\n  \"status\": \"in_progress\",\n  \"order\": 1,\n  \"createdAt\": \"<time>\",\n  \"updatedAt\": \"<time>\",\n  \"branch\": \"full\",\n  \"useWorktree\": true,\n  \"assignedAgent\": \"claude\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "create_task",
+        "arguments": {
+          "project_name": "nowhere",
+          "title": "Lost"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: project \"nowhere\" not found"
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "create_task",
+        "arguments": {
+          "project_name": "board",
+          "title": "Bad",
+          "assigned_agent": "nobody"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: agent \"nobody\" is not on in Vorn. Agents that are on: claude, copilot, codex, opencode, gemini."
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {
+          "project_name": "board",
+          "status": "in_progress"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"in_progress\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\",\n    \"useWorktree\": true\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {
+          "assigned_agent": "claude"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"in_progress\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\",\n    \"useWorktree\": true\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {
+          "workspace_id": "personal"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"createdAt\": \"<time>\",\n    \"description\": \"\",\n    \"id\": \"<id1>\",\n    \"order\": 0,\n    \"projectName\": \"board\",\n    \"status\": \"todo\",\n    \"title\": \"From an agent\",\n    \"updatedAt\": \"<time>\"\n  },\n  {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"in_progress\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\",\n    \"useWorktree\": true\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "get_task",
+        "arguments": {
+          "id": "$1"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"createdAt\": \"<time>\",\n  \"description\": \"\",\n  \"id\": \"<id1>\",\n  \"order\": 0,\n  \"projectName\": \"board\",\n  \"status\": \"todo\",\n  \"title\": \"From an agent\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "get_task",
+        "arguments": {
+          "id": "ghost"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: task \"ghost\" not found"
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "update_task",
+        "arguments": {
+          "id": "$1",
+          "title": "Retitled",
+          "status": "done"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"completedAt\": \"<time>\",\n  \"createdAt\": \"<time>\",\n  \"description\": \"\",\n  \"id\": \"<id1>\",\n  \"order\": 0,\n  \"projectName\": \"board\",\n  \"status\": \"done\",\n  \"title\": \"Retitled\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "update_task",
+        "arguments": {
+          "id": "$1",
+          "order": 0
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"completedAt\": \"<time>\",\n  \"createdAt\": \"<time>\",\n  \"description\": \"\",\n  \"id\": \"<id1>\",\n  \"order\": 0,\n  \"projectName\": \"board\",\n  \"status\": \"done\",\n  \"title\": \"Retitled\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "update_task",
+        "arguments": {
+          "id": "$2",
+          "status": "todo",
+          "use_worktree": false
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"assignedAgent\": \"claude\",\n  \"branch\": \"full\",\n  \"createdAt\": \"<time>\",\n  \"description\": \"All of it\",\n  \"id\": \"<id2>\",\n  \"order\": 1,\n  \"projectName\": \"board\",\n  \"status\": \"todo\",\n  \"title\": \"Full\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "update_task",
+        "arguments": {
+          "id": "ghost",
+          "title": "x"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: task \"ghost\" not found"
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "archive_task",
+        "arguments": {
+          "id": "$1"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"archivedAt\": \"<time>\",\n  \"completedAt\": \"<time>\",\n  \"createdAt\": \"<time>\",\n  \"description\": \"\",\n  \"id\": \"<id1>\",\n  \"order\": 0,\n  \"projectName\": \"board\",\n  \"status\": \"done\",\n  \"title\": \"Retitled\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {}
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"todo\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\"\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {
+          "include_archived": true
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"archivedAt\": \"<time>\",\n    \"completedAt\": \"<time>\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"\",\n    \"id\": \"<id1>\",\n    \"order\": 0,\n    \"projectName\": \"board\",\n    \"status\": \"done\",\n    \"title\": \"Retitled\",\n    \"updatedAt\": \"<time>\"\n  },\n  {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"todo\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\"\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "unarchive_task",
+        "arguments": {
+          "id": "$1"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"completedAt\": \"<time>\",\n  \"createdAt\": \"<time>\",\n  \"description\": \"\",\n  \"id\": \"<id1>\",\n  \"order\": 0,\n  \"projectName\": \"board\",\n  \"status\": \"done\",\n  \"title\": \"Retitled\",\n  \"updatedAt\": \"<time>\"\n}"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "archive_task",
+        "arguments": {
+          "id": "ghost"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: task \"ghost\" not found"
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "get_my_context",
+        "arguments": {
+          "cwd": "<work>"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"project\": {\n    \"name\": \"board\",\n    \"path\": \"<work>\",\n    \"preferredAgents\": [\n      \"claude\"\n    ]\n  },\n  \"cwd\": \"<work>\",\n  \"message\": \"No specific task matched. Showing all project tasks.\",\n  \"tasks\": [\n    {\n      \"id\": \"<id1>\",\n      \"title\": \"Retitled\",\n      \"status\": \"done\"\n    },\n    {\n      \"id\": \"<id2>\",\n      \"title\": \"Full\",\n      \"status\": \"todo\",\n      \"branch\": \"full\"\n    }\n  ]\n}"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "get_my_context",
+        "arguments": {
+          "task_id": "$2"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"task\": {\n    \"assignedAgent\": \"claude\",\n    \"branch\": \"full\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"All of it\",\n    \"id\": \"<id2>\",\n    \"order\": 1,\n    \"projectName\": \"board\",\n    \"status\": \"todo\",\n    \"title\": \"Full\",\n    \"updatedAt\": \"<time>\"\n  },\n  \"project\": {\n    \"name\": \"board\",\n    \"path\": \"<work>\",\n    \"preferredAgents\": [\n      \"claude\"\n    ],\n    \"workspaceId\": \"personal\"\n  },\n  \"siblingTasks\": [\n    {\n      \"id\": \"<id1>\",\n      \"title\": \"Retitled\",\n      \"status\": \"done\"\n    }\n  ]\n}"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "get_config",
+        "arguments": {}
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"version\": 1,\n  \"revision\": 1,\n  \"defaults\": {\n    \"shell\": \"<shell>\",\n    \"fontSize\": 13,\n    \"theme\": \"dark\",\n    \"reopenSessions\": true,\n    \"startAtLogin\": false,\n    \"domBlockRendering\": true,\n    \"minimalShellPrompt\": true,\n    \"keepSessionsRunning\": true,\n    \"hasSeededDevServerWorkflow\": true,\n    \"hasSeededDefaultTaskWorkflow\": true\n  },\n  \"projects\": [\n    {\n      \"name\": \"board\",\n      \"path\": \"<work>\",\n      \"preferredAgents\": [\n        \"claude\"\n      ],\n      \"workspaceId\": \"personal\"\n    },\n    {\n      \"name\": \"other\",\n      \"path\": \"<work>\",\n      \"preferredAgents\": [\n        \"claude\"\n      ],\n      \"workspaceId\": \"work\"\n    }\n  ],\n  \"agentCommands\": {\n    \"claude\": {\n      \"args\": [],\n      \"command\": \"claude\",\n      \"headlessArgs\": [\n        \"--dangerously-skip-permissions\"\n      ]\n    },\n    \"copilot\": {\n      \"args\": [],\n      \"command\": \"copilot\",\n      \"headlessArgs\": [\n        \"--allow-all\"\n      ]\n    },\n    \"codex\": {\n      \"args\": [],\n      \"command\": \"codex\",\n      \"headlessArgs\": [\n        \"-a\",\n        \"never\"\n      ]\n    },\n    \"opencode\": {\n      \"args\": [],\n      \"command\": \"opencode\"\n    },\n    \"gemini\": {\n      \"args\": [],\n      \"command\": \"gemini\",\n      \"headlessArgs\": [\n        \"-y\"\n      ]\n    }\n  },\n  \"workflows\": [\n    {\n      \"edges\": [\n        {\n          \"id\": \"e1\",\n          \"source\": \"trigger-1\",\n          \"target\": \"launch-1\"\n        }\n      ],\n      \"enabled\": true,\n      \"icon\": \"Play\",\n      \"iconColor\": \"#10b981\",\n      \"id\": \"system:default-task-workflow\",\n      \"name\": \"Default Task Workflow\",\n      \"nodes\": [\n        {\n          \"id\": \"trigger-1\",\n          \"type\": \"trigger\",\n          \"label\": \"When task moves to In Progress\",\n          \"position\": {\n            \"x\": 0,\n            \"y\": 0\n          },\n          \"config\": {\n            \"triggerType\": \"taskStatusChanged\",\n            \"fromStatus\": \"todo\",\n            \"toStatus\": \"in_progress\"\n          }\n        },\n        {\n          \"id\": \"launch-1\",\n          \"type\": \"launchAgent\",\n          \"label\": \"Launch task agent\",\n          \"position\": {\n            \"x\": 0,\n            \"y\": 120\n          },\n          \"config\": {\n            \"agentType\": \"fromTask\",\n            \"projectName\": \"\",\n            \"projectPath\": \"\",\n            \"headless\": true\n          }\n        }\n      ],\n      \"workspaceId\": \"personal\"\n    },\n    {\n      \"edges\": [\n        {\n          \"id\": \"e1\",\n          \"source\": \"trigger-1\",\n          \"target\": \"script-1\"\n        }\n      ],\n      \"enabled\": false,\n      \"icon\": \"RotateCcw\",\n      \"iconColor\": \"#c9972a\",\n      \"id\": \"system:dev-server-on-restore\",\n      \"name\": \"Bring the dev server back\",\n      \"nodes\": [\n        {\n          \"id\": \"trigger-1\",\n          \"type\": \"trigger\",\n          \"label\": \"When a session is restored\",\n          \"position\": {\n            \"x\": 0,\n            \"y\": 0\n          },\n          \"config\": {\n            \"triggerType\": \"sessionRestored\"\n          }\n        },\n        {\n          \"id\": \"script-1\",\n          \"type\": \"script\",\n          \"label\": \"Start the dev server\",\n          \"position\": {\n            \"x\": 0,\n            \"y\": 120\n          },\n          \"config\": {\n            \"scriptType\": \"bash\",\n            \"scriptContent\": \"yarn dev\",\n            \"cwd\": \"{{context.projectPath}}\"\n          }\n        }\n      ],\n      \"workspaceId\": \"personal\"\n    }\n  ],\n  \"remoteHosts\": [],\n  \"tasks\": [\n    {\n      \"completedAt\": \"<time>\",\n      \"createdAt\": \"<time>\",\n      \"description\": \"\",\n      \"id\": \"<id1>\",\n      \"order\": 0,\n      \"projectName\": \"board\",\n      \"status\": \"done\",\n      \"title\": \"Retitled\",\n      \"updatedAt\": \"<time>\"\n    },\n    {\n      \"assignedAgent\": \"claude\",\n      \"branch\": \"full\",\n      \"createdAt\": \"<time>\",\n      \"description\": \"All of it\",\n      \"id\": \"<id2>\",\n      \"order\": 1,\n      \"projectName\": \"board\",\n      \"status\": \"todo\",\n      \"title\": \"Full\",\n      \"updatedAt\": \"<time>\"\n    }\n  ],\n  \"workspaces\": [\n    {\n      \"id\": \"personal\",\n      \"name\": \"Personal\",\n      \"order\": 0\n    },\n    {\n      \"id\": \"work\",\n      \"name\": \"Work\",\n      \"order\": 1\n    }\n  ],\n  \"sessionGroups\": []\n}"
+          }
+        ]
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "delete_task",
+        "arguments": {
+          "id": "$2"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Deleted task: Full"
+          }
+        ]
+      },
+      "changed": 1
+    },
+    {
+      "step": {
+        "tool": "delete_task",
+        "arguments": {
+          "id": "$2"
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Error: task \"<id2>\" not found"
+          }
+        ],
+        "isError": true
+      },
+      "changed": 0
+    },
+    {
+      "step": {
+        "tool": "list_tasks",
+        "arguments": {
+          "include_archived": true
+        }
+      },
+      "answer": {
+        "content": [
+          {
+            "type": "text",
+            "text": "[\n  {\n    \"completedAt\": \"<time>\",\n    \"createdAt\": \"<time>\",\n    \"description\": \"\",\n    \"id\": \"<id1>\",\n    \"order\": 0,\n    \"projectName\": \"board\",\n    \"status\": \"done\",\n    \"title\": \"Retitled\",\n    \"updatedAt\": \"<time>\"\n  }\n]"
+          }
+        ]
+      },
+      "changed": 0
+    }
+  ]
+}

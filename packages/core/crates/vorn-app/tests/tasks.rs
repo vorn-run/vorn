@@ -239,14 +239,24 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
     shot.save(&mut app, "tasks-board");
 
     shot.hover(&mut app, card_id(&id));
-    shot.click(
-        &mut app,
-        control("task-card-menu", Act::Open(MenuKind::TaskCard(id.clone()))),
-    );
-    assert_eq!(app.menu_labels(&shot.ui), ["Edit", "Cancel task", "Delete"]);
+    let more = shot.button(&mut app, "More").expect("the card's menu");
+    shot.click(&mut app, more);
+    assert!(app.st.points.more.is_some());
+    for label in ["Edit", "Cancel task", "Delete"] {
+        assert!(
+            shot.labelled(&mut app, "MenuItem", label).is_some(),
+            "{label} in the menu"
+        );
+    }
+    for label in ["Archive", "Reopen task", "Review diff"] {
+        assert!(
+            shot.labelled(&mut app, "MenuItem", label).is_none(),
+            "{label} not in the menu"
+        );
+    }
     shot.save(&mut app, "task-card-menu");
     shot.send(&mut app, key("Escape", 0, None));
-    assert!(app.st.menu.is_none());
+    assert!(app.st.points.more.is_none());
 
     shot.frame(&mut app);
     let from = shot.ui.rect_of(card_id(&id)).expect("the card");
@@ -676,4 +686,92 @@ fn a_long_board_builds_only_the_cards_in_view() {
 #[test]
 fn a_long_board_on_cells_builds_only_the_cards_in_view() {
     long_board(true);
+}
+
+/// What a cells frame of the app shows, row after row.
+fn cells_text(app: &mut App) -> String {
+    use vorn_app::ui::backend::{Backend, Cells};
+    let mut ui = Ui::cells(&ui_config(1.0));
+    let size = vorn_app::ui::cells::units::px(160, 40);
+    app.frame(&mut ui, size);
+    app.frame(&mut ui, size);
+    let mut target = Cells::offscreen(160, 40);
+    target.present(&mut ui).expect("present");
+    (0..40)
+        .map(|r| target.buffer.row_text(r))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let project = add_project(&mut app, &v, "web", json!({}));
+    let info = app
+        .rpc()
+        .call("shell:create", json!(project))
+        .expect("a shell");
+    let sid = info["id"].as_str().expect("id").to_owned();
+    let made = app
+        .rpc()
+        .call(
+            "task:create",
+            json!({ "projectName": "web", "title": "Badge me", "status": "in_progress" }),
+        )
+        .expect("a task");
+    let id = made["task"]["id"].as_str().expect("id").to_owned();
+    app.rpc()
+        .call(
+            "task:patch",
+            json!({ "id": id, "set": { "assignedSessionId": sid } }),
+        )
+        .expect("assigned");
+    app.st.view = MainView::Sessions;
+    // The badge shows once its row and its template have both come.
+    let mut shown = String::new();
+    support::wait_for("the badge on the card", || {
+        let rows = app.st.points.rows_of("vorn.tasks");
+        let row = rows.get("working").is_some_and(|w| {
+            w.iter()
+                .any(|r| r.id == sid && r.text("title") == "Badge me")
+        });
+        let point = app.st.points.find("vorn.tasks", "badges", "task").is_some();
+        shown = cells_text(&mut app);
+        (row && point && shown.contains("Badge me")).then_some(())
+    });
+
+    // Switched off, the board says so, the tasks stay, and writes are refused.
+    app.rpc()
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": "vorn.tasks", "on": false }),
+        )
+        .expect("switched off");
+    app.st.view = MainView::Tasks;
+    support::wait_for("the board gone", || {
+        let mut ui = Ui::cells(&ui_config(1.0));
+        app.frame(&mut ui, (1200.0, 800.0));
+        (app.st.points.loaded && app.st.points.find("vorn.tasks", "views", "board").is_none())
+            .then_some(())
+    });
+    let off = cells_text(&mut app);
+    assert!(off.contains("Tasks is off"), "{off}");
+    let refused = app
+        .rpc()
+        .call("task:setStatus", json!({ "id": id, "status": "done" }));
+    assert!(refused.is_err());
+    let listed = app
+        .rpc()
+        .call("task:list", json!({}))
+        .expect("the core lists");
+    assert_eq!(listed[0]["title"], "Badge me");
+    app.rpc()
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": "vorn.tasks", "on": true }),
+        )
+        .expect("switched on");
 }

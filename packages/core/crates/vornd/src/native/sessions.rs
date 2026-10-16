@@ -1610,7 +1610,7 @@ fn register(
         }
     });
     match made {
-        Some(Ok(())) => super::tasks::log_event(native, &id, "created", Some(created)),
+        Some(Ok(())) => super::session_log::log_event(native, &id, "created", Some(created)),
         Some(Err(e)) => return Answer::Error(e.to_string()),
         // The server went while the session was prepared.
         None => return Answer::Error("The Vorn server is not connected to vornd".to_owned()),
@@ -1754,7 +1754,7 @@ fn set_fields(native: &Native, id: &str, fields: Map<String, Value>) -> Answer {
     match done {
         Some(Ok(())) => {
             if let Some(name) = renamed {
-                super::tasks::log_event(
+                super::session_log::log_event(
                     native,
                     id,
                     "renamed",

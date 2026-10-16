@@ -115,7 +115,7 @@ fn task_image(rest: &str, data_dir: &Path) -> Response<Body> {
     let (Some(task), Some(name)) = (percent_decode(task), percent_decode(name)) else {
         return invalid();
     };
-    let images = vorn_work::task_images::TaskImages::new(data_dir);
+    let images = vorn_tasks::images::TaskImages::new(data_dir);
     let Ok(file) = images.path(&task, &name) else {
         return invalid();
     };
@@ -293,7 +293,7 @@ mod tests {
     #[tokio::test]
     async fn serves_a_tasks_images_as_inert_content() {
         let data = tempfile::tempdir().unwrap();
-        let images = vorn_work::task_images::TaskImages::new(data.path());
+        let images = vorn_tasks::images::TaskImages::new(data.path());
         let src = data.path().join("shot.png");
         std::fs::write(&src, b"png").unwrap();
         let name = images.save("t1", src.to_str().unwrap()).unwrap();

@@ -412,11 +412,13 @@ struct RawContributes {
     menus: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dialogs: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    views: Vec<RawPoint>,
 }
 
 impl RawContributes {
     /// The template points, by place.
-    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 11] {
+    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 12] {
         use super::Place as P;
         [
             (P::Sidebar, &self.sidebar),
@@ -430,6 +432,7 @@ impl RawContributes {
             (P::Windows, &self.windows),
             (P::Menus, &self.menus),
             (P::Dialogs, &self.dialogs),
+            (P::Views, &self.views),
         ]
     }
 
@@ -447,6 +450,7 @@ impl RawContributes {
             P::Windows => &mut self.windows,
             P::Menus => &mut self.menus,
             P::Dialogs => &mut self.dialogs,
+            P::Views => &mut self.views,
             P::Panes => return None,
         })
     }

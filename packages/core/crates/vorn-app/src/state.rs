@@ -183,8 +183,6 @@ pub enum MenuKind {
     LaunchBranch,
     /// The Tasks toolbar's view options.
     TaskOptions,
-    /// A task's More menu (kanban card or list row).
-    TaskCard(String),
     /// The task form pickers.
     TaskStatus(crate::tasks::Form),
     TaskProject(crate::tasks::Form),

@@ -24,7 +24,7 @@ pub const TOPICS: &[&str] = &[
     "session:reordered",
     "terminal:exit",
     "config:changed",
-    "task:changed",
+    "task:rows",
     "workflow:changed",
     "workflow:runUpdated",
     "artifact:published",
@@ -97,6 +97,22 @@ pub enum Change {
     Config,
     /// The number of steps waiting on an approval changed.
     Approvals,
+    /// Tasks were written without saying which: the list is read again.
+    TasksStale,
+}
+
+/// How many tasks one read of the core's task list takes.
+pub const TASK_PAGE: u64 = 1000;
+
+/// The params of the task list's page from `offset`.
+pub fn task_page(offset: u64) -> Value {
+    json!({ "includeDescription": true, "offset": offset, "limit": TASK_PAGE })
+}
+
+/// The offset of the page after `got`, a page read from `offset`; `None` after the last.
+pub fn next_page(offset: u64, got: &Value) -> Option<u64> {
+    let n = got.as_array().map_or(0, Vec::len) as u64;
+    (n == TASK_PAGE).then_some(offset + n)
 }
 
 /// The models the main screen reads.
@@ -110,6 +126,8 @@ pub struct Store {
     /// In vornd's order, which is the grid's.
     pub sessions: Vec<Session>,
     pub tasks: Vec<TaskConfig>,
+    /// Raised each time [`Store::tasks`] changes, so what is drawn from them can be kept.
+    pub tasks_gen: u64,
     pub workflows: Vec<WorkflowDefinition>,
     /// The active workspace's session groups, in their order.
     pub groups: Vec<SessionGroupConfig>,
@@ -133,7 +151,7 @@ fn load_calls(rpc: &Rpc) -> [Pending; 6] {
     [
         rpc.request("config:load", Value::Null),
         rpc.request("project:list", Value::Null),
-        rpc.request("task:list", json!({ "includeDescription": true })),
+        rpc.request("task:list", task_page(0)),
         rpc.request("workflow:list", Value::Null),
         rpc.request("workflowRun:listWaiting", Value::Null),
         rpc.request("agent:list", Value::Null),
@@ -146,7 +164,19 @@ impl Store {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load(rpc: &Rpc) -> Result<Store, RpcError> {
         rpc.call("subscribe:set", subscription())?;
-        Store::from_answers(load_calls(rpc).map(|p| p.wait(CALL_TIMEOUT)))
+        let mut answers = load_calls(rpc).map(|p| p.wait(CALL_TIMEOUT));
+        // The board is read a page at a time, the rest after the first.
+        if let Ok(first) = &mut answers[2] {
+            let mut at = next_page(0, first);
+            while let Some(offset) = at {
+                let page = rpc.call("task:list", task_page(offset))?;
+                at = next_page(offset, &page);
+                if let (Value::Array(all), Value::Array(more)) = (&mut *first, page) {
+                    all.extend(more);
+                }
+            }
+        }
+        Store::from_answers(answers)
     }
 
     /// [`Store::load`] without holding the page's one thread.
@@ -158,6 +188,19 @@ impl Store {
         let mut answers = Vec::new();
         for p in load_calls(rpc) {
             answers.push(p.answer(CALL_TIMEOUT).await);
+        }
+        if let Some(Ok(first)) = answers.get_mut(2) {
+            let mut at = next_page(0, first);
+            while let Some(offset) = at {
+                let page = rpc
+                    .request("task:list", task_page(offset))
+                    .answer(CALL_TIMEOUT)
+                    .await?;
+                at = next_page(offset, &page);
+                if let (Value::Array(all), Value::Array(more)) = (&mut *first, page) {
+                    all.extend(more);
+                }
+            }
         }
         let answers: [Result<Value, RpcError>; 6] = answers
             .try_into()
@@ -371,29 +414,30 @@ impl Store {
             }
             "config:changed" => {
                 let mut params = params;
-                // vornd's configuration carries no tasks or workflows: the app's copies stay.
+                // vornd's configuration carries no tasks or workflows: the app's copies stay,
+                // moved across rather than copied, as they have not changed.
+                let carried = params.is_object() && params.get("tasks").is_none();
                 for key in ["tasks", "workflows"] {
                     if params.is_object() && params.get(key).is_none() {
-                        params[key] = self.config.get(key).cloned().unwrap_or(json!([]));
+                        params[key] = self
+                            .config
+                            .get_mut(key)
+                            .map(Value::take)
+                            .unwrap_or(json!([]));
                     }
                 }
                 let was = std::mem::replace(&mut self.config, params);
                 self.projects = records_in(self.config.get("projects"));
-                let tasks = std::mem::take(&mut self.tasks);
-                self.tasks = records_since(self.config.get("tasks"), was.get("tasks"), tasks);
+                if !carried {
+                    let tasks = std::mem::take(&mut self.tasks);
+                    self.tasks = records_since(self.config.get("tasks"), was.get("tasks"), tasks);
+                    self.tasks_gen += 1;
+                }
                 self.workflows = records_in(self.config.get("workflows"));
                 self.groups = groups(&self.config);
                 Change::Config
             }
-            "task:changed" => {
-                if !params.is_array() || !self.config.is_object() {
-                    return Change::Nothing;
-                }
-                let was = std::mem::replace(&mut self.config["tasks"], params);
-                let tasks = std::mem::take(&mut self.tasks);
-                self.tasks = records_since(self.config.get("tasks"), Some(&was), tasks);
-                Change::Config
-            }
+            "task:rows" => self.task_rows(&params),
             "workflow:changed" => {
                 if !params.is_array() || !self.config.is_object() {
                     return Change::Nothing;
@@ -408,9 +452,69 @@ impl Store {
 }
 
 impl Store {
+    /// `task:rows`: the rows a write changed, put in place or added last, and
+    /// the tasks gone; or word that the list is to be read again.
+    fn task_rows(&mut self, params: &Value) -> Change {
+        if !self.config.is_object() {
+            return Change::Nothing;
+        }
+        if params.get("reload").and_then(Value::as_bool) == Some(true) {
+            return Change::TasksStale;
+        }
+        let mut touched: Vec<String> = Vec::new();
+        for row in params
+            .get("upsert")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = row.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let list = tasks_list(&mut self.config);
+            match list
+                .iter_mut()
+                .find(|t| t.get("id").and_then(Value::as_str) == Some(id))
+            {
+                Some(t) => *t = row.clone(),
+                None => list.push(row.clone()),
+            }
+            touched.push(id.to_owned());
+        }
+        for id in params
+            .get("remove")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            tasks_list(&mut self.config)
+                .retain(|t| t.get("id").and_then(Value::as_str) != Some(id));
+            touched.push(id.to_owned());
+        }
+        if touched.is_empty() {
+            return Change::Nothing;
+        }
+        for id in &touched {
+            self.reread_task(id);
+        }
+        Change::Config
+    }
+
+    /// Replaces every task with `list`, a fresh read of the core's list.
+    pub fn set_tasks(&mut self, list: Value) {
+        if !self.config.is_object() || !list.is_array() {
+            return;
+        }
+        self.tasks = records_in(Some(&list));
+        self.config["tasks"] = list;
+        self.tasks_gen += 1;
+    }
+
     /// Rereads the task `id` from `config` after a change there: changed,
     /// added (last, as it was added) or gone.
     pub fn reread_task(&mut self, id: &str) {
+        self.tasks_gen += 1;
         let read = self
             .config
             .get("tasks")
@@ -429,6 +533,17 @@ impl Store {
             }
             (None, None) => {}
         }
+    }
+}
+
+/// The configuration's task list, made one if it is missing.
+fn tasks_list(config: &mut Value) -> &mut Vec<Value> {
+    if !config.get("tasks").is_some_and(Value::is_array) {
+        config["tasks"] = json!([]);
+    }
+    match config.get_mut("tasks") {
+        Some(Value::Array(list)) => list,
+        _ => unreachable!("tasks was just made an array"),
     }
 }
 
@@ -624,7 +739,7 @@ mod tests {
     fn tasks_and_workflows_come_by_their_own_notes_and_stay_through_a_config_change() {
         let mut s = Store::default();
         s.apply("config:changed", json!({ "projects": [] }));
-        s.apply("task:changed", json!([task("a", "A")]));
+        s.set_tasks(json!([task("a", "A")]));
         s.apply(
             "workflow:changed",
             json!([{ "id": "w", "name": "W", "icon": "Zap",
@@ -632,18 +747,43 @@ mod tests {
         );
         assert_eq!(titles(&s), ["A"]);
         assert_eq!(s.workflows.len(), 1);
-        // vornd's configuration has neither: the copies stay.
+        // vornd's configuration has neither: the copies stay, and the tasks are not read again.
+        let gen = s.tasks_gen;
         s.apply(
             "config:changed",
             json!({ "projects": [], "defaults": { "fontSize": 14 } }),
         );
         assert_eq!(titles(&s), ["A"]);
+        assert_eq!(s.tasks_gen, gen);
         assert_eq!(s.workflows.len(), 1);
         assert_eq!(s.config["tasks"][0]["id"], "a");
         assert_eq!(s.config["workflows"][0]["id"], "w");
-        s.apply("task:changed", json!([task("a", "A2"), task("b", "B")]));
-        assert_eq!(titles(&s), ["A2", "B"]);
-        assert_eq!(s.apply("task:changed", json!({})), Change::Nothing);
+    }
+
+    #[test]
+    fn the_rows_a_write_changed_come_in_place_new_ones_last() {
+        let mut s = Store::default();
+        s.apply("config:changed", json!({ "projects": [] }));
+        s.set_tasks(json!([task("a", "A"), task("b", "B")]));
+        let gen = s.tasks_gen;
+        let told = s.apply(
+            "task:rows",
+            json!({ "upsert": [task("a", "A2"), task("c", "C")] }),
+        );
+        assert_eq!(told, Change::Config);
+        assert_eq!(titles(&s), ["A2", "B", "C"]);
+        assert!(s.tasks_gen > gen);
+        s.apply("task:rows", json!({ "remove": ["b", "ghost"] }));
+        assert_eq!(titles(&s), ["A2", "C"]);
+        assert_eq!(s.config["tasks"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            s.apply("task:rows", json!({ "reload": true })),
+            Change::TasksStale
+        );
+        assert_eq!(s.apply("task:rows", json!({})), Change::Nothing);
+        assert_eq!(next_page(0, &json!([])), None);
+        let full = Value::Array(vec![json!({}); TASK_PAGE as usize]);
+        assert_eq!(next_page(TASK_PAGE, &full), Some(2 * TASK_PAGE));
     }
 
     #[test]

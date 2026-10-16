@@ -6578,6 +6578,7 @@ dependencies = [
 name = "vorn-components"
 version = "0.8.0-beta.13"
 dependencies = [
+ "serde_json",
  "vorn-view",
  "vornui",
 ]
@@ -6858,6 +6859,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-tasks"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vorn-extensions",
+ "vorn-mcp",
+ "vorn-store",
+ "vorn-view",
+ "vorn-work",
+]
+
+[[package]]
 name = "vorn-term-mirror"
 version = "0.7.5"
 dependencies = [
@@ -7007,6 +7026,7 @@ dependencies = [
  "vorn-size",
  "vorn-spawn",
  "vorn-store",
+ "vorn-tasks",
  "vorn-term-proto",
  "vorn-vault",
  "vorn-work",

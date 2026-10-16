@@ -315,24 +315,24 @@ impl World for Wired {
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
                 }
-                "task.importItems" => {
-                    let import: vorn_work::sources::Import = serde_json::from_value(args)
-                        .map_err(|e| needs(m, &format!("a connection and its items ({e})")))?;
-                    let now =
-                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                "task.importItems" | "task.sourceLink" => {
+                    let tasks = native
+                        .tasks()
+                        .cloned()
+                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
+                    tasks.api(m, args).await
+                }
+                "task.list" => {
                     on_store(&native, m, move |s| {
-                        vorn_work::sources::import(s, &import, &now, || {
-                            uuid::Uuid::new_v4().to_string()
-                        })
-                        .map(Value::Array)
+                        crate::native::task_list::page(s, &args)
                     })
                     .await
                 }
-                "task.sourceLink" => {
-                    let task =
-                        text(&args, "taskId").ok_or_else(|| needs(m, "the taskId to read"))?;
-                    on_store(&native, m, move |s| vorn_work::sources::link(s, &task)).await
+                "task.get" => {
+                    let id = text(&args, "id").ok_or_else(|| needs(m, "the id of the task"))?;
+                    on_store(&native, m, move |s| s.call("dbGetTask", json!([id]))).await
                 }
+                "agents.list" => ask(&native, "agent:list", Value::Null).await,
                 "project.list" => {
                     on_store(&native, m, |s| s.call("dbListProjects", json!([]))).await
                 }

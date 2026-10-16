@@ -2,6 +2,7 @@
 //! project's tasks, the detail panel beside them, the toolbar's popover and
 //! the pickers the forms open.
 
+pub mod board;
 mod detail;
 mod dialog;
 pub(crate) mod diff;
@@ -19,7 +20,7 @@ use crate::look::{self, Rgb};
 use crate::screen::menus::Item;
 use crate::state::MenuKind;
 use crate::tasks::{self, Form, Mode, Source, Status, TaskAct, STATUSES};
-use crate::ui::{div, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
+use crate::ui::{div, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role};
 
 pub fn title_id(form: Form) -> Id {
     Id::new("task-title").child(form)
@@ -57,22 +58,9 @@ pub fn desc_form(id: Id) -> Option<Form> {
         .find(|&f| desc_id(f) == id)
 }
 
-pub fn column_id(status: &str) -> Id {
-    Id::new("task-column").child(status)
-}
+pub use board::{card_id, column_id, column_scroll_id};
 
-pub fn card_id(task: &str) -> Id {
-    Id::new("task-card").child(task)
-}
-
-/// The scroll view of a board column's cards.
-pub fn column_scroll_id(status: &str) -> Id {
-    Id::new("task-column-scroll").child(status)
-}
-
-/// A one-line card's height, what a column guesses before it has measured one.
-const CARD_GUESS: f32 = 92.0;
-/// A list row's height, likewise.
+/// A list row's height, what the list guesses before it has measured one.
 const LINE_GUESS: f32 = 36.0;
 
 pub(super) fn ink(a: f32) -> Rgba {
@@ -530,234 +518,14 @@ fn list(s: &Screen<'_>, content: El, shown: &[&TaskConfig]) -> El {
         })
 }
 
-/// A board card (`TaskCard` kanban): id, menu, status and title, agent and
-/// date.
-fn kanban_card(s: &Screen<'_>, t: &TaskConfig, ghost: bool) -> El {
-    let id = card_id(&t.id);
-    let status = t.status.to_string();
-    let archived = t.archived_at.is_some();
-    let menu_kind = MenuKind::TaskCard(t.id.clone());
-    let menu_open = s.st.menu.as_ref().is_some_and(|m| m.kind == menu_kind);
-    let hot = !ghost && (s.ui.hovered(id) || menu_open);
-    let mut top = div().row().items_center().gap(6.0).child(
-        text(tasks::short_id(&t.project_name, &t.id), 10.0, faint())
-            .weight(500)
-            .line_height(14.0)
-            .silent(),
-    );
-    if let Some(ext) = t
-        .source_external_id
-        .as_deref()
-        .filter(|_| t.source_connector_id.is_some())
-    {
-        top = top
-            .child(text("\u{b7}", 10.0, faint()).line_height(14.0).silent())
-            .child(source_badge(ext));
-    }
-    if archived {
-        top = top.child(ico("archive", 10.0, 2.0, faint()));
-    }
-    let more = s.acts.on("task-card-menu", Act::Open(menu_kind));
-    let more_btn = div()
-        .id(more)
-        .on(Action::Click)
-        .p(4.0)
-        .rounded(4.0)
-        .role(Role::Button, "More actions")
-        .has_popup()
-        .opacity(if hot { 1.0 } else { 0.0 })
-        .child(ico(
-            "ellipsis",
-            14.0,
-            2.0,
-            faint().mix(secondary(), s.ui.hover(more)),
-        ));
-    let title_color = if status == "cancelled" {
-        faint()
-    } else {
-        primary()
-    };
-    let mut foot = div().row().items_center().gap(6.0);
-    if let Some(a) = &t.assigned_agent {
-        foot = foot.child(super::agent_icon(s, a, 13.0));
-        if live(s, t) {
-            foot = foot.child(div().size(6.0, 6.0).rounded(3.0).bg(c(tasks::SAGE)));
-        }
-    }
-    let mut card = div()
-        .col()
-        .px(14.0)
-        .py(12.0)
-        .rounded(6.0)
-        .bg(c(look::SURFACE_RAISED))
-        .border(1.0, if hot { white(0.16) } else { white(0.08) })
-        .child(
-            div()
-                .row()
-                .items_center()
-                .justify_between()
-                .pb(6.0)
-                .child(top)
-                .child(tooltip(s.ui, more_btn, more, "More actions", None)),
-        )
-        .child(
-            div()
-                .row()
-                .gap(6.0)
-                .child(div().pt(2.0).child(ico(
-                    tasks::status(&status).icon,
-                    14.0,
-                    2.0,
-                    tone(&status),
-                )))
-                .child(
-                    div().grow().min_w0().child(
-                        text(&t.title, 13.0, title_color)
-                            .weight(500)
-                            .line_height(18.0)
-                            .wrapping()
-                            .silent(),
-                    ),
-                ),
-        )
-        .child(
-            div()
-                .row()
-                .items_center()
-                .justify_between()
-                .pt(10.0)
-                .child(foot)
-                .child(
-                    text(
-                        format!("Created {}", tasks::short_date(&t.created_at)),
-                        11.0,
-                        faint(),
-                    )
-                    .line_height(16.0)
-                    .silent(),
-                ),
-        );
-    if status == "cancelled" || archived {
-        card = card.opacity(0.6);
-    }
-    if ghost {
-        return card;
-    }
-    s.acts.bind(id, Act::Task(TaskAct::Open(t.id.clone())));
-    let dragging =
-        s.st.tasks
-            .dragging
-            .as_ref()
-            .is_some_and(|(d, _)| d == &t.id);
-    card.id(id)
-        .sense(Sense::CLICK | Sense::MOVE | Sense::HOVER)
-        .on(Action::Click)
-        .role(Role::Button, &t.title)
-        .opacity(if dragging {
-            0.4
-        } else if status == "cancelled" || archived {
-            0.6
-        } else {
-            1.0
-        })
-}
-
-/// The cards built wherever they are: the one being dragged, and the one a
-/// menu or a delete confirmation hangs from.
+/// The rows built wherever they are: the one a delete confirmation hangs from.
 fn kept(s: &Screen<'_>) -> Vec<Id> {
-    let menu = s.st.menu.as_ref().and_then(|m| match &m.kind {
-        MenuKind::TaskCard(id) => Some(id.as_str()),
-        _ => None,
-    });
-    [
-        s.st.tasks.dragging.as_ref().map(|(id, _)| id.as_str()),
-        menu,
-        s.st.tasks.confirm_delete.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(card_id)
-    .collect()
-}
-
-fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
-    let mut row = div().row().gap(8.0).grow().min_h(0.0).w_full();
-    let keep = kept(s);
-    for st in &STATUSES {
-        let in_status = tasks::in_status(shown, st.key);
-        let over =
-            s.st.tasks
-                .dragging
-                .as_ref()
-                .is_some_and(|(_, col)| col.as_deref() == Some(st.key));
-        let scroll = column_scroll_id(st.key);
-        let mut cards = div()
-            .id(scroll)
-            .col()
-            .gap(8.0)
-            .grow()
-            .min_h(0.0)
-            .scroll_y()
-            .px(8.0)
-            .pb(8.0);
-        if in_status.is_empty() {
-            cards = cards.child(
-                div().min_h(80.0).center().child(
-                    div()
-                        .w_full()
-                        .px(16.0)
-                        .py(20.0)
-                        .rounded(8.0)
-                        .border(1.0, white(0.08))
-                        .dashed()
-                        .center()
-                        .child(
-                            text("Drop tasks here", 12.0, faint())
-                                .line_height(16.0)
-                                .silent(),
-                        ),
-                ),
-            );
-        }
-        let keys: Vec<Id> = in_status.iter().map(|t| card_id(&t.id)).collect();
-        let cards =
-            s.ui.windowed(scroll, &keys, CARD_GUESS, &keep)
-                .fill(cards, |i| kanban_card(s, in_status[i], false));
-        let add = s.acts.on(
-            "task-column-add",
-            Act::Task(TaskAct::New(st.key.to_owned())),
-        );
-        let add_hot = s.ui.hover(add);
-        let bottom = div().px(8.0).pb(8.0).child(
-            div()
-                .id(add)
-                .on(Action::Click)
-                .w_full()
-                .py(8.0)
-                .rounded(8.0)
-                .bg(white(0.0).mix(white(0.04), add_hot))
-                .center()
-                .role(Role::Button, "Add task")
-                .child(ico("plus", 12.0, 2.0, faint().mix(secondary(), add_hot))),
-        );
-        let mut column = div()
-            .id(column_id(st.key))
-            .sense(Sense::HOVER)
-            .col()
-            .flex(1.0)
-            .min_w0()
-            .min_h(0.0)
-            .rounded(8.0)
-            .role(Role::Group, st.label)
-            .child(header(s, st, in_status.len(), false))
-            .child(cards)
-            .child(bottom);
-        if over {
-            column = column.bg(white(0.04)).border(1.0, white(0.10));
-        }
-        row = row.child(column);
-    }
-    row
+    s.st.tasks
+        .confirm_delete
+        .as_deref()
+        .map(card_id)
+        .into_iter()
+        .collect()
 }
 
 fn empty(s: &Screen<'_>) -> El {
@@ -811,12 +579,11 @@ pub(super) fn view(s: &Screen<'_>) -> El {
         .min_w0()
         .min_h(0.0)
         .p(16.0);
-    content = if shown.is_empty() {
-        content.child(empty(s))
-    } else if board {
-        content.child(kanban(s, &shown))
-    } else {
-        list(s, content.scroll_y(), &shown)
+    content = match board::point(s) {
+        None if s.st.points.loaded => content.child(off()),
+        _ if shown.is_empty() => content.child(empty(s)),
+        _ if board => content.child(board::view(s).unwrap_or_else(div)),
+        _ => list(s, content.scroll_y(), &shown),
     };
     let mut row = div().row().grow().min_h(0.0).child(content);
     if let Some(panel) = detail::panel(s) {
@@ -832,17 +599,34 @@ pub(super) fn ghost(s: &Screen<'_>) -> Option<El> {
     if mid != card_id(id) {
         return None;
     }
-    let (gx, gy, w) = s.st.tasks.grab?;
-    let (px, py) = s.ui.pointer()?;
-    let t = s.store.tasks.iter().find(|t| &t.id == id)?;
-    Some(
-        div()
-            .absolute(px - gx, py - gy)
-            .w(w)
-            .opacity(0.9)
-            .silent()
-            .child(kanban_card(s, t, true)),
-    )
+    board::ghost(s, id, s.st.tasks.grab?)
+}
+
+/// What the view says while Tasks is switched off: the tasks are kept.
+fn off() -> El {
+    div()
+        .col()
+        .grow()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(div().pb(12.0).child(ico("list-todo", 40.0, 1.0, faint())))
+        .child(
+            div().pb(4.0).child(
+                text("Tasks is off", 14.0, faint())
+                    .line_height(20.0)
+                    .silent(),
+            ),
+        )
+        .child(
+            text(
+                "Your tasks are kept. Turn Tasks on in Settings \u{203a} Extensions.",
+                12.0,
+                faint(),
+            )
+            .line_height(16.0)
+            .silent(),
+        )
 }
 
 /// The toolbar popover's entries (`TaskToolbar`).
@@ -956,152 +740,6 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
         ),
         ..Item::default()
     });
-    items
-}
-
-/// `KanbanCardMenu`'s entries.
-pub(in crate::screen) fn card_items(s: &Screen<'_>, id: &str) -> Vec<Item> {
-    let Some(t) = s.store.tasks.iter().find(|t| t.id == id) else {
-        return Vec::new();
-    };
-    let status = t.status.to_string();
-    let archived = t.archived_at.is_some();
-    let key = || id.to_owned();
-    let mut items = Vec::new();
-    let faint_rgb = 0x5a5a5e;
-    let sec_rgb = 0x8b8a88;
-    if status == "in_progress" && can_open(s, t) {
-        let l = live(s, t);
-        items.push(
-            Item::new(
-                if l { "terminal" } else { "play" },
-                if l { "Focus session" } else { "Resume session" },
-                Act::Task(TaskAct::OpenSession(key())),
-            )
-            .tint(if l { look::INK } else { sec_rgb }),
-        );
-    }
-    if status == "in_review" {
-        items.push(
-            Item::new(
-                "file-code",
-                "Review diff",
-                Act::Task(TaskAct::ReviewDiff(key())),
-            )
-            .tint(sec_rgb),
-        );
-        items.push(
-            Item::new(
-                "circle-check",
-                "Mark as done",
-                Act::Task(TaskAct::Complete(key())),
-            )
-            .tint(sec_rgb),
-        );
-    }
-    if status == "cancelled" {
-        items.push(
-            Item::new(
-                "rotate-ccw",
-                "Reopen task",
-                Act::Task(TaskAct::Reopen(key())),
-            )
-            .tint(sec_rgb),
-        );
-    }
-    items.push(Item::new("pencil", "Edit", Act::Task(TaskAct::Edit(key()))).tint(faint_rgb));
-    let terminal = tasks::is_terminal(&status);
-    let mut sibling = false;
-    if !terminal {
-        items.push(
-            Item::new("circle-x", "Cancel task", Act::Task(TaskAct::Cancel(key())))
-                .tint(look::DANGER)
-                .sep(),
-        );
-        sibling = true;
-    }
-    if !archived && terminal {
-        items.push(
-            Item::new("archive", "Archive", Act::Task(TaskAct::Archive(key())))
-                .tint(faint_rgb)
-                .sep(),
-        );
-        sibling = true;
-    }
-    if archived {
-        items.push(
-            Item::new(
-                "archive-restore",
-                "Unarchive",
-                Act::Task(TaskAct::Unarchive(key())),
-            )
-            .tint(faint_rgb)
-            .sep(),
-        );
-        sibling = true;
-    }
-    if s.st.tasks.confirm_delete.as_deref() == Some(id) {
-        let btn = |place: &str, act: Act, label: &str, danger: bool| {
-            let bid = s.acts.on(place, act);
-            let hot = s.ui.hover(bid);
-            let (fg, bg) = if danger {
-                (c(look::DANGER), Rgba::hexa(look::DANGER, 0.10 + 0.10 * hot))
-            } else {
-                (secondary().mix(primary(), hot), white(0.04 + 0.04 * hot))
-            };
-            div()
-                .id(bid)
-                .on(Action::Click)
-                .px(8.0)
-                .py(4.0)
-                .rounded(6.0)
-                .bg(bg)
-                .role(Role::Button, label)
-                .child(
-                    text(label, 11.0, fg)
-                        .weight(if danger { 500 } else { 400 })
-                        .line_height(14.0)
-                        .silent(),
-                )
-        };
-        return vec![Item {
-            row: Some(
-                div()
-                    .col()
-                    .px(12.0)
-                    .py(8.0)
-                    .child(div().pb(10.0).child(
-                        text("Delete this task permanently?", 12.0, secondary()).line_height(16.0),
-                    ))
-                    .child(
-                        div()
-                            .row()
-                            .justify_end()
-                            .gap(8.0)
-                            .child(btn(
-                                "task-card-delete-cancel",
-                                Act::Task(TaskAct::AskDelete(String::new())),
-                                "Cancel",
-                                false,
-                            ))
-                            .child(
-                                btn(
-                                    "task-card-delete",
-                                    Act::Task(TaskAct::Delete(key())),
-                                    "Delete",
-                                    true,
-                                )
-                                .border(1.0, Rgba::hexa(look::DANGER, 0.20)),
-                            ),
-                    ),
-            ),
-            ..Item::default()
-        }];
-    }
-    let mut del =
-        Item::new("trash-2", "Delete", Act::Task(TaskAct::AskDelete(key()))).tint(look::DANGER);
-    del.separator = !sibling;
-    items.push(del);
     items
 }
 

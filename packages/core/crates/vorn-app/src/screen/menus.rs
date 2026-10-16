@@ -37,7 +37,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::LaunchBranch => 220.0,
         MenuKind::Recent | MenuKind::Headless => 280.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
-        MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
+        MenuKind::TaskProject(_) => 180.0,
         MenuKind::SetShell => 288.0,
         MenuKind::ExtInstall => 240.0,
         MenuKind::SetSelect(_) => 128.0,
@@ -84,11 +84,6 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
             }
         }
     }
-    if matches!(kind, MenuKind::TaskCard(_)) {
-        for it in &mut items {
-            it.card_row = true;
-        }
-    }
     items
 }
 
@@ -120,7 +115,6 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         | MenuKind::PromptProject
         | MenuKind::NodeMore(_) => super::workflows::menu_items(s, kind),
         MenuKind::TaskOptions => super::tasks::options_items(s),
-        MenuKind::TaskCard(id) => super::tasks::card_items(s, id),
         MenuKind::TaskStatus(f) => super::tasks::status_items(s, *f),
         MenuKind::TaskProject(f) => super::tasks::project_items(s, *f),
         MenuKind::TaskAgent(f) => super::tasks::agent_items(s, *f),

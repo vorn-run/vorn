@@ -24,17 +24,19 @@ pub mod headless;
 pub mod hooks;
 pub mod ide;
 pub mod layout;
+pub mod projects;
 pub mod reach;
 pub mod remote;
 pub mod script;
 pub mod secrets;
 #[cfg(feature = "engine")]
 pub mod session_events;
+pub mod session_log;
 pub mod sessions;
 pub mod shell;
 pub mod signin;
 pub mod ssh;
-pub mod tasks;
+pub mod task_list;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -145,6 +147,9 @@ pub enum Route {
     Identify,
     Config,
     Tasks,
+    TaskList,
+    Projects,
+    SessionLog,
     About,
     Script,
     Credential,
@@ -160,7 +165,10 @@ pub enum Route {
 /// Each module's methods and where they go, in the order they are matched.
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
-    (tasks::METHODS, Route::Tasks),
+    (vorn_tasks::METHODS, Route::Tasks),
+    (task_list::METHODS, Route::TaskList),
+    (projects::METHODS, Route::Projects),
+    (session_log::METHODS, Route::SessionLog),
     (about::METHODS, Route::About),
     (&[script::METHOD], Route::Script),
     (credential::METHODS, Route::Credential),
@@ -297,6 +305,8 @@ pub struct Native {
     work: OnceLock<Arc<work::Work>>,
     /// The Connectors built-in, once vornd has a database and its own address.
     connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
+    /// The Tasks built-in, once vornd has a database.
+    tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
     /// Installing and removing packages, one store for every kind.
     installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
     /// The sign-in windows programs call through ([`signin`]).
@@ -361,6 +371,7 @@ impl Native {
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
             connectors: OnceLock::new(),
+            tasks: OnceLock::new(),
             installs: OnceLock::new(),
             windows: Arc::default(),
             polls: Arc::default(),
@@ -498,6 +509,15 @@ impl Native {
 
     pub fn connectors(&self) -> Option<&Arc<extensions::builtin::connectors::ConnectorsBuiltin>> {
         self.connectors.get()
+    }
+
+    /// Keeps the Tasks built-in, once vornd has a database.
+    pub fn set_tasks(&self, tasks: Arc<extensions::builtin::tasks::TasksBuiltin>) {
+        let _ = self.tasks.set(tasks);
+    }
+
+    pub fn tasks(&self) -> Option<&Arc<extensions::builtin::tasks::TasksBuiltin>> {
+        self.tasks.get()
     }
 
     /// The one installer of packages, kept in `<data_dir>/connectors`; the first call makes it.
@@ -673,7 +693,21 @@ impl Native {
                 };
             }
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
-            Some(Route::Tasks) => return tasks::answer(self, &method, params).await,
+            Some(Route::Tasks) => {
+                let Some(tasks) = self.tasks.get().cloned() else {
+                    // Only a test starts vornd without a database.
+                    return Answer::Unanswered;
+                };
+                let m = method.clone();
+                let running = tokio::spawn(async move { tasks.answer(&m, params).await });
+                return running.await.unwrap_or_else(|err| {
+                    warn!(%method, %err, "a task call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                });
+            }
+            Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
+            Some(Route::Projects) => return projects::answer(self, &method, params).await,
+            Some(Route::SessionLog) => return session_log::answer(self, &method, params).await,
             Some(Route::About) => return about::answer(self, &method, params).await,
             Some(Route::Script) => return script::execute(self, params).await,
             Some(Route::Credential) => return credential::answer(self, &method, params).await,
@@ -686,18 +720,32 @@ impl Native {
                 let Some(host) = self.extensions.get().cloned() else {
                     // The built-ins' tools need no extension host.
                     return match method.as_str() {
-                        "extension:mcpTools" => Answer::Result(Value::Array(
-                            extensions::builtin::connectors::mcp_tools(self),
-                        )),
+                        "extension:mcpTools" => {
+                            let mut tools = extensions::builtin::connectors::mcp_tools(self);
+                            if let Some(tasks) = self.tasks.get() {
+                                tools.extend(tasks.mcp_tools());
+                            }
+                            Answer::Result(Value::Array(tools))
+                        }
                         "extension:mcpCall" => {
                             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
                             let arguments = params
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| json!({}));
-                            match extensions::builtin::connectors::mcp_call(self, name, arguments)
-                                .await
-                            {
+                            let tasks = self.tasks.get().cloned();
+                            let answered = match tasks {
+                                Some(t) => t.mcp_call(name, arguments.clone()).await,
+                                None => None,
+                            };
+                            let answered = match answered {
+                                Some(a) => Some(a),
+                                None => {
+                                    extensions::builtin::connectors::mcp_call(self, name, arguments)
+                                        .await
+                                }
+                            };
+                            match answered {
                                 Some(answered) => Answer::Result(answered),
                                 None => Answer::Error(format!(
                                     "No extension offers the MCP tool {name}"
@@ -1281,6 +1329,12 @@ mod tests {
         assert_eq!(route("extension:install"), Some(Route::Extensions));
         assert_eq!(route("connector:inboxRenew"), Some(Route::Work));
         assert_eq!(route("browser:readPage"), Some(Route::Desktop));
+        for method in projects::METHODS {
+            assert_eq!(route(method), Some(Route::Projects), "{method}");
+        }
+        for method in session_log::METHODS {
+            assert_eq!(route(method), Some(Route::SessionLog), "{method}");
+        }
         assert_eq!(group_of("git:status"), "git");
         assert_eq!(group_of("ping"), "ping");
     }

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use vorn_store::{Result, Store};
 
-use crate::js::number_value;
+use vorn_work::js::number_value;
 
 /// One external item, as a task is made from it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]

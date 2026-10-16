@@ -46,7 +46,7 @@ fn every_listed_tool_is_implemented() {
             "{name} is not implemented: {said}"
         );
     }
-    assert_eq!(crate::tool_count(), 66);
+    assert_eq!(crate::tool_count(), 59);
 }
 
 /// The task, workflow and config methods the calls so far wrote through.
@@ -57,140 +57,6 @@ fn writes(rpc: &FakeRpc) -> Vec<String> {
         .filter(|m| m == "config:save" || m.starts_with("task:") || m.starts_with("workflow:"))
         .filter(|m| m != "task:list" && m != "workflow:list")
         .collect()
-}
-
-fn stored_task() -> Value {
-    json!({ "id": "t2", "projectName": "app", "title": "Second", "description": "", "status": "done",
-            "order": 2, "createdAt": "2026-01-02T00:00:00.000Z", "updatedAt": "2026-01-02T00:00:00.000Z",
-            "completedAt": "2026-01-02T00:00:00.000Z" })
-}
-
-#[test]
-fn creates_a_task_through_task_create() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("task:create", json!({ "ok": true, "task": stored_task() }));
-    let result = run(
-        &rpc,
-        "create_task",
-        json!({ "project_name": "app", "title": "Second", "status": "done", "branch": "", "use_worktree": false }),
-    );
-    assert_eq!(parsed(&result), stored_task());
-    assert_eq!(
-        rpc.last("task:create"),
-        Some(
-            json!({ "projectName": "app", "title": "Second", "status": "done", "branch": "", "useWorktree": false })
-        )
-    );
-    assert_eq!(writes(&rpc), ["task:create"]);
-
-    rpc.answer("task:create", json!({ "ok": false }));
-    let missing = run(
-        &rpc,
-        "create_task",
-        json!({ "project_name": "nope", "title": "x" }),
-    );
-    assert_eq!(missing["isError"], true);
-    assert_eq!(text(&missing), "Error: project \"nope\" not found");
-}
-
-#[test]
-fn updates_a_task_through_task_update() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("task:update", json!({ "ok": true, "task": stored_task() }));
-    let result = run(
-        &rpc,
-        "update_task",
-        json!({ "id": "t2", "status": "done", "title": "Second" }),
-    );
-    assert_eq!(parsed(&result), stored_task());
-    assert_eq!(
-        rpc.last("task:update"),
-        Some(json!({ "id": "t2", "title": "Second", "status": "done" }))
-    );
-    assert_eq!(writes(&rpc), ["task:update"]);
-
-    rpc.answer("task:update", json!({ "ok": false }));
-    let gone = run(&rpc, "update_task", json!({ "id": "t9", "title": "x" }));
-    assert_eq!(gone["isError"], true);
-    assert_eq!(text(&gone), "Error: task \"t9\" not found");
-}
-
-#[test]
-fn an_updated_order_places_the_task_through_task_reorder() {
-    let mut config = sample_config();
-    config["tasks"] = json!(["a", "b", "c"]
-        .iter()
-        .zip(1..)
-        .map(|(id, order)| json!({ "id": id, "projectName": "app", "title": id, "order": order }))
-        .collect::<Vec<_>>());
-    let rpc = FakeRpc::new(config.clone());
-    let c = config["tasks"][2].clone();
-    rpc.answer("task:update", json!({ "ok": true, "task": c }));
-    rpc.answer("task:reorder", json!({ "ok": true }));
-    for (order, ids) in [
-        (1.5, ["a", "c", "b"]),
-        (1.0, ["a", "c", "b"]),
-        (0.0, ["c", "a", "b"]),
-    ] {
-        let result = run(&rpc, "update_task", json!({ "id": "c", "order": order }));
-        assert_eq!(parsed(&result), c);
-        assert_eq!(rpc.last("task:update"), Some(json!({ "id": "c" })));
-        assert_eq!(rpc.last("task:reorder"), Some(json!({ "ids": ids })));
-    }
-
-    rpc.answer("task:reorder", json!({ "ok": false }));
-    let gone = run(&rpc, "update_task", json!({ "id": "c", "order": 0 }));
-    assert_eq!(text(&gone), "Error: task \"c\" not found");
-}
-
-#[test]
-fn deletes_a_task_through_task_delete() {
-    let rpc = FakeRpc::new(sample_config());
-    rpc.answer("task:delete", json!({ "ok": true }));
-    let deleted = run(&rpc, "delete_task", json!({ "id": "t1" }));
-    assert_eq!(text(&deleted), "Deleted task: First");
-    assert_eq!(rpc.last("task:delete"), Some(json!({ "id": "t1" })));
-
-    let missing = run(&rpc, "delete_task", json!({ "id": "t9" }));
-    assert_eq!(text(&missing), "Error: task \"t9\" not found");
-    assert_eq!(writes(&rpc), ["task:delete"]);
-
-    rpc.answer("task:delete", json!({ "ok": false }));
-    let raced = run(&rpc, "delete_task", json!({ "id": "t1" }));
-    assert_eq!(raced["isError"], true);
-    assert_eq!(text(&raced), "Error: task \"t1\" not found");
-}
-
-#[test]
-fn archives_and_restores_a_task_through_task_archive() {
-    let mut config = sample_config();
-    config["tasks"][0]["status"] = json!("done");
-    let rpc = FakeRpc::new(config.clone());
-    rpc.answer("task:archive", json!({ "ok": true }));
-    let archived = run(&rpc, "archive_task", json!({ "id": "t1" }));
-    assert_eq!(parsed(&archived), config["tasks"][0]);
-    assert_eq!(
-        rpc.last("task:archive"),
-        Some(json!({ "id": "t1", "archived": true }))
-    );
-    run(&rpc, "unarchive_task", json!({ "id": "t1" }));
-    assert_eq!(
-        rpc.last("task:archive"),
-        Some(json!({ "id": "t1", "archived": false }))
-    );
-    assert_eq!(writes(&rpc), ["task:archive", "task:archive"]);
-
-    rpc.answer("task:archive", json!({ "ok": false }));
-    let raced = run(&rpc, "unarchive_task", json!({ "id": "t1" }));
-    assert_eq!(text(&raced), "Error: task \"t1\" not found");
-
-    let open = FakeRpc::new(sample_config());
-    let refused = run(&open, "archive_task", json!({ "id": "t1" }));
-    assert_eq!(
-        text(&refused),
-        "Error: only done or cancelled tasks can be archived (status: in_progress)"
-    );
-    assert!(writes(&open).is_empty());
 }
 
 #[test]
@@ -541,12 +407,6 @@ fn an_agent_id_must_name_an_agent_that_is_on() {
     assert!(rpc.last("terminal:create").is_none());
     launch("beta");
     assert_eq!(rpc.last("terminal:create").unwrap()["agentType"], "beta");
-    let task = run(
-        &rpc,
-        "create_task",
-        json!({ "project_name": "app", "title": "T", "assigned_agent": "gamma" }),
-    );
-    assert!(text(&task).contains("agent \"gamma\" is not on"));
     let project = run(
         &rpc,
         "create_project",

@@ -6,6 +6,7 @@
 
 pub mod agents;
 pub mod connectors;
+pub mod tasks;
 pub mod widget;
 pub mod worktrees;
 

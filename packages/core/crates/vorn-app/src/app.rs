@@ -830,7 +830,9 @@ impl App {
                     self.net_notified(&method, &params);
                     self.ext_notified(&method, &params);
                     let before = self.store.workspace().to_owned();
-                    self.store.apply(&method, params);
+                    if self.store.apply(&method, params) == crate::client::Change::TasksStale {
+                        self.reload_tasks();
+                    }
                     if self.store.workspace() != before {
                         self.workspace_switched();
                     }
@@ -1411,7 +1413,6 @@ impl App {
                     MenuKind::Grid
                         | MenuKind::ViewOptions
                         | MenuKind::TaskOptions
-                        | MenuKind::TaskCard(_)
                         | MenuKind::ExtInstall
                 ) =>
             {

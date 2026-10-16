@@ -955,7 +955,7 @@ migrations = "migrations"
         assert_eq!(
             sheet.methods,
             [
-                "sessions.read (sessions.list, sessions.get)",
+                "sessions.read (sessions.list, sessions.get, agents.list)",
                 "process.run (declared; Vorn cannot hold it to this)",
                 "storage (its own tables, storage.*)"
             ]
