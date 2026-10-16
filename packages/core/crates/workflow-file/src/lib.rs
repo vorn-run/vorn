@@ -1,49 +1,60 @@
-//! Workflows as files. A workflow is a KDL document, as templates are: a
-//! `workflow` node named after it, its fields, its trigger and its steps in
+//! Workflows as files. A workflow is a TOML document, as manifests and
+//! layouts are: its fields, a `[trigger]` and its steps as `[[step]]` in
 //! order. A step runs after the one before it unless it says what it
-//! `needs=`; a branch of a condition is `needs="check:true"`.
+//! `needs`; a branch of a condition is `"check:true"`.
 //!
-//! ```kdl
-//! // Reviews each pull request it is given.
-//! workflow "Review a pull request" {
-//!     id "review"
-//!     icon "GitPullRequest"
-//!     iconColor "#6366f1"
-//!     enabled #true
-//!     trigger "manual" id="start" {
-//!         inputs {
-//!             - {
-//!                 key "pullRequest"
-//!                 label "Pull request"
-//!                 type "text"
-//!             }
-//!         }
-//!     }
-//!     step "script" id="fetch" slug="fetch" {
-//!         scriptType "bash"
-//!         scriptContent "gh pr diff {{inputs.pullRequest}}"
-//!     }
-//!     step "condition" id="big" needs="fetch" {
-//!         variable "{{steps.fetch.output}}"
-//!         operator "isNotEmpty"
-//!     }
-//!     step "launchAgent" id="review" needs="big:true" {
-//!         agentType "claude"
-//!         prompt """
-//!             Review this diff.
-//!             {{steps.fetch.output}}
-//!             """
-//!     }
-//! }
+//! ```toml
+//! # Reviews each pull request it is given.
+//! name = "Review a pull request"
+//! id = "review"
+//! icon = "GitPullRequest"
+//! iconColor = "#6366f1"
+//! enabled = true
+//!
+//! [trigger]
+//! type = "manual"
+//! id = "start"
+//!
+//! [[trigger.inputs]]
+//! key = "pullRequest"
+//! label = "Pull request"
+//! type = "text"
+//!
+//! [[step]]
+//! id = "fetch"
+//! type = "script"
+//! slug = "fetch"
+//! scriptType = "bash"
+//! scriptContent = "gh pr diff {{inputs.pullRequest}}"
+//!
+//! [[step]]
+//! id = "big"
+//! type = "condition"
+//! variable = "{{steps.fetch.output}}"
+//! operator = "isNotEmpty"
+//!
+//! [[step]]
+//! id = "review"
+//! type = "launchAgent"
+//! needs = ["big:true"]
+//! agentType = "claude"
+//! prompt = """
+//! Review this diff.
+//! {{steps.fetch.output}}
+//! """
 //! ```
 //!
-//! A step's config is its children: a key and its value, an object as a
-//! block of keys, a list as a block of `-` items. A connection is named
-//! rather than numbered, `(connection)"workspace-eng"`, so a file shared
-//! with someone runs against their connection of that name; a path in the
-//! file's own project is `(project)"src/app"`. What the format cannot say
-//! plainly (an edge with an id of its own, a field the editor does not
-//! know) it still says, so every stored workflow reads back the same.
+//! A step's table holds its own fields (`id`, `type`, `label`, `slug`,
+//! `onError`, `x`, `y`, `needs`) and, beside them, its settings. A key
+//! starting with `@` is the file's own: `"@name"` is a field of the step the
+//! editor does not know, `"@config"` the settings when they cannot sit
+//! beside the fields. A connection is named rather than numbered,
+//! `{ "@connection" = "workspace-eng" }`, so a file shared with someone runs
+//! against their connection of that name; a path in the file's own project
+//! is `{ "@project" = "src/app" }`; a value TOML has no word for (null) is
+//! `{ "@json" = "null" }`. What the format cannot say plainly (an edge with
+//! an id of its own, a field the editor does not know) it still says, so
+//! every stored workflow reads back the same.
 //!
 //! [`write`] makes a file of a stored workflow, [`read`] reads one back
 //! with every error at its line and column, and [`update`] writes a
@@ -60,6 +71,9 @@ use std::fmt;
 pub use meet::meet;
 pub use merge::update;
 pub use read::{outline, read, Outlined, Read};
+
+/// The extension a workflow file has.
+pub const EXTENSION: &str = "toml";
 pub use write::write;
 
 /// One thing wrong with a workflow file, and where.
@@ -95,7 +109,7 @@ pub const CONNECTION_KEYS: [&str; 3] = ["connectionId", "profileConnectionId", "
 /// last ran and how.
 pub const RUNTIME_FIELDS: [&str; 2] = ["lastRunAt", "lastRunStatus"];
 
-/// The `workflows/<name>.kdl` file name a workflow is saved under.
+/// The `workflows/<name>.toml` file name a workflow is saved under.
 pub fn file_name(name: &str) -> String {
     let mut out = String::new();
     let mut gap = false;
@@ -111,7 +125,7 @@ pub fn file_name(name: &str) -> String {
         }
     }
     let stem: String = out.chars().take(60).collect();
-    format!("{}.kdl", if stem.is_empty() { "workflow" } else { &stem })
+    format!("{}.toml", if stem.is_empty() { "workflow" } else { &stem })
 }
 
 #[cfg(test)]

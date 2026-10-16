@@ -3,70 +3,83 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Number, Value};
 
 use crate::{Bindings, CONNECTION_KEYS, RUNTIME_FIELDS};
 
-/// Children of a `workflow` node that are not one of its fields.
-pub(crate) const RESERVED: [&str; 4] = ["trigger", "step", "edge", "edge-order"];
+/// Keys of the file itself that a workflow's own field of that name must not be read as.
+pub(crate) const RESERVED: [&str; 4] = ["trigger", "step", "edge", "edgeOrder"];
 
-const INDENT: &str = "    ";
+/// A step's own fields in its table; every other key is one of its settings.
+pub(crate) const STEP_FIELDS: [&str; 8] =
+    ["id", "type", "label", "slug", "onError", "x", "y", "needs"];
+
+/// An edge's keys in its table, and the stored fields they stand for.
+pub(crate) const EDGE_KEYS: [(&str, &str); 4] = [
+    ("id", "id"),
+    ("from", "source"),
+    ("to", "target"),
+    ("branch", "conditionBranch"),
+];
+
+/// Single-key tables that stand for a value rather than holding one.
+pub(crate) const TAGS: [&str; 4] = ["@json", "@connection", "@project", "@project-name"];
 
 /// The file `definition` (a stored workflow) writes as. Its fields come
-/// first, then its nodes in order, each naming the steps it needs when they
-/// are not simply the one before it.
+/// first, then its trigger and steps in order, each naming the steps it
+/// needs when they are not simply the one before it.
 pub fn write(definition: &Value, bindings: &Bindings<'_>) -> String {
-    let mut out = String::new();
     let empty = Map::new();
     let wf = definition.as_object().unwrap_or(&empty);
-    let name = wf.get("name").and_then(Value::as_str);
-    out.push_str("workflow");
-    if let Some(name) = name {
-        out.push(' ');
-        out.push_str(&string(name, 0));
-    }
-    out.push_str(" {\n");
     let w = Writer { bindings };
+    let mut top = Table::default();
+    if let Some(name) = wf.get("name") {
+        top.push(&w, "name".to_owned(), name, false);
+    }
     for (key, value) in wf {
-        let plain_name = key == "name" && value.is_string();
-        if plain_name || key == "nodes" || key == "edges" || RUNTIME_FIELDS.contains(&key.as_str())
-        {
-            continue;
+        let skip = matches!(key.as_str(), "name" | "nodes" | "edges")
+            || RUNTIME_FIELDS.contains(&key.as_str());
+        if !skip {
+            top.push(&w, escaped(key, &RESERVED), value, false);
         }
-        w.value_node(&mut out, &field_key(key, &RESERVED), value, 1, false);
     }
     let nodes = wf.get("nodes");
     let edges = wf.get("edges");
+    let mut graph = String::new();
     match (
         nodes.and_then(Value::as_array),
         edges.and_then(Value::as_array),
     ) {
         (Some(nodes), Some(edges)) if nodes.iter().all(Value::is_object) => {
-            w.graph(&mut out, nodes, edges);
+            if let Some(order) = w.graph(&mut graph, nodes, edges) {
+                top.inline.push(format!("edgeOrder = {order}"));
+            }
         }
         _ => {
             if let Some(n) = nodes {
-                w.value_node(&mut out, "@nodes", n, 1, false);
+                top.push(&w, "@nodes".to_owned(), n, false);
             }
             if let Some(e) = edges {
-                w.value_node(&mut out, "@edges", e, 1, false);
+                top.push(&w, "@edges".to_owned(), e, false);
             }
         }
     }
-    out.push_str("}\n");
+    let mut out = String::new();
+    top.write(&w, &mut out, &[]);
+    out.push_str(&graph);
     out
 }
 
 /// `@key` for a key that would read as something else here.
-pub(crate) fn field_key(key: &str, reserved: &[&str]) -> String {
-    if reserved.contains(&key) || key.starts_with('@') || key == "-" {
+pub(crate) fn escaped(key: &str, reserved: &[&str]) -> String {
+    if reserved.contains(&key) || key.starts_with('@') {
         format!("@{key}")
     } else {
         key.to_owned()
     }
 }
 
-/// An edge as the file can say it.
+/// An edge as `needs` can say it.
 struct EdgeOf<'a> {
     id: Option<&'a str>,
     source: &'a str,
@@ -122,7 +135,7 @@ pub(crate) fn default_id(source: &str, target: &str) -> String {
     format!("{source}-{target}")
 }
 
-/// A word `needs=` can hold: no space, and none of `:#`.
+/// A word `needs` can hold: no space, and none of `:#`.
 pub(crate) fn is_token(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(|c| c.is_whitespace() || c == ':' || c == '#')
 }
@@ -131,8 +144,76 @@ struct Writer<'b> {
     bindings: &'b Bindings<'b>,
 }
 
+/// One table being written: its `key = value` lines, then the tables under it.
+#[derive(Default)]
+struct Table<'v> {
+    inline: Vec<String>,
+    /// Objects as `[path.key]`, lists of objects as `[[path.key]]`.
+    nested: Vec<(String, &'v Value, bool)>,
+}
+
+impl<'v> Table<'v> {
+    /// `key` and its value: on a line of its own, or as a table under this one.
+    fn push(&mut self, w: &Writer<'_>, key: String, value: &'v Value, config: bool) {
+        let tables = match value {
+            Value::Object(map) => !map.is_empty() && !is_tag_shaped(map),
+            Value::Array(items) => !items.is_empty() && items.iter().all(table_shaped),
+            _ => false,
+        };
+        if tables {
+            self.nested.push((key, value, config));
+        } else {
+            let text = w.inline(&key, value, config);
+            self.inline.push(format!("{} = {text}", bare(&key)));
+        }
+    }
+
+    /// The lines, then each table under this one at `path`.
+    fn write(&self, w: &Writer<'_>, out: &mut String, path: &[String]) {
+        for line in &self.inline {
+            out.push_str(line);
+            out.push('\n');
+        }
+        for (key, value, config) in &self.nested {
+            let mut here = path.to_vec();
+            here.push(key.clone());
+            let header = here.iter().map(|k| bare(k)).collect::<Vec<_>>().join(".");
+            let (open, close) = if value.is_array() {
+                ("[[", "]]")
+            } else {
+                ("[", "]")
+            };
+            let maps: Vec<&Map<String, Value>> = match value {
+                Value::Object(map) => vec![map],
+                Value::Array(items) => items.iter().filter_map(Value::as_object).collect(),
+                _ => Vec::new(),
+            };
+            for map in maps {
+                let _ = write!(out, "\n{open}{header}{close}\n");
+                let mut t = Table::default();
+                for (k, v) in map {
+                    t.push(w, escaped(k, &[]), v, *config);
+                }
+                t.write(w, out, &here);
+            }
+        }
+    }
+}
+
+/// An object a reader would take for a tag: one key, a tag's name.
+fn is_tag_shaped(map: &Map<String, Value>) -> bool {
+    map.len() == 1 && map.keys().all(|k| TAGS.contains(&k.as_str()))
+}
+
+/// What can be written as a table of its own.
+fn table_shaped(v: &Value) -> bool {
+    v.as_object().is_some_and(|m| !is_tag_shaped(m))
+}
+
 impl Writer<'_> {
-    fn graph(&self, out: &mut String, nodes: &[Value], edges: &[Value]) {
+    /// Writes the trigger and steps into `out`; the `edgeOrder` list when
+    /// the edges are stored out of the order the steps give them.
+    fn graph(&self, out: &mut String, nodes: &[Value], edges: &[Value]) -> Option<String> {
         let ids: Vec<Option<&str>> = nodes
             .iter()
             .map(|n| n.get("id").and_then(Value::as_str))
@@ -162,399 +243,302 @@ impl Writer<'_> {
                 (Some(p), Some(list)) => list.len() == 1 && list[0].1 == p,
                 _ => false,
             };
-            let needs_attr = match (needs, id) {
+            let needs_list = match needs {
                 _ if implicit => None,
-                (Some(list), _) => Some(Some(
-                    list.iter()
-                        .map(|(_, t)| t.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                )),
-                (None, _) if n > 0 => Some(None),
-                (None, _) => None,
+                Some(list) => Some(list.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>()),
+                None if n > 0 => Some(Vec::new()),
+                None => None,
             };
             if let Some(list) = needs {
                 rebuilt.extend(list.iter().map(|(i, _)| *i));
             }
-            self.node(out, node, needs_attr);
+            self.node(out, node, n == 0, needs_list);
             previous = id;
         }
         for &i in &whole {
             self.edge(out, &edges[i]);
             rebuilt.push(i);
         }
-        // Edges stored out of node order keep their order in an `edge-order` line.
-        let in_order = rebuilt.iter().enumerate().all(|(at, i)| at == *i);
-        if !in_order {
-            let mut place = vec![0usize; rebuilt.len()];
-            for (at, i) in rebuilt.iter().enumerate() {
-                place[*i] = at;
-            }
-            out.push_str(INDENT);
-            out.push_str("edge-order");
-            for p in place {
-                let _ = write!(out, " {p}");
-            }
-            out.push('\n');
+        if rebuilt.iter().enumerate().all(|(at, i)| at == *i) {
+            return None;
         }
+        let mut place = vec![0usize; rebuilt.len()];
+        for (at, i) in rebuilt.iter().enumerate() {
+            place[*i] = at;
+        }
+        let list: Vec<String> = place.iter().map(ToString::to_string).collect();
+        Some(format!("[{}]", list.join(", ")))
     }
 
-    /// One node: `trigger` or `step "<type>"`, its id, label, slug, failure
-    /// rule, place and needs as properties, its config as its children.
-    fn node(&self, out: &mut String, node: &Value, needs: Option<Option<String>>) {
+    /// One node: `[trigger]` for a first node that is a trigger with a
+    /// type, else `[[step]]`; its own fields, then its settings.
+    fn node(&self, out: &mut String, node: &Value, first: bool, needs: Option<Vec<&str>>) {
         let empty = Map::new();
         let map = node.as_object().unwrap_or(&empty);
-        let kind = map.get("type").and_then(Value::as_str);
         let config = map.get("config");
-        let trigger = kind == Some("trigger");
-        out.push_str(INDENT);
-        let mut config_rest: Option<Map<String, Value>> = None;
-        if trigger {
-            out.push_str("trigger");
-            match config.and_then(Value::as_object) {
-                Some(c) if c.get("triggerType").is_some_and(Value::is_string) => {
-                    out.push(' ');
-                    out.push_str(&string(c["triggerType"].as_str().unwrap_or_default(), 1));
-                    let mut rest = c.clone();
-                    rest.shift_remove("triggerType");
-                    config_rest = Some(rest);
-                }
-                _ => {}
-            }
-        } else {
-            out.push_str("step");
-            if let Some(k) = kind {
-                out.push(' ');
-                out.push_str(&string(k, 1));
+        let flat = config.and_then(Value::as_object).filter(|c| {
+            c.keys()
+                .all(|k| !STEP_FIELDS.contains(&k.as_str()) && !k.starts_with('@'))
+        });
+        let trigger_type = flat
+            .and_then(|c| c.get("triggerType"))
+            .and_then(Value::as_str)
+            .filter(|_| first && map.get("type").and_then(Value::as_str) == Some("trigger"));
+        let mut t = Table::default();
+        if let Some(Value::String(id)) = map.get("id") {
+            t.inline.push(format!("id = {}", string(id)));
+        }
+        if let Some(kind) = trigger_type.or_else(|| map.get("type").and_then(Value::as_str)) {
+            t.inline.push(format!("type = {}", string(kind)));
+        }
+        for key in ["label", "slug", "onError"] {
+            if let Some(Value::String(s)) = map.get(key) {
+                t.inline.push(format!("{key} = {}", string(s)));
             }
         }
-        let mut extra: Vec<(&String, &Value)> = Vec::new();
+        let place = map.get("position").and_then(position);
+        if let Some((x, y)) = &place {
+            t.inline.push(format!("x = {x}"));
+            t.inline.push(format!("y = {y}"));
+        }
+        if let Some(list) = needs {
+            let words: Vec<String> = list.iter().map(|w| string(w)).collect();
+            t.inline.push(format!("needs = [{}]", words.join(", ")));
+        }
         for (key, value) in map {
-            match (key.as_str(), value) {
-                ("type", Value::String(_)) => {}
-                ("config", _) => {}
-                ("id" | "label" | "slug" | "onError", Value::String(s)) => {
-                    let _ = write!(out, " {key}={}", string(s, 1));
+            let said = match key.as_str() {
+                "id" | "label" | "slug" | "onError" | "type" => value.is_string(),
+                "position" => place.is_some(),
+                "config" => true,
+                _ => false,
+            };
+            if !said {
+                t.push(self, format!("@{key}"), value, false);
+            }
+        }
+        match (config, flat) {
+            (_, Some(c)) => {
+                for (k, v) in c {
+                    if trigger_type.is_none() || k != "triggerType" {
+                        t.push(self, k.clone(), v, true);
+                    }
                 }
-                ("position", p) if position(p).is_some() => {
-                    let (x, y) = position(p).unwrap_or_default();
-                    let _ = write!(out, " x={x} y={y}");
-                }
-                _ => extra.push((key, value)),
             }
+            (Some(other), None) => t.push(self, "@config".to_owned(), other, true),
+            // No settings at all, which a table without any would read as empty ones.
+            (None, None) => t.inline.push(format!("\"@config\" = {}", json_tag(""))),
         }
-        match needs {
-            Some(Some(list)) => {
-                let _ = write!(out, " needs={}", string(&list, 1));
-            }
-            Some(None) => out.push_str(" needs=#null"),
-            None => {}
-        }
-        let children: Option<Vec<(String, &Value)>> = match (config, &config_rest) {
-            (_, Some(rest)) => Some(rest.iter().map(|(k, v)| (child_key(k), v)).collect()),
-            (Some(Value::Object(c)), None) => {
-                Some(c.iter().map(|(k, v)| (child_key(k), v)).collect())
-            }
-            _ => None,
+        let path = if trigger_type.is_some() {
+            out.push_str("\n[trigger]\n");
+            "trigger"
+        } else {
+            out.push_str("\n[[step]]\n");
+            "step"
         };
-        let odd_config = match config {
-            None => None,
-            Some(Value::Object(_)) => None,
-            Some(other) => Some(other),
-        };
-        let mut body = String::new();
-        for (k, v) in &extra {
-            self.value_node(&mut body, &format!("@{k}"), v, 2, false);
-        }
-        if let Some(c) = odd_config {
-            self.value_node(&mut body, "@config", c, 2, false);
-        }
-        // An empty config beside other fields would read as none.
-        let empty_beside = config_rest.is_none()
-            && !extra.is_empty()
-            && children.as_ref().is_some_and(Vec::is_empty);
-        if empty_beside {
-            self.value_node(&mut body, "@config", &Value::Object(Map::new()), 2, false);
-        }
-        if let Some(children) = &children {
-            for (k, v) in children {
-                self.value_node(&mut body, k, v, 2, true);
-            }
-        }
-        // A trigger named by its type has a config already; an empty block says nothing more.
-        let has_config_block = children.is_some() && config_rest.is_none();
-        if body.is_empty() && !has_config_block {
-            out.push('\n');
-            return;
-        }
-        if body.is_empty() {
-            out.push_str(" {}\n");
-            return;
-        }
-        out.push_str(" {\n");
-        out.push_str(&body);
-        out.push_str(INDENT);
-        out.push_str("}\n");
+        t.write(self, out, &[path.to_owned()]);
     }
 
-    /// An edge the `needs=` of its target cannot say.
+    /// An edge `needs` cannot say.
     fn edge(&self, out: &mut String, edge: &Value) {
-        out.push_str(INDENT);
-        out.push_str("edge");
         let empty = Map::new();
         let map = edge.as_object().unwrap_or(&empty);
-        let mut extra = Vec::new();
+        let mut t = Table::default();
         for (k, v) in map {
-            let prop = match k.as_str() {
-                "id" => "id",
-                "source" => "from",
-                "target" => "to",
-                "conditionBranch" => "branch",
-                _ => "",
-            };
-            match v {
-                Value::String(s) if !prop.is_empty() => {
-                    let _ = write!(out, " {prop}={}", string(s, 1));
+            let named = EDGE_KEYS.iter().find(|(_, stored)| stored == k);
+            match (named, v) {
+                (Some((key, _)), Value::String(s)) => {
+                    t.inline.push(format!("{key} = {}", string(s)));
                 }
-                _ => extra.push((k, v)),
+                _ => {
+                    let taken = EDGE_KEYS.iter().any(|(file, _)| file == k);
+                    let key = if taken || k.starts_with('@') {
+                        format!("@{k}")
+                    } else {
+                        k.clone()
+                    };
+                    t.push(self, key, v, false);
+                }
             }
         }
-        if extra.is_empty() {
-            out.push('\n');
-            return;
-        }
-        out.push_str(" {\n");
-        for (k, v) in extra {
-            self.value_node(out, &format!("@{k}"), v, 2, false);
-        }
-        out.push_str(INDENT);
-        out.push_str("}\n");
+        out.push_str("\n[[edge]]\n");
+        t.write(self, out, &["edge".to_owned()]);
     }
 
-    /// `key value`, a block of keys for an object, a block of `-` items for
-    /// a list. `config` marks a step's config, whose connections and paths
-    /// are written by name.
-    fn value_node(&self, out: &mut String, key: &str, value: &Value, depth: usize, config: bool) {
-        for _ in 0..depth {
-            out.push_str(INDENT);
-        }
+    /// A value on one line, or across lines for text that has several.
+    /// `config` marks a step's settings, whose connections and paths are
+    /// written by name.
+    fn inline(&self, key: &str, value: &Value, config: bool) -> String {
         match value {
-            Value::Array(items) if items.is_empty() => {
-                out.push_str("(list)");
-                out.push_str(&ident(key));
-                out.push('\n');
-            }
-            Value::Array(items) => {
-                out.push_str(&ident(key));
-                out.push_str(" {\n");
-                for item in items {
-                    self.value_node(out, "-", item, depth + 1, config);
-                }
-                indent(out, depth);
-                out.push_str("}\n");
-            }
-            Value::Object(map) => {
-                out.push_str(&ident(key));
-                if map.is_empty() {
-                    out.push_str(" {}\n");
-                    return;
-                }
-                out.push_str(" {\n");
-                for (k, v) in map {
-                    self.value_node(out, &child_key(k), v, depth + 1, config);
-                }
-                indent(out, depth);
-                out.push_str("}\n");
-            }
-            scalar => {
-                out.push_str(&ident(key));
-                out.push(' ');
+            Value::Null => json_tag("null"),
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => number(n).unwrap_or_else(|| json_tag(&n.to_string())),
+            Value::String(s) => {
                 let bare = key.strip_prefix('@').unwrap_or(key);
-                out.push_str(&self.scalar(bare, scalar, depth, config));
-                out.push('\n');
+                config
+                    .then(|| self.bound(bare, s))
+                    .flatten()
+                    .unwrap_or_else(|| string(s))
             }
-        }
-    }
-
-    fn scalar(&self, key: &str, value: &Value, depth: usize, config: bool) -> String {
-        if let (true, Value::String(s)) = (config, value) {
-            if CONNECTION_KEYS.contains(&key) {
-                let named: Vec<&(String, String)> = self
-                    .bindings
-                    .connections
+            Value::Array(items) if items.is_empty() => "[]".to_owned(),
+            Value::Array(items) => {
+                let parts: Vec<String> = items.iter().map(|v| self.inline("", v, config)).collect();
+                let long = parts.iter().map(String::len).sum::<usize>() > 60
+                    || items.iter().any(Value::is_object)
+                    || parts.iter().any(|p| p.contains('\n'));
+                if !long {
+                    return format!("[{}]", parts.join(", "));
+                }
+                let mut out = String::from("[\n");
+                for p in parts {
+                    let _ = writeln!(out, "    {p},");
+                }
+                out.push(']');
+                out
+            }
+            Value::Object(map) if map.is_empty() => "{}".to_owned(),
+            Value::Object(map) => {
+                let parts: Vec<String> = map
                     .iter()
-                    .filter(|(id, _)| id == s)
+                    .map(|(k, v)| {
+                        let k = escaped(k, &[]);
+                        format!("{} = {}", bare(&k), self.inline(&k, v, config))
+                    })
                     .collect();
-                if let [(_, name)] = named.as_slice() {
-                    let unique = self
-                        .bindings
-                        .connections
-                        .iter()
-                        .filter(|(_, n)| n == name)
-                        .count()
-                        == 1;
-                    if unique {
-                        return format!("(connection){}", string(name, depth));
-                    }
-                }
+                format!("{{ {} }}", parts.join(", "))
             }
-            if let Some((name, path)) = self.bindings.project {
-                if s == path {
-                    return "(project)\".\"".to_owned();
-                }
-                if let Some(rest) = s.strip_prefix(path).and_then(|r| r.strip_prefix('/')) {
-                    if !rest.is_empty() {
-                        return format!("(project){}", string(rest, depth));
-                    }
-                }
-                if key == "projectName" && s == name {
-                    return format!("(project-name){}", string(name, depth));
+        }
+    }
+
+    /// A connection's id as its name, a path in the project by its place in it.
+    fn bound(&self, key: &str, s: &str) -> Option<String> {
+        if CONNECTION_KEYS.contains(&key) {
+            let conns = self.bindings.connections;
+            let named: Vec<&(String, String)> = conns.iter().filter(|(id, _)| id == s).collect();
+            if let [(_, name)] = named.as_slice() {
+                if conns.iter().filter(|(_, n)| n == name).count() == 1 {
+                    return Some(format!("{{ \"@connection\" = {} }}", string(name)));
                 }
             }
         }
-        match value {
-            Value::Null => "#null".into(),
-            Value::Bool(b) => format!("#{b}"),
-            Value::Number(n) => number(n),
-            Value::String(s) => string(s, depth),
-            _ => String::new(),
+        let (name, path) = self.bindings.project?;
+        if s == path {
+            return Some("{ \"@project\" = \".\" }".to_owned());
         }
+        if let Some(rest) = s.strip_prefix(path).and_then(|r| r.strip_prefix('/')) {
+            if !rest.is_empty() {
+                return Some(format!("{{ \"@project\" = {} }}", string(rest)));
+            }
+        }
+        (key == "projectName" && s == name)
+            .then(|| format!("{{ \"@project-name\" = {} }}", string(name)))
     }
 }
 
-fn indent(out: &mut String, depth: usize) {
-    for _ in 0..depth {
-        out.push_str(INDENT);
-    }
+/// `{ "@json" = "<text>" }`: a value TOML has no word for.
+fn json_tag(text: &str) -> String {
+    format!("{{ \"@json\" = {} }}", string(text))
 }
 
-/// A key inside an object: `-` and anything starting with `@` take an `@`.
-fn child_key(key: &str) -> String {
-    field_key(key, &[])
-}
-
-/// `{x, y}` of two numbers and nothing else.
+/// `{x, y}` of two numbers TOML holds, and nothing else.
 fn position(p: &Value) -> Option<(String, String)> {
     let map = p.as_object()?;
     if map.len() != 2 {
         return None;
     }
-    let x = map.get("x")?.as_number()?;
-    let y = map.get("y")?.as_number()?;
-    Some((number(x), number(y)))
+    let x = number(map.get("x")?.as_number()?)?;
+    let y = number(map.get("y")?.as_number()?)?;
+    Some((x, y))
 }
 
-/// A number as KDL writes it: a float keeps its point.
-pub(crate) fn number(n: &serde_json::Number) -> String {
-    if n.is_i64() || n.is_u64() {
-        return n.to_string();
+/// A number as TOML writes it, a float keeping its point; `None` for an
+/// integer past TOML's 64-bit signed range.
+fn number(n: &Number) -> Option<String> {
+    if let Some(i) = n.as_i64() {
+        return Some(i.to_string());
     }
-    let f = n.as_f64().unwrap_or(0.0);
-    let text = format!("{f:?}");
-    if text.contains('.') || text.contains("inf") || text.contains("NaN") {
-        return text;
+    if n.is_u64() {
+        return None;
     }
-    match text.split_once('e') {
-        Some((m, e)) => format!("{m}.0e{e}"),
-        None => format!("{text}.0"),
-    }
+    let text = format!("{:?}", n.as_f64()?);
+    Some(if text.contains(['.', 'e', 'E']) {
+        text
+    } else {
+        format!("{text}.0")
+    })
 }
 
-/// A node name: bare when KDL reads it as the same word, else quoted.
-pub(crate) fn ident(key: &str) -> String {
-    let mut chars = key.chars();
-    let bare = match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '@' => {
-            chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
-        }
-        _ => false,
-    } && !matches!(key, "true" | "false" | "null" | "inf" | "nan");
-    if bare || key == "-" {
+/// A key: bare when TOML reads it as the same word, else quoted.
+pub(crate) fn bare(key: &str) -> String {
+    let plain = !key.is_empty()
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if plain {
         key.to_owned()
     } else {
-        string(key, 0)
+        basic(key)
     }
 }
 
-/// One character as a KDL escape, when it needs one.
-fn escape(c: char, out: &mut String) {
-    match c {
-        '\\' => out.push_str("\\\\"),
-        '"' => out.push_str("\\\""),
-        '\r' => out.push_str("\\r"),
-        '\t' => out.push_str("\\t"),
-        '\u{8}' => out.push_str("\\b"),
-        '\u{c}' => out.push_str("\\f"),
-        c if (c as u32) < 0x20 || c == '\u{7f}' || is_newline(c) || is_invisible(c) => {
-            let _ = write!(out, "\\u{{{:x}}}", c as u32);
-        }
-        c => out.push(c),
-    }
+/// A character no TOML string holds as it is.
+fn is_control(c: char) -> bool {
+    (c < ' ' && c != '\t') || c == '\u{7f}'
 }
 
-/// Characters KDL reads as a line break.
-fn is_newline(c: char) -> bool {
-    matches!(
-        c,
-        '\n' | '\r' | '\u{85}' | '\u{b}' | '\u{c}' | '\u{2028}' | '\u{2029}'
-    )
-}
-
-/// Characters KDL refuses to see in a document, and the byte order mark.
-fn is_invisible(c: char) -> bool {
-    matches!(c, '\u{feff}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-}
-
-/// Whitespace KDL would read away from the edge of a line of a multi-line string.
-fn is_space(c: char) -> bool {
-    matches!(
-        c,
-        ' ' | '\t' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
-    )
-}
-
-/// A string: quoted on one line, or across lines when it has several,
-/// indented one deeper than its node at `depth`.
-pub(crate) fn string(s: &str, depth: usize) -> String {
+/// A string: on one line, or across lines when it has several; literal
+/// (`'…'`) when that spares its backslashes or quotes their escapes.
+pub(crate) fn string(s: &str) -> String {
     if !s.contains('\n') {
-        let mut out = String::with_capacity(s.len() + 2);
-        out.push('"');
-        for c in s.chars() {
-            escape(c, &mut out);
+        let worth = s.contains('\\') || s.contains('"');
+        if worth && !s.contains('\'') && !s.chars().any(is_control) {
+            return format!("'{s}'");
         }
-        out.push('"');
-        return out;
+        return basic(s);
     }
-    let pad = INDENT.repeat(depth + 1);
-    let mut out = String::from("\"\"\"\n");
-    for line in s.split('\n') {
-        if line.is_empty() {
-            out.push('\n');
-            continue;
-        }
-        out.push_str(&pad);
-        let chars: Vec<char> = line.chars().collect();
-        let first = chars.iter().position(|c| !is_space(*c));
-        let last = chars.iter().rposition(|c| !is_space(*c));
-        for (i, c) in chars.iter().enumerate() {
-            // A line of nothing but space, and space at a line's end, would be read away.
-            let edge = match (first, last) {
-                (Some(_), Some(l)) => i > l,
-                _ => true,
-            };
-            match c {
-                ' ' if edge => out.push_str("\\s"),
-                c if edge && is_space(*c) => {
-                    let _ = write!(out, "\\u{{{:x}}}", *c as u32);
-                }
-                c => escape(*c, &mut out),
+    let literal = s.contains('\\')
+        && !s.contains("'''")
+        && !s.ends_with('\'')
+        && !s.chars().any(|c| is_control(c) && c != '\n');
+    if literal {
+        return format!("'''\n{s}'''");
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    out.push_str("\"\"\"\n");
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            // Never two quotes in a row, so none closes the string early.
+            '"' if chars.peek().is_none_or(|n| *n == '"') => out.push_str("\\\""),
+            '\n' => out.push('\n'),
+            '\r' => out.push_str("\\r"),
+            c if is_control(c) => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
             }
+            c => out.push(c),
         }
-        out.push('\n');
     }
-    // The closing line's indent is what each line loses as it is read.
-    out.push_str(&pad);
     out.push_str("\"\"\"");
+    out
+}
+
+/// A basic string on one line: `"…"` with escapes.
+fn basic(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if is_control(c) => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
     out
 }
