@@ -188,16 +188,32 @@ pub const GRID_QUEUE: usize = 256;
 struct GridConns {
     next: u64,
     conns: HashMap<u64, mpsc::Sender<ServerMsg>>,
-    /// The write each grid input became, by the driver's `input_seq`, and
-    /// the event it answers: its InputAck goes out when sessiond says the
-    /// bytes were written.
-    inputs: HashMap<u64, (Peer, u64)>,
+    /// The write each grid input became, by its connection and the
+    /// driver's `input_seq`, and the event it answers: its InputAck goes
+    /// out when sessiond says the bytes were written.
+    inputs: HashMap<(u64, u64), (Peer, u64)>,
 }
 
-/// The connection the engine is running on, while there is one.
+/// A connection the engine is running on, while there is one.
 struct Current {
+    /// Tells this connection's grid inputs from another's.
+    link: u64,
     pool: Arc<Pool>,
     commands: mpsc::UnboundedSender<Command>,
+    /// sessiond's ids of the sessions it listed when it connected.
+    held: Vec<String>,
+}
+
+/// What a connection is to the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Role {
+    /// The sessiond new sessions go to: its connection decides when the
+    /// engine is up, and what no holder lists any more is forgotten.
+    Current,
+    /// A draining sessiond of another build that still runs sessions it
+    /// could not hand over: they are served beside the current one's, and
+    /// nothing new starts there.
+    Older,
 }
 
 /// The session engine as vornd runs it, across connections.
@@ -205,6 +221,9 @@ pub struct Engine {
     cfg: Config,
     write_timeout: Duration,
     current: Mutex<Option<Current>>,
+    /// The older sessionds' connections, one each.
+    older: Mutex<Vec<Current>>,
+    links: std::sync::atomic::AtomicU64,
     closed: Mutex<VecDeque<Brief>>,
     events: broadcast::Sender<Event>,
     grid: Mutex<GridConns>,
@@ -281,6 +300,8 @@ impl Engine {
             },
             write_timeout,
             current: Mutex::new(None),
+            older: Mutex::new(Vec::new()),
+            links: std::sync::atomic::AtomicU64::new(0),
             closed: Mutex::new(VecDeque::new()),
             events: broadcast::channel(EVENTS).0,
             grid: Mutex::new(GridConns::default()),
@@ -382,7 +403,7 @@ impl Engine {
     /// records it, and the terminal and every client resize when they reach
     /// the record. Clients' resizes go through [`Engine::sizes`] instead.
     pub fn resize(&self, session: &str, cols: u16, rows: u16) -> Result<(), String> {
-        self.command(Command::Resize(session.to_owned(), cols, rows))
+        self.command_for(session, Command::Resize(session.to_owned(), cols, rows))
     }
 
     /// Carries out what the streams asked for. A session that cannot be
@@ -391,11 +412,11 @@ impl Engine {
         if actions.is_empty() {
             return;
         }
-        let pool = self.current().as_ref().map(|c| Arc::clone(&c.pool));
         for a in actions {
             match a {
                 Action::Snapshot { session, token } => {
-                    if !pool.as_ref().is_some_and(|p| p.snapshot(&session, token)) {
+                    let pool = self.pool_of(&session);
+                    if !pool.is_some_and(|p| p.snapshot(&session, token)) {
                         self.streams.failed(token);
                     }
                 }
@@ -404,15 +425,13 @@ impl Engine {
                     token,
                     lines,
                 } => {
-                    if !pool
-                        .as_ref()
-                        .is_some_and(|p| p.output(&session, token, lines))
-                    {
+                    let pool = self.pool_of(&session);
+                    if !pool.is_some_and(|p| p.output(&session, token, lines)) {
                         self.streams.failed(token);
                     }
                 }
                 Action::Fetch { session, from } => {
-                    let _ = self.command(Command::Fetch(session, from));
+                    let _ = self.command_for(&session.clone(), Command::Fetch(session, from));
                 }
             }
         }
@@ -420,6 +439,32 @@ impl Engine {
 
     fn current(&self) -> std::sync::MutexGuard<'_, Option<Current>> {
         self.current.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn older(&self) -> std::sync::MutexGuard<'_, Vec<Current>> {
+        self.older.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The pool running session `id`: an older sessiond's when it holds it,
+    /// else the current one's, which a session still starting belongs to.
+    fn pool_of(&self, id: &str) -> Option<Arc<Pool>> {
+        if let Some(c) = self.older().iter().find(|c| c.pool.has(id)) {
+            return Some(Arc::clone(&c.pool));
+        }
+        self.current().as_ref().map(|c| Arc::clone(&c.pool))
+    }
+
+    /// Every connection's pool, the current one's first.
+    /// sessiond's ids of the sessions the older sessionds list.
+    fn older_held(&self) -> Vec<String> {
+        self.older().iter().flat_map(|c| c.held.clone()).collect()
+    }
+
+    fn pools(&self) -> Vec<Arc<Pool>> {
+        let mut pools: Vec<Arc<Pool>> =
+            self.current().iter().map(|c| Arc::clone(&c.pool)).collect();
+        pools.extend(self.older().iter().map(|c| Arc::clone(&c.pool)));
+        pools
     }
 
     fn closed(&self) -> std::sync::MutexGuard<'_, VecDeque<Brief>> {
@@ -472,15 +517,15 @@ impl Engine {
     /// Whether the engine runs session `id` now.
     pub fn has_session(&self, id: &str) -> bool {
         self.current().as_ref().is_some_and(|c| c.pool.has(id))
+            || self.older().iter().any(|c| c.pool.has(id))
     }
 
     /// A grid client's request for session `id`, for its actor.
     pub fn grid_input(&self, id: &str, m: GridIn) -> Result<(), String> {
-        let current = self.current();
-        let c = current
-            .as_ref()
+        let pool = self
+            .pool_of(id)
             .ok_or_else(|| "no session holder connected".to_owned())?;
-        if c.pool.grid(id, m) {
+        if pool.grid(id, m) {
             Ok(())
         } else {
             Err(format!("no session {id}"))
@@ -499,6 +544,7 @@ impl Engine {
         }
     }
 
+    /// A command for the current sessiond.
     fn command(&self, c: Command) -> Result<(), String> {
         self.current()
             .as_ref()
@@ -506,6 +552,17 @@ impl Engine {
             .commands
             .send(c)
             .map_err(|_| "the session holder connection closed".to_owned())
+    }
+
+    /// A command about `session`, for the sessiond that holds it.
+    fn command_for(&self, session: &str, c: Command) -> Result<(), String> {
+        if let Some(o) = self.older().iter().find(|o| o.pool.has(session)) {
+            return o
+                .commands
+                .send(c)
+                .map_err(|_| "the session holder connection closed".to_owned());
+        }
+        self.command(c)
     }
 
     /// What happens to sessions from now on. A subscriber that falls more
@@ -557,25 +614,23 @@ impl Engine {
 
     /// A signal for the program of `session`.
     pub fn signal(&self, session: &str, signal: Sig) -> Result<(), String> {
-        self.command(Command::Signal(session.to_owned(), signal))
+        self.command_for(session, Command::Signal(session.to_owned(), signal))
     }
 
     /// Input for a session's program.
     pub fn write(&self, session: &str, bytes: Vec<u8>) -> Result<(), String> {
-        self.command(Command::Write(session.to_owned(), bytes))
+        self.command_for(session, Command::Write(session.to_owned(), bytes))
     }
 
     pub fn close_stdin(&self, session: &str) -> Result<(), String> {
-        self.command(Command::CloseStdin(session.to_owned()))
+        self.command_for(session, Command::CloseStdin(session.to_owned()))
     }
 
     /// Every session in the engine, contents included. For tests and
     /// in-process callers only: [`Engine::report`] is what goes over HTTP.
     pub async fn sessions(&self) -> Vec<Summary> {
-        let Some(pool) = self.current().as_ref().map(|c| Arc::clone(&c.pool)) else {
-            return Vec::new();
-        };
-        tokio::task::spawn_blocking(move || pool.sessions())
+        let pools = self.pools();
+        tokio::task::spawn_blocking(move || pools.iter().flat_map(|p| p.sessions()).collect())
             .await
             .unwrap_or_default()
     }
@@ -585,10 +640,8 @@ impl Engine {
     /// cwd: the endpoint answers anyone on this machine. Read from what the
     /// workers last published, so it never waits on one.
     pub fn report(&self) -> Value {
-        let (connected, briefs) = match self.current().as_ref() {
-            Some(c) => (true, c.pool.briefs()),
-            None => (false, Vec::new()),
-        };
+        let connected = self.current().is_some();
+        let briefs: Vec<Brief> = self.pools().iter().flat_map(|p| p.briefs()).collect();
         let closed: Vec<Value> = self.closed().iter().map(brief).collect();
         json!({
             "connected": connected,
@@ -630,8 +683,20 @@ impl Engine {
     /// Cuts a last checkpoint for every session and hands them to sessiond,
     /// as a clean stop does, waiting at most a few seconds.
     pub async fn flush(&self) {
-        let (tx, rx) = oneshot::channel();
-        if self.command(Command::Flush(tx)).is_ok() {
+        let links: Vec<_> = self
+            .current()
+            .iter()
+            .chain(self.older().iter())
+            .map(|c| c.commands.clone())
+            .collect();
+        let mut waits = Vec::new();
+        for commands in links {
+            let (tx, rx) = oneshot::channel();
+            if commands.send(Command::Flush(tx)).is_ok() {
+                waits.push(rx);
+            }
+        }
+        for rx in waits {
             let _ = tokio::time::timeout(LAST_CHECKPOINTS, rx).await;
         }
     }
@@ -639,6 +704,28 @@ impl Engine {
     /// Runs every session `conn` holds until the connection ends; answers
     /// why it ended.
     pub(crate) async fn run(&self, conn: Conn, welcome: Welcome) -> String {
+        self.run_as(Role::Current, conn, welcome, None).await
+    }
+
+    /// As [`Engine::run`] for a draining sessiond of another build, beside
+    /// the current one: `listed` is told once its sessions are open, so
+    /// the current sessiond's connection can follow.
+    pub(crate) async fn run_older(
+        &self,
+        conn: Conn,
+        welcome: Welcome,
+        listed: Option<oneshot::Sender<()>>,
+    ) -> String {
+        self.run_as(Role::Older, conn, welcome, listed).await
+    }
+
+    async fn run_as(
+        &self,
+        role: Role,
+        conn: Conn,
+        welcome: Welcome,
+        listed: Option<oneshot::Sender<()>>,
+    ) -> String {
         let (mut reader, writer) = conn.split();
         let (in_tx, mut incoming) = mpsc::unbounded_channel();
         let mut reading: JoinHandle<String> = tokio::spawn(async move {
@@ -674,27 +761,42 @@ impl Engine {
             Err(e) => return format!("could not start the session engine: {e}"),
         };
         let (cmd_tx, mut commands) = mpsc::unbounded_channel();
-        // This connection's driver numbers its writes from 0 again: input
-        // waiting on the last one's numbers would be acknowledged by the
-        // wrong writes, and those were never written.
-        self.grid_conns().inputs.clear();
-        *self.current() = Some(Current {
+        // Each connection numbers its writes from 0: its inputs are told
+        // apart by the link, and the last connection's were never written.
+        let link = self
+            .links
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let held: Vec<String> = welcome.sessions.iter().map(|i| i.session.clone()).collect();
+        let this = Current {
+            link,
             pool: Arc::clone(&pool),
             commands: cmd_tx,
-        });
+            held: held.clone(),
+        };
+        match role {
+            Role::Current => *self.current() = Some(this),
+            Role::Older => self.older().push(this),
+        }
         // However this ends, a dropped future included, the sessions go
         // with the connection.
-        let _clear = Clear(self);
-        // Names of sessions this sessiond no longer holds go; every other
+        let _clear = Clear(self, role, link);
+        // Names of sessions no sessiond holds any more go; every other
         // session goes by its name from here on.
-        self.names()
-            .keep_only(welcome.sessions.iter().map(|i| i.session.as_str()));
+        if role == Role::Current {
+            let older = self.older_held();
+            self.names().keep_only(
+                held.iter()
+                    .map(String::as_str)
+                    .chain(older.iter().map(String::as_str)),
+            );
+        }
+        let mut early_input = Vec::new();
         for info in &welcome.sessions {
             let id = self.names().public(&info.session).to_owned();
             // Typed while it started, before the holder went: written now it holds it.
             let early = self.streams.opened(&id, info.epoch);
             if !early.is_empty() {
-                let _ = self.write(&id, early);
+                early_input.push((id.clone(), early));
             }
             let open = Open::from_info(info);
             if open.pty {
@@ -717,22 +819,36 @@ impl Engine {
             }
             pool.open(&id, open);
         }
-        self.registry.holder_listed();
-        self.streams.holder_up();
-        {
-            let ids: std::collections::HashSet<String> = welcome
-                .sessions
+        // After the sessions open, so the older connection is the one asked.
+        for (id, bytes) in early_input {
+            let _ = self.write(&id, bytes);
+        }
+        if role == Role::Current {
+            self.registry.holder_listed();
+            self.streams.holder_up();
+            let ids: std::collections::HashSet<String> = held
                 .iter()
-                .map(|i| self.names().public(&i.session).to_owned())
+                .chain(self.older_held().iter())
+                .map(|h| self.names().public(h).to_owned())
                 .collect();
             self.journal().keep_only(|id| ids.contains(id));
         }
-        info!(sessions = welcome.sessions.len(), "recovering sessions");
-        let _ = self.events.send(Event::Connected);
+        info!(
+            sessions = welcome.sessions.len(),
+            ?role,
+            "recovering sessions"
+        );
+        if role == Role::Current {
+            let _ = self.events.send(Event::Connected);
+        }
+        if let Some(listed) = listed {
+            let _ = listed.send(());
+        }
         // The pool moves into the driver so that `_clear` drops the last
         // reference, off the runtime's threads.
         let mut d = Driver {
             engine: self,
+            link,
             pool,
             to_send,
             backlog,
@@ -783,7 +899,9 @@ impl Engine {
         for (_, Parked { reply, .. }) in d.parked.drain() {
             let _ = reply.send(Err(why.clone()));
         }
-        self.streams.suspended();
+        if role == Role::Current {
+            self.streams.suspended();
+        }
         // The pool stops with the last reference, without last checkpoints:
         // the sessions are sessiond's, and the next connection recovers them.
         why
@@ -873,11 +991,25 @@ impl<const N: usize> Drop for Abort<N> {
     }
 }
 
-struct Clear<'a>(&'a Engine);
+struct Clear<'a>(&'a Engine, Role, u64);
 
 impl Drop for Clear<'_> {
     fn drop(&mut self) {
-        let Some(c) = self.0.current().take() else {
+        self.0
+            .grid_conns()
+            .inputs
+            .retain(|(link, _), _| *link != self.2);
+        let gone = match self.1 {
+            Role::Current => self.0.current().take(),
+            Role::Older => {
+                let mut older = self.0.older();
+                older
+                    .iter()
+                    .position(|c| c.link == self.2)
+                    .map(|at| older.remove(at))
+            }
+        };
+        let Some(c) = gone else {
             return;
         };
         // Dropping the pool joins its workers, each finishing the job in
@@ -984,6 +1116,8 @@ fn queued_size(m: &ToSessiond) -> usize {
 
 struct Driver<'a> {
     engine: &'a Engine,
+    /// Which connection this is, for the inputs it numbers.
+    link: u64,
     pool: Arc<Pool>,
     /// The writer's queue. Sending never waits; a writer that has stopped
     /// ends the connection, which the driver learns from its task.
@@ -1103,7 +1237,11 @@ impl Driver<'_> {
                 }
             }
             ToVornd::InputDone(done) => {
-                let acked = self.engine.grid_conns().inputs.remove(&done.input_seq);
+                let acked = self
+                    .engine
+                    .grid_conns()
+                    .inputs
+                    .remove(&(self.link, done.input_seq));
                 if let Some((peer, input_seq)) = acked {
                     self.engine.grid_send(
                         peer.conn,
@@ -1181,7 +1319,10 @@ impl Driver<'_> {
             Out::Grid(HubOut::Write { bytes, ack }) => {
                 self.write(session, bytes);
                 if let Some(ack) = ack {
-                    self.engine.grid_conns().inputs.insert(self.input_seq, ack);
+                    self.engine
+                        .grid_conns()
+                        .inputs
+                        .insert((self.link, self.input_seq), ack);
                 }
             }
             Out::Applied(entries) => {
@@ -1327,7 +1468,7 @@ impl Driver<'_> {
     /// Whether a session may be started under `name`: no session the
     /// engine runs, nor one waiting to be started, goes by it already.
     fn name_free(&self, name: &str) -> Result<(), String> {
-        let running = |id: &str| self.pool.has(id);
+        let running = |id: &str| self.engine.has_session(id);
         if running(name)
             || self.parked.contains_key(name)
             || self

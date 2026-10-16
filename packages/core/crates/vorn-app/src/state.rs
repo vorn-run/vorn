@@ -310,6 +310,8 @@ pub struct Recent {
     pub activity: u64,
     pub activity_label: String,
     pub can_resume: bool,
+    /// The terminal writing this conversation now, when one is.
+    pub running_in: Option<String>,
 }
 
 impl Recent {
@@ -338,6 +340,10 @@ impl Recent {
                 .get("canResumeExact")
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
+            running_in: v
+                .get("runningIn")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
     }
 }
@@ -677,6 +683,17 @@ pub fn basename(path: &str) -> &str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_recent_session_knows_the_terminal_running_it() {
+        let past = Recent::from_value(&json!({ "sessionId": "s1", "agentType": "acme" })).unwrap();
+        assert_eq!(past.running_in, None);
+        let live = Recent::from_value(
+            &json!({ "sessionId": "s1", "agentType": "acme", "runningIn": "t9" }),
+        )
+        .unwrap();
+        assert_eq!(live.running_in.as_deref(), Some("t9"));
+    }
 
     #[test]
     fn times_read_as_the_renderer_writes_them() {

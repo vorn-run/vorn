@@ -13,7 +13,9 @@
 //!
 //! With the session engine built in, the connection to the current sessiond
 //! is also where every session it holds is attached and parsed (see
-//! [`crate::engine`]).
+//! [`crate::engine`]). A drained sessiond that still runs sessions is
+//! connected to as well, so each of its terminals keeps its card and
+//! scrollback until it ends: draining only stops new sessions there.
 //!
 //! A holder that is only slow is never replaced, since a second one would
 //! split the sessions between two: one whose process is alive and whose
@@ -24,7 +26,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -100,12 +102,17 @@ pub struct HolderInstance {
     /// Whether it handed its sessions to the current sessiond instead of
     /// draining; it then only reaps their programs.
     pub handed_off: bool,
+    /// Whether vornd serves the sessions it still runs, beside the current
+    /// sessiond's.
+    pub attached: bool,
 }
 
 #[derive(Debug, Default)]
 struct State {
     current: Option<HolderInstance>,
     older: Vec<HolderInstance>,
+    /// The older sessionds whose sessions the engine serves, by instance.
+    attached: std::collections::HashSet<u128>,
     error: Option<String>,
 }
 
@@ -149,6 +156,43 @@ impl Holder {
         conn.hold().await
     }
 
+    /// Starts serving the sessions a drained sessiond still runs, when the
+    /// engine is built in and it has any. Answers a receiver that resolves
+    /// once they are open.
+    #[cfg(feature = "engine")]
+    fn serve_older(
+        self: &Arc<Self>,
+        home: &Path,
+        i: &Instance,
+        seen: &mut HolderInstance,
+    ) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        let engine = Arc::clone(self.engine.as_ref()?);
+        if !seen.compatible || seen.handed_off || seen.sessions.unwrap_or(0) == 0 {
+            return None;
+        }
+        seen.attached = true;
+        self.state().attached.insert(i.instance);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(serve_older(
+            engine,
+            Arc::clone(self),
+            home.to_owned(),
+            i.clone(),
+            tx,
+        ));
+        Some(rx)
+    }
+
+    #[cfg(not(feature = "engine"))]
+    fn serve_older(
+        self: &Arc<Self>,
+        _: &Path,
+        _: &Instance,
+        _: &mut HolderInstance,
+    ) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        None
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -165,6 +209,7 @@ impl Holder {
                 "sessions": i.sessions,
                 "compatible": i.compatible,
                 "handedOff": i.handed_off,
+                "attached": i.attached,
             })
         };
         json!({
@@ -231,7 +276,7 @@ pub async fn connect(endpoint: &str, holder: &Holder) -> io::Result<String> {
 async fn up(
     cfg: &HolderConfig,
     version: &str,
-    holder: &Holder,
+    holder: &Arc<Holder>,
     starting: &mut Option<Starting>,
     patience: Patience,
 ) -> io::Result<(Conn, Welcome)> {
@@ -257,13 +302,25 @@ async fn up(
         }
         None => start(installed, cfg.home.clone(), starting, patience.start).await?,
     };
+    let before = holder.older();
     let mut older = Vec::new();
     for i in others {
+        // Served beside the current one since an earlier round: nothing to redo.
+        if holder.state().attached.contains(&i.instance) {
+            older.extend(before.iter().find(|o| o.instance == i.instance).cloned());
+            continue;
+        }
         #[cfg(unix)]
-        older.push(retire(&instance, &i).await);
+        let mut seen = retire(&instance, &i).await;
         // ConPTY handles cannot move between processes: an older one drains.
         #[cfg(windows)]
-        older.push(drain(&i, HolderInstance::older(&i)).await);
+        let mut seen = drain(&i, HolderInstance::older(&i)).await;
+        let listed = holder.serve_older(&cfg.home, &i, &mut seen);
+        older.push(seen);
+        if let Some(listed) = listed {
+            // Before the current one lists its sessions, which forgets what no sessiond lists.
+            let _ = tokio::time::timeout(OLDER_ANSWER.give_up, listed).await;
+        }
     }
     holder.state().older = older;
     // After the adoptions, so the Welcome lists what was adopted.
@@ -276,6 +333,7 @@ async fn up(
         sessions: Some(live(&welcome)),
         compatible: true,
         handed_off: false,
+        attached: false,
     });
     Ok((conn, welcome))
 }
@@ -354,6 +412,7 @@ impl HolderInstance {
             sessions: None,
             compatible: SESSIOND_PROTOS.contains(&i.proto),
             handed_off: false,
+            attached: false,
         }
     }
 }
@@ -430,6 +489,48 @@ async fn drain(i: &Instance, mut seen: HolderInstance) -> HolderInstance {
         Err(err) => warn!(pid = i.pid, %err, "could not reach an older session holder"),
     }
     seen
+}
+
+/// Connects to the drained sessiond `i` and runs its sessions through the
+/// engine until it has none, trying again when the connection drops while
+/// the sessiond is still announced. `listed` resolves once they are open.
+#[cfg(feature = "engine")]
+async fn serve_older(
+    engine: Arc<crate::engine::Engine>,
+    holder: Arc<Holder>,
+    home: PathBuf,
+    i: Instance,
+    listed: tokio::sync::oneshot::Sender<()>,
+) {
+    let mut listed = Some(listed);
+    loop {
+        match Conn::open(&i.endpoint, OLDER_ANSWER).await {
+            Ok((conn, welcome)) => {
+                if welcome.sessions.is_empty() {
+                    break;
+                }
+                info!(pid = i.pid, build = %i.build, sessions = welcome.sessions.len(), "serving the sessions of a draining session holder");
+                let why = engine.run_older(conn, welcome, listed.take()).await;
+                info!(pid = i.pid, %why, "the connection to a draining session holder ended");
+            }
+            Err(err) if gone(&err) => break,
+            Err(err) => warn!(pid = i.pid, %err, "could not reach a draining session holder"),
+        }
+        let home = home.clone();
+        let instance = i.instance;
+        let announced = tokio::task::spawn_blocking(move || {
+            launch::running(&home)
+                .iter()
+                .any(|r| r.instance == instance)
+        })
+        .await
+        .unwrap_or(false);
+        if !announced {
+            break;
+        }
+        tokio::time::sleep(RESTART_AFTER).await;
+    }
+    holder.state().attached.remove(&i.instance);
 }
 
 fn live(w: &Welcome) -> usize {
@@ -699,7 +800,7 @@ mod tests {
         let (_conn, welcome) = up(
             &cfg,
             VERSION,
-            &Holder::new(),
+            &Arc::new(Holder::new()),
             &mut starting,
             quick(Duration::from_secs(10)),
         )
@@ -720,7 +821,7 @@ mod tests {
             let err = up(
                 &cfg,
                 VERSION,
-                &Holder::new(),
+                &Arc::new(Holder::new()),
                 &mut starting,
                 quick(Duration::from_millis(300)),
             )
@@ -746,7 +847,7 @@ mod tests {
         let err = up(
             &cfg,
             VERSION,
-            &Holder::new(),
+            &Arc::new(Holder::new()),
             &mut starting,
             quick(Duration::from_secs(1)),
         )
@@ -761,7 +862,7 @@ mod tests {
         let err = up(
             &cfg,
             VERSION,
-            &Holder::new(),
+            &Arc::new(Holder::new()),
             &mut starting,
             quick(Duration::from_secs(1)),
         )

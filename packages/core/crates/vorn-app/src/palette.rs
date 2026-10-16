@@ -341,11 +341,12 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
         } else {
             r.display.as_str()
         };
-        let sub = format!(
-            "{project} \u{b7} {} \u{b7} {}",
-            time_ago(r.timestamp, now),
-            r.activity_text()
-        );
+        let when = if r.running_in.is_some() {
+            "running".to_owned()
+        } else {
+            time_ago(r.timestamp, now)
+        };
+        let sub = format!("{project} \u{b7} {when} \u{b7} {}", r.activity_text());
         out.push(
             Entry::new(
                 Cat::Recent,

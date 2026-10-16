@@ -1046,6 +1046,14 @@ fn running_on(native: &Native, transcript: &str) -> Option<Value> {
     })?
 }
 
+/// The id of the live terminal writing conversation `transcript`.
+pub(super) fn running_terminal(native: &Native, transcript: &str) -> Option<String> {
+    running_on(native, transcript)?
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
 /// Terminal `id`, while its program runs.
 fn live_record(native: &Native, id: &str) -> Option<Value> {
     native
@@ -2225,6 +2233,9 @@ pub(super) mod tests {
         }))
         .unwrap();
         assert!(matches!(create(&fed.native, &named), Answer::Result(r) if r["id"] == "a"));
+        // Recent sessions name the terminal that writes it.
+        assert_eq!(running_terminal(&fed.native, "conv").as_deref(), Some("a"));
+        assert_eq!(running_terminal(&fed.native, "other"), None);
     }
 
     /// vornd owning the records between runs, with a project directory

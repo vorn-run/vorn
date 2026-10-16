@@ -8,10 +8,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::server::{self, Config, Sessiond};
 use vorn_sessiond_wire::PROTO;
+
+mod common;
 
 const VORND: &str = env!("CARGO_BIN_EXE_vornd");
 
@@ -722,6 +724,14 @@ impl Older {
         }
     }
 
+    /// Announced as a sessiond from before handoffs, which only a drain can retire.
+    fn without_handoff(self, home: &Path) -> Older {
+        let mut announced = launch::running(home).pop().expect("announced");
+        announced.handoff = None;
+        launch::announce(home, &announced).unwrap();
+        self
+    }
+
     fn pid(&self) -> u32 {
         let (_, w) = Client::hello(&self.d.endpoint());
         w.sessions
@@ -864,4 +874,205 @@ fn a_failed_handoff_drains_the_older_build_instead() {
         session: id.clone(),
     }));
     assert!(old.exits_within(PATIENCE), "the drained sessiond stays");
+}
+
+/// vornd's JSON-RPC socket, for the calls the app makes.
+#[cfg(unix)]
+struct Rpc {
+    ws: common::Socket,
+    next: u64,
+    /// vornd's log, quoted when a call never gets its answer.
+    log: PathBuf,
+}
+
+#[cfg(unix)]
+impl Rpc {
+    async fn open(v: &Vornd) -> Rpc {
+        Rpc {
+            ws: common::connect(v.port, common::CREDENTIAL).await,
+            next: 0,
+            log: v.log.clone(),
+        }
+    }
+
+    fn log(&self) -> String {
+        std::fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// `method` until it answers without an error: vornd reads its sessions once it is up.
+    async fn call(&mut self, method: &str, params: Value) -> Value {
+        let t = Instant::now();
+        loop {
+            self.next += 1;
+            let id = self.next;
+            common::send(
+                &mut self.ws,
+                json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+            )
+            .await;
+            let answer = loop {
+                let frame = common::next(&mut self.ws).await;
+                if frame["id"] == json!(id) {
+                    break frame;
+                }
+            };
+            if answer.get("error").is_none() {
+                return answer["result"].clone();
+            }
+            assert!(t.elapsed() < PATIENCE, "{method}: {answer}\n{}", self.log());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// `method` until its answer satisfies `ok`.
+    async fn until(
+        &mut self,
+        what: &str,
+        method: &str,
+        params: Value,
+        ok: impl Fn(&Value) -> bool,
+    ) {
+        let t = Instant::now();
+        loop {
+            let answer = self.call(method, params.clone()).await;
+            if ok(&answer) {
+                return;
+            }
+            assert!(
+                t.elapsed() < PATIENCE,
+                "{what}: last {method} answer {answer}\n{}",
+                self.log()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// vornd's record of a Claude terminal on conversation `conv`, as its last run wrote it down.
+#[cfg(unix)]
+fn carried_record(id: &str, dir: &Path, conv: &str) -> Value {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    json!({
+        "id": id, "agentType": "claude", "projectName": "demo", "projectPath": dir,
+        "status": "running", "createdAt": 1, "pid": 9, "groupId": "g",
+        "agentSessionId": conv, "savedAt": now,
+    })
+}
+
+#[cfg(unix)]
+fn carry(home: &Path, records: Vec<Value>) {
+    let dir = home.join("vornd");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sessions.json"),
+        json!({ "terminals": records }).to_string(),
+    )
+    .unwrap();
+}
+
+/// A terminal left in an older build's holder that cannot hand it over comes
+/// back as a card with its scrollback, takes input, and is released when its
+/// program ends. Resuming its conversation shows that card and starts nothing.
+#[cfg(unix)]
+#[test]
+fn a_session_left_in_a_drained_older_build_comes_back_as_a_card() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let old = Older::start(home.path()).without_handoff(home.path());
+    let id = old.session.clone();
+    let shell = old.pid();
+    carry(
+        home.path(),
+        vec![carried_record(&id, project.path(), "conv-1")],
+    );
+
+    let v = Vornd::start(
+        home.path(),
+        &[("SECRET_VORN_BOOTSTRAP_TOKEN", common::CREDENTIAL)],
+    );
+    let holder = v.wait_for("the older one served", |s| {
+        s["current"].is_object() && s["older"][0]["attached"] == true
+    });
+    reap.add(pid(&holder["current"]));
+    assert_eq!(holder["older"][0]["handedOff"], false, "{holder}");
+    assert_eq!(holder["older"][0]["sessions"], 1);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let mut rpc = Rpc::open(&v).await;
+        rpc.until("the card", "terminal:listActive", Value::Null, |l| {
+            l.as_array().is_some_and(|l| {
+                l.iter()
+                    .any(|t| t["id"] == json!(id) && t["status"] != json!("ended"))
+            })
+        })
+        .await;
+        let restored = rpc.call("sessions:restored", Value::Null).await;
+        assert_eq!(restored, json!([]), "adopted, not offered");
+        rpc.until(
+            "its scrollback",
+            "terminal:readOutput",
+            json!({ "id": id, "lines": 50 }),
+            |o| o.to_string().contains("got:one"),
+        )
+        .await;
+
+        // Resuming a conversation that is running shows the card and starts nothing.
+        let shown = rpc
+            .call(
+                "terminal:create",
+                json!({
+                    "agentType": "claude", "projectName": "demo",
+                    "projectPath": project.path(), "resumeSessionId": "conv-1",
+                }),
+            )
+            .await;
+        assert_eq!(shown["id"], json!(id), "{shown}");
+        assert_eq!(
+            v.get("/vornd/sessions")["sessions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            Client::hello(
+                &launch::running(home.path())
+                    .iter()
+                    .find(|i| i.pid == pid(&holder["current"]))
+                    .unwrap()
+                    .endpoint
+            )
+            .1
+            .sessions
+            .is_empty(),
+            "the current holder started nothing"
+        );
+
+        // Input reaches the older holder's shell.
+        rpc.call("terminal:write", json!({ "id": id, "data": "two\n" }))
+            .await;
+        rpc.until(
+            "the echo of what was typed",
+            "terminal:readOutput",
+            json!({ "id": id, "lines": 50 }),
+            |o| o.to_string().contains("got:two"),
+        )
+        .await;
+    });
+
+    launch::kill(shell).unwrap();
+    assert!(
+        old.exits_within(PATIENCE),
+        "the older holder exits once its shell ended and was released: {}",
+        v.log_text()
+    );
+    v.stop();
 }
