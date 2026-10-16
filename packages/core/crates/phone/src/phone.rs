@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vorn_app::paint::{self, Caret};
-use vorn_app::scroll::Scroll;
+use vorn_app::scroll::{self, Route, Rows, Scroll};
 use vorn_app::view::PaneView;
 use vorn_components::agent::AgentMarks;
 use vornui::input::mods;
@@ -65,6 +65,8 @@ pub struct Phone {
     pub ctrl: bool,
     preedit: String,
     scrolls: HashMap<String, Scroll>,
+    /// Where the current terminal gesture goes, fixed when it begins.
+    wheel: Option<(Route, Rows)>,
     term: Option<Rect>,
     touch: Option<Touch>,
     fling: Option<Fling>,
@@ -88,6 +90,7 @@ impl Phone {
             ctrl: false,
             preedit: String::new(),
             scrolls: HashMap::new(),
+            wheel: None,
             term: None,
             touch: None,
             fling: None,
@@ -294,9 +297,15 @@ impl Phone {
             Event::Click(id) => self.click(ui, id),
             Event::Submit(i) if i == id(screens::COMPOSER) => self.submit_composer(ui),
             Event::Submit(i) => self.model.submit(ui, i),
-            Event::Wheel { id, dy, phase, .. } if id == Id(TERMINAL) => {
+            Event::Wheel {
+                id,
+                dy,
+                x,
+                y,
+                phase,
+            } if id == Id(TERMINAL) => {
                 if let Some(sid) = self.session.clone() {
-                    self.scroll_terminal(ui, &sid, dy, phase);
+                    self.wheel_terminal(ui, &sid, dy, (x, y), phase);
                 }
             }
             _ => {}
@@ -396,6 +405,39 @@ impl Phone {
         }
         self.model.click(i);
         self.typing = ui.focus().is_some();
+    }
+
+    /// As on the desktop: wheel reports when the program tracks the mouse, arrows on the alternate screen, else history.
+    fn wheel_terminal(
+        &mut self,
+        ui: &mut Ui,
+        sid: &str,
+        dy: f32,
+        (x, y): (f32, f32),
+        phase: WheelPhase,
+    ) {
+        let Some(v) = self.model.views.get(sid) else {
+            return;
+        };
+        if phase == WheelPhase::Began || self.wheel.is_none() {
+            self.wheel = Some((scroll::route(v.mouse, !v.primary), Rows::default()));
+        }
+        let Some((route, rows)) = &mut self.wheel else {
+            return;
+        };
+        if *route == Route::History {
+            self.scroll_terminal(ui, sid, dy, phase);
+            return;
+        }
+        let (Some(r), Some(g)) = (self.term, &self.model.grid) else {
+            return;
+        };
+        let k = ui.scale();
+        let cell = ui.text.cell();
+        let n = rows.take(dy * k, phase, cell.h, *route);
+        let col = ((x - r.x) * k / cell.w).floor().max(0.0);
+        let row = ((y - r.y) * k / cell.h).floor().max(0.0);
+        g.wheel_rows(sid, n, *route, col, row);
     }
 
     fn scroll_terminal(&mut self, ui: &mut Ui, sid: &str, dy: f32, phase: WheelPhase) {
