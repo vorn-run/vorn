@@ -304,21 +304,37 @@ impl Work {
                 id
             }
         };
-        let taken = self
-            .files
-            .lock()
-            .by_id
-            .get(&id)
-            .filter(|p| p.as_path() != file && p.is_file())
-            .cloned();
+        let (taken, tied) = {
+            let s = self.files.lock();
+            let other = s
+                .by_id
+                .get(&id)
+                .filter(|p| p.as_path() != file && p.is_file())
+                .map(|p| p.display().to_string());
+            (other, s.by_id.contains_key(&id))
+        };
+        // A file never takes over a workflow made in the app.
+        let taken = match taken {
+            Some(other) => Some(other),
+            None if !tied && id != derived_id(name, file) => {
+                let w = id.clone();
+                let stored = self
+                    .db
+                    .run(move |s| s.call("dbGetWorkflow", json!([w])).ok())
+                    .await
+                    .flatten()
+                    .is_some_and(|v| v.is_object());
+                stored.then(|| "a workflow made in the app".to_owned())
+            }
+            None => None,
+        };
         if let Some(other) = taken {
             let mut s = self.files.lock();
             s.errors.insert(
                 file.to_owned(),
                 vec![format!(
-                    "{}: its id {id} is the workflow of {} already",
+                    "{}: its id {id} is the workflow of {other} already",
                     file.display(),
-                    other.display()
                 )],
             );
             if let Some(at) = at {
@@ -346,13 +362,15 @@ impl Work {
             }
             None => theirs.clone(),
         };
-        let stored = met.clone();
-        let changed = self
+        let (stored, w) = (met.clone(), id.clone());
+        let (changed, row) = self
             .db
-            .run(move |s| upsert(s, &stored))
+            .run(move |s| {
+                let changed = upsert(s, &stored).unwrap_or(false);
+                (changed, s.call("dbGetWorkflow", json!([w])).ok())
+            })
             .await
-            .flatten()
-            .unwrap_or(false);
+            .unwrap_or((false, None));
         let mut at = at;
         if met != theirs {
             let text = vorn_workflow_file::update(&text, &met, &bindings);
@@ -360,18 +378,41 @@ impl Work {
                 at = stamp(file);
             }
         }
-        let mut s = self.files.lock();
-        s.by_id.insert(id.clone(), file.to_owned());
-        s.base.insert(file.to_owned(), met);
-        if let Some(at) = at {
-            s.stamps.insert(file.to_owned(), at);
+        // The base is the row as stored, defaults and all, so a plain edit of the file meets nothing.
+        let base = row.filter(Value::is_object).map(as_file).unwrap_or(met);
+        let renamed: Vec<String> = {
+            let mut s = self.files.lock();
+            let renamed: Vec<String> = s
+                .by_id
+                .iter()
+                .filter(|(other, p)| p.as_path() == file && **other != id)
+                .map(|(other, _)| other.clone())
+                .collect();
+            for other in &renamed {
+                s.by_id.remove(other);
+            }
+            s.by_id.insert(id.clone(), file.to_owned());
+            s.base.insert(file.to_owned(), base);
+            if let Some(at) = at {
+                s.stamps.insert(file.to_owned(), at);
+            }
+            s.errors.remove(file);
+            self.files.keep(&s);
+            renamed
+        };
+        // The file now names another id: the workflow it named before goes.
+        for other in &renamed {
+            let w = other.clone();
+            self.db
+                .run(move |s| {
+                    let _ = s.call("dbDeleteWorkflow", json!([w]));
+                })
+                .await;
         }
-        s.errors.remove(file);
-        self.files.keep(&s);
         if changed {
             info!(file = %file.display(), workflow = %id, "a workflow was read from its file");
         }
-        changed
+        changed || !renamed.is_empty()
     }
 
     /// Writes workflow `id` back to its file, when it came from one,

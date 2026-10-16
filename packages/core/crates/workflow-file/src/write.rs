@@ -183,8 +183,7 @@ impl Writer<'_> {
             self.edge(out, &edges[i]);
             rebuilt.push(i);
         }
-        // A reader rebuilds edges in node order; where they were stored in
-        // another, the stored order is said as the rebuilt edges' places.
+        // Edges stored out of node order keep their order in an `edge-order` line.
         let in_order = rebuilt.iter().enumerate().all(|(at, i)| at == *i);
         if !in_order {
             let mut place = vec![0usize; rebuilt.len()];

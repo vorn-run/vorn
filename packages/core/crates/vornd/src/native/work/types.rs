@@ -92,17 +92,15 @@ fn providers(native: &Native) -> Vec<Provider> {
     out
 }
 
-/// Declares every provider that is on into `registry`, and marks the types
-/// of those that are off unavailable.
+/// Declares every provider into `registry`, the built-ins first so their
+/// types stay theirs, and marks unavailable the types of those that are off
+/// or gone.
 pub fn sync(native: &Native, registry: &Registry<VorndHost>) {
     let steps: HashMap<&str, Arc<dyn Step<VorndHost>>> =
         vorn_workflows::steps().into_iter().collect();
     let none = HashMap::new();
-    for p in providers(native) {
-        if !p.on {
-            registry.switch_off(&p.manifest.id);
-            continue;
-        }
+    let listed = providers(native);
+    for p in &listed {
         let local = if p.manifest.id == vorn_workflows::ID {
             &steps
         } else {
@@ -113,7 +111,18 @@ pub fn sync(native: &Native, registry: &Registry<VorndHost>) {
             let text = std::fs::read_to_string(dir.join(path)).ok()?;
             serde_json::from_str(&text).ok()
         };
-        vorn_workflows::declare::declare(registry, &p.manifest, &p.docs, local, &schema);
+        let taken =
+            vorn_workflows::declare::declare(registry, &p.manifest, &p.docs, local, &schema, p.on);
+        if !taken.is_empty() {
+            warn!(extension = %p.manifest.id, ?taken, "workflow types another extension declares were left with it");
+        }
+    }
+    for gone in registry
+        .providers()
+        .into_keys()
+        .filter(|id| !listed.iter().any(|p| p.manifest.id == *id))
+    {
+        registry.switch_off(&gone);
     }
     registry.set_fallback(Some(vorn_workflows::FALLBACK));
 }

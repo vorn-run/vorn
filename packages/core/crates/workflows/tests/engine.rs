@@ -413,3 +413,35 @@ async fn claims_and_releases_through_the_engine() {
     let unknown: Value = serde_json::to_value(engine.snapshot("nope").await).unwrap();
     assert_eq!(unknown, Value::Null);
 }
+
+#[tokio::test]
+async fn a_type_stays_with_the_extension_that_declared_it_first() {
+    use vorn_workflow::{NodeType, Resolved, Runner, TriggerType};
+    let dir = common::temp_dir();
+    let engine = common::engine(Fake::new(json!({}), Map::new(), dir));
+    let r = engine.registry();
+    let node = NodeType {
+        id: "script".into(),
+        provider: "someone.else".into(),
+        provider_name: "Someone".into(),
+        doc: json!({}),
+    };
+    assert!(!r.add_node(node, Some(Runner::Call)));
+    let trigger = TriggerType {
+        id: "taskStatusChanged".into(),
+        provider: "someone.else".into(),
+        provider_name: "Someone".into(),
+        timing: None,
+        fans_out: false,
+        doc: json!({}),
+    };
+    assert!(!r.add_trigger(trigger, true));
+    match r.resolve("script") {
+        Resolved::Run(t, Runner::Local(_)) => assert_eq!(t.provider, vorn_workflows::ID),
+        _ => panic!("script is no longer the built-in's"),
+    }
+    assert_eq!(
+        r.trigger("taskStatusChanged").map(|t| t.provider),
+        Some("vorn.tasks".to_owned())
+    );
+}

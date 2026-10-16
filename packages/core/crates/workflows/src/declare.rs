@@ -29,19 +29,22 @@ fn doc_from(node: &vorn_extensions::manifest::workflows::NodeDecl, schema: Optio
     })
 }
 
-/// Declares what `manifest` contributes to workflows. A node type's doc is
-/// `docs[id]` when given, else built from the manifest and `schema(path)`;
-/// it runs by `steps[id]` in vornd when given, else by a call to the
-/// extension.
+/// Declares what `manifest` contributes to workflows, available when `on`.
+/// A node type's doc is `docs[id]` when given, else built from the manifest
+/// and `schema(path)`; it runs by `steps[id]` in vornd when given, else by a
+/// call to the extension. Returns the ids another extension already holds,
+/// which stay theirs.
 pub fn declare<H: Host>(
     registry: &Registry<H>,
     manifest: &Manifest,
     docs: &Map<String, Value>,
     steps: &HashMap<&str, Arc<dyn Step<H>>>,
     schema: &dyn Fn(&str) -> Option<Value>,
-) {
+    on: bool,
+) -> Vec<String> {
+    let mut taken = Vec::new();
     let Some(c) = &manifest.contributes else {
-        return;
+        return taken;
     };
     for node in c.nodes() {
         let id = node.base.id.as_str();
@@ -59,19 +62,19 @@ pub fn declare<H: Host>(
             }
             d.insert("extension".into(), json!(manifest.id));
         }
-        let runner = match steps.get(id) {
+        let runner = on.then(|| match steps.get(id) {
             Some(step) => Runner::Local(Arc::clone(step)),
             None => Runner::Call,
+        });
+        let node = NodeType {
+            id: id.to_owned(),
+            provider: manifest.id.clone(),
+            provider_name: manifest.name.clone(),
+            doc,
         };
-        registry.add_node(
-            NodeType {
-                id: id.to_owned(),
-                provider: manifest.id.clone(),
-                provider_name: manifest.name.clone(),
-                doc,
-            },
-            runner,
-        );
+        if !registry.add_node(node, runner) {
+            taken.push(id.to_owned());
+        }
     }
     for trigger in c.triggers() {
         let mut doc = json!({ "title": trigger.base.title, "extension": manifest.id });
@@ -84,7 +87,7 @@ pub fn declare<H: Host>(
         if let Some(schema) = trigger.config.as_deref().and_then(schema) {
             doc["configSchema"] = schema;
         }
-        registry.add_trigger(TriggerType {
+        let declared = TriggerType {
             id: trigger.base.id.clone(),
             provider: manifest.id.clone(),
             provider_name: manifest.name.clone(),
@@ -95,8 +98,12 @@ pub fn declare<H: Host>(
             }),
             fans_out: trigger.poll,
             doc,
-        });
+        };
+        if !registry.add_trigger(declared, on) {
+            taken.push(trigger.base.id.clone());
+        }
     }
+    taken
 }
 
 /// The built-in's manifest, read.
@@ -109,8 +116,13 @@ pub fn manifest() -> Manifest {
 /// no extension declares run as its agent step.
 pub fn declare_builtin<H: Host>(registry: &Registry<H>) {
     let steps: HashMap<&str, Arc<dyn Step<H>>> = crate::steps().into_iter().collect();
-    declare(registry, &manifest(), &crate::node_docs(), &steps, &|_| {
-        None
-    });
+    declare(
+        registry,
+        &manifest(),
+        &crate::node_docs(),
+        &steps,
+        &|_| None,
+        true,
+    );
     registry.set_fallback(Some(crate::FALLBACK));
 }

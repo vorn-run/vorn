@@ -11,6 +11,8 @@ packages/core/crates/protocol/schema/store.json
 packages/core/crates/mcp/generated/
 packages/core/crates/connectors/generated/
 packages/core/crates/tasks/generated/
+packages/core/crates/workflow/generated/
+packages/core/crates/workflows/generated/
 # Generated from the extension WIT by vorn-extensions' build script, checked the same way.
 packages/core/crates/extensions/wit/stdio.json
 

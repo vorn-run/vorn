@@ -427,6 +427,7 @@ pub fn engine(fake: Fake) -> Engine<Fake> {
             &docs,
             &std::collections::HashMap::new(),
             &|_| None,
+            true,
         );
     }
     engine

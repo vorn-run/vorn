@@ -102,10 +102,14 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
 
     it('changes the workflow when its file is edited', async () => {
       const file = path.join(folder, 'review.kdl')
-      fs.writeFileSync(file, REVIEW.replace('echo checked', 'echo edited'))
+      const edited = REVIEW.replace('echo checked', 'echo edited')
+      fs.writeFileSync(file, edited)
       await until('the edit to be read', async () =>
         JSON.stringify(await workflow('file-review')).includes('echo edited')
       )
+      // A plain edit of the file is read, never written back.
+      await new Promise((r) => setTimeout(r, 1_500))
+      expect(fs.readFileSync(file, 'utf-8')).toBe(edited)
       await client.result('workflow:run', { workflowId: 'file-review' })
       const runs = await finished('file-review', 2)
       expect(output(runs[0], 'say')).toBe('said edited\n')
@@ -180,6 +184,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       const nodes = (await workflow('shared'))!.nodes as Array<{ config: Json }>
       expect(nodes[1].config.connectionId).toBe(conn.id)
       fs.rmSync(path.join(folder, 'shared.kdl'))
+      await until('the shared file to go', async () => (await workflow('shared')) === null)
     })
 
     it('saves a workflow made in Vorn to a file in one call', async () => {
@@ -261,6 +266,54 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       const wrong = run([good, bad])
       expect(wrong.status).toBe(1)
       expect(wrong.stderr).toContain(`${bad}:3:26: unknown property lable=; did you mean label=?`)
+    })
+
+    it('keeps a workflow made in Vorn from a file naming its id, and drops the old one when a file changes id', async () => {
+      await client.result('workflow:create', {
+        workflow: {
+          id: 'mine',
+          name: 'Mine',
+          icon: 'Zap',
+          iconColor: '#ffffff',
+          enabled: true,
+          nodes: [
+            {
+              id: 't',
+              type: 'trigger',
+              label: 'T',
+              position: { x: 0, y: 0 },
+              config: { triggerType: 'manual' }
+            }
+          ],
+          edges: []
+        }
+      })
+      const thief = path.join(folder, 'thief.kdl')
+      fs.writeFileSync(
+        thief,
+        'workflow "Not mine" {\n    id "mine"\n    trigger "manual" id="t"\n}\n'
+      )
+      await until('the file to be refused', async () => {
+        const files = await client.result<{ errors: Array<{ errors: string[] }> }>('workflow:files')
+        return files.errors.some((e) => e.errors.some((m) => m.includes('its id mine')))
+      })
+      expect((await workflow('mine'))!.name).toBe('Mine')
+
+      fs.writeFileSync(
+        thief,
+        'workflow "Renamed" {\n    id "first"\n    trigger "manual" id="t"\n}\n'
+      )
+      await until('the first id', async () => !!(await workflow('first')))
+      fs.writeFileSync(
+        thief,
+        'workflow "Renamed" {\n    id "second"\n    trigger "manual" id="t"\n}\n'
+      )
+      await until('the second id, and the first gone', async () => {
+        return !!(await workflow('second')) && (await workflow('first')) === null
+      })
+      fs.rmSync(thief)
+      await until('the file gone', async () => (await workflow('second')) === null)
+      expect((await workflow('mine'))!.name).toBe('Mine')
     })
 
     it('takes a workflow away when its file is removed', async () => {

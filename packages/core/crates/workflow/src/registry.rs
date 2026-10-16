@@ -137,39 +137,44 @@ impl<H: Host> Registry<H> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Declares `node` with the runner its steps run by; a type declared
-    /// before keeps its place in the list.
-    pub fn add_node(&self, node: NodeType, runner: Runner<H>) {
+    /// Declares `node`, run by `runner` or unavailable while `None`; a type
+    /// keeps its place, and stays with the extension that declared it first.
+    pub fn add_node(&self, node: NodeType, runner: Option<Runner<H>>) -> bool {
         let mut inner = self.write();
         match inner.nodes.iter_mut().find(|e| e.declared.id == node.id) {
+            Some(e) if e.declared.provider != node.provider => return false,
             Some(e) => {
                 e.declared = node;
-                e.runner = Some(runner);
+                e.runner = runner;
             }
             None => inner.nodes.push(Entry {
                 declared: node,
-                runner: Some(runner),
+                runner,
             }),
         }
+        true
     }
 
-    /// Declares `trigger`; a type declared before keeps its place.
-    pub fn add_trigger(&self, trigger: TriggerType) {
+    /// Declares `trigger`, available when `on`; as [`Registry::add_node`].
+    pub fn add_trigger(&self, trigger: TriggerType, on: bool) -> bool {
         let mut inner = self.write();
+        let runner = on.then_some(());
         match inner
             .triggers
             .iter_mut()
             .find(|e| e.declared.id == trigger.id)
         {
+            Some(e) if e.declared.provider != trigger.provider => return false,
             Some(e) => {
                 e.declared = trigger;
-                e.runner = Some(());
+                e.runner = runner;
             }
             None => inner.triggers.push(Entry {
                 declared: trigger,
-                runner: Some(()),
+                runner,
             }),
         }
+        true
     }
 
     /// The node type a step of a type nobody declares runs as, as steps of

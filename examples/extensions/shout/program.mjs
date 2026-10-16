@@ -1,6 +1,4 @@
-// Shout: a workflow step. Vorn calls `workflow.node.shout` with the step's
-// config (templates already expanded) and its run's context; the answer is
-// the step's state. One JSON-RPC message per line.
+// Answers `workflow.node.shout` over line-delimited JSON-RPC; see README.md.
 import process from 'node:process'
 import readline from 'node:readline'
 

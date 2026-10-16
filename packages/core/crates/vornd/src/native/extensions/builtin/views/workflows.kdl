@@ -1,6 +1,4 @@
-// The workflow being edited: a card per step, an edge per link between
-// steps. The client lays the canvas out and fills these rows from the
-// workflow it holds.
+// The edited workflow: a card per step and an edge per link, filled by the client.
 schema "vorn:view@1"
 
 rows "steps" {
