@@ -16,12 +16,14 @@ pub mod config;
 pub mod credential;
 pub mod desktop;
 pub mod env;
+pub mod event_stream;
 pub mod extensions;
 pub mod file;
 pub mod git;
 pub mod headless;
 pub mod hooks;
 pub mod ide;
+pub mod layout;
 pub mod reach;
 pub mod remote;
 pub mod script;
@@ -147,6 +149,7 @@ pub enum Route {
     Credential,
     Hooks,
     Extensions,
+    Layout,
     Work,
     Connectors,
     /// The calls vornd answers on its blocking threads ([`METHODS`]).
@@ -162,6 +165,7 @@ const ROUTES: &[(&[&str], Route)] = &[
     (credential::METHODS, Route::Credential),
     (hooks::METHODS, Route::Hooks),
     (extensions::METHODS, Route::Extensions),
+    (layout::METHODS, Route::Layout),
     (work::METHODS, Route::Work),
     (
         &["connector:inboxComplete", "connector:inboxRenew"],
@@ -625,6 +629,10 @@ impl Native {
             Some(Route::Script) => return script::execute(self, params).await,
             Some(Route::Credential) => return credential::answer(self, &method, params).await,
             Some(Route::Hooks) => return hooks::answer(self, &method, &params),
+            Some(Route::Layout) => {
+                // It starts sessions through this very call, so its future is boxed.
+                return Box::pin(layout::answer(self, &method, params, viewer)).await;
+            }
             Some(Route::Extensions) => {
                 let Some(host) = self.extensions.get().cloned() else {
                     // The built-ins' tools need no extension host.
@@ -875,7 +883,19 @@ impl Native {
         let records = |list: Vec<Value>| Answer::Result(Value::Array(list));
         registry
             .read(|r| match method {
-                "terminal:listActive" => records(r.terminals().into_iter().map(json_of).collect()),
+                "terminal:listActive" => records(
+                    r.terminals()
+                        .into_iter()
+                        .map(|t| {
+                            let mut listed = json_of(t);
+                            // A terminal whose program ended stays listed; `ended` says so, for `vorn session wait`.
+                            if r.terminal(&t.id).is_some_and(|(_, ended)| ended) {
+                                listed["ended"] = Value::Bool(true);
+                            }
+                            listed
+                        })
+                        .collect(),
+                ),
                 "headless:list" => records(r.headless().map(json_of).collect()),
                 "worktree:activeSessions" => match params.as_str() {
                     Some(path) => {
@@ -987,6 +1007,8 @@ pub struct Conn {
     authed: AtomicBool,
     /// Who this connection is, as its credential says.
     viewer: Mutex<config::Viewer>,
+    /// The public events this connection asked to hear, if it did.
+    events: Mutex<Option<event_stream::Subscription>>,
 }
 
 impl Conn {
@@ -1003,6 +1025,7 @@ impl Conn {
             } else {
                 config::Viewer::Local
             }),
+            events: Mutex::new(None),
         })
     }
 
@@ -1035,6 +1058,10 @@ impl Conn {
             self.identify(text);
             return Offer::Taken;
         }
+        if method == event_stream::SUBSCRIBE {
+            self.stream_events(text);
+            return Offer::Taken;
+        }
         match request_of(text).filter(|_| self.native.answers(method)) {
             Some((id, params)) => {
                 self.answer(method.to_owned(), id, params);
@@ -1053,6 +1080,40 @@ impl Conn {
         }
     }
 
+    /// Opens this connection's queue on the public events, replacing one it had, and answers with the names it holds.
+    fn stream_events(&self, text: &str) {
+        let Some((id, params)) = request_of(text) else {
+            return;
+        };
+        // A paired phone or browser is not the CLI: what the events carry stays on this machine.
+        let local = matches!(
+            *self.viewer.lock().unwrap_or_else(|e| e.into_inner()),
+            config::Viewer::Local | config::Viewer::Desktop
+        );
+        let opened = if local {
+            // The old queue leaves the bus first: one owner holds one queue.
+            self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
+            event_stream::open(self.native.events(), self.id, &self.reply, &params)
+        } else {
+            Err("events are for the person at this computer".to_owned())
+        };
+        let frame = match opened {
+            Ok((subscription, events)) => {
+                // The answer goes first, so the client knows the queue is in place.
+                self.reply.send_now(&json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "result": { "ok": true, "v": event_stream::VERSION, "events": events },
+                }));
+                *self.events.lock().unwrap_or_else(|e| e.into_inner()) = Some(subscription);
+                return;
+            }
+            Err(message) => json!({
+                "jsonrpc": "2.0", "id": id, "error": { "code": -32602, "message": message },
+            }),
+        };
+        self.reply.send_now(&frame);
+    }
+
     /// Whether `text`, a frame without a method, answers a call vornd made
     /// of main; if so it is settled here.
     pub fn settle_desktop(&self, text: &str) -> bool {
@@ -1062,6 +1123,7 @@ impl Conn {
     /// The client's side closed: main's calls fail now if this was main.
     pub fn closed(&self) {
         self.native.main.release(self.id);
+        self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 
     /// A session this connection asked for is told so, before the answer

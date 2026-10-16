@@ -39,6 +39,7 @@ vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
 vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
+vorn-layout = { path = "../layout" }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }
 vorn-connectors = { path = "../connectors" }

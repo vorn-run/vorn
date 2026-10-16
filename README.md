@@ -103,8 +103,11 @@ and says where. If that folder is not on your PATH, the notice offers the fix.
 ```bash
 vorn session start --agent claude --prompt "fix the failing test"
 vorn session list
-vorn session logs <id>
-vorn session send <id> "run the tests"
+vorn session read <target>
+vorn session send <target> "run the tests"
+vorn session wait <target> --timeout 10m
+vorn events --json
+vorn layout open dev
 vorn workflow list
 vorn workflow run "Nightly review" --input pr=42
 vorn workflow stop <run>
@@ -114,6 +117,82 @@ vorn server serve          # a server on its own, without the app
 `vorn` on its own opens the app. `--json` gives machine-readable output on stdout, with
 notices and errors on stderr, so a command can be piped. Settings → General → Command-Line
 Tool shows where the command is, and installs or removes it.
+
+### Targets and exit codes
+
+Every command that takes a session reads its `<target>` the same way, and the first rule that
+matches decides:
+
+1. a whole session id;
+2. a label (the session's name), exactly, then ignoring case;
+3. a position: `3` is the third session in `vorn session list`;
+4. the start or the end of an id.
+
+A rule that matches several sessions is ambiguous. The command lists the candidates on stderr
+(with `--json`, on stdout as `{"error":"ambiguous","candidates":[...]}`) and exits 3. A command
+that creates something prints its new id, and `--json` returns it.
+
+| Code | Meaning                                          |
+| ---- | ------------------------------------------------ |
+| 0    | Done                                             |
+| 1    | Failed                                           |
+| 2    | The command line was wrong                       |
+| 3    | A target matched more than one session or layout |
+| 4    | No server could be reached or started            |
+| 124  | `session wait --timeout` passed first            |
+
+### Waiting, reading and events
+
+`vorn session wait <target>` blocks until the session's program exits and exits with its code;
+`--json` prints the exit record. `--timeout 30s` (also `5m`, `1500ms`; a bare number is seconds)
+gives up with 124. `--status idle|done|blocked` waits for the program's status instead, as the
+app shows it (the program's own report, then hooks, then the screen rules). It waits on the
+server's events and never polls.
+
+`vorn session read <target>` prints the output the server kept. `--lines N` keeps the last N
+lines. `--scrollback`, `--unwrap` and `--format vt|html` read the terminal itself, with its
+soft-wrapped rows joined: `vt` keeps colours as SGR escapes and `html` draws them as spans in a
+`<pre>`. `--trim` drops trailing spaces and trailing blank lines. `session logs` is the same
+command.
+
+`vorn events --json` streams the server's public events, one JSON object per line, until
+stopped: `{"v":1,"event":"session.exited","at":1760000000000,"session":"…","data":{…}}`. The
+events are `session.created`, `session.status`, `session.exited`, `session.mark`,
+`session.program`, `agent.hook`, `git.changed`, `task.created` and `task.statusChanged`. `at` is
+milliseconds since the epoch and `session` is present for events about one. `--filter a,b` keeps
+those events; `--session <target>` keeps one session's. A client that falls behind is coalesced
+the way an extension is: only the latest `session.status` and `git.changed` of a batch.
+
+### Layouts
+
+A layout is a TOML file in `~/.vorn/layouts/` (the server's data directory), or one an
+extension offers with `[[contributes.layouts]]` and `file = "layouts/dev.toml"`. It is a tree:
+a split (`split = "horizontal"|"vertical"`, `ratio`, `[[children]]`) or one thing to open: a
+session (`agent = "claude"`, `command = ["tail", "-f", "app.log"]` or `shell = true`, with
+`cwd` and `label`) or `pane = "browser"` with a `url`.
+
+```toml
+name = "dev"
+project = "vorn"
+split = "horizontal"
+
+[[children]]
+agent = "claude"
+label = "agent"
+
+[[children]]
+command = ["tail", "-f", "app.log"]
+cwd = "logs"
+```
+
+`vorn layout list` shows them, `vorn layout open <name> [--project X]` starts the sessions
+through the same calls the app makes and prints their ids (3 when the name is ambiguous),
+`vorn layout save <name>` writes the project's open sessions, and `vorn layout check <file>`
+reports every mistake as `file:line: message`. The app lists layouts under Open Layout › in the
+command palette. Sessions start in tree order, which is the order the grid and tabs show them in.
+Split direction and ratio are kept in the file but the server does not size cards, so they do not
+change what opens; a `command` runs in a shell, which stays open when it ends; a `pane` opens
+beside the session before it and needs the app to be open.
 
 Workflows run in the server, so a run started here keeps going with nothing open — and a
 scheduled one happens whether or not the app is running.

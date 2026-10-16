@@ -6548,6 +6548,7 @@ dependencies = [
  "uuid",
  "vorn-app",
  "vorn-extensions",
+ "vorn-layout",
  "vorn-protocol",
  "vorn-spawn",
  "vorn-store",
@@ -6663,6 +6664,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+]
+
+[[package]]
+name = "vorn-layout"
+version = "0.0.0"
+dependencies = [
+ "toml 1.1.6+spec-1.1.0",
 ]
 
 [[package]]
@@ -6958,6 +6966,7 @@ dependencies = [
  "vorn-git",
  "vorn-grid-client",
  "vorn-hooks",
+ "vorn-layout",
  "vorn-logfile",
  "vorn-mcp",
  "vorn-pipeline",

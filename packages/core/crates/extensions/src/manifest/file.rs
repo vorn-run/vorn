@@ -387,6 +387,8 @@ struct RawContributes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     link_handlers: Vec<RawLink>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    layouts: Vec<RawLayout>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sidebar: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     badges: Vec<RawPoint>,
@@ -494,6 +496,19 @@ struct RawPane {
     command: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawLayout {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    file: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1231,6 +1246,27 @@ impl RawContributes {
             }
             footers.push(value);
         }
+        let mut layouts = Vec::new();
+        for (i, l) in self.layouts.iter().enumerate() {
+            let field = format!("contributes.layouts[{i}]");
+            let mut m = contribution_json(
+                &l.id,
+                l.title.as_ref(),
+                l.description.as_ref(),
+                l.when.as_ref(),
+                at,
+                &field,
+            )?;
+            m.insert("file".into(), json!(l.file));
+            let value = Value::Object(m);
+            if kept("layouts", value.clone()).is_none() {
+                return Err(at(
+                    &format!("{field}.file"),
+                    "is not a file under layouts/ ending in .toml".into(),
+                ));
+            }
+            layouts.push(value);
+        }
         let mut links = Vec::new();
         for (i, l) in self.link_handlers.iter().enumerate() {
             let field = format!("contributes.link_handlers[{i}]");
@@ -1309,6 +1345,7 @@ impl RawContributes {
             ("panes", panes),
             ("footers", footers),
             ("linkHandlers", links),
+            ("layouts", layouts),
         ] {
             if !list.is_empty() {
                 out.insert(key.into(), Value::Array(list));
@@ -1748,6 +1785,30 @@ header = "Authorization: Bearer {token}"
             parse(bare).unwrap_err().message,
             "declares no service, action, connector or contribution"
         );
+    }
+
+    #[test]
+    fn reads_layout_contributions_and_names_a_file_outside_layouts() {
+        let head = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[[contributes.layouts]]\nid = \"dev\"\ntitle = \"Dev\"\n";
+        let m = parse(&format!("{head}file = \"layouts/dev.toml\"\n")).unwrap();
+        let layouts = m.contributes.as_ref().unwrap().layouts();
+        assert_eq!(
+            (layouts[0].base.id.as_str(), layouts[0].file.as_str()),
+            ("dev", "layouts/dev.toml")
+        );
+        for bad in [
+            "../dev.toml",
+            "layouts/../dev.toml",
+            "dev.toml",
+            "layouts/dev.json",
+        ] {
+            let err = parse(&format!("{head}file = \"{bad}\"\n")).unwrap_err();
+            assert_eq!(
+                (err.line, err.field.as_str()),
+                (9, "contributes.layouts[0].file"),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

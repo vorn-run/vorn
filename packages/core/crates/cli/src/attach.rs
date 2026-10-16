@@ -4,13 +4,11 @@
 
 use std::path::PathBuf;
 
-use serde_json::Value;
-
 use crate::args::ClientArgs;
 use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
-use crate::js::field;
 use crate::output::Io;
+use crate::target::{self, Candidate, Miss};
 
 pub const ATTACH_USAGE: &str = "Usage
   vorn attach [<session>] [--data-dir <path>]
@@ -42,89 +40,41 @@ pub enum Outcome {
     Tui(Tui),
 }
 
-struct Listed {
-    id: String,
-    name: String,
-    created: f64,
-    terminal: bool,
-}
-
-fn listed(v: &Value, terminal: bool) -> Listed {
-    let s = |k| field(v, k).and_then(Value::as_str).unwrap_or("").to_owned();
-    Listed {
-        id: s("id"),
-        name: s("displayName"),
-        created: field(v, "createdAt").and_then(Value::as_f64).unwrap_or(0.0),
-        terminal,
-    }
-}
-
-/// The session `given` names in `vorn session list`'s order: a whole id, a
-/// unique prefix, a 1-based number or a display name. None picks the newest.
-fn pick(sessions: &[Listed], given: Option<&str>) -> Result<String, String> {
+/// The session `given` names by the rules in [`crate::target`]; none picks the newest terminal.
+fn pick(sessions: &[Candidate], given: Option<&str>) -> Result<String, CommandError> {
     let Some(given) = given.filter(|g| !g.is_empty()) else {
         return sessions
             .iter()
-            .filter(|s| s.terminal)
+            .filter(|s| !s.headless)
             .max_by(|a, b| a.created.total_cmp(&b.created))
             .map(|s| s.id.clone())
-            .ok_or_else(|| "no sessions running. Start one with: vorn session start".into());
+            .ok_or_else(|| {
+                CommandError::Refused(
+                    "no sessions running. Start one with: vorn session start".into(),
+                )
+            });
     };
-    let found = if let Some(s) = sessions.iter().find(|s| s.id == given) {
-        s
-    } else if let Some(s) = given
-        .parse::<usize>()
-        .ok()
-        .filter(|n| given.len() <= 3 && *n >= 1)
-        .and_then(|n| sessions.get(n - 1))
-    {
-        s
-    } else {
-        let by_id: Vec<&Listed> = sessions
-            .iter()
-            .filter(|s| s.id.starts_with(given))
-            .collect();
-        let by_name: Vec<&Listed> = sessions
-            .iter()
-            .filter(|s| s.name.eq_ignore_ascii_case(given))
-            .collect();
-        match (by_id.as_slice(), by_name.as_slice()) {
-            ([one], _) | ([], [one]) => *one,
-            ([], []) => return Err(format!("no session matches \"{given}\"")),
-            (many, _) if many.len() > 1 => {
-                return Err(format!("\"{given}\" matches {} sessions", many.len()))
-            }
-            (_, many) => return Err(format!("\"{given}\" names {} sessions", many.len())),
+    let found = match target::resolve(given, sessions) {
+        Ok(found) => found,
+        Err(Miss::None) => {
+            return Err(CommandError::Refused(format!(
+                "no session matches \"{given}\""
+            )))
+        }
+        Err(Miss::Ambiguous(found)) => {
+            return Err(CommandError::Ambiguous {
+                given: given.to_owned(),
+                found,
+            })
         }
     };
-    if !found.terminal {
-        return Err(format!(
+    if found.headless {
+        return Err(CommandError::Refused(format!(
             "{} is a headless session, which has no terminal to attach to",
             crate::output::short_id(&found.id)
-        ));
+        )));
     }
     Ok(found.id.clone())
-}
-
-async fn sessions(ctx: &Context<'_>) -> Result<Vec<Listed>, CommandError> {
-    let (terminals, headless) = ctx
-        .call_both("terminal:listActive", "headless:list")
-        .await
-        .map_err(CommandError::Call)?;
-    let items = |v: Value| match v {
-        Value::Array(v) => v,
-        _ => Vec::new(),
-    };
-    Ok(items(terminals)
-        .iter()
-        .map(|s| listed(s, true))
-        .chain(
-            items(headless)
-                .iter()
-                .filter(|s| field(s, "status").and_then(Value::as_str) == Some("running"))
-                .map(|s| listed(s, false)),
-        )
-        .collect())
 }
 
 /// `vorn attach [session]`, or `vorn` alone when `bare`.
@@ -160,7 +110,7 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
             focus: None,
         });
     }
-    let listed = match sessions(&ctx).await {
+    let listed = match crate::session::candidates(&ctx).await {
         Ok(listed) => listed,
         Err(err) => return Outcome::Exit(ctx.failed("could not list sessions", err)),
     };
@@ -169,10 +119,11 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
             data_dir,
             focus: Some(id),
         }),
-        Err(message) => {
+        Err(CommandError::Refused(message)) => {
             ctx.io.write_err(&format!("vorn: {message}\n"));
             Outcome::Exit(ExitCode::Failure)
         }
+        Err(err) => Outcome::Exit(ctx.error("could not attach", err)),
     }
 }
 
@@ -194,28 +145,40 @@ pub fn open(tui: &Tui) -> ExitCode {
 mod tests {
     use super::*;
 
-    fn s(id: &str, name: &str, created: f64, terminal: bool) -> Listed {
-        Listed {
+    fn s(id: &str, name: &str, created: f64, headless: bool) -> Candidate {
+        Candidate {
             id: id.into(),
-            name: name.into(),
+            label: name.into(),
+            agent: String::new(),
+            project: String::new(),
+            headless,
             created,
-            terminal,
         }
     }
 
     #[test]
-    fn picks_by_id_prefix_number_name_or_newest() {
+    fn picks_by_the_shared_rules_or_the_newest() {
         let all = [
-            s("aaaa1111", "build", 10.0, true),
-            s("bbbb2222", "", 30.0, true),
-            s("cccc3333", "", 50.0, false),
+            s("aaaa1111", "build", 10.0, false),
+            s("bbbb2222", "", 30.0, false),
+            s("cccc3333", "", 50.0, true),
         ];
-        assert_eq!(pick(&all, None).as_deref(), Ok("bbbb2222"));
-        assert_eq!(pick(&all, Some("aaaa")).as_deref(), Ok("aaaa1111"));
-        assert_eq!(pick(&all, Some("2")).as_deref(), Ok("bbbb2222"));
-        assert_eq!(pick(&all, Some("Build")).as_deref(), Ok("aaaa1111"));
-        assert!(pick(&all, Some("3")).unwrap_err().contains("headless"));
-        assert!(pick(&all, Some("zz")).unwrap_err().contains("no session"));
+        assert_eq!(pick(&all, None).unwrap(), "bbbb2222");
+        assert_eq!(pick(&all, Some("aaaa")).unwrap(), "aaaa1111");
+        assert_eq!(pick(&all, Some("2")).unwrap(), "bbbb2222");
+        assert_eq!(pick(&all, Some("Build")).unwrap(), "aaaa1111");
+        assert!(pick(&all, Some("3"))
+            .unwrap_err()
+            .to_string()
+            .contains("headless"));
+        assert!(pick(&all, Some("zz"))
+            .unwrap_err()
+            .to_string()
+            .contains("no session"));
+        assert!(matches!(
+            pick(&all, Some("a")),
+            Ok(_) | Err(CommandError::Ambiguous { .. })
+        ));
         assert!(pick(&[], None).is_err());
     }
 }

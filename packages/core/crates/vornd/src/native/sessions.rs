@@ -260,9 +260,34 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             None => bad_params(method),
         },
         "shell:create" => match params {
-            Value::Null => shell_create(native, None),
-            Value::String(cwd) if cwd.is_empty() => shell_create(native, None),
-            Value::String(cwd) if Path::new(cwd).is_absolute() => shell_create(native, Some(cwd)),
+            Value::Null => shell_create(native, &ShellAsk::default()),
+            Value::String(cwd) if cwd.is_empty() => shell_create(native, &ShellAsk::default()),
+            Value::String(cwd) if Path::new(cwd).is_absolute() => shell_create(
+                native,
+                &ShellAsk {
+                    cwd: Some(cwd),
+                    ..ShellAsk::default()
+                },
+            ),
+            // `{cwd, command?, displayName?}`: a layout's shell, with the line it types and its name.
+            Value::Object(o) => {
+                let text = |k: &str| o.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+                let cwd = text("cwd");
+                if o.keys()
+                    .any(|k| !["cwd", "command", "displayName"].contains(&k.as_str()))
+                    || cwd.is_some_and(|c| !Path::new(c).is_absolute())
+                {
+                    return bad_params(method);
+                }
+                shell_create(
+                    native,
+                    &ShellAsk {
+                        cwd,
+                        command: text("command"),
+                        name: text("displayName"),
+                    },
+                )
+            }
             _ => bad_params(method),
         },
         _ => match asked(method, params) {
@@ -1469,9 +1494,19 @@ fn prepare(
     Ok(out)
 }
 
+/// What `shell:create` is asked for.
+#[derive(Debug, Default)]
+struct ShellAsk<'a> {
+    cwd: Option<&'a str>,
+    /// A line typed into the shell once it is up.
+    command: Option<&'a str>,
+    name: Option<&'a str>,
+}
+
 /// `shell:create`: a login shell in `cwd`, or the home directory, with its
 /// integration, numbered after the shells there are.
-fn shell_create(native: &Native, cwd: Option<&str>) -> Answer {
+fn shell_create(native: &Native, ask: &ShellAsk<'_>) -> Answer {
+    let cwd = ask.cwd;
     if let Some(answer) = unstartable(native) {
         return answer;
     }
@@ -1507,11 +1542,19 @@ fn shell_create(native: &Native, cwd: Option<&str>) -> Answer {
         return not_ready();
     };
     let record = TerminalSession {
-        display_name: Some(format!("Shell {}", count + 1)),
+        display_name: Some(
+            ask.name
+                .map_or_else(|| format!("Shell {}", count + 1), str::to_owned),
+        ),
         shell_cwd: Some(dir.clone()),
         ..skeleton(&id, "shell", &project_name, &dir)
     };
-    register(native, record, &dir, argv, env, Input::None, Made::Created)
+    // A line to run is typed once the shell has drawn its prompt, as an agent's launch line is.
+    let input = match ask.command {
+        Some(line) => Input::Typed(format!("{line}\r").into_bytes()),
+        None => Input::None,
+    };
+    register(native, record, &dir, argv, env, input, Made::Created)
 }
 
 /// Sets `key` in `env`, replacing a value it had, as an object spread does.
