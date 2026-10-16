@@ -9,7 +9,7 @@ cd "$here"
 xcodegen generate --quiet
 for t in Drawn Native; do
   nice -n 10 xcodebuild -quiet -project VornPhone.xcodeproj -scheme "$t" -configuration Release \
-    -destination generic/platform=iOS -derivedDataPath build build
+    -destination generic/platform=iOS -derivedDataPath build VORN_HOST="${VORN_HOST:-}" build
 done
 if [ -n "${PROFILE:-}" ]; then
   security cms -D -i "$PROFILE" > build/profile.plist
@@ -22,7 +22,7 @@ if [ -n "${PROFILE:-}" ]; then
   [ -n "$cert" ] || { echo "no identity in the keychain matches the profile" >&2; exit 1; }
   for app in build/Build/Products/Release-iphoneos/*.app; do
     cp "$PROFILE" "$app/embedded.mobileprovision"
-    codesign -f -s "$cert" --entitlements build/entitlements.plist "$app"
+    codesign -f -s "$cert" --keychain "$HOME/Library/Keychains/login.keychain-db" --entitlements build/entitlements.plist "$app"
   done
 fi
 for app in build/Build/Products/Release-iphoneos/*.app; do

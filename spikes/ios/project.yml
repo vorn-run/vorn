@@ -36,6 +36,9 @@ targetTemplates:
         LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: Connects to Vorn on your computer.
         UIUserInterfaceStyle: Dark
+        VornHost: $(VORN_HOST)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
 targets:
   Drawn:
     templates: [Phone]

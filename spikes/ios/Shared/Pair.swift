@@ -19,27 +19,62 @@ struct Paired<Content: View>: View {
 }
 
 struct PairForm: View {
-    @State private var host = ""
-    @State private var token = ""
+    @State private var host = Bundle.main.object(forInfoDictionaryKey: "VornHost") as? String ?? ""
+    @State private var code = ""
+    @State private var note = ""
+    @State private var busy = false
     let done: (String, String) -> Void
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("192.168.0.14:7777", text: $host)
+                    TextField("192.168.0.14:56097", text: $host)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Device token", text: $token)
+                    TextField("Pairing code", text: $code)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
                 } footer: {
-                    Text("The address and a token from Settings › Devices on your computer.")
+                    Text(note.isEmpty ? "The code from Settings › Devices on your computer, in any case, with or without hyphens. Approve the request there." : note)
                 }
             }
             .navigationTitle("Pair")
             .toolbar {
-                Button("Connect") { done(host, token) }.disabled(host.isEmpty)
+                Button(busy ? "Waiting…" : "Connect") { Task { await pair() } }
+                    .disabled(host.isEmpty || code.isEmpty || busy)
             }
+        }
+    }
+
+    private func post(_ path: String, _ body: [String: Any]) async throws -> [String: Any] {
+        var req = URLRequest(url: URL(string: "http://\(host)\(path)")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, _) = try await URLSession.shared.data(for: req)
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    private func pair() async {
+        busy = true; defer { busy = false }
+        do {
+            let r = try await post("/api/pair/redeem", ["code": code, "deviceName": UIDevice.current.name])
+            guard let id = r["requestId"] as? String else { note = "Refused: \(r["error"] ?? "unknown")"; return }
+            note = "Approve this phone in Vorn on your computer."
+            for _ in 0..<120 {
+                let p = try await post("/api/pair/poll", ["requestId": id])
+                switch p["status"] as? String {
+                case "approved": if let t = p["token"] as? String { done(host, t) }; return
+                case "denied": note = "Denied on the computer."; return
+                case "expired": note = "The code expired; make a new one."; return
+                default: try await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+            }
+            note = "No answer from the computer."
+        } catch {
+            note = "Can't reach \(host): \(error.localizedDescription)"
         }
     }
 }
