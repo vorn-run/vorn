@@ -1324,7 +1324,7 @@ pub fn activation(value: Option<&Value>) -> Option<Activation> {
         remote_host: bounded_names(value.get("remoteHost")),
         agent: bounded_names(value.get("agent"))
             .into_iter()
-            .filter(|a| a == "shell" || vorn_agents::spec::valid_id(a))
+            .filter(|a| a == "shell" || vorn_agents::is_known(a))
             .collect(),
         platform: bounded_names(value.get("platform"))
             .into_iter()
@@ -1824,6 +1824,7 @@ mod tests {
 
     #[test]
     fn reads_what_an_extension_contributes() {
+        crate::testing::agents();
         let m = manifest(json!({
             "id": "x", "name": "X", "kind": "extension", "version": "1.2.0",
             "permissions": ["git.read", "git.read", "root", "agent.usage"],

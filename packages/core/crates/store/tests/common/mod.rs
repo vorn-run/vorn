@@ -13,19 +13,34 @@ const SEED_WORKFLOWS: &str = include_str!("../../../vornd/src/serve/seed-workflo
 pub const DEFAULT_TASK_WORKFLOW_ID: &str = "system:default-task-workflow";
 pub const DEV_SERVER_WORKFLOW_ID: &str = "system:dev-server-on-restore";
 
-/// The app's agent commands (`DEFAULT_AGENT_COMMANDS`).
+/// The agents Vorn ships switched on, in the launcher's order: the ones
+/// whose answers the recorded store answers name.
+pub fn shipped() -> Vec<vorn_agents::Agent> {
+    vorn_adapters::shipped()
+        .iter()
+        .filter(|s| s.on_by_default)
+        .filter_map(|s| vorn_agents::from_manifest_text(s.manifest).ok().flatten())
+        .collect()
+}
+
+/// The id of the `n`th agent Vorn ships.
+pub fn agent(n: usize) -> String {
+    shipped()[n].id().to_owned()
+}
+
+/// The app's agent commands (`DEFAULT_AGENT_COMMANDS`): each shipped agent's default.
 pub fn default_agent_commands() -> Map<String, Value> {
-    let commands = json!({
-        "acme": { "command": "acme", "args": [], "headlessArgs": ["--dangerously-skip-permissions"] },
-        "epsilon": { "command": "epsilon", "args": [], "headlessArgs": ["--allow-all"] },
-        "beta": { "command": "beta", "args": [], "headlessArgs": ["-a", "never"] },
-        "delta": { "command": "delta", "args": [] },
-        "gamma": { "command": "gamma", "args": [], "headlessArgs": ["-y"] }
-    });
-    match commands {
-        Value::Object(map) => map,
-        _ => unreachable!("an object literal"),
-    }
+    shipped()
+        .iter()
+        .map(|a| {
+            let c = a.default_command();
+            let mut entry = json!({ "command": c.command, "args": c.args });
+            if let Some(h) = c.headless_args {
+                entry["headlessArgs"] = json!(h);
+            }
+            (a.id().to_owned(), entry)
+        })
+        .collect()
 }
 
 fn seed_workflows() -> Vec<SeedWorkflow> {

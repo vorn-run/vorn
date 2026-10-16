@@ -192,6 +192,7 @@ mod tests {
 
     #[test]
     fn matches_agent_platform_and_remote() {
+        crate::testing::agents();
         let dir = Path::new("/");
         let s = subject(dir, Some("github.com"));
         assert!(matches(
@@ -217,6 +218,7 @@ mod tests {
 
     #[test]
     fn shows_what_each_rule_lets_through() {
+        crate::testing::agents();
         let root = tempfile::tempdir().unwrap();
         install(
             root.path(),

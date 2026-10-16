@@ -33,4 +33,4 @@ pattern = "\\b[A-Z]+-\\d+\\b"
 example = "ABC-1"
 
 [activates]
-agent = ["acme"]
+agent = ["claude"]

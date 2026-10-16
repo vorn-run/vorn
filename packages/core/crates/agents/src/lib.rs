@@ -28,7 +28,7 @@ pub mod status;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 
 use vorn_analysis::rules::Rules;
 
@@ -46,7 +46,9 @@ struct Inner {
 }
 
 impl Agent {
-    /// The agent `spec` describes, once [`AgentSpec::check`] passed.
+    /// The agent `spec` describes, once [`AgentSpec::check`] passed. From
+    /// then on its id is one Vorn knows ([`is_known`]) and the variables it
+    /// sets in its sessions are stripped from every process Vorn starts.
     pub fn new(spec: AgentSpec) -> Result<Agent, SpecError> {
         spec.check()?;
         let rules = (!spec.status.is_empty())
@@ -56,6 +58,14 @@ impl Agent {
                 field: "agent.status".to_owned(),
                 message: e.to_string(),
             })?;
+        if let Some(env) = &spec.env {
+            launch::env::add_markers(&env.strip, &env.strip_prefixes);
+        }
+        let mut known = KNOWN.write().unwrap_or_else(PoisonError::into_inner);
+        if !known.contains(&spec.id) {
+            known.push(spec.id.clone());
+        }
+        drop(known);
         Ok(Agent(Arc::new(Inner { spec, rules })))
     }
 
@@ -136,6 +146,19 @@ impl fmt::Debug for Agent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Agent({})", self.id())
     }
+}
+
+/// Every agent id an adapter read in this process has named, on or off.
+static KNOWN: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Whether an adapter Vorn read names agent `id`, switched on or not: a
+/// manifest's activation rule naming any other is one this Vorn cannot match.
+pub fn is_known(id: &str) -> bool {
+    KNOWN
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .any(|k| k == id)
 }
 
 /// The agents a host runs, in the order the launcher lists them. A shell is
@@ -256,6 +279,7 @@ mod tests {
         assert_eq!(agents.len(), 2);
         assert_eq!(agents.get("one"), Some(&a));
         assert!(agents.get("shell").is_none());
+        assert!(is_known("one") && !is_known("never-read"));
         assert_eq!(agents.first(), Some(&a));
         assert!(Agents::default().first().is_none());
     }

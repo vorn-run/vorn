@@ -147,7 +147,7 @@ async fn sends_input_with_enter_and_kills_by_prefix() {
     assert_eq!((code, err.as_str()), (0, ""));
     assert_eq!(
         out,
-        "ID        AGENT   PROJECT  BRANCH  STATUS\nc3f1a2e8  acme  vorn     -       running\n9b4d0117  beta   web      -       running\n"
+        "ID        AGENT  PROJECT  BRANCH  STATUS\nc3f1a2e8  acme   vorn     -       running\n9b4d0117  beta   web      -       running\n"
     );
 
     let (code, out, err) = vorn(port, &["session", "kill", "9b4d"]).await;

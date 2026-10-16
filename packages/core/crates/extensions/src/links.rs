@@ -65,6 +65,7 @@ mod tests {
 
     #[test]
     fn offers_the_handlers_whose_pattern_matches() {
+        crate::testing::agents();
         let root = tempfile::tempdir().unwrap();
         install(
             root.path(),

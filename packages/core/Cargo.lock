@@ -6594,6 +6594,7 @@ dependencies = [
  "ureq",
  "url",
  "uuid",
+ "vorn-adapters",
  "vorn-agents",
  "vorn-extensions",
  "vorn-mcp",
@@ -6640,6 +6641,7 @@ dependencies = [
  "tokio",
  "toml 1.1.6+spec-1.1.0",
  "tracing",
+ "vorn-adapters",
  "vorn-agents",
  "vorn-spawn",
  "vorn-view",
@@ -6849,6 +6851,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+ "vorn-adapters",
+ "vorn-agents",
  "vorn-protocol",
 ]
 

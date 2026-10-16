@@ -373,15 +373,17 @@ mod headless_args {
     #[test]
     fn headless_args_are_saved_and_loaded() {
         let mut store = memory();
+        let first = common::agent(0);
         save_config(
             &mut store,
             make_config(|c| {
-                c["acme"]["headlessArgs"] = json!(["--dangerously-skip-permissions", "--verbose"]);
+                c[first.as_str()]["headlessArgs"] =
+                    json!(["--dangerously-skip-permissions", "--verbose"]);
             }),
             &[],
         );
         assert_eq!(
-            load_config(&mut store)["agentCommands"]["acme"]["headlessArgs"],
+            load_config(&mut store)["agentCommands"][first.as_str()]["headlessArgs"],
             json!(["--dangerously-skip-permissions", "--verbose"])
         );
     }
@@ -389,15 +391,16 @@ mod headless_args {
     #[test]
     fn headless_args_load_as_absent_when_not_set() {
         let mut store = memory();
+        let bare = common::agent(3);
         save_config(
             &mut store,
             make_config(|c| {
-                c["delta"] = json!({ "command": "delta", "args": [] });
+                c[bare.as_str()] = json!({ "command": bare, "args": [] });
             }),
             &[],
         );
         assert!(lacks(
-            &load_config(&mut store)["agentCommands"]["delta"],
+            &load_config(&mut store)["agentCommands"][bare.as_str()],
             "headlessArgs"
         ));
     }
@@ -408,18 +411,19 @@ mod headless_args {
         save_config(&mut store, make_config(|_| {}), &[]);
 
         let mut loaded = load_config(&mut store);
-        let mut gamma = default_agent_commands()["gamma"].clone();
-        gamma["headlessArgs"] = json!(["-y", "--no-confirm"]);
-        loaded["agentCommands"]["gamma"] = gamma;
+        let (first, last) = (common::agent(0), common::agent(4));
+        let mut changed = default_agent_commands()[last.as_str()].clone();
+        changed["headlessArgs"] = json!(["-y", "--no-confirm"]);
+        loaded["agentCommands"][last.as_str()] = changed;
         save_config(&mut store, loaded, &[]);
 
         let reloaded = load_config(&mut store);
         assert_eq!(
-            reloaded["agentCommands"]["gamma"]["headlessArgs"],
+            reloaded["agentCommands"][last.as_str()]["headlessArgs"],
             json!(["-y", "--no-confirm"])
         );
         assert_eq!(
-            reloaded["agentCommands"]["acme"]["headlessArgs"],
+            reloaded["agentCommands"][first.as_str()]["headlessArgs"],
             json!(["--dangerously-skip-permissions"])
         );
     }

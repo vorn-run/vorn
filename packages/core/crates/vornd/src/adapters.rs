@@ -96,7 +96,6 @@ impl Adapters {
                         return None;
                     }
                 };
-                markers(&agent);
                 let extension = extension_id(s.manifest).unwrap_or_else(|| s.name.to_owned());
                 let icon = icon_path(&agent)
                     .and_then(|p| (s.file)(&p))
@@ -191,9 +190,6 @@ impl Adapters {
     /// The installed packages' adapters, after the shipped ones; a later one
     /// claiming an id already taken is left out.
     pub fn set_installed(&self, installed: Vec<Installed>) {
-        for i in &installed {
-            markers(&i.agent);
-        }
         let installed: Vec<Known> = installed
             .into_iter()
             .map(|i| Known {
@@ -272,14 +268,6 @@ fn describe(k: &Known) -> Value {
     put("extension", json!(k.extension));
     put("builtin", json!(k.builtin));
     Value::Object(out)
-}
-
-/// Registers what `agent` sets in the sessions it runs, so no process Vorn
-/// starts inherits it.
-fn markers(agent: &Agent) {
-    if let Some(env) = &agent.spec().env {
-        vorn_agents::launch::env::add_markers(&env.strip, &env.strip_prefixes);
-    }
 }
 
 /// The `id` at the top of a manifest's text.
