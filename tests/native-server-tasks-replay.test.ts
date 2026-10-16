@@ -31,13 +31,10 @@ function normalizer(dirs: Record<string, string>): (value: unknown) => unknown {
   const text = (s: string): string => {
     let out = s
     for (const [name, dir] of Object.entries(dirs)) out = out.split(dir).join(`<${name}>`)
-    out = out.replace(
-      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
-      (id) => {
-        if (!ids.has(id)) ids.set(id, `<id${ids.size + 1}>`)
-        return ids.get(id)!
-      }
-    )
+    out = out.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (id) => {
+      if (!ids.has(id)) ids.set(id, `<id${ids.size + 1}>`)
+      return ids.get(id)!
+    })
     return out.replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z/g, '<time>')
   }
   const walk = (v: unknown): unknown => {
@@ -68,7 +65,10 @@ const IMAGE = Buffer.from('png bytes').toString('base64')
 /** The `task:*`, `project:*` and `sessionEvent:*` calls, in the order a person or agent might make them. */
 const CALLS: Step[] = [
   { call: 'project:list' },
-  { call: 'task:create', params: { projectName: 'board', title: 'A', description: 'Why it matters.' } },
+  {
+    call: 'task:create',
+    params: { projectName: 'board', title: 'A', description: 'Why it matters.' }
+  },
   { call: 'task:create', params: { projectName: 'board', title: 'B', status: 'done' } },
   {
     call: 'task:create',
@@ -104,7 +104,10 @@ const CALLS: Step[] = [
   { call: 'task:update', params: { id: '$1', projectName: 'nowhere' } },
   { call: 'task:update', params: { id: 'ghost', title: 'x' } },
   { call: 'task:update', params: { id: '$1', projectName: 'board', status: 'in_review' } },
-  { call: 'task:patch', params: { id: '$1', set: { title: 'Patched', branch: 'p', assignedAgent: null } } },
+  {
+    call: 'task:patch',
+    params: { id: '$1', set: { title: 'Patched', branch: 'p', assignedAgent: null } }
+  },
   { call: 'task:patch', params: { id: '$1', set: { status: 'done' } } },
   { call: 'task:patch', params: { id: '$1', set: { projectName: 'nowhere' } } },
   { call: 'task:patch', params: { id: '$1' } },
@@ -157,7 +160,10 @@ const TOOLS: Step[] = [
     }
   },
   { tool: 'create_task', arguments: { project_name: 'nowhere', title: 'Lost' } },
-  { tool: 'create_task', arguments: { project_name: 'board', title: 'Bad', assigned_agent: 'nobody' } },
+  {
+    tool: 'create_task',
+    arguments: { project_name: 'board', title: 'Bad', assigned_agent: 'nobody' }
+  },
   { tool: 'list_tasks', arguments: { project_name: 'board', status: 'in_progress' } },
   { tool: 'list_tasks', arguments: { assigned_agent: 'claude' } },
   { tool: 'list_tasks', arguments: { workspace_id: 'personal' } },
@@ -281,14 +287,15 @@ describe.runIf(!!builtVornd)('Tasks as they answered before the built-in', () =>
     return out
   }
 
-  function compare(name: string, recorded: unknown): void {
+  /** The fixture `name`: written from `recorded` when recording, else read. */
+  function fixture(name: string, recorded: unknown): unknown {
     const file = path.join(FIXTURES, `${name}.json`)
     if (RECORD) {
       fs.mkdirSync(FIXTURES, { recursive: true })
       fs.writeFileSync(file, `${JSON.stringify(recorded, null, 2)}\n`)
-      return
+      return recorded
     }
-    expect(recorded).toEqual(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    return JSON.parse(fs.readFileSync(file, 'utf-8'))
   }
 
   it('answers every task call as it did', async () => {
@@ -304,9 +311,11 @@ describe.runIf(!!builtVornd)('Tasks as they answered before the built-in', () =>
       const frame = await client.call(step.call, withDirs(resolve(step.params, made)))
       const result = frame.result as { task?: { id?: string } } | undefined
       if (step.call === 'task:create' && result?.task?.id) made.push(result.task.id)
-      return frame.error ? { error: (frame.error as { message: string }).message } : (frame.result ?? null)
+      return frame.error
+        ? { error: (frame.error as { message: string }).message }
+        : (frame.result ?? null)
     })
-    compare('calls', recorded)
+    expect(recorded).toEqual(fixture('calls', recorded))
   })
 
   it('answers every MCP task tool as it did', async () => {
@@ -335,12 +344,14 @@ describe.runIf(!!builtVornd)('Tasks as they answered before the built-in', () =>
       if (step.tool === 'create_task' && created) made.push(created[1])
       return result
     })
-    compare('mcp', { names, tools, calls: recorded })
+    const answered = { names, tools, calls: recorded }
+    expect(answered).toEqual(fixture('mcp', answered))
   })
 
   it('leaves the board as it was', async () => {
     await until('quiet', () => true)
     const normalize = normalizer(dirs)
-    compare('board', normalize(await client.result('task:list', { includeDescription: true })))
+    const board = normalize(await client.result('task:list', { includeDescription: true }))
+    expect(board).toEqual(fixture('board', board))
   })
 })
