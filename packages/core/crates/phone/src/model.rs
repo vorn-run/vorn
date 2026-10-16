@@ -42,6 +42,8 @@ pub enum For {
     Run(String, bool),
     /// A gate's answer, by `run|node`; `true` goes back once it is taken.
     Gate(String, bool),
+    /// A workflow's schedule switched, by id; put back to the `bool` it was if refused.
+    Enable(String, bool),
     /// An answer nothing waits on; a failure shows as the screen's error.
     Quiet,
 }
@@ -188,6 +190,21 @@ impl Model {
                 self.busy.remove(&format!("gate:{key}"));
                 if back {
                     self.go = Some("back".into());
+                }
+            }
+            (For::Enable(id, was), answer) => {
+                let refused = match &answer {
+                    Ok(v) => v.get("ok") == Some(&Value::Bool(false)),
+                    Err(_) => true,
+                };
+                if refused {
+                    if let Some(w) = self.store.workflows.iter_mut().find(|w| w.id == id) {
+                        w.enabled = was;
+                    }
+                    let why = answer
+                        .err()
+                        .unwrap_or_else(|| "The computer kept the schedule as it was.".into());
+                    self.errors.insert("quiet".into(), why);
                 }
             }
             (For::Quiet, Ok(_)) => {}

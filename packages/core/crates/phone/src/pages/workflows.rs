@@ -294,8 +294,19 @@ pub fn workflow(cx: &Cx, id: &str) -> El {
     if !hint.is_empty() {
         about.push(say(hint, "secondary"));
     }
-    if w["enabled"] == json!(false) {
-        about.push(say("Turned off on the computer.", "secondary"));
+    if trigger_kind(&w) == "manual" {
+        about.push(row(vec![
+            say("Schedule", "body"),
+            say("Nothing fires this", "secondary"),
+        ]));
+    } else {
+        let on = w["enabled"] != json!(false);
+        about.push(cx.toggle(
+            Id::new("wf-enabled").child(id),
+            "Schedule",
+            on,
+            Do::Enable(id.to_owned(), !on),
+        ));
     }
     let steps: Vec<El> = all
         .iter()
@@ -312,6 +323,7 @@ pub fn workflow(cx: &Cx, id: &str) -> El {
         .collect();
     let mut rows = vec![section("", vec![start]), section("About", about)];
     rows.extend(cx.error(&format!("run:{id}")));
+    rows.extend(cx.error("quiet"));
     if !steps.is_empty() {
         rows.push(section("Steps", steps));
     }
@@ -857,4 +869,19 @@ pub fn answer(
     p.model.busy.insert(busy);
     p.model
         .call(For::Gate(key, back), "workflow:resolveGate", params);
+}
+
+/// Switches the workflow's schedule, showing the change before vornd answers.
+pub fn enable(p: &mut Phone, id: &str, on: bool) {
+    let Some(w) = p.model.store.workflows.iter_mut().find(|w| w.id == id) else {
+        return;
+    };
+    let was = w.enabled;
+    w.enabled = on;
+    p.model.revision += 1;
+    p.model.call(
+        For::Enable(id.to_owned(), was),
+        "workflow:setEnabled",
+        json!({ "id": id, "enabled": on }),
+    );
 }

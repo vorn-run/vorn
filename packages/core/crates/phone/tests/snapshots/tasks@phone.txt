@@ -18,3 +18,7 @@ column
       column
         text label="Fix the build" style="title"
         text label="vorn · VOR-T# · Jan #" style="secondary"
+      swipe style="leading"
+        button label="Complete" value="check" style="primary"
+      swipe style="trailing"
+        button label="Delete" value="trash-#" style="danger" confirm

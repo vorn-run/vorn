@@ -37,7 +37,8 @@ A screen is named by a route; the part after the first `:` is its argument.
 | `empty` | An empty state: title, a line saying why, and its buttons |
 | `link` | A row that opens the route in `value`; style `sheet` presents it |
 | `sheet` | A titled page over the screen |
-| `button` | A button, style `plain`, `primary` or `danger`, asking `confirm` first |
+| `button` | A button, style `plain`, `primary` or `danger`, asking `confirm` first; `value` names its icon |
+| `swipe` | Inside a `link`: the buttons shown when the row is swiped from its `style` edge, `leading` or `trailing` |
 | `more` | A menu of the buttons inside |
 | `choice`, `option` | A picker; segmented without a label, a menu with one |
 | `toggle` | A switch |

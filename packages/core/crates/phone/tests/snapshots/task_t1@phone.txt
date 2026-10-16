@@ -1,7 +1,10 @@
 column
   bar label="Fix the build"
-    link value="task-edit:t#" style="sheet"
-      text label="Edit" style="body"
+    more
+      link value="task-edit:t#" style="sheet"
+        icon value="pencil"
+        text label="Edit" style="body"
+      button label="Delete this task" value="trash-#" style="danger" confirm
   list
     section
       text label="Fix the build" style="title"

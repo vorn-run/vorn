@@ -77,6 +77,12 @@ pub enum Do {
         allow: bool,
     },
     TaskStatus(String, &'static str),
+    /// Files a finished task away, or brings it back.
+    Archive(String, bool),
+    /// Deletes a task; `true` leaves its page.
+    DeleteTask(String, bool),
+    /// Switches a workflow's schedule on or off.
+    Enable(String, bool),
     NewTaskProject(String),
     NewTask,
     SaveTask(String),
@@ -165,8 +171,26 @@ impl Cx<'_> {
             })
     }
 
+    /// A button shown as `icon`, labelled for those who cannot see it.
+    fn icon_button(&self, id: Id, label: &str, icon: &str, style: &'static str, d: Do) -> El {
+        self.view().bind(id, d);
+        div()
+            .id(id)
+            .on(Action::Click)
+            .role(Role::Button, label)
+            .sem(Sem::Button {
+                style,
+                confirm: None,
+                icon: Some(icon.to_owned()),
+            })
+    }
+
     /// A destructive button asking `confirm` first.
     fn asking(&self, id: Id, label: &str, confirm: &str, d: Do) -> El {
+        self.asking_with(id, label, confirm, None, d)
+    }
+
+    fn asking_with(&self, id: Id, label: &str, confirm: &str, icon: Option<&str>, d: Do) -> El {
         self.view().bind(id, d);
         div()
             .id(id)
@@ -175,7 +199,7 @@ impl Cx<'_> {
             .sem(Sem::Button {
                 style: "danger",
                 confirm: Some(confirm.to_owned()),
-                icon: None,
+                icon: icon.map(str::to_owned),
             })
     }
 
@@ -282,6 +306,16 @@ fn link(id: Id, label: &str, route: String, kids: Vec<El>) -> El {
         .role(Role::Link, label)
         .sem(Sem::Link(route))
         .children(kids)
+}
+
+/// A menu of `items` for the navigation bar.
+fn menu(items: Vec<El>) -> El {
+    div().sem(Sem::More).children(items)
+}
+
+/// The buttons a row shows when swiped from `edge`, `leading` or `trailing`.
+fn swipe(edge: &'static str, buttons: Vec<El>) -> El {
+    div().row().sem(Sem::Swipe(edge)).children(buttons)
 }
 
 /// A row that opens `route` over the screen.
@@ -497,6 +531,9 @@ pub fn run(p: &mut Phone, ui: &mut Ui, d: Do) {
             );
         }
         Do::TaskStatus(id, status) => tasks::set_status(p, &id, status),
+        Do::Archive(id, on) => tasks::archive(p, &id, on),
+        Do::DeleteTask(id, leave) => tasks::delete(p, &id, leave),
+        Do::Enable(id, on) => workflows::enable(p, &id, on),
         Do::NewTaskProject(n) => p.view.new_task_project = Some(n),
         Do::NewTask => tasks::add(p, ui),
         Do::SaveTask(id) => tasks::save(p, ui, &id),

@@ -201,7 +201,9 @@ struct More: View {
                 } else if n.k == "button" || n.k == "toggle" {
                     Button(role: n.style == "danger" ? .destructive : nil) {
                         if n.confirm != nil { asking = n } else if let id = n.id_ { nav.act(screen, ["id": id]) }
-                    } label: { Text(n.label ?? "") }
+                    } label: {
+                        if let i = n.value, !i.isEmpty { Label(n.label ?? "", vorn: i) } else { Text(n.label ?? "") }
+                    }
                 }
             }
         } label: {
@@ -340,10 +342,12 @@ struct Control: View {
                     .contentShape(Rectangle())
                 }
                 .foregroundStyle(Palette.ink)
+                .modifier(Swipes(screen: screen, row: node))
             } else {
                 NavigationLink(value: node.value ?? "") {
                     HStack(spacing: 12) { inline(node.kids) }
                 }
+                .modifier(Swipes(screen: screen, row: node))
             }
         case "toggle":
             Toggle(node.label ?? "", isOn: Binding(get: { node.on ?? false }, set: { _ in act() }))
@@ -428,12 +432,43 @@ struct Control: View {
                 .background(Palette.tone(n.style).opacity(0.2), in: Capsule())
             case "column": VStack(alignment: .leading, spacing: 2) { inline(n.kids) }
             case "row": HStack(spacing: 8) { inline(n.kids) }
-            case "drawn", "divider": EmptyView()
+            case "drawn", "divider", "swipe": EmptyView()
             default: Control(screen: screen, node: n)
             }
             if n.k == "text" && n.style == "body" && nodes.count > 1 && n.id == nodes.first?.id { Spacer(minLength: 8) }
             if n.k == "column" && nodes.count > 1 && n.id != nodes.last?.id { Spacer(minLength: 8) }
         })
+    }
+}
+
+/// A row's swipe actions, from the `swipe` nodes inside it; one that asks first asks once the row closes.
+struct Swipes: ViewModifier {
+    @EnvironmentObject var nav: Nav
+    let screen: String
+    let row: Node
+    @State private var asking: Node?
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .leading, allowsFullSwipe: true) { buttons("leading") }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) { buttons("trailing") }
+            .confirmationDialog(asking?.confirm ?? "", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
+                                titleVisibility: .visible) {
+                Button(asking?.label ?? "OK", role: .destructive) {
+                    if let id = asking?.id_ { nav.act(screen, ["id": id, "confirmed": true]) }
+                }
+            }
+    }
+
+    private func buttons(_ edge: String) -> some View {
+        ForEach(row.kids.filter { $0.k == "swipe" && $0.style == edge }.flatMap(\.kids)) { b in
+            Button {
+                if b.confirm != nil { asking = b } else if let id = b.id_ { nav.act(screen, ["id": id]) }
+            } label: {
+                Label(b.label ?? "", vorn: b.value ?? "")
+            }
+            .tint(b.style == "danger" ? .red : b.style == "primary" ? .green : .gray)
+        }
     }
 }
 

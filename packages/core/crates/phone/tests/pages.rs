@@ -313,6 +313,61 @@ fn tabs_scopes_and_task_moves_act_in_place() {
     );
 }
 
+fn act_on(p: &mut Phone, ui: &mut Ui, route: &str, label: &str) {
+    let t = tree(p, ui, route, PHONE);
+    let id = find(&t, label).id.expect("an act");
+    let d = p.view.act(id).expect("bound");
+    pages::run(p, ui, d);
+}
+
+#[test]
+fn a_task_row_swipes_to_complete_archive_and_delete() {
+    let mut p = phone(PHONE);
+    let mut ui = Ui::native(&config(3.0));
+    let t = tree(&mut p, &mut ui, "tasks", PHONE);
+    let row = t
+        .walk()
+        .into_iter()
+        .find(|n| n.kind == "link" && n.value == "task:t1")
+        .expect("row");
+    let edges: Vec<&str> = row
+        .children
+        .iter()
+        .filter(|n| n.kind == "swipe")
+        .map(|n| n.style)
+        .collect();
+    assert_eq!(edges, ["leading", "trailing"]);
+    assert!(!has(row, "Archive"), "only finished work is filed away");
+
+    act_on(&mut p, &mut ui, "tasks", "Complete");
+    let t1 = p.model.store.tasks.iter().find(|t| t.id == "t1").unwrap();
+    assert_eq!(t1.status.to_string(), "done");
+
+    act_on(&mut p, &mut ui, "task:t1", "Archive this task");
+    let t1 = p.model.store.tasks.iter().find(|t| t.id == "t1").unwrap();
+    assert!(t1.archived_at.is_some());
+    act_on(&mut p, &mut ui, "task:t1", "Put this task back");
+    let t1 = p.model.store.tasks.iter().find(|t| t.id == "t1").unwrap();
+    assert!(t1.archived_at.is_none());
+
+    act_on(&mut p, &mut ui, "task:t1", "Delete this task");
+    assert!(p.model.store.tasks.iter().all(|t| t.id != "t1"));
+    assert_eq!(p.model.go.take().as_deref(), Some("back"));
+}
+
+#[test]
+fn a_scheduled_workflow_switches_its_schedule() {
+    let mut p = phone(PHONE);
+    let mut ui = Ui::native(&config(3.0));
+    assert!(has(
+        &tree(&mut p, &mut ui, "workflow:w1", PHONE),
+        "Nothing fires this"
+    ));
+    p.model.store.workflows[0].nodes[0]["config"]["triggerType"] = json!("schedule");
+    act_on(&mut p, &mut ui, "workflow:w1", "Schedule");
+    assert!(!p.model.store.workflows[0].enabled);
+}
+
 #[test]
 fn a_gate_offers_its_answers_and_the_review_tab_counts_it() {
     let mut p = phone(PHONE);

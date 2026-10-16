@@ -48,10 +48,15 @@ pub enum Sem {
     Link(String),
     /// A row that opens the page `to` over the screen, as a sheet.
     Present(String),
+    /// The buttons inside, shown when a row is swiped from `leading` or `trailing`.
+    Swipe(&'static str),
     /// The screen's title, and the buttons inside for the platform's navigation bar.
     Bar(String),
     /// Nothing to list: a title, a line saying why, and the buttons inside to act on it.
-    Empty { title: String, body: String },
+    Empty {
+        title: String,
+        body: String,
+    },
     /// A button that puts its text on the clipboard, saying so once it has.
     Copy(String),
     /// Text in a role: `title`, `body`, `secondary`, `mono`, `error`.
@@ -244,6 +249,10 @@ impl Ui {
                     style: "sheet",
                     ..Node::of("link")
                 },
+                Sem::Swipe(edge) => Node {
+                    style: edge,
+                    ..Node::of("swipe")
+                },
                 Sem::Bar(title) => Node {
                     label: title.clone(),
                     ..Node::of("bar")
@@ -344,7 +353,10 @@ impl Ui {
             (Some(Role::Switch), _) => out.push(control("toggle")),
             (Some(Role::RadioButton), _) => {
                 let mut n = control("option");
-                n.children = kids(self).into_iter().filter(|k| k.kind == "icon").collect();
+                n.children = kids(self)
+                    .into_iter()
+                    .filter(|k| k.kind == "icon")
+                    .collect();
                 out.push(n);
             }
             (Some(Role::Button | Role::MenuItem | Role::Link), _) if el.id.is_some() => {

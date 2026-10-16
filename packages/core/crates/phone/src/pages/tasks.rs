@@ -8,7 +8,9 @@ use vorn_app::tasks::{self, STATUSES};
 use vorn_protocol::TaskConfig;
 use vornui::{El, Id, Ui};
 
-use super::{bar, choice, col, empty, icon, link, listing, present, row, say, section, Cx, Do};
+use super::{
+    bar, choice, col, empty, icon, link, listing, menu, present, row, say, section, swipe, Cx, Do,
+};
 use crate::model::{Fetched, For, Link};
 use crate::phone::Phone;
 
@@ -128,26 +130,75 @@ fn task_row(cx: &Cx, t: &TaskConfig) -> El {
     };
     let st = tasks::status(&status_of(t));
     let when = vorn_app::runs::relative(&t.updated_at, cx.now);
+    let mut kids = vec![
+        icon(st.icon),
+        col(vec![
+            say(title, "title"),
+            say(
+                format!(
+                    "{} · {} · {when}",
+                    t.project_name,
+                    tasks::short_id(&t.project_name, &t.id)
+                ),
+                "secondary",
+            ),
+        ]),
+    ];
+    kids.extend(row_actions(cx, t));
     link(
         Id::new("task-row").child(&t.id),
         title,
         format!("task:{}", t.id),
-        vec![
-            icon(st.icon),
-            col(vec![
-                say(title, "title"),
-                say(
-                    format!(
-                        "{} · {} · {when}",
-                        t.project_name,
-                        tasks::short_id(&t.project_name, &t.id)
-                    ),
-                    "secondary",
-                ),
-            ]),
-        ],
+        kids,
     )
 }
+
+/// What a row offers when swiped: complete what is open; file away what is over, or bring it back; delete.
+fn row_actions(cx: &Cx, t: &TaskConfig) -> Vec<El> {
+    let id = t.id.as_str();
+    let over = tasks::is_terminal(&status_of(t));
+    let mut out = Vec::new();
+    if !over {
+        out.push(swipe(
+            "leading",
+            vec![cx.icon_button(
+                Id::new("task-complete").child(id),
+                "Complete",
+                "check",
+                "primary",
+                Do::TaskStatus(id.to_owned(), "done"),
+            )],
+        ));
+    }
+    let mut trailing = vec![cx.asking_with(
+        Id::new("task-delete").child(id),
+        "Delete",
+        DELETE_ASK,
+        Some("trash-2"),
+        Do::DeleteTask(id.to_owned(), false),
+    )];
+    if !live(t) {
+        trailing.push(cx.icon_button(
+            Id::new("task-unarchive").child(id),
+            "Unarchive",
+            "archive-restore",
+            "plain",
+            Do::Archive(id.to_owned(), false),
+        ));
+    } else if over {
+        trailing.push(cx.icon_button(
+            Id::new("task-archive").child(id),
+            "Archive",
+            "archive",
+            "plain",
+            Do::Archive(id.to_owned(), true),
+        ));
+    }
+    out.push(swipe("trailing", trailing));
+    out
+}
+
+const DELETE_ASK: &str = "Delete this task permanently?";
 
 pub fn scope(cx: &Cx) -> El {
     let search = Id::new("tasks-scope-find");
@@ -253,18 +304,52 @@ pub fn task(cx: &Cx, id: &str) -> El {
     if !runs.is_empty() {
         rows.push(section("Runs", runs));
     }
-    col(vec![
-        bar(
-            title,
-            vec![present(
-                Id::new("task-edit-open").child(id),
-                "Edit",
-                format!("task-edit:{id}"),
-                None,
-            )],
-        ),
-        listing(rows),
-    ])
+    let mut items = vec![present(
+        Id::new("task-edit-open").child(id),
+        "Edit",
+        format!("task-edit:{id}"),
+        Some("pencil"),
+    )];
+    if !live(t) {
+        items.push(cx.icon_button(
+            Id::new("task-unarchive").child(id),
+            "Put this task back",
+            "archive-restore",
+            "plain",
+            Do::Archive(id.to_owned(), false),
+        ));
+    } else if tasks::is_terminal(&current) {
+        items.push(cx.icon_button(
+            Id::new("task-archive").child(id),
+            "Archive this task",
+            "archive",
+            "plain",
+            Do::Archive(id.to_owned(), true),
+        ));
+    }
+    items.push(cx.asking_with(
+        Id::new("task-delete").child(id),
+        "Delete this task",
+        DELETE_ASK,
+        Some("trash-2"),
+        Do::DeleteTask(id.to_owned(), true),
+    ));
+    col(vec![bar(title, vec![menu(items)]), listing(rows)])
+}
+
+/// Files the task away or brings it back, as the desktop does; only finished work is filed.
+pub fn archive(p: &mut Phone, id: &str, archived: bool) {
+    change(p, id, |config, now| {
+        tasks::set_archived(config, id, archived, now)
+    });
+}
+
+/// Deletes the task, leaving its page when `leave`.
+pub fn delete(p: &mut Phone, id: &str, leave: bool) {
+    change(p, id, |config, _| tasks::remove(config, id));
+    if leave {
+        p.model.go = Some("back".into());
+    }
 }
 
 /// Changes a task's status as the desktop does, and tells vornd.

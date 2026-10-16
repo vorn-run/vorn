@@ -10,6 +10,9 @@ column
         text label="Starts" style="body"
         text label="Manual" style="secondary"
       text label="Run manually from the play button" style="secondary"
+      row
+        text label="Schedule" style="body"
+        text label="Nothing fires this" style="secondary"
     section label="Steps"
       column
         text label="Write" style="body"

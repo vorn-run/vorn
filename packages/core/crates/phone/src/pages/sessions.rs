@@ -6,7 +6,6 @@ use serde_json::json;
 use vorn_app::client::store::Session;
 use vorn_app::screen::menus::{agent_name, AGENTS};
 use vorn_components::status::Status;
-use vornui::native::Sem;
 use vornui::{El, Id, Ui};
 
 use super::{
@@ -359,7 +358,7 @@ pub fn session(cx: &Cx, sid: &str) -> El {
     let s = cx.p.model.store.session(sid);
     let title = s.map_or_else(|| "Session".into(), Session::title);
     let st = s.map_or(Status::Idle, |s| Status::parse(s.status()));
-    let menu = vorn_more(vec![
+    let menu = super::menu(vec![
         present(
             Id::new("rename-open").child(sid),
             "Rename",
@@ -414,10 +413,6 @@ pub fn session(cx: &Cx, sid: &str) -> El {
     }
     out.push(terminal(cx.p));
     col(out)
-}
-
-fn vorn_more(items: Vec<El>) -> El {
-    vornui::div().sem(Sem::More).children(items)
 }
 
 pub fn rename(cx: &Cx, sid: &str) -> El {
