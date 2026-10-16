@@ -1,6 +1,4 @@
-//! Building trees: one function per designed component, and chained
-//! setters for what is optional, as
-//! `list("rows", entries).select(vec![button("rm", "Remove")])`.
+//! Building trees: one function per component and chained setters for the optional parts.
 
 use crate::{
     Badge, ButtonStyle, Choose, Entry, Kind, Meter, Node, Paint, Segment, TextStyle, Tone,

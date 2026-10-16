@@ -1,11 +1,4 @@
-//! Extension UI as an element tree. An extension answers `ui.render` with a
-//! tree of designed components (lists of entries, stats, meters, buttons,
-//! fields) and `ui.event` with what a click, a Return or a choice did; the
-//! client draws the tree with its own kit on every surface it has.
-//!
-//! The tree is data: a Rust extension builds it with [`sdk`], a Wasm one
-//! returns it from the `ui` world in `wit/tree.wit`, and a program in any
-//! language prints it as JSON. Every one is read and [`check`]ed the same.
+//! Extension UI as an element tree, built with [`sdk`], from Wasm or as JSON, and [`check`]ed the same.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,8 +8,7 @@ mod tests;
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
 pub const RENDER: &str = "ui.render";
-/// The call that tells an extension what happened: args `{point, event}`,
-/// answer `{toast?, open?, patch?}` where `patch` is a list of [`Patch`].
+/// Tells an extension what happened: args `{point, event}`, answer `{toast?, open?, patch?}`.
 pub const EVENT: &str = "ui.event";
 /// The colour tokens this build knows; a tree names the set it was made for.
 pub const TOKENS: u32 = 1;
@@ -123,9 +115,7 @@ pub enum Kind {
     },
     /// Controls for a whole page; a settings page lifts it into its header.
     Toolbar,
-    /// Entries, or groups of them. With `select`, each entry has a box to
-    /// check, and `bulk` buttons show while any is checked, their clicks
-    /// carrying the checked ids. `lazy` builds only the rows in view.
+    /// Entries or groups; `select` adds check boxes and `bulk` buttons, `lazy` builds rows in view only.
     List {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         empty: Option<String>,
@@ -150,8 +140,7 @@ pub enum Kind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         actions: Vec<Node>,
     },
-    /// One row of a list: its id is the row's. `actions` show on hover and
-    /// `more` behind its menu; `children` draw under its detail.
+    /// One list row: `actions` show on hover, `more` behind its menu, `children` under its detail.
     Entry(Box<Entry>),
     /// Columns of cards.
     Board,
@@ -272,8 +261,7 @@ impl ButtonStyle {
     }
 }
 
-/// Theme colours by meaning, set 1 of [`TOKENS`]. A token from a later set
-/// reads as `unknown` and draws as ink.
+/// Theme colours by meaning, set 1 of [`TOKENS`]; a later set's token draws as ink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Token {
@@ -308,8 +296,7 @@ pub enum Paint {
     Tint { token: Token, alpha: f32 },
 }
 
-/// How a box sits: a column unless `row`, sizes in logical pixels (cells
-/// scale them). Kept small: the designed components carry their own look.
+/// How a box sits: a column unless `row`, sizes in logical pixels.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Props {
     #[serde(default, skip_serializing_if = "is_false")]
@@ -411,8 +398,7 @@ pub struct Patch {
     pub node: Option<Node>,
 }
 
-/// Applies `patches` to `tree` in order and checks what comes out; on an
-/// error `tree` is left as it was.
+/// Applies `patches` to `tree` in order and checks the result; on an error `tree` is unchanged.
 pub fn patch(tree: &mut Node, patches: &[Patch]) -> Result<(), Vec<String>> {
     let mut next = tree.clone();
     for (i, p) in patches.iter().enumerate() {
@@ -424,8 +410,13 @@ pub fn patch(tree: &mut Node, patches: &[Patch]) -> Result<(), Vec<String>> {
         } else if !splice(&mut next, p) {
             return Err(vec![format!("patch[{i}]: no node is '{}'", p.id)]);
         }
+        // Checking each step bounds the depth chained patches can build.
+        check(&next).map_err(|e| {
+            e.into_iter()
+                .map(|m| format!("patch[{i}]: {m}"))
+                .collect::<Vec<_>>()
+        })?;
     }
-    check(&next)?;
     *tree = next;
     Ok(())
 }

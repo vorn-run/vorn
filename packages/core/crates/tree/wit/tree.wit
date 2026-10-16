@@ -1,8 +1,6 @@
 package vorn:extension@1.0.0;
 
-/// Extension UI as an element tree. A tree and an event travel as the JSON
-/// `vorn-tree` reads, so a Wasm guest, a program over stdio and a built-in
-/// are checked against one schema.
+/// Extension UI as an element tree, sent as the JSON `vorn-tree` checks for every kind of extension.
 interface tree {
   /// Where the tree draws.
   record surface {
@@ -22,8 +20,7 @@ world ui {
 
   /// Runs one of the extension's actions on the host, as `rows` or a command.
   import call: func(action: string, args: string) -> result<string, string>;
-  /// Changes `point`'s drawn tree without a render: a JSON list of
-  /// `{id, node?}`, each replacing node `id`, or removing it with no `node`.
+  /// Changes `point`'s tree without a render: a JSON list of `{id, node?}`, no `node` removing it.
   import patch: func(point: string, patches: string) -> result<_, string>;
 
   /// Rows the host has for this extension, as JSON, before a render.

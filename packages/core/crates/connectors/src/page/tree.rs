@@ -1,5 +1,4 @@
-//! The Connections page as an element tree: connections grouped by their
-//! connector, each with its settings as chips, and the form that adds one.
+//! The Connections page as an element tree: connections by connector, and the add form.
 
 use serde_json::{json, Value};
 use vorn_tree::sdk::*;

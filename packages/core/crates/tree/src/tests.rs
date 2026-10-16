@@ -182,3 +182,17 @@ fn a_patch_replaces_or_removes_a_node_by_id() {
     )
     .is_err());
 }
+
+#[test]
+fn chained_patches_cannot_nest_past_the_limit() {
+    let mut tree = col([text("Leaf").id("p0")]);
+    let patches: Vec<Patch> = (0..MAX_DEPTH)
+        .map(|i| Patch {
+            id: format!("p{i}"),
+            node: Some(col([text("Leaf").id(format!("p{}", i + 1))]).id(format!("p{i}"))),
+        })
+        .collect();
+    let err = patch(&mut tree, &patches).unwrap_err();
+    assert!(err[0].contains("deeper"), "{err:?}");
+    assert_eq!(tree, col([text("Leaf").id("p0")]));
+}

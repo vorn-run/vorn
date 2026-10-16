@@ -1,5 +1,4 @@
-//! Every component drawn on pixels and on terminal cells: on pixels each
-//! names itself to assistive technology; on cells each reads as text.
+//! Every component on pixels (named for assistive technology) and on cells (read as text).
 
 use std::cell::RefCell;
 

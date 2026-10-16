@@ -1,5 +1,4 @@
-//! The Worktrees settings page as an element tree: totals over every
-//! worktree, then each project's worktrees with what removing them frees.
+//! The Worktrees settings page as an element tree: totals, then each project's worktrees.
 
 use serde_json::{json, Value};
 use vorn_extensions::api::ExtError;

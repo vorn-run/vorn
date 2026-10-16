@@ -24,8 +24,7 @@ pub const PROJECTS: &str = "projects";
 pub const SETTINGS: &str = "settings";
 pub const FILTERS: &str = "filters";
 
-/// Filters a connection's chips leave out: how it ties to its package,
-/// which its group already says, and the tools an MCP server reported.
+/// Filters left off a connection's chips: its package tie and an MCP server's tools.
 const UNSHOWN: &[&str] = &[
     conns::filter::CONNECTOR_ID,
     conns::filter::VERSION,
@@ -316,8 +315,7 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
     ]
 }
 
-/// A connection's filters as "key: value" chips, in key order: a package's
-/// settings one by one, secrets masked and long values cut.
+/// A connection's filters as "key: value" chips in key order, secrets masked and long values cut.
 fn chips(conn: &Value) -> Vec<String> {
     let secret: Vec<String> = conns::password_fields(text(conn, "connectorId"))
         .iter()
@@ -495,8 +493,7 @@ fn create_params(d: &Draft) -> Option<Value> {
     Some(params)
 }
 
-/// Picks connector `id` for the connection being added, with what its
-/// program reports about itself.
+/// Picks connector `id` for the connection being added, with what its program reports.
 async fn pick(c: &Arc<Connectors>, id: String) -> Result<Value, String> {
     let manifest = probe(c, &id).await;
     let mut held = draft(c);

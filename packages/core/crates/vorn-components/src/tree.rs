@@ -1,7 +1,4 @@
-//! An extension's element tree ([`vorn_tree`]) drawn with the kit: each
-//! designed component the way Vorn's own screens draw it, on pixels and on
-//! terminal cells. The caller binds each control to an [`Id`] and decides
-//! what it does; selection is the caller's to keep.
+//! An extension's element tree ([`vorn_tree`]) drawn with the kit on pixels and cells; the caller binds ids.
 
 use vorn_tree::{
     ButtonStyle, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token, Tone,
@@ -107,8 +104,7 @@ pub fn view(ui: &Ui, tree: &Node, bind: &dyn TreeBind) -> El {
     Cx { ui, bind }.node(tree)
 }
 
-/// Tree `tree` as a page: the toolbar, when the root is one or holds one,
-/// apart for the page's header, and the rest.
+/// Tree `tree` as a page: its toolbar, for the page's header, and the rest.
 pub fn page(ui: &Ui, tree: &Node, bind: &dyn TreeBind) -> (Option<El>, Option<El>) {
     let cx = Cx { ui, bind };
     if matches!(tree.kind, Kind::Toolbar) {
@@ -342,7 +338,7 @@ impl Cx<'_> {
             .row()
             .items_center()
             .gap(4.0)
-            .px(if label.is_empty() { 6.0 } else { 8.0 })
+            .px(if label.is_empty() { 4.0 } else { 8.0 })
             .py(4.0)
             .shrink0()
             .rounded(radius::SM)
@@ -433,7 +429,7 @@ impl Cx<'_> {
             div()
                 .row()
                 .items_center()
-                .gap(6.0)
+                .gap(8.0)
                 .min_w0()
                 .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500)))
                 .child(
@@ -469,8 +465,7 @@ impl Cx<'_> {
         }
     }
 
-    /// A meter's bar and, when its segments are labelled, its legend; in an
-    /// entry the bar alone, short. Nothing in an entry when it is empty.
+    /// A meter's bar and its legend when labelled; in an entry a short bar, or nothing when empty.
     fn meter(&self, m: &Meter, short: bool) -> Option<El> {
         let max = if m.max.is_finite() && m.max > 0.0 {
             m.max
@@ -570,7 +565,7 @@ impl Cx<'_> {
                 div()
                     .row()
                     .items_center()
-                    .gap(6.0)
+                    .gap(8.0)
                     .shrink0()
                     .child(key.shrink0())
                     .child(
@@ -589,8 +584,7 @@ impl Cx<'_> {
         Some(div().col().gap(8.0).min_w0().child(bar).child(legend))
     }
 
-    /// A list: its head when it checks rows, then its entries in one box,
-    /// or its groups, each under its heading.
+    /// A list: its check head, then its entries in one box or its groups under their headings.
     fn list(
         &self,
         n: &Node,
@@ -654,8 +648,7 @@ impl Cx<'_> {
             .child(body)
     }
 
-    /// A list's head: a box that checks every row, how many are, and the
-    /// bulk buttons, which act on those; one height either way.
+    /// A list's head: a box that checks every row, the count checked and the bulk buttons.
     fn list_head(&self, l: &Listing<'_>, can: &[String], bulk: &[Node]) -> El {
         let all = !can.is_empty() && l.checked.len() == can.len();
         let some = !l.checked.is_empty();
@@ -800,8 +793,7 @@ impl Cx<'_> {
             .child_if((!kids.is_empty()).then(|| self.items(kids, l)))
     }
 
-    /// A group's heading: with an icon, a well and its note under it; else
-    /// its note quietly after. Its aside and its buttons sit at the right.
+    /// A group's heading with its icon and note, and its aside and buttons at the right.
     fn group_head(&self, n: &Node) -> El {
         let Kind::Group {
             heading,
@@ -864,8 +856,7 @@ impl Cx<'_> {
         .children(actions.iter().map(|b| self.node(b)))
     }
 
-    /// A long list built as it scrolls: group headings and entries in one
-    /// scroll view, only those in view built.
+    /// A long list in one scroll view, building only the headings and entries in view.
     fn lazy(&self, n: &Node, l: &Listing<'_>) -> El {
         enum Item<'a> {
             Head(&'a Node),
@@ -912,10 +903,7 @@ impl Cx<'_> {
             })
     }
 
-    /// One entry: its check box, icon, title over code and detail, chips
-    /// and children under; actions show while the row is hovered or one
-    /// has focus; its figure and bar in a column; then its more menu. On
-    /// cells, with no hover to reveal them, its actions join the menu.
+    /// One entry; its actions show on hover, and on cells join its more menu.
     fn entry(&self, n: &Node, e: &Entry, l: Option<&Listing<'_>>) -> El {
         let node = key(n);
         let id = self.bind.on(Ev::Hover {
@@ -1096,17 +1084,14 @@ impl Cx<'_> {
         if !cells {
             row = row.min_h(if two { 52.0 } else { 40.0 }).py(8.0);
         }
-        // Actions that only show on hover sit before the figure, so a row
-        // without one keeps its figure in its neighbours' column.
+        // Hover actions sit before the figure so figures stay in one column.
         if !acts.is_empty() {
             row = row.child(div().row().items_center().gap(4.0).shrink0().children(acts));
         }
         row.child_if(column).child_if(self.more(node, &menu))
     }
 
-    /// A "more" button and, while open, its menu; nothing when it has no
-    /// buttons. A button that asks first asks under the more button, as
-    /// its menu closes on the press.
+    /// A "more" button and its open menu; a confirm asks under the button.
     fn more(&self, owner: &str, items: &[&Node]) -> Option<El> {
         if items.is_empty() {
             return None;
@@ -1140,7 +1125,7 @@ impl Cx<'_> {
         let mut b = div()
             .id(menu)
             .on(Action::Click)
-            .px(6.0)
+            .px(4.0)
             .py(4.0)
             .shrink0()
             .rounded(radius::SM)
@@ -1160,7 +1145,7 @@ impl Cx<'_> {
                 .py(4.0)
                 .bg(color::SURFACE_OVERLAY)
                 .border(1.0, Rgba::white(0.10))
-                .rounded(radius::LG)
+                .rounded(radius::SM)
                 .role(Role::Menu, "More")
                 .children(entries);
             b = b.overlay(panel, Place::BelowEnd, 4.0);

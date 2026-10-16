@@ -164,8 +164,7 @@ impl Found {
     }
 }
 
-/// The page's totals over the worktrees it lists: all of them on disk; of
-/// those no session holds, the build output and what removing frees.
+/// The page's totals: all on disk, and of what no session holds, build output and removable.
 fn summary_row(shown: &[&Found]) -> Value {
     let total: u64 = shown.iter().map(|f| f.size()).sum();
     let free: Vec<&&Found> = shown.iter().filter(|f| f.free()).collect();
@@ -268,9 +267,7 @@ async fn remove(api: &Api, path: &str, project: &str) -> Result<Value, ExtError>
     Ok(json!({ "removed": path, "toast": "Worktree removed" }))
 }
 
-/// The settings page's rows: every worktree but the projects' own
-/// checkouts, by project in the order listed, the largest first in each;
-/// and its totals.
+/// The settings page's rows, by project with the largest first, and its totals.
 fn settings_rows(found: &[Found]) -> (Vec<Value>, Value) {
     let mut shown: Vec<&Found> = found.iter().filter(|f| !f.flag("main")).collect();
     let mut order: Vec<&str> = Vec::new();
@@ -331,8 +328,7 @@ async fn reclaim_all(api: &Api) -> Result<Value, ExtError> {
     Ok(json!({ "reclaimed": done, "toast": toast }))
 }
 
-/// Removes the checked worktrees, deleting the folders git no longer knows;
-/// one that fails stops the rest, and the list is scanned again either way.
+/// Removes the checked worktrees; one that fails stops the rest, then the list is rescanned.
 async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
     let ids: Vec<String> = args["ids"]
         .as_array()
