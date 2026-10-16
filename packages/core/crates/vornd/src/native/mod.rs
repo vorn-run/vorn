@@ -883,7 +883,19 @@ impl Native {
         let records = |list: Vec<Value>| Answer::Result(Value::Array(list));
         registry
             .read(|r| match method {
-                "terminal:listActive" => records(r.terminals().into_iter().map(json_of).collect()),
+                "terminal:listActive" => records(
+                    r.terminals()
+                        .into_iter()
+                        .map(|t| {
+                            let mut listed = json_of(t);
+                            // A terminal whose program ended stays listed; `ended` says so, for `vorn session wait`.
+                            if r.terminal(&t.id).is_some_and(|(_, ended)| ended) {
+                                listed["ended"] = Value::Bool(true);
+                            }
+                            listed
+                        })
+                        .collect(),
+                ),
                 "headless:list" => records(r.headless().map(json_of).collect()),
                 "worktree:activeSessions" => match params.as_str() {
                     Some(path) => {

@@ -570,8 +570,12 @@ async fn wait_for(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comman
             ExitCode::Ok,
         ));
     }
-    if field(&now, "status").and_then(Value::as_str) == Some("exited") {
-        let code = field(&now, "exitCode").and_then(Value::as_i64);
+    let ended = field(&now, "ended").and_then(Value::as_bool) == Some(true);
+    if ended || field(&now, "status").and_then(Value::as_str) == Some("exited") {
+        // A headless run keeps its code; a shell its last one; another terminal's is not kept.
+        let code = field(&now, "exitCode")
+            .or_else(|| field(&now, "shellExitCode"))
+            .and_then(Value::as_i64);
         return Ok(finished(
             ctx,
             &target,

@@ -194,6 +194,25 @@ async fn wait_returns_the_childs_exit_code_and_124_on_timeout() {
     assert_eq!(record["session"], json!(leaves));
     assert_eq!(record["exitCode"], 7);
 
+    // A shell that ended before `wait` began is still listed, and its code is read from it.
+    let gone = r.shell(cwd.path(), "gone", Some("exit 9")).await;
+    let t = Instant::now();
+    loop {
+        let listed = r.call("terminal:listActive", Value::Null).await;
+        let ended = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == json!(gone) && s["ended"] == json!(true));
+        if ended {
+            break;
+        }
+        assert!(t.elapsed() < PATIENCE, "never ended: {listed}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let (code, _, err) = r.vorn(&["session", "wait", &gone, "--timeout", "5s"]).await;
+    assert_eq!(code, 9, "{err}");
+
     let stays = r.shell(cwd.path(), "stays", None).await;
     let t = Instant::now();
     let (code, out, err) = r

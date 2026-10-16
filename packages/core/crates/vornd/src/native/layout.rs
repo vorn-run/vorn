@@ -121,11 +121,31 @@ fn read(found: &Found) -> Result<(String, Layout), String> {
     Ok((text, layout))
 }
 
+/// Runs `work` on a blocking thread: layouts are files, and so are the manifests that offer more.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &Viewer) -> Answer {
     match method {
-        "layout:list" => list(native),
+        "layout:list" => {
+            let n = Arc::clone(native);
+            blocking(move || list(&n))
+                .await
+                .unwrap_or_else(Answer::Error)
+        }
         "layout:get" => {
-            match pick(native, &params).and_then(|f| read(&f).map(|(text, _)| (f, text))) {
+            let n = Arc::clone(native);
+            let got = blocking(move || {
+                pick(&n, &params).and_then(|f| read(&f).map(|(text, _)| (f, text)))
+            })
+            .await
+            .and_then(|r| r);
+            match got {
                 Ok((f, text)) => {
                     Answer::Result(json!({ "name": f.name, "source": f.source, "toml": text }))
                 }
@@ -210,7 +230,11 @@ fn command_line(words: &[String]) -> String {
 }
 
 async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
-    let (found, layout) = match pick(native, params).and_then(|f| read(&f).map(|(_, l)| (f, l))) {
+    let (n, ask) = (Arc::clone(native), params.clone());
+    let read = blocking(move || pick(&n, &ask).and_then(|f| read(&f).map(|(_, l)| (f, l))))
+        .await
+        .and_then(|r| r);
+    let (found, layout) = match read {
         Ok(ok) => ok,
         Err(e) => return Answer::Error(e),
     };
@@ -352,7 +376,11 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
         return Answer::Error("vornd has no data directory yet".to_owned());
     };
     let file = dir.join(format!("{name}.toml"));
-    if file.exists() && params.get("overwrite") != Some(&Value::Bool(true)) {
+    let taken = {
+        let file = file.clone();
+        blocking(move || file.exists()).await.unwrap_or(false)
+    };
+    if taken && params.get("overwrite") != Some(&Value::Bool(true)) {
         return Answer::Error(format!(
             "layout \"{name}\" exists; pass overwrite to replace it"
         ));
