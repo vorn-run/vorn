@@ -8,7 +8,7 @@ import {
   serverArchiveName,
   windowsVersion
 } from '../packages/core/scripts/package-native.mjs'
-import { electronFeed, feeds, nativeFeed } from '../packages/core/scripts/release-feeds.mjs'
+import { feeds, nativeFeed } from '../packages/core/scripts/release-feeds.mjs'
 import {
   compareVersions,
   nextPatch,
@@ -19,7 +19,7 @@ import {
 const version = '0.8.0-beta.9'
 
 function fakeFiles() {
-  const files: Record<string, { sha256: string; sha512: string; size: number }> = {}
+  const files: Record<string, { sha256: string; size: number }> = {}
   const names = [
     ...Object.values(assetNames(version, 'darwin', 'arm64')),
     ...Object.values(assetNames(version, 'darwin', 'x64')),
@@ -27,13 +27,13 @@ function fakeFiles() {
     ...Object.values(assetNames(version, 'linux', 'x64'))
   ]
   names.forEach((n, i) => {
-    files[n] = { sha256: `sha256-${i}`, sha512: `sha512-${i}`, size: 100 + i }
+    files[n] = { sha256: `sha256-${i}`, size: 100 + i }
   })
   return files
 }
 
 describe('native packages', () => {
-  it('keeps the Electron release asset names', () => {
+  it('names the release assets', () => {
     expect(assetNames(version, 'darwin', 'arm64')).toEqual({
       zip: 'Vorn-0.8.0-beta.9-arm64-mac.zip',
       dmg: 'Vorn-0.8.0-beta.9-arm64.dmg'
@@ -99,47 +99,8 @@ describe('release feeds', () => {
     expect(feed.assets[0]).toMatchObject({ sha256: 'sha256-0', size: 100 })
   })
 
-  it('writes the Electron updater feed in its format', () => {
-    const files = fakeFiles()
-    const yml = electronFeed({
-      version,
-      releaseDate,
-      names: ['Vorn-Setup-0.8.0-beta.9.exe'],
-      files
-    })
-    const sum = files['Vorn-Setup-0.8.0-beta.9.exe']
-    expect(yml).toBe(`version: 0.8.0-beta.9
-files:
-  - url: Vorn-Setup-0.8.0-beta.9.exe
-    sha512: ${sum.sha512}
-    size: ${sum.size}
-path: Vorn-Setup-0.8.0-beta.9.exe
-sha512: ${sum.sha512}
-releaseDate: '2026-10-20T10:00:00.000Z'
-`)
-  })
-
-  it('publishes the beta feeds beside the latest ones for a prerelease only', () => {
-    const files = fakeFiles()
-    expect(Object.keys(feeds({ ...base, files })).sort()).toEqual([
-      'beta-linux.yml',
-      'beta-mac.yml',
-      'beta.yml',
-      'latest-linux.yml',
-      'latest-mac.yml',
-      'latest.yml',
-      'vorn-update.json'
-    ])
-    const stableFiles: typeof files = {}
-    for (const [name, v] of Object.entries(files)) stableFiles[name.replace('-beta.9', '')] = v
-    const stable = feeds({ ...base, version: '0.8.0', tag: 'v0.8.0', files: stableFiles })
-    expect(Object.keys(stable).some((n) => n.startsWith('beta'))).toBe(false)
-  })
-
-  it('puts the arm64 zip first for Macs and keeps the Intel one', () => {
-    const mac = feeds({ ...base, files: fakeFiles() })['latest-mac.yml']
-    expect(mac).toContain('path: Vorn-0.8.0-beta.9-arm64-mac.zip')
-    expect(mac).toContain('  - url: Vorn-0.8.0-beta.9-mac.zip')
+  it('publishes only the native feed', () => {
+    expect(Object.keys(feeds({ ...base, files: fakeFiles() }))).toEqual(['vorn-update.json'])
   })
 })
 

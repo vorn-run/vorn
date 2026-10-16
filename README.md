@@ -87,11 +87,6 @@ when you restart. Terminals survive the restart on macOS and Linux. The .deb doe
 itself; Vorn says when a new one is out. Windows builds are signed only when the release has a
 code-signing certificate, so SmartScreen may ask before the first run.
 
-Coming from 0.8.0-beta.8 or earlier, the update arrives the usual way: the app is the same
-`com.vorn.app`, so permissions, the Dock, login items and the `vorn://` scheme carry over. If you
-installed beta.8 on Windows for all users rather than just yourself, install this version once
-with the setup file and uninstall the old one from Settings → Apps.
-
 ## Command line
 
 Installing Vorn also puts a `vorn` command on your PATH. It talks to the same server the app
@@ -153,8 +148,7 @@ server's events and never polls.
 `vorn session read <target>` prints the output the server kept. `--lines N` keeps the last N
 lines. `--scrollback`, `--unwrap` and `--format vt|html` read the terminal itself, with its
 soft-wrapped rows joined: `vt` keeps colours as SGR escapes and `html` draws them as spans in a
-`<pre>`. `--trim` drops trailing spaces and trailing blank lines. `session logs` is the same
-command.
+`<pre>`. `--trim` drops trailing spaces and trailing blank lines.
 
 `vorn events --json` streams the server's public events, one JSON object per line, until
 stopped: `{"v":1,"event":"session.exited","at":1760000000000,"session":"…","data":{…}}`. The

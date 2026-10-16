@@ -299,8 +299,7 @@ jobs:
           shopt -s nullglob
           gh release upload "$TAG" dist-native/Vorn-* dist-native/vorn_* --clobber
 
-  # The update feeds, from every platform's assets: the native app's, and the
-  # Electron updater's so the last Electron release updates onto this one.
+  # The update feed, from every platform's assets.
   feeds:
     needs: package
     runs-on: ubuntu-latest
@@ -323,15 +322,13 @@ jobs:
           path: dist-native
           merge-multiple: true
 
-      - name: Write the feeds
+      - name: Write the feed
         run: node packages/core/scripts/release-feeds.mjs --dir dist-native
 
       - uses: actions/upload-artifact@v7
         with:
           name: vorn-update-feeds
-          path: |
-            dist-native/vorn-update.json
-            dist-native/*.yml
+          path: dist-native/vorn-update.json
           if-no-files-found: error
 
   # The previous release, installed with a temp HOME and data dir, updates
@@ -384,7 +381,7 @@ jobs:
           node packages/core/scripts/update-path.mjs
           --dir update-path --key ${{ matrix.name }} --work "$RUNNER_TEMP/update-path-work"
 
-  # The feeds go up last, so no install sees a release its predecessor cannot update onto.
+  # The feed goes up last, so no install sees a release its predecessor cannot update onto.
   publish-feeds:
     if: inputs.tag != ''
     needs: [feeds, update-path]
@@ -399,4 +396,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" dist-native/vorn-update.json dist-native/*.yml --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist-native/vorn-update.json --clobber --repo "$GITHUB_REPOSITORY"
