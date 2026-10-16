@@ -132,6 +132,17 @@ pub struct Paths {
     pub component: PathBuf,
 }
 
+/// The bench's compiled form of `component`, compiled once per build of it.
+pub fn precompiled(component: &Path) -> PathBuf {
+    let cache = component.with_file_name("ext-tiers-compiled");
+    let bytes = std::fs::read(component).expect("the component");
+    let compiled = vorn_extensions::wasm::compiled(&cache, &bytes);
+    if !compiled.is_file() {
+        vorn_extensions::wasm::precompile(component, &cache).expect("compiles");
+    }
+    compiled
+}
+
 fn env(home: &Path) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| ["PATH", "TMPDIR"].contains(&k.as_str()))
@@ -288,10 +299,13 @@ impl Tier {
                 let folder = ext.folder(&packs, &service);
                 if kind == Kind::Wasm {
                     std::fs::copy(&paths.component, folder.join("ext.wasm")).expect("component");
-                    let cwasm = vorn_extensions::wasm::cwasm_of(&paths.component);
-                    if cwasm.is_file() {
-                        std::fs::copy(&cwasm, folder.join("ext.cwasm")).expect("precompiled");
-                    }
+                    // In Vorn's cache already, as `vorn ext install` would leave it,
+                    // so the tier runs on the runtime vornd ships.
+                    let compiled = precompiled(&paths.component);
+                    let cache = store.root().join(vorn_extensions::wasm::COMPILED);
+                    std::fs::create_dir_all(&cache).expect("cache");
+                    let name = compiled.file_name().expect("named");
+                    std::fs::copy(&compiled, cache.join(name)).expect("compiled");
                 }
                 Installs::new(store, "git", env(home.path()))
                     .link(&folder)

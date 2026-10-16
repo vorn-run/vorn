@@ -4,8 +4,8 @@
 //! `ext-tiers all --program P --component C --out DIR` runs every tier of
 //! both extensions, each in a fresh process of its own so memory reads
 //! clean, and writes `results.json` and `results.md`. `ext-tiers run ..` is
-//! one of those processes; `ext-tiers precompile C` keeps the `.cwasm` vornd
-//! loads beside a component.
+//! one of those processes; `ext-tiers precompile C` compiles a component
+//! once, ahead of the runs.
 
 mod scenario;
 mod stats;
@@ -425,7 +425,7 @@ fn all(args: &[String]) -> Value {
             child(&["crash", "--tier", k.name()], &paths)
         })
         .collect();
-    let cwasm = vorn_extensions::wasm::cwasm_of(&paths.component);
+    let cwasm = tier::precompiled(&paths.component);
     let sizes = json!({
         "program": size(&paths.program),
         "component_wasm": size(&paths.component),
@@ -466,13 +466,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("precompile") => {
             let wasm = PathBuf::from(args.get(2).expect("precompile <component.wasm>"));
-            match vorn_extensions::wasm::precompile(&wasm) {
-                Ok(out) => println!("{}", out.display()),
-                Err(e) => {
-                    eprintln!("{e}");
-                    std::process::exit(1);
-                }
-            }
+            println!("{}", tier::precompiled(&wasm).display());
         }
         Some("run") => {
             let rt = tokio::runtime::Builder::new_multi_thread()

@@ -30,12 +30,14 @@ vorn-agents = { path = "../agents" }
 
 # Services as sandboxed Wasm components (the E9.4 spike): Wasmtime's runtime and
 # component model, and WASI preview 2 with nothing granted. The compiler is a
-# separate feature, so vornd loads precompiled components only.
+# separate feature, so vornd runs only components Vorn already compiled.
 wasmtime = { version = "=49.0.2", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
 wasmtime-wasi = { version = "=49.0.2", optional = true, default-features = false, features = ["p2"] }
+# Names compiled components by what they were compiled from.
+sha2 = { version = "0.10", optional = true, default-features = false }
 
 [features]
-wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:sha2"]
 wasm-compile = ["wasm", "wasmtime/cranelift"]
 
 [target.'cfg(unix)'.dependencies]

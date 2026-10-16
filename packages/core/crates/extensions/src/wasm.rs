@@ -11,9 +11,12 @@
 //! instance, never vornd; the lifecycle counts it as a crash and starts a
 //! fresh one on the next use, within the crash budget.
 //!
-//! vornd links Wasmtime's runtime only, so it loads the `.cwasm` precompiled
-//! beside the component; the `wasm-compile` feature adds the compiler, which
-//! compiles a component with no `.cwasm` and keeps one beside it.
+//! Wasmtime maps compiled code as it is, so the only compiled code loaded is
+//! what Vorn compiled itself: kept in the extensions folder's [`COMPILED`]
+//! cache, named by the SHA-256 of the component it came from. A package's own
+//! `.cwasm` is never read. vornd links Wasmtime's runtime only, so it runs a
+//! component the cache already holds; the `wasm-compile` feature adds the
+//! compiler, which fills the cache on first use.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -42,7 +45,7 @@ use bindings::vorn::extension::types as wit;
 
 /// How often the deadline clock ticks while a component runs.
 const TICK: Duration = Duration::from_millis(10);
-/// The most linear memory one instance may hold.
+/// The most linear memory one instance may hold, over all its memories.
 const MEMORY_CAP: usize = 64 << 20;
 
 /// The engine settings a `.cwasm` is compiled and loaded with; they must agree.
@@ -113,42 +116,72 @@ fn ticks(deadline: Duration) -> u64 {
         .max(1)
 }
 
-/// Where the precompiled form of `wasm` is kept.
-pub fn cwasm_of(wasm: &Path) -> PathBuf {
-    wasm.with_extension("cwasm")
+/// The folder, in the extensions folder, of what Vorn compiled.
+pub const COMPILED: &str = ".compiled";
+
+/// Where `cache` keeps the compiled form of the component `wasm`.
+pub fn compiled(cache: &Path, wasm: &[u8]) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let hex: String = Sha256::digest(wasm)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    cache.join(format!("{hex}.cwasm"))
 }
 
-/// Compiles `wasm` into the `.cwasm` vornd loads.
+fn read(wasm: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(wasm).map_err(|e| format!("{}: {e}", wasm.display()))
+}
+
+/// Compiles `wasm` into `cache`, where [`load`] finds it.
 #[cfg(feature = "wasm-compile")]
-pub fn precompile(wasm: &Path) -> Result<PathBuf, String> {
+pub fn precompile(wasm: &Path, cache: &Path) -> Result<PathBuf, String> {
+    compile(wasm, &read(wasm)?, cache)
+}
+
+#[cfg(feature = "wasm-compile")]
+fn compile(wasm: &Path, bytes: &[u8], cache: &Path) -> Result<PathBuf, String> {
     let rt = runtime()?;
-    let bytes = std::fs::read(wasm).map_err(|e| format!("{}: {e}", wasm.display()))?;
-    let compiled = rt
+    let code = rt
         .engine
-        .precompile_component(&bytes)
+        .precompile_component(bytes)
         .map_err(|e| format!("{} does not compile: {e:#}", wasm.display()))?;
-    let out = cwasm_of(wasm);
-    std::fs::write(&out, compiled).map_err(|e| format!("{}: {e}", out.display()))?;
+    let out = compiled(cache, bytes);
+    std::fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    // Whole or not at all, so a reader never maps half a file.
+    let part = out.with_extension(format!("{}.part", std::process::id()));
+    std::fs::write(&part, code)
+        .and_then(|()| std::fs::rename(&part, &out))
+        .map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(out)
 }
 
-fn load(wasm: &Path) -> Result<Component, String> {
+fn load(wasm: &Path, cache: &Path) -> Result<Component, String> {
     let rt = runtime()?;
-    let cwasm = cwasm_of(wasm);
+    let bytes = read(wasm)?;
+    let code = compiled(cache, &bytes);
     #[cfg(feature = "wasm-compile")]
-    if !cwasm.is_file() {
-        precompile(wasm)?;
+    if !code.is_file() {
+        compile(wasm, &bytes, cache)?;
     }
-    // SAFETY: a .cwasm is machine code Wasmtime maps as it is. vornd loads only
-    // the one beside a package's component, compiled with `config()`; Wasmtime
-    // still refuses one built by another version or for another CPU.
-    unsafe { Component::deserialize_file(&rt.engine, &cwasm) }.map_err(|e| {
+    let refused = |e: wasmtime::Error| {
         format!(
-            "{} is not precompiled for this Vorn ({e:#}); compile it to {}",
+            "{} is not compiled for this Vorn ({e:#}); compile it into {}",
             wasm.display(),
-            cwasm.display()
+            cache.display()
         )
-    })
+    };
+    // SAFETY: compiled code is mapped as it is. `code` is in Vorn's own cache,
+    // written only by `compile` with `config()`, from exactly these bytes;
+    // Wasmtime still refuses one built by another version or for another CPU.
+    let loaded = unsafe { Component::deserialize_file(&rt.engine, &code) }.map_err(refused);
+    #[cfg(feature = "wasm-compile")]
+    let loaded = loaded.or_else(|_| {
+        compile(wasm, &bytes, cache)?;
+        // SAFETY: as above, and just written.
+        unsafe { Component::deserialize_file(&rt.engine, &code) }.map_err(refused)
+    });
+    loaded
 }
 
 /// What an instance's store holds.
@@ -171,21 +204,24 @@ impl WasiView for State {
     }
 }
 
-/// The memory cap, and the most linear memory the instance has held.
+/// The memory cap over every linear memory of the instance, and the most it has held.
 struct Limits {
+    total: usize,
     peak: Arc<AtomicUsize>,
 }
 
 impl ResourceLimiter for Limits {
     fn memory_growing(
         &mut self,
-        _: usize,
+        current: usize,
         desired: usize,
         _: Option<usize>,
     ) -> wasmtime::Result<bool> {
-        let ok = desired <= MEMORY_CAP;
+        let total = self.total - current.min(self.total) + desired;
+        let ok = total <= MEMORY_CAP;
         if ok {
-            self.peak.fetch_max(desired, Ordering::Relaxed);
+            self.total = total;
+            self.peak.fetch_max(total, Ordering::Relaxed);
         }
         Ok(ok)
     }
@@ -405,6 +441,8 @@ fn stopped(name: &str, trap: &wasmtime::Error) -> CallError {
 /// Everything a component's thread is started with.
 pub(crate) struct Start {
     pub wasm: PathBuf,
+    /// Vorn's cache of compiled components.
+    pub cache: PathBuf,
     pub name: String,
     pub init: InitCtx,
     pub start_timeout: Duration,
@@ -416,7 +454,7 @@ pub(crate) struct Start {
 impl Service {
     /// Loads and instantiates the component and answers its `guest.init`.
     pub(crate) async fn start(s: Start) -> Result<Service, String> {
-        let component = load(&s.wasm)?;
+        let component = load(&s.wasm, &s.cache)?;
         let (jobs, rx) = std_mpsc::channel::<Job>();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
         let ended = Arc::new(AtomicBool::new(false));
@@ -425,6 +463,7 @@ impl Service {
             wasi: WasiCtxBuilder::new().build(),
             table: ResourceTable::new(),
             limits: Limits {
+                total: 0,
                 peak: Arc::clone(&memory),
             },
             router: s.router,

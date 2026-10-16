@@ -83,6 +83,8 @@ fn rig(wasm: &Path, uses: &str, policy: Policy, call_timeout: Duration) -> Rig {
     )
     .unwrap();
     fs::copy(wasm, folder.path().join("ext.wasm")).unwrap();
+    // Compiled code a package ships is never run: only what Vorn compiled.
+    fs::write(folder.path().join("ext.cwasm"), b"not Vorn's").unwrap();
     let env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| ["PATH", "HOME", "TMPDIR"].contains(&k.as_str()))
         .collect();
@@ -133,6 +135,13 @@ async fn a_component_answers_and_publishes_through_the_gate() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], "/p/api/.worktrees/w1");
     assert_eq!(rig.world.calls.load(Ordering::SeqCst), 1);
+    let cache = rig
+        .router
+        .store()
+        .root()
+        .join(vorn_extensions::wasm::COMPILED);
+    let compiled = vorn_extensions::wasm::compiled(&cache, &fs::read(&wasm).unwrap());
+    assert!(compiled.is_file(), "compiled into Vorn's cache");
     rig.router.lifecycle().stop_all().await;
 }
 

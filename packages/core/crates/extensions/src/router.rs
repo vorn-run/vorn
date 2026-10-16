@@ -473,6 +473,7 @@ impl Router {
     ) -> Result<Program, String> {
         let start = crate::wasm::Start {
             wasm: PathBuf::from(&pack.path).join(component),
+            cache: self.store.root().join(crate::wasm::COMPILED),
             name: format!("[extensions] {}", pack.name()),
             init,
             start_timeout: self.settings.start_timeout,
