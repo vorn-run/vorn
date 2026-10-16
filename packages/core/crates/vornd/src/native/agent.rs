@@ -120,14 +120,14 @@ fn found(native: &Native, _params: &Value) -> Result<Vec<(Agent, Option<PathBuf>
     let mut commands = HashMap::with_capacity(agents.len());
     for agent in agents.iter() {
         let command = command_of(&settings, agent).ok_or_else(|| unreadable_command(agent))?;
-        commands.insert(agent.clone(), command);
+        commands.insert(agent.id().to_owned(), command);
     }
     let env = native.env.get();
     Ok(detect::locate(
         &agents,
         |agent| {
             commands
-                .remove(agent)
+                .remove(agent.id())
                 .unwrap_or_else(|| agent.default_command())
         },
         path_of(&env),

@@ -630,11 +630,10 @@ fn quick_launch(store: &Store, st: &State, out: &mut Vec<Entry>) {
             format!("Branch: {}", w.branch)
         }
     };
-    let installed = store.agents.iter().filter(|a| {
-        st.installed
-            .as_ref()
-            .is_some_and(|i| i.iter().any(|k| *k == a.key))
-    });
+    let installed = store
+        .agents
+        .iter()
+        .filter(|a| st.installed.as_ref().is_some_and(|i| i.contains(&a.key)));
     for a in installed {
         let (agent, name) = (a.key.as_str(), a.label.as_str());
         for p in &local {

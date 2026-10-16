@@ -40,6 +40,10 @@ fn plugins_page_lists_adds_and_connects() {
     };
     let mut app = connect(&v);
     add_project(&mut app, &v, "api", json!({}));
+    // The test agent's adapter is a linked package: gone, nothing is installed.
+    app.rpc()
+        .call("extension:remove", json!({ "id": "test.acme" }))
+        .expect("removed");
     let mut shot = Shot::new();
 
     // Opened from the settings nav, the page loads itself.

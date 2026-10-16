@@ -15,12 +15,15 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 use vorn_agents::{Agent, Agents};
 
+/// A file of a package, by its path in it.
+type FileOf<'a> = Box<dyn Fn(&str) -> Option<&'a [u8]> + 'a>;
+
 /// A package an adapter is read from.
 struct Package<'a> {
     name: &'a str,
     manifest: &'a str,
     on: bool,
-    file: Box<dyn Fn(&str) -> Option<&'a [u8]> + 'a>,
+    file: FileOf<'a>,
 }
 
 /// One adapter vornd knows, on or off.

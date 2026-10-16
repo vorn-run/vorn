@@ -46,7 +46,9 @@ pub(crate) mod testing {
     /// Reads adapters for `alpha` and `beta`.
     pub fn agents() {
         for id in ["alpha", "beta"] {
-            let text = format!("[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{id}\"\n");
+            let text = format!(
+                "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{id}\"\n"
+            );
             vorn_agents::from_manifest_text(&text).expect("a test adapter reads");
         }
     }

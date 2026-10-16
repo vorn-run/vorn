@@ -30,7 +30,11 @@ fn every_shipped_adapter_is_a_package_in_the_public_format() {
     for s in vorn_adapters::shipped() {
         let manifest = vorn_extensions::manifest::file::parse(s.manifest)
             .unwrap_or_else(|e| panic!("{}: {e}", s.name));
-        assert!(manifest.agent.is_some(), "{} has an [agent] section", s.name);
+        assert!(
+            manifest.agent.is_some(),
+            "{} has an [agent] section",
+            s.name
+        );
         assert_eq!(manifest.service, None, "{} needs no program", s.name);
         assert_eq!(support::agent(s.name).id(), s.name);
     }
@@ -119,7 +123,14 @@ fn hermes_lists_past_sessions_from_hermes_home() {
         data: dir.path().join("data"),
     };
     let spec = support::agent("hermes");
-    let sqlite = spec.spec().history.as_ref().unwrap().sqlite.as_ref().unwrap();
+    let sqlite = spec
+        .spec()
+        .history
+        .as_ref()
+        .unwrap()
+        .sqlite
+        .as_ref()
+        .unwrap();
     let set = |n: &str| (n == "HERMES_HOME").then(|| home.to_string_lossy().into_owned());
     assert_eq!(places.path_with(&sqlite.db, &set), db);
     assert_eq!(

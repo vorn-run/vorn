@@ -130,11 +130,10 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
 
 /// The agents that are on and installed (all of them before detection answers).
 fn installed<'a>(s: &'a Screen<'_>) -> impl Iterator<Item = &'a crate::agents::AgentInfo> + 'a {
-    s.store.agents.iter().filter(|a| {
-        s.st.installed
-            .as_ref()
-            .is_none_or(|i| i.iter().any(|k| *k == a.key))
-    })
+    s.store
+        .agents
+        .iter()
+        .filter(|a| s.st.installed.as_ref().is_none_or(|i| i.contains(&a.key)))
 }
 
 /// `workflow-menu-items`: the workflows a menu offers, contextual ones only

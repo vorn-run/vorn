@@ -249,7 +249,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         .store
         .agents
         .iter()
-        .find(|a| first.iter().any(|k| *k == a.key))
+        .find(|a| first.contains(&a.key))
         .cloned()
     {
         let id = vorn_app::screen::settings::agent_field_id(&agent.key, AgentField::Args);

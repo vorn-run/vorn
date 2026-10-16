@@ -484,10 +484,7 @@ fn agent_choice(s: &Screen<'_>) -> El {
         .rounded(8.0)
         .bg(white(0.04));
     for a in &s.store.agents {
-        let installed =
-            s.st.installed
-                .as_ref()
-                .is_none_or(|l| l.iter().any(|k| *k == a.key));
+        let installed = s.st.installed.as_ref().is_none_or(|l| l.contains(&a.key));
         let id = s.acts.on(
             "default-agent",
             set(default_act("defaultAgent", format!("\"{}\"", a.key))),

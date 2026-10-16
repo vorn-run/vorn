@@ -300,7 +300,8 @@ impl CatalogAnswer {
 /// One list per agent, project directory and command configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Key {
-    agent: Agent,
+    /// The agent's id.
+    agent: String,
     project: PathBuf,
     command: AgentCommand,
 }
@@ -364,7 +365,7 @@ impl Catalog {
             );
         }
         let key = Key {
-            agent,
+            agent: agent.id().to_owned(),
             project: PathBuf::from(crate::paths::normalize_lexically(&request.project_path)),
             command: command.clone(),
         };

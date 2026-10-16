@@ -73,7 +73,12 @@ fn an_adapters_card_footer_draws_its_agents_tool_calls_on_every_surface() {
     let footer = shot.until(&mut app, "an adapter's card footer", |a, _| {
         a.st.points
             .at("cardFooters")
-            .find(|p| a.store.agents.iter().any(|g| g.builtin && g.extension == p.extension))
+            .find(|p| {
+                a.store
+                    .agents
+                    .iter()
+                    .any(|g| g.builtin && g.extension == p.extension)
+            })
             .map(|p| p.extension.clone())
     });
     let agent = app
@@ -113,10 +118,19 @@ fn an_adapters_card_footer_draws_its_agents_tool_calls_on_every_surface() {
     shot.save(&mut app, "adapter-footer");
     let [wide, narrow] = cells(&mut app);
     for (size, text) in [("120x36", &wide), ("80x24", &narrow)] {
-        assert!(text.contains("1 tool calls"), "{size} shows the tool calls:\n{text}");
-        assert!(text.contains("last edit"), "{size} shows the last tool:\n{text}");
+        assert!(
+            text.contains("1 tool calls"),
+            "{size} shows the tool calls:\n{text}"
+        );
+        assert!(
+            text.contains("last edit"),
+            "{size} shows the last tool:\n{text}"
+        );
     }
-    assert!(wide.contains("mini"), "the model it was started with:\n{wide}");
+    assert!(
+        wide.contains("mini"),
+        "the model it was started with:\n{wide}"
+    );
 }
 
 #[test]
@@ -130,7 +144,10 @@ fn with_every_adapter_off_the_launcher_opens_a_plain_shell() {
     app.rpc()
         .call("extension:remove", json!({ "id": "test.acme" }))
         .expect("removed");
-    let builtins = app.rpc().call("extension:builtins", Value::Null).expect("builtins");
+    let builtins = app
+        .rpc()
+        .call("extension:builtins", Value::Null)
+        .expect("builtins");
     let adapters: Vec<String> = app
         .store
         .agents
@@ -148,7 +165,9 @@ fn with_every_adapter_off_the_launcher_opens_a_plain_shell() {
         }
     }
     let mut shot = Shot::new();
-    shot.until(&mut app, "no agent on", |a, _| a.store.agents.is_empty().then_some(()));
+    shot.until(&mut app, "no agent on", |a, _| {
+        a.store.agents.is_empty().then_some(())
+    });
     assert_eq!(app.store.default_agent(), "shell");
     // The launcher starts a shell in the chosen project.
     shot.frame(&mut app);
@@ -163,7 +182,12 @@ fn with_every_adapter_off_the_launcher_opens_a_plain_shell() {
     assert!(session.is_shell(), "{:?}", session.info.agent_type);
     // Switched on again, its agents come back.
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": adapters[0], "on": true }))
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": adapters[0], "on": true }),
+        )
         .expect("switched on");
-    shot.until(&mut app, "an agent on", |a, _| (!a.store.agents.is_empty()).then_some(()));
+    shot.until(&mut app, "an agent on", |a, _| {
+        (!a.store.agents.is_empty()).then_some(())
+    });
 }

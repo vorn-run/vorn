@@ -431,7 +431,12 @@ async fn read_stream(around: Around, id: String, mut rx: tokio::sync::mpsc::Rece
         };
         let args = json!({ "session": id, "lines": lines });
         let extension = &around.extension;
-        match around.extensions.router().call(extension, "agent.stream", args, ctx).await {
+        match around
+            .extensions
+            .router()
+            .call(extension, "agent.stream", args, ctx)
+            .await
+        {
             Ok(read) => took(&around.registry, &around.events, &id, &read),
             Err(err) => warn!(%extension, %err, "an adapter did not read a headless stream"),
         }
@@ -452,14 +457,20 @@ fn took(
     {
         registry.headless_conversation(id, conversation);
     }
-    for event in read.get("events").and_then(Value::as_array).into_iter().flatten() {
+    for event in read
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let Some(name) = event.get("event").and_then(Value::as_str) else {
             continue;
         };
         let tool = event.get("tool").and_then(Value::as_str);
-        events.emit(vorn_extensions::events::AGENT_HOOK, || {
-            json!({ "sessionId": id, "event": name, "tool": tool })
-        });
+        events.emit(
+            vorn_extensions::events::AGENT_HOOK,
+            || json!({ "sessionId": id, "event": name, "tool": tool }),
+        );
     }
 }
 
@@ -625,7 +636,9 @@ mod tests {
         took(&fed.registry, fed.native.events(), &id, &read);
         assert_eq!(
             fed.registry
-                .read(|r| r.headless_record(&id).and_then(|h| h.agent_session_id.clone()))
+                .read(|r| r
+                    .headless_record(&id)
+                    .and_then(|h| h.agent_session_id.clone()))
                 .flatten()
                 .as_deref(),
             Some("conv-1")
