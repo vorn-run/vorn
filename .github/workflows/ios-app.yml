@@ -1,0 +1,47 @@
+name: iOS app
+
+# Builds the iPhone and iPad app in apps/ios, unsigned.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/ios/**'
+      - 'packages/core/crates/phone/**'
+      - 'packages/core/crates/vornui/**'
+      - 'packages/core/crates/vorn-components/**'
+      - '.github/workflows/ios-app.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install && rustup target add aarch64-apple-ios
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: ios-app-v1-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: ios-app-v1-
+
+      - name: xcodegen
+        run: brew install xcodegen
+
+      - name: Build the app
+        run: |
+          xcode=$(ls -d /Applications/Xcode_2[6-9]*.app | sort -V | tail -1)
+          DEVELOPER_DIR="$xcode/Contents/Developer" sh apps/ios/build.sh

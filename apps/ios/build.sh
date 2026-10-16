@@ -1,13 +1,13 @@
 #!/bin/sh
-# Builds the app; PROFILE=<.mobileprovision> signs them and a device id installs them.
+# Builds the iPhone and iPad app; PROFILE=<.mobileprovision> signs them and a device id installs them.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 core="$here/../../packages/core"
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 (cd "$core" && IPHONEOS_DEPLOYMENT_TARGET=26.0 nice -n 10 cargo build --profile release -j 3 -p vorn-phone --target aarch64-apple-ios)
 cd "$here"
 xcodegen generate --quiet
-nice -n 10 xcodebuild -quiet -project VornPhone.xcodeproj -scheme Native -configuration Release \
+nice -n 10 xcodebuild -quiet -project Vorn.xcodeproj -scheme Vorn -configuration Release \
   -destination generic/platform=iOS -derivedDataPath build VORN_HOST="${VORN_HOST:-}" build
 if [ -n "${PROFILE:-}" ]; then
   security cms -D -i "$PROFILE" > build/profile.plist

@@ -1,4 +1,4 @@
-name: VornPhone
+name: Vorn
 options:
   deploymentTarget:
     iOS: "26.0"
@@ -9,41 +9,45 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
-    SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridge.h
+    SWIFT_OBJC_BRIDGING_HEADER: Vorn/Bridge.h
     LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/../../packages/core/target/aarch64-apple-ios/release
     OTHER_LDFLAGS: [-lvorn_phone]
-    TARGETED_DEVICE_FAMILY: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
     SUPPORTED_PLATFORMS: iphoneos
     ENABLE_BITCODE: NO
     DEAD_CODE_STRIPPING: YES
-targetTemplates:
-  Phone:
+targets:
+  Vorn:
     type: application
     platform: iOS
+    sources: [Vorn]
     dependencies:
       - sdk: Metal.framework
       - sdk: QuartzCore.framework
       - sdk: Security.framework
       - sdk: SystemConfiguration.framework
+    settings:
+      base:
+        PRODUCT_NAME: Vorn
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.ios
     info:
-      path: ${target_name}/Info.plist
+      path: Vorn/Info.plist
       properties:
-        CFBundleDisplayName: $(PRODUCT_NAME)
+        CFBundleDisplayName: Vorn
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
+        UIRequiresFullScreen: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: Connects to Vorn on your computer.
+        NSCameraUsageDescription: Vorn uses the camera to scan the pairing code shown by the desktop app.
         UIUserInterfaceStyle: Dark
         VornHost: $(VORN_HOST)
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-targets:
-  Native:
-    templates: [Phone]
-    sources: [Shared, Native]
-    settings:
-      base:
-        PRODUCT_NAME: Vorn Native
-        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.native
