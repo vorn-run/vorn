@@ -16,7 +16,7 @@ pub const WORKFLOW_USAGE: &str = "Usage
   vorn workflow run <name or id> [--input key=value] [--wait] [--json]
   vorn workflow stop <run>
   vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]
-  vorn workflow check <file.kdl>...
+  vorn workflow check <file.toml>...
 
 A run happens in the server, so it keeps going when nothing is watching. The
 command answers with the run rather than waiting for it to finish; with
@@ -454,6 +454,9 @@ async fn check(ctx: &mut Context<'_>, files: &[String]) -> ExitCode {
                 }
             }
             Ok(read) => {
+                for h in &read.hints {
+                    ctx.io.write_err(&format!("{file}:{}:{}: hint: {}\n", h.at.0, h.at.1, h.message));
+                }
                 if let Some((nodes, triggers, _)) = &known {
                     for w in &read.warnings {
                         ctx.io.write_err(&format!("{file}:{w}\n"));

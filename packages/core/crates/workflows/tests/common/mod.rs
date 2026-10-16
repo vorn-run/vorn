@@ -27,6 +27,9 @@ pub struct World {
     /// The ids of the sessions started.
     pub handed: Vec<String>,
     pub pages: HashMap<(String, String, u32), String>,
+    /// Scripts running now, and the most that ever ran at once.
+    pub scripts: u32,
+    pub most_scripts: u32,
 }
 
 #[derive(Clone)]
@@ -206,6 +209,15 @@ impl Host for Fake {
                     let reply = self
                         .take(method, &params)
                         .unwrap_or(json!({ "result": { "success": true, "output": "" } }));
+                    if let Some(ms) = reply.get("delayMs").and_then(Value::as_u64) {
+                        {
+                            let mut w = self.world();
+                            w.scripts += 1;
+                            w.most_scripts = w.most_scripts.max(w.scripts);
+                        }
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                        self.world().scripts -= 1;
+                    }
                     let run_id = params
                         .get("runId")
                         .and_then(Value::as_str)

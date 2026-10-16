@@ -908,7 +908,7 @@ impl<H: Host> Engine<H> {
                 {
                     continue;
                 }
-                let Some(node) = workflow.node(&s.node_id) else {
+                let Some(node) = workflow.state_node(&s.node_id) else {
                     continue;
                 };
                 let made =

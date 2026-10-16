@@ -542,7 +542,10 @@ fn loop_frame(
         white(0.08)
     };
     let w = f(e.w);
-    let chip = if for_each {
+    let parallel = cfg.get("parallel").and_then(Value::as_bool) == Some(true);
+    let chip = if for_each && parallel {
+        "each, in parallel".to_owned()
+    } else if for_each {
         "each".to_owned()
     } else {
         format!(

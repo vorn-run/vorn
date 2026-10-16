@@ -155,6 +155,16 @@ impl Workflow {
         self.nodes.iter().find(|n| n.id == id)
     }
 
+    /// The node a run's state is of: the node of that id, or for one item
+    /// of a loop run in parallel (`<step>#<n>`), the step it ran.
+    pub fn state_node(&self, id: &str) -> Option<&Node> {
+        self.node(id).or_else(|| {
+            let (step, n) = id.rsplit_once('#')?;
+            n.parse::<u32>().ok()?;
+            self.node(step)
+        })
+    }
+
     /// The first trigger node.
     pub fn trigger(&self) -> Option<&Node> {
         self.nodes.iter().find(|n| n.kind == NodeKind::Trigger)

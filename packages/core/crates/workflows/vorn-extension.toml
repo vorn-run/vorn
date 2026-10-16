@@ -58,10 +58,10 @@ timing = "webhook"
 id = "default-task-workflow"
 title = "Default Task Workflow"
 description = "An agent picks up a task moved to In Progress."
-file = "workflows/default-task.kdl"
+file = "workflows/default-task.toml"
 
 [[contributes.workflows]]
 id = "dev-server-on-restore"
 title = "Bring the dev server back"
 description = "The dev server comes back with its session; off until you turn it on."
-file = "workflows/dev-server.kdl"
+file = "workflows/dev-server.toml"

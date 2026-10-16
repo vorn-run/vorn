@@ -1713,7 +1713,10 @@ pub fn subtitle(node: &Value) -> String {
             format!("{p} \u{b7} initial: {}", c("initialStatus"))
         }
         "loop" => {
-            if c("mode") == "forEach" {
+            let parallel = node.pointer("/config/parallel").and_then(Value::as_bool) == Some(true);
+            if c("mode") == "forEach" && parallel {
+                "each, in parallel".to_owned()
+            } else if c("mode") == "forEach" {
                 "each".to_owned()
             } else {
                 let n = node

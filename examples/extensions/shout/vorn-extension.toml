@@ -22,4 +22,4 @@ rules = ["Templates in text expand before it is shouted."]
 [[contributes.workflows]]
 id = "try-shout"
 title = "Try Shout"
-file = "workflows/try-shout.kdl"
+file = "workflows/try-shout.toml"

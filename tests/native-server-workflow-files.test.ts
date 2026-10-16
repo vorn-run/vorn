@@ -1,6 +1,6 @@
 /**
  * Workflows as files, through a vornd of the test's own: a project's
- * `.vorn/workflows/*.kdl` is read into its workflows and watched, so an edit
+ * `.vorn/workflows/*.toml` is read into its workflows and watched, so an edit
  * to the file changes the workflow; a change made in Vorn is written back to
  * the file with its comments kept; a workflow made in Vorn is saved to a
  * project's folder in one call; a file that does not read says where;
@@ -25,22 +25,30 @@ const SHOUT = path.resolve(__dirname, '../examples/extensions/shout')
 type Json = Record<string, unknown>
 type Run = { runId: string; status: string; nodeStates: Array<Json & { nodeId: string }> }
 
-const REVIEW = `// Checks the build, then says so.
-workflow "File review" {
-    id "file-review"
-    enabled #true
-    trigger "manual" id="start"
-    // The check itself.
-    step "script" id="check" slug="check" {
-        scriptType "bash"
-        scriptContent "echo checked"
-    }
-    step "script" id="say" slug="say" {
-        // Reads the step above.
-        scriptType "bash"
-        scriptContent "echo said {{steps.check.output}}"
-    }
-}
+const REVIEW = `# Checks the build, then says so.
+name = "File review"
+id = "file-review"
+enabled = true
+
+[trigger]
+id = "start"
+type = "manual"
+
+# The check itself.
+[[step]]
+id = "check"
+type = "script"
+slug = "check"
+scriptType = "bash"
+scriptContent = "echo checked"
+
+[[step]]
+id = "say"
+type = "script"
+slug = "say"
+# Reads the step above.
+scriptType = "bash"
+scriptContent = "echo said {{steps.check.output}}"
 `
 
 describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
@@ -72,7 +80,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       work = servedDir('vorn-wf-files-work-')
       folder = path.join(work, '.vorn', 'workflows')
       fs.mkdirSync(folder, { recursive: true })
-      fs.writeFileSync(path.join(folder, 'review.kdl'), REVIEW)
+      fs.writeFileSync(path.join(folder, 'review.toml'), REVIEW)
       const config = (await client.result('config:load')) as Json
       await client.result('config:save', {
         ...config,
@@ -101,7 +109,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     })
 
     it('changes the workflow when its file is edited', async () => {
-      const file = path.join(folder, 'review.kdl')
+      const file = path.join(folder, 'review.toml')
       const edited = REVIEW.replace('echo checked', 'echo edited')
       fs.writeFileSync(file, edited)
       await until('the edit to be read', async () =>
@@ -116,7 +124,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     })
 
     it('writes a change made in Vorn back to the file, keeping its comments', async () => {
-      const file = path.join(folder, 'review.kdl')
+      const file = path.join(folder, 'review.toml')
       expect(
         await client.result('workflow:update', {
           id: 'file-review',
@@ -125,12 +133,12 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       ).toEqual({ ok: true })
       await client.result('workflow:setEnabled', { id: 'file-review', enabled: false })
       const text = fs.readFileSync(file, 'utf-8')
-      expect(text).toContain('workflow "File review, renamed" {')
-      expect(text).toContain('enabled #false')
+      expect(text).toContain('name = "File review, renamed"')
+      expect(text).toContain('enabled = false')
       for (const kept of [
-        '// Checks the build, then says so.',
-        '// The check itself.',
-        '// Reads the step above.'
+        '# Checks the build, then says so.',
+        '# The check itself.',
+        '# Reads the step above.'
       ]) {
         expect(text).toContain(kept)
       }
@@ -140,7 +148,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     })
 
     it('lets an edit in the editor and an edit of the file meet without loss', async () => {
-      const file = path.join(folder, 'review.kdl')
+      const file = path.join(folder, 'review.toml')
       const text = fs.readFileSync(file, 'utf-8')
       // The file is edited by hand, and before vornd has read it the editor renames the workflow.
       fs.writeFileSync(file, text.replace('echo edited', 'echo by hand'))
@@ -154,8 +162,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       })
       const now = fs.readFileSync(file, 'utf-8')
       expect(now).toContain('echo by hand')
-      expect(now).toContain('workflow "Renamed in the editor" {')
-      expect(now).toContain('// The check itself.')
+      expect(now).toContain('name = "Renamed in the editor"')
+      expect(now).toContain('# The check itself.')
     })
 
     it('binds a connection the file names to the connection of that name here', async () => {
@@ -167,23 +175,27 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
         filters: { command: process.execPath, args: '[]' }
       })
       fs.writeFileSync(
-        path.join(folder, 'shared.kdl'),
+        path.join(folder, 'shared.toml'),
         [
-          'workflow "Shared" {',
-          '    id "shared"',
-          '    trigger "manual" id="t"',
-          '    step "callConnectorAction" id="act" {',
-          '        connectionId (connection)"Shared"',
-          '        action "list"',
-          '    }',
-          '}',
+          'name = "Shared"',
+          'id = "shared"',
+          '',
+          '[trigger]',
+          'id = "t"',
+          'type = "manual"',
+          '',
+          '[[step]]',
+          'id = "act"',
+          'type = "callConnectorAction"',
+          'connectionId = { "@connection" = "Shared" }',
+          'action = "list"',
           ''
         ].join('\n')
       )
       await until('the shared file to be read', async () => !!(await workflow('shared')))
       const nodes = (await workflow('shared'))!.nodes as Array<{ config: Json }>
       expect(nodes[1].config.connectionId).toBe(conn.id)
-      fs.rmSync(path.join(folder, 'shared.kdl'))
+      fs.rmSync(path.join(folder, 'shared.toml'))
       await until('the shared file to go', async () => (await workflow('shared')) === null)
     })
 
@@ -217,10 +229,10 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
         id: 'made-here',
         projectName: 'p'
       })
-      expect(saved).toEqual({ path: path.join(folder, 'made-here.kdl'), created: true })
+      expect(saved).toEqual({ path: path.join(folder, 'made-here.toml'), created: true })
       const text = fs.readFileSync(saved.path, 'utf-8')
-      expect(text).toContain('cwd (project)"src"')
-      expect(text).toContain('needs="t#e1"')
+      expect(text).toContain('cwd = { "@project" = "src" }')
+      expect(text).toContain('needs = ["t#e1"]')
       const files = await client.result<{ files: Array<{ workflowId: string }> }>('workflow:files')
       expect(files.files.map((f) => f.workflowId).sort()).toEqual(['file-review', 'made-here'])
       const again = await client.result<{ created: boolean }>('workflow:saveToFile', {
@@ -236,8 +248,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
 
     it('says where a file that does not read goes wrong, and keeps its last workflow', async () => {
       fs.writeFileSync(
-        path.join(folder, 'broken.kdl'),
-        'workflow "Broken" {\n    id "broken"\n    step "script" id="a" lable="A"\n}\n'
+        path.join(folder, 'broken.toml'),
+        'name = "Broken"\nid = "broken"\n\n[[step]]\nid = "a"\ntype = "script"\nneeds = ["nowhere"]\n'
       )
       await until('the error to show', async () => {
         const files = await client.result<{ errors: Array<{ errors: string[] }> }>('workflow:files')
@@ -247,14 +259,14 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
         'workflow:files'
       )
       expect(files.errors[0].errors).toEqual([
-        `${path.join(folder, 'broken.kdl')}:3:26: unknown property lable=; did you mean label=?`
+        `${path.join(folder, 'broken.toml')}:4:1: needs \`nowhere\`, which no step here is`
       ])
       expect(await workflow('broken')).toBeNull()
     })
 
     it.runIf(!!vornBinary)('checks files from the command line by file, line and column', () => {
-      const good = path.join(folder, 'review.kdl')
-      const bad = path.join(folder, 'broken.kdl')
+      const good = path.join(folder, 'review.toml')
+      const bad = path.join(folder, 'broken.toml')
       const run = (files: string[]) =>
         spawnSync(vornBinary!, ['workflow', 'check', ...files, '--data-dir', served.dataDir], {
           encoding: 'utf-8',
@@ -265,7 +277,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(ok.stdout).toMatch(/^1 workflow file read/)
       const wrong = run([good, bad])
       expect(wrong.status).toBe(1)
-      expect(wrong.stderr).toContain(`${bad}:3:26: unknown property lable=; did you mean label=?`)
+      expect(wrong.stderr).toContain(`${bad}:4:1: needs \`nowhere\`, which no step here is`)
     })
 
     it('keeps a workflow made in Vorn from a file naming its id, and drops the old one when a file changes id', async () => {
@@ -288,10 +300,10 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
           edges: []
         }
       })
-      const thief = path.join(folder, 'thief.kdl')
+      const thief = path.join(folder, 'thief.toml')
       fs.writeFileSync(
         thief,
-        'workflow "Not mine" {\n    id "mine"\n    trigger "manual" id="t"\n}\n'
+        'name = "Not mine"\nid = "mine"\n\n[trigger]\nid = "t"\ntype = "manual"\n'
       )
       await until('the file to be refused', async () => {
         const files = await client.result<{ errors: Array<{ errors: string[] }> }>('workflow:files')
@@ -301,12 +313,12 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
 
       fs.writeFileSync(
         thief,
-        'workflow "Renamed" {\n    id "first"\n    trigger "manual" id="t"\n}\n'
+        'name = "Renamed"\nid = "first"\n\n[trigger]\nid = "t"\ntype = "manual"\n'
       )
       await until('the first id', async () => !!(await workflow('first')))
       fs.writeFileSync(
         thief,
-        'workflow "Renamed" {\n    id "second"\n    trigger "manual" id="t"\n}\n'
+        'name = "Renamed"\nid = "second"\n\n[trigger]\nid = "t"\ntype = "manual"\n'
       )
       await until('the second id, and the first gone', async () => {
         return !!(await workflow('second')) && (await workflow('first')) === null
@@ -317,8 +329,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     })
 
     it('takes a workflow away when its file is removed', async () => {
-      fs.rmSync(path.join(folder, 'broken.kdl'))
-      fs.rmSync(path.join(folder, 'made-here.kdl'))
+      fs.rmSync(path.join(folder, 'broken.toml'))
+      fs.rmSync(path.join(folder, 'made-here.toml'))
       await until('the workflow to go', async () => (await workflow('made-here')) === null)
       expect(await workflow('file-review')).not.toBeNull()
     })

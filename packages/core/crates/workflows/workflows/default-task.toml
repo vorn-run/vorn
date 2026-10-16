@@ -1,0 +1,28 @@
+# Every install starts with this once: an agent picks up a task moved to In Progress.
+name = "Default Task Workflow"
+id = "system:default-task-workflow"
+icon = "Play"
+iconColor = "#10b981"
+enabled = true
+workspaceId = "personal"
+
+[trigger]
+id = "trigger-1"
+type = "taskStatusChanged"
+label = "When task moves to In Progress"
+x = 0
+y = 0
+fromStatus = "todo"
+toStatus = "in_progress"
+
+[[step]]
+id = "launch-1"
+type = "launchAgent"
+label = "Launch task agent"
+x = 0
+y = 120
+needs = ["trigger-1#e1"]
+agentType = "fromTask"
+projectName = ""
+projectPath = ""
+headless = true

@@ -2938,12 +2938,36 @@ fn loop_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
         );
     }
     let mut out = vec![block(vec![label("Repeat"), radios])];
+    let parallel = n.pointer("/config/parallel").and_then(Value::as_bool) == Some(true);
     if mode == "forEach" {
         out.push(block(vec![
             label("Items"),
             var_area(s, d, bind(Some(id), "config.items", Conv::Keep, true), cfg_str(n, "items"), "{{steps.review.items}}", 1, true),
             help("A list from an earlier step: a JSON array, or an object holding one. Each pass reads its item as {{loop.item}}, and every item gets a pass.", 6.0),
         ]));
+        out.push(switch_card(
+            s,
+            WfAct::Toggle("config.parallel".into()),
+            parallel,
+            "layers",
+            "Run in parallel",
+            if parallel {
+                "Items run side by side, each as its own rows in the run."
+            } else {
+                "Items run one after another."
+            },
+            false,
+        ));
+        if parallel {
+            let limit = n
+                .pointer("/config/concurrency")
+                .map_or_else(String::new, |v| wf::text_of(Some(v)));
+            out.push(block(vec![
+                label("At most at once"),
+                input(s, bind(Some(id), "config.concurrency", Conv::Count, false), &limit, "4", false, Wash::Quiet, 13.0, 12.0),
+                help("How many items run at the same time. Up to 16; blank is 4.", 6.0),
+            ]));
+        }
     } else {
         let max = n
             .pointer("/config/maxIterations")
@@ -2953,6 +2977,10 @@ fn loop_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             input(s, bind(Some(id), "config.maxIterations", Conv::Passes, false), &max, "", false, Wash::Quiet, 13.0, 12.0),
             help("This is what ends the loop, not a safety net: an agent asked whether its own work is good enough tends to say yes. Capped at 10.", 6.0),
         ]));
+    }
+    // Items run side by side all run, so there is no pass to stop after.
+    if mode == "forEach" && parallel {
+        return section(out);
     }
     let ops = [
         ("equals", "equals"),

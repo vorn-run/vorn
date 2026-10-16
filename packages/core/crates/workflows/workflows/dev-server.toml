@@ -1,0 +1,25 @@
+# Every install starts with this once, switched off: the dev server comes back with its session.
+name = "Bring the dev server back"
+id = "system:dev-server-on-restore"
+icon = "RotateCcw"
+iconColor = "#c9972a"
+enabled = false
+workspaceId = "personal"
+
+[trigger]
+id = "trigger-1"
+type = "sessionRestored"
+label = "When a session is restored"
+x = 0
+y = 0
+
+[[step]]
+id = "script-1"
+type = "script"
+label = "Start the dev server"
+x = 0
+y = 120
+needs = ["trigger-1#e1"]
+scriptType = "bash"
+scriptContent = "yarn dev"
+cwd = "{{context.projectPath}}"

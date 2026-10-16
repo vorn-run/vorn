@@ -338,6 +338,19 @@ impl<H: Host> Engine<H> {
                     _ => 1,
                 }
             };
+            if crate::parallel::is_parallel(config) && !items.is_empty() {
+                let until = config
+                    .pointer("/until/variable")
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.trim().is_empty());
+                if until {
+                    fail("A loop that runs in parallel goes through every item, so it cannot stop early on a condition. Remove the condition, or run the items one at a time.".into());
+                    return Ok(());
+                }
+                return self
+                    .execute_parallel(node, workflow, run, context, active, &body, items)
+                    .await;
+            }
             let unit = if for_each { "item" } else { "pass" };
             let mut summary: Vec<String> = Vec::new();
             let mut stop_reason = if for_each {
@@ -542,12 +555,12 @@ impl<H: Host> Engine<H> {
 }
 
 /// The start of a pass's output, where the answer is.
-fn cap(text: &str) -> &str {
+pub(crate) fn cap(text: &str) -> &str {
     js::head(text, LOOP_RESULT_OUTPUT_CHARS)
 }
 
 /// What one pass left behind, per step, for `{{steps.<loop>.results}}`.
-fn pass_result(
+pub(crate) fn pass_result(
     run: &vorn_protocol::WorkflowExecution,
     iteration: u32,
     item: Option<&Value>,
@@ -563,6 +576,9 @@ fn pass_result(
             for (k, v) in fields {
                 entry.insert(k.clone(), v.clone());
             }
+        }
+        if let Some(json) = state.and_then(|s| graph::printed_json(step, s)) {
+            entry.insert("json".into(), json);
         }
         entry.insert(
             "output".into(),
