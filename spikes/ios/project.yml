@@ -1,0 +1,53 @@
+name: VornPhone
+options:
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    # build.sh signs with a development profile after the build.
+    CODE_SIGNING_ALLOWED: NO
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    SWIFT_OBJC_BRIDGING_HEADER: Shared/Bridge.h
+    LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/../../packages/core/target/aarch64-apple-ios/release
+    OTHER_LDFLAGS: [-lvorn_phone]
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTED_PLATFORMS: iphoneos
+    ENABLE_BITCODE: NO
+    DEAD_CODE_STRIPPING: YES
+targetTemplates:
+  Phone:
+    type: application
+    platform: iOS
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+    info:
+      path: ${target_name}/Info.plist
+      properties:
+        CFBundleDisplayName: $(PRODUCT_NAME)
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        NSLocalNetworkUsageDescription: Connects to Vorn on your computer.
+        UIUserInterfaceStyle: Dark
+targets:
+  Drawn:
+    templates: [Phone]
+    sources: [Shared, Drawn]
+    settings:
+      base:
+        PRODUCT_NAME: Vorn Drawn
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.drawn
+  Native:
+    templates: [Phone]
+    sources: [Shared, Native]
+    settings:
+      base:
+        PRODUCT_NAME: Vorn Native
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.native

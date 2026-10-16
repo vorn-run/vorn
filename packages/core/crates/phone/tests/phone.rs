@@ -94,6 +94,9 @@ fn native_controls(key: &str) -> Vec<(Id, &'static str, String)> {
     let mut out = Native::default();
     out.present(&mut ui).expect("native");
     let tree = ui.native_tree().expect("tree");
+    if let Some(prefix) = shot() {
+        std::fs::write(format!("{prefix}-native.json"), &out.json).expect("json");
+    }
     let kinds: Vec<_> = tree.walk().iter().map(|n| n.kind).collect();
     for k in [
         "section", "list", "toggle", "choice", "option", "field", "more", "button", "text",

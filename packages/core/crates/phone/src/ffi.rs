@@ -245,6 +245,15 @@ pub unsafe extern "C" fn vp_attach_layer(
     })
 }
 
+/// Stops drawing into the layer attached last, before the host lets it go.
+#[no_mangle]
+pub extern "C" fn vp_detach_layer(h: *mut Handle) {
+    with(h, |h| {
+        h.layer = None;
+        h.phone.terminal_only = false;
+    });
+}
+
 /// The view is `w`×`h` points at `scale`, inside `insets`, with the keyboard `keyboard` points tall.
 #[no_mangle]
 pub extern "C" fn vp_resize(
