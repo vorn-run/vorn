@@ -5,9 +5,7 @@ use std::collections::BTreeSet;
 
 use ext_ui_sdk::theme::{self, white};
 use ext_ui_sdk::widgets::{self, button};
-use ext_ui_sdk::{
-    div, shape, text, El, Radius, Role, TextSize, Token, Tone,
-};
+use ext_ui_sdk::{div, shape, text, El, Radius, Role, TextSize, Token, Tone};
 use serde_json::Value;
 
 ext_ui_sdk::wit_bindgen::generate!({
@@ -58,7 +56,9 @@ impl Screen {
     fn visible(&self) -> impl Iterator<Item = (usize, &Row)> {
         let q = self.filter.to_lowercase();
         self.rows.iter().enumerate().filter(move |(_, r)| {
-            q.is_empty() || r.name.to_lowercase().contains(&q) || r.branch.to_lowercase().contains(&q)
+            q.is_empty()
+                || r.name.to_lowercase().contains(&q)
+                || r.branch.to_lowercase().contains(&q)
         })
     }
 
@@ -107,11 +107,19 @@ impl Screen {
                     ),
             )
             .child(
-                widgets::list("worktrees", "Worktrees", self.visible().map(|(i, r)| self.row(i, r)))
-                    .grow()
-                    .min_h(0.0),
+                widgets::list(
+                    "worktrees",
+                    "Worktrees",
+                    self.visible().map(|(i, r)| self.row(i, r)),
+                )
+                .grow()
+                .min_h(0.0),
             )
-            .child(text(self.status.clone(), TextSize::Xs, theme::INK_SECONDARY))
+            .child(text(
+                self.status.clone(),
+                TextSize::Xs,
+                theme::INK_SECONDARY,
+            ))
     }
 
     fn row(&self, i: usize, r: &Row) -> El {
@@ -147,8 +155,17 @@ impl Screen {
             row.bg(theme::CLEAR).hover_bg(white(0.04))
         };
         row.child(check)
-            .child(text(r.name.clone(), TextSize::Xs, theme::INK).w(160.0).truncate())
-            .child(text(r.branch.clone(), TextSize::Xs, theme::MUTED).mono().grow().truncate())
+            .child(
+                text(r.name.clone(), TextSize::Xs, theme::INK)
+                    .w(160.0)
+                    .truncate(),
+            )
+            .child(
+                text(r.branch.clone(), TextSize::Xs, theme::MUTED)
+                    .mono()
+                    .grow()
+                    .truncate(),
+            )
             .child(widgets::badge(r.status.clone(), tone))
             .child(text(r.size.clone(), TextSize::Xs, theme::INK_SECONDARY).w(64.0))
     }
@@ -160,18 +177,38 @@ impl Screen {
         let bins = if s.cells { 12 } else { 48 }.min(sizes.len().max(1));
         let peak: Vec<u64> = (0..bins)
             .map(|b| {
-                let (lo, hi) = (b * sizes.len() / bins, ((b + 1) * sizes.len() / bins).max(b * sizes.len() / bins + 1));
-                sizes[lo.min(sizes.len())..hi.min(sizes.len())].iter().map(|x| x.0).max().unwrap_or(0)
+                let (lo, hi) = (
+                    b * sizes.len() / bins,
+                    ((b + 1) * sizes.len() / bins).max(b * sizes.len() / bins + 1),
+                );
+                sizes[lo.min(sizes.len())..hi.min(sizes.len())]
+                    .iter()
+                    .map(|x| x.0)
+                    .max()
+                    .unwrap_or(0)
             })
             .collect();
         let top = peak.iter().copied().max().unwrap_or(0).max(1) as f32;
-        let largest = sizes.iter().max_by_key(|x| x.0).map(|x| format!(", largest {} at {}", x.1.name, x.1.size));
-        let name = format!("Sizes of {} worktrees{}", sizes.len(), largest.unwrap_or_default());
+        let largest = sizes
+            .iter()
+            .max_by_key(|x| x.0)
+            .map(|x| format!(", largest {} at {}", x.1.name, x.1.size));
+        let name = format!(
+            "Sizes of {} worktrees{}",
+            sizes.len(),
+            largest.unwrap_or_default()
+        );
         let step = if bins > 1 { w / (bins - 1) as f32 } else { 0.0 };
         let pts: Vec<String> = peak
             .iter()
             .enumerate()
-            .map(|(i, v)| format!("{:.1},{:.1}", i as f32 * step, h - 1.0 - *v as f32 / top * (h - 2.0)))
+            .map(|(i, v)| {
+                format!(
+                    "{:.1},{:.1}",
+                    i as f32 * step,
+                    h - 1.0 - *v as f32 / top * (h - 2.0)
+                )
+            })
             .collect();
         let svg = format!(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {w} {h}'><polygon fill-opacity='0.25' points='0,{h} {} {w},{h}'/><polyline fill='none' stroke='#fff' stroke-width='1.5' stroke-linejoin='round' points='{}'/></svg>",
@@ -179,8 +216,13 @@ impl Screen {
             pts.join(" ")
         );
         let blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-        let glyph: String = peak.iter().map(|v| blocks[((*v as f32 / top) * 7.0).round() as usize]).collect();
-        shape(svg, w, h, ext_ui_sdk::theme::tint(Token::Accent, 0.9)).glyph(glyph).access(Role::Image, name)
+        let glyph: String = peak
+            .iter()
+            .map(|v| blocks[((*v as f32 / top) * 7.0).round() as usize])
+            .collect();
+        shape(svg, w, h, ext_ui_sdk::theme::tint(Token::Accent, 0.9))
+            .glyph(glyph)
+            .access(Role::Image, name)
     }
 
     fn row_at(id: &str) -> Option<usize> {
@@ -200,7 +242,8 @@ impl Screen {
                 self.selected.clear();
             }
             (EventKind::Click, _) => {
-                let Some(r) = Screen::row_at(id).and_then(|i| self.rows.get(i).map(|r| (i, r))) else {
+                let Some(r) = Screen::row_at(id).and_then(|i| self.rows.get(i).map(|r| (i, r)))
+                else {
                     return false;
                 };
                 if !r.1.removable {

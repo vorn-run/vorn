@@ -92,11 +92,12 @@ impl Draw {
                 };
                 text(s.clone(), px, paint(*ink))
             }
-            Kind::Shape((svg, ink)) => div().content(Content::Svg {
-                svg: svg.clone(),
-                color: paint(*ink),
-            })
-            .shrink0(),
+            Kind::Shape((svg, ink)) => div()
+                .content(Content::Svg {
+                    svg: svg.clone(),
+                    color: paint(*ink),
+                })
+                .shrink0(),
             Kind::Button(label) => widgets::button(ui, id.unwrap_or(anon), label),
             Kind::Field((name, ph)) => widgets::text_input(ui, id.unwrap_or(anon), name, ph),
             Kind::Badge((v, t)) => {
@@ -192,9 +193,8 @@ impl Draw {
                 Event::Submit(id) => name(&id).map(|n| (n, EventKind::Submit, String::new())),
                 Event::Move { id, x, y, .. } => {
                     let over = self.drags.iter().find(|d| {
-                        ui.rect_of(**d).is_some_and(|r| {
-                            y >= r.y && y < r.y + r.h && x >= r.x && x < r.x + r.w
-                        })
+                        ui.rect_of(**d)
+                            .is_some_and(|r| y >= r.y && y < r.y + r.h && x >= r.x && x < r.x + r.w)
                     });
                     match (name(&id), over.and_then(name)) {
                         (Some(n), Some(o)) => Some((n, EventKind::DragOver, o)),

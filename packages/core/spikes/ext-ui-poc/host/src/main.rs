@@ -699,7 +699,11 @@ fn main() {
         }
         c.shoot(&format!("{out}/{name}-selected.{ext}"));
         let t = Instant::now();
-        for st in [Step::Move(spots.remove.0, spots.remove.1), Step::Down, Step::Up] {
+        for st in [
+            Step::Move(spots.remove.0, spots.remove.1),
+            Step::Down,
+            Step::Up,
+        ] {
             c.apply(&st);
         }
         c.frame();
@@ -805,7 +809,11 @@ fn main() {
     for _ in 0..20 {
         let mut c = wasm::UiC::new(&engine, &uic_c);
         c.data(&rows_json);
-        let nodes = c.render(wasm::tree::Surface { cells: false, width: LOGICAL.0, height: LOGICAL.1 });
+        let nodes = c.render(wasm::tree::Surface {
+            cells: false,
+            width: LOGICAL.0,
+            height: LOGICAL.1,
+        });
         peak_c += c.store.data().peak;
         held_c.push((c, nodes));
     }

@@ -2,10 +2,10 @@
 
 wit_bindgen::generate!({ world: "sdk", path: "../wit" });
 
-pub use vorn::ext_ui_poc::tree;
 pub use tree::{
     Confirm, EventKind, Kind, Node, Paint, Prop, Radius, Role, Surface, TextSize, Token, Tone,
 };
+pub use vorn::ext_ui_poc::tree;
 pub use wit_bindgen;
 
 /// One box and the boxes inside it.
