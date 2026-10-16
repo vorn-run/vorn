@@ -1,8 +1,5 @@
-//! The whole-config snapshot: `loadConfig` and `saveConfig`.
-//!
-//! Tasks and workflows are not part of it: they are read and written
-//! through their own calls, and a snapshot that carries them is read
-//! without them.
+//! The whole-config snapshot: `loadConfig` and `saveConfig`. Tasks and
+//! workflows have their own calls.
 //!
 //! A save rewrites the collections it carries from the snapshot, but a row
 //! the snapshot leaves out is deleted only if the saving client could have
@@ -266,22 +263,18 @@ impl Store {
             }
             let cmd = AgentCommandConfig::deserialize(cmd)?;
             tx.execute(
-                "INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+                "INSERT INTO agent_commands (agent_type, command, args, headless_args, row_revision)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(agent_type) DO UPDATE SET
          row_revision = excluded.row_revision,
          command = excluded.command,
          args = excluded.args,
-         headless_args = excluded.headless_args,
-         fallback_command = excluded.fallback_command,
-         fallback_args = excluded.fallback_args",
+         headless_args = excluded.headless_args",
                 params![
                     agent_type,
                     cmd.command,
                     json_text(&cmd.args)?,
                     json_if_truthy(cmd.headless_args.as_ref())?,
-                    cmd.fallback_command,
-                    json_if_truthy(cmd.fallback_args.as_ref())?,
                     rev,
                 ],
             )?;
@@ -594,10 +587,6 @@ pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value
             headless_args: get_opt_text(row, "headless_args")?
                 .map(|t| parse_json(&t))
                 .transpose()?,
-            fallback_command: get_opt_text(row, "fallback_command")?,
-            fallback_args: get_opt_text(row, "fallback_args")?
-                .map(|t| parse_json(&t))
-                .transpose()?,
         };
         result.insert(get_text(row, "agent_type")?, serde_json::to_value(cmd)?);
     }
@@ -633,16 +622,8 @@ mod tests {
             "version": 1,
             "defaults": { "shell": "/bin/bash", "fontSize": 14, "theme": "light" },
             "projects": [{ "name": "p", "path": "/p", "preferredAgents": ["acme"], "hostIds": ["h"] }],
-            "agentCommands": { "acme": { "command": "acme", "args": ["--x"], "fallbackCommand": "c2" } },
-            "workflows": [{
-                "id": "w", "name": "W", "icon": "Zap", "iconColor": "#fff",
-                "nodes": [], "edges": [], "enabled": false, "staggerDelayMs": 250
-            }],
+            "agentCommands": { "acme": { "command": "acme", "args": ["--x"], "headlessArgs": ["-p"] } },
             "remoteHosts": [{ "id": "h", "label": "H", "hostname": "h.local", "user": "me", "port": 22 }],
-            "tasks": [{
-                "id": "t", "projectName": "p", "title": "T", "description": "d",
-                "status": "todo", "order": 1, "createdAt": "c", "updatedAt": "u", "useWorktree": true
-            }],
             "workspaces": [
                 { "id": "personal", "name": "Personal", "icon": "User", "iconColor": "#6b7280", "order": 0 },
                 { "id": "w2", "name": "Work", "order": 1 }
@@ -759,46 +740,6 @@ mod tests {
         // A client that has seen p2's revision and leaves it out deleted it.
         store.save_config(&snapshot(Some(2)), &[]).unwrap();
         assert_eq!(project_names(&store), ["p"]);
-    }
-
-    /// A database from before tasks and workflows left the document: its rows
-    /// are neither loaded into it nor touched by a save, whatever it carries.
-    #[test]
-    fn a_save_leaves_tasks_and_workflows_alone() {
-        let mut store = test_support::store();
-        store.save_config(&snapshot(None), &[]).unwrap();
-        store
-            .call(
-                "dbInsertTask",
-                json!([{ "id": "kept", "projectName": "p", "title": "K", "description": "",
-                    "status": "todo", "order": 0, "createdAt": "c", "updatedAt": "u" }]),
-            )
-            .unwrap();
-        store
-            .call(
-                "dbInsertWorkflow",
-                json!([{ "id": "wf", "name": "Wf", "icon": "Zap", "iconColor": "#fff",
-                    "nodes": [], "edges": [], "enabled": true }]),
-            )
-            .unwrap();
-        let loaded = store.load_config().unwrap();
-        assert!(loaded.get("tasks").is_none() && loaded.get("workflows").is_none());
-
-        // An old client's snapshot: no tasks, then other tasks, then none at all.
-        for tasks in [json!([]), snapshot(None)["tasks"].clone(), Value::Null] {
-            let mut old = snapshot(None);
-            old["tasks"] = tasks;
-            old["workflows"] = json!([]);
-            store.save_config(&old, &[]).unwrap();
-            let ids: Vec<String> = store
-                .db_list_tasks(None, None)
-                .unwrap()
-                .into_iter()
-                .map(|t| t.id)
-                .collect();
-            assert_eq!(ids, ["kept"]);
-            assert_eq!(store.db_list_workflows().unwrap().len(), 1);
-        }
     }
 
     #[test]

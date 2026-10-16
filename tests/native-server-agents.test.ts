@@ -42,7 +42,7 @@ const shared = { dataDir: '' }
 
 /** What the configuration says of two agents. */
 const AGENT_COMMANDS = {
-  gemini: { command: 'gemini-missing', args: [], fallbackCommand: 'gem-fallback' },
+  gemini: { command: 'gem-renamed', args: [] },
   codex: { command: 'codex', args: ['--profile', 'work', '--yolo'] }
 }
 
@@ -245,13 +245,13 @@ function makeFixture(): Fixture {
   return { root, home, project, worktree, linked, plain }
 }
 
-/** The stand-in CLIs, the gemini fallback and the stand-in login shell. */
+/** The stand-in CLIs, gemini under its configured name and the stand-in login shell. */
 function makeTools(root: string): { bin: string; shell: string } {
   const bin = path.join(root, 'bin')
   for (const name of ['claude', 'codex', 'copilot', 'opencode']) {
     write(path.join(bin, name), FAKE_CLI, 0o755)
   }
-  write(path.join(bin, 'gem-fallback'), '#!/bin/sh\n', 0o755)
+  write(path.join(bin, 'gem-renamed'), '#!/bin/sh\n', 0o755)
   const shell = path.join(root, 'login-shell')
   write(shell, '#!/bin/sh\nexec env\n', 0o755)
   return { bin, shell }

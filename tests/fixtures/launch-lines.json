@@ -1614,57 +1614,12 @@
       }
     },
     {
-      "name": "fallback command",
-      "platform": "posix",
-      "bin": ["claude-code"],
-      "commands": {
-        "claude": {
-          "command": "claude",
-          "args": ["--a"],
-          "fallbackCommand": "claude-code",
-          "fallbackArgs": ["--fb"]
-        }
-      },
-      "payload": {
-        "agentType": "claude",
-        "initialPrompt": "x"
-      },
-      "line": "claude-code --fb x",
-      "headless": {
-        "command": "{bin}/claude-code",
-        "args": ["--fb", "-p"],
-        "stdin": "x"
-      }
-    },
-    {
-      "name": "fallback without arguments",
-      "platform": "posix",
-      "bin": ["claude-code"],
-      "commands": {
-        "claude": {
-          "command": "claude",
-          "args": ["--a"],
-          "fallbackCommand": "claude-code"
-        }
-      },
-      "payload": {
-        "agentType": "claude"
-      },
-      "line": "claude-code",
-      "headless": {
-        "command": "{bin}/claude-code",
-        "args": ["-p", ""]
-      }
-    },
-    {
-      "name": "fallback not found",
+      "name": "command not on PATH",
       "platform": "posix",
       "commands": {
         "claude": {
           "command": "claude",
-          "args": ["--a"],
-          "fallbackCommand": "claude-code",
-          "fallbackArgs": ["--fb"]
+          "args": ["--a"]
         }
       },
       "payload": {

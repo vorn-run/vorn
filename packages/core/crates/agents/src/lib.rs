@@ -118,8 +118,6 @@ impl Agent {
             command: launch.command.clone(),
             args: launch.args.clone(),
             headless_args: launch.headless_args.clone(),
-            fallback_command: None,
-            fallback_args: None,
         }
     }
 }
@@ -228,8 +226,6 @@ pub struct AgentCommand {
     pub command: String,
     pub args: Vec<String>,
     pub headless_args: Option<Vec<String>>,
-    pub fallback_command: Option<String>,
-    pub fallback_args: Option<Vec<String>>,
 }
 
 /// The agent a manifest's text describes, read once per process: the same

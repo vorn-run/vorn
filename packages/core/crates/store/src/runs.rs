@@ -18,15 +18,6 @@ use crate::{Result, Store};
 /// Runs kept per workflow; older finished ones are trimmed on save.
 const MAX_WORKFLOW_RUNS: i64 = 50;
 
-/// `workflowRunId`: the run's own id, or one made from its workflow and start.
-fn workflow_run_id(execution: &WorkflowExecution) -> String {
-    if execution.run_id.is_empty() {
-        format!("{}:{}", execution.workflow_id, execution.started_at)
-    } else {
-        execution.run_id.clone()
-    }
-}
-
 /// `ns.feedback?.length ? JSON.stringify(ns.feedback) : null`.
 fn feedback_text(feedback: Option<&Value>) -> Result<SqlValue> {
     let stored = match feedback {
@@ -251,7 +242,10 @@ impl Store {
     /// oldest finished runs past [`MAX_WORKFLOW_RUNS`]. Returns the trimmed
     /// run ids, whose gate views the caller removes.
     pub fn save_workflow_run(&mut self, execution: &WorkflowExecution) -> Result<Vec<String>> {
-        let run_id = workflow_run_id(execution);
+        let run_id = &execution.run_id;
+        if run_id.is_empty() {
+            return Err(crate::Error::Refused("a workflow run needs a runId".into()));
+        }
         let tx = self.write_transaction()?;
         tx.execute(
             "INSERT OR REPLACE INTO workflow_runs (
@@ -275,14 +269,14 @@ impl Store {
             ],
         )?;
 
-        tx.execute("DELETE FROM workflow_run_nodes WHERE run_id = ?", [&run_id])?;
+        tx.execute("DELETE FROM workflow_run_nodes WHERE run_id = ?", [run_id])?;
         {
             let mut insert_node = tx.prepare(
                 "INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for, message, view_token, round, feedback, rejected_at, editable_text, edited_text)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
             for ns in &execution.node_states {
-                insert_node.execute(params_from_iter(node_params(&run_id, ns)?))?;
+                insert_node.execute(params_from_iter(node_params(run_id, ns)?))?;
             }
         }
 
@@ -500,6 +494,8 @@ mod tests {
     fn saves_and_reads_back_a_run_with_its_nodes() {
         let mut store = test_support::store();
         let mut exec = run("wf", "", "2026-10-05T00:00:00.000Z", "running");
+        assert!(store.save_workflow_run(&exec).is_err());
+        exec.run_id = "wf-run-1".into();
         exec.inputs = Some(json!({ "a": 1 }));
         exec.connector_item = Some(json!([1, 2]));
         exec.connector_inbox_id = Some(7.0);
@@ -521,7 +517,7 @@ mod tests {
         ];
         assert!(store.save_workflow_run(&exec).unwrap().is_empty());
 
-        let id = "wf:2026-10-05T00:00:00.000Z";
+        let id = "wf-run-1";
         let got = store.get_workflow_run(id).unwrap().unwrap();
         assert_eq!(
             got,

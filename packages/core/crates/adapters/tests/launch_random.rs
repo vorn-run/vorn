@@ -145,8 +145,6 @@ fn cases(count: usize) -> Vec<Case> {
                 command: line.clone(),
                 args: command_args,
                 headless_args: None,
-                fallback_command: None,
-                fallback_args: None,
             },
             machine: Machine {
                 platform,

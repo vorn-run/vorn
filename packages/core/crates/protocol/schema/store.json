@@ -8,11 +8,7 @@
           "type": "string"
         },
         "args": {},
-        "headlessArgs": {},
-        "fallbackCommand": {
-          "type": "string"
-        },
-        "fallbackArgs": {}
+        "headlessArgs": {}
       },
       "required": [
         "command",

@@ -1,14 +1,11 @@
 //! Vorn's store on rusqlite.
 //!
-//! The same database file, schema and migrations as the server's
-//! `database.ts`, so either can open what the other wrote, and both can have
-//! it open at once (WAL). Every call takes and returns the protocol types of
-//! `vorn-protocol`, generated from the TypeScript that defines them, and
-//! behaves as the TypeScript function of the same name does: the same rows
-//! written, the same fields left out of what it reads back.
+//! One database file (`vorn.db`) in WAL mode, so more than one process can
+//! have it open at once. Every call takes and returns the protocol types of
+//! `vorn-protocol`.
 //!
-//! [`Store::call`] answers a call by its TypeScript name with JSON arguments,
-//! which is how a host that speaks JSON (the server, through napi) drives it.
+//! [`Store::call`] answers a call by its name with JSON arguments, which is
+//! how a host that speaks JSON drives it.
 //! [`ProjectHosts`] and [`AgentSettings`] are the reads a second process
 //! makes without opening the store: which projects are on a remote host, and
 //! how the agents are configured.
@@ -74,13 +71,13 @@ pub enum Error {
     Json(serde_json::Error),
     /// A call named something the store does not answer.
     UnknownCall(String),
-    /// A call's arguments did not have the shape its TypeScript signature has.
+    /// A call's arguments did not have the shape its signature has.
     BadArguments {
         call: String,
         error: serde_json::Error,
     },
-    /// A precondition the TypeScript also refuses, worded as it words it
-    /// (`Artifact not found: <id>`).
+    /// A call refused because a precondition does not hold, or the file
+    /// cannot be opened (`Artifact not found: <id>`).
     Refused(String),
     Io(std::io::Error),
 }
@@ -144,7 +141,7 @@ pub enum Opened {
     /// The file opened (or was created) and is current.
     Ok,
     /// The file was not a database. It was copied to `backup` and replaced
-    /// with a new one, as `database.ts` does.
+    /// with a new one.
     Recovered { backup: PathBuf },
 }
 
@@ -163,8 +160,8 @@ impl Store {
         }
     }
 
-    /// A database in memory, as `initTestDatabase` makes: schema and
-    /// migrations, but none of the seeded workflows.
+    /// A database in memory with the schema but none of the seeded
+    /// workflows.
     pub fn open_in_memory(options: StoreOptions) -> Result<Store> {
         let conn = Connection::open_in_memory()?;
         let mut store = Store {
@@ -261,7 +258,7 @@ impl Store {
         })
     }
 
-    /// Answers the `database.ts` call named `call`, with its arguments as a
+    /// Answers the call named `call`, with its arguments as a
     /// JSON array in signature order, and returns what it returns.
     /// `undefined` is `null` both ways.
     pub fn call(&mut self, call: &str, args: Value) -> Result<Value> {
@@ -275,7 +272,7 @@ impl Store {
 }
 
 /// Whether opening failed because the file is not a database, the case
-/// `database.ts` recovers from by starting a new one.
+/// [`Store::open`] recovers from by starting a new one.
 fn is_corrupt(err: &Error) -> bool {
     match err {
         Error::Sqlite(rusqlite::Error::SqliteFailure(failure, _)) => matches!(

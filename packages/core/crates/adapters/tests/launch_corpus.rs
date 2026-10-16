@@ -66,8 +66,6 @@ fn command(v: &Value) -> AgentCommand {
         command: string(&v["command"]).unwrap(),
         args: strings(&v["args"]).unwrap(),
         headless_args: strings(&v["headlessArgs"]),
-        fallback_command: string(&v["fallbackCommand"]),
-        fallback_args: strings(&v["fallbackArgs"]),
     }
 }
 

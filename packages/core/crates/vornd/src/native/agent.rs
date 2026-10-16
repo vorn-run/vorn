@@ -59,7 +59,7 @@ pub(super) fn settings(native: &Native) -> Option<AgentSettings> {
 }
 
 /// The configured command for `agent`, or its default when none is stored.
-/// `None` for a stored one of a shape the server's code would not expect.
+/// `None` for a stored one of an unexpected shape.
 pub(super) fn command_of(settings: &AgentSettings, agent: &Agent) -> Option<AgentCommand> {
     let Some(stored) = settings.commands.get(agent.id()) else {
         return Some(agent.default_command());
@@ -75,17 +75,10 @@ pub(super) fn command_of(settings: &AgentSettings, agent: &Agent) -> Option<Agen
             Some(_) => None,
         }
     };
-    let fallback_command = match stored.get("fallbackCommand") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(_) => return None,
-    };
     Some(AgentCommand {
         command: stored.get("command")?.as_str()?.to_owned(),
         args: strings(stored.get("args"))??,
         headless_args: strings(stored.get("headlessArgs"))?,
-        fallback_command,
-        fallback_args: strings(stored.get("fallbackArgs"))?,
     })
 }
 
@@ -283,8 +276,6 @@ fn unused() -> AgentCommand {
         command: String::new(),
         args: Vec::new(),
         headless_args: None,
-        fallback_command: None,
-        fallback_args: None,
     }
 }
 
@@ -388,14 +379,14 @@ mod tests {
     #[test]
     fn reads_a_stored_command_and_defaults_the_rest() {
         let s = settings_with(json!({
-            "gamma": { "command": "gam", "args": ["-x"], "fallbackCommand": "g2" },
+            "gamma": { "command": "gam", "args": ["-x"], "headlessArgs": ["-p"] },
             "beta": { "command": "beta", "args": "not a list" }
         }));
         let agents = crate::adapters::testing::adapters().agents();
         let gamma = command_of(&s, agents.get("gamma").unwrap()).unwrap();
         assert_eq!(gamma.command, "gam");
         assert_eq!(gamma.args, ["-x"]);
-        assert_eq!(gamma.fallback_command.as_deref(), Some("g2"));
+        assert_eq!(gamma.headless_args.as_deref(), Some(&["-p".to_owned()][..]));
         let acme = agents.get("acme").unwrap();
         assert_eq!(command_of(&s, acme), Some(acme.default_command()));
         assert_eq!(command_of(&s, agents.get("beta").unwrap()), None);

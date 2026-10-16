@@ -72,8 +72,6 @@ export interface AgentCommandConfig {
   command: string
   args: string[]
   headlessArgs?: string[]
-  fallbackCommand?: string
-  fallbackArgs?: string[]
 }
 
 export interface TerminalSession {
@@ -1364,9 +1362,6 @@ export interface WorkflowExecution {
    * Identity of this run, unique across every run of every workflow. A workflow
    * can have several runs in flight at once (connector fan-out gives one run per
    * item), so `workflowId` alone does not identify a run.
-   *
-   * Runs written before this field existed are keyed `<workflowId>:<startedAt>`;
-   * that remains the fallback when reading them back, so old history still loads.
    */
   runId: string
   workflowId: string
@@ -1404,15 +1399,6 @@ export interface WorkflowExecution {
   retryOfRunId?: string
   /** The workflow as this run started it; resuming follows this, not a later edit. */
   definition?: WorkflowDefinition
-}
-
-/** Stable identity for a run row, tolerating history written before `runId`. */
-export function workflowRunId(execution: {
-  runId?: string
-  workflowId: string
-  startedAt: string
-}): string {
-  return execution.runId || `${execution.workflowId}:${execution.startedAt}`
 }
 
 // ─── Tailscale Network Access ────────────────────────────────────
@@ -1993,7 +1979,6 @@ export const IPC = {
   GIT_WORKTREE_DIRTY: 'git:worktreeDirty',
   GIT_LIST_WORKTREES: 'git:listWorktrees',
   GIT_CHECKOUT_BRANCH: 'git:checkoutBranch',
-  GIT_GET_WORKTREE_BRANCH: 'git:getWorktreeBranch',
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
@@ -2137,19 +2122,15 @@ export const IPC = {
   SCRIPT_EXIT: 'script:exit',
   WORKFLOW_RUN_UPDATED: 'workflow:runUpdated',
   WORKFLOW_RUN: 'workflow:run',
-  WORKFLOW_SESSION_RESTORED: 'workflow:sessionRestored',
   WORKFLOW_STOP_RUN_REQUEST: 'workflow:stopRun',
   WORKFLOW_RESOLVE_GATE: 'workflow:resolveGate',
   WORKFLOW_RETRY_RUN: 'workflow:retryRun',
   WORKFLOW_RERUN: 'workflow:rerun',
-  WORKFLOW_RUN_SAVE: 'workflowRun:save',
   WORKFLOW_RUN_LIST: 'workflowRun:list',
   WORKFLOW_RUN_LIST_BY_TASK: 'workflowRun:listByTask',
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
   WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
-  WORKFLOW_RUN_CLAIM: 'workflowRun:claim',
-  WORKFLOW_RUN_RELEASE: 'workflowRun:release',
   SESSION_EVENT_LIST: 'sessionEvent:list',
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
@@ -2170,7 +2151,6 @@ export const IPC = {
   CREDENTIAL_IMPORT_KEY_FILE: 'credential:importKeyFile',
   CREDENTIAL_DELETE_KEY: 'credential:deleteKey',
   CREDENTIAL_LIST_KEYS: 'credential:listKeys',
-  CREDENTIAL_GET_ENCRYPTED_KEY: 'credential:getEncryptedKey',
   CREDENTIAL_SAFE_STORAGE_AVAILABLE: 'credential:safeStorageAvailable',
   SSH_TEST_CONNECTION: 'ssh:testConnection',
   OPEN_EXTERNAL: 'shell:openExternal',
@@ -2196,8 +2176,6 @@ export const IPC = {
   CONNECTOR_STATUS: 'connector:status',
   CONNECTOR_PROBE_AUTH: 'connector:probeAuth',
   CONNECTION_UPSERT_FROM_ITEM: 'connection:upsertFromItem',
-  CONNECTOR_INBOX_COMPLETE: 'connector:inboxComplete',
-  CONNECTOR_INBOX_RENEW: 'connector:inboxRenew',
   WORKFLOW_RUN_MANUAL: 'workflow:runManual',
   CONNECTION_BACKFILL: 'connection:backfill',
   CREDENTIALS_IMPORT: 'credentials:import',
@@ -2224,13 +2202,8 @@ export const IPC = {
   // Extensions
   EXTENSION_LIST: 'extension:list',
   EXTENSION_ACTIVATION: 'extension:activation',
-  EXTENSION_FOOTER_ITEMS: 'extension:footerItems',
   EXTENSION_OPEN_PANE: 'extension:openPane',
-  EXTENSION_CLOSE_PANE: 'extension:closePane',
-  EXTENSION_RUN_HANDLER: 'extension:runHandler',
-  EXTENSION_MATCH_LINKS: 'extension:matchLinks',
-  EXTENSION_SELECTION_REQUEST: 'extension:selectionRequest',
-  EXTENSION_SELECTION_RESULT: 'extension:selectionResult'
+  EXTENSION_CLOSE_PANE: 'extension:closePane'
 } as const
 
 /** An environment variable a connector package reads, from its manifest. */

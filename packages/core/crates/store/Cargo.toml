@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Vorn's store on rusqlite: the same database file, schema and migrations as the server's database.ts"
+description = "Vorn's store on rusqlite: the database file, its schema and the calls on it"
 
 [dependencies]
 # `hooks` for the authorizer that holds an extension to its own tables.

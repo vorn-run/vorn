@@ -251,9 +251,7 @@ fn runnable(path: &Path) -> bool {
     path.exists()
 }
 
-/// The configured command as found (`resolveAgentCommand`): the primary
-/// where it is on PATH, else the fallback where that is, else the primary
-/// by name.
+/// The configured command as found: where it is on PATH, else by name.
 struct Resolved<'a> {
     command: &'a str,
     args: &'a [String],
@@ -273,15 +271,6 @@ fn resolve<'a>(
             args: &config.args,
             path,
         };
-    }
-    if let Some(fallback) = config.fallback_command.as_deref().filter(|f| !f.is_empty()) {
-        if let Some(path) = find_on_path(fallback, path_env, platform) {
-            return Resolved {
-                command: fallback,
-                args: config.fallback_args.as_deref().unwrap_or_default(),
-                path,
-            };
-        }
     }
     Resolved {
         command: &config.command,
