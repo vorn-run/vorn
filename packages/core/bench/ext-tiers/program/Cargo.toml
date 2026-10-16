@@ -1,0 +1,10 @@
+[package]
+name = "ext-tiers-program"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The program tier of the E9.4 spike: the shared extensions served over stdio JSON-RPC"
+
+[dependencies]
+ext-tiers-logic = { path = "../logic" }
+serde_json = "1"

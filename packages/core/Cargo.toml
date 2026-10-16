@@ -41,6 +41,10 @@ members = [
   "crates/layout",
   "bench/scale",
   "bench/workflows",
+  "bench/ext-tiers",
+  "bench/ext-tiers/logic",
+  "bench/ext-tiers/program",
+  "bench/ext-tiers/component",
 ]
 exclude = ["vendor"]
 

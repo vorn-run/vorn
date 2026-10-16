@@ -362,7 +362,12 @@ enum Job {
         deadline: Duration,
         reply: oneshot::Sender<Result<Value, CallError>>,
     },
-    Events(Vec<Event>),
+    /// `done` is dropped once the guest has the batch behind it, so a busy
+    /// guest holds its queue back as a full pipe holds back a program.
+    Events {
+        batch: Vec<Event>,
+        done: oneshot::Sender<()>,
+    },
 }
 
 /// A component service: its thread, and what it was last seen to hold.
@@ -387,10 +392,13 @@ fn transport(e: impl std::fmt::Display) -> CallError {
 
 /// What a trap or a passed deadline reads as.
 fn stopped(name: &str, trap: &wasmtime::Error) -> CallError {
-    if trap.downcast_ref::<wasmtime::Trap>() == Some(&wasmtime::Trap::Interrupt) {
-        CallError::Timeout(format!("{name} ran past its deadline and was stopped"))
-    } else {
-        CallError::Transport(format!("{name} stopped: {trap:#}"))
+    match trap.downcast_ref::<wasmtime::Trap>() {
+        Some(wasmtime::Trap::Interrupt) => {
+            CallError::Timeout(format!("{name} ran past its deadline and was stopped"))
+        }
+        // The trap alone: its wasm backtrace names nothing a reader can use.
+        Some(t) => CallError::Transport(format!("{name} stopped: {t}")),
+        None => CallError::Transport(format!("{name} stopped: {trap:#}")),
     }
 }
 
@@ -438,6 +446,7 @@ impl Service {
                     start_deadline,
                     ready_tx,
                     &rx,
+                    &flag,
                 );
                 flag.store(true, Ordering::Release);
             })
@@ -491,9 +500,12 @@ impl Service {
         })
     }
 
-    /// `guest.on-event`; nothing answers it.
-    pub fn on_event(&self, batch: Vec<Event>) -> Result<(), CallError> {
-        self.send(Job::Events(batch))
+    /// `guest.on-event`; nothing answers it, but it resolves only once the guest is done with it.
+    pub async fn on_event(&self, batch: Vec<Event>) -> Result<(), CallError> {
+        let (done, handled) = oneshot::channel();
+        self.send(Job::Events { batch, done })?;
+        let _ = handled.await;
+        Ok(())
     }
 
     /// The most linear memory its instance has held, in bytes.
@@ -530,6 +542,7 @@ fn run(
     start_deadline: Duration,
     ready: oneshot::Sender<Result<(), String>>,
     jobs: &std_mpsc::Receiver<Job>,
+    ended: &AtomicBool,
 ) {
     let rt = match runtime() {
         Ok(rt) => rt,
@@ -615,12 +628,14 @@ fn run(
                         }));
                     }
                     Err(trap) => {
+                        // Ended before the answer, so the next call starts a fresh instance.
+                        ended.store(true, Ordering::Release);
                         let _ = reply.send(Err(stopped(name, &trap)));
                         return;
                     }
                 }
             }
-            Job::Events(batch) => {
+            Job::Events { batch, done } => {
                 store.set_epoch_deadline(ticks(start_deadline));
                 let batch: Vec<wit::Event> = batch
                     .into_iter()
@@ -633,6 +648,10 @@ fn run(
                     let _busy = rt.enter();
                     guest.call_on_event(&mut store, &batch)
                 };
+                if handled.is_err() {
+                    ended.store(true, Ordering::Release);
+                }
+                drop(done);
                 if let Err(trap) = handled {
                     tracing::warn!("[extensions] {}", stopped(name, &trap));
                     return;

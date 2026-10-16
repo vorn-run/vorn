@@ -117,7 +117,7 @@ impl Program {
         match self {
             Program::Child(c) => c.notify(Method::GuestOnEvent.name(), json!(params)).await,
             #[cfg(feature = "wasm")]
-            Program::Component(c) => c.on_event(params.batch),
+            Program::Component(c) => c.on_event(params.batch).await,
         }
     }
 
