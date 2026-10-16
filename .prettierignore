@@ -30,3 +30,5 @@ packages/core/bench/workflows/results/
 # The Mac app's highlighter bundle and its entry, written by apps/macos/scripts/gen-shiki.sh.
 apps/macos/Sources/VornUI/Resources/shiki.js
 apps/macos/scripts/shiki/
+# Recorded byte for byte from 0.8 hook installers.
+packages/core/crates/adapters/agents/*/fixtures/
