@@ -21,10 +21,8 @@ pub(super) enum PlugCall {
     Builtins,
     Connections,
     Statuses,
-    /// `extension:installed`, else `connector:listPacks` when that is all vornd has.
-    Packs {
-        fallback: bool,
-    },
+    /// `extension:installed`.
+    Packs,
     Catalog {
         load: bool,
     },
@@ -366,7 +364,7 @@ impl App {
             Value::Null,
         );
         self.call(
-            Call::Plug(PlugCall::Packs { fallback: false }),
+            Call::Plug(PlugCall::Packs),
             "extension:installed",
             Value::Null,
         );
@@ -743,14 +741,7 @@ impl App {
                 }
                 self.plug_loaded();
             }
-            PlugCall::Packs { fallback: false } if answer.is_err() => {
-                self.call(
-                    Call::Plug(PlugCall::Packs { fallback: true }),
-                    "connector:listPacks",
-                    Value::Null,
-                );
-            }
-            PlugCall::Packs { .. } => {
+            PlugCall::Packs => {
                 if let Ok(v) = &answer {
                     p.packs = arr(v);
                 }

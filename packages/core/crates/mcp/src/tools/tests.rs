@@ -208,7 +208,7 @@ fn workflows_are_checked_stored_and_run() {
     let bad = run(
         &rpc,
         "update_workflow",
-        json!({ "id": id, "nodes": [{ "id": "l", "type": "loop", "label": "L", "config": { "mode": "repeat" }, "position": { "x": 0, "y": 0 } }] }),
+        json!({ "workflow_id": id, "nodes": [{ "id": "l", "type": "loop", "label": "L", "config": { "mode": "repeat" }, "position": { "x": 0, "y": 0 } }] }),
     );
     assert_eq!(bad["isError"], true);
     assert!(
@@ -224,7 +224,7 @@ fn workflows_are_checked_stored_and_run() {
     );
     assert_eq!(parsed(&renamed)["name"], "Renamed");
     assert_eq!(
-        text(&run(&rpc, "delete_workflow", json!({ "id": id }))),
+        text(&run(&rpc, "delete_workflow", json!({ "workflow_id": id }))),
         "Deleted workflow: Renamed"
     );
 }

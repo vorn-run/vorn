@@ -97,15 +97,13 @@ pub fn welcome(hello: &Hello, build: &str, instance: u64) -> Result<Welcome, Ser
         return Err(ServerMsg::Error {
             code: code::UPGRADE,
             message: format!(
-                "grid protocol {} is not served here; this vornd speaks {PROTO_MAJOR} and {}",
-                hello.proto_major,
-                PROTO_MAJOR.saturating_sub(1)
+                "grid protocol {} is not served here; this vornd speaks {PROTO_MAJOR}",
+                hello.proto_major
             ),
         });
     }
     Ok(Welcome {
-        // Served in the client's major, which is this one or the last.
-        proto_major: hello.proto_major,
+        proto_major: PROTO_MAJOR,
         proto_minor: PROTO_MINOR,
         caps: hello.caps & caps::ALL,
         vornd_build: build.to_owned(),
@@ -608,17 +606,16 @@ mod tests {
         }
     }
 
-    /// TP-T18's handshake: this major and the one before attach with the
-    /// capabilities both sides have; any other gets Error 426.
+    /// TP-T18's handshake: this major attaches with the capabilities both
+    /// sides have; any other gets Error 426.
     #[test]
     fn versions_meet_on_common_capabilities_or_fail_with_426() {
         let w = welcome(&hello(PROTO_MAJOR, caps::ALL | 1 << 40), "vornd", 7).unwrap();
         assert_eq!(w.caps, caps::ALL);
         assert_eq!(w.proto_major, PROTO_MAJOR);
-        let older = welcome(&hello(PROTO_MAJOR - 1, caps::GRID), "vornd", 7).unwrap();
-        assert_eq!(older.caps, caps::GRID);
-        assert_eq!(older.proto_major, PROTO_MAJOR - 1);
-        for major in [PROTO_MAJOR + 1, PROTO_MAJOR + 7] {
+        let fewer = welcome(&hello(PROTO_MAJOR, caps::GRID), "vornd", 7).unwrap();
+        assert_eq!(fewer.caps, caps::GRID);
+        for major in [PROTO_MAJOR - 1, PROTO_MAJOR + 1, PROTO_MAJOR + 7] {
             match welcome(&hello(major, caps::ALL), "vornd", 7) {
                 Err(ServerMsg::Error { code: c, .. }) => assert_eq!(c, code::UPGRADE),
                 other => panic!("{other:?}"),

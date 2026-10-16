@@ -91,11 +91,11 @@ mod transcript {
 
     const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     const FILES: [&str; 5] = [
-        "packages/server/src/pty-manager.ts",
-        "packages/server/src/vornd-sessions.ts",
-        "src/renderer/lib/terminal-registry.ts",
-        "packages/shared/src/protocol.ts",
-        "tests/pty-manager-recovery.test.ts",
+        "packages/core/crates/sessiond/src/pty.rs",
+        "packages/core/crates/vornd/src/terminal.rs",
+        "packages/core/crates/term-proto/src/screen.rs",
+        "packages/core/crates/term-proto/src/msg.rs",
+        "packages/core/crates/vornd/tests/grid.rs",
     ];
     const WORDS: [&str; 7] = ["the", "flush", "buffer", "screen", "model", "per", "chunk"];
 

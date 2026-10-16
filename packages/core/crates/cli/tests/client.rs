@@ -156,7 +156,7 @@ async fn sends_input_with_enter_and_kills_by_prefix() {
         (0, "", "Killed 9b4d0117.\n")
     );
 
-    let (code, _, err) = vorn(port, &["session", "logs", "9b4d0117"]).await;
+    let (code, _, err) = vorn(port, &["session", "read", "9b4d0117"]).await;
     assert_eq!(code, 1);
     assert!(err.contains("is a headless session, which has no terminal to read"));
 

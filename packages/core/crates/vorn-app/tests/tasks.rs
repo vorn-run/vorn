@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, seed_tasks, Shot, TestVornd};
+use support::{add_project, connect, key, seed_runs, seed_tasks, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::runs::RunAct;
@@ -478,7 +478,7 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
             "logs": "all checks passed"
         }]
     });
-    app.rpc().call("workflowRun:save", run).expect("run saved");
+    seed_runs(&v, &[run]);
     shot.click(&mut app, card_id(&id));
     shot.until(&mut app, "the run", |app, _| {
         (app.st.tasks.runs.first()?["runId"] == "run-1").then_some(())

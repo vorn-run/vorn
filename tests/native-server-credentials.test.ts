@@ -39,6 +39,15 @@ describe.runIf(runnable)('SSH secrets in vornd', () => {
       .filter((f) => fs.existsSync(f))
       .map((f) => fs.readFileSync(f).toString('latin1'))
       .join('')
+  /** A key's row as vornd stored it. */
+  const keyRow = (id: string): Partial<SSHKey> | undefined =>
+    queryDb(db(), (d) =>
+      d
+        .prepare(
+          'SELECT id, label, encrypted_private_key AS encryptedPrivateKey, key_type AS keyType FROM ssh_keys WHERE id = ?'
+        )
+        .get(id)
+    ) as Partial<SSHKey> | undefined
   const host = (id: string, extra: Partial<RemoteHost> = {}): RemoteHost => ({
     id,
     label: id,
@@ -71,7 +80,7 @@ describe.runIf(runnable)('SSH secrets in vornd', () => {
       privateKey: KEY,
       publicKey: 'ssh-ed25519 AAAA'
     })
-    const row = await client.result<SSHKey>('credential:getEncryptedKey', id)
+    const row = keyRow(id)
     expect(row).toMatchObject({
       id,
       label: 'laptop',
@@ -112,8 +121,7 @@ describe.runIf(runnable)('SSH secrets in vornd', () => {
       hostPasswords: { b: PASSWORD, 'no-such-host': PASSWORD }
     })
     expect(answer).toEqual({ connections: 0, sshKeys: 1, hostPasswords: 1 })
-    const row = await client.result<SSHKey>('credential:getEncryptedKey', 'sealed-key')
-    expect(row.encryptedPrivateKey).toBe(IN_VAULT)
+    expect(keyRow('sealed-key')?.encryptedPrivateKey).toBe(IN_VAULT)
     await until('the hosts told', async () => {
       const config = await client.result<AppConfig>('config:load')
       return config.remoteHosts?.[0]?.encryptedPassword === IN_VAULT

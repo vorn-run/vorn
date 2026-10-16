@@ -72,20 +72,16 @@ pub const METHODS: &[&str] = &[
     "workflow:runManual",
     "workflow:stopRun",
     "workflow:resolveGate",
-    "workflow:sessionRestored",
     "workflow:executionComplete",
     "workflow:describe",
     "workflow:nodeTypes",
     "workflow:saveToFile",
     "workflow:files",
-    "workflowRun:save",
     "workflowRun:list",
     "workflowRun:listByTask",
     "workflowRun:listWaiting",
     "workflowRun:listRunning",
     "workflowRun:listAll",
-    "workflowRun:claim",
-    "workflowRun:release",
     "scheduler:getLog",
     "scheduler:getNextRun",
     "webhook:info",
@@ -305,30 +301,6 @@ impl Work {
         if !running.is_empty() {
             info!(count = running.len(), "reconciling runs left running");
             self.engine.reconcile(running, &workflows).await;
-        }
-    }
-
-    /// Answers `method` with `params`: the work model's calls, and the
-    /// connector inbox's, whose leases are its.
-    pub async fn answer(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
-        use vorn_workflow::Host;
-        let id = params.get("id").and_then(Value::as_f64).map(|id| id as i64);
-        let lease = text(params, "leaseToken");
-        match (method, id, lease) {
-            ("connector:inboxComplete", Some(id), Some(lease)) => {
-                let disposition = text(params, "disposition").unwrap_or_else(|| "retry".into());
-                self.host()
-                    .complete_inbox(id, &lease, &disposition, text(params, "error"))
-                    .await;
-                Answer::Void
-            }
-            ("connector:inboxRenew", Some(id), Some(lease)) => {
-                Answer::Result(Value::Bool(self.host().renew_inbox(id, &lease).await))
-            }
-            ("connector:inboxComplete" | "connector:inboxRenew", _, _) => {
-                Answer::Error(format!("{method} needs an id and a leaseToken"))
-            }
-            _ => self.call(method, params).await,
         }
     }
 
@@ -606,28 +578,6 @@ impl Work {
             }
             "workflow:files" => Answer::Result(self.files.listed()),
             "workflow:nodeTypes" => Answer::Result(types::listed(self.engine.registry())),
-            "workflow:sessionRestored" => {
-                let id = text(params, "sessionId").unwrap_or_default();
-                let session = self
-                    .native
-                    .upgrade()
-                    .and_then(|n| n.session_records())
-                    .and_then(|(terminals, _)| {
-                        terminals.into_iter().find(|t| t["id"] == id.as_str())
-                    });
-                if let Some(session) = session {
-                    let restore = text(params, "restore").unwrap_or_else(|| "cold".into());
-                    let environment = param(params, "environment").cloned();
-                    vorn_workflows::triggers::session_restored(
-                        &self.engine,
-                        &session,
-                        &restore,
-                        environment,
-                    )
-                    .await;
-                }
-                Answer::Void
-            }
             "workflow:executionComplete" => {
                 use vorn_workflow::Host;
                 let status = text(params, "status").unwrap_or_default();
@@ -649,35 +599,6 @@ impl Work {
                         source,
                     })
                     .await;
-                Answer::Void
-            }
-            "workflowRun:save" => {
-                let Ok(run) =
-                    serde_json::from_value::<vorn_protocol::WorkflowExecution>(params.clone())
-                else {
-                    return Answer::Error("workflowRun:save needs a run".into());
-                };
-                use vorn_workflow::Host;
-                self.host().save_run(run).await;
-                Answer::Void
-            }
-            "workflowRun:claim" => {
-                let claim = self.engine.claim(
-                    &text(params, "workflowId").unwrap_or_default(),
-                    text(params, "params").as_deref(),
-                    params
-                        .get("windowMs")
-                        .and_then(Value::as_f64)
-                        .map(|ms| ms as i64),
-                );
-                Answer::Result(json!({ "granted": claim.granted, "runId": claim.run_id }))
-            }
-            "workflowRun:release" => {
-                self.engine.release(
-                    &text(params, "workflowId").unwrap_or_default(),
-                    text(params, "params").as_deref(),
-                    &text(params, "runId").unwrap_or_default(),
-                );
                 Answer::Void
             }
             _ => Answer::Error(format!("Method not found: {method}")),

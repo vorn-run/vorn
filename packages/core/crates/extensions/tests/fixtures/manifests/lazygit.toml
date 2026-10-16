@@ -1,0 +1,23 @@
+id = "lazygit"
+name = "Lazygit"
+version = "2.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+command = ["node", "index.js"]
+
+[declares]
+uses = ["agent.usage", "terminal.send"]
+
+[connector]
+
+[[contributes.panes]]
+id = "git"
+title = "Git"
+command = ["lazygit", "-p", "."]
+
+[[contributes.footers]]
+id = "usage"
+title = "Usage"
+every = 5.5
+when = { workspace_contains = [".git"] }

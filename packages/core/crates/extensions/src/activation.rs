@@ -224,24 +224,42 @@ mod tests {
             root.path(),
             "x",
             "1.0.0",
-            &json!({ "id": "x", "name": "X", "kind": "extension", "contributes": {
-                "panes": [{ "id": "p", "web": "web/a.html" }, { "id": "q", "command": ["q"], "when": { "agent": ["beta"] } }],
-                "footers": [{ "id": "f", "every": 5, "when": { "remoteHost": ["github.com"] } }],
-                "linkHandlers": [{ "id": "l", "pattern": "a" }]
-            } }),
+            r#"name = "X"
+[connector]
+[[contributes.panes]]
+id = "p"
+web = "web/a.html"
+[[contributes.panes]]
+id = "q"
+command = ["q"]
+when = { agent = ["beta"] }
+[[contributes.footers]]
+id = "f"
+every = 5.0
+when = { remote_host = ["github.com"] }
+[[contributes.link_handlers]]
+id = "l"
+pattern = "a"
+"#,
         );
         install(
             root.path(),
             "y",
             "1.0.0",
-            &json!({ "id": "y", "name": "Y", "kind": "extension", "activates": { "agent": ["beta"] },
-                     "contributes": { "panes": [{ "id": "p", "web": "web/a.html" }] } }),
+            r#"name = "Y"
+[connector]
+[activates]
+agent = ["beta"]
+[[contributes.panes]]
+id = "p"
+web = "web/a.html"
+"#,
         );
         install(
             root.path(),
             "c",
             "1.0.0",
-            &json!({ "id": "c", "name": "C", "actions": [{ "type": "a" }] }),
+            "name = \"C\"\n[[connector.actions]]\ntype = \"a\"\n",
         );
         let store = PackStore::new(root.path());
         let packs = store.list();

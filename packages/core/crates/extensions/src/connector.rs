@@ -3,9 +3,8 @@
 //! options, a page of a trigger, or an action. The bridge's lifecycle keeps
 //! it ([`crate::lifecycle`]); this is only how it is spoken to.
 //!
-//! An installed pack names the protocol it speaks; a checkout or a stored
-//! command is asked. A child that never heard of the hello was built for the
-//! MCP-era SDK, and is told so rather than run.
+//! An installed package names the protocol it speaks; a checkout or a stored
+//! command is asked.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -20,8 +19,7 @@ use crate::manifest::{self, Manifest};
 /// Every protocol this build speaks, offered in `vorn/hello`.
 pub const SUPPORTED_PROTOCOLS: &[u64] = &[1];
 
-/// The protocol's error codes this side reads.
-const METHOD_NOT_FOUND: i64 = -32601;
+/// The protocol error code this side reads.
 const UNSUPPORTED_PROTOCOL: i64 = -32001;
 
 /// How long each kind of call may take.
@@ -83,10 +81,8 @@ pub struct SdkLaunch {
 /// Why a child could not be opened in a protocol this build speaks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {
-    /// It speaks a newer protocol than this build.
+    /// It speaks a newer protocol than this build, or names none.
     Unsupported(String),
-    /// It was built for the MCP-era SDK.
-    Outdated(String),
     /// It would not start or would not answer the hello.
     Failed(String),
 }
@@ -94,19 +90,12 @@ pub enum OpenError {
 impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OpenError::Unsupported(m) | OpenError::Outdated(m) | OpenError::Failed(m) => {
-                f.write_str(m)
-            }
+            OpenError::Unsupported(m) | OpenError::Failed(m) => f.write_str(m),
         }
     }
 }
 
 impl std::error::Error for OpenError {}
-
-/// What a connector built on the MCP-era SDK is told, wherever it would have run.
-pub fn outdated_message(name: &str) -> String {
-    format!("{name} was built for an older Vorn. Update it in Settings › Extensions, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.")
-}
 
 fn needs_newer_vorn(key: &str, protocol: Option<u64>) -> OpenError {
     let spoken = match protocol {
@@ -159,14 +148,17 @@ pub async fn open(
     host_version: &str,
     timeouts: Timeouts,
 ) -> Result<SdkClient, OpenError> {
-    let probe = match (launch.source, launch.protocol) {
-        (Source::Pack, None) => return Err(OpenError::Outdated(outdated_message(key))),
+    match (launch.source, launch.protocol) {
+        (Source::Pack, None) => {
+            return Err(OpenError::Unsupported(format!(
+                "{key} names no connector protocol"
+            )))
+        }
         (Source::Pack, Some(p)) if !SUPPORTED_PROTOCOLS.contains(&p) => {
             return Err(needs_newer_vorn(key, Some(p)))
         }
-        (Source::Pack, Some(_)) => false,
-        _ => true,
-    };
+        _ => {}
+    }
     let child = Child::start(&launch.launch, key.to_owned()).map_err(OpenError::Failed)?;
     let command = launch.launch.program.to_string_lossy().into_owned();
     let hello = child
@@ -184,7 +176,6 @@ pub async fn open(
         Err(err) => {
             child.close().await;
             return Err(match err.code() {
-                Some(METHOD_NOT_FOUND) if probe => OpenError::Outdated(outdated_message(key)),
                 Some(UNSUPPORTED_PROTOCOL) => needs_newer_vorn(key, None),
                 _ => OpenError::Failed(format!("{key} did not answer vorn/hello: {err}")),
             });
@@ -449,7 +440,6 @@ mod tests {
             needs_newer_vorn("x", None).to_string(),
             "x speaks a newer connector protocol, which needs a newer Vorn"
         );
-        assert!(outdated_message("Kusto").starts_with("Kusto was built for an older Vorn."));
     }
 
     #[tokio::test]
@@ -467,7 +457,10 @@ mod tests {
         let err = open(&launch, "Pack", "1", Timeouts::default())
             .await
             .unwrap_err();
-        assert!(matches!(err, OpenError::Outdated(_)));
+        assert_eq!(
+            err,
+            OpenError::Unsupported("Pack names no connector protocol".into())
+        );
         let newer = SdkLaunch {
             protocol: Some(9),
             ..launch

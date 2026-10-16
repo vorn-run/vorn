@@ -60,7 +60,6 @@ pub fn match_links(packs: &[InstalledPack], subject: &Subject<'_>, text: &str) -
 mod tests {
     use super::*;
     use crate::pack::{fixture::install, PackStore};
-    use serde_json::json;
     use std::path::Path;
 
     #[test]
@@ -71,10 +70,17 @@ mod tests {
             root.path(),
             "jira",
             "1.0.0",
-            &json!({ "id": "jira", "name": "Jira", "kind": "extension", "contributes": { "linkHandlers": [
-                { "id": "issue", "title": "Open issue", "pattern": "\\b[A-Z]+-\\d+\\b" },
-                { "id": "beta", "pattern": "x", "when": { "agent": ["beta"] } }
-            ] } }),
+            r#"name = "Jira"
+[connector]
+[[contributes.link_handlers]]
+id = "issue"
+title = "Open issue"
+pattern = '\b[A-Z]+-\d+\b'
+[[contributes.link_handlers]]
+id = "beta"
+pattern = "x"
+when = { agent = ["beta"] }
+"#,
         );
         let packs = PackStore::new(root.path()).extensions();
         let subject = Subject {

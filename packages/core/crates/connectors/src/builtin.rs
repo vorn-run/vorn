@@ -1848,8 +1848,7 @@ impl Connectors {
 
     /// `connector:inspectPack`: clones a connector's repository and
     /// describes it, its declared hosts and borrowed sign-in included, running
-    /// nothing of it. A `.vorn.tgz` pack of 0.8 is refused with the command
-    /// that installs it from git.
+    /// nothing of it.
     async fn inspect_pack(self: &Arc<Self>, params: &Value) -> Value {
         let source = match GitSource::parse(params) {
             Ok(s) => s,
@@ -1868,7 +1867,7 @@ impl Connectors {
         }
     }
 
-    /// The preview the confirm sheet shows: 0.8's fields and the install sheet's.
+    /// The preview the confirm sheet shows: the manifest's fields and the install sheet's.
     fn inspect_git(&self, source: &GitSource) -> Result<Value, String> {
         let installs = &self.services.installs;
         let sheet = installs.inspect_git_at(
@@ -2242,9 +2241,6 @@ impl Connectors {
     }
 }
 
-/// What 0.8's `.vorn.tgz` packs are told.
-pub const PACK_FORMAT_GONE: &str = "Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.";
-
 /// A connector's repository, as a client names it to install from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSource {
@@ -2255,7 +2251,7 @@ pub struct GitSource {
 }
 
 impl GitSource {
-    /// Reads `{kind: "git", url, branch?, path?}`; any other kind is a 0.8 pack.
+    /// Reads `{kind: "git", url, branch?, path?}`; any other kind is refused.
     pub fn parse(raw: &Value) -> Result<GitSource, String> {
         let text = |k: &str| {
             raw.get(k)
@@ -2270,7 +2266,6 @@ impl GitSource {
                 branch: text("branch"),
                 path: text("path"),
             }),
-            Some("file" | "url" | "staged") => Err(PACK_FORMAT_GONE.to_owned()),
             _ => Err("That is not a connector to install".to_owned()),
         }
     }

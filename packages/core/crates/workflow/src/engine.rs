@@ -323,13 +323,13 @@ impl<H: Host> Engine<H> {
         locked(&self.inner.active).len()
     }
 
-    /// `workflowRun:claim`.
+    /// Claims the right to run `workflow_id` for `params`, or names the run that holds it.
     pub fn claim(&self, workflow_id: &str, params: Option<&str>, window_ms: Option<i64>) -> Claim {
         let now = vorn_work_now();
         locked(&self.inner.claims).claim(workflow_id, params, window_ms, now, new_id)
     }
 
-    /// `workflowRun:release`.
+    /// Lets go of the claim `run_id` holds.
     pub fn release(&self, workflow_id: &str, params: Option<&str>, run_id: &str) {
         locked(&self.inner.claims).release(workflow_id, params, run_id);
     }

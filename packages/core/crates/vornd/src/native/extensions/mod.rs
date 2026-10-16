@@ -1,5 +1,5 @@
 //! Extensions, hosted here: the programs that speak the extension API, which
-//! the bridge's [`Router`] calls, and the extensions of 0.8 that add to a
+//! the bridge's [`Router`] calls, and the extensions that add to a
 //! card, one process per extension and project; installing, linking and
 //! removing them; the `extension:*` calls clients make about them, the bands
 //! and panes they show, and the bridge a card extension speaks back on
@@ -36,7 +36,7 @@ use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::router::Router;
-use vorn_extensions::{links, token, views};
+use vorn_extensions::{token, views};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
 
@@ -47,11 +47,8 @@ use builtin::Builtins;
 pub const METHODS: &[&str] = &[
     "extension:list",
     "extension:activation",
-    "extension:footerItems",
     "extension:openPane",
     "extension:closePane",
-    "extension:runHandler",
-    "extension:matchLinks",
     "extension:installed",
     "extension:inspect",
     "extension:install",
@@ -59,7 +56,6 @@ pub const METHODS: &[&str] = &[
     "extension:remove",
     "extension:call",
     "extension:rows",
-    "extension:running",
     "extension:mcpTools",
     "extension:mcpCall",
     "extension:setSandbox",
@@ -109,15 +105,9 @@ pub const RESERVED: &[&str] = &[
     "vorn",
 ];
 
-/// The notification a window answers a selection request with.
-pub const SELECTION_RESULT: &str = "extension:selectionResult";
-
 const FOOTER_ITEMS: &str = "extension:footerItems";
 const ACTIVATION: &str = "extension:activation";
-const SELECTION_REQUEST: &str = "extension:selectionRequest";
 
-/// Long enough for a window busy painting, short enough not to hold a band's turn.
-const SELECTION_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often the installed packs are looked at for a change.
 const PACK_CHECK: Duration = Duration::from_secs(2);
 /// How often a linked package's templates are looked at: a saved one redraws within 100 ms.
@@ -166,8 +156,6 @@ pub trait Around: Send + Sync + 'static {
     fn rename(&self, id: &str, name: &str) -> Result<(), String>;
     /// Tells the clients drawing session `scope`.
     fn broadcast(&self, method: &str, params: Value, scope: &str);
-    /// How many clients are connected.
-    fn clients(&self) -> u64;
     /// The environment a program is started with.
     fn base_env(&self) -> Vec<(String, String)>;
     /// Starts a terminal named `id`; answered with its pid once it runs.
@@ -225,7 +213,7 @@ struct Bands {
     pollers: HashMap<Key, JoinHandle<()>>,
 }
 
-/// The extension host: its processes, panes, bands and pending selections.
+/// The extension host: its processes, panes and bands.
 pub struct Extensions {
     hosts: Arc<Hosts>,
     router: Arc<Router>,
@@ -241,10 +229,8 @@ pub struct Extensions {
     home: PathBuf,
     grants: Mutex<Grants>,
     bands: Mutex<Bands>,
-    selections: Mutex<HashMap<u64, oneshot::Sender<String>>>,
     /// Each open pane keeps its extension's host running: a pane's program holds that host's token.
     pane_hosts: Mutex<HashMap<String, Lease<Host>>>,
-    next_selection: AtomicU64,
     /// The newest sync asked for each session; reading git can finish them out of order.
     syncs: Mutex<HashMap<String, u64>>,
     next_sync: AtomicU64,
@@ -338,9 +324,7 @@ impl Extensions {
             home,
             grants: Mutex::default(),
             bands: Mutex::default(),
-            selections: Mutex::default(),
             pane_hosts: Mutex::default(),
-            next_selection: AtomicU64::new(0),
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
             relist: AtomicBool::new(false),
@@ -617,23 +601,10 @@ impl Extensions {
                 self.router
                     .rows(text(params, "id"), text(params, "collection")),
             )),
-            "extension:running" => Ok(json!(self
-                .router
-                .lifecycle()
-                .running()
-                .into_iter()
-                .map(|k| json!({ "extensionId": k.extension, "scope": k.scope }))
-                .collect::<Vec<_>>())),
             "extension:activation" => match session() {
                 Ok(s) => Ok(Value::Array(self.states(&s).await)),
                 Err(err) => Err(err),
             },
-            "extension:footerItems" => {
-                let readings = guard(&self.bands)
-                    .footers
-                    .readings_of(text(params, "sessionId"));
-                Ok(serde_json::to_value(readings).unwrap_or_default())
-            }
             "extension:openPane" => match session() {
                 Ok(s) => self
                     .open_pane(text(params, "extensionId"), text(params, "paneId"), &s)
@@ -644,18 +615,6 @@ impl Extensions {
             "extension:closePane" => {
                 Ok(json!({ "closed": self.close_pane(text(params, "nonce")) }))
             }
-            "extension:runHandler" => match session() {
-                Ok(s) => {
-                    let (ext, handler) = (text(params, "extensionId"), text(params, "handlerId"));
-                    self.run_handler(ext, handler, &s, text(params, "url"))
-                        .await
-                }
-                Err(err) => Err(err),
-            },
-            "extension:matchLinks" => match session() {
-                Ok(s) => Ok(self.match_links(&s, text(params, "text")).await),
-                Err(err) => Err(err),
-            },
             _ => return Answer::Unanswered,
         };
         answered.map_or_else(Answer::Error, Answer::Result)
@@ -1116,72 +1075,6 @@ impl Extensions {
             Lookup::Unknown => None,
         }
     }
-
-    async fn run_handler(
-        &self,
-        ext: &str,
-        handler: &str,
-        session: &Live,
-        url: &str,
-    ) -> Result<Value, String> {
-        let key = HostKey {
-            extension_id: ext.to_owned(),
-            project_path: session.project_path.clone(),
-        };
-        let host = self.hosts.get_or_start(&key).await?;
-        let Some(asked) = host.handler(handler, session.asked(), url).await? else {
-            return Ok(json!({}));
-        };
-        info!("[extensions] {ext} {handler} opened {asked}");
-        let grant = self.open_pane(ext, &asked, session).await?;
-        Ok(json!({ "openedPane": grant }))
-    }
-
-    async fn match_links(&self, session: &Live, text: &str) -> Value {
-        if text.is_empty() {
-            return json!([]);
-        }
-        let packs = self.hosts.store().extensions();
-        let remote = self.remote_host(session, &packs).await;
-        let subject = subject_of(session, remote.as_deref());
-        serde_json::to_value(links::match_links(&packs, &subject, text)).unwrap_or_default()
-    }
-
-    /// What is selected in `session`, which only a window drawing it knows.
-    async fn selection(&self, session: &str) -> String {
-        if self.around.clients() == 0 {
-            return String::new();
-        }
-        let id = self.next_selection.fetch_add(1, Ordering::Relaxed) + 1;
-        let (tx, rx) = oneshot::channel();
-        guard(&self.selections).insert(id, tx);
-        self.around.broadcast(
-            SELECTION_REQUEST,
-            json!({ "requestId": id, "sessionId": session }),
-            session,
-        );
-        match tokio::time::timeout(SELECTION_TIMEOUT, rx).await {
-            Ok(Ok(text)) => text,
-            _ => {
-                guard(&self.selections).remove(&id);
-                String::new()
-            }
-        }
-    }
-
-    /// A window's answer to a selection request; the first one wins.
-    pub fn resolve_selection(&self, params: &Value) {
-        let Some(id) = params.get("requestId").and_then(Value::as_u64) else {
-            return;
-        };
-        let text = params
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if let Some(waiting) = guard(&self.selections).remove(&id) {
-            let _ = waiting.send(text.to_owned());
-        }
-    }
 }
 
 fn subject_of<'a>(session: &'a Live, remote_host: Option<&'a str>) -> Subject<'a> {
@@ -1380,11 +1273,10 @@ fn reconcile(extensions: &Arc<Extensions>, known: &mut HashMap<String, Live>, al
     *known = now;
 }
 
-/// [`Around`] in vornd: the registry, the session host, its own endpoint and the server's clients.
+/// [`Around`] in vornd: the registry, the session host and its own endpoint.
 pub struct Wired {
     pub native: Weak<super::Native>,
     pub loopback: Arc<crate::mcp::Loopback>,
-    pub clients: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl Around for Wired {
@@ -1429,10 +1321,6 @@ impl Around for Wired {
         if let Some(native) = self.native.upgrade() {
             native.broadcast_to(method, params, Some(scope));
         }
-    }
-
-    fn clients(&self) -> u64 {
-        (self.clients)()
     }
 
     fn base_env(&self) -> Vec<(String, String)> {

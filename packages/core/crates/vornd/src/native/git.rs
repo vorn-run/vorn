@@ -41,7 +41,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
                     .collect(),
             )
         }),
-        "git:getBranch" | "git:getWorktreeBranch" => {
+        "git:getBranch" => {
             any_path(native, params).map(|(p, place)| json!(place.git(native).branch(Path::new(p))))
         }
         "git:worktreeDirty" => {

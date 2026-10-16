@@ -22,7 +22,6 @@ struct Fake {
     live: Mutex<Vec<Live>>,
     notes: OnceLock<broadcast::Sender<Value>>,
     told: Mutex<Vec<(String, Value, String)>>,
-    clients: AtomicU64,
     started: Mutex<Vec<(String, SpawnSpec)>>,
     killed: Mutex<Vec<String>>,
     written: Mutex<Vec<(String, String)>>,
@@ -65,10 +64,6 @@ impl Around for Fake {
 
     fn broadcast(&self, method: &str, params: Value, scope: &str) {
         guard(&self.told).push((method.into(), params, scope.into()));
-    }
-
-    fn clients(&self) -> u64 {
-        self.clients.load(Ordering::Relaxed)
     }
 
     fn base_env(&self) -> Vec<(String, String)> {
@@ -116,19 +111,13 @@ impl Around for Fake {
     }
 }
 
-fn install(root: &Path, id: &str, manifest: Value) {
+fn install(root: &Path, id: &str, manifest: &str) {
     let dir = root.join(id).join("1.0.0");
     fs::create_dir_all(dir.join("web")).unwrap();
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
     fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
     fs::write(dir.join("web/index.html"), "<p>pane</p>").unwrap();
-    let manifest = vorn_extensions::manifest::file::from_pack_json(manifest.as_object().unwrap())
-        .expect("a fixture manifest converts");
-    fs::write(
-        dir.join(vorn_extensions::manifest::file::FILE),
-        vorn_extensions::manifest::file::to_toml(&manifest),
-    )
-    .unwrap();
+    fs::write(dir.join(vorn_extensions::manifest::file::FILE), manifest).unwrap();
     fs::write(
         root.join(id).join("current.json"),
         json!({ "version": "1.0.0", "installedAt": 1 }).to_string(),
@@ -136,21 +125,46 @@ fn install(root: &Path, id: &str, manifest: Value) {
     .unwrap();
 }
 
-fn extension(id: &str) -> Value {
-    json!({
-        "id": id, "name": id.to_uppercase(), "kind": "extension", "protocol": 1,
-        "permissions": ["git.read", "terminal.read", "terminal.selection", "terminal.send",
-                        "card.rename", "agent.usage"],
-        "contributes": {
-            "panes": [
-                { "id": "p", "title": "Page", "web": "web/index.html" },
-                { "id": "prog", "title": "Program", "command": ["lazygit", "-p"] },
-                { "id": "broken", "title": "Broken", "command": ["missing"] }
-            ],
-            "footers": [{ "id": "f", "every": 5 }],
-            "linkHandlers": [{ "id": "l", "pattern": "PROJ-\\d+" }]
-        }
-    })
+fn extension(id: &str) -> String {
+    let name = id.to_uppercase();
+    format!(
+        r#"id = "{id}"
+name = "{name}"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+command = ["node", "index.js"]
+
+[declares]
+uses = ["git.read", "terminal.read", "terminal.selection", "terminal.send", "card.rename", "agent.usage"]
+
+[connector]
+
+[[contributes.panes]]
+id = "p"
+title = "Page"
+web = "web/index.html"
+
+[[contributes.panes]]
+id = "prog"
+title = "Program"
+command = ["lazygit", "-p"]
+
+[[contributes.panes]]
+id = "broken"
+title = "Broken"
+command = ["missing"]
+
+[[contributes.footers]]
+id = "f"
+every = 5.0
+
+[[contributes.link_handlers]]
+id = "l"
+pattern = 'PROJ-\d+'
+"#
+    )
 }
 
 struct World {
@@ -219,8 +233,8 @@ impl GateWorld for NoWorld {
 
 fn world() -> World {
     let packs = tempfile::tempdir().unwrap();
-    install(packs.path(), "x", extension("x"));
-    install(packs.path(), "y", extension("y"));
+    install(packs.path(), "x", &extension("x"));
+    install(packs.path(), "y", &extension("y"));
     let project = tempfile::tempdir().unwrap();
     let git = std::process::Command::new("git")
         .args(["init", "-q"])
@@ -324,12 +338,7 @@ async fn lists_the_installed_extensions() {
 #[tokio::test]
 async fn a_call_about_an_unknown_session_fails_as_the_server_worded_it() {
     let w = world();
-    for method in [
-        "extension:activation",
-        "extension:openPane",
-        "extension:runHandler",
-        "extension:matchLinks",
-    ] {
+    for method in ["extension:activation", "extension:openPane"] {
         let answer = w.call(method, json!({ "sessionId": "nope" })).await;
         assert_eq!(answer, Answer::Error("Session not found: nope".into()));
     }
@@ -450,29 +459,6 @@ async fn a_program_pane_runs_in_a_terminal_holding_the_extensions_token() {
 }
 
 #[tokio::test]
-async fn a_link_handler_opens_the_pane_its_extension_names() {
-    let w = world();
-    w.add(w.session("s1"));
-    let ask =
-        |url: &str| json!({ "sessionId": "s1", "extensionId": "x", "handlerId": "l", "url": url });
-    let opened = result(w.call("extension:runHandler", ask("https://a/pane")).await);
-    assert_eq!(opened["openedPane"]["paneId"], "p");
-    let nothing = result(w.call("extension:runHandler", ask("https://a/b")).await);
-    assert_eq!(nothing, json!({}));
-
-    let text = json!({ "sessionId": "s1", "text": "see PROJ-12 now" });
-    let links = result(w.call("extension:matchLinks", text).await);
-    assert_eq!(links[0]["handlerId"], "l");
-    assert_eq!(links.as_array().unwrap().len(), 2);
-    let empty = json!({ "sessionId": "s1", "text": "" });
-    assert_eq!(
-        result(w.call("extension:matchLinks", empty).await),
-        json!([])
-    );
-    w.ext.stop().await;
-}
-
-#[tokio::test]
 async fn footers_are_read_for_each_session_and_released_with_it() {
     let w = world();
     w.ext.start();
@@ -481,21 +467,11 @@ async fn footers_are_read_for_each_session_and_released_with_it() {
     until(|| w.fake.told(FOOTER_ITEMS).len() >= 2).await;
     assert!(w.fake.told(FOOTER_ITEMS).len() >= 2);
     assert_eq!(w.fake.told(ACTIVATION)[0]["sessionId"], "s1");
-    let readings = result(
-        w.call("extension:footerItems", json!({ "sessionId": "s1" }))
-            .await,
-    );
-    assert_eq!(readings.as_array().unwrap().len(), 2, "{readings}");
 
     guard(&w.fake.live).clear();
     w.fake.note();
     until(|| w.ext.hosts() == 0).await;
     assert_eq!(w.ext.hosts(), 0);
-    let readings = result(
-        w.call("extension:footerItems", json!({ "sessionId": "s1" }))
-            .await,
-    );
-    assert_eq!(readings, json!([]));
 }
 
 #[tokio::test]
@@ -606,23 +582,6 @@ async fn a_page_speaks_for_the_session_its_pane_was_opened_on() {
         assert_eq!(refused.0, StatusCode::UNAUTHORIZED);
     }
     w.ext.stop().await;
-}
-
-#[tokio::test]
-async fn a_selection_is_asked_of_the_windows_and_the_first_answer_wins() {
-    let w = world();
-    assert_eq!(w.ext.selection("s1").await, "");
-    w.fake.clients.store(1, Ordering::Relaxed);
-    let ext = Arc::clone(&w.ext);
-    let asked = tokio::spawn(async move { ext.selection("s1").await });
-    until(|| !w.fake.told(SELECTION_REQUEST).is_empty()).await;
-    let id = w.fake.told(SELECTION_REQUEST)[0]["requestId"].clone();
-    w.ext
-        .resolve_selection(&json!({ "requestId": id, "text": "picked" }));
-    w.ext
-        .resolve_selection(&json!({ "requestId": id, "text": "late" }));
-    w.ext.resolve_selection(&json!({}));
-    assert_eq!(asked.await.unwrap(), "picked");
 }
 
 #[tokio::test]

@@ -77,15 +77,7 @@ async fn greets_a_child_and_asks_it_everything() {
 }
 
 #[tokio::test]
-async fn tells_an_old_or_newer_child_from_a_broken_one() {
-    let Some(launch) = fixture("mcp-only") else {
-        return;
-    };
-    let err = sdk::open(&launch, "Old", "1.0", Timeouts::default())
-        .await
-        .unwrap_err();
-    assert!(matches!(err, OpenError::Outdated(_)), "{err}");
-
+async fn tells_a_newer_child_from_a_broken_one() {
     let Some(launch) = fixture("hello-unsupported") else {
         return;
     };

@@ -42,25 +42,16 @@ fn named(value: Option<&str>) -> Option<&str> {
 #[derive(Debug, Clone)]
 pub struct DataDir {
     path: PathBuf,
-    /// Whether somebody named it (`--data-dir` or `VORN_DATA_DIR`). Looking for
-    /// any Vorn process is a fair answer only for the default directory.
-    named: bool,
 }
 
 impl DataDir {
     /// `--data-dir`, else `VORN_DATA_DIR`, else `~/.vorn`.
     pub fn resolve(flag: Option<&str>) -> DataDir {
         let env = std::env::var("VORN_DATA_DIR").ok();
-        match named(flag).or(named(env.as_deref())) {
-            Some(dir) => DataDir {
-                path: PathBuf::from(dir),
-                named: true,
-            },
-            None => DataDir {
-                path: home_dir().join(".vorn"),
-                named: false,
-            },
-        }
+        let path = named(flag)
+            .or(named(env.as_deref()))
+            .map_or_else(|| home_dir().join(".vorn"), PathBuf::from);
+        DataDir { path }
     }
 
     pub fn path(&self) -> &Path {
@@ -209,120 +200,25 @@ fn pid_alive(_pid: f64) -> bool {
     true
 }
 
-/// `ws-port`, or what can be found out when it is missing or stale.
+/// `ws-port` as vornd writes it (`{"port": 53829, "pid": 1234}`); a file
+/// whose server is gone reads as missing.
 pub fn read_port(dir: &DataDir) -> PortFile {
     let Ok(raw) = std::fs::read_to_string(dir.port_file()) else {
-        return discover_and_heal(dir);
-    };
-    let raw = js_trim(&raw);
-    if raw.is_empty() {
-        return PortFile::Invalid;
-    }
-
-    // JSON: {"port": 53829, "pid": 1234}
-    if raw.starts_with('{') {
-        let Ok(parsed) = serde_json::from_str::<Value>(raw) else {
-            return discover_and_heal(dir);
-        };
-        let port = parsed.get("port").and_then(Value::as_f64);
-        let Some(port) = port.filter(|p| p.is_finite() && *p > 0.0) else {
-            return PortFile::Invalid;
-        };
-        if let Some(pid) = parsed.get("pid").and_then(Value::as_f64) {
-            if pid.fract() == 0.0 && pid > 0.0 && !pid_alive(pid) {
-                // The server that wrote it is gone: the file is stale.
-                return discover_and_heal(dir);
-            }
-        }
-        return PortFile::Port(port);
-    }
-
-    // Legacy plain-number format: 53829
-    match crate::args::parse_int(raw) {
-        Some(port) if port.is_finite() && port > 0.0 => PortFile::Port(port),
-        _ => PortFile::Invalid,
-    }
-}
-
-/// Looks for a listening Vorn process, and writes what it finds back to
-/// `ws-port`. Only for the default data directory: in a named one it would
-/// report somebody else's server.
-fn discover_and_heal(dir: &DataDir) -> PortFile {
-    if dir.named {
         return PortFile::Missing;
-    }
-    match discover_port() {
-        Some(port) => {
-            let _ = std::fs::create_dir_all(dir.path());
-            let _ = std::fs::write(dir.port_file(), format!("{{\"port\":{port}}}"));
-            PortFile::Port(f64::from(port))
+    };
+    let Ok(parsed) = serde_json::from_str::<Value>(js_trim(&raw)) else {
+        return PortFile::Invalid;
+    };
+    let port = parsed.get("port").and_then(Value::as_f64);
+    let Some(port) = port.filter(|p| p.is_finite() && *p > 0.0) else {
+        return PortFile::Invalid;
+    };
+    if let Some(pid) = parsed.get("pid").and_then(Value::as_f64) {
+        if pid.fract() == 0.0 && pid > 0.0 && !pid_alive(pid) {
+            return PortFile::Missing;
         }
-        None => PortFile::Missing,
     }
-}
-
-fn run_quietly(program: &str, args: &[&str]) -> Option<String> {
-    let output = vorn_spawn::command(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// The digits right after the first `marker` in `line`.
-fn digits_after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
-    let rest = &line[line.find(marker)? + marker.len()..];
-    let end = rest
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(rest.len());
-    (end > 0).then(|| &rest[..end])
-}
-
-fn port_after(line: &str, marker: &str) -> Option<u16> {
-    digits_after(line, marker)?.parse().ok()
-}
-
-/// The port a Vorn process listens on, asked of the OS: the wildcard address
-/// first, loopback otherwise.
-fn discover_port() -> Option<u16> {
-    if cfg!(windows) {
-        let tasks = run_quietly(
-            "tasklist",
-            &["/FI", "IMAGENAME eq Vorn.exe", "/FO", "CSV", "/NH"],
-        )?;
-        let pid = digits_after(&tasks, "\"Vorn.exe\",\"")?;
-        let netstat = run_quietly("netstat", &["-ano"])?;
-        let mut fallback = None;
-        for line in netstat.lines() {
-            if !line.contains("LISTENING") || !line.trim().ends_with(pid) {
-                continue;
-            }
-            if let Some(port) = port_after(line, "0.0.0.0:") {
-                return Some(port);
-            }
-            fallback = fallback.or_else(|| port_after(line, "127.0.0.1:"));
-        }
-        fallback
-    } else {
-        let lsof = run_quietly("lsof", &["-iTCP", "-sTCP:LISTEN", "-P", "-n"])?;
-        let mut fallback = None;
-        for line in lsof.lines().filter(|l| l.contains("Vorn")) {
-            if let Some(port) = port_after(line, "*:") {
-                return Some(port);
-            }
-            if fallback.is_none() {
-                fallback = line
-                    .split_whitespace()
-                    .find_map(|word| word.rsplit_once(':').and_then(|(_, p)| p.parse().ok()));
-            }
-        }
-        fallback
-    }
+    PortFile::Port(port)
 }
 
 /// The running server's local credential.
@@ -617,12 +513,11 @@ mod tests {
     fn dir(path: &Path) -> DataDir {
         DataDir {
             path: path.to_owned(),
-            named: true,
         }
     }
 
     #[test]
-    fn reads_both_port_file_formats() {
+    fn reads_the_port_file_vornd_writes() {
         let tmp = tempfile::tempdir().unwrap();
         let d = dir(tmp.path());
         assert_eq!(read_port(&d), PortFile::Missing);
@@ -631,7 +526,7 @@ mod tests {
         assert_eq!(read_port(&d), PortFile::Invalid);
 
         std::fs::write(d.port_file(), "53829\n").unwrap();
-        assert_eq!(read_port(&d), PortFile::Port(53829.0));
+        assert_eq!(read_port(&d), PortFile::Invalid);
 
         std::fs::write(d.port_file(), "{\"port\":4100}").unwrap();
         assert_eq!(read_port(&d), PortFile::Port(4100.0));
@@ -639,9 +534,8 @@ mod tests {
         std::fs::write(d.port_file(), "{\"port\":\"4100\"}").unwrap();
         assert_eq!(read_port(&d), PortFile::Invalid);
 
-        // Not JSON after all: read as missing, which is what a failed parse means.
         std::fs::write(d.port_file(), "{port").unwrap();
-        assert_eq!(read_port(&d), PortFile::Missing);
+        assert_eq!(read_port(&d), PortFile::Invalid);
 
         std::fs::write(d.port_file(), "nope").unwrap();
         assert_eq!(read_port(&d), PortFile::Invalid);

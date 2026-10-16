@@ -693,7 +693,6 @@ fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
     fs::rename(&kept, dir).map_err(|e| e.to_string())
 }
 
-/// A git install carries `vorn-extension.toml`; 0.8 packs install as archives.
 /// `folder` resolved, and the manifest it would be linked as.
 fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
     let folder = folder

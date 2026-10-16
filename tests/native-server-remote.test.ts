@@ -152,7 +152,7 @@ describe.runIf(runnable)('a project on a remote host, from vornd', () => {
     worktree = created.worktreePath
     expect(worktree.startsWith(`${path.dirname(repo)}/.vorn-worktrees/far/`)).toBe(true)
     expect(fs.existsSync(worktree)).toBe(true)
-    expect(await call('git:getWorktreeBranch', worktree)).toBe('feat')
+    expect(await call('git:getBranch', worktree)).toBe('feat')
 
     fs.writeFileSync(path.join(worktree, 'change.txt'), 'x\n')
     expect(await call('git:worktreeDirty', worktree)).toBe(true)

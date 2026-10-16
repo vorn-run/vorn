@@ -648,3 +648,15 @@ pub fn seed_workflows(rpc: &vorn_app::client::Rpc, workflows: &[Value]) {
             .expect("workflow:create");
     }
 }
+
+/// Writes `runs` straight into vornd's database, as the engine would have saved them.
+pub fn seed_runs(v: &TestVornd, runs: &[Value]) {
+    let mut store = vorn_store::Store::open_beside(&v.home.join("vorn.db"))
+        .expect("vorn.db opens")
+        .expect("vornd made vorn.db");
+    for run in runs {
+        let run: vorn_protocol::WorkflowExecution =
+            serde_json::from_value(run.clone()).expect("a workflow run");
+        store.save_workflow_run(&run).expect("run saved");
+    }
+}

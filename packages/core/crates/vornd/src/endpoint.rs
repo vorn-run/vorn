@@ -260,15 +260,9 @@ impl Daemon {
             Arc::clone(native.events()),
         );
         let installs = native.installs(&db_dir);
-        let daemon = Arc::downgrade(self);
         let around = Wired {
             native: Arc::downgrade(native),
             loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),
-            clients: Box::new(move || {
-                daemon
-                    .upgrade()
-                    .map_or(0, |d| d.open.load(Ordering::Relaxed))
-            }),
         };
         let declared = std::env::var("VORN_APP_ORIGINS").ok();
         let ancestors =

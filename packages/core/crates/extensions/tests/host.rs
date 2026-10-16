@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use vorn_extensions::host::{Asked, HostKey, HostSettings, Hosts};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::manifest::file;
@@ -14,18 +14,12 @@ use vorn_extensions::pack::PackStore;
 
 const FIXTURE: &str = include_str!("fixtures/extension.mjs");
 
-fn install(root: &Path, id: &str, manifest: Value) {
+fn install(root: &Path, id: &str, manifest: &str) {
     let dir = root.join(id).join("1.0.0");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
     fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
-    // One that names no protocol was built for the MCP era and stays the 0.8 pack it was.
-    if manifest.get("protocol").is_some() {
-        let manifest = file::from_pack_json(manifest.as_object().unwrap()).unwrap();
-        fs::write(dir.join(file::FILE), file::to_toml(&manifest)).unwrap();
-    } else {
-        fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
-    }
+    fs::write(dir.join(file::FILE), manifest).unwrap();
     fs::write(
         root.join(id).join("current.json"),
         json!({ "version": "1.0.0", "installedAt": 1 }).to_string(),
@@ -33,9 +27,19 @@ fn install(root: &Path, id: &str, manifest: Value) {
     .unwrap();
 }
 
-fn extension(id: &str) -> Value {
-    json!({ "id": id, "name": id.to_uppercase(), "kind": "extension", "protocol": 1,
-            "contributes": { "footers": [{ "id": "f", "every": 5 }] } })
+/// An extension's manifest, drawn through the connector protocol or, without
+/// it, from a template only the extension API fills.
+fn extension(id: &str, connector: bool) -> String {
+    let name = id.to_uppercase();
+    let draws = if connector {
+        "[connector]\n[[contributes.footers]]\nid = \"f\"\nevery = 5.0\n"
+    } else {
+        "[[contributes.sidebar]]\nid = \"s\"\nview = \"views/s.kdl\"\n"
+    };
+    format!(
+        "id = \"{id}\"\nname = \"{name}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\
+         [service]\ncommand = [\"node\", \"index.js\"]\n{draws}"
+    )
 }
 
 struct World {
@@ -46,11 +50,9 @@ struct World {
 
 fn world() -> World {
     let packs = tempfile::tempdir().unwrap();
-    install(packs.path(), "x", extension("x"));
-    install(packs.path(), "y", extension("y"));
-    let mut outdated = extension("old");
-    outdated.as_object_mut().unwrap().remove("protocol");
-    install(packs.path(), "old", outdated);
+    install(packs.path(), "x", &extension("x", true));
+    install(packs.path(), "y", &extension("y", true));
+    install(packs.path(), "api", &extension("api", false));
     let hosts = Hosts::new(
         Lifecycle::new(Policy::default()),
         PackStore::new(packs.path()),
@@ -169,8 +171,5 @@ async fn says_why_a_host_does_not_start() {
         async move { hosts.get_or_start(&k).await.unwrap_err() }
     };
     assert_eq!(err("nope").await, "No extension \"nope\" is installed");
-    assert_eq!(
-        err("old").await,
-        vorn_extensions::pack::legacy_message("OLD")
-    );
+    assert_eq!(err("api").await, "API names no connector protocol");
 }

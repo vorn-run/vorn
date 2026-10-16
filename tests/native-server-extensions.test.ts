@@ -1,8 +1,7 @@
 /**
  * Extensions hosted by vornd, on a real server and its vornd: a pack installed
  * in the data directory is listed and activated on a session, its child is
- * started with a token of its own, its footer and link handler are answered,
- * its pane page is served, its bridge takes only its own token, and a child
+ * started with a token of its own, its footer is read, its pane page is served, its bridge takes only its own token, and a child
  * that dies is started again.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
@@ -85,11 +84,17 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
   let through: Watcher
   let session: TerminalSession
 
+  /** The newest footer reading of `id` vornd told this client about. */
   const readingOf = async (id: string): Promise<Reading | undefined> => {
-    const readings = await through.result<Reading[]>('extension:footerItems', {
-      sessionId: session.id
-    })
-    return readings.find((r) => r.extensionId === id && r.items.length > 0)
+    const told = through.toldBy('extension:footerItems') as Array<{
+      sessionId: string
+      readings: Reading[]
+    }>
+    return told
+      .filter((t) => t.sessionId === session.id)
+      .reverse()
+      .flatMap((t) => t.readings)
+      .find((r) => r.extensionId === id && r.items.length > 0)
   }
 
   const bridge = (host: string, token: string, method: string): Promise<Response> =>
@@ -175,47 +180,6 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
       closed: true
     })
     expect((await fetch(grant.url)).status).toBe(404)
-  })
-
-  it('matches links and opens the pane their handler names', async () => {
-    const links = await through.result<Array<{ extensionId: string; handlerId: string }>>(
-      'extension:matchLinks',
-      { sessionId: session.id, text: 'see DEMO-12' }
-    )
-    expect(links.map((l) => [l.extensionId, l.handlerId])).toEqual([['demo', 'ticket']])
-    const opened = await through.result<{ openedPane?: { url: string } }>('extension:runHandler', {
-      extensionId: 'demo',
-      handlerId: 'ticket',
-      sessionId: session.id,
-      url: 'DEMO-12'
-    })
-    expect(opened.openedPane?.url).toContain('/extensions/demo/pane/page/')
-    expect(
-      await through.result('extension:runHandler', {
-        extensionId: 'other',
-        handlerId: 'ticket',
-        sessionId: session.id,
-        url: 'OTHER-7'
-      })
-    ).toEqual({})
-  })
-
-  it("asks the session's window for its selection", async () => {
-    const demo = await readingOf('demo')
-    const asked = bridge(valueOf(demo, 'host'), valueOf(demo, 'token'), 'selection')
-    await until(
-      'the selection request',
-      () => through.toldBy('extension:selectionRequest').length > 0
-    )
-    const [request] = through.toldBy('extension:selectionRequest') as Array<{
-      requestId: number
-      sessionId: string
-    }>
-    expect(request.sessionId).toBe(session.id)
-    through.notify('extension:selectionResult', { requestId: request.requestId, text: 'picked' })
-    const res = await asked
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ result: 'picked' })
   })
 
   it('starts a child that died again, with a new token', async () => {

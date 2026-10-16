@@ -65,7 +65,6 @@ pub const METHODS: &[&str] = &[
     "git:listBranches",
     "git:listRemoteBranches",
     "git:createWorktree",
-    "git:getWorktreeBranch",
     "git:worktreeDirty",
     "git:listWorktrees",
     "git:deleteBranches",
@@ -130,9 +129,6 @@ pub const METHODS: &[&str] = &[
     "worktree:reclaimArtifacts",
     "worktree:pruneOrphans",
     "git:removeWorktree",
-    // The connector inbox's leases are the work model's ([`work`]).
-    "connector:inboxComplete",
-    "connector:inboxRenew",
     "config:load",
     "config:save",
 ];
@@ -176,10 +172,6 @@ const ROUTES: &[(&[&str], Route)] = &[
     (extensions::METHODS, Route::Extensions),
     (layout::METHODS, Route::Layout),
     (work::METHODS, Route::Work),
-    (
-        &["connector:inboxComplete", "connector:inboxRenew"],
-        Route::Work,
-    ),
     (vorn_connectors::builtin::METHODS, Route::Connectors),
     (METHODS, Route::Native),
 ];
@@ -783,7 +775,7 @@ impl Native {
                     return Answer::Error("vornd does not run workflows".to_owned());
                 };
                 let m = method.clone();
-                let running = tokio::spawn(async move { work.answer(&m, &params).await });
+                let running = tokio::spawn(async move { work.call(&m, &params).await });
                 return running.await.unwrap_or_else(|err| {
                     warn!(%method, %err, "a work call failed");
                     Answer::Error(format!("{method} failed in vornd"))
@@ -1157,16 +1149,6 @@ impl Conn {
         if method == AUTH_METHOD || !self.admitted() {
             return Offer::Pass;
         }
-        if method == extensions::SELECTION_RESULT {
-            if let Some(host) = self.native.extensions.get() {
-                let params = serde_json::from_str::<Value>(text)
-                    .ok()
-                    .and_then(|mut frame| frame.get_mut("params").map(Value::take))
-                    .unwrap_or_default();
-                host.resolve_selection(&params);
-                return Offer::Taken;
-            }
-        }
         if method == IDENTIFY {
             self.identify(text);
             return Offer::Taken;
@@ -1343,7 +1325,6 @@ mod tests {
             assert!(route(method).is_none(), "{method}");
         }
         assert_eq!(route("extension:install"), Some(Route::Extensions));
-        assert_eq!(route("connector:inboxRenew"), Some(Route::Work));
         assert_eq!(route("browser:readPage"), Some(Route::Desktop));
         for method in projects::METHODS {
             assert_eq!(route(method), Some(Route::Projects), "{method}");

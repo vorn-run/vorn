@@ -11,21 +11,11 @@ use crate::workflow::graph::{self, is_sign_in_wait, name_of};
 use crate::workflow::portability as portable;
 use crate::zod;
 
-/// `resolveWorkflowId`: `workflow_id`, or its older alias `id`.
+/// `resolveWorkflowId`: the non-empty `workflow_id`.
 fn resolve_workflow_id(args: &Args) -> Result<String, String> {
-    let id = match args.get("workflow_id") {
-        Some(id) => Some(id),
-        None => args.get("id"),
-    };
-    let Some(id) = id.and_then(Value::as_str).filter(|s| !s.is_empty()) else {
-        return Err("provide workflow_id".to_owned());
-    };
-    if let (Some(a), Some(b)) = (args.nonempty("workflow_id"), args.nonempty("id")) {
-        if a != b {
-            return Err("workflow_id and id disagree — pass only workflow_id".to_owned());
-        }
-    }
-    Ok(id.to_owned())
+    args.nonempty("workflow_id")
+        .map(str::to_owned)
+        .ok_or_else(|| "provide workflow_id".to_owned())
 }
 
 fn not_found(id: &str) -> Value {
@@ -1099,14 +1089,14 @@ mod tests {
     }
 
     #[test]
-    fn workflow_id_and_its_alias_must_agree() {
-        let args = Args::new(Some(json!({ "workflow_id": "a", "id": "b" })));
+    fn needs_a_workflow_id() {
+        let args = Args::new(Some(json!({ "workflow_id": "a" })));
+        assert_eq!(resolve_workflow_id(&args).unwrap(), "a");
+        let args = Args::new(Some(json!({ "id": "b" })));
         assert_eq!(
             resolve_workflow_id(&args).unwrap_err(),
-            "workflow_id and id disagree — pass only workflow_id"
+            "provide workflow_id"
         );
-        let args = Args::new(Some(json!({ "id": "b" })));
-        assert_eq!(resolve_workflow_id(&args).unwrap(), "b");
         assert_eq!(
             resolve_workflow_id(&Args::new(None)).unwrap_err(),
             "provide workflow_id"

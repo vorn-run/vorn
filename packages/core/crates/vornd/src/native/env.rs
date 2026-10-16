@@ -111,11 +111,6 @@ impl SafeEnv {
         self.shell().answer.is_some()
     }
 
-    /// Whether the login shell is being asked now.
-    pub fn asking(&self) -> bool {
-        self.shell().asking
-    }
-
     /// Starts asking the login shell, once.
     pub fn prime(self: &Arc<Self>) {
         let mut shell = self.shell();

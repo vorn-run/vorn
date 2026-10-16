@@ -32,8 +32,7 @@ use crate::screen::{
     StyleDef, TermDelta, TermState, Underline,
 };
 
-/// The protocol major this build speaks. vornd also accepts the previous one
-/// (TP §13), so an app one release ahead or behind still attaches.
+/// The protocol major this build speaks; a peer must speak the same one.
 pub const PROTO_MAJOR: u16 = 1;
 pub const PROTO_MINOR: u16 = 0;
 
@@ -41,10 +40,9 @@ pub const PROTO_MINOR: u16 = 0;
 /// whose every cell holds a long cluster, with its history tail, fits.
 pub const MAX_FRAME: usize = 64 << 20;
 
-/// Whether a peer speaking `major` can be served: this build's major or the
-/// one before it.
+/// Whether a peer speaking `major` can be served.
 pub fn major_supported(major: u16) -> bool {
-    major == PROTO_MAJOR || major.checked_add(1) == Some(PROTO_MAJOR)
+    major == PROTO_MAJOR
 }
 
 /// Capability bits of `Hello` and `Welcome`; both sides use the
@@ -158,7 +156,6 @@ impl From<CborError> for MsgError {
 pub enum ClientKind {
     #[default]
     Native,
-    Electron,
     Web,
     Cli,
     /// A kind a newer client names.
@@ -1382,9 +1379,8 @@ impl ClientMsg {
                     w.key(3).uint(h.caps);
                     w.key(4).uint(match h.client {
                         ClientKind::Native => 0,
-                        ClientKind::Electron => 1,
-                        ClientKind::Web => 2,
-                        ClientKind::Cli => 3,
+                        ClientKind::Web => 1,
+                        ClientKind::Cli => 2,
                         ClientKind::Unknown => 255,
                     });
                     w.key(5).text(&h.build);
@@ -1550,9 +1546,8 @@ impl ClientMsg {
                 caps: d.num_or_zero(3)?,
                 client: match d.variant(4)?.unwrap_or(0) {
                     0 => ClientKind::Native,
-                    1 => ClientKind::Electron,
-                    2 => ClientKind::Web,
-                    3 => ClientKind::Cli,
+                    1 => ClientKind::Web,
+                    2 => ClientKind::Cli,
                     _ => ClientKind::Unknown,
                 },
                 build: d.text(5)?,
@@ -2675,7 +2670,7 @@ mod tests {
             })
         );
         assert!(major_supported(PROTO_MAJOR));
-        assert!(major_supported(PROTO_MAJOR - 1));
+        assert!(!major_supported(PROTO_MAJOR - 1));
         assert!(!major_supported(PROTO_MAJOR + 1));
     }
 

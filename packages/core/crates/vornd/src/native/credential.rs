@@ -20,7 +20,6 @@ pub const METHODS: &[&str] = &[
     "credential:storeKey",
     "credential:listKeys",
     "credential:deleteKey",
-    "credential:getEncryptedKey",
 ];
 
 /// The kind of key a private key's text names, as the desktop read it.
@@ -90,13 +89,6 @@ fn call(native: &Native, method: &str, params: &Value) -> Result<Value, String> 
             with_store(native, |s| s.db_delete_ssh_key(&id))?;
             native.secrets.remove_item(Kind::SshKey, &id);
             Ok(Value::Null)
-        }
-        // What the desktop reads to hand over a key it sealed: the marker once vornd keeps it.
-        "credential:getEncryptedKey" => {
-            let id = params.as_str().unwrap_or_default().to_owned();
-            with_store(native, |s| {
-                Ok(serde_json::to_value(s.db_get_ssh_key(&id)?).unwrap_or(Value::Null))
-            })
         }
         _ => Err(format!("vornd does not answer {method}")),
     }

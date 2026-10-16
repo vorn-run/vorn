@@ -155,9 +155,7 @@ pub fn update_ends_sessions(running: &[Instance], vornd_min: u16) -> bool {
 /// skipped, so other platforms install the binary alone.
 pub const COMPANIONS: &[&str] = &["conpty.dll", "x64/OpenConsole.exe", "arm64/OpenConsole.exe"];
 
-/// The directory a version is installed in. Named differently from the
-/// single files older builds installed (`vorn-sessiond-<version>`), so the
-/// two layouts never collide.
+/// The directory a version is installed in.
 pub fn installed_dir(home: &Path, version: &str) -> PathBuf {
     home.join("bin").join(format!("sessiond-{version}"))
 }
@@ -768,25 +766,6 @@ mod tests {
         let i = inst(1, 2);
         announce(home.path(), &i).unwrap();
         assert_eq!(running(home.path()), vec![i]);
-    }
-
-    /// An older build's single-file install of the same version is a
-    /// different path, so it neither stops the install nor is touched.
-    #[test]
-    fn the_old_single_file_layout_does_not_collide() {
-        let home = tempfile::tempdir().unwrap();
-        let old = home.path().join("bin").join(format!(
-            "vorn-sessiond-0.8.0{}",
-            std::env::consts::EXE_SUFFIX
-        ));
-        fs::create_dir_all(old.parent().unwrap()).unwrap();
-        fs::write(&old, b"old").unwrap();
-        let src = home.path().join("bundled");
-        fs::write(&src, b"new").unwrap();
-        let a = install(&src, home.path(), "0.8.0").unwrap();
-        assert_ne!(a, old);
-        assert_eq!(fs::read(&a).unwrap(), b"new");
-        assert_eq!(fs::read(&old).unwrap(), b"old");
     }
 
     /// The files beside the bundled binary go with it, in the same layout;
