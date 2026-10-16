@@ -10,5 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ext-tiers-logic = { path = "../logic" }
+ext-tiers-tasks = { path = "../tasks" }
 serde_json = "1"
 wit-bindgen = "0.62"

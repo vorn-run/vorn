@@ -117,6 +117,11 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("agents.list", Permission::SessionsRead),
     ("task.importItems", Permission::TasksWrite),
     ("task.sourceLink", Permission::TasksRead),
+    // Tasks itself, served outside vornd: a call on the board's tables, the
+    // rows clients are told changed, and the trigger a write fires.
+    ("task.store", Permission::TasksWrite),
+    ("task.told", Permission::TasksWrite),
+    ("task.emit", Permission::TasksWrite),
     ("project.list", Permission::TasksRead),
     ("workflow.get", Permission::WorkflowsRead),
     ("workflow.list", Permission::WorkflowsRead),
@@ -136,6 +141,9 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
     "task.sourceLink",
+    "task.store",
+    "task.told",
+    "task.emit",
     "workflow.get",
     "workflow.list",
     "workflow.seed",

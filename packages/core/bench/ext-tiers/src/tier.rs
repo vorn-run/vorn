@@ -54,10 +54,15 @@ impl Kind {
     }
 }
 
-/// Worktree cleanup or the Widget: its id, files and events.
+/// Where the Tasks built-in's manifest and templates are.
+pub const TASKS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/tasks");
+
+/// Worktree cleanup, the Widget or Tasks: its id, files and events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ext {
     pub id: &'static str,
+    /// The folder its manifest is in, with its templates under `views/`.
+    pub dir: &'static str,
     pub toml: &'static str,
     pub views: &'static [&'static str],
     pub events: &'static [&'static str],
@@ -66,6 +71,7 @@ pub struct Ext {
 
 pub const WORKTREES: Ext = Ext {
     id: "vorn.worktrees",
+    dir: BUILTIN,
     toml: "worktrees.toml",
     views: &["idle.kdl", "confirm.kdl", "settings.kdl"],
     events: &["worktree.idle"],
@@ -74,6 +80,7 @@ pub const WORKTREES: Ext = Ext {
 
 pub const WIDGET: Ext = Ext {
     id: "vorn.widget",
+    dir: BUILTIN,
     toml: "widget.toml",
     views: &["widget.kdl", "compact.kdl"],
     events: &[
@@ -84,6 +91,15 @@ pub const WIDGET: Ext = Ext {
         "agent.permissionClosed",
     ],
     collections: &["agents", "permissions", "suggestions", "options"],
+};
+
+pub const TASKS: Ext = Ext {
+    id: "vorn.tasks",
+    dir: TASKS_DIR,
+    toml: "vorn-extension.toml",
+    views: &["board.kdl", "badge.kdl"],
+    events: &["agent.conversation"],
+    collections: &["working"],
 };
 
 impl Ext {
@@ -100,7 +116,7 @@ impl Ext {
     }
 
     fn manifest_text(self) -> String {
-        std::fs::read_to_string(Path::new(BUILTIN).join(self.toml))
+        std::fs::read_to_string(Path::new(self.dir).join(self.toml))
             .expect("the built-in's manifest")
     }
 
@@ -117,7 +133,7 @@ impl Ext {
         std::fs::write(dir.join("vorn-extension.toml"), toml).expect("manifest");
         for v in self.views {
             std::fs::copy(
-                Path::new(BUILTIN).join("views").join(v),
+                Path::new(self.dir).join("views").join(v),
                 dir.join("views").join(v),
             )
             .expect("view");
@@ -263,9 +279,19 @@ pub struct Tier {
 impl Tier {
     /// Sets it up, started for none: nothing runs until something uses it.
     pub fn new(kind: Kind, ext: Ext, paths: &Paths, call_timeout: Duration) -> Tier {
+        Tier::on(kind, ext, paths, call_timeout, Arc::new(Fake::new()))
+    }
+
+    /// Sets it up over `world`.
+    pub fn on(
+        kind: Kind,
+        ext: Ext,
+        paths: &Paths,
+        call_timeout: Duration,
+        world: Arc<Fake>,
+    ) -> Tier {
         let home = tempfile::tempdir().expect("temp home");
         let store = PackStore::new(home.path().join("extensions"));
-        let world = Arc::new(Fake::new());
         let mut settings = RouterSettings::new(env(home.path()), "bench");
         settings.call_timeout = call_timeout;
         let router = Router::new(

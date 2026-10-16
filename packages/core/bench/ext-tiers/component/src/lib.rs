@@ -1,6 +1,6 @@
 //! An extension served as a Wasm component of the `extension` world in
 //! `wit/extension.wit`, for `wasm32-wasip2`. It serves whichever extension
-//! `init` names.
+//! `init` names; Tasks keeps the imports to call from its tools.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -55,6 +55,7 @@ struct Component;
 impl Guest for Component {
     fn init(ctx: InitCtx) -> Result<(), ExtError> {
         let mut ext = ext_tiers_logic::by_id(&ctx.id)
+            .or_else(|| ext_tiers_tasks::by_id(&ctx.id, Box::new(Imports)))
             .ok_or_else(|| ext_error(Error::new("unknown", format!("no extension {}", ctx.id))))?;
         ext.init(&mut Imports);
         *EXT.lock().unwrap_or_else(PoisonError::into_inner) = Some(ext);

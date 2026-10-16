@@ -1773,6 +1773,7 @@ name = "ext-tiers-component"
 version = "0.1.0"
 dependencies = [
  "ext-tiers-logic",
+ "ext-tiers-tasks",
  "serde_json",
  "wit-bindgen 0.62.0",
 ]
@@ -1798,6 +1799,27 @@ name = "ext-tiers-program"
 version = "0.1.0"
 dependencies = [
  "ext-tiers-logic",
+ "ext-tiers-tasks",
+ "serde_json",
+]
+
+[[package]]
+name = "ext-tiers-tasks"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ext-tiers-logic",
+ "ext-tiers-tasks-shim",
+ "serde_json",
+ "uuid",
+ "vorn-mcp",
+]
+
+[[package]]
+name = "ext-tiers-tasks-shim"
+version = "0.1.0"
+dependencies = [
+ "jiff",
  "serde_json",
 ]
 
@@ -7017,6 +7039,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "vorn-extensions",
+ "vorn-store",
+ "vorn-tasks",
 ]
 
 [[package]]

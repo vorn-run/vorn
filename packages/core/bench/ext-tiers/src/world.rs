@@ -1,9 +1,9 @@
 //! What lies behind the gate in the bench: 32 terminals, two projects'
-//! worktrees, and permission requests that resolve. Every tier reaches the
-//! same one through the same gate.
+//! worktrees, and permission requests that resolve; for Tasks, a board in a
+//! real store ([`Board`]). Every tier reaches the same one through the same gate.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 use tokio::sync::Notify;
@@ -11,12 +11,16 @@ use vorn_extensions::api::types::{Request, Response};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{Answer, Caller, World};
 
+use crate::tasks::Board;
+
 /// The busy terminals.
 pub const TERMINALS: usize = 32;
 
 pub struct Fake {
     sessions: Vec<Value>,
     worktrees: Mutex<Vec<Value>>,
+    /// The task board, when Tasks is measured.
+    board: Option<Arc<Board>>,
     /// Core calls answered.
     pub calls: AtomicU64,
     /// Publishes that changed a row.
@@ -57,6 +61,20 @@ fn worktree(i: usize) -> Value {
 }
 
 impl Fake {
+    /// The world with a task board too.
+    pub fn with_board(board: Arc<Board>) -> Fake {
+        Fake {
+            board: Some(board),
+            ..Fake::new()
+        }
+    }
+
+    /// Counts a publish and wakes whoever waits for one.
+    pub fn saw_publish(&self) {
+        self.published.fetch_add(1, Ordering::SeqCst);
+        self.moved.notify_waiters();
+    }
+
     pub fn new() -> Fake {
         let sessions = (0..TERMINALS)
             .map(|i| {
@@ -71,6 +89,7 @@ impl Fake {
         Fake {
             sessions,
             worktrees: Mutex::new((0..20).map(worktree).collect()),
+            board: None,
             calls: AtomicU64::new(0),
             published: AtomicU64::new(0),
             moved: Notify::new(),
@@ -121,6 +140,16 @@ impl Fake {
 impl World for Fake {
     fn call(&self, _: &Caller, method: &str, args: Value) -> Answer<Value> {
         self.calls.fetch_add(1, Ordering::Relaxed);
+        if let Some(board) = self.board.as_ref().filter(|_| Board::answers(method)) {
+            // Off the runtime, as vornd reads its store.
+            let (board, method) = (Arc::clone(board), method.to_owned());
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || board.answer(&method, &args))
+                    .await
+                    .map_err(|e| ExtError::new("failed", e.to_string()))?
+                    .map_err(|e| ExtError::new("failed", e))
+            });
+        }
         let answer = self.answer(method, &args);
         Box::pin(async move { answer })
     }
@@ -134,7 +163,6 @@ impl World for Fake {
     }
 
     fn published(&self, _: &Caller, _: &str, _: &[Value]) {
-        self.published.fetch_add(1, Ordering::Relaxed);
-        self.moved.notify_waiters();
+        self.saw_publish();
     }
 }

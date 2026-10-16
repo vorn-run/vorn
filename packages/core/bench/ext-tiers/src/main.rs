@@ -10,6 +10,7 @@
 mod scenario;
 mod stats;
 mod sys;
+mod tasks;
 mod tier;
 mod world;
 
@@ -276,6 +277,12 @@ async fn run(args: &[String]) -> Value {
             Value::Array(log)
         }
         "crash" => crash(kind, &paths).await,
+        "tasks" => {
+            let n = flag(args, "--n")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(100);
+            tasks::case(kind, n, &paths).await
+        }
         _ => perf(kind, ext, &paths).await,
     }
 }
@@ -446,6 +453,60 @@ fn all(args: &[String]) -> Value {
     })
 }
 
+/// Tasks under each tier at each board size, `--reps` times, the tiers
+/// interleaved, each case in a fresh process: E6's `meta.json`,
+/// `raw.jsonl` and `summary.md` in `--out`.
+fn tasks_all(args: &[String]) {
+    let paths = paths(args);
+    let reps: usize = flag(args, "--reps")
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(5);
+    let tiers: Vec<usize> = flag(args, "--tiers")
+        .unwrap_or_else(|| "100,1000,10000".into())
+        .split(',')
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    let dir = PathBuf::from(flag(args, "--out").unwrap_or_else(|| ".".into()));
+    std::fs::create_dir_all(&dir).expect("out dir");
+    let mut rows = Vec::new();
+    for &n in &tiers {
+        for rep in 0..reps {
+            for kind in [Kind::Builtin, Kind::Program, Kind::Wasm] {
+                let mut row = child(
+                    &["tasks", "--tier", kind.name(), "--n", &n.to_string()],
+                    &paths,
+                );
+                if row.get("failed").is_some() {
+                    eprintln!("{} at {n}: {}", kind.name(), row["failed"]);
+                    continue;
+                }
+                row["rep"] = json!(rep);
+                eprintln!(
+                    "{} {n} rep {rep}: list p99 {} ms",
+                    kind.name(),
+                    row["list_ms"]["p99"]
+                );
+                rows.push(row);
+            }
+        }
+    }
+    let machine = machine();
+    let meta = json!({ "machine": machine, "reps": reps, "tiers": tiers, "writes": 60, "lists": 20, "restarts": 10 });
+    std::fs::write(
+        dir.join("meta.json"),
+        serde_json::to_string_pretty(&meta).expect("json") + "\n",
+    )
+    .expect("meta");
+    let raw: String = rows.iter().map(|r| format!("{r}\n")).collect();
+    std::fs::write(dir.join("raw.jsonl"), raw).expect("raw");
+    std::fs::write(
+        dir.join("summary.md"),
+        tasks::summary(&machine, &rows, &tiers),
+    )
+    .expect("summary");
+    println!("{}", dir.join("summary.md").display());
+}
+
 fn machine() -> Value {
     let sysctl = |k: &str| {
         Command::new("sysctl")
@@ -491,8 +552,9 @@ fn main() {
             }
             println!("{}", dir.join("results.json").display());
         }
+        Some("tasks") => tasks_all(&args),
         _ => {
-            eprintln!("ext-tiers all|run|precompile ..");
+            eprintln!("ext-tiers all|tasks|run|precompile ..");
             std::process::exit(2);
         }
     }

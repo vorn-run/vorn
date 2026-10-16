@@ -4,12 +4,13 @@
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufWriter, Write};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use ext_tiers_logic::{probe, Error, Extension, Host, Op};
 use serde_json::{json, Value};
 
 struct Stdio {
-    lines: std::io::Lines<std::io::StdinLock<'static>>,
+    lines: std::io::Lines<std::io::BufReader<std::io::Stdin>>,
     out: BufWriter<std::io::Stdout>,
     next_id: u64,
     /// Messages that came while it waited for an answer.
@@ -42,7 +43,35 @@ impl Stdio {
     }
 }
 
-impl Host for Stdio {
+static STDIO: Mutex<Option<Stdio>> = Mutex::new(None);
+
+/// The process's stdio, as every extension it serves reaches Vorn: Tasks
+/// keeps it, as its tools call it from within their own futures.
+struct Shared;
+
+impl Shared {
+    fn lock() -> MutexGuard<'static, Option<Stdio>> {
+        STDIO.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn with<T>(f: impl FnOnce(&mut Stdio) -> T) -> T {
+        f(Self::lock()
+            .as_mut()
+            .expect("stdio is set before anything runs"))
+    }
+}
+
+impl Host for Shared {
+    fn call(&mut self, method: &str, args: Value) -> Result<Value, Error> {
+        Shared::with(|stdio| stdio.call(method, args))
+    }
+
+    fn publish(&mut self, collection: &str, ops: Vec<Op>) {
+        Shared::with(|stdio| stdio.publish(collection, ops));
+    }
+}
+
+impl Stdio {
     fn call(&mut self, method: &str, args: Value) -> Result<Value, Error> {
         self.next_id += 1;
         let id = self.next_id;
@@ -95,20 +124,23 @@ fn answer(id: Value, answer: Result<Value, Error>) -> Value {
 
 /// Serves the extension `guest.init` names until stdin closes.
 fn main() {
-    let mut stdio = Stdio {
-        lines: std::io::stdin().lock().lines(),
+    *Shared::lock() = Some(Stdio {
+        lines: std::io::BufReader::new(std::io::stdin()).lines(),
         out: BufWriter::new(std::io::stdout()),
         next_id: 0,
         later: VecDeque::new(),
-    };
+    });
+    let mut stdio = Shared;
     let mut ext: Option<Box<dyn Extension>> = None;
-    while let Some(message) = stdio.next() {
+    while let Some(message) = Shared::with(Stdio::next) {
         let id = message.get("id").cloned();
         let params = &message["params"];
         match message["method"].as_str() {
             Some("guest.init") => {
                 let named = params["ctx"]["id"].as_str().unwrap_or_default();
-                let reply = match ext_tiers_logic::by_id(named) {
+                let found = ext_tiers_logic::by_id(named)
+                    .or_else(|| ext_tiers_tasks::by_id(named, Box::new(Shared)));
+                let reply = match found {
                     Some(mut e) => {
                         e.init(&mut stdio);
                         ext = Some(e);
@@ -117,7 +149,7 @@ fn main() {
                     None => Err(Error::new("unknown", format!("no extension {named}"))),
                 };
                 if let Some(id) = id {
-                    stdio.send(&answer(id, reply));
+                    Shared::with(|s| s.send(&answer(id, reply)));
                 }
             }
             Some("guest.handle") => {
@@ -129,7 +161,7 @@ fn main() {
                     (None, None) => Err(Error::new("start", "guest.init came first")),
                 };
                 if let Some(id) = id {
-                    stdio.send(&answer(id, reply));
+                    Shared::with(|s| s.send(&answer(id, reply)));
                 }
             }
             Some("guest.on-event") => {

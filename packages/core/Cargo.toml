@@ -46,6 +46,8 @@ members = [
   "bench/ext-tiers/program",
   "bench/ext-tiers/component",
   "bench/ext-tiers/probe",
+  "bench/ext-tiers/tasks",
+  "bench/ext-tiers/tasks/shim",
 ]
 exclude = ["vendor"]
 

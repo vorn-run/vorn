@@ -4,12 +4,31 @@
 # runs every tier and writes bench/ext-tiers/results/{results.json,summary.md}
 # and the widget fixture vorn-app's templates test draws. Arguments go to the
 # bench, e.g. --runs 3.
+#
+# `ext-tiers-bench.sh tasks` runs Tasks instead (the built-in, a program and a
+# component over one board) into bench/ext-tiers/results/tasks, e.g.
+# `tasks --reps 5 --tiers 100,1000,10000`.
 set -eu
 cd "$(dirname "$0")/.."
 rustup target list --installed | grep -qx wasm32-wasip2 || rustup target add wasm32-wasip2
 cargo build --release --locked -p ext-tiers-program -p vorn-bench-ext-tiers
 cargo build --release --locked --target wasm32-wasip2 -p ext-tiers-component
 target=${CARGO_TARGET_DIR:-target}
+prettier=../../node_modules/.bin/prettier
+if [ "${1:-}" = tasks ]; then
+  shift
+  target=$(cd "$target" && pwd)
+  component="$target/wasm32-wasip2/release/ext_tiers_component.wasm"
+  "$target/release/ext-tiers" precompile "$component"
+  "$target/release/ext-tiers" tasks \
+    --program "$target/release/ext-tiers-program" \
+    --component "$component" \
+    --out bench/ext-tiers/results/tasks \
+    "$@"
+  [ ! -x "$prettier" ] || "$prettier" --log-level warn --write bench/ext-tiers/results/tasks
+  cat bench/ext-tiers/results/tasks/summary.md
+  exit
+fi
 # The host three times: without the Wasm tier, with its runtime (what vornd
 # ships) and with the compiler too; the differences are what each adds.
 cargo build --release --locked -p ext-tiers-probe
@@ -32,6 +51,5 @@ bench="$target/release/ext-tiers"
   --probe-compile "$target/release/ext-tiers-probe-compile" \
   "$@"
 node bench/ext-tiers/summary.mjs bench/ext-tiers/results/results.json > bench/ext-tiers/results/summary.md
-prettier=../../node_modules/.bin/prettier
 [ ! -x "$prettier" ] || "$prettier" --log-level warn --write bench/ext-tiers/results bench/ext-tiers/fixtures
 cat bench/ext-tiers/results/summary.md

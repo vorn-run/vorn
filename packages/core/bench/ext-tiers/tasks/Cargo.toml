@@ -1,0 +1,21 @@
+[package]
+name = "ext-tiers-tasks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The Tasks built-in's logic for the program and Wasm tiers: its own calls, triggers and MCP tools compiled unchanged, the tables reached over the bridge"
+
+# The built-in's files carry their own tests, which need its real store.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ext-tiers-logic = { path = "../logic" }
+serde_json = { version = "1", features = ["preserve_order"] }
+uuid = { version = "1", features = ["v4"] }
+# The tools are the built-in's own, written with the MCP server's toolkit.
+vorn-mcp = { path = "../../../crates/mcp" }
+# `calls.rs` and `triggers.rs` name these crates; the shim answers for both.
+vorn_store = { package = "ext-tiers-tasks-shim", path = "shim" }
