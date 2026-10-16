@@ -21,7 +21,7 @@ A screen is named by a route; the part after the first `:` is its argument.
 | Route | Screen |
 | --- | --- |
 | `sessions`, `tasks`, `workflows` | The tabs |
-| `sessions-scope`, `tasks-scope`, `task-new` | Sheets |
+| `sessions-scope`, `tasks-scope`, `sessions-view`, `tasks-view`, `task-new` | Sheets; the view options are kept across launches (`vp_prefs`) |
 | `launch` | A new session |
 | `session:<id>` | A terminal |
 | `task:<id>`, `workflow:<id>`, `workflow-run:<id>`, `run:<id>` | Details |
@@ -40,7 +40,7 @@ A screen is named by a route; the part after the first `:` is its argument.
 | `button` | A button, style `plain`, `primary` or `danger`, asking `confirm` first; `value` names its icon |
 | `swipe` | Inside a `link`: the buttons shown when the row is swiped from its `style` edge, `leading` or `trailing` |
 | `more` | A menu of the buttons inside |
-| `choice`, `option` | A picker; segmented without a label, a menu with one |
+| `choice`, `option` | A picker; segmented without a label, a menu with one. An option's `text` kid is a line under it |
 | `toggle` | A switch |
 | `field` | A text field, `multiline` or `secret` |
 | `copy` | A button that copies `value` |

@@ -355,7 +355,7 @@ impl Ui {
                 let mut n = control("option");
                 n.children = kids(self)
                     .into_iter()
-                    .filter(|k| k.kind == "icon")
+                    .filter(|k| k.kind == "icon" || k.kind == "text")
                     .collect();
                 out.push(n);
             }

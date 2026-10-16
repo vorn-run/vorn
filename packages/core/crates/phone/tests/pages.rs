@@ -105,11 +105,13 @@ fn has(n: &Node, label: &str) -> bool {
 const ROUTES: &[(&str, &[&str])] = &[
     ("sessions", &["bar", "section", "link", "status"]),
     ("sessions-scope", &["bar", "field", "option"]),
+    ("sessions-view", &["bar", "section", "option", "toggle"]),
     ("launch", &["choice", "option", "field", "button"]),
     ("session:s2", &["bar", "more", "button", "drawn"]),
     ("rename:s1", &["bar", "field"]),
     ("tasks", &["bar", "choice", "option", "link"]),
     ("tasks-scope", &["field", "option"]),
+    ("tasks-view", &["bar", "section", "option", "toggle"]),
     ("task:t1", &["choice", "option", "section"]),
     ("task-new", &["field", "choice", "button"]),
     ("task-edit:t1", &["field", "button"]),
@@ -247,17 +249,11 @@ fn sessions_show_each_agents_mark() {
 }
 
 #[test]
-fn sessions_group_by_project_waiting_first_and_show_requests() {
+fn sessions_group_by_status_waiting_first_and_show_requests() {
     let mut p = phone(PHONE);
     let mut ui = Ui::native(&config(3.0));
     let t = tree(&mut p, &mut ui, "sessions", PHONE);
-    let sections: Vec<_> = t
-        .walk()
-        .into_iter()
-        .filter(|n| n.kind == "section")
-        .map(|n| n.label.clone())
-        .collect();
-    assert_eq!(sections, ["vorn", "site"]);
+    assert_eq!(sections(&t), ["Waiting", "Running", "Idle"]);
     let t = tree(&mut p, &mut ui, "session:s2", PHONE);
     assert!(has(&t, "Allow") && has(&t, "Deny"));
     let deny = find(&t, "Deny").id.expect("id");
@@ -311,6 +307,47 @@ fn tabs_scopes_and_task_moves_act_in_place() {
         Some("back"),
         "a sheet closes once picked"
     );
+}
+
+fn sections(t: &Node) -> Vec<String> {
+    t.walk()
+        .into_iter()
+        .filter(|n| n.kind == "section")
+        .map(|n| n.label.clone())
+        .collect()
+}
+
+#[test]
+fn view_options_regroup_filter_and_survive_a_relaunch() {
+    let mut p = phone(PHONE);
+    let mut ui = Ui::native(&config(3.0));
+    act_on(&mut p, &mut ui, "sessions-view", "Project");
+    let t = tree(&mut p, &mut ui, "sessions", PHONE);
+    assert_eq!(sections(&t), ["site", "vorn"], "newest first");
+    assert!(has(&t, "View options, changed"));
+    act_on(&mut p, &mut ui, "sessions-view", "Waiting");
+    let t = tree(&mut p, &mut ui, "sessions", PHONE);
+    assert_eq!(sections(&t), ["vorn"]);
+    act_on(&mut p, &mut ui, "sessions-view", "Agent");
+    let t = tree(&mut p, &mut ui, "sessions", PHONE);
+    assert!(
+        t.walk().iter().any(|n| n.label.ends_with("· Claude Code")),
+        "the agent shows"
+    );
+
+    act_on(&mut p, &mut ui, "tasks-view", "Project");
+    act_on(&mut p, &mut ui, "tasks-view", "Archived");
+    pages::run(&mut p, &mut ui, pages::Do::Font(3.0));
+    let saved = p.view.prefs();
+
+    let mut q = phone(PHONE);
+    q.view.restore(&saved);
+    assert_eq!(q.view.prefs(), saved);
+    assert_eq!(q.view.font, 15.0);
+    let t = tree(&mut q, &mut ui, "sessions", PHONE);
+    assert_eq!(sections(&t), ["vorn"]);
+    pages::run(&mut q, &mut ui, pages::Do::Font(100.0));
+    assert_eq!(q.view.font, 28.0, "within range");
 }
 
 fn act_on(p: &mut Phone, ui: &mut Ui, route: &str, label: &str) {

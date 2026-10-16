@@ -1,5 +1,6 @@
 //! The phone's native screens by route: each a vornui tree the native backend reads, and the acts its controls run.
 
+pub mod options;
 mod sessions;
 mod tasks;
 mod workflows;
@@ -83,6 +84,15 @@ pub enum Do {
     DeleteTask(String, bool),
     /// Switches a workflow's schedule on or off.
     Enable(String, bool),
+    /// Sets a view option, by its key, to an option's key.
+    Pick(&'static str, String),
+    /// Shows or hides a fact on a list's rows: the list, the fact.
+    Field(&'static str, &'static str),
+    ResetFields(&'static str),
+    /// Shows archived tasks on the board, or stops.
+    Archived,
+    /// Makes the terminal's text bigger or smaller by this many points.
+    Font(f32),
     NewTaskProject(String),
     NewTask,
     SaveTask(String),
@@ -121,12 +131,20 @@ pub struct View {
     /// A gate's rewritten text, by run and node, sent with its answer.
     pub edited: HashMap<(String, String), String>,
     pub limits: HashMap<String, usize>,
+    /// View options set away from where they start, by key.
+    pub picks: HashMap<&'static str, String>,
+    /// The facts each list's rows show, once changed.
+    pub fields: HashMap<&'static str, Vec<String>>,
+    pub archived: bool,
+    /// The terminal's text size, points.
+    pub font: f32,
 }
 
 impl View {
     pub fn new() -> View {
         View {
             column: "todo",
+            font: crate::TERM_SIZE,
             ..View::default()
         }
     }
@@ -458,6 +476,8 @@ pub fn screen(p: &mut Phone, ui: &mut Ui, screen: &str) -> El {
     let body = match route {
         "sessions" => sessions::list(&cx),
         "sessions-scope" => sessions::scope(&cx),
+        "sessions-view" => options::sessions(&cx),
+        "tasks-view" => options::tasks(&cx),
         "launch" => sessions::launch(&cx),
         "session" => sessions::session(&cx, arg),
         "rename" => sessions::rename(&cx, arg),
@@ -534,6 +554,15 @@ pub fn run(p: &mut Phone, ui: &mut Ui, d: Do) {
         Do::Archive(id, on) => tasks::archive(p, &id, on),
         Do::DeleteTask(id, leave) => tasks::delete(p, &id, leave),
         Do::Enable(id, on) => workflows::enable(p, &id, on),
+        Do::Pick(key, value) => {
+            p.view.picks.insert(key, value);
+        }
+        Do::Field(list, field) => p.view.flip_field(options::fields_of(list), field),
+        Do::ResetFields(list) => {
+            p.view.fields.remove(list);
+        }
+        Do::Archived => p.view.archived = !p.view.archived,
+        Do::Font(delta) => options::font(p, delta),
         Do::NewTaskProject(n) => p.view.new_task_project = Some(n),
         Do::NewTask => tasks::add(p, ui),
         Do::SaveTask(id) => tasks::save(p, ui, &id),

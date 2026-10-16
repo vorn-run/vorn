@@ -449,6 +449,23 @@ pub extern "C" fn vp_native_action(h: *mut Handle, screen: *const c_char, action
     });
 }
 
+/// The view options worth keeping across launches, as JSON.
+#[no_mangle]
+pub extern "C" fn vp_prefs(h: *mut Handle) -> *mut c_char {
+    with(h, |h| str_out(h.phone.view.prefs().to_string()))
+}
+
+/// Takes back what [`vp_prefs`] gave.
+#[no_mangle]
+pub extern "C" fn vp_set_prefs(h: *mut Handle, json: *const c_char) {
+    with(h, |h| {
+        if let Ok(v) = serde_json::from_str::<Value>(str_in(json)) {
+            h.phone.view.restore(&v);
+            h.phone.dirty = true;
+        }
+    });
+}
+
 /// Where the host goes next, once: a route, `replace:<route>` or `back`; null when nowhere.
 #[no_mangle]
 pub extern "C" fn vp_take_go(h: *mut Handle) -> *mut c_char {

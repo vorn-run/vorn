@@ -16,6 +16,9 @@ final class Core: ObservableObject {
     private var seen: UInt64 = 0
     private var trees: [String: (revision: Int, node: Node?)] = [:]
     private var tick: Timer?
+    private static let prefsKey = "vorn.prefs"
+    /// The view options as last saved, to write only when they change.
+    private var prefs: String?
 
     init(host: String, token: String) {
         let wake: VpWake = { ctx in
@@ -24,6 +27,10 @@ final class Core: ObservableObject {
         }
         handle = vp_new(host, token, wake, Unmanaged.passRetained(box).toOpaque())
         box.core = self
+        if let saved = UserDefaults.standard.string(forKey: Self.prefsKey) {
+            vp_set_prefs(handle, saved)
+        }
+        prefs = currentPrefs()
         // Relative times ("2m ago") move on without vornd saying anything.
         tick = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.revision += 1 }
     }
@@ -71,6 +78,16 @@ final class Core: ObservableObject {
               let json = String(data: data, encoding: .utf8) else { return }
         vp_native_action(handle, screen, json)
         revision += 1
+        if let now = currentPrefs(), now != prefs {
+            prefs = now
+            UserDefaults.standard.set(now, forKey: Self.prefsKey)
+        }
+    }
+
+    private func currentPrefs() -> String? {
+        guard let p = vp_prefs(handle) else { return nil }
+        defer { vp_free_string(p) }
+        return String(cString: p)
     }
 
     func metrics() -> [String: Any] {

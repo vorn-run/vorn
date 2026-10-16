@@ -76,6 +76,8 @@ pub struct Model {
     pub views: HashMap<String, PaneView>,
     /// Counts the terminal updates folded in, for keystroke latency.
     pub grid_updates: u64,
+    /// When each session last printed something here, epoch ms.
+    pub last_output: HashMap<String, f64>,
     /// Bumped when anything a native screen reads changes; terminal output does not.
     pub revision: u64,
     pub points: Points,
@@ -106,6 +108,7 @@ impl Model {
             grid: None,
             views: HashMap::new(),
             grid_updates: 0,
+            last_output: HashMap::new(),
             revision: 0,
             points: Points::default(),
             acts: Acts::default(),
@@ -315,6 +318,11 @@ impl Model {
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
                 if let Some(v) = g.view(&id) {
+                    // History arriving for a scrolled view is not output.
+                    if self.views.get(&id).is_none_or(|o| o.rev != v.rev) {
+                        let now = vorn_app::tasks::ms(&vorn_app::tasks::now_iso()).unwrap_or(0.0);
+                        self.last_output.insert(id.clone(), now);
+                    }
                     self.views.insert(id, v);
                     self.grid_updates += 1;
                     changed = true;

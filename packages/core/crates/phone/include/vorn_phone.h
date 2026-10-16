@@ -29,6 +29,8 @@ void vp_open_session(VpHandle *h, const char *id);
 char *vp_native_tree(VpHandle *h, const char *screen);
 void vp_native_action(VpHandle *h, const char *screen, const char *action_json);
 char *vp_take_go(VpHandle *h);
+char *vp_prefs(VpHandle *h);
+void vp_set_prefs(VpHandle *h, const char *json);
 
 char *vp_metrics(VpHandle *h);
 void vp_metrics_reset(VpHandle *h);

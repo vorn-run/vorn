@@ -507,6 +507,7 @@ impl vornui::App for Phone {
 
     fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         self.term = None;
+        ui.text.set_term_size(self.view.font);
         let Some(sid) = self.session.clone() else {
             return;
         };

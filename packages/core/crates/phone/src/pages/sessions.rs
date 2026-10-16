@@ -8,6 +8,7 @@ use vorn_app::screen::menus::{agent_name, AGENTS};
 use vorn_components::status::Status;
 use vornui::{El, Id, Ui};
 
+use super::options::{self, SESSION_FIELDS, SESSION_GROUP, SESSION_ORDER, SESSION_STATUS};
 use super::{
     badge, bar, choice, col, empty, link, listing, present, row, say, section, status, tone, Cx,
     Do, Scope,
@@ -30,23 +31,107 @@ fn in_scope(s: &Session, scope: Option<&Scope>) -> bool {
     }
 }
 
-/// Anything waiting on a person first, then the newest.
-fn order(a: &&Session, b: &&Session) -> std::cmp::Ordering {
-    let waiting = |s: &Session| s.status() != "waiting";
-    waiting(a)
-        .cmp(&waiting(b))
-        .then(b.info.created_at.total_cmp(&a.info.created_at))
+/// Where a status's group goes: what waits on a person first, then what runs, then what broke.
+fn attention(status: &str) -> u8 {
+    match status {
+        "waiting" => 0,
+        "running" => 1,
+        "error" => 2,
+        _ => 3,
+    }
+}
+
+fn status_label(status: &str) -> &'static str {
+    SESSION_STATUS
+        .options
+        .iter()
+        .find(|(k, _, _)| *k == status)
+        .map_or("Idle", |(_, label, _)| label)
+}
+
+const MAIN_CHECKOUT: &str = "Main checkout";
+
+/// What a session's worktree is called.
+fn worktree_label(s: &Session) -> &str {
+    s.info
+        .worktree_name
+        .as_deref()
+        .or(s.info.branch.as_deref())
+        .unwrap_or(MAIN_CHECKOUT)
+}
+
+/// When a session last printed something here, else when it started; epoch ms.
+fn activity(cx: &Cx, s: &Session) -> f64 {
+    cx.p.model
+        .last_output
+        .get(&s.info.id)
+        .copied()
+        .unwrap_or(s.info.created_at)
+}
+
+/// The sessions the options keep, sorted, under their groups' (key, label); one unlabelled group when ungrouped.
+fn grouped<'a>(cx: &Cx, all: &'a [Session]) -> Vec<(String, String, Vec<&'a Session>)> {
+    let v = cx.view();
+    let scope = v.sessions_scope.as_ref();
+    let want = v.pick(&SESSION_STATUS);
+    let mut kept: Vec<&Session> = all
+        .iter()
+        .filter(|s| in_scope(s, scope) && (want == "all" || s.status() == want))
+        .collect();
+    if v.pick(&SESSION_ORDER) == "created" {
+        kept.sort_by(|a, b| b.info.created_at.total_cmp(&a.info.created_at));
+    } else {
+        kept.sort_by(|a, b| activity(cx, b).total_cmp(&activity(cx, a)));
+    }
+    let by = v.pick(&SESSION_GROUP);
+    if by == "none" {
+        return if kept.is_empty() {
+            vec![]
+        } else {
+            vec![(String::new(), String::new(), kept)]
+        };
+    }
+    let mut groups: Vec<(String, String, Vec<&Session>)> = Vec::new();
+    for s in kept {
+        let (key, label) = match by {
+            "status" => (s.status().to_owned(), status_label(s.status()).to_owned()),
+            "project" => (s.info.project_name.clone(), s.info.project_name.clone()),
+            _ => (
+                format!(
+                    "{}\u{0}{}",
+                    s.info.project_name,
+                    s.info.worktree_path.as_deref().unwrap_or("")
+                ),
+                worktree_label(s).to_owned(),
+            ),
+        };
+        match groups.iter_mut().find(|g| g.0 == key) {
+            Some(g) => g.2.push(s),
+            None => groups.push((key, label, vec![s])),
+        }
+    }
+    if by == "status" {
+        groups.sort_by_key(|g| attention(&g.0));
+    }
+    groups
 }
 
 pub fn list(cx: &Cx) -> El {
     let m = &cx.p.model;
     let scope = cx.view().sessions_scope.as_ref();
-    let mut items = vec![super::filter(
-        Id::new("sessions-scope-open"),
-        "Show sessions from",
-        "sessions-scope".into(),
-        scope.is_some(),
-    )];
+    let mut items = vec![
+        super::filter(
+            Id::new("sessions-scope-open"),
+            "Show sessions from",
+            "sessions-scope".into(),
+            scope.is_some(),
+        ),
+        options::button(
+            "sessions-view-open",
+            "sessions-view",
+            cx.view().sessions_changed(),
+        ),
+    ];
     if cx.online() {
         items.push(link(
             Id::new("launch-open"),
@@ -74,17 +159,7 @@ pub fn list(cx: &Cx) -> El {
             Link::Unpaired => empty("Not paired", "Pair the phone with a computer first.", vec![]),
         }
     } else {
-        let shown: Vec<&Session> = all.iter().filter(|s| in_scope(s, scope)).collect();
-        let mut groups: BTreeMap<&str, Vec<&Session>> = BTreeMap::new();
-        for s in &shown {
-            groups
-                .entry(s.info.project_name.as_str())
-                .or_default()
-                .push(s);
-        }
-        let mut groups: Vec<(&str, Vec<&Session>)> = groups.into_iter().collect();
-        let waits = |g: &[&Session]| !g.iter().any(|s| s.status() == "waiting");
-        groups.sort_by_key(|g| waits(&g.1));
+        let groups = grouped(cx, all);
         let mut rows = Vec::new();
         if let Some(sc) = scope {
             rows.push(row(vec![
@@ -97,34 +172,59 @@ pub fn list(cx: &Cx) -> El {
                 ),
             ]));
         }
-        if shown.is_empty() {
+        if groups.is_empty() {
             rows.push(say(
                 format!("Nothing here. {} elsewhere.", all.len()),
                 "secondary",
             ));
         }
-        for (project, mut ss) in groups {
-            ss.sort_by(order);
-            let title = if project.is_empty() { "Other" } else { project };
-            let key = format!("sessions:{project}");
+        for (key, label, ss) in groups {
+            let key = format!("sessions:{key}");
             let limit = cx.view().limit(&key);
             let mut kids: Vec<El> = ss.iter().take(limit).map(|s| session_row(cx, s)).collect();
             kids.extend(cx.more(&key, ss.len().min(limit), ss.len()));
-            rows.push(section(title, kids));
+            let title = if label.is_empty() && cx.view().pick(&SESSION_GROUP) == "project" {
+                "Other".to_owned()
+            } else {
+                label
+            };
+            rows.push(section(&title, kids));
         }
         listing(rows)
     };
     col(vec![head, body])
 }
 
+/// The facts under a session's name, as the options ask.
 fn meta(cx: &Cx, s: &Session) -> String {
+    let v = cx.view();
+    let has = |f: &str| v.shows(&SESSION_FIELDS, f);
     let mut parts = Vec::new();
-    if let Some(b) = s.info.branch.as_deref().filter(|b| !b.is_empty()) {
-        parts.push(b.to_owned());
+    if has("project")
+        && s.info
+            .display_name
+            .as_deref()
+            .is_some_and(|n| !n.trim().is_empty())
+    {
+        parts.push(s.info.project_name.clone());
     }
-    parts.push(agent_name(&s.info.agent_type).to_owned());
-    let at = vorn_app::tasks::iso(s.info.created_at);
-    parts.push(vorn_app::runs::relative(&at, cx.now));
+    if has("time") {
+        let at = vorn_app::tasks::iso(s.info.created_at);
+        parts.push(vorn_app::runs::relative(&at, cx.now));
+    }
+    let branch = s.info.branch.as_deref().filter(|b| !b.is_empty());
+    if has("branch") {
+        parts.extend(branch.map(str::to_owned));
+    }
+    if has("worktree") {
+        let w = worktree_label(s);
+        if Some(w) != branch {
+            parts.push(w.to_owned());
+        }
+    }
+    if has("agent") {
+        parts.push(agent_name(&s.info.agent_type).to_owned());
+    }
     parts.join(" · ")
 }
 
@@ -139,22 +239,18 @@ fn session_row(cx: &Cx, s: &Session) -> El {
     let sid = s.info.id.as_str();
     let st = Status::parse(s.status());
     let title = s.title();
-    link(
-        row_id(sid),
-        &title,
-        format!("session:{sid}"),
-        vec![
-            super::agent(&s.info.agent_type),
-            status(s.status(), tone(st)),
-            col(vec![
-                say(title.clone(), "title"),
-                say(meta(cx, s), "secondary"),
-            ]),
-        ]
-        .into_iter()
-        .chain(asks(cx, sid).then(|| badge("Asks", "warn")))
-        .collect(),
-    )
+    let mut kids = vec![super::agent(&s.info.agent_type)];
+    if cx.view().shows(&SESSION_FIELDS, "status") {
+        kids.push(status(s.status(), tone(st)));
+    }
+    let meta = meta(cx, s);
+    let mut lines = vec![say(title.clone(), "title")];
+    if !meta.is_empty() {
+        lines.push(say(meta, "secondary"));
+    }
+    kids.push(col(lines));
+    kids.extend(asks(cx, sid).then(|| badge("Asks", "warn")));
+    link(row_id(sid), &title, format!("session:{sid}"), kids)
 }
 
 /// Every project and branch sessions run in, with how many each has.
@@ -364,6 +460,20 @@ pub fn session(cx: &Cx, sid: &str) -> El {
             "Rename",
             format!("rename:{sid}"),
             Some("pencil"),
+        ),
+        cx.icon_button(
+            Id::new("font-smaller"),
+            &format!("Smaller text, now {} point", cx.view().font),
+            "minus",
+            "",
+            Do::Font(-1.0),
+        ),
+        cx.icon_button(
+            Id::new("font-larger"),
+            &format!("Larger text, now {} point", cx.view().font),
+            "plus",
+            "",
+            Do::Font(1.0),
         ),
         cx.asking(
             Id::new("kill").child(sid),

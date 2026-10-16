@@ -355,7 +355,12 @@ struct Control: View {
             Button { act() } label: {
                 HStack(spacing: 12) {
                     if let i = node.icon { VornIcon(i, ink: .secondary) }
-                    Text(node.label ?? "").foregroundStyle(Palette.ink)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(node.label ?? "").foregroundStyle(Palette.ink)
+                        if let sub = node.kids.first(where: { $0.k == "text" })?.label {
+                            Text(sub).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                     Spacer()
                     if node.on == true { VornIcon(name: "check", ink: Palette.bronze) }
                 }

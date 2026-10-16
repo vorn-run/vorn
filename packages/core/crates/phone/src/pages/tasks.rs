@@ -8,6 +8,7 @@ use vorn_app::tasks::{self, STATUSES};
 use vorn_protocol::TaskConfig;
 use vornui::{El, Id, Ui};
 
+use super::options::{self, TASK_FIELDS, TASK_GROUP, TASK_ORDER};
 use super::{
     bar, choice, col, empty, icon, link, listing, menu, present, row, say, section, swipe, Cx, Do,
 };
@@ -45,6 +46,7 @@ pub fn board(cx: &Cx) -> El {
                 "tasks-scope".into(),
                 scope.is_some(),
             ),
+            options::button("tasks-view-open", "tasks-view", cx.view().tasks_changed()),
             present(
                 Id::new("task-new-open"),
                 "New task",
@@ -66,11 +68,20 @@ pub fn board(cx: &Cx) -> El {
         };
         return col(vec![head, body]);
     }
+    let source = match cx.view().source() {
+        "all" => tasks::Source::All,
+        "local" => tasks::Source::Local,
+        id => tasks::Source::Connector(id.to_owned()),
+    };
     let scoped: Vec<&TaskConfig> = m
         .store
         .tasks
         .iter()
-        .filter(|t| live(t) && scope.is_none_or(|p| t.project_name == p))
+        .filter(|t| {
+            (cx.view().archived || live(t))
+                && source.keeps(t)
+                && scope.is_none_or(|p| t.project_name == p)
+        })
         .collect();
     let column = cx.view().column;
     let tabs = choice(
@@ -93,7 +104,11 @@ pub fn board(cx: &Cx) -> El {
         .copied()
         .filter(|t| status_of(t) == column)
         .collect();
-    here.sort_by(|a, b| a.order.total_cmp(&b.order));
+    match cx.view().pick(&TASK_ORDER) {
+        "newest" => here.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
+        "oldest" => here.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+        _ => here.sort_by(|a, b| a.order.total_cmp(&b.order)),
+    }
     let key = format!("tasks:{column}");
     let limit = cx.view().limit(&key);
     let mut rows: Vec<El> = Vec::new();
@@ -117,8 +132,21 @@ pub fn board(cx: &Cx) -> El {
             "secondary",
         ));
     }
-    rows.extend(here.iter().take(limit).map(|t| task_row(cx, t)));
-    rows.extend(cx.more(&key, here.len().min(limit), here.len()));
+    let shown = &here[..here.len().min(limit)];
+    if cx.view().pick(&TASK_GROUP) == "project" {
+        let mut groups: Vec<(&str, Vec<El>)> = Vec::new();
+        for t in shown {
+            let el = task_row(cx, t);
+            match groups.iter_mut().find(|g| g.0 == t.project_name) {
+                Some(g) => g.1.push(el),
+                None => groups.push((&t.project_name, vec![el])),
+            }
+        }
+        rows.extend(groups.into_iter().map(|(name, kids)| section(name, kids)));
+    } else {
+        rows.extend(shown.iter().map(|t| task_row(cx, t)));
+    }
+    rows.extend(cx.more(&key, shown.len(), here.len()));
     col(vec![head, tabs, listing(rows)])
 }
 
@@ -129,21 +157,15 @@ fn task_row(cx: &Cx, t: &TaskConfig) -> El {
         t.title.as_str()
     };
     let st = tasks::status(&status_of(t));
-    let when = vorn_app::runs::relative(&t.updated_at, cx.now);
-    let mut kids = vec![
-        icon(st.icon),
-        col(vec![
-            say(title, "title"),
-            say(
-                format!(
-                    "{} · {} · {when}",
-                    t.project_name,
-                    tasks::short_id(&t.project_name, &t.id)
-                ),
-                "secondary",
-            ),
-        ]),
-    ];
+    let meta = meta(cx, t);
+    let mut lines = vec![say(title, "title")];
+    if !meta.is_empty() {
+        lines.push(say(meta, "secondary"));
+    }
+    let mut kids = vec![icon(st.icon), col(lines)];
+    if !live(t) {
+        kids.push(icon("archive"));
+    }
     kids.extend(row_actions(cx, t));
     link(
         Id::new("task-row").child(&t.id),
@@ -151,6 +173,31 @@ fn task_row(cx: &Cx, t: &TaskConfig) -> El {
         format!("task:{}", t.id),
         kids,
     )
+}
+
+/// The facts under a task's title, as the options ask.
+fn meta(cx: &Cx, t: &TaskConfig) -> String {
+    cx.view()
+        .fields(&TASK_FIELDS)
+        .into_iter()
+        .filter_map(|f| match f {
+            "project" => Some(t.project_name.clone()),
+            "date" => Some(tasks::short_date(&t.created_at)),
+            "status" => Some(tasks::status(&status_of(t)).label.to_owned()),
+            "agent" => t
+                .assigned_agent
+                .as_ref()
+                .map(|a| agent_name(&a.to_string()).to_owned()),
+            "branch" => t.branch.clone().filter(|b| !b.is_empty()),
+            "source" => Some(match &t.source_connector_id {
+                Some(id) => options::connector_name(cx, id),
+                None => "Local".to_owned(),
+            }),
+            "id" => Some(tasks::short_id(&t.project_name, &t.id)),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// What a row offers when swiped: complete what is open; file away what is over, or bring it back; delete.

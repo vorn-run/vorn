@@ -4,6 +4,8 @@ column
       link value="rename:s#" style="sheet"
         icon value="pencil"
         text label="Rename" style="body"
+      button label="Smaller text, now ## point" value="minus"
+      button label="Larger text, now ## point" value="plus"
       button label="End session" style="danger" confirm
   icon value="agent:claude"
   status value="waiting" style="warn"
