@@ -179,3 +179,26 @@ fn reads_hermes_sessions_from_its_store() {
     assert_eq!(list[0].activity_count, 4.0);
     assert_eq!(list[0].display, "Plan");
 }
+
+#[test]
+fn sessions_at_the_same_moment_keep_the_order_0_8_listed_them_in() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join(".claude/history.jsonl"),
+        "{\"sessionId\":\"c\",\"project\":\"/p\",\"timestamp\":1735787046000}\n",
+    );
+    sqlite(
+        &dir.path().join(".local/share/opencode/opencode.db"),
+        "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_updated INTEGER, time_archived INTEGER);
+         CREATE TABLE message (id TEXT, session_id TEXT);
+         INSERT INTO session VALUES ('o', '/p', 'Open', 1735787046000, NULL);",
+    );
+    sqlite(
+        &dir.path().join(".copilot/session-store.db"),
+        "CREATE TABLE sessions (id TEXT, cwd TEXT, summary TEXT, updated_at TEXT);
+         CREATE TABLE turns (id INTEGER, session_id TEXT);
+         INSERT INTO sessions VALUES ('p', '/p', 'S', '2025-01-02T03:04:06Z');",
+    );
+    let list = recent_sessions(&support::on_by_default(), &homes(dir.path()), None, 20);
+    assert_eq!(ids(&list), ["c", "p", "o"]);
+}

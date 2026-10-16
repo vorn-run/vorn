@@ -60,6 +60,7 @@ skip = [
 ]
 
 [agent.history]
+rank = 3
 activity = "turn"
 title_limit = 80
 

@@ -96,6 +96,8 @@ impl Daemon {
                     ));
                 }
             }
+            // Read now: the adapters say which variables no process inherits.
+            native.adapters();
             native
         };
         Arc::new(Daemon {

@@ -141,6 +141,7 @@ Recent sessions reads the agent's own files. Pick the shape that fits:
 [agent.history]
 activity = "turn"                  # what one unit of a conversation is called
 title_limit = 80
+rank = 5                           # orders it among agents at the same moment, lower first
 
 # One JSON object per line, one line per prompt.
 [agent.history.jsonl]

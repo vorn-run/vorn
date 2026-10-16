@@ -108,15 +108,17 @@ impl RecentSession {
 
 /// Every agent's sessions, newest first, at most `limit` (`getRecentSessions`).
 /// With a scope, only the sessions recorded in one of its directories.
-/// Sessions at the same moment keep `agents`' order.
+/// Sessions at the same moment keep their agents' history rank, then `agents`' order.
 pub fn recent_sessions(
     agents: &Agents,
     homes: &Homes,
     scope: Option<&ProjectScope>,
     limit: usize,
 ) -> Vec<RecentSession> {
-    let mut all: Vec<RecentSession> = agents
-        .iter()
+    let mut ranked: Vec<&Agent> = agents.iter().collect();
+    ranked.sort_by_key(|a| a.spec().history.as_ref().map_or(0, |h| h.rank));
+    let mut all: Vec<RecentSession> = ranked
+        .into_iter()
         .flat_map(|agent| provider(agent, homes, scope, limit))
         .collect();
     all.sort_by(|a, b| js::newest_first(a.timestamp, b.timestamp));

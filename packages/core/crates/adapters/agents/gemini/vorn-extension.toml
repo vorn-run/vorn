@@ -28,6 +28,7 @@ prompt = []
 no_prompt = ["-p", ""]
 
 [agent.history]
+rank = 1
 activity = "prompt"
 title_limit = 80
 

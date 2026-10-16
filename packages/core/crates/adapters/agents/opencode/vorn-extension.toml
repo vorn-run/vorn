@@ -43,6 +43,7 @@ args = ["models"]
 lines = '^[^\s/]+/\S+$'
 
 [agent.history]
+rank = 4
 activity = "message"
 title_limit = 80
 

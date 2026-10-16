@@ -340,6 +340,10 @@ pub struct History {
     /// The longest title listed, in UTF-16 units; uncut when absent.
     #[serde(default)]
     pub title_limit: Option<usize>,
+    /// Orders sessions of different agents at the same moment, lower
+    /// first; the launcher's order among equal ranks.
+    #[serde(default)]
+    pub rank: u32,
     #[serde(default)]
     pub jsonl: Option<JsonlHistory>,
     #[serde(default)]

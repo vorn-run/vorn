@@ -51,6 +51,7 @@ skip = [
 ]
 
 [agent.history]
+rank = 0
 activity = "entry"
 
 [agent.history.jsonl]
