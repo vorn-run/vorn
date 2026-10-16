@@ -48,6 +48,17 @@ Every screen and feature of the React Native phone app, and where it stands in t
 - [x] Hardware keyboard in the terminal (arrows, Escape); pointer hover
 - [x] Settings pages
 
+## Security
+
+- [x] vornd serves other machines over TLS with its own long-lived self-signed certificate, kept in the data dir (`tls-cert.der`, `tls-key.der`, key 0600). Plain connections are accepted from this machine only.
+- [x] The pairing QR (`&fp=`) and the pair-by-hand panel carry the certificate's SHA-256 fingerprint, on the Rust and macOS desktops.
+- [x] The phone pins it for pairing and for its sockets: no system trust and no prompts. New pairings need the fingerprint.
+- [x] The LAN listener opens only while sharing is on in Settings.
+- [x] Settings › Devices shows each device's name, last seen time and address, with Revoke; revoking closes its open sockets at once (close code 4002).
+- [x] The phone's Settings shows the computer and certificate it trusts, with Forget this computer. A computer paired before certificates is marked "Not secured. Pair again".
+- [x] Tests: a wrong fingerprint is refused (`trusts_a_client_only_with_the_pinned_certificate`, `a_socket_connects_only_to_the_certificate_it_pinned`); a revoked token is refused at once on open sockets (`a_revoked_device_is_closed_out_at_once`); with sharing off nothing listens on the LAN (`nothing_listens_on_the_lan_while_sharing_is_off`).
+- New dependencies: rustls (TLS, ring provider only), rcgen (makes the certificate), tokio-rustls (TLS on vornd's and the phone's async sockets).
+
 ## Left out, and why
 
 - Push notifications: the previous app has none; vornd has no push sender yet.
