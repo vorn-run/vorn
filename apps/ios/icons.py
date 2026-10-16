@@ -1,4 +1,4 @@
-"""Writes Vorn/Icons.xcassets from vornui's icon set and the agent marks, the same SVGs the desktop draws."""
+"""Writes Vorn/Icons.xcassets from vornui's icon set, the same SVGs the desktop draws."""
 import json
 import os
 import shutil
@@ -38,11 +38,6 @@ def main():
             # A template image is tinted by its alpha, so the stroke's colour only has to be opaque.
             svg = open(os.path.join(icons, file)).read().replace("currentColor", "#000000")
             imageset(file[:-4], svg, True)
-            count += 1
-    marks = os.path.join(crates, "vorn-components", "assets", "agents")
-    for file in sorted(os.listdir(marks)):
-        if file.endswith(".svg"):
-            imageset("agent-" + file[:-4], open(os.path.join(marks, file)).read(), False)
             count += 1
     print(f"{count} icons", file=sys.stderr)
 

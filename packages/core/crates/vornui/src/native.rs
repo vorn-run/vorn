@@ -426,7 +426,7 @@ mod tests {
                 div()
                     .sem(Sem::Section("Account \"main\"".into()))
                     .child(text("Account", 13.0, crate::theme::color::WHITE).sem(Sem::Hidden))
-                    .child(widgets::toggle(Id::new("t"), "Count", true, false))
+                    .child(widgets::toggle(&ui, Id::new("t"), "Count", true, false))
                     .child(widgets::text_input(&ui, field, "Key", "Key").secure())
                     .child(
                         div()

@@ -12,7 +12,7 @@ The script builds `libvorn_phone.a` for the device and the simulator, writes `Vo
 
 ## Icons
 
-`icons.py` turns vornui's own SVGs (`packages/core/crates/vornui/icons`) into template images and the agent marks into full-colour images named `agent-<key>`, so the app draws the same glyphs as the desktop. An extension's mark, unknown at build time, arrives as SVG in the node and is drawn by the core's renderer (`vp_svg_rgba`).
+`icons.py` turns vornui's own SVGs (`packages/core/crates/vornui/icons`) into template images, so the app draws the same glyphs as the desktop. An agent's mark comes from its adapter (`agent:list`) and an extension's from its manifest; neither is known at build time, so each arrives as SVG in the node and is drawn by the core's renderer (`vp_svg_rgba`).
 
 ## Routes
 
@@ -46,7 +46,7 @@ A screen is named by a route; the part after the first `:` is its argument.
 | `prose`, `key` | A Markdown editor: its `field`, a Write/Preview switch, and its `key` kids in the keyboard bar (`vp_markdown_key` applies one) |
 | `copy` | A button that copies `value` |
 | `text` | Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown` |
-| `icon` | A glyph: `value` is the vornui name (`agent:<key>` for a mark), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
+| `icon` | A glyph: `value` is the vornui name (`agent:<key>` for an agent's mark, drawn from `label`), `style` its tone (`good`, `warn`, `busy`, `bad`, `muted`, `lit`), `label` inline SVG |
 | `status`, `badge` | Small marks |
 | `drawn` | A drawn vornui view (a terminal) |
 

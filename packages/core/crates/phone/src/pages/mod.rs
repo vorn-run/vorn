@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
+use vorn_app::client::store::Store;
 use vorn_components::status::Status;
 use vornui::accesskit::Role;
 use vornui::native::Sem;
@@ -408,9 +409,16 @@ fn icon(name: &str) -> El {
     div().sem(Sem::icon(name))
 }
 
-/// `agent`'s mark, as the desktop draws it.
-fn agent(agent: &str) -> El {
-    div().sem(Sem::icon(vorn_components::agent::icon_name(agent)))
+/// `agent`'s mark from its adapter, as the desktop draws it, or a terminal for a shell or an agent without one.
+fn agent(store: &Store, agent: &str) -> El {
+    match store.agents.get(agent).and_then(|a| a.icon.clone()) {
+        Some(svg) => div().sem(Sem::Icon {
+            name: format!("agent:{agent}"),
+            tone: "",
+            svg: Some(svg),
+        }),
+        None => icon("terminal"),
+    }
 }
 
 fn status(value: &str, tone: &'static str) -> El {

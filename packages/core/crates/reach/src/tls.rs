@@ -10,7 +10,9 @@ use std::sync::Arc;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{ring, CryptoProvider};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
-use rustls::{CertificateError, ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme};
+use rustls::{
+    CertificateError, ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme,
+};
 use sha2::{Digest, Sha256};
 
 pub use rustls;
@@ -191,7 +193,9 @@ mod tests {
                 return Ok(());
             }
         }
-        Err(rustls::Error::General("the handshake did not finish".to_owned()))
+        Err(rustls::Error::General(
+            "the handshake did not finish".to_owned(),
+        ))
     }
 
     #[test]
@@ -221,7 +225,10 @@ mod tests {
         assert_eq!(parse_fingerprint(&hex).as_deref(), Some(hex.as_str()));
         let colons = vec!["AB"; 32].join(":");
         assert_eq!(parse_fingerprint(&colons).as_deref(), Some(hex.as_str()));
-        assert_eq!(parse_fingerprint(&grouped(&hex)).as_deref(), Some(hex.as_str()));
+        assert_eq!(
+            parse_fingerprint(&grouped(&hex)).as_deref(),
+            Some(hex.as_str())
+        );
         assert_eq!(parse_fingerprint("abcd"), None);
         assert_eq!(parse_fingerprint(&"zz".repeat(32)), None);
         assert!(client_config("abcd").is_err());

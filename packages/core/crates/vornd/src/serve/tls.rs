@@ -79,7 +79,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(dir.join(KEY_FILE)).unwrap().permissions().mode();
+            let mode = std::fs::metadata(dir.join(KEY_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
         std::fs::write(dir.join(KEY_FILE), b"garbage").unwrap();

@@ -666,7 +666,10 @@ pub fn answer(native: &Native, method: &str, params: &Value) -> Answer {
         return Answer::Error("vornd has no hook endpoint".to_owned());
     };
     if method == "permission:list" {
-        let open = lock(&hooks.pending).iter().map(|p| p.info.clone()).collect();
+        let open = lock(&hooks.pending)
+            .iter()
+            .map(|p| p.info.clone())
+            .collect();
         return Answer::Result(Value::Array(open));
     }
     hooks.resolve(params, method == "permission:resolve-top");

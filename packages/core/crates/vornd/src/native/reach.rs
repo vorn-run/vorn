@@ -455,7 +455,11 @@ impl Native {
         if row.revoked_at.is_some() || !token::secret_matches(parsed.secret, &row.token_hash) {
             return None;
         }
-        if let Err(err) = tokens.touch(&row.id, &vorn_store::now_iso(), &peer.to_canonical().to_string()) {
+        if let Err(err) = tokens.touch(
+            &row.id,
+            &vorn_store::now_iso(),
+            &peer.to_canonical().to_string(),
+        ) {
             debug!(%err, "could not record a device token's use");
         }
         Some(Authenticated {

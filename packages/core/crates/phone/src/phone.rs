@@ -499,7 +499,14 @@ fn key(code: &str, m: u16) -> Input {
 impl vornui::App for Phone {
     fn view(&mut self, ui: &mut Ui) -> El {
         self.step_fling(ui);
-        self.marks.load(ui);
+        self.marks.load(
+            ui,
+            self.model
+                .store
+                .agents
+                .iter()
+                .filter_map(|a| Some((a.key.as_str(), a.icon.as_deref()?, a.mark.as_deref()))),
+        );
         self.model.acts.clear();
         self.dirty = false;
         screens::root(self, ui)

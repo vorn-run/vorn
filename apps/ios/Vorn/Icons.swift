@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// An icon node drawn as the desktop draws it: vornui's own glyphs and agent marks from the asset catalog build.sh makes, an extension's SVG through the core's renderer.
+/// An icon node drawn as the desktop draws it: vornui's own glyphs from the asset catalog build.sh makes, an agent's or extension's SVG through the core's renderer.
 struct VornIcon: View {
     let name: String
     var tone: String?
@@ -28,11 +28,7 @@ struct VornIcon: View {
             if let svg, !svg.isEmpty, let img = Self.raster(svg, px: Int(size * scale)) {
                 Image(uiImage: img).resizable()
             } else if let asset = Self.asset(name) {
-                if name.hasPrefix("agent:") {
-                    Image(asset).resizable()
-                } else {
-                    tinted(Image(asset).renderingMode(.template).resizable())
-                }
+                tinted(Image(asset).renderingMode(.template).resizable())
             } else {
                 Color.clear
             }
@@ -57,8 +53,7 @@ struct VornIcon: View {
 
     /// The catalog's name for an icon, if the app ships it.
     nonisolated static func asset(_ name: String) -> String? {
-        let asset = name.hasPrefix("agent:") ? "agent-" + name.dropFirst(6) : name
-        return !asset.isEmpty && UIImage(named: asset) != nil ? asset : nil
+        !name.isEmpty && UIImage(named: name) != nil ? name : nil
     }
 
     private static let cache = NSCache<NSString, UIImage>()

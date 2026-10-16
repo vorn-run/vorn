@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use vorn_app::client::store::Session;
-use vorn_app::screen::menus::{agent_name, AGENTS};
 use vorn_components::status::Status;
 use vornui::{El, Id, Ui};
 
@@ -231,7 +230,7 @@ fn meta(cx: &Cx, s: &Session) -> String {
         }
     }
     if has("agent") {
-        parts.push(agent_name(&s.info.agent_type).to_owned());
+        parts.push(cx.p.model.store.agents.label(&s.info.agent_type).to_owned());
     }
     parts.join(" · ")
 }
@@ -247,7 +246,7 @@ fn session_row(cx: &Cx, s: &Session) -> El {
     let sid = s.info.id.as_str();
     let st = Status::parse(s.status());
     let title = s.title();
-    let mut kids = vec![super::agent(&s.info.agent_type)];
+    let mut kids = vec![super::agent(&cx.p.model.store, &s.info.agent_type)];
     if cx.view().shows(&SESSION_FIELDS, "status") {
         kids.push(status(s.status(), tone(st)));
     }
@@ -374,20 +373,23 @@ pub fn launch(cx: &Cx) -> El {
                 )
             })
             .collect();
-    let agents = AGENTS
-        .iter()
-        .map(|(k, n)| (*k, *n))
-        .chain([(SHELL, "Shell")])
-        .map(|(k, n)| {
-            cx.option(
-                Id::new("launch-agent").child(k),
-                n,
-                agent == k,
-                Do::LaunchAgent(k.to_owned()),
-            )
-            .child(super::agent(k))
-        })
-        .collect();
+    let agents =
+        cx.p.model
+            .store
+            .agents
+            .iter()
+            .map(|a| (a.key.as_str(), a.name.as_str()))
+            .chain([(SHELL, "Shell")])
+            .map(|(k, n)| {
+                cx.option(
+                    Id::new("launch-agent").child(k),
+                    n,
+                    agent == k,
+                    Do::LaunchAgent(k.to_owned()),
+                )
+                .child(super::agent(&cx.p.model.store, k))
+            })
+            .collect();
     let wt = cx.view().launch_worktree;
     let where_ = choice(
         "Where it works",
@@ -509,7 +511,10 @@ pub fn session(cx: &Cx, sid: &str) -> El {
     ]);
     let mut out = vec![
         bar(title, vec![menu]),
-        super::agent(s.map_or(SHELL, |s| s.info.agent_type.as_str())),
+        super::agent(
+            &cx.p.model.store,
+            s.map_or(SHELL, |s| s.info.agent_type.as_str()),
+        ),
         status(s.map_or("idle", Session::status), tone(st)),
     ];
     for q in

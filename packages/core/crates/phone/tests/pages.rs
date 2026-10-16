@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use vorn_app::agents::Agents;
 use vorn_phone::model::Link;
 use vorn_phone::pages::{self, Do};
 use vorn_phone::{config, Model, Phone};
@@ -22,6 +23,12 @@ fn phone(size: (f32, f32)) -> Phone {
     model.link = Link::Online;
     let s = &mut model.store;
     s.sessions_known = true;
+    s.agents = Agents::from_json(&json!([
+        { "id": "acme", "name": "Acme Code", "label": "Acme Code", "mark": "*",
+          "icon": "<svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"#d97757\"/></svg>" },
+        { "id": "beta", "name": "Beta CLI", "label": "Beta",
+          "icon": "<svg viewBox=\"0 0 24 24\"><rect width=\"24\" height=\"24\" fill=\"#7a9dff\"/></svg>" },
+    ]));
     s.projects = vec![
         de(json!({ "name": "vorn", "path": "/src/vorn", "preferredAgents": [] })),
         de(json!({ "name": "site", "path": "/src/site", "preferredAgents": [] })),
@@ -32,7 +39,7 @@ fn phone(size: (f32, f32)) -> Phone {
         ("s3", "site", "idle", 1_700_000_200_000),
     ] {
         s.upsert(de(json!({
-            "id": id, "agentType": "claude", "projectName": project,
+            "id": id, "agentType": "acme", "projectName": project,
             "projectPath": format!("/src/{project}"), "status": status,
             "createdAt": at, "pid": 1, "branch": "main",
         })));
@@ -51,7 +58,7 @@ fn phone(size: (f32, f32)) -> Phone {
             { "key": "topic", "label": "Topic", "type": "text", "required": true },
             { "key": "deep", "label": "Go deep", "type": "boolean" } ] } },
         { "id": "write", "type": "launchAgent", "label": "Write", "position": { "x": 0, "y": 0 },
-          "config": { "agentType": "claude", "prompt": "Write" } },
+          "config": { "agentType": "acme", "prompt": "Write" } },
         { "id": "gate", "type": "approval", "label": "Check", "position": { "x": 0, "y": 0 },
           "config": { "message": "Ship it?", "feedback": { "from": "write", "maxRounds": 3 } } },
     ]);
@@ -197,15 +204,9 @@ fn every_screen_matches_its_snapshot() {
     );
 }
 
-/// Whether the app ships `icon`: vornui's set and the agent marks go into its asset catalog at build time, and an extension's own mark comes as SVG.
+/// Whether the app ships `icon`: vornui's set goes into its asset catalog at build time, and an agent's or extension's own mark comes as SVG.
 fn ships(icon: &Node) -> bool {
-    !icon.label.is_empty()
-        || vornui::icons::source(&icon.value).is_some()
-        || icon.value.strip_prefix("agent:").is_some_and(|a| {
-            vorn_components::agent::MARKS
-                .iter()
-                .any(|(name, _)| *name == a)
-        })
+    !icon.label.is_empty() || vornui::icons::source(&icon.value).is_some()
 }
 
 #[test]
@@ -238,14 +239,14 @@ fn sessions_show_each_agents_mark() {
     let marks = t
         .walk()
         .into_iter()
-        .filter(|n| n.kind == "icon" && n.value == "agent:claude")
+        .filter(|n| n.kind == "icon" && n.value == "agent:acme" && n.label.starts_with("<svg"))
         .count();
     assert_eq!(marks, 3);
     let t = tree(&mut p, &mut ui, "launch", PHONE);
     assert!(t
         .walk()
         .iter()
-        .any(|n| n.kind == "option" && n.children.iter().any(|k| k.value == "agent:codex")));
+        .any(|n| n.kind == "option" && n.children.iter().any(|k| k.value == "agent:beta")));
 }
 
 #[test]
@@ -344,7 +345,7 @@ fn view_options_regroup_filter_and_survive_a_relaunch() {
     act_on(&mut p, &mut ui, "sessions-view", "Agent");
     let t = tree(&mut p, &mut ui, "sessions", PHONE);
     assert!(
-        t.walk().iter().any(|n| n.label.ends_with("· Claude Code")),
+        t.walk().iter().any(|n| n.label.ends_with("· Acme Code")),
         "the agent shows"
     );
 
@@ -474,7 +475,7 @@ fn screens_build_within_budget_at_ten_thousand_tasks() {
     s.config["tasks"] = Value::Array(tasks);
     for i in 0..1_000 {
         s.upsert(de(json!({
-            "id": format!("x{i}"), "agentType": "claude", "projectName": "vorn",
+            "id": format!("x{i}"), "agentType": "acme", "projectName": "vorn",
             "projectPath": "/src/vorn", "status": "running", "createdAt": 1_700_000_000_000_i64, "pid": 1,
         })));
     }

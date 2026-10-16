@@ -44,7 +44,7 @@ Every screen and feature of the React Native phone app, and where it stands in t
 
 ## Shared
 
-- [x] Every icon is vornui's or the agent's own mark, shipped at build time; an extension's marks come as SVG (test `every_icon_a_screen_uses_ships_with_the_app`)
+- [x] Every icon is vornui's, shipped at build time, or an agent's or extension's own mark, sent as SVG from its adapter or manifest (test `every_icon_a_screen_uses_ships_with_the_app`)
 - [x] Hardware keyboard in the terminal (arrows, Escape); pointer hover
 - [x] Settings pages
 

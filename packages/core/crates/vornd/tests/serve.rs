@@ -274,7 +274,9 @@ async fn open_pinned(port: u16, pin: &str) -> Result<TlsSocket, String> {
         .connect(name, tcp)
         .await
         .map_err(|e| e.to_string())?;
-    let req = format!("wss://127.0.0.1:{port}/ws").into_client_request().unwrap();
+    let req = format!("wss://127.0.0.1:{port}/ws")
+        .into_client_request()
+        .unwrap();
     let (ws, _) = tokio_tungstenite::client_async(req, tls)
         .await
         .map_err(|e| e.to_string())?;
@@ -292,11 +294,15 @@ async fn trusts_a_client_only_with_the_pinned_certificate() {
     let served = serve(data.path(), home.path());
     let pin = kept_fingerprint(data.path());
 
-    let mut ws = open_pinned(served.port, &pin).await.expect("the right pin connects");
+    let mut ws = open_pinned(served.port, &pin)
+        .await
+        .expect("the right pin connects");
     assert_eq!(next(&mut ws).await.unwrap()["method"], "server:hello");
 
     let wrong = vorn_reach::tls::fingerprint(b"another certificate");
-    let refused = open_pinned(served.port, &wrong).await.err().expect("refused");
+    let refused = open_pinned(served.port, &wrong)
+        .await
+        .expect_err("refused");
     assert!(refused.contains("certificate"), "{refused}");
 
     // The certificate is kept, so a paired phone's pin holds after a restart.
@@ -321,11 +327,19 @@ async fn a_revoked_device_is_closed_out_at_once() {
     send(&mut phone, json!({ "jsonrpc": "2.0", "id": 1, "method": "auth:authenticate", "params": { "token": token } })).await;
     assert_eq!(answer(&mut phone, 1).await["result"], json!({ "ok": true }));
 
-    send(&mut desktop, json!({ "jsonrpc": "2.0", "id": 2, "method": "token:list" })).await;
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "token:list" }),
+    )
+    .await;
     let listed = answer(&mut desktop, 2).await["result"].clone();
     assert_eq!(listed[0]["lastAddress"], "127.0.0.1", "{listed}");
 
-    send(&mut desktop, json!({ "jsonrpc": "2.0", "id": 3, "method": "token:revoke", "params": id })).await;
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "token:revoke", "params": id }),
+    )
+    .await;
     assert_eq!(answer(&mut desktop, 3).await["result"]["revoked"], true);
     let closed = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
@@ -340,7 +354,10 @@ async fn a_revoked_device_is_closed_out_at_once() {
 
     let mut again = open_pinned(served.port, &pin).await.unwrap();
     send(&mut again, json!({ "jsonrpc": "2.0", "id": 1, "method": "auth:authenticate", "params": { "token": token } })).await;
-    assert_eq!(answer(&mut again, 1).await["error"]["message"], "Authentication failed");
+    assert_eq!(
+        answer(&mut again, 1).await["error"]["message"],
+        "Authentication failed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -348,7 +365,11 @@ async fn nothing_listens_on_the_lan_while_sharing_is_off() {
     let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let served = serve(data.path(), home.path());
     let mut desktop = open(served.port, Some(CREDENTIAL), "").await;
-    send(&mut desktop, json!({ "jsonrpc": "2.0", "id": 1, "method": "server:reachableUrls" })).await;
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "server:reachableUrls" }),
+    )
+    .await;
     let reachable = answer(&mut desktop, 1).await["result"].clone();
     assert_eq!(reachable["remote"], false, "{reachable}");
     assert_eq!(reachable["urls"], json!([]));

@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
-use vorn_app::screen::menus::agent_name;
 use vorn_app::tasks::{self, STATUSES};
 use vorn_protocol::TaskConfig;
 use vornui::{El, Id, Ui};
@@ -191,7 +190,7 @@ fn meta(cx: &Cx, t: &TaskConfig) -> String {
             "agent" => t
                 .assigned_agent
                 .as_ref()
-                .map(|a| agent_name(&a.to_string()).to_owned()),
+                .map(|a| cx.p.model.store.agents.label(&a.to_string()).to_owned()),
             "branch" => t.branch.clone().filter(|b| !b.is_empty()),
             "source" => Some(match &t.source_connector_id {
                 Some(id) => options::connector_name(cx, id),
@@ -320,7 +319,7 @@ pub fn task(cx: &Cx, id: &str) -> El {
         .collect();
     let agent = t.assigned_agent.as_ref().map_or_else(
         || "Not set".to_owned(),
-        |a| agent_name(&a.to_string()).to_owned(),
+        |a| cx.p.model.store.agents.label(&a.to_string()).to_owned(),
     );
     let branch = t.branch.as_deref().filter(|b| !b.is_empty());
     let mut rows = vec![

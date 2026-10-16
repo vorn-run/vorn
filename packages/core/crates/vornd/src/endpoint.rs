@@ -430,7 +430,12 @@ pub(crate) fn serve_connection(
         if !tls {
             return serve_http(daemon, stream, peer).await;
         }
-        let Some(acceptor) = daemon.serving.get().and_then(|s| s.tls()).map(|t| t.acceptor.clone()) else {
+        let Some(acceptor) = daemon
+            .serving
+            .get()
+            .and_then(|s| s.tls())
+            .map(|t| t.acceptor.clone())
+        else {
             debug!(%peer, "refused: no certificate to serve another machine with");
             return;
         };
@@ -855,7 +860,13 @@ mod tests {
 
     #[test]
     fn only_this_machine_may_connect_in_the_clear() {
-        for other in ["192.168.1.20", "100.64.0.1", "::ffff:192.168.1.20", "fe80::1", "0.0.0.0"] {
+        for other in [
+            "192.168.1.20",
+            "100.64.0.1",
+            "::ffff:192.168.1.20",
+            "fe80::1",
+            "0.0.0.0",
+        ] {
             assert!(must_use_tls(other.parse().unwrap()), "{other}");
         }
         for this in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {

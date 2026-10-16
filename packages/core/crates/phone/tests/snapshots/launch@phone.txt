@@ -6,16 +6,10 @@ column
         option label="vorn" on=true
         option label="site" on=false
       choice label="Agent"
-        option label="Claude Code" on=true
-          icon value="agent:claude"
-        option label="GitHub Copilot" on=false
-          icon value="agent:copilot"
-        option label="Codex" on=false
-          icon value="agent:codex"
-        option label="OpenCode" on=false
-          icon value="agent:opencode"
-        option label="Gemini" on=false
-          icon value="agent:gemini"
+        option label="Acme Code" on=true
+          icon label="<svg>" value="agent:acme"
+        option label="Beta CLI" on=false
+          icon label="<svg>" value="agent:beta"
         option label="Shell" on=false
           icon value="terminal"
     section

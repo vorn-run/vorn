@@ -223,7 +223,10 @@ mod tests {
             .db_touch_device_token("t1", "2026-10-05T00:00:00.600Z")
             .unwrap();
         let listed = json(beside.list().unwrap());
-        assert_eq!(listed[0]["lastAddress"], "192.168.1.7", "kept when not said");
+        assert_eq!(
+            listed[0]["lastAddress"], "192.168.1.7",
+            "kept when not said"
+        );
         assert_eq!(listed[0]["lastSeenAt"], "2026-10-05T00:00:00.600Z");
         assert_eq!(beside.secret("t1").unwrap().unwrap().token_hash, "ab");
         assert!(beside.revoke("t1", "2026-10-05T00:00:01.000Z").unwrap());

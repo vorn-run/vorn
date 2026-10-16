@@ -12,7 +12,7 @@ column
   list
     section label="Waiting"
       link value="session:s#"
-        icon value="agent:claude"
+        icon label="<svg>" value="agent:acme"
         status value="waiting" style="warn"
         column
           text label="vorn" style="title"
@@ -20,14 +20,14 @@ column
         badge value="Asks" style="warn"
     section label="Running"
       link value="session:s#"
-        icon value="agent:claude"
+        icon label="<svg>" value="agent:acme"
         status value="running" style="busy"
         column
           text label="vorn" style="title"
           text label="Nov ## · main" style="secondary"
     section label="Idle"
       link value="session:s#"
-        icon value="agent:claude"
+        icon label="<svg>" value="agent:acme"
         status value="idle" style="muted"
         column
           text label="site" style="title"

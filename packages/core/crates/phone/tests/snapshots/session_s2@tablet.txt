@@ -7,7 +7,7 @@ column
       button label="Smaller text, now ## point" value="minus"
       button label="Larger text, now ## point" value="plus"
       button label="End session" style="danger" confirm
-  icon value="agent:claude"
+  icon label="<svg>" value="agent:acme"
   status value="waiting" style="warn"
   section label="Permission"
     text label="Wants to use Bash" style="title"

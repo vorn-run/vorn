@@ -42,7 +42,13 @@ mod tests {
     #[test]
     fn nothing_while_bound_to_loopback() {
         assert_eq!(
-            reachable_urls(3456, false, &["100.1.1.1".into()], &["10.0.0.2".into()], Some("ab")),
+            reachable_urls(
+                3456,
+                false,
+                &["100.1.1.1".into()],
+                &["10.0.0.2".into()],
+                Some("ab")
+            ),
             json!({ "urls": [], "port": 3456, "remote": false })
         );
     }
