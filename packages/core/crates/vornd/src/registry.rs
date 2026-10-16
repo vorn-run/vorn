@@ -1772,6 +1772,17 @@ impl Registry {
         self.native_upsert_headless(id, json!({ "started": { "pid": pid, "epoch": epoch } }))
     }
 
+    /// Headless agent `id` took `conversation`, as its adapter read it from
+    /// what it printed: the conversation it is resumed by.
+    pub fn headless_conversation(&mut self, id: &str, conversation: &str) -> Option<Value> {
+        let row = self.headless.get_mut(id)?;
+        if row.record.agent_session_id.as_deref() == Some(conversation) {
+            return None;
+        }
+        row.record.agent_session_id = Some(conversation.to_owned());
+        self.native_upsert_headless(id, json!({}))
+    }
+
     /// Headless agent `id`'s program could not be started, and why: it
     /// ended with exit code 1, as the server ends one whose spawn failed.
     pub fn headless_failed(&mut self, id: &str, why: &str) -> Option<Value> {
@@ -2585,6 +2596,13 @@ impl SessionRegistry {
     /// [`Registry::session_closed`].
     pub fn session_closed(&self, id: &str) {
         self.lock().registry.session_closed(id);
+    }
+
+    /// [`Registry::headless_conversation`].
+    pub fn headless_conversation(&self, id: &str, conversation: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.headless_conversation(id, conversation);
+        self.tell(note);
     }
 
     /// [`Registry::headless_exit`].

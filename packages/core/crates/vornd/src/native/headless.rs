@@ -262,6 +262,7 @@ fn register(native: &Native, launch: Launch) -> Answer {
         stdin,
     } = launch;
     let id = record.id.clone();
+    let agent_type = record.agent_type.clone();
     let answer = serde_json::to_value(&record).unwrap_or(Value::Null);
     let created = json!({
         "agentType": record.agent_type,
@@ -300,10 +301,11 @@ fn register(native: &Native, launch: Launch) -> Answer {
         output: output_tx,
         ended: ended_tx,
     };
+    let reader = stream_reader(native, &agent_type, &id);
     if let (Some(notifier), Ok(runtime)) =
         (native.notifier(), tokio::runtime::Handle::try_current())
     {
-        runtime.spawn(tell_output(notifier, id.clone(), output));
+        runtime.spawn(tell_output(notifier, id.clone(), output, reader));
     }
     host.start_watched(
         spec,
@@ -342,17 +344,122 @@ async fn tell_output(
     notifier: super::Notifier,
     id: String,
     mut output: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    reader: Option<tokio::sync::mpsc::Sender<String>>,
 ) {
     let mut text = super::script::Utf8::default();
+    let mut lines = String::new();
     while let Some(bytes) = output.recv().await {
         let data = text.push(&bytes);
-        if !data.is_empty() {
-            notifier.tell(
-                "headless:data",
-                json!({ "id": id, "data": data }),
-                Some(&id),
-            );
+        if data.is_empty() {
+            continue;
         }
+        if let Some(reader) = &reader {
+            lines.push_str(&data);
+            while let Some(end) = lines.find('\n') {
+                let line: String = lines.drain(..=end).collect();
+                // A reader that falls behind loses lines rather than holding the output up.
+                let _ = reader.try_send(line.trim_end_matches(['\r', '\n']).to_owned());
+            }
+        }
+        notifier.tell(
+            "headless:data",
+            json!({ "id": id, "data": data }),
+            Some(&id),
+        );
+    }
+}
+
+/// How many lines a headless run's reader holds before it drops new ones.
+const STREAM_BACKLOG: usize = 1024;
+/// The most lines one `agent.stream` call carries.
+const STREAM_BATCH: usize = 256;
+
+/// The reader of headless session `id`'s output, when its agent's adapter
+/// reads its stream with a program (`[agent.headless] stream`).
+fn stream_reader(
+    native: &Native,
+    agent: &str,
+    id: &str,
+) -> Option<tokio::sync::mpsc::Sender<String>> {
+    let adapters = native.adapters();
+    let streams = adapters
+        .get(agent)?
+        .spec()
+        .headless
+        .as_ref()
+        .is_some_and(|h| h.stream);
+    if !streams {
+        return None;
+    }
+    let around = Around {
+        extension: adapters.extension_of(agent)?,
+        extensions: Arc::clone(native.extensions()?),
+        registry: Arc::clone(native.registry.get()?),
+        events: Arc::clone(native.events()),
+    };
+    let runtime = tokio::runtime::Handle::try_current().ok()?;
+    let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BACKLOG);
+    runtime.spawn(read_stream(around, id.to_owned(), rx));
+    Some(tx)
+}
+
+/// What a stream's reader reaches: the program that reads it, and where
+/// what it read goes.
+struct Around {
+    extension: String,
+    extensions: Arc<super::extensions::Extensions>,
+    registry: Arc<crate::registry::SessionRegistry>,
+    events: Arc<vorn_extensions::events::Bus>,
+}
+
+/// Hands what a headless run prints to its adapter's program, a batch of
+/// lines at a time, and takes in what it reads there: the conversation the
+/// run took, and hook events as the agent's hooks would post them.
+async fn read_stream(around: Around, id: String, mut rx: tokio::sync::mpsc::Receiver<String>) {
+    use vorn_extensions::api::types::CallCtx;
+    while let Some(first) = rx.recv().await {
+        let mut lines = vec![first];
+        while lines.len() < STREAM_BATCH {
+            match rx.try_recv() {
+                Ok(line) => lines.push(line),
+                Err(_) => break,
+            }
+        }
+        let ctx = CallCtx {
+            caller: "vornd".to_owned(),
+            project: None,
+        };
+        let args = json!({ "session": id, "lines": lines });
+        let extension = &around.extension;
+        match around.extensions.router().call(extension, "agent.stream", args, ctx).await {
+            Ok(read) => took(&around.registry, &around.events, &id, &read),
+            Err(err) => warn!(%extension, %err, "an adapter did not read a headless stream"),
+        }
+    }
+}
+
+/// Applies what an adapter's program read from session `id`'s stream.
+fn took(
+    registry: &crate::registry::SessionRegistry,
+    events: &vorn_extensions::events::Bus,
+    id: &str,
+    read: &Value,
+) {
+    if let Some(conversation) = read
+        .get("conversation")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty())
+    {
+        registry.headless_conversation(id, conversation);
+    }
+    for event in read.get("events").and_then(Value::as_array).into_iter().flatten() {
+        let Some(name) = event.get("event").and_then(Value::as_str) else {
+            continue;
+        };
+        let tool = event.get("tool").and_then(Value::as_str);
+        events.emit(vorn_extensions::events::AGENT_HOOK, || {
+            json!({ "sessionId": id, "event": name, "tool": tool })
+        });
     }
 }
 
@@ -496,6 +603,41 @@ mod tests {
         } else {
             assert_eq!(last, "");
         }
+    }
+
+    #[tokio::test]
+    async fn takes_the_conversation_and_hook_events_an_adapter_read() {
+        use vorn_extensions::events::{Owner, Queue};
+        let fed = ready();
+        let Answer::Result(record) =
+            call(&fed.native, "headless:create", &request("gamma", json!({})))
+        else {
+            panic!("not started");
+        };
+        let id = record["id"].as_str().unwrap().to_owned();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        fed.native.events().subscribe_with(
+            Owner::Core("test".into()),
+            &[vorn_extensions::events::AGENT_HOOK.to_owned()],
+            Queue { tx, tally: None },
+        );
+        let read = json!({ "conversation": "conv-1", "events": [{ "event": "PreToolUse", "tool": "edit" }, { "nope": 1 }] });
+        took(&fed.registry, fed.native.events(), &id, &read);
+        assert_eq!(
+            fed.registry
+                .read(|r| r.headless_record(&id).and_then(|h| h.agent_session_id.clone()))
+                .flatten()
+                .as_deref(),
+            Some("conv-1")
+        );
+        let event = rx.recv().await.unwrap();
+        assert_eq!(
+            event.data,
+            json!({ "sessionId": id, "event": "PreToolUse", "tool": "edit" })
+        );
+        assert!(rx.try_recv().is_err());
+        // An adapter that does not read streams gets no reader.
+        assert!(stream_reader(&fed.native, "gamma", &id).is_none());
     }
 
     #[test]

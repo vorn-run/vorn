@@ -176,6 +176,10 @@ pub struct Headless {
     /// `{id}`; its prompt, or an empty one, goes to stdin.
     #[serde(default)]
     pub resume_tail: Vec<String>,
+    /// Its package's service reads what a headless run prints, line by line
+    /// (`agent.stream`), into the conversation it took and hook events.
+    #[serde(default)]
+    pub stream: bool,
 }
 
 /// The model a session runs. Absent, no model can be chosen.

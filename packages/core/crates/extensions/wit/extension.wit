@@ -136,6 +136,10 @@ interface guest {
   init: func(ctx: init-ctx) -> result<_, ext-error>;
   /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
   /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
+  /// An agent adapter whose `[agent.headless]` says `stream = true` is called
+  /// `agent.stream` with `{session, lines}`, what a headless run printed, and
+  /// answers `{conversation?, events?: [{event, tool?}]}`: the conversation
+  /// the run took, and hook events by Vorn's names (`PreToolUse`, `Stop`, ...).
   handle: func(method: string, args: json, ctx: call-ctx) -> result<json, ext-error>;
   on-event: func(batch: list<event>);
 }

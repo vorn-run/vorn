@@ -629,8 +629,17 @@ pub fn is_range(range: &str) -> bool {
 impl Raw {
     fn check(&self, at: &At<'_>, builtin: bool) -> Result<(), FileError> {
         if let Some(agent) = &self.agent {
-            vorn_agents::AgentSpec::from_toml(agent.clone())
+            let spec = vorn_agents::AgentSpec::from_toml(agent.clone())
                 .map_err(|e| at(&e.field, e.message))?;
+            // Its own templates may name the agent it adapts.
+            vorn_agents::know(&spec.id);
+            let streams = spec.headless.as_ref().is_some_and(|h| h.stream);
+            if streams && self.service.is_none() {
+                return Err(at(
+                    "agent.headless.stream",
+                    "needs a [service] to read what a headless run prints".into(),
+                ));
+            }
         }
         if !is_id(&self.id) {
             return Err(at(

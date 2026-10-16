@@ -166,6 +166,17 @@ impl Adapters {
         });
     }
 
+    /// The extension whose adapter runs agent `id`, among those on.
+    pub fn extension_of(&self, id: &str) -> Option<String> {
+        let state = self.read();
+        state
+            .shipped
+            .iter()
+            .chain(&state.installed)
+            .find(|k| k.on && k.agent.id() == id)
+            .map(|k| k.extension.clone())
+    }
+
     /// Whether `extension` is one of the shipped adapters.
     pub fn ships(&self, extension: &str) -> bool {
         self.read().shipped.iter().any(|k| k.extension == extension)

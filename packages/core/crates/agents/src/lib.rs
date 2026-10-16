@@ -61,11 +61,7 @@ impl Agent {
         if let Some(env) = &spec.env {
             launch::env::add_markers(&env.strip, &env.strip_prefixes);
         }
-        let mut known = KNOWN.write().unwrap_or_else(PoisonError::into_inner);
-        if !known.contains(&spec.id) {
-            known.push(spec.id.clone());
-        }
-        drop(known);
+        know(&spec.id);
         Ok(Agent(Arc::new(Inner { spec, rules })))
     }
 
@@ -150,6 +146,14 @@ impl fmt::Debug for Agent {
 
 /// Every agent id an adapter read in this process has named, on or off.
 static KNOWN: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Records that an adapter names agent `id`, as reading its manifest does.
+pub fn know(id: &str) {
+    let mut known = KNOWN.write().unwrap_or_else(PoisonError::into_inner);
+    if !known.iter().any(|k| k == id) {
+        known.push(id.to_owned());
+    }
+}
 
 /// Whether an adapter Vorn read names agent `id`, switched on or not: a
 /// manifest's activation rule naming any other is one this Vorn cannot match.
