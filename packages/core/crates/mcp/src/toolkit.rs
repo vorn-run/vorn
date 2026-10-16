@@ -2,7 +2,9 @@
 //! calls through, its parsed arguments, and the shapes of an answer, so a
 //! built-in extension's tools answer as Vorn's own do.
 
-pub use crate::tools::{error_of, failed, items, object, pretty, text, Args, Cx, Outcome};
+pub use crate::tools::{
+    agents_off, error_of, failed, items, object, pretty, text, Args, Cx, Outcome,
+};
 
 /// `answer.key` as JavaScript destructures it: a TypeError on `null`.
 pub fn destructure<'a>(

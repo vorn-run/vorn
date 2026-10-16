@@ -24,7 +24,7 @@ use vorn_work::prompt::{task_prompt, workflow_prompt};
 use vorn_work::structured;
 use vorn_work::template::{context_field, resolve, resolve_value, Field, StepOutputs};
 
-use crate::engine::{lock, new_id, tasks_of, Active, Engine, Run};
+use crate::engine::{lock, new_id, Active, Engine, Run};
 use crate::host::{Host, Note};
 use crate::waves::{BoxFuture, Mode, Waves};
 
@@ -887,7 +887,6 @@ impl<H: Host> Engine<H> {
             _ => {}
         }
 
-        let tasks = tasks_of(cfg);
         let projects: &[Value] = cfg
             .get("projects")
             .and_then(Value::as_array)
@@ -897,75 +896,53 @@ impl<H: Host> Engine<H> {
                 .iter()
                 .find(|p| p.get("name").and_then(Value::as_str) == Some(name))
         };
-        let mut resolved_task: Option<Value> = None;
-        let mut apply_task =
-            |task: &Value, branch: &mut Option<String>, use_worktree: &mut Option<Value>| {
-                let project_name = task
-                    .get("projectName")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                prompt = Some(match project_named(project_name) {
-                    Some(project) => {
-                        let siblings: Vec<Value> = tasks
-                            .iter()
-                            .filter(|t| {
-                                t.get("projectName").and_then(Value::as_str) == Some(project_name)
-                            })
-                            .cloned()
-                            .collect();
-                        task_prompt(task, project, &siblings)
-                    }
-                    None => text_of(task.get("description")).unwrap_or_default(),
-                });
-                task_id = text_of(task.get("id"));
-                if existing.is_none() {
-                    *branch = text_of(task.get("branch"))
-                        .filter(|b| !b.is_empty())
-                        .or(branch.take());
-                    *use_worktree = task
-                        .get("useWorktree")
-                        .filter(|v| vorn_work::is_truthy(Some(v)))
-                        .cloned()
-                        .or(use_worktree.take());
-                }
-            };
         let static_task = config
             .get("taskId")
             .filter(|v| !v.is_null())
             .map(js::to_string);
         let effective_task =
             static_task.or_else(|| context.and_then(Context::task_id).map(str::to_owned));
-        if let Some(id) = effective_task.filter(|id| !id.is_empty()) {
-            let found = tasks
-                .iter()
-                .find(|t| {
-                    t.get("id").and_then(Value::as_str) == Some(id.as_str())
-                        && !matches!(
-                            t.get("status").and_then(Value::as_str),
-                            Some("done" | "cancelled")
-                        )
+        let resolved_task: Option<Value> =
+            if let Some(id) = effective_task.filter(|id| !id.is_empty()) {
+                self.inner.host.task(&id).await.filter(|t| {
+                    !matches!(
+                        t.get("status").and_then(Value::as_str),
+                        Some("done" | "cancelled")
+                    )
                 })
-                .cloned();
-            if let Some(task) = found {
-                apply_task(&task, &mut branch, &mut use_worktree);
-                resolved_task = Some(task);
-            }
-        } else if vorn_work::is_truthy(config.get("taskFromQueue")) {
-            let project = node.text("projectName").unwrap_or("");
-            let mut queued: Vec<&Value> = tasks
-                .iter()
-                .filter(|t| {
-                    t.get("projectName").and_then(Value::as_str) == Some(project)
-                        && t.get("status").and_then(Value::as_str) == Some("todo")
-                })
-                .collect();
-            queued.sort_by(|a, b| {
-                let o = |t: &Value| t.get("order").and_then(Value::as_f64).unwrap_or(0.0);
-                o(a).total_cmp(&o(b))
+            } else if vorn_work::is_truthy(config.get("taskFromQueue")) {
+                let project = node.text("projectName").unwrap_or("");
+                let mut queued = self.inner.host.tasks(project, Some("todo")).await;
+                queued.sort_by(|a, b| {
+                    let o = |t: &Value| t.get("order").and_then(Value::as_f64).unwrap_or(0.0);
+                    o(a).total_cmp(&o(b))
+                });
+                queued.into_iter().next()
+            } else {
+                None
+            };
+        if let Some(task) = &resolved_task {
+            let project_name = task
+                .get("projectName")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            prompt = Some(match project_named(project_name) {
+                Some(project) => {
+                    let siblings = self.inner.host.tasks(project_name, None).await;
+                    task_prompt(task, project, &siblings)
+                }
+                None => text_of(task.get("description")).unwrap_or_default(),
             });
-            if let Some(task) = queued.first().map(|t| (*t).clone()) {
-                apply_task(&task, &mut branch, &mut use_worktree);
-                resolved_task = Some(task);
+            task_id = text_of(task.get("id"));
+            if existing.is_none() {
+                branch = text_of(task.get("branch"))
+                    .filter(|b| !b.is_empty())
+                    .or(branch.take());
+                use_worktree = task
+                    .get("useWorktree")
+                    .filter(|v| vorn_work::is_truthy(Some(v)))
+                    .cloned()
+                    .or(use_worktree.take());
             }
         }
 

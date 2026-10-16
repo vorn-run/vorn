@@ -200,13 +200,6 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Opti
         "update_project" => projects::update_project(cx, &args).await,
         "delete_project" => projects::delete_project(cx, &args).await,
 
-        "list_tasks" => tasks::list_tasks(cx, &args).await,
-        "create_task" => tasks::create_task(cx, &args).await,
-        "get_task" => tasks::get_task(cx, &args).await,
-        "update_task" => tasks::update_task(cx, &args).await,
-        "delete_task" => tasks::delete_task(cx, &args).await,
-        "archive_task" => tasks::archive_task(cx, &args).await,
-        "unarchive_task" => tasks::unarchive_task(cx, &args).await,
         "get_my_context" => tasks::get_my_context(cx, &args).await,
 
         "list_workflows" => workflows::list_workflows(cx, &args).await,

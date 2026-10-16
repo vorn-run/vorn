@@ -1,0 +1,41 @@
+id = "vorn.tasks"
+name = "Tasks"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, and the MCP task tools. Off, the tasks are kept as they are."
+
+[declares]
+uses = ["tasks.read", "tasks.write", "sessions.read"]
+
+[[contributes.views]]
+id = "board"
+title = "Tasks"
+icon = "list-todo"
+view = "views/board.kdl"
+
+[[contributes.badges]]
+id = "task"
+title = "Task in progress"
+view = "views/badge.kdl"
+
+[mcp.list_tasks]
+description = "List tasks, optionally filtered by project, status, assigned agent, or workspace. Archived tasks are excluded by default; pass include_archived=true to include them."
+
+[mcp.create_task]
+description = "Create a new task in a project"
+
+[mcp.get_task]
+description = "Get a task by ID"
+
+[mcp.update_task]
+description = "Update a task's properties"
+
+[mcp.delete_task]
+description = "Delete a task by ID"
+
+[mcp.archive_task]
+description = "Archive a finished task (status must be done or cancelled). Archived tasks are hidden from default views but preserved and restorable."
+
+[mcp.unarchive_task]
+description = "Restore an archived task so it shows in default views again."

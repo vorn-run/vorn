@@ -1,18 +1,13 @@
-//! `tools/tasks.ts`: tasks, read from the config blob and written through
-//! the `task:*` methods, which apply the board's rules: where a new task
-//! sits, and the dates a status change stamps or clears.
+//! `tools/tasks.ts`'s `get_my_context`: the project and task an agent works
+//! in, read from the core's task list. The other task tools are the Tasks
+//! built-in's, which adds them while it is on.
 
 use serde_json::{json, Map, Value};
 
 use super::data;
-use super::{agents_off, failed, object, pretty, text, Args, Cx, Outcome};
+use super::{failed, object, pretty, Args, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
-
-/// `isTerminalTaskStatus`.
-fn terminal(status: Option<&Value>) -> bool {
-    matches!(status.and_then(Value::as_str), Some("done" | "cancelled"))
-}
 
 fn not_found(id: &str) -> Value {
     failed(format!("Error: task \"{id}\" not found"))
@@ -66,168 +61,9 @@ fn brief(task: &Value) -> Value {
     object(["id", "title", "status", "branch"].map(|k| (k, task.get(k).cloned())))
 }
 
-pub async fn list_tasks<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let mut tasks = data::tasks(cx, args.str("project_name"), args.str("status")).await?;
-    if !args.truthy("include_archived") {
-        tasks.retain(|t| !json::truthy(t.get("archivedAt")));
-    }
-    if let Some(workspace) = args.nonempty("workspace_id") {
-        let projects = data::list(cx, "projects").await?;
-        let names: Vec<&Value> = projects
-            .iter()
-            .filter(|p| super::projects::in_workspace(p, workspace))
-            .filter_map(|p| p.get("name"))
-            .collect();
-        // A Set's `has` is SameValueZero: strings and numbers alike.
-        tasks.retain(|t| {
-            names
-                .iter()
-                .any(|n| json::strict_equals(Some(n), t.get("projectName")))
-        });
-    }
-    if let Some(agent) = args.nonempty("assigned_agent") {
-        tasks.retain(|t| t.get("assignedAgent").and_then(Value::as_str) == Some(agent));
-    }
-    Ok(pretty(&Value::Array(tasks)))
-}
-
-pub async fn create_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let assigned: Vec<&str> = args.nonempty("assigned_agent").into_iter().collect();
-    if let Some(off) = agents_off(cx, &assigned).await {
-        return Ok(off);
-    }
-    let params = object(
-        [
-            ("projectName", "project_name"),
-            ("title", "title"),
-            ("description", "description"),
-            ("status", "status"),
-            ("branch", "branch"),
-            ("useWorktree", "use_worktree"),
-            ("assignedAgent", "assigned_agent"),
-        ]
-        .map(|(key, arg)| (key, args.get(arg).cloned())),
-    );
-    match data::write(cx, "task:create", params).await? {
-        Some(answer) => Ok(pretty(answer.get("task").unwrap_or(&Value::Null))),
-        None => Ok(failed(format!(
-            "Error: project \"{}\" not found",
-            args.str("project_name").unwrap_or_default()
-        ))),
-    }
-}
-
-pub async fn get_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let id = args.str("id").unwrap_or_default();
-    match data::find(cx, "tasks", "id", id).await? {
-        Some(task) => Ok(pretty(&task)),
-        None => Ok(not_found(id)),
-    }
-}
-
-pub async fn update_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let assigned: Vec<&str> = args.nonempty("assigned_agent").into_iter().collect();
-    if let Some(off) = agents_off(cx, &assigned).await {
-        return Ok(off);
-    }
-    let id = args.str("id").unwrap_or_default();
-    let params = object(
-        [
-            ("id", "id"),
-            ("title", "title"),
-            ("description", "description"),
-            ("status", "status"),
-            ("branch", "branch"),
-            ("useWorktree", "use_worktree"),
-            ("assignedAgent", "assigned_agent"),
-        ]
-        .map(|(key, arg)| (key, args.get(arg).cloned())),
-    );
-    let Some(answer) = data::write(cx, "task:update", params).await? else {
-        return Ok(not_found(id));
-    };
-    let task = answer.get("task").cloned().unwrap_or(Value::Null);
-    match args.get("order").and_then(Value::as_f64) {
-        Some(order) => place(cx, &task, order).await,
-        None => Ok(pretty(&task)),
-    }
-}
-
-/// `task:update` ignores `order`, so a requested order becomes a place on the
-/// board: before the first other task ordered after it, applied by
-/// `task:reorder`, which permutes the slots the project's tasks already hold.
-async fn place<R: Rpc>(cx: &Cx<'_, R>, task: &Value, order: f64) -> Outcome {
-    let id = task.get("id").and_then(Value::as_str).unwrap_or_default();
-    let order_of = |t: &Value| t.get("order").and_then(Value::as_f64).unwrap_or(0.0);
-    let project = task.get("projectName").and_then(Value::as_str);
-    let mut board = data::tasks(cx, project, None).await?;
-    board.retain(|t| t.get("id").and_then(Value::as_str) != Some(id));
-    board.sort_by(|a, b| order_of(a).total_cmp(&order_of(b)));
-    let at = board.partition_point(|t| order_of(t) <= order);
-    let mut ids: Vec<Value> = board.iter().filter_map(|t| t.get("id").cloned()).collect();
-    ids.insert(at, Value::from(id));
-    if data::write(cx, "task:reorder", json!({ "ids": ids }))
-        .await?
-        .is_none()
-    {
-        return Ok(not_found(id));
-    }
-    let placed = data::find(cx, "tasks", "id", id).await?;
-    Ok(pretty(&placed.unwrap_or(Value::Null)))
-}
-
-pub async fn delete_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let id = args.str("id").unwrap_or_default();
-    let Some(task) = data::find(cx, "tasks", "id", id).await? else {
-        return Ok(not_found(id));
-    };
-    if data::write(cx, "task:delete", json!({ "id": id }))
-        .await?
-        .is_none()
-    {
-        return Ok(not_found(id));
-    }
-    Ok(text(format!(
-        "Deleted task: {}",
-        json::display(task.get("title"))
-    )))
-}
-
-/// `task:archive`, then the task as it is stored now.
-async fn set_archived<R: Rpc>(cx: &Cx<'_, R>, id: &str, archived: bool) -> Outcome {
-    let params = json!({ "id": id, "archived": archived });
-    if data::write(cx, "task:archive", params).await?.is_none() {
-        return Ok(not_found(id));
-    }
-    let updated = data::find(cx, "tasks", "id", id).await?;
-    Ok(pretty(&updated.unwrap_or(Value::Null)))
-}
-
-pub async fn archive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let id = args.str("id").unwrap_or_default();
-    let Some(task) = data::find(cx, "tasks", "id", id).await? else {
-        return Ok(not_found(id));
-    };
-    if !terminal(task.get("status")) {
-        return Ok(failed(format!(
-            "Error: only done or cancelled tasks can be archived (status: {})",
-            json::display(task.get("status"))
-        )));
-    }
-    set_archived(cx, id, true).await
-}
-
-pub async fn unarchive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let id = args.str("id").unwrap_or_default();
-    if data::find(cx, "tasks", "id", id).await?.is_none() {
-        return Ok(not_found(id));
-    }
-    set_archived(cx, id, false).await
-}
-
 pub async fn get_my_context<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     if let Some(task_id) = args.nonempty("task_id") {
-        let Some(task) = data::find(cx, "tasks", "id", task_id).await? else {
+        let Some(task) = data::task(cx, task_id).await? else {
             return Ok(not_found(task_id));
         };
         // dbGetProject compares with ===, and dbListTasks filters nothing out
@@ -238,6 +74,7 @@ pub async fn get_my_context<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
             .find(|p| json::strict_equals(p.get("name"), task.get("projectName")));
         let siblings = match task.get("projectName") {
             None => data::tasks(cx, None, None).await?,
+            Some(Value::String(p)) => data::tasks(cx, Some(p), None).await?,
             Some(_) => data::list(cx, "tasks")
                 .await?
                 .into_iter()
@@ -285,11 +122,14 @@ pub async fn get_my_context<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
         })));
     };
 
-    let project_tasks: Vec<Value> = data::list(cx, "tasks")
-        .await?
-        .into_iter()
-        .filter(|t| json::strict_equals(t.get("projectName"), project.get("name")))
-        .collect();
+    let project_tasks: Vec<Value> = match project.get("name") {
+        Some(Value::String(name)) => data::tasks(cx, Some(name), None).await?,
+        name => data::list(cx, "tasks")
+            .await?
+            .into_iter()
+            .filter(|t| json::strict_equals(t.get("projectName"), name))
+            .collect(),
+    };
 
     let mut matched_task: Option<&Value> = None;
     for t in &project_tasks {

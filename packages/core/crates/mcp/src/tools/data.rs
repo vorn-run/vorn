@@ -39,14 +39,14 @@ pub async fn load<R: Rpc>(cx: &Cx<'_, R>) -> Result<Value, String> {
     Ok(cx.call("config:load", None).await?)
 }
 
+/// How many tasks one read of the core's task list takes.
+const TASK_PAGE: u64 = 1000;
+
 /// `(await loadConfig()).<list> ?? []`; tasks, with their descriptions, and
 /// workflows from their own calls.
 pub async fn list<R: Rpc>(cx: &Cx<'_, R>, key: &str) -> Result<Vec<Value>, String> {
     let read = match key {
-        "tasks" => {
-            cx.call("task:list", Some(json!({ "includeDescription": true })))
-                .await?
-        }
+        "tasks" => return task_pages(cx, json!({})).await,
         "workflows" => cx.call("workflow:list", None).await?,
         _ => {
             let config = load(cx).await?;
@@ -199,13 +199,41 @@ pub async fn find<R: Rpc>(
         .find(|row| field_is(row, by, id)))
 }
 
-/// `dbListTasks(projectName, status)`.
+/// The core's task list under `filter`, with descriptions, a page at a time.
+async fn task_pages<R: Rpc>(cx: &Cx<'_, R>, filter: Value) -> Result<Vec<Value>, String> {
+    let mut all = Vec::new();
+    let mut offset = 0;
+    loop {
+        let mut params = filter.clone();
+        params["includeDescription"] = json!(true);
+        params["offset"] = json!(offset);
+        params["limit"] = json!(TASK_PAGE);
+        let page = cx.call("task:list", Some(params)).await?;
+        let rows = super::items(Some(&page));
+        let n = rows.len() as u64;
+        all.extend_from_slice(rows);
+        if n < TASK_PAGE {
+            return Ok(all);
+        }
+        offset += n;
+    }
+}
+
+/// `dbListTasks(projectName, status)`: the list filters, then each name is
+/// matched exactly, as the list skips an empty one.
 pub async fn tasks<R: Rpc>(
     cx: &Cx<'_, R>,
     project: Option<&str>,
     status: Option<&str>,
 ) -> Result<Vec<Value>, String> {
-    Ok(list(cx, "tasks")
+    let mut filter = json!({});
+    if let Some(p) = project.filter(|p| !p.is_empty()) {
+        filter["projectName"] = json!(p);
+    }
+    if let Some(s) = status.filter(|s| !s.is_empty()) {
+        filter["status"] = json!(s);
+    }
+    Ok(task_pages(cx, filter)
         .await?
         .into_iter()
         .filter(|t| {
@@ -213,6 +241,12 @@ pub async fn tasks<R: Rpc>(
                 && status.is_none_or(|s| field_is(t, "status", s))
         })
         .collect())
+}
+
+/// `task:get`: the task `id`, with its description, or `None`.
+pub async fn task<R: Rpc>(cx: &Cx<'_, R>, id: &str) -> Result<Option<Value>, String> {
+    let task = cx.call("task:get", Some(json!({ "id": id }))).await?;
+    Ok(task.is_object().then_some(task))
 }
 
 /// `rpcCall('workflowRun:list', { workflowId, limit })`.

@@ -1,0 +1,256 @@
+[
+  {
+    "name": "list_tasks",
+    "description": "List tasks, optionally filtered by project, status, assigned agent, or workspace. Archived tasks are excluded by default; pass include_archived=true to include them.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "project_name": {
+          "description": "Filter by project name",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "description": "Filter by status",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "assigned_agent": {
+          "description": "Filter by assigned agent type",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        "workspace_id": {
+          "description": "Filter by workspace ID (returns tasks from all projects in that workspace)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "include_archived": {
+          "description": "Include archived tasks in the result (default: false)",
+          "type": "boolean"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_task",
+    "description": "Create a new task in a project",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "project_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name (must match existing project)"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Task title"
+        },
+        "description": {
+          "description": "Task description (markdown)",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "status": {
+          "description": "Task status (default: todo)",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "branch": {
+          "description": "Git branch for this task",
+          "type": "string",
+          "maxLength": 200
+        },
+        "use_worktree": {
+          "description": "Create a git worktree for this task",
+          "type": "boolean"
+        },
+        "assigned_agent": {
+          "description": "Assign to an agent type",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        }
+      },
+      "required": [
+        "project_name",
+        "title"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_task",
+    "description": "Get a task by ID",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_task",
+    "description": "Update a task's properties",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        },
+        "title": {
+          "description": "New title",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "description": {
+          "description": "New description",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "status": {
+          "description": "New status",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "branch": {
+          "description": "Git branch",
+          "type": "string",
+          "maxLength": 200
+        },
+        "use_worktree": {
+          "description": "Use git worktree",
+          "type": "boolean"
+        },
+        "assigned_agent": {
+          "description": "Assigned agent type",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        "order": {
+          "description": "Queue order",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_task",
+    "description": "Delete a task by ID",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "archive_task",
+    "description": "Archive a finished task (status must be done or cancelled). Archived tasks are hidden from default views but preserved and restorable.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "unarchive_task",
+    "description": "Restore an archived task so it shows in default views again.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+]

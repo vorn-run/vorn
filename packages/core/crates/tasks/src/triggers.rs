@@ -1,7 +1,7 @@
 //! The workflow triggers a task's change fires (`taskTriggersForChange`,
 //! per task): a task that was not there before is created, and one whose
 //! status changed moved. Each carries an effect id naming the change itself,
-//! so a trigger delivered twice runs once ([`crate::receipts`]). vornd emits
+//! so a trigger delivered twice runs once ([`vorn_work::receipts`]). vornd emits
 //! each as a public event when a task is written, and the work model fires
 //! it from there.
 
@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 
 use serde_json::{json, Value};
 
-use crate::js;
+use vorn_work::js;
 
 /// The trigger `task` fires over what it was before (`prior`, `None` for a
 /// new task): `{effectId, kind, task, from?, to?}`, or `None` when its status

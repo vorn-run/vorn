@@ -125,7 +125,7 @@ fn unknown_tools_and_bad_arguments_are_tool_errors() {
 #[test]
 fn a_result_is_ordered_as_the_sdk_checks_it() {
     let result = result_of(json!({
-        "jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": { "name": "get_task", "arguments": { "id": "t1" } }
+        "jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": { "name": "list_projects", "arguments": {} }
     }));
     let keys: Vec<&str> = result
         .as_object()
@@ -137,7 +137,7 @@ fn a_result_is_ordered_as_the_sdk_checks_it() {
     assert!(result["content"][0]["text"]
         .as_str()
         .unwrap()
-        .contains("\"First\""));
+        .contains("\"app\""));
 
     let reordered =
         normalize_result(json!({ "isError": true, "extra": 1, "content": [], "_meta": {} }));

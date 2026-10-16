@@ -1,0 +1,65 @@
+// The task board: a column per status, a card per task. The client holds
+// the tasks, read a page at a time from the core's list, as these rows.
+schema "vorn:view@1"
+
+rows "tasks" {
+    title string
+    status enum todo in_progress in_review done cancelled
+    // The project's letters and the id's, as APP-1A2B.
+    short string
+    // When it was made, as Mar 5.
+    created string
+    agent string
+    // Its session is open.
+    live bool
+    // The id of the item a connector imported it from.
+    source string
+    archived bool
+    dim bool
+    focus bool
+    resume bool
+    review bool
+    reopen bool
+    cancel bool
+    archive bool
+}
+
+board "tasks" by="status" move="move" open="open" add="add" empty="Drop tasks here" dim="{row.dim}" {
+    column todo label="Todo" icon="circle" tone=idle
+    column in_progress label="In Progress" icon="clock" tone=active
+    column in_review label="In Review" icon="eye" tone=busy
+    column done label="Done" icon="circle-check" tone=good
+    column cancelled label="Cancelled" icon="circle-x" tone=muted
+    card {
+        row {
+            text "{row.short}" role=secondary
+            text "·" role=secondary when="{row.source}"
+            icon link when="{row.source}"
+            text "#{row.source}" role=secondary when="{row.source}"
+            icon archive when="{row.archived}"
+            text "" grow=#true
+            more {
+                button "Focus session" icon=terminal call=focus when="{row.focus}"
+                button "Resume session" icon=play call=resume when="{row.resume}"
+                button "Review diff" icon=file-code call=review when="{row.review}"
+                button "Mark as done" icon=circle-check call=complete when="{row.review}"
+                button "Reopen task" icon=rotate-ccw call=reopen when="{row.reopen}"
+                button Edit icon=pencil call=edit
+                button "Cancel task" icon=circle-x call=cancel style=danger when="{row.cancel}"
+                button Archive icon=archive call=archive when="{row.archive}"
+                button Unarchive icon=archive-restore call=unarchive when="{row.archived}"
+                button Delete icon=trash-2 call=delete style=danger confirm="Delete this task permanently?"
+            }
+        }
+        row {
+            icon "{column.icon}" tone=column
+            text "{row.title}" role=title grow=#true wrap=#true
+        }
+        row {
+            icon "agent:{row.agent}" when="{row.agent}"
+            status "{row.live}" "true"=good when="{row.live}"
+            text "" grow=#true
+            text "Created {row.created}" role=secondary
+        }
+    }
+}

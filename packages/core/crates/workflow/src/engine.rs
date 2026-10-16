@@ -620,12 +620,7 @@ impl<H: Host> Engine<H> {
 
     /// The triggering task, as the configuration has it now.
     async fn task_by_id(&self, id: Option<&str>) -> Option<Value> {
-        let id = id?;
-        let config = self.config().await?;
-        tasks_of(&config)
-            .iter()
-            .find(|t| t.get("id").and_then(Value::as_str) == Some(id))
-            .cloned()
+        self.inner.host.task(id?).await
     }
 
     /// `contextFromRun`: a run's launch context, so a retry resolves the
@@ -1927,7 +1922,7 @@ pub fn workflows_of(config: &Value) -> Vec<Workflow> {
         .unwrap_or_default()
 }
 
-/// The configuration's tasks.
+/// The configuration's tasks, where a host keeps them there.
 pub(crate) fn tasks_of(config: &Value) -> &[Value] {
     config
         .get("tasks")
