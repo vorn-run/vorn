@@ -343,6 +343,9 @@ pub struct Contributions {
     pub footers: Option<Vec<Footer>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link_handlers: Option<Vec<LinkHandler>>,
+    /// Saved layouts it offers, each a file under `layouts/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layouts: Option<Vec<LayoutFile>>,
     /// What it draws from templates, by where it shows.
     #[serde(flatten)]
     pub points: BTreeMap<Place, Vec<Point>>,
@@ -359,6 +362,10 @@ impl Contributions {
 
     pub fn link_handlers(&self) -> &[LinkHandler] {
         self.link_handlers.as_deref().unwrap_or_default()
+    }
+
+    pub fn layouts(&self) -> &[LayoutFile] {
+        self.layouts.as_deref().unwrap_or_default()
     }
 
     pub fn points(&self, place: Place) -> &[Point] {
@@ -398,10 +405,12 @@ impl Contributions {
         let panes = self.panes().iter().map(|p| &p.base);
         let footers = self.footers().iter().map(|f| &f.base);
         let links = self.link_handlers().iter().map(|l| &l.base);
+        let layouts = self.layouts().iter().map(|l| &l.base);
         let points = self.points.values().flatten().map(|p| &p.base);
         panes
             .chain(footers)
             .chain(links)
+            .chain(layouts)
             .chain(points)
             .map(|c| c.when.as_ref())
     }
@@ -546,6 +555,19 @@ pub struct Contribution {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<Activation>,
+}
+
+/// A saved layout (`layouts/<name>.toml`) the extension offers to open.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LayoutFile {
+    #[serde(flatten)]
+    pub base: Contribution,
+    pub file: String,
+}
+
+/// `layouts/<name>.toml`, never climbing out of the package.
+pub fn is_layout_path(path: &str) -> bool {
+    js::test(layout_entry(), path) && !path.split('/').any(|s| s == ".." || s == ".")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -777,6 +799,7 @@ macro_rules! pattern {
 pattern!(executable_name, r"^[A-Za-z0-9][A-Za-z0-9._-]*$");
 pattern!(path_data, r"^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$");
 pattern!(view_box, r"^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$");
+pattern!(layout_entry, r"^layouts\/[A-Za-z0-9._/-]+\.toml$");
 pattern!(web_entry, r"^web\/[A-Za-z0-9._/-]+\.html$");
 pattern!(view_entry, r"^views\/[A-Za-z0-9._/-]+\.kdl$");
 pattern!(contribution_id, r"^[a-zA-Z][a-zA-Z0-9_-]*$");
@@ -1390,6 +1413,13 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         })
         .collect();
 
+    let layouts: Vec<LayoutFile> = declared("layouts")
+        .filter_map(|(base, raw)| {
+            let file = js::trim(&text(raw.get("file"), "")).to_owned();
+            is_layout_path(&file).then_some(LayoutFile { base, file })
+        })
+        .collect();
+
     let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
     let mut ids: Vec<String> = Vec::new();
     for place in Place::POINTS {
@@ -1417,13 +1447,19 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
     }
     points.retain(|_, ps| !ps.is_empty());
 
-    if panes.is_empty() && footers.is_empty() && link_handlers.is_empty() && points.is_empty() {
+    if panes.is_empty()
+        && footers.is_empty()
+        && link_handlers.is_empty()
+        && layouts.is_empty()
+        && points.is_empty()
+    {
         return None;
     }
     Some(Contributions {
         panes: (!panes.is_empty()).then_some(panes),
         footers: (!footers.is_empty()).then_some(footers),
         link_handlers: (!link_handlers.is_empty()).then_some(link_handlers),
+        layouts: (!layouts.is_empty()).then_some(layouts),
         points,
     })
 }

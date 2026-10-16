@@ -72,6 +72,14 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     string("lines"),
     string("limit"),
     string("timeout"),
+    string("format"),
+    string("filter"),
+    string("session"),
+    string("status"),
+    boolean("force"),
+    boolean("trim"),
+    boolean("unwrap"),
+    boolean("scrollback"),
     boolean("headless"),
     boolean("wait"),
     boolean("worktree"),
@@ -405,6 +413,21 @@ pub struct ClientArgs {
     pub lines: Option<f64>,
     pub limit: Option<f64>,
     pub timeout_ms: Option<f64>,
+    /// `vorn session wait --timeout <dur>`: how long to wait for the session, not for a call.
+    pub wait_timeout: Option<std::time::Duration>,
+    /// `session read --format`: `text`, `vt` or `html`.
+    pub format: Option<String>,
+    /// `vorn events --filter a,b`: the event names, split.
+    pub filter: Vec<String>,
+    /// `vorn events --session <target>`.
+    pub session: Option<String>,
+    /// `vorn session wait --status`: `idle`, `done` or `blocked`.
+    pub status: Option<String>,
+    /// `vorn layout save --force`: replace a layout of that name.
+    pub force: bool,
+    pub trim: bool,
+    pub unwrap: bool,
+    pub scrollback: bool,
     pub headless: bool,
     /// Stay until the run or headless session ends, reporting it to the terminal.
     pub wait: bool,
@@ -413,6 +436,23 @@ pub struct ClientArgs {
     pub raw: bool,
     pub json: bool,
     pub help: bool,
+}
+
+/// `30s`, `5m`, `1500ms`, `2h`; a bare number is seconds.
+pub fn parse_duration(raw: &str) -> Option<std::time::Duration> {
+    let raw = js_trim(raw);
+    let end = raw
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(raw.len());
+    let n: f64 = raw[..end].parse().ok().filter(|n: &f64| n.is_finite() && *n > 0.0)?;
+    let unit = match &raw[end..] {
+        "" | "s" => 1.0,
+        "ms" => 0.001,
+        "m" => 60.0,
+        "h" => 3600.0,
+        _ => return None,
+    };
+    std::time::Duration::try_from_secs_f64(n * unit).ok()
 }
 
 /// A count, a line budget, a millisecond ceiling: all of them positive integers.
@@ -461,7 +501,50 @@ impl ClientArgs {
             return Err(ArgsError("--data-dir needs a directory".into()));
         }
 
+        // For `session wait` the ceiling is how long to wait, in units, not a call's milliseconds.
+        let waiting = parsed.positionals.first().map(String::as_str) == Some("session")
+            && parsed.positionals.get(1).map(String::as_str) == Some("wait");
+        let wait_timeout = match parsed.str("timeout").filter(|_| waiting) {
+            None => None,
+            Some(raw) => Some(parse_duration(raw).ok_or_else(|| {
+                ArgsError(format!(
+                    "--timeout must be a duration such as 30s, 5m or 1500ms, got \"{raw}\""
+                ))
+            })?),
+        };
+        let format = owned("format");
+        if let Some(f) = format.as_deref().filter(|f| !["text", "vt", "html"].contains(f)) {
+            return Err(ArgsError(format!(
+                "--format must be text, vt or html, got \"{f}\""
+            )));
+        }
+        let status = owned("status");
+        if let Some(s) = status.as_deref().filter(|s| !["idle", "done", "blocked"].contains(s)) {
+            return Err(ArgsError(format!(
+                "--status must be idle, done or blocked, got \"{s}\""
+            )));
+        }
+        let filter = parsed
+            .str("filter")
+            .map(|f| {
+                f.split(',')
+                    .map(js_trim)
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(ClientArgs {
+            wait_timeout,
+            format,
+            filter,
+            session: owned("session"),
+            status,
+            force: parsed.flag("force"),
+            trim: parsed.flag("trim"),
+            unwrap: parsed.flag("unwrap"),
+            scrollback: parsed.flag("scrollback"),
             agent: owned("agent"),
             prompt: owned("prompt"),
             project: owned("project"),
@@ -475,7 +558,11 @@ impl ClientArgs {
             data_dir,
             lines: positive_int(parsed.str("lines"), "--lines")?,
             limit: positive_int(parsed.str("limit"), "--limit")?,
-            timeout_ms: positive_int(parsed.str("timeout"), "--timeout")?,
+            timeout_ms: if waiting {
+                None
+            } else {
+                positive_int(parsed.str("timeout"), "--timeout")?
+            },
             headless: parsed.flag("headless"),
             wait: parsed.flag("wait"),
             worktree: parsed.flag("worktree"),
@@ -641,6 +728,25 @@ mod tests {
             serde_json::Value::Object(ok.inputs.unwrap()).to_string(),
             r#"{"pr":"5"}"#
         );
+    }
+
+    #[test]
+    fn reads_durations_with_units_and_bare_seconds() {
+        use std::time::Duration;
+        assert_eq!(parse_duration("30s"), Some(Duration::from_secs(30)));
+        assert_eq!(parse_duration("5m"), Some(Duration::from_secs(300)));
+        assert_eq!(parse_duration("1500ms"), Some(Duration::from_millis(1500)));
+        assert_eq!(parse_duration("2"), Some(Duration::from_secs(2)));
+        assert_eq!(parse_duration("0"), None);
+        assert_eq!(parse_duration("3x"), None);
+        let a = ClientArgs::parse(&argv(&["session", "wait", "x", "--timeout", "2s"])).unwrap();
+        assert_eq!((a.wait_timeout, a.timeout_ms), (Some(Duration::from_secs(2)), None));
+        let a = ClientArgs::parse(&argv(&["session", "list", "--timeout", "2000"])).unwrap();
+        assert_eq!((a.wait_timeout, a.timeout_ms), (None, Some(2000.0)));
+        assert!(ClientArgs::parse(&argv(&["--format", "pdf"])).is_err());
+        assert!(ClientArgs::parse(&argv(&["--status", "x"])).is_err());
+        let a = ClientArgs::parse(&argv(&["events", "--filter", "a, b,,c"])).unwrap();
+        assert_eq!(a.filter, ["a", "b", "c"]);
     }
 
     #[test]

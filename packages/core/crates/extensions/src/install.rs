@@ -417,6 +417,11 @@ impl Installs {
                     .iter()
                     .map(|l| format!("Link handler: {}", l.base.title)),
             );
+            adds.extend(
+                c.layouts()
+                    .iter()
+                    .map(|l| format!("Layout: {}", l.base.title)),
+            );
             for (place, points) in &c.points {
                 adds.extend(
                     points

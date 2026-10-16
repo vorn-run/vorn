@@ -49,6 +49,22 @@ impl<'a> Context<'a> {
         ExitCode::Failure
     }
 
+    /// A command's error: an ambiguous target exits 3 with its candidates, anything else 1.
+    pub fn error(&mut self, what: &str, err: CommandError) -> ExitCode {
+        match err {
+            CommandError::Ambiguous { given, found } => {
+                self.io
+                    .write_err(&format!("vorn: {}", crate::target::describe(&given, &found)));
+                if self.args.json {
+                    let data = crate::target::describe_json(&given, &found);
+                    self.io.write(&crate::js::as_json(&data));
+                }
+                ExitCode::Ambiguous
+            }
+            other => self.failed(what, other),
+        }
+    }
+
     /// A server to talk to, started if there is not one already. False when
     /// it could not be.
     pub async fn server(&mut self) -> bool {
@@ -115,6 +131,11 @@ pub enum CommandError {
     Call(CallError),
     /// The answer did not name what was asked for: `no session matches "x"`.
     Refused(String),
+    /// The target matched several sessions; [`Context::error`] lists them.
+    Ambiguous {
+        given: String,
+        found: Vec<(usize, crate::target::Candidate)>,
+    },
 }
 
 impl std::fmt::Display for CommandError {
@@ -122,6 +143,9 @@ impl std::fmt::Display for CommandError {
         match self {
             CommandError::Call(err) => write!(f, "{err}"),
             CommandError::Refused(message) => f.write_str(message),
+            CommandError::Ambiguous { given, found } => {
+                f.write_str(crate::target::describe(given, found).trim_end())
+            }
         }
     }
 }

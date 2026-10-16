@@ -17,16 +17,20 @@ pub mod args;
 pub mod attach;
 pub mod client;
 pub mod exit;
+pub mod events;
 pub mod ext;
 pub mod js;
+pub mod layout;
 pub mod launch;
 pub mod mcp;
 pub mod output;
 pub mod paths;
+pub mod render;
 pub mod rpc;
 pub mod server;
 pub mod session;
 pub mod status;
+pub mod target;
 pub mod time;
 pub mod web;
 pub mod workflow;
@@ -45,7 +49,9 @@ Usage
   vorn attach [<session>]                                One session, full window
   vorn session start --agent <agent> [--prompt <text>]   Start an agent session
   vorn session list [--recent] [--json]                  What is running
-  vorn session logs|send|kill <id>                       Read, steer, stop one
+  vorn session read|send|wait|kill <target>              Read, steer, wait for, stop one
+  vorn layout list|open|save|check                       Saved arrangements of sessions
+  vorn events [--json] [--filter <e,...>]                What happens, as it happens
   vorn workflow list [--json]                            Workflows
   vorn workflow run <name> [--input k=v]                 Start one
   vorn workflow stop <run>                               Stop a run
@@ -60,6 +66,10 @@ Options common to the commands that talk to a server
   --json              Machine-readable output on stdout
   --data-dir <path>   Reach a server started with the same flag
   --timeout <ms>      Give up on a call after this long
+
+A <target> is an id, a label, a position in `vorn session list` or the start or
+end of an id, in that order. Exit codes: 0 ok, 1 failed, 2 usage, 3 ambiguous
+target, 4 no server; `session wait` passes the session's own code, or 124.
 
 Running `vorn` with no command in a terminal opens Vorn there; piped, it prints
 this. With no server running, a command starts one and says so.
@@ -84,8 +94,9 @@ pub fn find_command(argv: &[String]) -> Option<&str> {
     None
 }
 
-const COMMANDS: [&str; 10] = [
+const COMMANDS: [&str; 12] = [
     "session", "workflow", "server", "serve", "token", "help", "mcp", "attach", "ext", "web",
+    "events", "layout",
 ];
 
 /// An option that swallowed the command because its own value was missing:
@@ -134,6 +145,10 @@ async fn client_command(argv: &[String], io: &mut dyn Io, mcp: bool) -> ExitCode
     let mut ctx = client::Context::new(io, args);
     if noun.as_deref() == Some("session") {
         session::run(&mut ctx).await
+    } else if noun.as_deref() == Some("layout") {
+        layout::run(&mut ctx).await
+    } else if noun.as_deref() == Some("events") {
+        events::run(&mut ctx).await
     } else if noun.as_deref() == Some("ext") {
         ext::run(&mut ctx).await
     } else {
@@ -196,7 +211,7 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
         "server" => server::run(&without_command(argv, command), io),
         // `vorn-server` was called this way for as long as it existed.
         "serve" | "token" => server::run(argv, io),
-        "session" | "workflow" | "ext" => client_command(argv, io, false).await,
+        "session" | "workflow" | "ext" | "events" | "layout" => client_command(argv, io, false).await,
         "mcp" => client_command(&without_command(argv, command), io, true).await,
         "web" => web::run(&without_command(argv, command), io),
         _ => {
@@ -204,7 +219,7 @@ async fn run_command(argv: &[String], io: &mut dyn Io) -> ExitCode {
                 return code;
             }
             io.write_err(&format!(
-                "vorn: unknown command \"{command}\". Try: session, workflow, ext, server, help\n"
+                "vorn: unknown command \"{command}\". Try: session, workflow, layout, events, ext, server, help\n"
             ));
             ExitCode::Usage
         }
@@ -259,7 +274,7 @@ mod tests {
         assert_eq!(code, 2);
         assert_eq!(
             io.err,
-            "vorn: unknown command \"bogus\". Try: session, workflow, ext, server, help\n"
+            "vorn: unknown command \"bogus\". Try: session, workflow, layout, events, ext, server, help\n"
         );
 
         let (code, io) = run_sync(&["--data-dir", "session", "list"]);

@@ -1,0 +1,13 @@
+[package]
+name = "vorn-layout"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Saved layouts: the TOML a person writes, read with the line of every mistake, and written back"
+
+[dependencies]
+# Same TOML reader the extension manifest uses: 1.x reports the span of every key, so errors name their line. Already in the tree.
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std", "display"] }

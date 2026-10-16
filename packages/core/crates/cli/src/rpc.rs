@@ -472,6 +472,41 @@ impl Client {
         }
     }
 
+    /// Opens a socket, calls `events:subscribe` on it and waits for the answer: the
+    /// server's queue is in place when this returns, so nothing after it is missed.
+    pub async fn events(&self, params: Value) -> Result<Events, CallError> {
+        let (request, port) = self.connection()?;
+        let (mut ws, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(|err| connect_error(err, port))?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0", "id": id, "method": "events:subscribe", "params": params,
+        });
+        if let Err(err) = ws.send(Message::text(frame.to_string())).await {
+            return Err(closed_error(err, &self.dir));
+        }
+        let mut events = Events {
+            ws,
+            dir: self.dir.clone(),
+        };
+        let answer = tokio::time::timeout(
+            Duration::from_millis(timer_ms(self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS))),
+            events.frame(|f| f.get("id") == Some(&Value::from(id))),
+        )
+        .await
+        .map_err(|_| CallError::TimedOut {
+            method: "events:subscribe".into(),
+            ms: self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+        })??;
+        if let Some(error) = answer.get("error").filter(|e| !e.is_null()) {
+            return Err(CallError::Remote(crate::js::string(crate::js::field(
+                error, "message",
+            ))));
+        }
+        Ok(events)
+    }
+
     /// Sends a notification and does not wait for anything back.
     pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), CallError> {
         let (request, port) = self.connection()?;
@@ -491,6 +526,46 @@ impl Client {
             .map_err(|err| connect_error(err, port))?;
         let _ = ws.close(None).await;
         Ok(())
+    }
+}
+
+/// A server's public events, as they arrive.
+pub struct Events {
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    dir: DataDir,
+}
+
+impl Events {
+    /// The next JSON frame `keep` accepts.
+    async fn frame(&mut self, keep: impl Fn(&Value) -> bool) -> Result<Value, CallError> {
+        loop {
+            let message = match self.ws.next().await {
+                None => return Err(closed(1006, &self.dir)),
+                Some(Err(err)) => return Err(closed_error(err, &self.dir)),
+                Some(Ok(message)) => message,
+            };
+            let raw: &[u8] = match &message {
+                Message::Text(text) => text.as_bytes(),
+                Message::Close(frame) => {
+                    let code = frame.as_ref().map_or(1005, |f| u16::from(f.code));
+                    return Err(closed(code, &self.dir));
+                }
+                _ => continue,
+            };
+            if let Ok(frame) = serde_json::from_slice::<Value>(raw) {
+                if keep(&frame) {
+                    return Ok(frame);
+                }
+            }
+        }
+    }
+
+    /// The next event's envelope `{v, event, at, session?, data}`.
+    pub async fn next(&mut self) -> Result<Value, CallError> {
+        let mut frame = self
+            .frame(|f| f.get("method").and_then(Value::as_str) == Some("events:event"))
+            .await?;
+        Ok(frame.get_mut("params").map(Value::take).unwrap_or(Value::Null))
     }
 }
 

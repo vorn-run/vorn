@@ -386,6 +386,29 @@ impl Extensions {
         out
     }
 
+    /// The layouts installed extensions offer: `(extension id, layout id, title, file)`.
+    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf)> {
+        let store = self.router.store();
+        let mut out = Vec::new();
+        for id in store.ids() {
+            let Ok(pack) = store.inspect_unmeasured(&id) else {
+                continue;
+            };
+            let Some(contributes) = pack.manifest.contributes.as_ref() else {
+                continue;
+            };
+            for l in contributes.layouts() {
+                out.push((
+                    id.clone(),
+                    l.base.id.clone(),
+                    l.base.title.clone(),
+                    pack.path.join(&l.file),
+                ));
+            }
+        }
+        out
+    }
+
     fn contributions_changed(&self, extension: &str) {
         self.around.broadcast(
             CONTRIBUTIONS_CHANGED,
