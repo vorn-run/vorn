@@ -6,8 +6,9 @@
 // Extensions and the Connectors built-in's Connections page. `adapters`
 // links a test agent's adapter and the example card footer, starts a session
 // of that agent, posts a hook event as the agent would, and waits for the
-// footer to show it.
-//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters]
+// footer to show it. `phone-chromium` and `phone-webkit` do the templates run
+// at a phone's size (390x844 at 3x, touch) and check every control fits the width.
+//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [phone-chromium] [phone-webkit]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
 import { spawn } from 'node:child_process'
@@ -26,7 +27,8 @@ const runs = process.argv.slice(2).length
   ? process.argv.slice(2)
   : ['webgpu', 'webgl', 'pair', 'templates', 'adapters']
 const turns = join(core, '../../examples/extensions/turns')
-const { chromium } = await import(process.env.PLAYWRIGHT ?? 'playwright-core')
+const engines = await import(process.env.PLAYWRIGHT ?? 'playwright-core')
+const PHONE = { width: 390, height: 844 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // Headless GPU: Metal on a Mac, SwiftShader (Vulkan for WebGPU) elsewhere.
@@ -285,10 +287,31 @@ async function cardFoot(page, name) {
   return page.screenshot({ clip })
 }
 
+/** Every mirrored control the page shows lies inside the phone's width. */
+async function fitsPhone(page) {
+  const outside = await page.evaluate((width) => {
+    const roles = ['button', 'textbox', 'radio', 'switch', 'checkbox', 'menuitem']
+    return [...document.querySelectorAll('[role][aria-label]')]
+      .filter((e) => roles.includes(e.getAttribute('role')))
+      .map((e) => [e, e.getBoundingClientRect()])
+      .filter(([, r]) => r.width > 0 && r.height > 0 && (r.left < -0.5 || r.right > width + 0.5))
+      .map(([e, r]) => `${e.getAttribute('role')}:${e.getAttribute('aria-label')} ${r.left}..${r.right}`)
+  }, PHONE.width)
+  if (outside.length) throw new Error(`outside the phone's width: ${outside.join(', ')}`)
+}
+
 async function run(what, vornd, server) {
   let postToolCall
-  const browser = await chromium.launch({ channel: 'chromium', args: gpuArgs })
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  const phone = what.startsWith('phone-')
+  const engine = phone ? what.slice('phone-'.length) : 'chromium'
+  const browser = await engines[engine].launch(
+    engine === 'chromium' ? { channel: 'chromium', args: gpuArgs } : {}
+  )
+  const page = await browser.newPage(
+    phone
+      ? { viewport: PHONE, deviceScaleFactor: 3, hasTouch: true, isMobile: true }
+      : { viewport: { width: 1280, height: 800 } }
+  )
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
@@ -299,9 +322,10 @@ async function run(what, vornd, server) {
       const device = (await server.call('token:create', { name: 'smoke adapters' })).plaintext
       postToolCall = await adapterSession(vornd, server)
       await page.goto(`http://127.0.0.1:${vornd.port}/app/#token=${device}`)
-    } else if (what === 'templates') {
+    } else if (what === 'templates' || phone) {
       const device = (await server.call('token:create', { name: 'smoke templates' })).plaintext
-      await server.call('extension:link', { path: turns })
+      // Linked once; a later run finds it there already.
+      await server.call('extension:link', { path: turns }).catch(() => {})
       // Its program starts on its first call or event; this call starts it.
       await server.call('extension:call', {
         id: 'example.turns',
@@ -329,8 +353,14 @@ async function run(what, vornd, server) {
       console.log(`ok adapters (${used})`)
       return
     }
-    if (what === 'templates') {
+    if (what === 'templates' || phone) {
       await templates(page)
+      if (phone) {
+        await fitsPhone(page)
+        if (shots) await page.screenshot({ path: join(shots, `web-${what}.png`) })
+        console.log(`ok ${what} (${used})`)
+        return
+      }
       if (shots) await page.screenshot({ path: join(shots, 'web-templates.png') })
       console.log(`ok templates (${used})`)
       return
