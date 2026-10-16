@@ -3,13 +3,16 @@
 // `pair` pairs a fresh browser with a code instead, as a phone does.
 // `templates` opens the example extension's settings page and works its
 // choice, secret field, Sign in button and more menu, then Settings ›
-// Extensions and the Connectors built-in's Connections page.
-//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates]
+// Extensions and the Connectors built-in's Connections page. `adapters`
+// starts a session of the agent whose shipped adapter draws a card footer,
+// posts a hook event as the agent would, and waits for the footer to show it.
+//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -20,7 +23,7 @@ const dist = process.env.WEB_DIST ?? join(core, 'crates/vorn-web/dist')
 const shots = process.env.SHOTS
 const runs = process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ['webgpu', 'webgl', 'pair', 'templates']
+  : ['webgpu', 'webgl', 'pair', 'templates', 'adapters']
 const turns = join(core, '../../examples/extensions/turns')
 const { chromium } = await import(process.env.PLAYWRIGHT ?? 'playwright-core')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -204,7 +207,79 @@ async function extensions(page) {
       .then(() => page.screenshot({ path: join(shots, 'web-connections.png') }))
 }
 
+/** Posts a hook event to the endpoint vornd registered in its HOME, as an agent's hook does. */
+async function postHook(vornd, body) {
+  const dir = join(vornd.home, '.vorn')
+  const [port, token] = await until('the hook endpoint', () => {
+    try {
+      return ['port', 'token'].map((f) => readFileSync(join(dir, f), 'utf8').trim())
+    } catch {
+      return null
+    }
+  })
+  const text = JSON.stringify(body)
+  const status = await new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: '127.0.0.1',
+        port: Number(port),
+        path: '/hooks',
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+      },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode)
+      }
+    )
+    req.on('error', reject)
+    req.end(text)
+  })
+  if (status !== 200) throw new Error(`the hook answered ${status}`)
+}
+
+/** A session of the agent whose shipped adapter draws a card footer; answers how to post its tool call. */
+async function adapterSession(vornd, server) {
+  const points = await server.call('extension:contributions')
+  const agents = await server.call('agent:list')
+  const footers = new Set(points.filter((p) => p.kind === 'cardFooters').map((p) => p.extension))
+  const agent = agents.find((a) => a.builtin && footers.has(a.extension))
+  if (!agent) throw new Error('no shipped adapter draws a card footer')
+  const cfg = await server.call('config:load')
+  cfg.agentCommands = { ...cfg.agentCommands, [agent.id]: { command: '/bin/sh', args: [] } }
+  await server.call('config:save', cfg)
+  const session = await server.call('terminal:create', {
+    agentType: agent.id,
+    projectName: 'smoke',
+    projectPath: vornd.home,
+    model: 'mini'
+  })
+  return () =>
+    postHook(vornd, {
+      hook_event_name: 'PreToolUse',
+      session_id: 'smoke-conversation',
+      cwd: vornd.home,
+      tool_name: 'edit',
+      vorn_terminal_id: session.id
+    })
+}
+
+/** The bottom strip of the card named `name`, as pixels: where its footer draws. */
+async function cardFoot(page, name) {
+  const card = await until('the card', async () => {
+    const b = await page
+      .locator(`[role="group"][aria-label="${name}"]`)
+      .last()
+      .boundingBox()
+      .catch(() => null)
+    return b && b.width > 0 ? b : null
+  })
+  const clip = { x: card.x, y: card.y + card.height - 64, width: card.width, height: 64 }
+  return page.screenshot({ clip })
+}
+
 async function run(what, vornd, server) {
+  let postToolCall
   const browser = await chromium.launch({ channel: 'chromium', args: gpuArgs })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const errors = []
@@ -213,6 +288,10 @@ async function run(what, vornd, server) {
   try {
     if (what === 'pair') {
       await pair(page, vornd, server)
+    } else if (what === 'adapters') {
+      const device = (await server.call('token:create', { name: 'smoke adapters' })).plaintext
+      postToolCall = await adapterSession(vornd, server)
+      await page.goto(`http://127.0.0.1:${vornd.port}/app/#token=${device}`)
     } else if (what === 'templates') {
       const device = (await server.call('token:create', { name: 'smoke templates' })).plaintext
       await server.call('extension:link', { path: turns })
@@ -232,6 +311,16 @@ async function run(what, vornd, server) {
     )
     if (what === 'webgpu' || what === 'webgl') {
       if (!used.startsWith(what)) throw new Error(`asked for ${what}, got ${used}`)
+    }
+    if (what === 'adapters') {
+      // Template text is drawn, not mirrored: the footer shows as the card's foot changing.
+      await sleep(1500)
+      const before = await cardFoot(page, 'smoke')
+      await postToolCall()
+      await until('the footer', async () => !(await cardFoot(page, 'smoke')).equals(before))
+      if (shots) await page.screenshot({ path: join(shots, 'web-adapters.png') })
+      console.log(`ok adapters (${used})`)
+      return
     }
     if (what === 'templates') {
       await templates(page)
