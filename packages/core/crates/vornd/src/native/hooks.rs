@@ -281,8 +281,13 @@ impl Hooks {
                 Some((a.clone(), spec))
             })
             .collect();
+        // Held throughout: `stop` takes it after marking itself stopped, so
+        // nothing is merged back in once it has taken the hooks out.
+        let mut merged = lock(&self.merged);
+        if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
         let gone: Vec<Merged> = {
-            let mut merged = lock(&self.merged);
             let keep: HashSet<&str> = wanted.iter().map(|(a, _)| a.id()).collect();
             let gone: Vec<String> = merged
                 .keys()
@@ -315,7 +320,7 @@ impl Hooks {
             match settings::install_file(&file, self.port, &self.token, &all, &events) {
                 Ok(()) => {
                     let all = all.iter().map(|e| (*e).to_owned()).collect();
-                    lock(&self.merged).insert(agent.id().to_owned(), Merged { file, all });
+                    merged.insert(agent.id().to_owned(), Merged { file, all });
                 }
                 Err(err) => {
                     warn!(%err, agent = agent.id(), "could not merge hooks into an agent's settings")

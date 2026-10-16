@@ -172,7 +172,10 @@ impl Probe {
                 }
                 let mut again = self.last.clone().unwrap_or(Value::Null);
                 let id = again.get("id").and_then(Value::as_u64).unwrap_or(0) + 1;
-                again["id"] = Value::from(id);
+                let Some(fields) = again.as_object_mut() else {
+                    return Err(DiscoveryError::Unsupported);
+                };
+                fields.insert("id".to_owned(), Value::from(id));
                 set(&mut again, cursor_at, Value::String(cursor.to_owned()));
                 self.last = Some(again.clone());
                 Ok(Step::Send(vec![again]))

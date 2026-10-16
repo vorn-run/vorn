@@ -59,6 +59,8 @@ async function startVornd() {
   mkdirSync(data)
   writeFileSync(join(home, '.zshrc'), '')
   const env = { ...process.env, HOME: home, VORN_HOME: data, ZDOTDIR: home }
+  // An agent's own home would be the person's, not the test's.
+  for (const name of ['COPILOT_HOME', 'XDG_DATA_HOME', 'HERMES_HOME', 'VORN_DATA_DIR']) delete env[name]
   const args = ['--data-dir', data, '--port', '0', '--host', '127.0.0.1', '--web', dist]
   args.push('--sessiond', join(bin, 'vorn-sessiond'), '--exit-with-stdin')
   const proc = spawn(join(bin, 'vornd'), args, { env, stdio: ['pipe', 'pipe', 'inherit'] })

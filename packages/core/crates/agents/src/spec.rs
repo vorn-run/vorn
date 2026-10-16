@@ -640,6 +640,17 @@ impl AgentSpec {
                 }
             }
         }
+        for (field, template, json) in self.paths() {
+            if !rooted(template) || template.split(['/', '\\']).any(|seg| seg == "..") {
+                return Err(error(
+                    field,
+                    "starts at `~`, `{data}`, `{env:NAME|fallback}` or `/`, and has no `..`",
+                ));
+            }
+            if json && !template.ends_with(".json") {
+                return Err(error(field, "names a .json file"));
+            }
+        }
         if let Some(m) = &self.models {
             if !m.flag.starts_with('-') {
                 return Err(error("models.flag", "is a flag"));
@@ -655,6 +666,14 @@ impl AgentSpec {
                             .map_err(|e| error("models.list.lines", e.to_string()))?;
                     }
                     (None, false) => {
+                        if list
+                            .steps
+                            .iter()
+                            .flat_map(|s| &s.send)
+                            .any(|m| !m.is_object())
+                        {
+                            return Err(error("models.list.steps", "sends JSON objects"));
+                        }
                         if !list.steps.iter().any(|s| s.models.is_some()) {
                             return Err(error("models.list.steps", "no step reads `models`"));
                         }
@@ -718,6 +737,50 @@ impl AgentSpec {
     /// What menus call it.
     pub fn label(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Every path template, its field, and whether it is a JSON file Vorn writes.
+    fn paths(&self) -> Vec<(&'static str, &str, bool)> {
+        let mut out = Vec::new();
+        if let Some(c) = self.resume.as_ref().and_then(|r| r.capture.as_ref()) {
+            out.push(("resume.capture.db", c.db.as_str(), false));
+        }
+        if let Some(h) = &self.history {
+            if let Some(j) = &h.jsonl {
+                out.push(("history.jsonl.file", j.file.as_str(), false));
+            }
+            if let Some(q) = &h.sqlite {
+                out.push(("history.sqlite.db", q.db.as_str(), false));
+                if let Some(c) = &q.count_lines {
+                    out.push(("history.sqlite.count_lines.file", c.file.as_str(), false));
+                }
+            }
+            if let Some(f) = &h.json_files {
+                if let Some(m) = &f.markers {
+                    out.push(("history.json_files.markers.dir", m.dir.as_str(), false));
+                }
+                if let Some(m) = &f.map {
+                    out.push(("history.json_files.map.file", m.file.as_str(), false));
+                    out.push((
+                        "history.json_files.map.sessions",
+                        m.sessions.as_str(),
+                        false,
+                    ));
+                }
+            }
+        }
+        if let Some(h) = &self.hooks {
+            if let Some(s) = &h.settings {
+                out.push(("hooks.settings.file", s.file.as_str(), true));
+            }
+            if let Some(f) = &h.file {
+                out.push(("hooks.file.path", f.path.as_str(), true));
+            }
+        }
+        if let Some(u) = &self.usage {
+            out.push(("usage.transcript", u.transcript.as_str(), false));
+        }
+        out
     }
 
     /// The name a workflow step uses.
@@ -876,6 +939,16 @@ mod tests {
         assert!(bad("[[agent.status]]\nstatus = 'idle'\nany = ['(']").contains("agent.status"));
         assert!(bad("[agent.models.list]\nargs = []").contains("`lines` or `steps`"));
         assert!(bad("unknown = 1").contains("unknown"));
+        let hooks = |file: &str| {
+            bad(&format!(
+                "[agent.hooks.settings]\nfile = '{file}'\nevents = []"
+            ))
+        };
+        assert!(hooks("~/.zshrc").contains("names a .json file"));
+        assert!(hooks("~/../x/settings.json").contains("no `..`"));
+        assert!(hooks("rel/settings.json").contains("no `..`"));
+        assert!(bad("[agent.history]\nactivity = 'a'\n[agent.history.jsonl]\nfile = '../h'\nsession = 's'\nproject = 'p'\ntime = 't'\ntitle = 'd'").contains("history.jsonl.file"));
+        assert!(bad("[agent.models.list]\nargs = []\n[[agent.models.list.steps]]\nsend = ['x']\nreply = {}\nmodels = 'm'").contains("JSON objects"));
         let shell = base.replace("\"demo\"\n            name", "\"shell\"\n            name");
         assert!(AgentSpec::from_manifest(&shell).is_err());
     }

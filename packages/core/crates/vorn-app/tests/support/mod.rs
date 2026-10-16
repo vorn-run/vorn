@@ -93,6 +93,10 @@ impl TestVornd {
             .env("VORND_KEYCHAIN", "0")
             .env("VORN_SESSIOND_IDLE_EXIT", "2")
             .env_remove("VORN_DATA_DIR")
+            // An agent's own home would be the person's, not the test's.
+            .env_remove("COPILOT_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("HERMES_HOME")
             .env_remove("VORN_ALLOW_DEFAULT_DATA_DIR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
