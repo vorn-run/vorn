@@ -13,17 +13,39 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
 use tokio::time::Instant;
 use tracing::{info, warn};
 
-use crate::child::Child;
-
-/// Something the lifecycle keeps running: a child, however it is spoken to.
+/// Something the lifecycle keeps running: a child or a component, however it is spoken to.
 pub trait Running: Send + Sync + 'static {
-    fn child(&self) -> &Child;
+    fn name(&self) -> &str;
+    /// Whether it ended; one that ended on its own counts as a crash.
+    fn exited(&self) -> bool;
+    fn close(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+/// [`Running`] for a type that is one child.
+#[macro_export]
+macro_rules! running_child {
+    ($ty:ty, $field:tt) => {
+        impl $crate::lifecycle::Running for $ty {
+            fn name(&self) -> &str {
+                self.$field.name()
+            }
+            fn exited(&self) -> bool {
+                self.$field.exited()
+            }
+            fn close(
+                &self,
+            ) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()> + Send + '_>> {
+                Box::pin(self.$field.close())
+            }
+        }
+    };
 }
 
 /// Which program, for what: a project, a connection, or nothing.
@@ -209,11 +231,8 @@ impl Lifecycle {
             .is_some_and(|s| Arc::ptr_eq(s, &slot));
         if !still_wanted {
             // Stopped while it started.
-            service.child().close().await;
-            return Err(format!(
-                "{} was stopped before it started",
-                service.child().name()
-            ));
+            service.close().await;
+            return Err(format!("{} was stopped before it started", service.name()));
         }
         let mut st = guard(&slot.state);
         st.held = Some(Held {
@@ -268,7 +287,7 @@ impl Lifecycle {
             let mut running: usize = 0;
             for (key, slot) in slots.iter().filter(|(k, _)| *k != starting) {
                 let st = guard(&slot.state);
-                if st.held.as_ref().is_some_and(|h| !h.run.child().exited()) {
+                if st.held.as_ref().is_some_and(|h| !h.run.exited()) {
                     running += 1;
                     if st.in_flight == 0 {
                         idle.push((st.last_used, key, slot));
@@ -287,7 +306,7 @@ impl Lifecycle {
             }
         }
         for held in stopping {
-            tokio::spawn(async move { held.run.child().close().await });
+            tokio::spawn(async move { held.run.close().await });
         }
     }
 
@@ -300,7 +319,7 @@ impl Lifecycle {
                 guard(&s.state)
                     .held
                     .as_ref()
-                    .is_some_and(|h| !h.run.child().exited())
+                    .is_some_and(|h| !h.run.exited())
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -315,7 +334,7 @@ impl Lifecycle {
             .iter()
             .filter_map(|(k, s)| {
                 let held = guard(&s.state).held.clone()?;
-                if held.run.child().exited() {
+                if held.run.exited() {
                     return None;
                 }
                 let service = held.any.downcast::<T>().ok()?;
@@ -334,7 +353,7 @@ impl Lifecycle {
         let closing: Vec<_> = removed
             .iter()
             .filter_map(|slot| guard(&slot.state).held.take())
-            .map(|held| tokio::spawn(async move { held.run.child().close().await }))
+            .map(|held| tokio::spawn(async move { held.run.close().await }))
             .collect();
         for handle in closing {
             let _ = handle.await;
@@ -361,7 +380,7 @@ impl Lifecycle {
         for (key, slot) in guard(&self.slots).iter() {
             let mut st = guard(&slot.state);
             let idle = st.in_flight == 0 && now.duration_since(st.last_used) >= idle_for;
-            if idle && st.held.as_ref().is_some_and(|h| !h.run.child().exited()) {
+            if idle && st.held.as_ref().is_some_and(|h| !h.run.exited()) {
                 if let Some(held) = st.held.take() {
                     info!("[extensions] {} stops after sitting idle", key.extension);
                     stopping.push(held);
@@ -369,7 +388,7 @@ impl Lifecycle {
             }
         }
         for held in stopping {
-            tokio::spawn(async move { held.run.child().close().await });
+            tokio::spawn(async move { held.run.close().await });
         }
     }
 
@@ -403,7 +422,7 @@ fn lease_of<T: Running>(slot: &Arc<Slot>, key: &ServiceKey) -> Result<Option<Lea
     let Some(held) = st.held.clone() else {
         return Ok(None);
     };
-    if held.run.child().exited() {
+    if held.run.exited() {
         st.held = None;
         st.crashes.push(Instant::now());
         warn!("[extensions] {} ended; it starts again", key.extension);
@@ -424,12 +443,14 @@ fn lease_of<T: Running>(slot: &Arc<Slot>, key: &ServiceKey) -> Result<Option<Lea
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::child::Launch;
+    use crate::child::{Child, Launch};
     use std::path::PathBuf;
 
     struct Sleeper(Child);
 
-    impl Running for Sleeper {
+    crate::running_child!(Sleeper, 0);
+
+    impl Sleeper {
         fn child(&self) -> &Child {
             &self.0
         }

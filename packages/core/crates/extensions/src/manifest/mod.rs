@@ -155,10 +155,15 @@ impl Kind {
     }
 }
 
-/// The program a service runs, and the events it is woken for.
+/// The program a service runs, or the Wasm component in its place, and the events it is woken for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Service {
+    /// Empty when it runs a component.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub command: Vec<String>,
+    /// A `.wasm` component inside the package, run sandboxed in vornd.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<String>,
 }

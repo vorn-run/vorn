@@ -38,6 +38,8 @@ pub mod signin;
 pub mod token;
 pub mod usage;
 pub mod views;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 #[cfg(test)]
 pub(crate) mod testing {
