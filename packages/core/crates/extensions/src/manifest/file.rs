@@ -1805,7 +1805,7 @@ header = "Authorization: Bearer {token}"
             let err = parse(&format!("{head}file = \"{bad}\"\n")).unwrap_err();
             assert_eq!(
                 (err.line, err.field.as_str()),
-                (6, "contributes.layouts[0].file"),
+                (9, "contributes.layouts[0].file"),
                 "{bad}"
             );
         }
