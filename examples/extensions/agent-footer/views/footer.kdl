@@ -1,5 +1,5 @@
-// What Copilot is doing on this card, as its hooks report it: the model it
-// was started with, its tool calls and the last tool it ran.
+// What the agent on this card is doing, as its hooks report it: the model
+// it was started with, its tool calls and the last tool it ran.
 schema "vorn:view@1"
 
 rows "sessions" {

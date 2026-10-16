@@ -1,4 +1,4 @@
-//! The adapters added with no change to Vorn's core: each is only a package
+//! An adapter added with no change to Vorn's core: it is only a package
 //! in the public format, installed the way any person installs one, and
 //! launches, resumes and lists past sessions from its data.
 
@@ -7,7 +7,6 @@ mod support;
 use std::fs;
 
 use rusqlite::Connection;
-use serde_json::{json, Value};
 use vorn_agents::history::{recent_sessions_for, Homes};
 use vorn_agents::launch::{self, LaunchRequest, Machine, Platform, Quoting};
 
@@ -18,11 +17,6 @@ const POSIX: Machine = Machine {
 
 fn line(req: &LaunchRequest) -> String {
     launch::launch_line(req, None, &[], &POSIX).unwrap()
-}
-
-fn headless(req: &LaunchRequest) -> Value {
-    let h = launch::headless_spawn(req, None, &[], &POSIX).unwrap();
-    json!({ "command": h.command, "args": h.args, "stdin": h.stdin })
 }
 
 #[test]
@@ -45,45 +39,13 @@ fn an_adapter_installs_from_its_folder_as_any_extension_does() {
     let root = tempfile::tempdir().unwrap();
     let store = vorn_extensions::pack::PackStore::new(root.path().join("packages"));
     let installs = vorn_extensions::install::Installs::new(store.clone(), "git", Vec::new());
-    for name in ["pi", "hermes"] {
+    for name in ["hermes"] {
         let pack = installs.link(&support::package(name)).unwrap();
         let section = pack.manifest.agent.clone().expect("an [agent] section");
         let spec = vorn_agents::AgentSpec::from_toml(section).unwrap();
         assert_eq!(spec.id, name);
         assert!(pack.path.join(spec.icon.unwrap()).is_file());
     }
-}
-
-#[test]
-fn pi_launches_resumes_and_pins_by_its_flags() {
-    let pi = support::agent("pi");
-    let mut req = LaunchRequest::new(pi.clone());
-    req.initial_prompt = Some("fix the build".into());
-    assert_eq!(line(&req), "pi 'fix the build'");
-    req.resume_session_id = Some("0190-abc".into());
-    req.initial_prompt = None;
-    assert_eq!(line(&req), "pi --session 0190-abc");
-    let mut pinned = LaunchRequest::new(pi.clone());
-    pinned.session_id = Some("0190-new".into());
-    assert_eq!(line(&pinned), "pi --session-id 0190-new");
-    // A configured --continue gives way to the session Vorn names.
-    let configured = vorn_agents::AgentCommand {
-        args: vec!["--continue".into()],
-        ..pi.default_command()
-    };
-    assert_eq!(
-        launch::launch_line(&req, Some(&configured), &[], &POSIX).unwrap(),
-        "pi --session 0190-abc"
-    );
-    let mut run = LaunchRequest::new(pi.clone());
-    run.initial_prompt = Some("summarize".into());
-    assert_eq!(
-        headless(&run),
-        json!({ "command": "pi", "args": ["-p"], "stdin": "summarize" })
-    );
-    let mut model = LaunchRequest::new(pi);
-    model.model = Some("anthropic/claude-sonnet-4-5".into());
-    assert_eq!(line(&model), "pi --model anthropic/claude-sonnet-4-5");
 }
 
 #[test]

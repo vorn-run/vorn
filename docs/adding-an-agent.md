@@ -154,7 +154,7 @@ title = "prompt"
 
 `[agent.history.sqlite]` runs a query over the agent's database, with `{scope}` where the project's directories are matched. `[agent.history.json_files]` reads one JSON file per conversation in a folder per project.
 
-Paths start with `~`, `{data}` (`$XDG_DATA_HOME`, `~/.local/share`, or `%LOCALAPPDATA%` on Windows) or `{env:NAME|fallback}`.
+Paths start with `~`, `/`, `{data}` (`$XDG_DATA_HOME`, `~/.local/share`, or `%LOCALAPPDATA%` on Windows) or `{env:NAME|fallback}`. They never hold `..`, and the hook files Vorn writes end in `.json`.
 
 ## 7. Status
 
@@ -237,7 +237,7 @@ A CLI whose headless output is a stream of JSON events can tell Vorn the convers
 
 ## 11. Draw on its cards
 
-An adapter may add templates like any extension (`[[contributes.card_footers]]` with `when = { agent = ["acme"] }`). Its templates read one row per session of the agent from the `sessions` collection: `{id, model, tool, tools}`.
+An adapter is an extension, so it can add templates, such as a card footer with `when = { agent = ["acme"] }`, and fill them as any extension does. `examples/extensions/agent-footer` is one: a footer on each agent's card with the model it was started with and the tools its hooks report, read from the `session.created` and `agent.hook` events.
 
 ## 12. Try it
 

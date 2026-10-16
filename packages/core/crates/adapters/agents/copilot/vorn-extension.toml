@@ -1,9 +1,9 @@
-# GitHub Copilot CLI, run from its adapter, with its own footer on each card.
+# GitHub Copilot CLI, run from its adapter.
 id = "vorn.agents.copilot"
 name = "GitHub Copilot"
 version = "0.9.0"
 api = "vorn:extension@0.9"
-description = "Runs GitHub Copilot CLI: launches and resumes it, lists its models, reads its status and hooks, and shows its model on each card."
+description = "Runs GitHub Copilot CLI: launches and resumes it, lists its models, reads its status and answers its hooks."
 
 [agent]
 id = "copilot"
@@ -112,10 +112,3 @@ status = "idle"
 rows = [-8, -1]
 any = ['@ to mention files', '^[\s│]*>(\s|$)', '\? for shortcuts']
 
-[declares]
-uses = ["sessions.read"]
-
-[[contributes.card_footers]]
-id = "model"
-view = "views/footer.kdl"
-when = { agent = ["copilot"] }
