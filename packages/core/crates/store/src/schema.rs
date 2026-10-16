@@ -644,7 +644,9 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        let err = Store::open(&path, test_support::options()).unwrap_err();
+        let Err(err) = Store::open(&path, test_support::options()) else {
+            panic!("a version 26 file opened");
+        };
         assert!(matches!(err, Error::Refused(_)), "{err:?}");
     }
 
