@@ -1,5 +1,6 @@
 //! The task list, the one read of the task table the core keeps: `task:list`
-//! for clients and `task.list` for extensions, both a page of it. Writing
+//! for clients and `task.list` for extensions, both a page of it, and one
+//! task by id (`task:get`, `task.get`), so reading never needs Tasks on. Writing
 //! tasks is the Tasks built-in's; telling clients what a write changed
 //! ([`told`]) is the core's, so a client hears the rows that changed and
 //! never reads the whole table again.
@@ -14,7 +15,7 @@ use super::config::{blocking, with_store};
 use super::{Answer, Native};
 
 /// Every call this module answers.
-pub const METHODS: &[&str] = &["task:list"];
+pub const METHODS: &[&str] = &["task:list", "task:get"];
 
 /// The longest page `task.list` gives an extension, and its default.
 pub const MAX_PAGE: u64 = 1000;
@@ -73,11 +74,19 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer
         // Only a test starts vornd without one.
         return Answer::Unanswered;
     }
-    if method != "task:list" {
+    if !METHODS.contains(&method) {
         return Answer::Unanswered;
     }
     let n = Arc::clone(native);
-    match blocking(method, move || with_store(&n, |store| list(store, &params))).await {
+    let listing = method == "task:list";
+    let read = move |store: &mut Store| {
+        if listing {
+            list(store, &params)
+        } else {
+            store.call("dbGetTask", json!([params.get("id")]))
+        }
+    };
+    match blocking(method, move || with_store(&n, read)).await {
         Ok(tasks) => Answer::Result(tasks),
         Err(message) => Answer::Error(message),
     }
@@ -105,18 +114,37 @@ impl Change {
     }
 }
 
+/// `change` as the rows are now: each changed row read again, so two
+/// writes to one task told out of order still leave the later row last.
+fn as_stored(store: &mut Store, change: Change) -> Result<Change> {
+    let Change::Rows(rows) = change else {
+        return Ok(change);
+    };
+    let mut now = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id = row.get("id").cloned().unwrap_or(Value::Null);
+        let read = store.call("dbGetTask", json!([id]))?;
+        if !read.is_null() {
+            now.push(read);
+        }
+    }
+    Ok(Change::Rows(now))
+}
+
 /// Tells every client the board changed: the configuration, as a client of
-/// before rereads the board on it, then the rows. Told in the order the
-/// changes were stored.
+/// before rereads the board on it, then the rows, read again under the
+/// order lock so the last told is the last stored.
 pub async fn told(native: &Arc<Native>, change: Change) {
     let n = Arc::clone(native);
     let _order = native.config_order.lock().await;
     let loaded = blocking("config:changed", move || {
-        with_store(&n, |store| store.load_config())
+        with_store(&n, |store| {
+            Ok((store.load_config()?, as_stored(store, change)?))
+        })
     })
     .await;
     match loaded {
-        Ok(config) => {
+        Ok((config, change)) => {
             native.broadcast("config:changed", config);
             native.broadcast("task:rows", change.note());
             native.config_changed();

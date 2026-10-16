@@ -31,6 +31,7 @@ pub fn listed() -> &'static [Value] {
 fn api_name(method: &str) -> &str {
     match method {
         "agent:list" => "agents.list",
+        "task:get" => "task.get",
         other => other,
     }
 }

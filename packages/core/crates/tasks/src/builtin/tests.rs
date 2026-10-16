@@ -84,6 +84,10 @@ impl Host for Fake {
     fn call(&self, method: &str, params: Value) -> Pending<Result<Value, String>> {
         let answer = match method {
             "agents.list" => Ok(self.agents.clone()),
+            "task.get" => self
+                .store()
+                .call("dbGetTask", json!([params.get("id")]))
+                .map_err(|e| e.to_string()),
             "project.list" => Ok(self.store().call("dbListProjects", json!([])).unwrap()),
             "task.list" => {
                 let get = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
@@ -204,8 +208,9 @@ async fn each_write_tells_the_rows_it_changed_and_nothing_else() {
         )
         .await;
     assert_eq!(
-        result(tasks.answer("task:get", json!({ "id": "a" })).await)["title"],
-        "a"
+        tasks.answer("task:get", json!({ "id": "a" })).await,
+        Answer::Unanswered,
+        "reading a task is the core's"
     );
     assert!(host.changes().is_empty());
     assert_eq!(

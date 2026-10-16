@@ -113,6 +113,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("files.write", Permission::FilesWrite),
     ("secrets.get", Permission::SecretsRead),
     ("task.list", Permission::TasksRead),
+    ("task.get", Permission::TasksRead),
     ("agents.list", Permission::SessionsRead),
     ("task.importItems", Permission::TasksWrite),
     ("task.sourceLink", Permission::TasksRead),

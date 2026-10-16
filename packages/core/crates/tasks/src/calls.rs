@@ -59,11 +59,6 @@ fn num(n: f64) -> Value {
     }
 }
 
-/// `task:get`.
-pub fn get(store: &mut Store, params: &Value) -> Result<Value> {
-    store.call("dbGetTask", json!([params.get("id")]))
-}
-
 /// `task:setStatus`; whether anything changed is the second value.
 pub fn set_status(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
@@ -356,6 +351,11 @@ pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A task as the core reads it.
+    fn get(s: &mut Store, params: &Value) -> Result<Value> {
+        s.call("dbGetTask", json!([params.get("id")]))
+    }
     use vorn_store::StoreOptions;
 
     fn store() -> Store {

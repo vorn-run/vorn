@@ -1,4 +1,4 @@
-//! The Tasks built-in: every `task:*` call but the list, the connectors'
+//! The Tasks built-in: every `task:*` call but the reads (the list and one task by id), the connectors'
 //! imports (`task.importItems`, `task.sourceLink`), the conversation an
 //! agent starts kept on its terminal's task, and the badge rows a session's
 //! card draws. Each write tells clients the rows it changed, and a task
@@ -33,7 +33,6 @@ pub const BADGES: &str = "working";
 
 /// Every call this built-in answers.
 pub const METHODS: &[&str] = &[
-    "task:get",
     "task:setStatus",
     "task:create",
     "task:update",
@@ -116,7 +115,6 @@ fn write(store: &mut Store, method: &str, params: &Value) -> vorn_store::Result<
         None
     };
     let (value, changed) = match method {
-        "task:get" => (calls::get(store, params)?, false),
         "task:setStatus" => calls::set_status(store, params, &now)?,
         "task:create" => calls::create(store, params, uuid::Uuid::new_v4().to_string(), &now)?,
         "task:update" => calls::update(store, params, &now)?,
@@ -216,8 +214,11 @@ impl Tasks {
                     self.host.emit(name, trigger);
                 }
                 if let Some(change) = done.change {
+                    let badged = self.touches_badges(&change);
                     self.host.changed(change).await;
-                    self.badges().await;
+                    if badged {
+                        self.badges().await;
+                    }
                 }
                 match done.value {
                     Some(value) => Answer::Result(value),
@@ -282,8 +283,12 @@ impl Tasks {
             })
             .await?;
         if !rows.is_empty() {
-            self.host.changed(Change::Rows(rows)).await;
-            self.badges().await;
+            let change = Change::Rows(rows);
+            let badged = self.touches_badges(&change);
+            self.host.changed(change).await;
+            if badged {
+                self.badges().await;
+            }
         }
         Ok(Value::Array(answers))
     }
@@ -322,6 +327,29 @@ impl Tasks {
             }
             Ok(None) => {}
             Err(err) => warn!(%err, "could not keep the conversation on the task"),
+        }
+    }
+
+    /// Whether `change` can move a badge: a task in progress on a session
+    /// now, or one a badge shows. Others leave the badges as they are, so a
+    /// write never reads the tasks in progress for nothing.
+    fn touches_badges(&self, change: &Change) -> bool {
+        let shown = self
+            .badges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let on_a_badge = |id: &str| {
+            shown
+                .values()
+                .any(|b| b.get("task").and_then(Value::as_str) == Some(id))
+        };
+        match change {
+            Change::Removed(ids) => ids.iter().any(|id| on_a_badge(id)),
+            Change::Rows(rows) => rows.iter().any(|r| {
+                let working = r.get("status").and_then(Value::as_str) == Some("in_progress")
+                    && r.get("assignedSessionId").is_some_and(|s| !s.is_null());
+                working || r.get("id").and_then(Value::as_str).is_some_and(on_a_badge)
+            }),
         }
     }
 

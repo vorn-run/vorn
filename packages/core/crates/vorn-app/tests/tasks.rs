@@ -744,7 +744,10 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
 
     // Switched off, the board says so, the tasks stay, and writes are refused.
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": "vorn.tasks", "on": false }))
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": "vorn.tasks", "on": false }),
+        )
         .expect("switched off");
     app.st.view = MainView::Tasks;
     support::wait_for("the board gone", || {
@@ -765,6 +768,9 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
         .expect("the core lists");
     assert_eq!(listed[0]["title"], "Badge me");
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": "vorn.tasks", "on": true }))
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": "vorn.tasks", "on": true }),
+        )
         .expect("switched on");
 }

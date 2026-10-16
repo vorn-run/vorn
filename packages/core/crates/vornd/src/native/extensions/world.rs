@@ -328,6 +328,10 @@ impl World for Wired {
                     })
                     .await
                 }
+                "task.get" => {
+                    let id = text(&args, "id").ok_or_else(|| needs(m, "the id of the task"))?;
+                    on_store(&native, m, move |s| s.call("dbGetTask", json!([id]))).await
+                }
                 "agents.list" => ask(&native, "agent:list", Value::Null).await,
                 "project.list" => {
                     on_store(&native, m, |s| s.call("dbListProjects", json!([]))).await

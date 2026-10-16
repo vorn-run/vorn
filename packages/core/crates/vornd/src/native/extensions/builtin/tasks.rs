@@ -233,7 +233,8 @@ async fn board_action(tasks: &TasksBuiltin, action: &str, args: Value) -> Result
             serde_json::json!({ "id": id, "archived": false }),
         ),
         "delete" => ("task:delete", serde_json::json!({ "id": id })),
-        "open" => ("task:get", serde_json::json!({ "id": id })),
+        // Opening a card is the client's; there is nothing to write.
+        "open" => return Ok(Value::Null),
         _ => return Err(super::unknown("Tasks", action)),
     };
     match tasks.answer(method, params).await {
@@ -378,6 +379,10 @@ mod tests {
             .await,
             Answer::Error(builtin::OFF.to_owned())
         );
+        let Answer::Result(read) = ask(&native, "task:get", json!({ "id": "t1" })).await else {
+            panic!("the core reads a task while Tasks is off");
+        };
+        assert_eq!(read["title"], "T");
         assert!(tasks.mcp_tools().is_empty());
         assert!(tasks.mcp_call("list_tasks", json!({})).await.is_none());
         let refused = tasks.api("task.importItems", json!({})).await.unwrap_err();
