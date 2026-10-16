@@ -1139,7 +1139,8 @@ column {
         let tree = ui.native_tree().unwrap();
         let all = tree.walk();
         let kinds: Vec<_> = all.iter().map(|n| n.kind).collect();
-        for k in vorn_view::NODES {
+        // A board is drawn whole: native platforms show tasks on their own screens.
+        for k in vorn_view::NODES.iter().filter(|k| **k != "board") {
             assert!(kinds.contains(k), "no {k} node in {kinds:?}");
         }
         let toggle = all.iter().find(|n| n.kind == "toggle").unwrap();
