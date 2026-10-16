@@ -7,6 +7,8 @@ struct Computer: Codable, Identifiable, Equatable {
     var name: String
     /// `host:port`, or a `wss://host:port` base when it was paired over https.
     var host: String
+    /// SHA-256 of the certificate it was paired with; none for a pairing made before certificates.
+    var fingerprint: String?
 }
 
 /// The paired computers and which one is in use.
@@ -32,14 +34,16 @@ final class Computers: ObservableObject {
 
     func token(_ c: Computer) -> String? { Keychain.get("vorn.token.\(c.id)") }
 
-    /// Saves a pairing and makes it the one in use; the same address replaces its token.
-    func add(name: String, host: String, token: String) {
-        let id = list.first { $0.host == host }?.id ?? UUID().uuidString
+    /// Saves a pairing and makes it the one in use; the same machine replaces its token, scheme and certificate.
+    func add(name: String, host: String, token: String, fingerprint: String?) {
+        let id = list.first { Pairing.hostOf($0.host) == Pairing.hostOf(host) }?.id ?? UUID().uuidString
         Keychain.set("vorn.token.\(id)", token)
         if let i = list.firstIndex(where: { $0.id == id }) {
             list[i].name = name
+            list[i].host = host
+            list[i].fingerprint = fingerprint
         } else {
-            list.append(Computer(id: id, name: name, host: host))
+            list.append(Computer(id: id, name: name, host: host, fingerprint: fingerprint))
         }
         select(id)
     }
@@ -67,7 +71,7 @@ final class Computers: ObservableObject {
         let token = defaults.string(forKey: "vornToken") ?? ""
         defaults.removeObject(forKey: "vornHost")
         defaults.removeObject(forKey: "vornToken")
-        if !token.isEmpty { add(name: Pairing.hostOf(host), host: host, token: token) }
+        if !token.isEmpty { add(name: Pairing.hostOf(host), host: host, token: token, fingerprint: nil) }
     }
 
     /// The id half of a `vorn_<id>_<secret>` token, which is not secret; the secret may contain `_`.

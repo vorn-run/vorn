@@ -6,7 +6,7 @@
 typedef struct VpHandle VpHandle;
 typedef void (*VpWake)(void *ctx);
 
-VpHandle *vp_new(const char *host, const char *token, VpWake wake, void *ctx);
+VpHandle *vp_new(const char *host, const char *token, const char *pin, VpWake wake, void *ctx);
 void vp_free(VpHandle *h);
 
 bool vp_attach_layer(VpHandle *h, void *metal_layer, float w, float h_pt, float scale, bool terminal_only);

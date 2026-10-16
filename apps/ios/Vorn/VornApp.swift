@@ -206,6 +206,7 @@ struct Settings: View {
             }
             Button("Pair another computer") { adding = true }
             if let c = computers.current {
+                trusted(c)
                 Button("Forget this computer", role: .destructive) { forgetting = c }
             }
         }
@@ -215,6 +216,28 @@ struct Settings: View {
             Button("Forget", role: .destructive) { forget(c) }
         } message: { _ in
             Text("This phone gives up its token. You'll need a new pairing code from Settings › Remote Access to connect again.")
+        }
+    }
+
+    /// The certificate this phone trusts for `c`, or that it has none to check.
+    @ViewBuilder
+    private func trusted(_ c: Computer) -> some View {
+        if let fp = c.fingerprint {
+            VStack(alignment: .leading, spacing: 4) {
+                Label { Text("Trusted certificate") } icon: { VornIcon(name: "lock").scaleEffect(0.8) }
+                    .font(.subheadline).foregroundStyle(Palette.ink)
+                Text(Pairing.grouped(fp)).font(.caption).fontDesign(.monospaced).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            .padding(.vertical, 2)
+        } else {
+            Button { adding = true } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Not secured. Pair again").foregroundStyle(.orange)
+                    Text("Paired before certificates, so this connection is not encrypted.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

@@ -188,11 +188,13 @@ fn with<T: Default>(h: *mut Handle, f: impl FnOnce(&mut Handle) -> T) -> T {
     }
 }
 
-/// A phone app connecting to vornd at `host` (`ip:port`) with device token `token`.
+/// A phone app connecting to vornd at `host` (`ip:port`) with device token
+/// `token`, over TLS trusting only the certificate `pin` names unless it is empty.
 #[no_mangle]
 pub extern "C" fn vp_new(
     host: *const c_char,
     token: *const c_char,
+    pin: *const c_char,
     wake: WakeFn,
     ctx: *mut c_void,
 ) -> *mut Handle {
@@ -200,11 +202,12 @@ pub extern "C" fn vp_new(
     let ctx = Arc::new(Ctx(ctx));
     let model = Model::new(Arc::new(move || wake(ctx.0)));
     let mut phone = Phone::new(model);
-    let (host, token) = (str_in(host), str_in(token));
+    let (host, token, pin) = (str_in(host), str_in(token), str_in(pin));
     if !host.is_empty() {
         phone.connect(Target {
             host: host.to_owned(),
             token: token.to_owned(),
+            pin: (!pin.is_empty()).then(|| pin.to_owned()),
         });
     }
     Box::into_raw(Box::new(Handle {

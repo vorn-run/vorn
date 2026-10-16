@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import VisionKit
 
@@ -17,29 +18,51 @@ struct Paired<Content: View>: View {
                 ProgressView()
             }
         }
-        .task(id: computers.active) { connect() }
+        .task(id: computers.current) { connect() }
     }
 
     private func connect() {
         core = nil
         guard let c = computers.current else { return }
         guard let token = computers.token(c) else { return computers.remove(c.id) }
-        core = Core(host: c.host, token: token)
+        core = Core(host: c.host, token: token, pin: c.fingerprint)
     }
 }
 
 /// The address and code exchange, shared by the scanner and the form.
 enum Pairing {
-    struct Payload { let url: String; let code: String }
+    struct Payload { let url: String; let code: String; let fingerprint: String? }
 
-    /// Reads `vorn://pair?url=…&code=…` (or `vorn:/pair?…`); anything else isn't ours.
+    /// Reads `vorn://pair?url=…&code=…&fp=…` (or `vorn:/pair?…`); anything else isn't ours.
     static func payload(_ raw: String) -> Payload? {
         guard let u = URLComponents(string: raw), u.scheme == "vorn" else { return nil }
         let target = u.host?.isEmpty == false ? u.host! : u.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard target == "pair",
               let url = u.queryItems?.first(where: { $0.name == "url" })?.value, !url.isEmpty,
               let code = u.queryItems?.first(where: { $0.name == "code" })?.value, !code.isEmpty else { return nil }
-        return Payload(url: url, code: code)
+        let fp = u.queryItems?.first(where: { $0.name == "fp" })?.value
+        return Payload(url: url, code: code, fingerprint: fp)
+    }
+
+    /// A certificate's SHA-256 as 64 lowercase hex digits, however it was grouped or typed.
+    static func fingerprint(_ raw: String) -> String? {
+        let hex = raw.lowercased().filter { !" :-\n\t".contains($0) }
+        return hex.count == 64 && hex.allSatisfy(\.isHexDigit) ? hex : nil
+    }
+
+    /// `fingerprint` in fours, as the computer shows it.
+    static func grouped(_ fingerprint: String) -> String {
+        stride(from: 0, to: fingerprint.count, by: 4).map { i in
+            let a = fingerprint.index(fingerprint.startIndex, offsetBy: i)
+            return String(fingerprint[a..<(fingerprint.index(a, offsetBy: 4, limitedBy: fingerprint.endIndex) ?? fingerprint.endIndex)])
+        }.joined(separator: " ")
+    }
+
+    /// The same origin over https, the only way a pinned computer is reached.
+    static func secure(_ base: URL) -> URL {
+        var u = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        u?.scheme = "https"
+        return u?.url ?? base
     }
 
     /// The server's HTTP origin from what was typed or scanned, e.g. `http://host:port`.
@@ -67,7 +90,7 @@ enum Pairing {
         host.replacingOccurrences(of: "wss://", with: "").replacingOccurrences(of: "ws://", with: "")
     }
 
-    enum Failure: Error { case expired, spent, refused, unreachable, denied, timedOut }
+    enum Failure: Error { case expired, spent, refused, unreachable, denied, timedOut, changed, outdated }
 
     static func message(_ f: Failure, machine: String) -> String {
         switch f {
@@ -77,39 +100,74 @@ enum Pairing {
         case .unreachable: "Could not reach \(machine). Is this phone on the same network?"
         case .denied: "That computer refused this phone."
         case .timedOut: "Nobody answered before the code expired."
+        case .changed: "\(machine) did not show the certificate this code names. Show a new code on your computer."
+        case .outdated: "This code has no certificate fingerprint. Update Vorn on your computer, then show a new code."
         }
     }
 
-    private static func post(_ base: URL, _ path: String, _ body: [String: Any]) async throws -> (Int, [String: Any]) {
+    /// Trusts a server only when its certificate hashes to `fingerprint`, never the system's roots.
+    private final class Pin: NSObject, URLSessionDelegate {
+        let fingerprint: String
+        private(set) var mismatched = false
+        init(_ fingerprint: String) { self.fingerprint = fingerprint }
+
+        func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge)
+            async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+            guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+                  let trust = challenge.protectionSpace.serverTrust else { return (.performDefaultHandling, nil) }
+            let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first
+            let seen = leaf.map { SHA256.hash(data: SecCertificateCopyData($0) as Data).map { String(format: "%02x", $0) }.joined() }
+            guard seen == fingerprint else {
+                mismatched = true
+                return (.cancelAuthenticationChallenge, nil)
+            }
+            return (.useCredential, URLCredential(trust: trust))
+        }
+    }
+
+    private static func post(_ base: URL, _ path: String, _ body: [String: Any], pin: String) async throws -> (Int, [String: Any]) {
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let trust = Pin(pin)
+        let session = URLSession(configuration: .ephemeral, delegate: trust, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let data: Data, resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            if trust.mismatched { throw Failure.changed }
+            throw error
+        }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         return (status, (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
     }
 
     /// Trades a code for a place in the computer's queue.
-    static func redeem(_ base: URL, code: String) async -> Result<String, Failure> {
+    static func redeem(_ base: URL, code: String, pin: String) async -> Result<String, Failure> {
         do {
-            let (status, r) = try await post(base, "api/pair/redeem", ["code": code, "deviceName": UIDevice.current.name])
+            let (status, r) = try await post(base, "api/pair/redeem", ["code": code, "deviceName": UIDevice.current.name], pin: pin)
             if (200..<300).contains(status), let id = r["requestId"] as? String { return .success(id) }
             switch r["error"] as? String {
             case "expired": return .failure(.expired)
             case "spent": return .failure(.spent)
             default: return .failure(.refused)
             }
+        } catch Failure.changed {
+            return .failure(.changed)
         } catch {
             return .failure(.unreachable)
         }
     }
 
     /// Waits up to five minutes for someone to approve the phone; a dropped poll is retried.
-    static func decision(_ base: URL, request: String) async -> Result<(token: String, name: String?), Failure> {
+    static func decision(_ base: URL, request: String, pin: String) async -> Result<(token: String, name: String?), Failure> {
         let deadline = Date().addingTimeInterval(300)
         while Date() < deadline, !Task.isCancelled {
-            if let (status, p) = try? await post(base, "api/pair/poll", ["requestId": request]) {
+            var answer: (Int, [String: Any])?
+            do { answer = try await post(base, "api/pair/poll", ["requestId": request], pin: pin) } catch Failure.changed { return .failure(.changed) } catch {}
+            if let (status, p) = answer {
                 if !(200..<300).contains(status) { return .failure(.timedOut) }
                 switch p["status"] as? String {
                 case "approved":
@@ -266,14 +324,18 @@ struct ScanScreen: View {
     private func scanned(_ raw: String) {
         guard !handled, let p = Pairing.payload(raw) else { return }
         handled = true
-        guard let base = Pairing.base(p.url) else {
+        guard let found = Pairing.base(p.url) else {
             stage = .failed("That code carries an address Vorn cannot use.")
             return
         }
+        let base = Pairing.secure(found)
+        let machine = Pairing.hostOf(Pairing.coreHost(base))
+        guard let pin = p.fingerprint.flatMap(Pairing.fingerprint) else {
+            stage = .failed(Pairing.message(.outdated, machine: machine))
+            return
+        }
         job = Task { @MainActor in
-            let host = Pairing.coreHost(base)
-            let machine = Pairing.hostOf(host)
-            if let failure = await pair(computers, base: base, code: p.code, name: nil, waiting: { stage = .waiting(machine) }) {
+            if let failure = await pair(computers, base: base, pin: pin, code: p.code, name: nil, waiting: { stage = .waiting(machine) }) {
                 stage = .failed(Pairing.message(failure, machine: machine))
             }
         }
@@ -282,17 +344,17 @@ struct ScanScreen: View {
 
 /// Redeems `code`, waits for approval and saves the computer; returns why it failed, if it did.
 @MainActor
-private func pair(_ computers: Computers, base: URL, code: String, name: String?, waiting: () -> Void) async -> Pairing.Failure? {
+private func pair(_ computers: Computers, base: URL, pin: String, code: String, name: String?, waiting: () -> Void) async -> Pairing.Failure? {
     let host = Pairing.coreHost(base)
-    switch await Pairing.redeem(base, code: code) {
+    switch await Pairing.redeem(base, code: code, pin: pin) {
     case .failure(let f): return f
     case .success(let request):
         waiting()
-        switch await Pairing.decision(base, request: request) {
+        switch await Pairing.decision(base, request: request, pin: pin) {
         case .failure(let f): return f
         case .success(let ok):
             if Task.isCancelled { return nil }
-            computers.add(name: name ?? ok.name ?? Pairing.hostOf(host), host: host, token: ok.token)
+            computers.add(name: name ?? ok.name ?? Pairing.hostOf(host), host: host, token: ok.token, fingerprint: pin)
             return nil
         }
     }
@@ -332,6 +394,7 @@ struct ManualScreen: View {
     @State private var name = ""
     @State private var address = Bundle.main.object(forInfoDictionaryKey: "VornHost") as? String ?? ""
     @State private var secret = ""
+    @State private var fingerprint = ""
     @State private var stage = Stage.idle
     @State private var job: Task<Void, Never>?
 
@@ -352,6 +415,15 @@ struct ManualScreen: View {
                 TextField("192.168.0.4:61601", text: $address)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .fontDesign(.monospaced)
+            }
+            Section {
+                TextField("3f2a 9c41 …", text: $fingerprint, axis: .vertical)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .fontDesign(.monospaced)
+            } header: {
+                Text("Certificate fingerprint")
+            } footer: {
+                Text("Under the code on your computer. This phone will only talk to the computer that holds this certificate.")
             }
             Section {
                 SecureField("vorn_… or a pairing code", text: $secret)
@@ -390,20 +462,25 @@ struct ManualScreen: View {
 
     private func submit() {
         let value = secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let base = Pairing.base(address), !value.isEmpty else {
+        guard let found = Pairing.base(address), !value.isEmpty else {
             stage = .failed("Both an address and a token are needed.")
             return
         }
+        guard let pin = Pairing.fingerprint(fingerprint) else {
+            stage = .failed("The fingerprint is 64 letters and digits, shown under the code on your computer.")
+            return
+        }
+        let base = Pairing.secure(found)
         let host = Pairing.coreHost(base)
         let machine = Pairing.hostOf(host)
         let named = name.trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("vorn_") {
-            computers.add(name: named.isEmpty ? machine : named, host: host, token: value)
+            computers.add(name: named.isEmpty ? machine : named, host: host, token: value, fingerprint: pin)
             return
         }
         stage = .waiting(machine)
         job = Task { @MainActor in
-            if let f = await pair(computers, base: base, code: value, name: named.isEmpty ? nil : named,
+            if let f = await pair(computers, base: base, pin: pin, code: value, name: named.isEmpty ? nil : named,
                                   waiting: { stage = .waiting(machine) }) {
                 stage = .failed(Pairing.message(f, machine: machine))
             }

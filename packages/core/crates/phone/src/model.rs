@@ -15,11 +15,26 @@ use vorn_app::points::{self, kind, Point, PointAct, Points, Press};
 use vorn_app::view::PaneView;
 use vornui::{Id, Ui};
 
-/// Where the phone is pointed: `host:port` (or a `wss://host:port` base) and a device token.
+/// Where the phone is pointed: `host:port` (or a `wss://host:port` base), a
+/// device token, and the certificate fingerprint it trusts, over TLS.
 #[derive(Clone)]
 pub struct Target {
     pub host: String,
     pub token: String,
+    pub pin: Option<String>,
+}
+
+impl Target {
+    /// The socket at `path`: `wss` when a certificate is pinned.
+    fn url(&self, path: &str) -> String {
+        if self.host.contains("://") {
+            format!("{}/{path}", self.host)
+        } else if self.pin.is_some() {
+            format!("wss://{}/{path}", self.host)
+        } else {
+            format!("ws://{}/{path}", self.host)
+        }
+    }
 }
 
 /// How the connection stands, for the header's computer pill.
@@ -421,12 +436,9 @@ impl Model {
 
 fn open(t: &Target, wake: Wake) -> Result<Connected, String> {
     let socket = |path: &str| Socket {
-        url: if t.host.contains("://") {
-            format!("{}/{path}", t.host)
-        } else {
-            format!("ws://{}/{path}", t.host)
-        },
+        url: t.url(path),
         token: t.token.clone(),
+        pin: t.pin.clone(),
     };
     let (rpc, events) =
         Rpc::over(Box::new(socket("ws")), wake.clone()).map_err(|e| e.to_string())?;
@@ -456,4 +468,21 @@ fn open(t: &Target, wake: Wake) -> Result<Connected, String> {
         grid,
         permissions,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Target;
+
+    #[test]
+    fn a_pinned_computer_is_reached_over_tls() {
+        let t = |host: &str, pin: Option<&str>| Target {
+            host: host.into(),
+            token: String::new(),
+            pin: pin.map(Into::into),
+        };
+        assert_eq!(t("10.0.0.2:5", Some("ab")).url("ws"), "wss://10.0.0.2:5/ws");
+        assert_eq!(t("10.0.0.2:5", None).url("ws"), "ws://10.0.0.2:5/ws");
+        assert_eq!(t("wss://h:5", None).url("grid"), "wss://h:5/grid");
+    }
 }

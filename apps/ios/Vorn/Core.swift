@@ -20,12 +20,13 @@ final class Core: ObservableObject {
     /// The view options as last saved, to write only when they change.
     private var prefs: String?
 
-    init(host: String, token: String) {
+    /// Connects over TLS trusting only the certificate `pin` names, or in the clear without one.
+    init(host: String, token: String, pin: String?) {
         let wake: VpWake = { ctx in
             guard let ctx else { return }
             Unmanaged<WakeBox>.fromOpaque(ctx).takeUnretainedValue().ring()
         }
-        handle = vp_new(host, token, wake, Unmanaged.passRetained(box).toOpaque())
+        handle = vp_new(host, token, pin ?? "", wake, Unmanaged.passRetained(box).toOpaque())
         box.core = self
         if let saved = UserDefaults.standard.string(forKey: Self.prefsKey) {
             vp_set_prefs(handle, saved)
