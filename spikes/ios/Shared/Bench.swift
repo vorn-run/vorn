@@ -1,7 +1,6 @@
 import Foundation
 
-/// A scripted run, on launch with `-vornBench 1`: scrolls the list and the terminal and types,
-/// timing each part, so the two apps are measured the same way without hands.
+/// With `-vornBench 1`, scrolls the list and terminal and types, timing each part the same in both apps.
 final class Bench {
     private let core: Core
     private let label: String

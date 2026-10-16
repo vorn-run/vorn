@@ -1,5 +1,4 @@
-//! A UI drawn into a layer a platform's own view owns (a CAMetalLayer in
-//! an iOS view), framed by the platform's display link rather than winit.
+//! A UI drawn into a layer a platform view owns, such as a CAMetalLayer, framed by its display link.
 
 use std::ffi::c_void;
 
@@ -67,9 +66,7 @@ impl Layer {
         }
     }
 
-    /// Builds, lays out and draws a frame of `app`; `None` when the layer
-    /// had no drawable to give (hidden, or resized under the frame). The
-    /// caller hands [`Ui::take_events`] to the app after each input.
+    /// Builds, lays out and draws a frame of `app`; `None` when the layer had no drawable.
     pub fn frame<A: App>(&mut self, app: &mut A) -> Result<Option<Laid>, String> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)

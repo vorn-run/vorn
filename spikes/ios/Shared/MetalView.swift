@@ -128,7 +128,11 @@ final class MetalView: UIView, UITextInput {
     var hasText: Bool { !typed.isEmpty }
 
     func insertText(_ text: String) {
-        commitMarked()
+        if let m = marked {
+            typed = (typed as NSString).replacingCharacters(in: m, with: "")
+            marked = nil
+            vp_preedit(core.handle, "")
+        }
         typed += text
         vp_text(core.handle, text)
     }

@@ -1,11 +1,10 @@
 #!/bin/sh
-# Builds the Rust library for iPhone and both apps; signs them when PROFILE names a development
-# .mobileprovision covering the device, and installs them when a device id is given.
+# Builds both apps; PROFILE=<.mobileprovision> signs them and a device id installs them.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 core="$here/../../packages/core"
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-(cd "$core" && nice -n 10 cargo build --profile release -j 3 -p vorn-phone --target aarch64-apple-ios)
+(cd "$core" && IPHONEOS_DEPLOYMENT_TARGET=26.0 nice -n 10 cargo build --profile release -j 3 -p vorn-phone --target aarch64-apple-ios)
 cd "$here"
 xcodegen generate --quiet
 for t in Drawn Native; do

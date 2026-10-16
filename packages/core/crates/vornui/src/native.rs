@@ -1,8 +1,4 @@
-//! The native backend: a frame read as a tree of what each box means
-//! (a list, a toggle, a secret field) for a platform to draw with its own
-//! views. Boxes say what they are with [`El::sem`]; controls are read from
-//! their accessibility role, and anything else lends its children to its
-//! parent. Platform views act on the frame by id through [`Ui::access`].
+//! The native backend: a frame read as a semantic tree for platform views, which act by id through [`Ui::access`].
 
 use accesskit::Role;
 
@@ -57,9 +53,7 @@ pub enum Sem {
 /// One node of the semantic tree.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Node {
-    /// `column`, `row`, `list`, `section`, `divider`, `sheet`, `more`,
-    /// `choice`, `option`, `icon`, `status`, `badge`, `button`, `toggle`,
-    /// `field`, `link`, `text`, `drawn`.
+    /// What the box is, e.g. `list`, `section`, `toggle`, `field`, `link`, `text` or `drawn`.
     pub kind: &'static str,
     pub id: Option<Id>,
     pub label: String,
@@ -152,16 +146,14 @@ fn quote(s: &mut String, v: &str) {
 }
 
 impl Ui {
-    /// A UI whose frames are read as a semantic tree for [`Native`]; it
-    /// lays out on the CPU so presses and fields resolve as on pixels.
+    /// A UI whose frames are laid out on the CPU and read as a semantic tree for [`Native`].
     pub fn native(cfg: &crate::UiConfig) -> Ui {
         let mut ui = Ui::headless(crate::RenderMode::Cpu, cfg);
         ui.native = Some(Node::of("column"));
         ui
     }
 
-    /// Whether frames are read as a semantic tree: menus list their
-    /// entries and fields their text whether open or not.
+    /// Whether frames are read as a semantic tree, with menus and fields shown whether open or not.
     pub fn is_native(&self) -> bool {
         self.native.is_some()
     }
@@ -320,8 +312,7 @@ fn text_of(el: &El) -> Option<String> {
     el.children.iter().find_map(text_of)
 }
 
-/// The native backend: the last frame's semantic tree as JSON, for a
-/// platform to draw with its own views.
+/// The last frame's semantic tree as JSON, for a platform to draw with its own views.
 #[derive(Default)]
 pub struct Native {
     pub json: String,

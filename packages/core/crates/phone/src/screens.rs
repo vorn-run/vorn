@@ -1,6 +1,4 @@
-//! The phone's screens, laid out by width: one column with tabs below a
-//! compact width, a list beside the open session above it. Boxes say what
-//! they are, so a native host reads the same screens as its own views.
+//! The phone's screens: tabs in one column when compact, the list beside the session when wide.
 
 use vorn_app::client::store::Session;
 use vorn_app::points::Point;
@@ -649,8 +647,7 @@ pub fn settings_page(p: &Phone, ui: &Ui, pt: &Point) -> El {
         .unwrap_or_else(|| empty("Nothing to set", "This page has no template."))
 }
 
-/// What a native host shows for `screen`: `sessions`, `tasks`,
-/// `workflows`, `settings`, `settings:<key>` or `session:<id>`.
+/// What a native host shows for `screen`, e.g. `sessions`, `settings:<key>` or `session:<id>`.
 pub fn native(p: &Phone, ui: &Ui, screen: &str) -> El {
     p.model.acts.clear();
     if let Some(key) = screen.strip_prefix("settings:") {

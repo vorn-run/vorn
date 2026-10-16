@@ -1,5 +1,4 @@
-//! The phone app's state and input: what is open, the terminal's scroll,
-//! and touches read as taps and drags.
+//! The phone app's state and input: what is open, the terminal's scroll, and touches as taps and drags.
 
 use std::collections::HashMap;
 

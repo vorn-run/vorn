@@ -1,6 +1,4 @@
-//! The phone's connection to one vornd: its sessions, the one terminal
-//! shown, and the extensions' settings pages, kept current from its
-//! notifications. Connecting runs off the UI thread.
+//! The phone's link to one vornd: sessions, the open terminal and extension settings, kept current.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};

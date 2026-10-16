@@ -19,10 +19,9 @@ enum Palette {
 
     static func tone(_ t: String?) -> Color {
         switch t {
-        case "ok", "success": .green
-        case "warn", "warning", "attention": bronze
-        case "danger", "error": .red
-        case "info": .blue
+        case "good": .green
+        case "warn", "busy": bronze
+        case "bad": .red
         default: .secondary
         }
     }

@@ -1,5 +1,4 @@
-//! The C API the iOS host calls, all on its main thread. Strings in are
-//! UTF-8 and borrowed; strings out are freed with [`vp_free_string`].
+//! The C API the iOS host calls on its main thread; returned strings go back to [`vp_free_string`].
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -212,8 +211,7 @@ pub unsafe extern "C" fn vp_free(h: *mut Handle) {
     }
 }
 
-/// Draws into `layer`, a CAMetalLayer, `w`×`h` points at `scale`; only the
-/// open session's terminal when `terminal_only`. Answers whether it could.
+/// Draws into the CAMetalLayer `layer` (just the terminal when `terminal_only`); false if it can't.
 ///
 /// # Safety
 /// `layer` outlives `h`'s use of it (until `vp_free`).

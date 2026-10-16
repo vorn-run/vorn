@@ -1,6 +1,4 @@
-//! Vorn on a phone. Two hosts share these screens: one draws the whole app
-//! into a Metal layer, the other reads each screen as a semantic tree for
-//! the platform's own views and draws only the terminal.
+//! Vorn on a phone: screens a host either draws whole or reads as native views around a drawn terminal.
 
 pub mod ffi;
 pub mod model;

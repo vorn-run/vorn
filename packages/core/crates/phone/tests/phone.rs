@@ -1,7 +1,4 @@
-//! The turns extension's settings page in the phone's compact layout at
-//! 390x844 points: drawn in pixels at 3x, in terminal cells, and read as a
-//! native tree, with the same controls in each. `VORN_PHONE_SHOT=<prefix>`
-//! saves the pixels as a PNG and the cells as text.
+//! The turns settings page at 390x844 in pixels, cells and a native tree; `VORN_PHONE_SHOT=<prefix>` saves them.
 
 use std::path::Path;
 use std::sync::Arc;
