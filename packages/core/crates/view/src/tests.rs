@@ -396,7 +396,7 @@ rows "cards" {
     state enum todo doing done
     late bool
 }
-board "cards" by="state" move="move" open="open" add="add" empty="Drop cards here" dim="{row.late}" {
+board "cards" by="state" move="move" open="open" add="add" empty="Drop cards here" dim="{row.late}" label="{row.title}" {
     column todo label="To do" icon="circle" tone=idle
     column doing label="Doing" icon="clock" tone=active
     column done label="Done" icon="circle-check" tone=good

@@ -7,6 +7,7 @@
 //! report clicks on; what a click does is the caller's to decide.
 
 pub mod agent;
+pub mod board;
 pub mod card;
 pub mod dock;
 pub mod glyph;

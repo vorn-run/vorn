@@ -734,6 +734,12 @@ pub struct Tasks {
     pub grab: Option<(f32, f32, f32)>,
     /// When a drag near a column's edge last scrolled it.
     pub edge_scrolled: Option<Instant>,
+    /// The board's cards, placed, kept between frames.
+    pub placed: crate::screen::tasks::board::Placed,
+    /// The task list is being read again, a page at a time.
+    pub reloading: bool,
+    /// It was asked to be read again while a read ran.
+    pub reload_again: bool,
 }
 
 impl Tasks {
@@ -777,19 +783,34 @@ impl Tasks {
         project: Option<&str>,
         projects: &[&str],
     ) -> Vec<&'a TaskConfig> {
+        self.visible_at(tasks, project, projects)
+            .into_iter()
+            .map(|i| &tasks[i])
+            .collect()
+    }
+
+    /// Where each of the tasks [`Tasks::visible`] shows is in `tasks`.
+    pub fn visible_at(
+        &self,
+        tasks: &[TaskConfig],
+        project: Option<&str>,
+        projects: &[&str],
+    ) -> Vec<usize> {
         tasks
             .iter()
-            .filter(|t| match project {
+            .enumerate()
+            .filter(|(_, t)| match project {
                 Some(p) => t.project_name == p,
                 None => projects.contains(&t.project_name.as_str()),
             })
-            .filter(|t| self.archived || t.archived_at.is_none())
-            .filter(|t| {
+            .filter(|(_, t)| self.archived || t.archived_at.is_none())
+            .filter(|(_, t)| {
                 self.filter
                     .as_deref()
                     .is_none_or(|f| t.status.as_str() == f)
             })
-            .filter(|t| self.source.keeps(t))
+            .filter(|(_, t)| self.source.keeps(t))
+            .map(|(i, _)| i)
             .collect()
     }
 }
@@ -981,6 +1002,27 @@ pub fn form_of(t: &TaskConfig) -> TaskForm {
         images: t.images.clone(),
         attaching: false,
     }
+}
+
+/// What a press on the Tasks board's template does in the app: its cards'
+/// menus and its columns' add buttons, each the act the board ran before it
+/// was a template. `None` for a call the built-in answers itself.
+pub fn board_press(press: &crate::points::Press) -> Option<TaskAct> {
+    let row = press.row.clone()?;
+    Some(match press.call.as_deref()? {
+        "open" => TaskAct::Open(row),
+        "add" => TaskAct::New(row),
+        "focus" | "resume" => TaskAct::OpenSession(row),
+        "review" => TaskAct::ReviewDiff(row),
+        "complete" => TaskAct::Complete(row),
+        "reopen" => TaskAct::Reopen(row),
+        "edit" => TaskAct::Edit(row),
+        "cancel" => TaskAct::Cancel(row),
+        "archive" => TaskAct::Archive(row),
+        "unarchive" => TaskAct::Unarchive(row),
+        "delete" => TaskAct::Delete(row),
+        _ => return None,
+    })
 }
 
 /// The kanban drop rules (`handleKanbanDrop`): the status change a card

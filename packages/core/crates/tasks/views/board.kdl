@@ -24,7 +24,7 @@ rows "tasks" {
     archive bool
 }
 
-board "tasks" by="status" move="move" open="open" add="add" empty="Drop tasks here" dim="{row.dim}" {
+board "tasks" by="status" move="move" open="open" add="add" empty="Drop tasks here" dim="{row.dim}" label="{row.title}" {
     column todo label="Todo" icon="circle" tone=idle
     column in_progress label="In Progress" icon="clock" tone=active
     column in_review label="In Review" icon="eye" tone=busy

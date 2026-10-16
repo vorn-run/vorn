@@ -52,12 +52,60 @@ pub(super) enum TaskCall {
         task: Option<String>,
         toast: Option<&'static str>,
     },
+    /// A page of the task list read again from `offset`, after `read`.
+    Page {
+        offset: u64,
+        read: Vec<Value>,
+    },
 }
 
 impl App {
+    /// Reads the task list again, a page at a time, as vornd asks when tasks
+    /// were written without saying which; one read at a time.
+    pub(super) fn reload_tasks(&mut self) {
+        if std::mem::replace(&mut self.st.tasks.reloading, true) {
+            self.st.tasks.reload_again = true;
+            return;
+        }
+        self.call(
+            Call::Task(TaskCall::Page {
+                offset: 0,
+                read: Vec::new(),
+            }),
+            "task:list",
+            crate::client::store::task_page(0),
+        );
+    }
+
     pub(super) fn task_answered(&mut self, call: TaskCall, answer: Result<Value, RpcError>) {
+        if let TaskCall::Page { offset, mut read } = call {
+            let Ok(page) = answer else {
+                self.st.tasks.reloading = false;
+                return;
+            };
+            let next = crate::client::store::next_page(offset, &page);
+            if let Value::Array(rows) = page {
+                read.extend(rows);
+            }
+            if let Some(offset) = next {
+                self.call(
+                    Call::Task(TaskCall::Page { offset, read }),
+                    "task:list",
+                    crate::client::store::task_page(offset),
+                );
+                return;
+            }
+            self.store.set_tasks(Value::Array(read));
+            self.st.tasks.reloading = false;
+            if std::mem::take(&mut self.st.tasks.reload_again) {
+                self.reload_tasks();
+            }
+            return;
+        }
         let t = &mut self.st.tasks;
         match call {
+            // Read above, before the task state is borrowed.
+            TaskCall::Page { .. } => {}
             TaskCall::Runs(id) => {
                 if t.selected.as_deref() == Some(id.as_str()) {
                     t.runs = list(answer);
@@ -322,6 +370,23 @@ impl App {
 
     /// Each frame: thumbnails to the GPU and the debounced autosave.
     pub(super) fn tasks_tick(&mut self, ui: &mut Ui) {
+        if self.st.view == MainView::Tasks {
+            let names: Vec<&str> = self
+                .store
+                .workspace_projects()
+                .map(|p| p.name.as_str())
+                .collect();
+            let t = &mut self.st.tasks;
+            let mut placed = std::mem::take(&mut t.placed);
+            placed.refresh(
+                t,
+                &self.store.tasks,
+                self.st.project.as_deref(),
+                &names,
+                self.store.tasks_gen,
+            );
+            self.st.tasks.placed = placed;
+        }
         // The diff follows the task and its directory, as the panel's `diffKey`.
         let key = self.diff_cwd().map(|cwd| {
             let id = self.st.tasks.selected.as_deref().unwrap_or("");

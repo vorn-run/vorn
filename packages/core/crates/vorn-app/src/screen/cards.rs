@@ -447,38 +447,6 @@ pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> 
     Some(chip)
 }
 
-/// The task in progress on this session, as a pill.
-fn task_chip(s: &Screen<'_>, id: &str, dim: f32) -> Option<El> {
-    let task = s.store.tasks.iter().find(|t| {
-        t.assigned_session_id.as_deref() == Some(id) && t.status.as_str() == "in_progress"
-    })?;
-    let chip = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .px(6.0)
-        .py(2.0)
-        .rounded(999.0)
-        .border(1.0, fade(look::WHITE, 0.08, dim))
-        .role(Role::Button, task.title.as_str())
-        .child(ico(
-            "list-todo",
-            10.0,
-            2.0,
-            fade(look::INK, look::INK_FAINT, dim),
-        ))
-        .child(
-            text(
-                truncate(&task.title, 24),
-                10.0,
-                fade(look::INK, look::INK_SECONDARY, dim),
-            )
-            .line_height(12.0)
-            .silent(),
-        );
-    Some(chip)
-}
-
 /// What the session's program reports of itself: its line, its progress,
 /// and how many steps run under it (the sidebar lists them).
 fn report(session: &Session, dim: f32) -> Option<El> {
@@ -549,9 +517,6 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         .h(look::CARD_STATUS_H - 1.0)
         .shrink0();
     if let Some(chip) = branch_chip(s, session, dim) {
-        bar = bar.child(chip);
-    }
-    if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
     }
     bar = bar.child(report(session, dim).unwrap_or_else(|| div().grow()));

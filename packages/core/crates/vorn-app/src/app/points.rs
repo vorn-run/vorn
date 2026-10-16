@@ -154,6 +154,13 @@ impl App {
 
     /// What a template's button or toggle asks for, in the order the template reads.
     fn press(&mut self, ui: &mut Ui, extension: &str, press: &Press) {
+        // The board's menus and add buttons are the app's, as the board always was.
+        if extension == crate::screen::tasks::board::TASKS {
+            if let Some(act) = crate::tasks::board_press(press) {
+                self.run_task(ui, act);
+                return;
+            }
+        }
         if let Some(params) = points::call_params(extension, press) {
             self.call(Call::Point(PointCall::Called), "extension:call", params);
         }

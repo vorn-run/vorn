@@ -26,6 +26,7 @@ pub mod kind {
     pub const WINDOWS: &str = "windows";
     pub const MENUS: &str = "menus";
     pub const DIALOGS: &str = "dialogs";
+    pub const VIEWS: &str = "views";
 }
 
 /// One contribution and its template, or why the template does not check.

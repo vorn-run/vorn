@@ -206,6 +206,8 @@ pub struct Board {
     pub empty: Option<Text>,
     /// The cards drawn faded, as a cancelled or archived one.
     pub dim: Option<Cond>,
+    /// What a screen reader says a card is.
+    pub label: Option<Text>,
 }
 
 /// One column of a board: the value of `by` it holds, and its header.
@@ -313,6 +315,14 @@ impl Row {
         Some(Row { id, fields })
     }
 
+    /// A string field as it is held, without a copy; `None` for any other.
+    pub fn str(&self, field: &str) -> Option<&str> {
+        if field == "id" {
+            return Some(&self.id);
+        }
+        self.fields.get(field).and_then(Value::as_str)
+    }
+
     /// A field as text; an absent or null field is empty.
     pub fn text(&self, field: &str) -> String {
         if field == "id" {
@@ -342,6 +352,15 @@ pub trait Source {
 
     fn first(&self, collection: &str) -> Option<&Row> {
         self.rows(collection).first()
+    }
+
+    /// Row `index` of `collection` whole, as a card or an item draws it. A
+    /// client holding many rows may keep only what places them in
+    /// [`Source::rows`] and fill the rest here, for the rows it draws.
+    fn row_at(&self, collection: &str, index: usize) -> Option<std::borrow::Cow<'_, Row>> {
+        self.rows(collection)
+            .get(index)
+            .map(std::borrow::Cow::Borrowed)
     }
 }
 
@@ -517,7 +536,7 @@ fn keys_of(kind: &str) -> &'static [&'static str] {
         "choice" => &["rows", "label", "selected", "call", "when"],
         "list" => &["rows", "item", "empty", "where", "is", "when"],
         "board" => &[
-            "rows", "by", "columns", "card", "move", "open", "add", "empty", "dim", "when",
+            "rows", "by", "columns", "card", "move", "open", "add", "empty", "dim", "label", "when",
         ],
         _ => &["when"],
     }
@@ -1081,6 +1100,9 @@ impl Parser {
         let dim = body
             .get("dim")
             .and_then(|v| self.cond(v, &format!("{path}.dim"), inner));
+        let label = body
+            .get("label")
+            .and_then(|v| self.text(v, &format!("{path}.label"), inner));
         Some(Board {
             rows,
             by: by.to_owned(),
@@ -1091,6 +1113,7 @@ impl Parser {
             add,
             empty,
             dim,
+            label,
         })
     }
 

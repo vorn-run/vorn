@@ -5,7 +5,8 @@
 use std::collections::BTreeMap;
 
 use vorn_view::{
-    Action as Do, Cond, Kind, Node, Role as TextRole, Row, Source, Style, Template, Tone,
+    Action as Do, BoardColumn, Cond, Kind, Node, Role as TextRole, Row, Source, Style, Template,
+    Tone,
 };
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
@@ -50,6 +51,23 @@ pub trait Bind {
     fn menu(&self, slot: u64, row: Option<&str>) -> Id;
     /// Whether the more menu of button `id` is open.
     fn menu_open(&self, id: Id) -> bool;
+    /// The id of row `row`'s card on a board of `rows`; a click on it opens
+    /// the row, through the board's `open` method when it has one.
+    fn card(&self, rows: &str, row: &str, open: Option<&str>) -> Id {
+        let _ = open;
+        crate::board::card_id(rows, row)
+    }
+    /// The row being dragged on a board of `rows`, and the column it is over.
+    fn dragging(&self, rows: &str) -> Option<(String, Option<String>)> {
+        let _ = rows;
+        None
+    }
+    /// An icon the client draws for a name not in the kit's set, as
+    /// `agent:<key>` for an agent's mark; `None` draws the kit's.
+    fn icon(&self, name: &str, size: f32) -> Option<El> {
+        let _ = (name, size);
+        None
+    }
 }
 
 /// The colour a tone draws in.
@@ -60,12 +78,21 @@ pub fn tone(t: Tone) -> Rgba {
         Tone::Warn => color::AMBER_400,
         Tone::Busy => color::BRONZO,
         Tone::Muted => color::INK_FAINT,
+        Tone::Idle => color::STATUS_SLATE,
+        Tone::Active => color::STATUS_BLUE,
     }
 }
 
 /// Template `t` with `row` in scope (a session's row, for a per-session place).
 pub fn view(ui: &Ui, t: &Template, row: Option<&Row>, src: &dyn Source, bind: &dyn Bind) -> El {
-    let cx = Cx { ui, src, bind };
+    let cx = Cx {
+        ui,
+        src,
+        bind,
+        column: None,
+        soft: false,
+        reveal: None,
+    };
     cx.node(&t.view, row, 1).unwrap_or_else(div)
 }
 
@@ -100,13 +127,19 @@ pub fn invalid(place: &str, errors: &[String]) -> El {
     b
 }
 
-struct Cx<'a> {
-    ui: &'a Ui,
-    src: &'a dyn Source,
-    bind: &'a dyn Bind,
+pub(crate) struct Cx<'a> {
+    pub(crate) ui: &'a Ui,
+    pub(crate) src: &'a dyn Source,
+    pub(crate) bind: &'a dyn Bind,
+    /// In a board's card: the column it is in.
+    pub(crate) column: Option<&'a BoardColumn>,
+    /// Tones drawn muted, as a board shows many at once.
+    pub(crate) soft: bool,
+    /// In a card: how far its controls show, as they show on hover.
+    pub(crate) reveal: Option<f32>,
 }
 
-fn child_slot(slot: u64, i: usize) -> u64 {
+pub(crate) fn child_slot(slot: u64, i: usize) -> u64 {
     slot.wrapping_mul(31).wrapping_add(i as u64 + 1)
 }
 
@@ -124,6 +157,12 @@ pub fn slots(t: &Template) -> Vec<u64> {
                 }
             }
             Kind::List { item, .. } => walk(item, child_slot(slot, 0), out),
+            Kind::Board(b) => {
+                walk(&b.card, child_slot(slot, 0), out);
+                for i in 0..b.columns.len() * 2 {
+                    out.push(child_slot(slot, i + 1));
+                }
+            }
             Kind::Choice { .. } => {
                 for i in 0..vorn_view::MAX_LIST {
                     out.push(child_slot(slot, i));
@@ -139,7 +178,15 @@ pub fn slots(t: &Template) -> Vec<u64> {
 
 impl Cx<'_> {
     fn holds(&self, when: Option<&Cond>, row: Option<&Row>) -> bool {
-        when.is_none_or(|c| c.holds(row, self.src))
+        when.is_none_or(|c| c.holds_in(row, self.src, self.column))
+    }
+
+    /// The colour `t` draws in here.
+    pub(crate) fn tone_of(&self, t: Tone) -> Rgba {
+        match t {
+            Tone::Good if self.soft => color::STATUS_SAGE,
+            other => tone(other),
+        }
     }
 
     fn kids(&self, kids: &[Node], row: Option<&Row>, slot: u64) -> Vec<El> {
@@ -149,11 +196,11 @@ impl Cx<'_> {
             .collect()
     }
 
-    fn node(&self, n: &Node, row: Option<&Row>, slot: u64) -> Option<El> {
+    pub(crate) fn node(&self, n: &Node, row: Option<&Row>, slot: u64) -> Option<El> {
         if !self.holds(n.when.as_ref(), row) {
             return None;
         }
-        let fill = |t: &vorn_view::Text| t.fill(row, self.src);
+        let fill = |t: &vorn_view::Text| t.fill_in(row, self.src, self.column);
         Some(match &n.kind {
             Kind::Column(kids) => div()
                 .col()
@@ -179,17 +226,39 @@ impl Cx<'_> {
                         .silent(),
                 )
                 .children(self.kids(children, row, slot)),
-            Kind::Text { value, role, grow } => {
-                let t = words(&fill(value), *role);
+            Kind::Text {
+                value,
+                role,
+                grow,
+                wrap,
+            } => {
+                let t = if *wrap {
+                    wrapped(&fill(value), *role)
+                } else {
+                    words(&fill(value), *role)
+                };
                 if *grow {
                     div().grow().min_w0().child(t)
                 } else {
                     t.shrink0()
                 }
             }
-            Kind::Icon { name, tone: t } => {
-                let ink = t.map_or(color::GRAY_400, tone);
-                crate::lucide(&fill(name), 14.0, 2.0, ink).shrink0()
+            Kind::Icon {
+                name,
+                tone: t,
+                column_tone,
+            } => {
+                let t = if *column_tone {
+                    self.column.and_then(|c| c.tone)
+                } else {
+                    *t
+                };
+                let ink = t.map_or(color::GRAY_400, |t| self.tone_of(t));
+                let name = fill(name);
+                match self.bind.icon(&name, 14.0) {
+                    Some(drawn) => drawn.shrink0(),
+                    None => crate::lucide(&name, 14.0, 2.0, ink).shrink0(),
+                }
             }
             Kind::Status { value, tones } => self.status(&fill(value), tones),
             Kind::Badge { value, tones } => {
@@ -197,7 +266,7 @@ impl Cx<'_> {
                 let ink = if tones.is_empty() {
                     color::GRAY_300
                 } else {
-                    tone(Tone::of(tones, &v))
+                    self.tone_of(Tone::of(tones, &v))
                 };
                 widgets::badge(&v, ink, Rgba::white(0.06)).role(Role::Label, v.as_str())
             }
@@ -289,6 +358,7 @@ impl Cx<'_> {
                 )
             }
             Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
+            Kind::Board(b) => crate::board::view(self, b, slot),
         })
     }
 
@@ -354,7 +424,7 @@ impl Cx<'_> {
     }
 
     fn status(&self, value: &str, tones: &BTreeMap<String, Tone>) -> El {
-        let ink = tone(Tone::of(tones, value));
+        let ink = self.tone_of(Tone::of(tones, value));
         let dot = if self.ui.is_cells() {
             text("●", 12.0, ink).line_height(16.0).silent()
         } else {
@@ -397,9 +467,15 @@ impl Cx<'_> {
             return None;
         }
         let hot = self.ui.hover(menu);
+        let open = self.bind.menu_open(menu);
+        let shown = match self.reveal {
+            Some(r) if !open => r.max(hot),
+            _ => 1.0,
+        };
         let mut b = div()
             .id(menu)
             .on(Action::Click)
+            .opacity(shown)
             .px(6.0)
             .py(4.0)
             .shrink0()
@@ -413,7 +489,7 @@ impl Cx<'_> {
                 2.0,
                 color::GRAY_400.mix(color::WHITE, hot),
             ));
-        if self.bind.menu_open(menu) {
+        if open {
             let panel = div()
                 .col()
                 .min_w(160.0)
@@ -520,16 +596,24 @@ impl Cx<'_> {
     }
 }
 
-fn words(s: &str, role: TextRole) -> El {
-    let el = match role {
+/// Text in a role, on as many lines as it takes.
+fn wrapped(s: &str, role: TextRole) -> El {
+    styled(s, role).wrapping().silent()
+}
+
+fn styled(s: &str, role: TextRole) -> El {
+    match role {
         TextRole::Title => text(s, 13.0, color::GRAY_200)
             .line_height(18.0)
             .weight(size::SEMIBOLD),
         TextRole::Body => text(s, size::XS.0, color::GRAY_300).line_height(size::XS.1),
         TextRole::Secondary => text(s, 11.0, color::GRAY_500).line_height(16.0),
         TextRole::Mono => text(s, 11.0, color::GRAY_400).mono().line_height(16.0),
-    };
-    el.truncate().silent()
+    }
+}
+
+fn words(s: &str, role: TextRole) -> El {
+    styled(s, role).truncate().silent()
 }
 
 fn filled(a: &Do, row: Option<&Row>, src: &dyn Source, confirm: Option<String>) -> Press {
