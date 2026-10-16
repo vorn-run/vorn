@@ -403,6 +403,20 @@ pub fn minimap_view(id: Id, m: &Minimap, h: f32) -> El {
 
 /// The canvas pane `size` big at `view`: the dot grid under `world` (cards
 /// and edges in flow units), with what floats over it.
+/// The part of the world a surface of `size` shows at `view`, as `(x0, y0, x1, y1)`,
+/// widened by `margin` screen points, so what lies outside it need not be drawn.
+pub fn visible(view: Viewport, size: (f32, f32), margin: f64) -> (f64, f64, f64, f64) {
+    // Scaled about the box's centre and shifted as `surface` does: a world point lands at `p * zoom + view`.
+    let (w, h) = (f64::from(size.0), f64::from(size.1));
+    let z = view.zoom.max(f64::EPSILON);
+    (
+        (-margin - view.x) / z,
+        (-margin - view.y) / z,
+        (w + margin - view.x) / z,
+        (h + margin - view.y) / z,
+    )
+}
+
 pub fn surface(id: Id, size: (f32, f32), view: Viewport, world: Vec<El>, over: Vec<El>) -> El {
     let (w, h) = size;
     let z = f(view.zoom);
@@ -627,6 +641,23 @@ pub(crate) fn view(cx: &Cx<'_>, g: &Graph, slot: u64) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_visible_world_is_the_pane_undone_by_the_view() {
+        let view = Viewport {
+            x: 100.0,
+            y: -50.0,
+            zoom: 2.0,
+        };
+        assert_eq!(
+            visible(view, (400.0, 300.0), 0.0),
+            (-50.0, 25.0, 150.0, 175.0)
+        );
+        assert_eq!(
+            visible(Viewport::default(), (400.0, 300.0), 10.0),
+            (-10.0, -10.0, 410.0, 310.0)
+        );
+    }
 
     #[test]
     fn an_unplaced_graph_goes_in_layers_by_its_longest_path() {

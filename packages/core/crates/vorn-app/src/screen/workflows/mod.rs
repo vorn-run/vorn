@@ -306,6 +306,15 @@ pub fn editor_point<'a>(s: &Screen<'a>) -> Option<&'a crate::points::Point> {
         .filter(|p| matches!(&p.template, Ok(Some(t)) if matches!(t.view.kind, vorn_view::Kind::Graph(_))))
 }
 
+/// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
+pub fn is_off(s: &Screen<'_>) -> bool {
+    editor_point(s).is_none()
+        && s.st.points.builtins.iter().any(|b| {
+            b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
+                && b.get("on") == Some(&Value::Bool(false))
+        })
+}
+
 /// What the view says while the Workflow editor is switched off: the
 /// workflows are kept and still run.
 pub fn off() -> El {

@@ -94,14 +94,30 @@ pub fn canvas(s: &Screen<'_>, d: &Draft) -> El {
         }
     }
     let status = live_status(s, d);
+    // Only what the pane shows is drawn; the margin keeps hover tools and ports.
+    let (x0, y0, x1, y1) = kit::visible(view, (w, h), 96.0);
+    let shown = |l: f64, t: f64, r: f64, b: f64| r >= x0 && l <= x1 && b >= y0 && t <= y1;
+    let in_view = |e: &canvas::Element| shown(e.x, e.y, e.x + e.w, e.y + e.h);
+    let by_id: HashMap<&str, &canvas::Element> =
+        els.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let edge_in_view =
+        |e: &canvas::Edge| match (by_id.get(e.source.as_str()), by_id.get(e.target.as_str())) {
+            (Some(a), Some(b)) => shown(
+                a.x.min(b.x),
+                a.y.min(b.y),
+                (a.x + a.w).max(b.x + b.w),
+                (a.y + a.h).max(b.y + b.h),
+            ),
+            _ => true,
+        };
     let mut world = Vec::new();
-    for e in &els.edges {
+    for e in els.edges.iter().filter(|e| edge_in_view(e)) {
         world.extend(edge_line(&els, e));
     }
-    for e in &els.edges {
+    for e in els.edges.iter().filter(|e| edge_in_view(e)) {
         world.extend(edge_pill(s, &els, e));
     }
-    for e in &els.nodes {
+    for e in els.nodes.iter().filter(|e| in_view(e)) {
         world.push(element(s, d, &els, e, &status));
     }
     if let Some(Gesture::Connect {

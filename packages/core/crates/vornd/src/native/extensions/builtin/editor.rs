@@ -85,6 +85,15 @@ fn labels(nodes: Option<&Value>) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Whether a gate of `run` asks now.
+fn asking(run: &WorkflowExecution) -> bool {
+    run.status == "running" && run.node_states.iter().any(is_gate)
+}
+
+fn is_gate(s: &vorn_protocol::NodeExecutionState) -> bool {
+    s.status.0 == "waiting" && s.waiting_for.as_deref() != Some("signIn")
+}
+
 /// The gates of `run` asking now, as rows: its workflow is `name`, its steps labelled `labels`.
 pub fn gate_rows(
     run: &WorkflowExecution,
@@ -96,7 +105,7 @@ pub fn gate_rows(
     }
     run.node_states
         .iter()
-        .filter(|s| s.status.0 == "waiting" && s.waiting_for.as_deref() != Some("signIn"))
+        .filter(|s| is_gate(s))
         .map(|s| {
             let label = labels
                 .get(&s.node_id)
@@ -180,6 +189,16 @@ impl Editor {
 
     /// A run moved: its gates' rows, as they ask now.
     pub fn run_changed(&self, run: &WorkflowExecution) {
+        // Called on every step's update: a run with no gate, now or before, costs a scan of its states.
+        if !asking(run)
+            && !self
+                .gates
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&run.run_id)
+        {
+            return;
+        }
         let Some(native) = self.on() else { return };
         let name = run
             .definition

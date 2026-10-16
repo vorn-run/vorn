@@ -81,7 +81,8 @@ struct Entry<T, R> {
 }
 
 struct Inner<H: Host> {
-    nodes: Vec<Entry<NodeType, Runner<H>>>,
+    /// Shared, so resolving a step clones a pointer and not the type's doc.
+    nodes: Vec<Entry<Arc<NodeType>, Runner<H>>>,
     triggers: Vec<Entry<TriggerType, ()>>,
     /// The node type a step of a type no extension declares runs as.
     fallback: Option<String>,
@@ -117,9 +118,9 @@ impl<H: Host> std::fmt::Debug for Registry<H> {
 /// How a step of some type is to run.
 pub enum Resolved<H: Host> {
     /// By this runner, of this extension.
-    Run(NodeType, Runner<H>),
+    Run(Arc<NodeType>, Runner<H>),
     /// Its extension is off.
-    Off(NodeType),
+    Off(Arc<NodeType>),
     /// No extension declares it, and nothing stands in.
     Unknown,
 }
@@ -144,11 +145,11 @@ impl<H: Host> Registry<H> {
         match inner.nodes.iter_mut().find(|e| e.declared.id == node.id) {
             Some(e) if e.declared.provider != node.provider => return false,
             Some(e) => {
-                e.declared = node;
+                e.declared = Arc::new(node);
                 e.runner = runner;
             }
             None => inner.nodes.push(Entry {
-                declared: node,
+                declared: Arc::new(node),
                 runner,
             }),
         }
@@ -211,11 +212,11 @@ impl<H: Host> Registry<H> {
             Some(Entry {
                 declared,
                 runner: Some(runner),
-            }) => Resolved::Run(declared.clone(), runner.clone()),
+            }) => Resolved::Run(Arc::clone(declared), runner.clone()),
             Some(Entry {
                 declared,
                 runner: None,
-            }) => Resolved::Off(declared.clone()),
+            }) => Resolved::Off(Arc::clone(declared)),
             None => Resolved::Unknown,
         }
     }
@@ -226,7 +227,7 @@ impl<H: Host> Registry<H> {
             .nodes
             .iter()
             .filter(|e| e.runner.is_some())
-            .map(|e| e.declared.clone())
+            .map(|e| NodeType::clone(&e.declared))
             .collect()
     }
 

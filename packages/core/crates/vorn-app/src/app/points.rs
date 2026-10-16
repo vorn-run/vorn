@@ -373,7 +373,8 @@ impl App {
             );
         }
         let palette = self.st.dialog == Some(crate::state::Dialog::Palette);
-        if !self.st.points.builtins_loaded && (self.st.settings.open || palette) {
+        let workflows = self.st.view == crate::screen::MainView::Workflows;
+        if !self.st.points.builtins_loaded && (self.st.settings.open || palette || workflows) {
             self.st.points.builtins_loaded = true;
             self.call(
                 Call::Point(PointCall::Builtins),
