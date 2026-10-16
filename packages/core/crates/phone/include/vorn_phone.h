@@ -32,3 +32,5 @@ char *vp_take_go(VpHandle *h);
 char *vp_metrics(VpHandle *h);
 void vp_metrics_reset(VpHandle *h);
 void vp_free_string(char *s);
+uint8_t *vp_svg_rgba(const char *svg, uint32_t px);
+void vp_free_rgba(uint8_t *p, uint32_t px);

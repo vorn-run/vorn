@@ -131,11 +131,11 @@ pub fn list(cx: &Cx) -> El {
     let mut items = vec![];
     if tab == WfTab::Workflows {
         let on = cx.view().trigger != Trigger::All;
-        items.push(present(
+        items.push(super::filter(
             Id::new("wf-trigger-open"),
             "Show workflows",
             "workflows-trigger".into(),
-            Some(if on { "filter-on" } else { "filter" }),
+            on,
         ));
     }
     let body = match tab {
@@ -541,7 +541,7 @@ fn gate(cx: &Cx, run_id: &str, r: &Value, st: &Value) -> El {
             gid("review"),
             "Open review",
             format!("review:{run_id}:{node}"),
-            Some("doc"),
+            Some("file-text"),
         ));
         if gates::editable(st).is_some() {
             rows.push(present(
@@ -556,7 +556,7 @@ fn gate(cx: &Cx, run_id: &str, r: &Value, st: &Value) -> El {
                 gid("changes"),
                 "Request changes",
                 format!("gate-changes:{run_id}:{node}"),
-                Some("reply"),
+                Some("message-square"),
             ));
         }
         rows.push(cx.asking(
@@ -739,7 +739,7 @@ pub fn review(cx: &Cx, arg: &str) -> El {
                 gid("changes"),
                 "Request changes",
                 format!("gate-changes:{run_id}:{node}"),
-                Some("reply"),
+                Some("message-square"),
             ));
         }
         acts.push(cx.asking(

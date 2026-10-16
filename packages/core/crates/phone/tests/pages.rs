@@ -139,6 +139,57 @@ fn every_screen_reads_at_phone_and_tablet_sizes() {
     }
 }
 
+/// Whether the app ships `icon`: vornui's set and the agent marks go into its asset catalog at build time, and an extension's own mark comes as SVG.
+fn ships(icon: &Node) -> bool {
+    !icon.label.is_empty()
+        || vornui::icons::source(&icon.value).is_some()
+        || icon.value.strip_prefix("agent:").is_some_and(|a| {
+            vorn_components::agent::MARKS
+                .iter()
+                .any(|(name, _)| *name == a)
+        })
+}
+
+#[test]
+fn every_icon_a_screen_uses_ships_with_the_app() {
+    let mut seen = 0;
+    for size in [PHONE, TABLET] {
+        let mut p = phone(size);
+        for (route, _) in ROUTES {
+            let mut ui = Ui::native(&config(3.0));
+            let t = tree(&mut p, &mut ui, route, size);
+            for n in t.walk() {
+                let name = match n.kind {
+                    "icon" => n,
+                    "button" if !n.value.is_empty() => n,
+                    _ => continue,
+                };
+                seen += 1;
+                assert!(ships(name), "{route}: no icon {:?}", name.value);
+            }
+        }
+    }
+    assert!(seen > 0);
+}
+
+#[test]
+fn sessions_show_each_agents_mark() {
+    let mut p = phone(PHONE);
+    let mut ui = Ui::native(&config(3.0));
+    let t = tree(&mut p, &mut ui, "sessions", PHONE);
+    let marks = t
+        .walk()
+        .into_iter()
+        .filter(|n| n.kind == "icon" && n.value == "agent:claude")
+        .count();
+    assert_eq!(marks, 3);
+    let t = tree(&mut p, &mut ui, "launch", PHONE);
+    assert!(t
+        .walk()
+        .iter()
+        .any(|n| n.kind == "option" && n.children.iter().any(|k| k.value == "agent:codex")));
+}
+
 #[test]
 fn sessions_group_by_project_waiting_first_and_show_requests() {
     let mut p = phone(PHONE);

@@ -34,9 +34,9 @@ enum Place: String, CaseIterable, Identifiable {
     var title: String { rawValue.capitalized }
     var icon: String {
         switch self {
-        case .sessions: "display"
-        case .tasks: "checklist"
-        case .workflows: "point.3.connected.trianglepath.dotted"
+        case .sessions: "monitor"
+        case .tasks: "list-todo"
+        case .workflows: "workflow"
         }
     }
 }
@@ -82,7 +82,7 @@ struct Root: View {
     private var phone: some View {
         TabView(selection: $place) {
             ForEach(Place.allCases) { p in
-                Tab(p.title, systemImage: p.icon, value: p) {
+                Tab(p.title, image: p.icon, value: p) {
                     Stack(core: core, nav: tabs.of(p)) {
                         Screen(core: core, name: p.rawValue).toolbar { gear }
                     }
@@ -97,7 +97,7 @@ struct Root: View {
         NavigationSplitView {
             List(selection: Binding(get: { place }, set: { if let p = $0 { go(p) } })) {
                 ForEach(Place.allCases) { p in
-                    Label(p.title, systemImage: p.icon).tag(p)
+                    Label(p.title, image: p.icon).tag(p)
                         .badge(p == .workflows ? waiting : 0)
                 }
             }
@@ -111,7 +111,7 @@ struct Root: View {
             .navigationSplitViewColumnWidth(min: 320, ideal: 380)
         } detail: {
             Stack(core: core, nav: detail) {
-                ContentUnavailableView("Nothing open", systemImage: place.icon,
+                ContentUnavailableView("Nothing open", image: place.icon,
                                        description: Text("Pick something from the list to see it here."))
             }
         }
@@ -155,7 +155,7 @@ struct Root: View {
 
     private var gear: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button { settings = true } label: { Image(systemName: "gearshape") }
+            Button { settings = true } label: { VornIcon(name: "settings") }
                 .accessibilityLabel("Settings")
         }
     }
@@ -199,7 +199,7 @@ struct Settings: View {
                             Text(Pairing.hostOf(c.host)).font(.caption).fontDesign(.monospaced).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if c.id == computers.active { Image(systemName: "checkmark").foregroundStyle(Palette.bronze) }
+                        if c.id == computers.active { VornIcon(name: "check", ink: Palette.bronze) }
                     }
                 }
                 .swipeActions { Button("Forget", role: .destructive) { forgetting = c } }
@@ -264,7 +264,7 @@ struct SessionScreen: View {
                     vp_send(core.handle, draft)
                     draft = ""
                 } label: {
-                    Image(systemName: "arrow.up").font(.body.weight(.semibold))
+                    VornIcon(name: "arrow-up")
                         .frame(width: 44, height: 44)
                         .background(draft.isEmpty ? Color(white: 0.2) : Palette.bronze, in: Circle())
                         .foregroundStyle(.black)
@@ -280,6 +280,7 @@ struct SessionScreen: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
+                    if let mark = top.first(where: { $0.k == "icon" }) { VornIcon(mark) }
                     Text(bar?.label ?? "Session").font(.headline).lineLimit(1)
                     if let s = top.first(where: { $0.k == "status" }) {
                         Circle().fill(Palette.tone(s.style)).frame(width: 8, height: 8)

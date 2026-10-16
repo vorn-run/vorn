@@ -343,7 +343,11 @@ impl Cx<'_> {
                     Some(drawn) => drawn.shrink0(),
                     None => crate::lucide(&name, 14.0, 2.0, ink).shrink0(),
                 };
-                drawn.sem(Sem::Icon(name))
+                drawn.sem(Sem::Icon {
+                    name,
+                    tone: t.map_or("", tone_name),
+                    svg: None,
+                })
             }
             Kind::Status { value, tones } => self.status(&fill(value), tones),
             Kind::Badge { value, tones } => {

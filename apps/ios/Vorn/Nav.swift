@@ -127,7 +127,7 @@ extension Node {
 
     /// The text a link or bar item shows.
     var caption: String { label?.isEmpty == false ? label! : kids.first { $0.k == "text" }?.label ?? "" }
-    var symbol: String? { kids.first { $0.k == "icon" }?.value }
+    var icon: Node? { kids.first { $0.k == "icon" } }
 }
 
 /// One screen's tree as a List, re-read whenever vornd sends something.
@@ -171,7 +171,7 @@ struct BarItem: View {
             Button {
                 if node.style == "sheet" { nav.present(node.value ?? "") } else { nav.push(node.value ?? "") }
             } label: {
-                if let s = node.symbol { Image(systemName: Symbols.of(s)) } else { Text(node.caption) }
+                if let i = node.icon { VornIcon(i) } else { Text(node.caption) }
             }
             .accessibilityLabel(node.caption)
         case "more":
@@ -196,7 +196,7 @@ struct More: View {
                     Button {
                         if n.style == "sheet" { nav.present(n.value ?? "") } else { nav.push(n.value ?? "") }
                     } label: {
-                        if let s = n.symbol { Label(n.caption, systemImage: Symbols.of(s)) } else { Text(n.caption) }
+                        if let i = n.icon?.value { Label(n.caption, vorn: i) } else { Text(n.caption) }
                     }
                 } else if n.k == "button" || n.k == "toggle" {
                     Button(role: n.style == "danger" ? .destructive : nil) {
@@ -205,7 +205,7 @@ struct More: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44)
+            VornIcon(name: "ellipsis").frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("More")
         .confirmationDialog(asking?.confirm ?? "", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }),
@@ -260,7 +260,7 @@ struct Empty: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(node.label ?? "", systemImage: (node.value ?? "").isEmpty ? "hourglass" : "tray")
+            Label(node.label ?? "", vorn: (node.value ?? "").isEmpty ? "loader-circle" : "inbox")
         } description: {
             if let b = node.value, !b.isEmpty { Text(b) }
         } actions: {
@@ -334,7 +334,7 @@ struct Control: View {
                     HStack(spacing: 12) {
                         inline(node.kids)
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        VornIcon(name: "chevron-right", ink: Color(white: 0.35)).scaleEffect(0.75)
                     }
                     .contentShape(Rectangle())
                 }
@@ -348,10 +348,11 @@ struct Control: View {
             Toggle(node.label ?? "", isOn: Binding(get: { node.on ?? false }, set: { _ in act() }))
         case "option":
             Button { act() } label: {
-                HStack {
+                HStack(spacing: 12) {
+                    if let i = node.icon { VornIcon(i, ink: .secondary) }
                     Text(node.label ?? "").foregroundStyle(Palette.ink)
                     Spacer()
-                    if node.on == true { Image(systemName: "checkmark").foregroundStyle(Palette.bronze) }
+                    if node.on == true { VornIcon(name: "check", ink: Palette.bronze) }
                 }
                 .contentShape(Rectangle())
             }
@@ -383,7 +384,7 @@ struct Control: View {
                 if node.confirm != nil { asking = true } else { act() }
             } label: {
                 if let icon = node.value, !icon.isEmpty, (node.label ?? "").isEmpty {
-                    Image(systemName: Symbols.of(icon))
+                    VornIcon(name: icon)
                 } else if node.style == "primary" {
                     Text(node.label ?? "").fontWeight(.semibold).foregroundStyle(Palette.bronze)
                 } else {
@@ -400,7 +401,7 @@ struct Control: View {
                 copied = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
             } label: {
-                Label(copied ? "Copied" : (node.label ?? "Copy"), systemImage: copied ? "checkmark" : "doc.on.doc")
+                Label { Text(copied ? "Copied" : (node.label ?? "Copy")) } icon: { VornIcon(name: copied ? "check" : "copy") }
             }
         case "more":
             More(screen: screen, node: node)
@@ -418,7 +419,7 @@ struct Control: View {
         AnyView(ForEach(nodes) { n in
             switch n.k {
             case "text": Leaf.text(n, row: node.k == "link")
-            case "icon": Image(systemName: Symbols.of(n.value ?? "")).foregroundStyle(.secondary)
+            case "icon": VornIcon(n, ink: .secondary)
             case "status": Circle().fill(Palette.tone(n.style)).frame(width: 8, height: 8)
                 .accessibilityLabel(n.value ?? "")
             case "badge": Text(n.value ?? "").font(.caption2.weight(.semibold))
@@ -449,17 +450,3 @@ enum Leaf {
     }
 }
 
-enum Symbols {
-    /// The app's icon names to the system's.
-    static func of(_ name: String) -> String {
-        [
-            "monitor": "display", "list-todo": "checklist", "workflow": "point.3.connected.trianglepath.dotted",
-            "settings": "gearshape", "chevron-right": "chevron.right", "terminal": "terminal",
-            "circle": "circle", "check": "checkmark", "x": "xmark", "play": "play.fill", "pause": "pause.fill",
-            "ellipsis": "ellipsis", "puzzle": "puzzlepiece.extension", "bot": "cpu", "git-branch": "arrow.triangle.branch",
-            "plus": "plus", "filter": "line.3.horizontal.decrease.circle", "filter-on": "line.3.horizontal.decrease.circle.fill",
-            "pencil": "pencil", "doc": "doc.text", "reply": "arrowshape.turn.up.left", "clock": "clock", "eye": "eye",
-            "circle-check": "checkmark.circle", "circle-x": "xmark.circle",
-        ][name] ?? "circle.dashed"
-    }
-}

@@ -286,17 +286,36 @@ fn link(id: Id, label: &str, route: String, kids: Vec<El>) -> El {
 
 /// A row that opens `route` over the screen.
 fn present(id: Id, label: &str, route: String, icon: Option<&str>) -> El {
+    present_with(id, label, route, icon.map(self::icon))
+}
+
+fn present_with(id: Id, label: &str, route: String, icon: Option<El>) -> El {
     div()
         .id(id)
         .on(Action::Click)
         .role(Role::Link, label)
         .sem(Sem::Present(route))
-        .child_if(icon.map(self::icon))
+        .child_if(icon)
         .child(say(label, "body"))
 }
 
+/// The filter button that opens `route`, lit while a filter is on, as the desktop's sidebar draws it.
+fn filter(id: Id, label: &str, route: String, lit: bool) -> El {
+    let icon = div().sem(Sem::Icon {
+        name: "list-filter".into(),
+        tone: if lit { "lit" } else { "" },
+        svg: None,
+    });
+    present_with(id, label, route, Some(icon))
+}
+
 fn icon(name: &str) -> El {
-    div().sem(Sem::Icon(name.to_owned()))
+    div().sem(Sem::icon(name))
+}
+
+/// `agent`'s mark, as the desktop draws it.
+fn agent(agent: &str) -> El {
+    div().sem(Sem::icon(vorn_components::agent::icon_name(agent)))
 }
 
 fn status(value: &str, tone: &'static str) -> El {

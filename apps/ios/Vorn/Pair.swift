@@ -135,8 +135,7 @@ struct PairFlow: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Image(systemName: "desktopcomputer")
-                        .font(.title2).foregroundStyle(.secondary)
+                    VornIcon(name: "monitor", ink: .secondary)
                         .frame(width: 48, height: 48)
                         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
                         .padding(.bottom, 28)
@@ -145,18 +144,18 @@ struct PairFlow: View {
                         .font(.title3).foregroundStyle(.secondary).padding(.top, 16)
                     Spacer(minLength: 48)
                     NavigationLink(value: Step.scan) {
-                        Label("Scan the code", systemImage: "qrcode.viewfinder")
+                        Label { Text("Scan the code") } icon: { VornIcon(name: "scan") }
                             .font(.headline).frame(maxWidth: .infinity, minHeight: 52)
                     }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).tint(Palette.ink)
                     .foregroundStyle(Palette.bg)
                     NavigationLink(value: Step.manual) {
-                        HStack(spacing: 6) { Text("Enter the details by hand"); Image(systemName: "chevron.right").font(.footnote) }
+                        HStack(spacing: 6) { Text("Enter the details by hand"); VornIcon(name: "chevron-right").scaleEffect(0.7) }
                             .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 52)
                     }
                     .foregroundStyle(Palette.ink)
                     Spacer(minLength: 32)
-                    Label("Codes expire in five minutes · Nothing is saved", systemImage: "lock")
+                    Label { Text("Codes expire in five minutes · Nothing is saved") } icon: { VornIcon(name: "lock").scaleEffect(0.8) }
                         .font(.footnote).foregroundStyle(.tertiary)
                     DisclosureGroup(isExpanded: $help) {
                         VStack(alignment: .leading, spacing: 10) {
@@ -168,7 +167,7 @@ struct PairFlow: View {
                         }
                         .padding(.top, 12)
                     } label: {
-                        Label("Where do I find the code?", systemImage: "questionmark.circle")
+                        Label { Text("Where do I find the code?") } icon: { VornIcon(name: "circle-help") }
                             .font(.subheadline.weight(.medium)).foregroundStyle(Palette.ink)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
@@ -247,7 +246,7 @@ struct ScanScreen: View {
                     if DataScannerViewController.isSupported {
                         Scanner { scanned($0) }
                     } else {
-                        ContentUnavailableView("Vorn needs the camera", systemImage: "camera",
+                        ContentUnavailableView("Vorn needs the camera", image: "scan",
                                                description: Text("It reads the pairing code shown on your computer. Nothing is recorded and nothing leaves this phone."))
                     }
                 }

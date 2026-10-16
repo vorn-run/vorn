@@ -37,15 +37,11 @@ pub fn board(cx: &Cx) -> El {
     let head = bar(
         "Tasks",
         vec![
-            present(
+            super::filter(
                 Id::new("tasks-scope-open"),
                 "Show tasks from",
                 "tasks-scope".into(),
-                Some(if scope.is_some() {
-                    "filter-on"
-                } else {
-                    "filter"
-                }),
+                scope.is_some(),
             ),
             present(
                 Id::new("task-new-open"),

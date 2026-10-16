@@ -30,6 +30,7 @@ targets:
       base:
         PRODUCT_NAME: Vorn
         PRODUCT_BUNDLE_IDENTIFIER: run.vorn.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
     info:
       path: Vorn/Info.plist
       properties:

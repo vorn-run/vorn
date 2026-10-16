@@ -378,6 +378,25 @@ pub extern "C" fn vp_call(h: *mut Handle, method: *const c_char, params: *const 
     });
 }
 
+/// `svg` drawn `px` pixels square by the desktop's renderer, as straight RGBA (`px * px * 4` bytes); null if it doesn't parse.
+#[no_mangle]
+pub extern "C" fn vp_svg_rgba(svg: *const c_char, px: u32) -> *mut u8 {
+    match vornui::rasterize_svg_rgba(str_in(svg), px, px) {
+        Some(rgba) => Box::into_raw(rgba.into_boxed_slice()).cast(),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Frees what [`vp_svg_rgba`] returned for `px`.
+#[no_mangle]
+pub extern "C" fn vp_free_rgba(p: *mut u8, px: u32) {
+    if !p.is_null() {
+        let len = (px * px * 4) as usize;
+        // SAFETY: `p` came from `vp_svg_rgba(_, px)`, a boxed slice of `len` bytes.
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, len)) });
+    }
+}
+
 /// Whether the system keyboard should be up.
 #[no_mangle]
 pub extern "C" fn vp_wants_keyboard(h: *mut Handle) -> bool {

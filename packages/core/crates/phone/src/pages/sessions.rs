@@ -42,15 +42,11 @@ fn order(a: &&Session, b: &&Session) -> std::cmp::Ordering {
 pub fn list(cx: &Cx) -> El {
     let m = &cx.p.model;
     let scope = cx.view().sessions_scope.as_ref();
-    let mut items = vec![present(
+    let mut items = vec![super::filter(
         Id::new("sessions-scope-open"),
         "Show sessions from",
         "sessions-scope".into(),
-        Some(if scope.is_some() {
-            "filter-on"
-        } else {
-            "filter"
-        }),
+        scope.is_some(),
     )];
     if cx.online() {
         items.push(link(
@@ -148,6 +144,7 @@ fn session_row(cx: &Cx, s: &Session) -> El {
         &title,
         format!("session:{sid}"),
         vec![
+            super::agent(&s.info.agent_type),
             status(s.status(), tone(st)),
             col(vec![
                 say(title.clone(), "title"),
@@ -269,6 +266,7 @@ pub fn launch(cx: &Cx) -> El {
                 agent == k,
                 Do::LaunchAgent(k.to_owned()),
             )
+            .child(super::agent(k))
         })
         .collect();
     let wt = cx.view().launch_worktree;
@@ -376,6 +374,7 @@ pub fn session(cx: &Cx, sid: &str) -> El {
     ]);
     let mut out = vec![
         bar(title, vec![menu]),
+        super::agent(s.map_or(SHELL, |s| s.info.agent_type.as_str())),
         status(s.map_or("idle", Session::status), tone(st)),
     ];
     for q in

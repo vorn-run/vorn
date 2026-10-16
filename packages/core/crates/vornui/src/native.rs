@@ -23,8 +23,12 @@ pub enum Sem {
     More,
     /// One of a set of options, each a radio button inside.
     Choice,
-    /// An icon by its name in the app's set.
-    Icon(String),
+    /// An icon: a name in the app's set (a Lucide name, or `agent:<key>` for an agent's mark), or an SVG an extension declared; `tone` tints it.
+    Icon {
+        name: String,
+        tone: &'static str,
+        svg: Option<String>,
+    },
     /// A dot whose tone says the state `value`.
     Status {
         value: String,
@@ -71,6 +75,17 @@ pub struct Node {
     pub style: &'static str,
     pub confirm: Option<String>,
     pub children: Vec<Node>,
+}
+
+impl Sem {
+    /// The icon `name` from the app's set, untinted.
+    pub fn icon(name: impl Into<String>) -> Sem {
+        Sem::Icon {
+            name: name.into(),
+            tone: "",
+            svg: None,
+        }
+    }
 }
 
 impl Node {
@@ -251,9 +266,11 @@ impl Ui {
                     value: what.clone(),
                     ..Node::of("drawn")
                 },
-                Sem::Icon(name) => {
+                Sem::Icon { name, tone, svg } => {
                     out.push(Node {
                         value: name.clone(),
+                        style: tone,
+                        label: svg.clone().unwrap_or_default(),
                         ..Node::of("icon")
                     });
                     return;
@@ -325,7 +342,11 @@ impl Ui {
                 });
             }
             (Some(Role::Switch), _) => out.push(control("toggle")),
-            (Some(Role::RadioButton), _) => out.push(control("option")),
+            (Some(Role::RadioButton), _) => {
+                let mut n = control("option");
+                n.children = kids(self).into_iter().filter(|k| k.kind == "icon").collect();
+                out.push(n);
+            }
             (Some(Role::Button | Role::MenuItem | Role::Link), _) if el.id.is_some() => {
                 out.push(control("button"));
             }

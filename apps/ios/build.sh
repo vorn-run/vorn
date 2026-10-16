@@ -6,6 +6,7 @@ core="$here/../../packages/core"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 (cd "$core" && IPHONEOS_DEPLOYMENT_TARGET=26.0 nice -n 10 cargo build --profile release -j 3 -p vorn-phone --target aarch64-apple-ios)
 cd "$here"
+python3 icons.py
 xcodegen generate --quiet
 nice -n 10 xcodebuild -quiet -project Vorn.xcodeproj -scheme Vorn -configuration Release \
   -destination generic/platform=iOS -derivedDataPath build VORN_HOST="${VORN_HOST:-}" build
