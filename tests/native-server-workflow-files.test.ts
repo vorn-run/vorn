@@ -154,6 +154,34 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(now).toContain('// The check itself.')
     })
 
+    it('binds a connection the file names to the connection of that name here', async () => {
+      const conn = await client.result<{ id: string }>('connection:create', {
+        connectorId: 'mcp',
+        name: 'Shared',
+        syncIntervalMinutes: 0,
+        statusMapping: {},
+        filters: { command: process.execPath, args: '[]' }
+      })
+      fs.writeFileSync(
+        path.join(folder, 'shared.kdl'),
+        [
+          'workflow "Shared" {',
+          '    id "shared"',
+          '    trigger "manual" id="t"',
+          '    step "callConnectorAction" id="act" {',
+          '        connectionId (connection)"Shared"',
+          '        action "list"',
+          '    }',
+          '}',
+          ''
+        ].join('\n')
+      )
+      await until('the shared file to be read', async () => !!(await workflow('shared')))
+      const nodes = (await workflow('shared'))!.nodes as Array<{ config: Json }>
+      expect(nodes[1].config.connectionId).toBe(conn.id)
+      fs.rmSync(path.join(folder, 'shared.kdl'))
+    })
+
     it('saves a workflow made in Vorn to a file in one call', async () => {
       const made = {
         id: 'made-here',
