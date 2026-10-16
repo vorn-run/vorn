@@ -66,7 +66,7 @@
   "resolutions": {
     "serialize-javascript": "^7.0.5",
     "@xmldom/xmldom": "^0.8.15",
-    "hono": "^4.13.5",
+    "hono": "^4.13.7",
     "@hono/node-server": "^2.0.11",
     "lodash": "^4.18.1",
     "flatted": "^3.4.2",
@@ -77,7 +77,7 @@
     "picomatch": "^4.0.4",
     "@humanfs/node": "^0.16.8",
     "js-yaml": "^4.3.2",
-    "ip-address": "^10.3.1",
+    "ip-address": "^10.7.1",
     "fast-uri": "^3.1.8",
     "tsup/esbuild": "^0.28.1",
     "postcss": "^8.5.23"
