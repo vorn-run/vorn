@@ -444,9 +444,11 @@ impl Service {
                     state,
                     &init,
                     start_deadline,
-                    ready_tx,
-                    &rx,
-                    &flag,
+                    Ends {
+                        ready: ready_tx,
+                        jobs: &rx,
+                        ended: &flag,
+                    },
                 );
                 flag.store(true, Ordering::Release);
             })
@@ -533,6 +535,14 @@ impl crate::lifecycle::Running for Service {
     }
 }
 
+/// What the component's thread talks to: who waits for it to start, its
+/// jobs, and the flag that tells the lifecycle it ended.
+struct Ends<'a> {
+    ready: oneshot::Sender<Result<(), String>>,
+    jobs: &'a std_mpsc::Receiver<Job>,
+    ended: &'a AtomicBool,
+}
+
 /// The component's thread: instantiate, init, then calls and events until the queue goes or it traps.
 fn run(
     name: &str,
@@ -540,10 +550,9 @@ fn run(
     state: State,
     init: &InitCtx,
     start_deadline: Duration,
-    ready: oneshot::Sender<Result<(), String>>,
-    jobs: &std_mpsc::Receiver<Job>,
-    ended: &AtomicBool,
+    ends: Ends<'_>,
 ) {
+    let Ends { ready, jobs, ended } = ends;
     let rt = match runtime() {
         Ok(rt) => rt,
         Err(e) => {

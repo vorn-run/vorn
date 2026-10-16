@@ -7,7 +7,8 @@ use crate::tier::Tier;
 use crate::world::{session_id, TERMINALS};
 
 /// One step's answer and the rows after it.
-fn step(log: &mut Vec<Value>, name: &str, answer: Value, tier: &Tier) {
+async fn step(log: &mut Vec<Value>, name: &str, answer: Value, tier: &Tier) {
+    tier.quiet().await;
     log.push(json!({ "step": name, "answer": answer, "rows": tier.snapshot() }));
 }
 
@@ -53,13 +54,11 @@ pub async fn widget(tier: &Tier) -> Vec<Value> {
         let status = json!({ "sessionId": session_id(i), "status": "waiting" });
         tier.emit("session.status", &status).await;
     }
-    tier.settled().await;
-    step(&mut log, "sessions", Value::Null, tier);
+    step(&mut log, "sessions", Value::Null, tier).await;
     for (n, id) in ["p1", "p2", "p3", "p4"].iter().enumerate() {
         tier.emit("agent.permission", &request(id, n + 1, n)).await;
     }
-    tier.settled().await;
-    step(&mut log, "asking", Value::Null, tier);
+    step(&mut log, "asking", Value::Null, tier).await;
     for (action, id) in [
         ("pick", "p2:0:1"),
         ("submit", "p2"),
@@ -71,14 +70,13 @@ pub async fn widget(tier: &Tier) -> Vec<Value> {
         ("fly", "p3"),
     ] {
         let a = answered(tier.call(action, json!({ "id": id })).await);
-        step(&mut log, &format!("{action} {id}"), a, tier);
+        step(&mut log, &format!("{action} {id}"), a, tier).await;
     }
     tier.emit("agent.permissionClosed", &json!({ "requestId": "p3" }))
         .await;
     tier.emit("session.exited", &json!({ "sessionId": session_id(3) }))
         .await;
-    tier.settled().await;
-    step(&mut log, "closed", Value::Null, tier);
+    step(&mut log, "closed", Value::Null, tier).await;
     log
 }
 
@@ -94,7 +92,7 @@ pub async fn worktrees(tier: &Tier) -> Vec<Value> {
         (format!("{project}/.worktrees/w{i}"), project.to_owned())
     };
     let a = answered(tier.call("scan", json!({})).await);
-    step(&mut log, "scan", a, tier);
+    step(&mut log, "scan", a, tier).await;
     for i in [0, 1, 2, 5, 7, 8] {
         let (path, project) = w(i);
         tier.emit(
@@ -103,8 +101,7 @@ pub async fn worktrees(tier: &Tier) -> Vec<Value> {
         )
         .await;
     }
-    tier.settled().await;
-    step(&mut log, "idle", Value::Null, tier);
+    step(&mut log, "idle", Value::Null, tier).await;
     let (dirty, dirty_project) = w(3);
     let (clean, clean_project) = w(4);
     let calls = [
@@ -133,7 +130,7 @@ pub async fn worktrees(tier: &Tier) -> Vec<Value> {
     ];
     for (action, args) in calls {
         let a = answered(tier.call(action, args).await);
-        step(&mut log, action, a, tier);
+        step(&mut log, action, a, tier).await;
     }
     log
 }

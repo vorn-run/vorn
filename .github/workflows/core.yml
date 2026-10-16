@@ -184,6 +184,13 @@ jobs:
         with:
           tool: cargo-nextest@0.9.145
 
+      # The Wasm component vorn-extensions' wasm tests load (they skip without it).
+      - name: Wasm test component
+        working-directory: packages/core
+        run: |
+          rustup target add wasm32-wasip2
+          cargo build --profile ci --locked --target wasm32-wasip2 -p ext-tiers-component
+
       # Every crate in one run, so each compiles once. Cargo
       # builds the binaries the tests start (vornd, vorn-sessiond, the recovery
       # programs) side by side in target/ci. On Windows sessiond hosts its

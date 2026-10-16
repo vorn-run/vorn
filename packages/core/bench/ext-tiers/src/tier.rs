@@ -3,6 +3,7 @@
 //! router, the lifecycle and the gate as vornd runs them.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -365,6 +366,19 @@ impl Tier {
         }
     }
 
+    /// Settled, and no row has moved for a while: a program's publishes are
+    /// answered on tasks of their own, so they can land after its last answer.
+    pub async fn quiet(&self) {
+        self.settled().await;
+        loop {
+            let seen = self.world.published.load(Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if self.world.published.load(Ordering::SeqCst) == seen {
+                return;
+            }
+        }
+    }
+
     pub fn rows(&self, collection: &str) -> Vec<Value> {
         self.router.rows(self.ext.id, collection)
     }
@@ -383,6 +397,17 @@ impl Tier {
         loop {
             let moved = self.world.moved.notified();
             if self.rows(collection).iter().any(|r| r["id"] == id) {
+                return;
+            }
+            moved.await;
+        }
+    }
+
+    /// Waits until something was published after the `before`th publish.
+    pub async fn published_after(&self, before: u64) {
+        loop {
+            let moved = self.world.moved.notified();
+            if self.world.published.load(Ordering::SeqCst) > before {
                 return;
             }
             moved.await;

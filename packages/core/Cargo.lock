@@ -1785,6 +1785,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ext-tiers-probe"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "vorn-extensions",
+]
+
+[[package]]
 name = "ext-tiers-program"
 version = "0.1.0"
 dependencies = [

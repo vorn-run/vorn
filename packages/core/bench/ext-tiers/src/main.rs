@@ -62,6 +62,20 @@ async fn first_answer(tier: &Tier) -> Duration {
     t.elapsed()
 }
 
+/// Stopped, then one event: the time until its first publish. A built-in
+/// does not stop, so its start is counted with it.
+async fn first_publish(tier: &Tier, kind: Kind, name: &str, data: &Value) -> Duration {
+    tier.stop().await;
+    let before = tier.world.published.load(Ordering::SeqCst);
+    let t = Instant::now();
+    if kind == Kind::Builtin {
+        tier.start().await.expect("started");
+    }
+    tier.emit(name, data).await;
+    tier.published_after(before).await;
+    t.elapsed()
+}
+
 /// `count` events from `make`, then the time until every one was handled, and the CPU it took.
 async fn burst(tier: &Tier, count: usize, make: impl Fn(usize) -> (&'static str, Value)) -> Value {
     let (cpu0, calls0, pub0) = (
@@ -103,6 +117,23 @@ async fn perf(kind: Kind, ext: Ext, paths: &Paths) -> Value {
         tier.stop().await;
         cold.push(ms(first_answer(&tier).await));
     }
+    let mut to_publish = Vec::new();
+    for n in 0..15 {
+        let (name, data) = if ext == WORKTREES {
+            let path = "/p/web/.worktrees/w1";
+            (
+                "worktree.idle",
+                json!({ "worktreePath": path, "projectPath": "/p/web" }),
+            )
+        } else {
+            (
+                "agent.permission",
+                scenario::request(&format!("cold{n}"), n % 32, 0),
+            )
+        };
+        to_publish.push(ms(first_publish(&tier, kind, name, &data).await));
+    }
+    tier.start().await.expect("started");
     let mut echo = Vec::new();
     for i in 0..2000 {
         let t = Instant::now();
@@ -116,6 +147,7 @@ async fn perf(kind: Kind, ext: Ext, paths: &Paths) -> Value {
         "ext": ext.short(),
         "cold_first_ms": stats::round(ms(cold_first)),
         "cold_ms": stats::summary(&cold),
+        "cold_event_to_publish_ms": stats::summary(&to_publish),
         "echo_us": stats::summary(&echo),
         "idle": idle,
     });
@@ -308,6 +340,49 @@ fn differs(a: &Value, b: &Value) -> Option<Value> {
         .map(|(x, y)| json!({ "left": x, "right": y }))
 }
 
+/// A log with each collection's rows in id order: what the rows are, whatever order they came in.
+fn unordered(log: &Value) -> Value {
+    let mut log = log.clone();
+    for step in log.as_array_mut().into_iter().flatten() {
+        for rows in step["rows"]
+            .as_object_mut()
+            .into_iter()
+            .flat_map(|m| m.values_mut())
+        {
+            if let Some(rows) = rows.as_array_mut() {
+                rows.sort_by(|x, y| x["id"].to_string().cmp(&y["id"].to_string()));
+            }
+        }
+    }
+    log
+}
+
+/// How `runs` plays of the scenario under `kind` compare with the built-in's rows.
+fn against(builtin: &Value, kind: Kind, ext: &str, runs: usize, paths: &Paths) -> (Value, Value) {
+    let (mut same_rows, mut same_order) = (0, 0);
+    let mut first_difference = Value::Null;
+    let mut last = Value::Null;
+    for _ in 0..runs {
+        eprintln!("scenario {} {ext}", kind.name());
+        let log = child(&["scenario", "--tier", kind.name(), "--ext", ext], paths);
+        if differs(builtin, &log).is_none() {
+            same_order += 1;
+        }
+        match differs(&unordered(builtin), &unordered(&log)) {
+            None => same_rows += 1,
+            Some(d) => first_difference = d,
+        }
+        last = log;
+    }
+    let report = json!({
+        "runs": runs,
+        "same_rows": same_rows,
+        "same_order": same_order,
+        "first_difference": first_difference,
+    });
+    (report, last)
+}
+
 fn all(args: &[String]) -> Value {
     let paths = paths(args);
     let runs: usize = flag(args, "--runs")
@@ -327,20 +402,16 @@ fn all(args: &[String]) -> Value {
                 ));
             }
         }
-        let logs: Vec<Value> = kinds
-            .iter()
-            .map(|k| {
-                eprintln!("scenario {} {ext}", k.name());
-                child(&["scenario", "--tier", k.name(), "--ext", ext], &paths)
-            })
-            .collect();
-        let diff = differs(&logs[0], &logs[1]).or_else(|| differs(&logs[0], &logs[2]));
+        eprintln!("scenario builtin {ext}");
+        let builtin = child(&["scenario", "--tier", "builtin", "--ext", ext], &paths);
+        let (program, _) = against(&builtin, Kind::Program, ext, runs, &paths);
+        let (wasm, last) = against(&builtin, Kind::Wasm, ext, runs, &paths);
         same.insert(
             ext.to_owned(),
-            json!({ "identical": diff.is_none(), "steps": logs[0].as_array().map_or(0, Vec::len), "first_difference": diff }),
+            json!({ "steps": builtin.as_array().map_or(0, Vec::len), "program": program, "wasm": wasm }),
         );
         if ext == "widget" {
-            fixture = logs[2]
+            fixture = last
                 .as_array()
                 .and_then(|l| l.iter().find(|s| s["step"] == "asking"))
                 .map(|s| s["rows"].clone())
@@ -361,6 +432,7 @@ fn all(args: &[String]) -> Value {
         "component_cwasm": size(&cwasm),
         "probe_without_wasm": flag(args, "--probe-off").map_or(Value::Null, |p| size(Path::new(&p))),
         "probe_with_wasm": flag(args, "--probe-on").map_or(Value::Null, |p| size(Path::new(&p))),
+        "probe_with_compiler": flag(args, "--probe-compile").map_or(Value::Null, |p| size(Path::new(&p))),
     });
     json!({
         "machine": machine(),
