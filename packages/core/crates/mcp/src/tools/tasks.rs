@@ -1,4 +1,4 @@
-//! `tools/tasks.ts`'s `get_my_context`: the project and task an agent works
+//! `get_my_context`: the project and task an agent works
 //! in, read from the core's task list. The other task tools are the Tasks
 //! built-in's, which adds them while it is on.
 
@@ -33,8 +33,8 @@ pub(crate) fn resolve(cwd: &str, p: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
-/// `path.resolve(value)` for a value read out of the config, which Node
-/// refuses unless it is a string.
+/// `path.resolve(value)` for a value read out of the config, refused unless
+/// it is a string.
 fn resolve_value(cwd: &str, value: Option<&Value>) -> Result<String, String> {
     match value {
         Some(Value::String(s)) => Ok(resolve(cwd, s)),

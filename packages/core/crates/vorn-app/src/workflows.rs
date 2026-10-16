@@ -1,6 +1,6 @@
-//! Workflows as the renderer's landing, sidebar and editor read them: run
-//! buckets and status lines (`run-presentation`), the canvas's flow and its
-//! edits (`workflow-helpers`), the node factories and the run inputs.
+//! Workflows as the landing, sidebar and editor read them: run buckets and
+//! status lines, the canvas's flow and its edits, the node factories and
+//! the run inputs.
 
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +21,7 @@ pub enum Tab {
     Review,
 }
 
-/// `RunBucket`: the Status filter.
+/// The Status filter.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Bucket {
     #[default]
@@ -208,7 +208,7 @@ pub struct Workflows {
     pub history: Vec<Value>,
     /// The step library's search.
     pub search: String,
-    /// `launchingSince`: a run asked for from the editor, not yet reported.
+    /// A run asked for from the editor, not yet reported.
     pub launching: Option<f64>,
     pub prompt: Option<Prompt>,
     pub missed: Vec<Missed>,
@@ -248,7 +248,7 @@ pub struct Workflows {
 }
 
 impl Workflows {
-    /// `stillNeeded`: the canvas's unbound steps and an import's leftovers,
+    /// The canvas's unbound steps and an import's leftovers,
     /// when no selection, library, history or start-from holds the slot.
     pub fn still_needed(&self) -> Vec<crate::templates::Need> {
         use crate::templates as t;
@@ -276,7 +276,7 @@ impl Workflows {
     }
 }
 
-/// The variable dropdown under a field (`VariableAutocomplete`).
+/// The variable dropdown under a field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ac {
     pub bind: Bind,
@@ -336,7 +336,7 @@ pub struct LibraryData {
     pub highlight: usize,
 }
 
-/// `useDefinitionHistory`: snapshots of nodes and edges, edits within half
+/// Snapshots of nodes and edges, edits within half
 /// a second undone as one.
 #[derive(Debug, Default)]
 pub struct Undo {
@@ -368,7 +368,7 @@ impl Undo {
     }
 }
 
-/// `liveExecSignature`'s part for one run: its status, end and the nodes
+/// What tells one run's live state apart: its status, end and the nodes
 /// parked on a gate.
 pub fn live_signature(run: &Value) -> (String, String, Vec<String>) {
     let waiting = crate::runs::states(run)
@@ -469,7 +469,7 @@ impl Workflows {
     }
 }
 
-/// `bucketOf`: a paused run is waiting, not running.
+/// A paused run is waiting, not running.
 pub fn bucket(run: &Value) -> Bucket {
     match s(run, "status") {
         Some("running" | "waiting") => {
@@ -489,7 +489,7 @@ fn failed_step(run: &Value) -> Option<&Value> {
     runs::states(run).find(|n| s(n, "status") == Some("error"))
 }
 
-/// `runStatusLine`.
+/// A run's status in one line.
 pub fn status_line(run: &Value, nodes: &Value) -> String {
     let named = |id: &str| runs::node_label(runs::node(nodes, id), id);
     if let Some(w) = runs::states(run).find(|n| s(n, "status") == Some("waiting")) {
@@ -537,7 +537,7 @@ pub fn is_sign_in(state: &Value) -> bool {
     s(state, "status") == Some("waiting") && s(state, "waitingFor") == Some("signIn")
 }
 
-/// `stepProgress`: succeeded steps out of those reached, the trigger left out.
+/// Succeeded steps out of those reached, the trigger left out.
 pub fn progress(run: &Value, nodes: &Value) -> (usize, usize) {
     let steps = runs::steps(run, nodes, false);
     let done = steps
@@ -547,11 +547,11 @@ pub fn progress(run: &Value, nodes: &Value) -> (usize, usize) {
     (done, steps.len())
 }
 
-/// `describeRun`'s title, subtitle, source label and glyphs.
+/// A run's title, subtitle, source label and glyphs.
 pub struct Described {
     pub title: String,
     pub subtitle: Option<String>,
-    /// `sourceLabel`.
+    /// What started the run.
     pub source: String,
     /// The connector a connector run draws when its workflow has no icon.
     pub connector: Option<String>,
@@ -570,7 +570,7 @@ fn source_icon(source: &str) -> &'static str {
     }
 }
 
-/// `connectorTitle`: GitHub's issues and pull requests share one number
+/// GitHub's issues and pull requests share one number
 /// sequence, so the item's URL tells them apart.
 fn connector_title(item: &Value, connector: &str) -> Option<String> {
     let id = s(item, "externalId").unwrap_or("");
@@ -584,7 +584,7 @@ fn connector_title(item: &Value, connector: &str) -> Option<String> {
     }
 }
 
-/// `describeRun`. `look_connector` is the connector the run's connection
+/// A run, described. `look_connector` is the connector the run's connection
 /// resolves to, which a packaged connector's item only knows as `sdk`.
 pub fn describe(run: &Value, wf: Option<&Value>, look_connector: Option<&str>) -> Described {
     let name = wf
@@ -638,7 +638,7 @@ pub fn describe(run: &Value, wf: Option<&Value>, look_connector: Option<&str>) -
             fallback: source_icon("task"),
         };
     }
-    // `sourceOf`: a connector poll draws the play glyph but reads "manual".
+    // A connector poll draws the play glyph but reads "manual".
     let (source, label) = match trigger {
         Some("once" | "recurring") => ("schedule", "scheduled"),
         Some("connectorPoll") => ("connector", "manual"),
@@ -666,12 +666,12 @@ fn trigger_type(wf: &Value) -> Option<&str> {
         .as_str()
 }
 
-/// `isScheduledWorkflow`: any trigger but a manual one.
+/// Any trigger but a manual one.
 pub fn is_scheduled(wf: &Value) -> bool {
     trigger_type(wf).is_some_and(|t| t != "manual")
 }
 
-/// `statusDotState`: the sidebar's dot for a workflow, the gate first.
+/// The sidebar's dot for a workflow, the gate first.
 pub fn side_status(wf: &Value, waiting: bool, failed: bool) -> Option<&'static str> {
     if waiting {
         Some("waiting")
@@ -690,7 +690,7 @@ pub fn side_status(wf: &Value, waiting: bool, failed: bool) -> Option<&'static s
     }
 }
 
-/// `isContextual`: a manual trigger run against a session.
+/// A manual trigger run against a session.
 pub fn contextual(nodes: &[Value]) -> bool {
     trigger(nodes)
         .and_then(|t| t.get("config"))
@@ -709,7 +709,7 @@ pub fn inputs(nodes: &[Value]) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// `isValidInputKey`.
+/// Whether `key` can name a run input.
 pub fn valid_key(key: &str) -> bool {
     let mut chars = key.chars();
     chars
@@ -726,7 +726,7 @@ pub fn asked(nodes: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// `needsRunPrompt`.
+/// Whether a run must ask for something before it starts.
 pub fn needs_prompt(nodes: &[Value], has_source: bool) -> bool {
     (contextual(nodes) && !has_source) || !asked(nodes).is_empty()
 }
@@ -742,7 +742,7 @@ fn mentions(v: Option<&str>, field: &str) -> bool {
     v.is_some_and(|v| v.contains(&format!("context.{field}")))
 }
 
-/// `detectRequiredFields`: whether a contextual run asks for a branch and a
+/// Whether a contextual run asks for a branch and a
 /// worktree.
 pub fn required(nodes: &[Value]) -> (bool, bool) {
     let (mut branch, mut worktree) = (false, false);
@@ -879,7 +879,7 @@ pub fn trigger_info(kind: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// `switchTriggerType`.
+/// A trigger kind's starting config.
 pub fn trigger_config(kind: &str) -> Value {
     match kind {
         "once" => json!({ "triggerType": "once", "runAt": crate::tasks::now_iso() }),
@@ -1061,7 +1061,7 @@ pub fn convert(conv: Conv, text: &str) -> Result<Option<Value>, String> {
     })
 }
 
-/// `handleNodeLabelChange`: the label, a slug of it no other step has,
+/// The label, a slug of it no other step has,
 /// and every `steps.<old>.` reference renamed.
 pub fn relabel(d: &mut Draft, id: &str, label: &str) {
     let taken: HashSet<String> = d
@@ -1185,7 +1185,7 @@ pub fn var_sources(
     (groups, vars)
 }
 
-/// What the step library hands back (`LibraryPick`).
+/// What the step library hands back.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pick {
     /// A built-in step: `agent`, `script`, `httpRequest`, `condition`,
@@ -1219,7 +1219,7 @@ pub enum Pick {
 }
 
 impl Pick {
-    /// `stepForPick`: the node type and what it already knows.
+    /// The node type and what it already knows.
     fn step(&self) -> Option<(&str, Value)> {
         Some(match self {
             Pick::Type(t) => (t.as_str(), json!({})),
@@ -1257,7 +1257,7 @@ fn slugs(nodes: &[Value], except: Option<&str>) -> HashSet<String> {
         .collect()
 }
 
-/// `createNodeWithUniqueSlug`: an addable step, agents in the first project.
+/// An addable step, agents in the first project.
 pub fn new_step(
     kind: &str,
     nodes: &[Value],
@@ -1296,7 +1296,7 @@ fn with_config(mut n: Value, preset: &Value) -> Value {
     n
 }
 
-/// `handleLibraryPick`: what was picked, where the open anchor says; the
+/// What was picked, where the open anchor says; the
 /// node to select after.
 pub fn pick(
     d: &mut Draft,
@@ -1451,7 +1451,7 @@ pub fn pick(
     made
 }
 
-/// `handleInsertNode`.
+/// Inserts a step after `after`.
 fn insert(
     d: &mut Draft,
     after: &str,
@@ -1506,7 +1506,7 @@ fn insert(
     Some(nid)
 }
 
-/// `handlePaletteInsert`: a step dropped where an edge was released, the
+/// A step dropped where an edge was released, the
 /// computed layout materialized first.
 fn palette_insert(
     d: &mut Draft,
@@ -1565,13 +1565,13 @@ fn palette_insert(
     Some(nid)
 }
 
-/// `handleDeleteNode`.
+/// Removes step `id`.
 pub fn remove(d: &mut Draft, id: &str) {
     let (nodes, edges) = graph::remove(d.nodes(), d.edges(), id);
     d.set_graph(nodes, edges);
 }
 
-/// `handleConnectEdge`.
+/// Connects `source` to `target`.
 pub fn connect(d: &mut Draft, source: &str, target: &str) {
     let mut edges = d.edges().to_vec();
     edges.push(json!({ "id": crate::tasks::uuid(), "source": source, "target": target }));
@@ -1579,7 +1579,7 @@ pub fn connect(d: &mut Draft, source: &str, target: &str) {
     d.set_graph(nodes, edges);
 }
 
-/// `handlePositionsCommit`.
+/// Writes moved positions into the draft.
 pub fn commit_positions(d: &mut Draft, positions: &HashMap<String, (f64, f64)>) {
     let nodes: Vec<Value> = d
         .nodes()
@@ -1596,7 +1596,7 @@ pub fn commit_positions(d: &mut Draft, positions: &HashMap<String, (f64, f64)>) 
     d.set_graph(nodes, edges);
 }
 
-/// `handleTidyUp`: the layout's positions written in.
+/// The layout's positions written in.
 pub fn tidy(d: &mut Draft) {
     let (positions, _) = crate::canvas::layout_positions(d.nodes(), d.edges());
     commit_positions(d, &positions);

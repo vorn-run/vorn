@@ -1,10 +1,8 @@
-//! The graph checks the workflow tools make, from `@vornrun/shared/workflow-graph`
-//! and `tools/workflows.ts`.
+//! The graph checks the workflow tools make.
 //!
 //! A graph reaches these as the caller sent it: `import_workflow` checks a
-//! file nothing has parsed against a schema, so a node may be anything. Each
-//! check reads it the way the TypeScript does, and where the TypeScript would
-//! throw on a malformed node, so does the port, with V8's message.
+//! file nothing has parsed against a schema, so a node may be anything. A
+//! malformed node fails the check with a JavaScript-style TypeError message.
 
 use serde_json::Value;
 

@@ -1,7 +1,7 @@
 //! The MCP tools Connectors adds to Vorn's server: discovering, installing
 //! and invoking connectors, each a thin call into the built-in's own
-//! methods, worded as `tools/connectors.ts` words them. Vorn's server checks
-//! their arguments against the TypeScript's schemas before they get here.
+//! methods. Vorn's server checks their arguments against the generated
+//! schemas before they get here.
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -21,7 +21,7 @@ static TOOLS: LazyLock<Vec<Value>> = LazyLock::new(|| {
         .expect("generated/tools.json is JSON")
 });
 
-/// The tools as `tools/list` lists them, exactly as the TypeScript defines them.
+/// The tools as `tools/list` lists them, from `generated/tools.json`.
 pub fn listed() -> &'static [Value] {
     &TOOLS
 }

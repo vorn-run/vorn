@@ -1,6 +1,5 @@
-//! The Tasks view's model: the statuses as `task-status.ts` lists them, the
-//! board's filters and sections, and each task mutation as the renderer's
-//! tasks slice makes it, on the config that `config:save` writes back.
+//! The Tasks view's model: the statuses, the board's filters and sections,
+//! and each task mutation, on the config that `config:save` writes back.
 
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
@@ -83,7 +82,7 @@ pub fn resumable(agents: &crate::agents::Agents, agent: &str) -> bool {
 /// `TASK_TEMPLATE`: what a new task's description starts as.
 pub const TEMPLATE: &str = "## Description\nDescribe what needs to be done...\n\n## Acceptance Criteria\n- [ ] Criterion 1\n- [ ] Criterion 2\n\n## Notes\nAny additional context or references.\n";
 
-/// `getTaskShortId`: three letters of the project and four of the id.
+/// Three letters of the project and four of the id.
 pub fn short_id(project: &str, id: &str) -> String {
     let prefix: String = project
         .chars()
@@ -140,7 +139,7 @@ pub fn locale_string(iso: &str) -> String {
     }
 }
 
-/// `formatTaskDate`: "Mar 5".
+/// "Mar 5".
 pub fn short_date(iso: &str) -> String {
     match parts(iso) {
         Some((_, m, d, _, _)) => format!("{} {d}", MONTHS[m - 1]),
@@ -395,7 +394,7 @@ pub enum TaskAct {
 }
 
 /// A slash command: title, description, icon and what it inserts at the
-/// start of the line (`slash-commands.ts`).
+/// start of the line.
 pub const SLASH: [(&str, &str, &str, &str); 9] = [
     ("Heading 1", "Large section heading", "heading-1", "# "),
     ("Heading 2", "Medium section heading", "heading-2", "## "),
@@ -418,7 +417,7 @@ pub const SLASH: [(&str, &str, &str, &str); 9] = [
     ("Divider", "Horizontal separator line", "minus", "---\n"),
 ];
 
-/// `filterSlashCommands`: the commands whose title or description holds
+/// The commands whose title or description holds
 /// `query`, as indexes into [`SLASH`].
 pub fn slash_matches(query: &str) -> Vec<usize> {
     let q = query.to_lowercase();
@@ -628,7 +627,7 @@ impl DiffFile {
     }
 }
 
-/// `formatReviewFeedback`.
+/// Review comments as a prompt for the agent.
 pub fn feedback(comments: &[Comment]) -> String {
     let mut out = "Please address the following review comments:\n\n".to_owned();
     let mut files: Vec<&str> = Vec::new();
@@ -660,7 +659,7 @@ pub struct Diff {
     pub comments: Vec<Comment>,
 }
 
-/// The commit dialog (`CommitDialog`).
+/// The commit dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     pub unstaged: bool,
@@ -698,7 +697,7 @@ pub struct Tasks {
     pub dirty: Option<Instant>,
     pub confirm_delete: Option<String>,
     pub diff: Diff,
-    /// The task and directory the diff is of (`diffKey`).
+    /// The task and directory the diff is of.
     pub diff_key: Option<String>,
     pub diff_open: bool,
     pub runs_open: bool,
@@ -877,8 +876,7 @@ fn set(t: &mut Map<String, Value>, k: &str, v: Option<Value>) {
     }
 }
 
-/// A status change as the slice makes it (`completeTask`, `reviewTask`,
-/// `cancelTask`, `reopenTask`, or `updateTask` to in progress).
+/// A status change: done, in review, cancelled, reopened, or in progress.
 pub fn set_status(config: &mut Value, id: &str, status: &str, now: &str) -> bool {
     patch(config, id, now, |t| {
         t.insert("status".into(), json!(status));
@@ -908,7 +906,7 @@ pub fn set_status(config: &mut Value, id: &str, status: &str, now: &str) -> bool
     })
 }
 
-/// `startTask`: the task in progress in `session`.
+/// The task in progress in `session`.
 pub fn start(
     config: &mut Value,
     id: &str,
@@ -928,7 +926,7 @@ pub fn start(
     })
 }
 
-/// `archiveTask` and `unarchiveTask`: only finished work is filed away.
+/// Archives or unarchives a task: only finished work is filed away.
 pub fn set_archived(config: &mut Value, id: &str, archived: bool, now: &str) -> bool {
     let Some(t) = config.get("tasks").and_then(Value::as_array).and_then(|l| {
         l.iter()
@@ -953,7 +951,7 @@ pub fn remove(config: &mut Value, id: &str) -> bool {
     list.len() != before
 }
 
-/// The form's fields onto a task, as `updateTask` gets them; `useWorktree`
+/// The form's fields onto a task; `useWorktree`
 /// and the rest go when unset.
 pub fn apply_form(t: &mut Map<String, Value>, f: &TaskForm, title: &str, description: &str) {
     t.insert("title".into(), json!(title.trim()));
@@ -966,7 +964,7 @@ pub fn apply_form(t: &mut Map<String, Value>, f: &TaskForm, title: &str, descrip
     set(t, "images", (!f.images.is_empty()).then(|| json!(f.images)));
 }
 
-/// `addTask`: a new task from the form, ordered last among its project's
+/// A new task from the form, ordered last among its project's
 /// tasks of `status`.
 pub fn add(config: &mut Value, f: &TaskForm, title: &str, description: &str, now: &str) {
     let order = config
@@ -1025,7 +1023,7 @@ pub fn board_press(press: &crate::points::Press) -> Option<TaskAct> {
     })
 }
 
-/// The kanban drop rules (`handleKanbanDrop`): the status change a card
+/// The kanban drop rules: the status change a card
 /// dropped from `from` onto `to` makes, if any.
 pub fn drop_status(from: &str, to: &str) -> Option<&'static str> {
     if from == to || (to == "in_progress" && from != "todo") {

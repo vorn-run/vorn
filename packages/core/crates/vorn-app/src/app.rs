@@ -1,5 +1,5 @@
 //! The app: vornd's models and the grid folded into one state, the keys
-//! routed the way the renderer's shortcuts route them, and each frame built
+//! routed to the shortcuts, and each frame built
 //! from that state. It knows nothing of windows, so the same `App` draws
 //! into a window or offscreen.
 
@@ -94,8 +94,8 @@ pub enum Shortcut {
     Prompt(bool),
 }
 
-/// The renderer's global shortcuts (`useKeyboardShortcuts`). Escape is not
-/// one: it closes what is open, else a terminal takes it, as xterm does.
+/// The global shortcuts. Escape is not one: it closes what is open, else a
+/// terminal takes it, as xterm does.
 pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     let only = |want: u16| m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT) == want;
     if code == "Backquote" && only(mods::CTRL) {
@@ -542,7 +542,7 @@ impl App {
         app
     }
 
-    /// `useState(sessionCount > 0)`: a project first seen without sessions
+    /// A project first seen without sessions
     /// starts folded and stays so until opened.
     fn see_projects(&mut self) {
         for p in &self.store.projects {
@@ -671,7 +671,7 @@ impl App {
         self.data_dir = Some(dir);
     }
 
-    /// `setActiveWorkspace`'s reset: a selection from the last workspace
+    /// Resets the selection on a workspace switch: one from the last workspace
     /// would narrow the new one to nothing.
     fn workspace_switched(&mut self) {
         self.st.project = None;
@@ -680,8 +680,7 @@ impl App {
         self.st.focused = None;
     }
 
-    /// Changes the sidebar's view options and writes them down, as
-    /// `saveSidebarSettings` does on every change.
+    /// Changes the sidebar's view options and writes them down.
     fn set_sidebar_view(&mut self, change: impl FnOnce(&mut crate::sidebar_view::SidebarView)) {
         change(&mut self.st.sidebar_view);
         if let Some(dir) = &self.data_dir {
@@ -1071,8 +1070,7 @@ impl App {
         }
     }
 
-    /// `sessions:resume`'s answer, as the renderer's `resumeEndedSession`
-    /// takes it.
+    /// Takes `sessions:resume`'s answer for an ended session.
     fn resumed(&mut self, old: &str, auto: bool, answer: Result<Value, RpcError>) {
         let v = match answer {
             Ok(v) => v,
@@ -1593,7 +1591,7 @@ impl App {
         );
     }
 
-    /// `addSessionGroup`: "New group" after the last, its name being
+    /// "New group" after the last, its name being
     /// edited, holding `session` when one asked for it.
     fn new_group(&mut self, ui: &mut Ui, session: Option<String>) {
         let id = crate::graph::new_id();
@@ -1630,7 +1628,7 @@ impl App {
         }
     }
 
-    /// `setActiveWorkspace`: saved in the config, which every app on this
+    /// Saved in the config, which every app on this
     /// vornd follows.
     fn switch_workspace(&mut self, id: String) {
         let mut config = self.store.config.clone();
@@ -1662,7 +1660,7 @@ impl App {
         ui.set_focus(Some(WS_NAME));
     }
 
-    /// `handleCreate` (then a switch to it) or `handleUpdate`.
+    /// Creates the workspace (then switches to it) or updates it.
     fn save_workspace(&mut self, ui: &mut Ui) {
         let name = ui.edit_text(WS_NAME).trim().to_owned();
         let Some(form) = self.st.ws_form.as_ref().filter(|_| !name.is_empty()) else {
@@ -1710,7 +1708,7 @@ impl App {
         self.save_config(config, call);
     }
 
-    /// `removeWorkspace`: its groups go with it, its projects and
+    /// Its groups go with it, its projects and
     /// workflows move to `personal`, which it hands the screen to if it
     /// had it.
     fn delete_workspace(&mut self, id: &str) {
@@ -1758,7 +1756,7 @@ impl App {
         );
     }
 
-    /// `updateSessionGroup`: one field of a group, saved quietly.
+    /// One field of a group, saved quietly.
     fn patch_group(&mut self, id: &str, key: &str, value: String) {
         let mut config = self.store.config.clone();
         let Some(g) = config
@@ -1775,7 +1773,7 @@ impl App {
         self.save_config(config, Call::Quiet);
     }
 
-    /// `removeSessionGroup`: the group goes, its sessions let go through
+    /// The group goes, its sessions let go through
     /// the server, which owns membership.
     fn delete_group(&mut self, id: &str) {
         let Some(name) = self.store.group(id).map(|g| g.name.clone()) else {
@@ -1805,7 +1803,7 @@ impl App {
         }
     }
 
-    /// `moveSessionToGroup`: shown at once, then told to the server.
+    /// Shown at once, then told to the server.
     fn move_to_group(&mut self, session: String, group: Option<String>, call: Call) {
         if let Some(s) = self
             .store
@@ -1879,8 +1877,7 @@ impl App {
             Act::ToggleSidebar => {
                 self.st.sidebar = !self.st.sidebar;
                 if self.st.sidebar {
-                    // Reopened, the projects take their first fold again, as
-                    // today's remounted ProjectItems do.
+                    // Reopened, the projects take their first fold again.
                     self.st.seen_projects.clear();
                     self.st.collapsed.clear();
                     self.see_projects();

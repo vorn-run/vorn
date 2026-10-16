@@ -174,7 +174,7 @@ impl McpPoll {
     }
 }
 
-/// `JSON.parse`'s complaint about `raw`, close to the words Node uses.
+/// Why `raw` is not JSON, worded like `JSON.parse`'s error.
 fn json_error(raw: &str, err: &serde_json::Error) -> String {
     if raw.trim().is_empty() {
         return "Unexpected end of JSON input".to_owned();

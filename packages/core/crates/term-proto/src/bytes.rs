@@ -1,5 +1,5 @@
-//! The raw-byte stream a bytes client (xterm.js on the web, the phone, the
-//! desktop renderer) reads: Terminal State Protocol §7 Bytes and Resized,
+//! The raw-byte stream a bytes client (xterm.js on the web, the phone)
+//! reads: Terminal State Protocol §7 Bytes and Resized,
 //! §12's reconnect rule and §14's frame version 2.
 //!
 //! A bytes client parses the session itself, so what it is sent must be the

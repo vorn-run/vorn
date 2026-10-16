@@ -1,6 +1,6 @@
 //! Where a call's path is, and how to reach it there: on this machine, or
-//! in a project on a remote host, logged in to over ssh as the server's
-//! `sshExec` does (`vorn_remote::Login`).
+//! in a project on a remote host, logged in to over ssh
+//! (`vorn_remote::Login`).
 
 use std::path::PathBuf;
 

@@ -5,10 +5,9 @@
 //! The engine ([`vorn_workflow`]) walks runs through [`host::VorndHost`];
 //! the scheduler and the connector inbox ([`schedule`]) start them; the
 //! pages a browser opens (an artifact, a gate's review page, a webhook) are
-//! answered over HTTP ([`routes`]). Reads come from `vorn.db` as the server
-//! answered them ([`vorn_work::reads`]). Every client hears about runs and
-//! artifacts through the server's broadcast, since the server holds every
-//! client; what it no longer does is run any of this.
+//! answered over HTTP ([`routes`]). Reads come from `vorn.db`
+//! ([`vorn_work::reads`]). Every client hears about runs and artifacts
+//! through the server's broadcast.
 
 pub mod db;
 pub mod files;
@@ -330,7 +329,7 @@ impl Work {
         )
     }
 
-    /// A read the database answers as the server's handler did.
+    /// A read the database answers.
     async fn read(&self, method: &str, params: &Value) -> Answer {
         let (data_dir, port) = self.read_host();
         let (method, params) = (method.to_owned(), params.clone());

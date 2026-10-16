@@ -1,13 +1,13 @@
-//! The settings page (`SettingsPage` and its panels): which panel is open,
+//! The settings page and its panels: which panel is open,
 //! what each panel holds that vornd does not, and the wording the panels
-//! derive from vornd's answers (`update-status.ts`, `server-runtime.ts`,
-//! the worktree manager's totals and selection).
+//! derive from vornd's answers (the updater, the server's runtime, the
+//! worktree manager's totals and selection).
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-/// A panel of the settings page (`SettingsCategory`).
+/// A panel of the settings page.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Category {
     #[default]
@@ -29,7 +29,7 @@ pub enum Category {
 }
 
 impl Category {
-    /// The renderer's id for a category (`setSettingsCategory`).
+    /// The category an id names.
     pub fn from_id(id: &str) -> Option<Category> {
         Some(match id {
             "appearance" => Category::Appearance,
@@ -200,7 +200,7 @@ pub enum KeyField {
     Import,
 }
 
-/// One of `shell:listInstalled`'s shells (`InstalledShell`).
+/// One of `shell:listInstalled`'s shells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shell {
     pub family: String,
@@ -239,7 +239,7 @@ pub fn sigil(family: Option<&str>) -> &'static str {
     }
 }
 
-/// The updater's state (`UpdateStatus`); `Unsupported` in a build tree.
+/// The updater's state; `Unsupported` in a build tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UpdateStatus {
     Idle {
@@ -266,7 +266,7 @@ pub enum UpdateStatus {
     Unsupported,
 }
 
-/// The tones a status can carry (`StatusTone`).
+/// The tones a status can carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Blocked,
@@ -294,7 +294,7 @@ pub struct UpdateView {
     pub action: Option<UpdateAction>,
 }
 
-/// `formatLastChecked`.
+/// When updates were last checked, in words.
 pub fn last_checked(at: Option<f64>, now: f64) -> Option<String> {
     let at = at?;
     let seconds = ((now - at) / 1000.0).floor().max(0.0) as u64;
@@ -311,7 +311,7 @@ pub fn last_checked(at: Option<f64>, now: f64) -> Option<String> {
     })
 }
 
-/// `describeUpdateStatus`.
+/// The label, detail, tone and action for the updater's state.
 pub fn describe_update(status: &UpdateStatus, channel: &str, now: f64) -> UpdateView {
     let view = |label: String, detail: Option<String>, tone, action| UpdateView {
         label,
@@ -377,7 +377,7 @@ pub fn describe_update(status: &UpdateStatus, channel: &str, now: f64) -> Update
     }
 }
 
-/// `updateCostLine`: what restarting for an update does to the sessions.
+/// What restarting for an update does to the sessions.
 pub fn update_cost(sessions: usize, turn_running: bool, survive: bool) -> Option<String> {
     if sessions == 0 {
         return None;
@@ -402,8 +402,7 @@ pub fn update_cost(sessions: usize, turn_running: bool, survive: bool) -> Option
     Some(format!("{subject} {fate}.{turn}"))
 }
 
-/// What the Terminal server row says (`describeServerRuntime`) for a
-/// server whose build is known.
+/// What the Terminal server row says for a server whose build is known.
 pub fn describe_server(server: &str, app: &str, adopted: bool) -> (String, &'static str) {
     if server == app {
         let how = if adopted {
@@ -450,7 +449,7 @@ impl SshKey {
     }
 }
 
-/// `truncateKey`: a long public key with its middle cut out.
+/// A long public key with its middle cut out.
 pub fn truncate_key(key: &str) -> String {
     let n = key.chars().count();
     if n <= 60 {
@@ -511,7 +510,7 @@ pub struct SshPage {
     pub importing: bool,
 }
 
-/// One of `connection:listKeys`'s entries (`ConnectorKey`).
+/// One of `connection:listKeys`'s entries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnKey {
     pub connection: String,
@@ -562,7 +561,7 @@ impl ConnKey {
     }
 }
 
-/// `describeField`: what a key's stored value can be said to be.
+/// What a key's stored value can be said to be.
 pub fn describe_field(f: &KeyFieldInfo) -> String {
     if !f.readable {
         return "Locked \u{2014} this machine cannot read it".to_owned();
@@ -580,7 +579,7 @@ pub fn describe_field(f: &KeyFieldInfo) -> String {
         .unwrap_or_else(|| "Set".to_owned())
 }
 
-/// `describeUsage`.
+/// How many steps use something, in words.
 pub fn describe_usage(n: u64) -> String {
     match n {
         0 => "unused".to_owned(),
@@ -600,7 +599,7 @@ pub struct KeyRowState {
     pub error: Option<String>,
 }
 
-/// A session holder vornd reports (`SessionHolder`).
+/// A session holder vornd reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holder {
     pub pid: i64,
@@ -658,7 +657,7 @@ fn plural(n: i64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// `olderNote`: what an older session holder means for its sessions.
+/// What an older session holder means for its sessions.
 pub fn older_note(h: &Holder) -> String {
     let held = match h.sessions {
         None => "Sessions started before Vorn was updated".to_owned(),
@@ -681,7 +680,7 @@ pub fn older_note(h: &Holder) -> String {
     }
 }
 
-/// The `vorn` command's state on this machine (`ShimStatus`).
+/// The `vorn` command's state on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliState {
     pub available: bool,
@@ -777,7 +776,7 @@ pub fn default_command(a: &Agent) -> Value {
     v
 }
 
-/// `getCommand`: the configured command, else the default.
+/// The configured command, else the default.
 pub fn command_of(config: &Value, a: &Agent) -> Value {
     config
         .get("agentCommands")
@@ -800,7 +799,7 @@ pub fn args_text(cmd: &Value, headless: bool) -> String {
     strings(cmd.get(if headless { "headlessArgs" } else { "args" })).join(" ")
 }
 
-/// `isModified`: the command differs from its default.
+/// The command differs from its default.
 pub fn modified(cmd: &Value, a: &Agent) -> bool {
     let d = default_command(a);
     cmd.get("command") != d.get("command")
@@ -813,7 +812,7 @@ pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
 
-/// `serverStaysUp`: why the server will not shut down on its own, if it
+/// Why the server will not shut down on its own, if it
 /// will not.
 pub fn server_stays_up(config: &Value) -> Option<String> {
     let polling = config

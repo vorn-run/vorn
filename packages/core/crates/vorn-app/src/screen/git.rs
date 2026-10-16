@@ -1,6 +1,6 @@
-//! A session's git on screen: `GitChangesIndicator` and `OpenInButton` in
-//! the card's status bar, the `BranchPicker` popover, the Changes panel
-//! (`RightPanel`), `WorktreeCleanupDialog`, and the worktree toasts.
+//! A session's git on screen: the changes count and the open-in button in
+//! the card's status bar, the branch picker, the Changes panel, the
+//! worktree cleanup dialog, and the worktree toasts.
 
 use super::tasks::diff::{self, Scope};
 use super::{c, ico, sidebar_project_icon, truncate, white, Screen};
@@ -36,7 +36,7 @@ fn git(a: GitAct) -> Act {
     Act::Git(a)
 }
 
-/// `GitChangesIndicator`: `+N -N` once a session has changes.
+/// `+N -N` once a session has changes.
 pub(super) fn indicator(s: &Screen<'_>, session: &Session, dim: f32) -> Option<El> {
     let st = s.st.git.stats.get(&session.info.id)?;
     if !st.changed() {
@@ -186,7 +186,7 @@ pub(super) fn open_in_panel(s: &Screen<'_>, session: &str) -> El {
     col
 }
 
-/// `BranchPicker`: the filter, the fetch, and the branches.
+/// The filter, the fetch, and the branches.
 pub(super) fn branch_panel(s: &Screen<'_>) -> El {
     let Some(b) = &s.st.git.branches else {
         return div();
@@ -355,7 +355,7 @@ fn panel_button(s: &Screen<'_>, act: Act, name: &str, label: &str, base: u32) ->
     tooltip(s.ui, b, id, label, None)
 }
 
-/// `RightPanel`: the open session's changes, beside the sessions.
+/// The open session's changes, beside the sessions.
 pub(super) fn right_panel(s: &Screen<'_>) -> Option<El> {
     let sid = s.st.git.panel.as_deref()?;
     let session = s.store.session(sid)?;
@@ -372,7 +372,7 @@ pub(super) fn right_panel(s: &Screen<'_>) -> Option<El> {
         .py(6.0)
         .border_bottom(1.0, white(0.06))
         .shrink0();
-    // The sidebar's active project, as today's header reads it.
+    // The sidebar's active project.
     let project =
         s.st.project
             .as_deref()
@@ -694,7 +694,7 @@ fn feedback(s: &Screen<'_>) -> El {
         )
 }
 
-/// One toast in today's style, with its action buttons.
+/// One toast, with its action buttons.
 pub(super) fn toast(
     s: &Screen<'_>,
     (glyph, tint): (&str, u32),

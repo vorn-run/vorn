@@ -174,7 +174,7 @@ impl Identity {
     }
 }
 
-/// `replacesIncumbent`: whether a running vornd is an older build this app
+/// Whether a running vornd is an older build this app
 /// should replace with its own. Its terminals live in the session holder,
 /// which the new vornd takes over. Only between packaged builds that both say
 /// which they are: a dev build has one version across every edit.

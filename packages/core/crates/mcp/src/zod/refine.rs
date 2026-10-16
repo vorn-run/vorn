@@ -1,8 +1,8 @@
 //! The refinements the tools' schemas use, each a rule zod runs as code.
 //!
 //! `scripts/gen-mcp-tools.mjs` names every one it finds and refuses one it
-//! does not know, so each name here answers for one function in the
-//! TypeScript, with that function's messages word for word.
+//! does not know, so each name here answers for one function in
+//! `packages/mcp`, with that function's messages word for word.
 
 use std::sync::LazyLock;
 

@@ -1,8 +1,7 @@
-//! Syntax colour for the editor (`shiki.ts`): the language a file name
-//! implies, and the colours of its tokens in today's vitesse-dark theme.
+//! Syntax colour for the editor: the language a file name
+//! implies, and the colours of its tokens in the vitesse-dark theme.
 //!
-//! Today's app runs Shiki's TextMate grammars. This is a lexer per family
-//! of languages instead, matched to Shiki per token class (comments,
+//! A lexer per family of languages, matched to Shiki per token class (comments,
 //! strings, numbers, keywords, storage words, constants, types, functions,
 //! properties, punctuation) rather than per scope; the fixtures under
 //! `tests/fixtures/highlight` hold Shiki's own output and the test says how

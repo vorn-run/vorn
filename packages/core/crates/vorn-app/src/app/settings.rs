@@ -1,5 +1,5 @@
 //! What the settings page's controls do and the answers to the calls they
-//! make, as `SettingsPage` and its panels do them.
+//! make.
 
 use std::sync::mpsc;
 

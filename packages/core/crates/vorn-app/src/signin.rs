@@ -1,4 +1,4 @@
-//! A connection's signed-in profile (`connection-sessions.ts`): the sign-in
+//! A connection's signed-in profile: the sign-in
 //! window, and the hidden pages that make calls as the person signed in
 //! there. The pure half lives here: which origins a call may reach, which
 //! headers it may send, the script a page runs, and who a check names.
@@ -209,7 +209,7 @@ fn allowed_header(name: &str) -> bool {
         && !lower.starts_with("proxy-")
 }
 
-/// `sessionHeaders`: the string headers a connector may send, and none of the rest.
+/// The string headers a connector may send, and none of the rest.
 pub fn session_headers(value: Option<&Value>) -> Map<String, Value> {
     value
         .and_then(Value::as_object)
@@ -265,7 +265,7 @@ pub fn fetch_script(n: u64, request: &Value) -> String {
     )
 }
 
-/// `identityFrom`: who the check's answer names, from the manifest's paths.
+/// Who the check's answer names, from the manifest's paths.
 pub fn identity_from(body: &str, paths: &[String]) -> Option<String> {
     let parsed: Value = serde_json::from_str(body).ok()?;
     let values: Vec<String> = paths

@@ -1,5 +1,5 @@
-//! `tools/workflows.ts` and `tools/describe-nodes.ts`: workflows, their runs,
-//! the gates runs park on, and moving a workflow between machines.
+//! Workflows, their runs, the gates runs park on, and moving a workflow
+//! between machines.
 
 use serde_json::{json, Map, Value};
 

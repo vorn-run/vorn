@@ -114,7 +114,7 @@ pub fn session_named<'a>(bound: Option<&'a str>, body: &'a Map<String, Value>) -
 }
 
 /// The checks on the session, then the call read from its body. A body that
-/// does not say what the method needs fails with 500, as a thrown error did.
+/// does not say what the method needs fails with 500.
 pub fn request(
     caller: &Caller,
     method: &str,

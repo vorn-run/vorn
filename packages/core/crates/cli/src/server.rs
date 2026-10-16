@@ -74,7 +74,7 @@ impl From<vorn_store::Error> for TokenError {
 /// The database a token command works on: `--data-dir`, else `~/.vorn`.
 ///
 /// `VORN_DATA_DIR` is deliberately not read: it says where a *running*
-/// server is, and the TypeScript token commands never consulted it either.
+/// server is.
 fn database_dir(flag: Option<&str>) -> PathBuf {
     flag.map(PathBuf::from)
         .unwrap_or_else(|| crate::rpc::home_dir().join(".vorn"))

@@ -1,4 +1,4 @@
-//! `FileTypeIcon`: the Seti glyph and colour today's app gives a file by its
+//! The Seti glyph and colour the app gives a file by its
 //! name, drawn from the glyph's outline rather than from the icon font.
 
 mod tables;
@@ -21,7 +21,7 @@ fn def(name: &str) -> Option<(u32, u32)> {
 
 const DEFAULT: &str = "_default";
 
-/// `resolveIcon`: the whole name, then a compound extension, then the last
+/// The whole name, then a compound extension, then the last
 /// one, then dotfiles as config. Returns the glyph's code point and colour.
 pub fn resolve(name: &str) -> (u32, u32) {
     let lower = name.to_lowercase();

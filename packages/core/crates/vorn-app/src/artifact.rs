@@ -1,7 +1,6 @@
 //! Artifacts in the browser pane: what vornd keeps of one (its versions and
 //! the comments on them), what a page declares about itself (its manifest),
-//! and the renderer's rules for both (`artifact-comments.ts`,
-//! `doc-edits.ts`, `design-canvas.ts`, `parseManifest`).
+//! and the rules for both: comments, doc edits and the design canvas.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -129,7 +128,7 @@ impl State {
 /// `POPOVER_WIDTH`.
 pub const POPOVER_WIDTH: f32 = 260.0;
 
-/// `placePopover`: under the selection, or over it when there is no room.
+/// Under the selection, or over it when there is no room.
 pub fn place_popover(rect: (f32, f32, f32, f32), area: (f32, f32)) -> (f32, f32) {
     let (x, y, _, h) = rect;
     let x = x.min(area.0 - POPOVER_WIDTH - 8.0).max(8.0);
@@ -142,7 +141,7 @@ pub fn place_popover(rect: (f32, f32, f32, f32), area: (f32, f32)) -> (f32, f32)
     (x, y)
 }
 
-/// `latestSentBatch`: the comments sent last, together.
+/// The comments sent last, together.
 pub fn latest_sent_batch(comments: &[Comment]) -> Vec<&Comment> {
     let mut latest: Option<&Comment> = None;
     for c in comments {
@@ -175,7 +174,7 @@ pub struct Mark {
     pub state: &'static str,
 }
 
-/// `marksFor`: sent first, so a draft on the same words paints over it.
+/// Sent first, so a draft on the same words paints over it.
 pub fn marks_for(drafts: &[&Comment], sent: &[&Comment], focus: Option<&str>) -> Vec<Mark> {
     sent.iter()
         .chain(drafts)
@@ -248,7 +247,7 @@ fn para_key(p: &str) -> String {
     stripped.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// `mergeDocEdit`: the edited doc as the new version's body, and each run
+/// The edited doc as the new version's body, and each run
 /// of changed paragraphs as one edit, by a longest common subsequence over
 /// the paragraphs' keys.
 pub fn merge_doc_edit(original: &str, edited: &str) -> (String, Vec<DocEdit>) {
@@ -299,7 +298,7 @@ pub fn merge_doc_edit(original: &str, edited: &str) -> (String, Vec<DocEdit>) {
     (format!("{}\n", out.join("\n\n")), edits)
 }
 
-/// A design's canvas: its zoom limits and spacing (`design-canvas.ts`).
+/// A design's canvas: its zoom limits and spacing.
 pub const MIN_ZOOM: f64 = 0.25;
 pub const MAX_ZOOM: f64 = 1.0;
 pub const CANVAS_PAD: f64 = 24.0;
@@ -321,7 +320,7 @@ pub struct Placed {
     pub top: f64,
 }
 
-/// `placeArtboards`: side by side at `zoom`, and the canvas's size.
+/// Side by side at `zoom`, and the canvas's size.
 pub fn place_artboards(boards: &[Artboard], zoom: f64) -> (Vec<Placed>, f64, f64) {
     let mut left = CANVAS_PAD;
     let mut tallest = 0.0f64;
@@ -350,7 +349,7 @@ pub fn clamp_zoom(zoom: f64) -> f64 {
     (js_round(zoom * 100.0) / 100.0).clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
-/// `fitZoom`: the largest zoom at which every artboard is in view.
+/// The largest zoom at which every artboard is in view.
 pub fn fit_zoom(boards: &[Artboard], area: (f64, f64)) -> f64 {
     if boards.is_empty() || area.0 <= 0.0 || area.1 <= 0.0 {
         return MAX_ZOOM;
@@ -362,7 +361,7 @@ pub fn fit_zoom(boards: &[Artboard], area: (f64, f64)) -> f64 {
     clamp_zoom((by_width.min(by_height) * 100.0).floor() / 100.0)
 }
 
-/// `artboardUrl`: the page told which artboard it is, in its hash.
+/// The page told which artboard it is, in its hash.
 pub fn artboard_url(url: &str, id: &str) -> String {
     let base = url.split_once('#').map_or(url, |(b, _)| b);
     format!("{base}#artboard={}", encode_uri_component(id))
@@ -612,7 +611,7 @@ fn parse_artboard(raw: &Value) -> Option<Artboard> {
     })
 }
 
-/// `mergeTweaks`: per declared tweak, what was set here, else what the page
+/// Per declared tweak, what was set here, else what the page
 /// holds, else the default; a value counts only of the declared type, finite,
 /// and still among the options.
 pub fn merge_tweaks(

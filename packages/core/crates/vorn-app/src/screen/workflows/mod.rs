@@ -1,5 +1,5 @@
-//! The Workflows view: the runs landing (`WorkflowsLandingView`), the
-//! sidebar's section (`WorkflowsSection`), their menus, and the editor.
+//! The Workflows view: the runs landing, the
+//! sidebar's section, their menus, and the editor.
 
 mod canvas;
 mod dialogs;
@@ -78,7 +78,7 @@ pub(super) fn hex(v: Option<&str>) -> Option<Rgba> {
         .map(Rgba::hex)
 }
 
-/// `useConnectorLook`: how a connection's connector is drawn.
+/// How a connection's connector is drawn.
 fn connection_look(s: &Screen<'_>, connection: &str) -> Option<Look> {
     let src = crate::library::Sources {
         connections: &s.st.wf.connections,
@@ -103,7 +103,7 @@ fn run_look(s: &Screen<'_>, run: &Value) -> Option<Look> {
         .and_then(|c| connection_look(s, c))
 }
 
-/// `RunIcon`: the workflow's `ICON_MAP` glyph in its colour, else the
+/// The workflow's `ICON_MAP` glyph in its colour, else the
 /// connector's mark for a connector run, else the source's glyph; the last
 /// two in `color`.
 fn run_icon(w: Option<&Value>, d: &wf::Described, lk: Option<&Look>, size: f32, color: Rgba) -> El {
@@ -197,7 +197,7 @@ pub fn icon_picker(s: &Screen<'_>) -> El {
         ))
 }
 
-/// `IconColorPicker`: `PROJECT_ICON_OPTIONS` eight across, then
+/// `PROJECT_ICON_OPTIONS` eight across, then
 /// `ICON_COLOR_PALETTE`, choosing through `on_icon` and `on_color`.
 pub fn icon_colors(
     s: &Screen<'_>,
@@ -1078,7 +1078,7 @@ fn side_glyph(s: &Screen<'_>, w: &Value) -> El {
     }
 }
 
-/// `WorkflowItem`: the glyph with its status dot, the name, and Run and
+/// The glyph with its status dot, the name, and Run and
 /// More on hover, held in place so the name truncates the same way.
 fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> El {
     let id = sv(w, "id").unwrap_or("").to_owned();

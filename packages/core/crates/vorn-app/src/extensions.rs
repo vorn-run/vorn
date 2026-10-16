@@ -1,5 +1,4 @@
-//! Extension panes (`ExtensionPaneCard`, `ExtensionPaneIcon`,
-//! `use-extensions`): what each session's extensions offer, which pane a
+//! Extension panes: what each session's extensions offer, which pane a
 //! card has open, and what to call it. The pure half; the RPC glue is
 //! `app::extensions`.
 
@@ -198,7 +197,7 @@ fn panes_of(pack: Option<&Value>) -> Vec<&Value> {
         .unwrap_or_default()
 }
 
-/// `paneLabel`: the pane's title, its extension's name and a glyph, falling
+/// The pane's title, its extension's name and a glyph, falling
 /// back to the ids so a pane always opens with some name.
 pub fn label(packs: &[Value], ext: &str, pane: &str) -> (String, String, Option<Value>) {
     let pack = packs.iter().find(|p| s(p, "id") == Some(ext));

@@ -1,10 +1,9 @@
-//! The browser, artifact and device pane logic against the TypeScript it
-//! ports, recorded as `tests/fixtures/js-reference/browser-pane.json` at the
-//! repository root by `tests/browser-pane-reference.test.ts`.
+//! The browser, artifact and device pane logic against recorded answers in
+//! `tests/fixtures/js-reference/browser-pane.json` at the repository root.
 //!
 //! Every recorded input runs through the Rust and must give the recorded
-//! answer; numbers compare to within [`EPSILON`], since JavaScript prints them
-//! through its own shortest form.
+//! answer; numbers compare to within [`EPSILON`], since the fixture prints
+//! them in JavaScript's shortest form.
 
 use std::path::PathBuf;
 

@@ -1,4 +1,4 @@
-//! The command palette (`CommandPalette`): a search field over the
+//! The command palette: a search field over the
 //! commands, grouped by category until something is typed.
 
 use super::{agent_icon, c, ico, white, Screen};
@@ -161,7 +161,7 @@ fn row(s: &Screen<'_>, i: usize, cmd: &palette::Entry, query: &str) -> El {
     el
 }
 
-/// `highlightMatch`: the first match of what is typed, white and bold.
+/// The first match of what is typed, white and bold.
 fn highlighted(label: &str, query: &str, fg: crate::ui::Rgba) -> El {
     let style = |t: &str, color, weight| {
         text(t, 13.0, color)

@@ -1,6 +1,5 @@
-//! The Remote Access page (`NetworkSettings`): share this machine, with its
-//! addresses and devices (`ShareThisMachine`, `DeviceTokenList`), or use
-//! another one (`UseAnotherMachine`).
+//! The Remote Access page: share this machine, with its addresses and devices,
+//! or use another one.
 
 use web_time::Instant;
 
@@ -50,7 +49,7 @@ fn net(place: &str, s: &Screen<'_>, act: NetAct) -> Id {
     s.acts.on(place, Act::Net(act))
 }
 
-/// `SegmentedControl`: "This machine" / "Another machine".
+/// "This machine" / "Another machine".
 fn segmented(s: &Screen<'_>, viewing: Mode) -> El {
     let option = |mode: Mode, label: &str| {
         let id = net("net-view", s, NetAct::View(mode));
@@ -214,7 +213,7 @@ fn confirm(s: &Screen<'_>) -> El {
         )
 }
 
-/// `AddressBlock`: the first address, its kind, and the others on demand.
+/// The first address, its kind, and the others on demand.
 fn addresses(s: &Screen<'_>, n: &Network) -> Option<El> {
     let reachable = n.reachable.as_ref()?;
     let (primary, rest) = reachable.urls.split_first()?;
@@ -295,7 +294,7 @@ fn addresses(s: &Screen<'_>, n: &Network) -> Option<El> {
     Some(card)
 }
 
-/// `DeviceTokenList`: the devices allowed in, and the only place to add one.
+/// The devices allowed in, and the only place to add one.
 fn devices(s: &Screen<'_>, n: &Network) -> El {
     let active = n.active();
     let mut head = div()
@@ -920,7 +919,7 @@ fn revoke(s: &Screen<'_>, id: &str) -> El {
         )
 }
 
-/// `CopyButton`: "Copy", then "Copied" for two seconds.
+/// "Copy", then "Copied" for two seconds.
 fn copy_button(s: &Screen<'_>, n: &Network, value: &str) -> El {
     let id = net("net-copy", s, NetAct::Copy(value.to_owned()));
     let hot = s.ui.hover(id);

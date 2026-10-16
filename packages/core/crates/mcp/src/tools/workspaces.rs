@@ -1,4 +1,4 @@
-//! `tools/workspaces.ts`: workspaces, kept in the config blob.
+//! Workspaces, kept in the config blob.
 
 use serde_json::Value;
 

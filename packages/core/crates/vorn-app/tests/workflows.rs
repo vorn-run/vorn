@@ -629,7 +629,7 @@ fn a_gate_is_edited_sent_back_reviewed_and_approved() {
     );
 }
 
-/// Forks, a loop and a request: the canvas from today's layout.
+/// Forks, a loop and a request on one canvas.
 fn shapes(web: &std::path::Path) -> Value {
     let sc = |cmd: &str| json!({ "scriptType": "bash", "scriptContent": cmd, "projectName": "web", "projectPath": web });
     let n = |id: &str, kind: &str, label: &str, config: Value| json!({ "id": id, "type": kind, "label": label, "slug": id, "position": { "x": 0, "y": 0 }, "config": config });

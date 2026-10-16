@@ -1,5 +1,5 @@
-//! The window's chrome: the 40 px toolbar (`App.tsx`), the window controls
-//! drawn when there is no system title bar (`WindowControls`), the headless
+//! The window's chrome: the 40 px toolbar, the window controls
+//! drawn when there is no system title bar, the headless
 //! badge and recent-sessions popovers, the restored banner and toasts.
 
 use super::{c, ico, mod_label, truncate, white, MainView, Screen};
@@ -64,7 +64,7 @@ pub const VIEWS: Id = Id(0x7669_6577_7069_6c6c);
 /// The views in pill order, indexed by `Event::Select`.
 pub const VIEW_ORDER: [MainView; 3] = [MainView::Sessions, MainView::Tasks, MainView::Workflows];
 
-/// `MainViewPills`: icon-only pills whose tooltips name the view.
+/// Icon-only pills whose tooltips name the view.
 fn pills(s: &Screen<'_>) -> El {
     let keys = [
         format!("{m}S", m = mod_label()),
@@ -183,7 +183,7 @@ fn waiting<'a>(s: &'a Screen<'_>) -> Vec<Waiting<'a>> {
         .collect()
 }
 
-/// `SessionDock`: waiting approvals, then minimized cards; nothing when
+/// Waiting approvals, then minimized cards; nothing when
 /// neither.
 fn dock(s: &Screen<'_>) -> Option<El> {
     use crate::components::dock::{
@@ -247,12 +247,12 @@ fn dock(s: &Screen<'_>) -> Option<El> {
     dock(s.ui, ids, state, items)
 }
 
-/// `useFilteredHeadless`: the sessions the badge counts and lists.
+/// The sessions the badge counts and lists.
 fn headless_visible<'a>(s: &Screen<'a>) -> Vec<&'a Headless> {
     crate::headless::shown(s.store, s.st)
 }
 
-/// HeadlessBadge: hidden without headless sessions; a zap and the count,
+/// Hidden without headless sessions; a zap and the count,
 /// with a pulsing green dot while one runs, else a red one if one failed.
 fn headless_badge(s: &Screen<'_>) -> Option<El> {
     let list = headless_visible(s);
@@ -325,7 +325,7 @@ pub(super) fn headless_panel(s: &Screen<'_>) -> El {
     col
 }
 
-/// HeadlessPill: status, agent, name, branch, the last line of output and
+/// Status, agent, name, branch, the last line of output and
 /// how long it ran; kill and hide on hover; a click unfolds its log.
 fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     let id = s.acts.on("headless", Act::ToggleHeadless(h.id.clone()));
@@ -554,7 +554,7 @@ fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     pill
 }
 
-/// RecentSessionsPopover: the sessions this machine ran here, newest
+/// The sessions this machine ran here, newest
 /// first, resumable ones on a click.
 pub(super) fn recent_panel(s: &Screen<'_>) -> El {
     let scope = s.st.project.as_deref().unwrap_or("All Projects");
@@ -900,7 +900,7 @@ pub(super) fn top_bar(s: &Screen<'_>) -> El {
     )
 }
 
-/// SessionRestoredBanner: the sessions the last run left, offered back.
+/// The sessions the last run left, offered back.
 pub(super) fn banner(s: &Screen<'_>) -> Option<El> {
     let prev = &s.st.banner;
     if prev.is_empty() {

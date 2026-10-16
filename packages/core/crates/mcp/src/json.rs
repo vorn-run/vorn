@@ -172,7 +172,7 @@ pub fn num(x: f64) -> Value {
 
 /// An object's keys in the order `JSON.parse` leaves them: the ones that are
 /// array indexes first, ascending, then the rest as they came. Applied to
-/// anything a client sent, since the TypeScript only ever saw it parsed.
+/// anything a client sent.
 pub fn js_order(value: Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(items.into_iter().map(js_order).collect()),

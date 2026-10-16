@@ -202,7 +202,7 @@ impl Transport {
         let Ok(raw) = serde_json::from_slice::<Value>(req.body) else {
             return Response::error(400, -32700, "Parse error: Invalid JSON");
         };
-        // The TypeScript only ever sees the body as `JSON.parse` left it.
+        // Keys in the order `JSON.parse` leaves them, which the tools rely on.
         let raw = js::js_order(raw);
         let messages = match raw {
             Value::Array(items) => items,

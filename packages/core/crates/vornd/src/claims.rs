@@ -8,9 +8,9 @@
 //! [`SPAWN_WINDOW`], longer than an agent takes to report the conversation it
 //! took, so a spawn that dies never holds one for ever; while its session's
 //! workspace is still being prepared it does not lapse at all, since git has
-//! no upper bound the window could cover. The server's own starts (a resume,
-//! a create for a remote host) claim here too, through `vornd:claim`, so
-//! there is one set of claims for both.
+//! no upper bound the window could cover. Starts made elsewhere (a resume, a
+//! create for a remote host) claim here too, through `vornd:claim`, so there
+//! is one set of claims for all.
 //!
 //! Creates naming the same conversation while one is preparing share its
 //! answer ([`OnePerKey`]): the second wants the session the first is

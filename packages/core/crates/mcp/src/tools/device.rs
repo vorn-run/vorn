@@ -1,4 +1,4 @@
-//! `tools/device.ts`: the agent's half of its session's device pane, an iOS
+//! The agent's half of its session's device pane, an iOS
 //! simulator claimed by one session at a time. Scoped to the caller's session
 //! as the browser tools are, and fenced the same way, under a label that says
 //! a device wrote it rather than a web page.

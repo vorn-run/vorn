@@ -423,7 +423,7 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
     assert!(app.st.banner.is_empty());
     let s = app.store.session(&id).expect("the ended pane");
     assert!(s.ended());
-    // vornd does not tell a clean stop from a crash, as the renderer reads it.
+    // vornd does not tell a clean stop from a crash.
     assert_eq!(s.cause, Some("the server stopped unexpectedly"));
     shot.save(&mut app, "restored-ended");
     // A shell's strip offers a new shell in its place, under its id.

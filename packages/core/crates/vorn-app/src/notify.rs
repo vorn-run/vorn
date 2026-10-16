@@ -1,9 +1,8 @@
-//! System notifications (`lib/notifications.ts`, `lib/run-notifications.ts`):
-//! which vornd events are worth interrupting someone for, under the
-//! `defaults.notifications` preferences, and handing them to the OS.
+//! System notifications: which vornd events are worth interrupting someone for,
+//! under the `defaults.notifications` preferences, and handing them to the OS.
 //!
 //! Only while the window is not focused, at most one per source every ten
-//! seconds, as the renderer does. A run that ends is told regardless.
+//! seconds. A run that ends is told regardless.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,7 +28,7 @@ pub struct Notice {
     pub key: Option<String>,
 }
 
-/// `defaults.notifications`, read the way the renderer reads it.
+/// The `defaults.notifications` preferences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Prefs {
     enabled: bool,
@@ -138,7 +137,7 @@ impl Notifier {
         true
     }
 
-    /// `announceRun`: gates that just started waiting, and a run that just ended.
+    /// Gates that just started waiting, and a run that just ended.
     fn run(&mut self, run: &Value, config: &Value, prefs: Prefs) -> Vec<Notice> {
         let key = crate::runs::key(run);
         let previous = self.runs.remove(&key);
@@ -192,7 +191,7 @@ impl Notifier {
     }
 }
 
-/// `sendWorkflowGateNotification` and `sendWorkflowSignInNotification`.
+/// The notice for a run waiting on a gate or a sign-in.
 fn gate(wf: &Value, run: &Value, id: &str) -> Notice {
     let name = s(wf, "name").unwrap_or("");
     let wf_id = s(wf, "id").unwrap_or("");

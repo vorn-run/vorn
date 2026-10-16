@@ -1,8 +1,6 @@
-//! The panes beside a session's terminal (`PaneColumn`, `SplitDivider`,
-//! `PaneCard`, `PaneTabStrip`), its Files pane (`FilesCard`,
-//! `FileTreeExplorer`) and Terminals panel (`TerminalsCard`), an open file
-//! (`FilePanel`, `CodeEditor`), and a file popped out into a card of its
-//! own (`EditorCard`).
+//! The panes beside a session's terminal (their column, dividers, cards
+//! and tab strips), its Files pane with its tree and Terminals panel, an
+//! open file, and a file popped out into a card of its own.
 
 use super::cards;
 use super::{c, ico, truncate, white, Screen};
@@ -102,7 +100,7 @@ pub fn divider_of(st: &State, id: Id) -> Option<PaneDivider> {
     None
 }
 
-/// `SplitDivider`: a 1px seam with a 3px grab either side.
+/// A 1px seam with a 3px grab either side.
 fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
     let hot = if s.ui.pressed(id) {
         1.0
@@ -123,7 +121,7 @@ fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
     }
 }
 
-/// `FileTypeIcon`: a file's Seti glyph in its colour.
+/// A file's Seti glyph in its colour.
 pub(crate) fn file_icon(name: &str, size: f32) -> El {
     let (ch, color) = crate::file_icons::resolve(name);
     match crate::file_icons::svg(ch) {
@@ -147,7 +145,7 @@ fn icon_button(s: &Screen<'_>, place: &str, act: Act, name: &str, label: &str, o
     tooltip(s.ui, b, id, label, None)
 }
 
-/// `PaneControls`: pop out, maximize or restore, close.
+/// Pop out, maximize or restore, close.
 fn controls(s: &Screen<'_>, kind: SideKind, owner: &str, pop: Option<Act>) -> El {
     let id = pane_id(kind, owner);
     let max = s.st.side.saved.maximized.as_deref() == Some(id.as_str());
@@ -200,8 +198,7 @@ struct Tab {
     extract: Option<Act>,
 }
 
-/// `PaneTabStrip`: the pane's title bar.
-/// What a strip carries besides its tabs.
+/// The pane's title bar. What a strip carries besides its tabs.
 struct Strip<'a> {
     leading: Option<El>,
     /// The title shown while there are no tabs.
@@ -401,7 +398,7 @@ fn overflows(names: &[&str], w: f32) -> bool {
     need > (w - 120.0).max(0.0)
 }
 
-/// `FilesCard`: the tree and the open files as tabs.
+/// The tree and the open files as tabs.
 fn files_card(s: &Screen<'_>, owner: &str, session: &Session) -> El {
     let Some(fp) = s.st.side.saved.files.get(owner) else {
         return div();
@@ -781,7 +778,7 @@ fn tail(path: &str, max: usize) -> String {
     format!("\u{2026}{rest}")
 }
 
-/// `FilePanel`: the path strip, the find bar, the notices and the body.
+/// The path strip, the find bar, the notices and the body.
 pub(super) fn file_panel(s: &Screen<'_>, key: &str, cwd: &str, extra: Option<El>) -> El {
     let col = div().col().min_w0().min_h(0.0).bg(pane_bg());
     let Some(b) = s.st.editors.buffers.get(key) else {
@@ -1090,7 +1087,7 @@ fn overlay(
     out
 }
 
-/// `CodeEditor`: the gutter beside the coloured, editable text, with the
+/// The gutter beside the coloured, editable text, with the
 /// find marks.
 fn editor_view(key: &str, b: &Buffer) -> El {
     let text_ = b.text();
@@ -1149,7 +1146,7 @@ fn editor_view(key: &str, b: &Buffer) -> El {
         )
 }
 
-/// `ReadView`: a file shown but not editable, capped at 2000 lines.
+/// A file shown but not editable, capped at 2000 lines.
 fn read_view(key: &str, b: &Buffer) -> El {
     let all: Vec<&str> = b.text().split('\n').collect();
     let capped = all.len() > editor::MAX_HIGHLIGHT_LINES;
@@ -1191,7 +1188,7 @@ fn read_view(key: &str, b: &Buffer) -> El {
     col
 }
 
-/// `TerminalsCard`: the shells a session holds, one in front.
+/// The shells a session holds, one in front.
 fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
     let Some(panel) = s.st.side.saved.panels.get(owner) else {
         return div();
@@ -1290,7 +1287,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
     col
 }
 
-/// `PaneColumn`: `owner`'s panes stacked, resizable, one maximized over
+/// `owner`'s panes stacked, resizable, one maximized over
 /// the rest.
 fn column(s: &Screen<'_>, owner: &str, session: &Session) -> Option<El> {
     let entries = s.st.side.entries(owner);
@@ -1403,7 +1400,7 @@ pub(super) fn frame(
         .child(div().row().flex(1.0 - r).min_w0().min_h(0.0).child(panes))
 }
 
-/// `EditorCard`: a file popped out of a session, as a cell of its own.
+/// A file popped out of a session, as a cell of its own.
 pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
     let Some(cd) = s.st.side.saved.cards.get(card) else {
         return div();

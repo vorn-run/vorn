@@ -3,23 +3,22 @@
 //!
 //! A headless agent runs on pipes in vornd's session holder, never on a
 //! terminal: its prompt goes in on stdin, which then closes, and some agents
-//! behave differently on a TTY. Each call answers as the server's
-//! `HeadlessManager` did, from the session registry vornd keeps
-//! ([`crate::registry`]), which then holds the record: the record it
-//! created, its program's start, or why it could not start. How the program
+//! behave differently on a TTY. Each call answers from the session registry
+//! vornd keeps ([`crate::registry`]), which then holds the record: the record
+//! it created, its program's start, or why it could not start. How the program
 //! ended the registry reads from the session's exit effect
-//! ([`crate::registry::Registry::headless_exit`]). Clients are sent the
-//! output as it comes (`headless:data`) and the end
-//! ([`super::session_events`]), and the record goes a while after the exit.
+//! ([`crate::registry::Registry::headless_exit`]). Clients are sent the output
+//! as it comes (`headless:data`) and the end ([`super::session_events`]), and
+//! the record goes a while after the exit.
 //!
 //! A create prepares the workspace as a terminal's does
-//! ([`super::sessions::workspace`]) and builds the process as
-//! `buildHeadlessSpawnArgs` does ([`vorn_agents::launch::headless_spawn`]):
+//! ([`super::sessions::workspace`]) and builds the process
+//! ([`vorn_agents::launch::headless_spawn`]):
 //! the arguments first, so arguments that cannot be built create nothing.
 //! A stop sends the program
 //! `SIGTERM`, and `SIGKILL` [`FORCE_KILL_DELAY`] later if it still runs.
 //!
-//! A create naming a remote host runs the agent here, as the server ran it.
+//! A create naming a remote host runs the agent here.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,7 +50,7 @@ const PROMPT_NAME_LEN: usize = 60;
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
-        // A remote host named runs the agent here, as the server ran it.
+        // A remote host named runs the agent here.
         "headless:create" => match CreateRequest::read(params, &native.agents()) {
             Some(req) => create(
                 native,
@@ -221,9 +220,8 @@ fn prepare(
 }
 
 /// The process to start and the line that says what it is. On Windows the
-/// program runs through cmd.exe, as the server's `shell: true` runs it,
-/// with each argument quoted for cmd so none is word-split; on POSIX the
-/// arguments reach it as they are.
+/// program runs through cmd.exe, with each argument quoted for cmd so none is
+/// word-split; on POSIX the arguments reach it as they are.
 fn process_of(command: &str, args: &[String]) -> (Vec<String>, String) {
     if cfg!(windows) {
         let quoted: Vec<String> = std::iter::once(command)
@@ -249,7 +247,7 @@ fn process_of(command: &str, args: &[String]) -> (Vec<String>, String) {
 }
 
 /// Puts the record in the registry and starts the program. The answer is
-/// the record, as the server answers before its program is up.
+/// the record, sent before its program is up.
 fn register(native: &Native, launch: Launch) -> Answer {
     let (Some(registry), Some(host)) = (native.registry.get(), native.host.get()) else {
         return not_ready();
@@ -483,7 +481,7 @@ fn stop(host: &dyn super::sessions::Host, id: &str, sig: Sig) {
 }
 
 /// `headless:kill`: the agent is asked to stop, and made to a while later.
-/// Answers nothing, as the server does, whether or not an agent runs under `id`.
+/// Answers nothing, whether or not an agent runs under `id`.
 fn kill(native: &Native, id: &str) -> Answer {
     let running = native.registry.get().and_then(|r| {
         r.read(|r| {
@@ -706,7 +704,7 @@ mod tests {
         // Up: signalled at once.
         assert_eq!(call(&fed.native, "headless:kill", &json!(id)), Answer::Void);
         assert_eq!(fed.host.signals().len(), 4);
-        // Ended: nothing to stop, as the server answers.
+        // Ended: nothing to stop.
         fed.registry.headless_exit(
             &id,
             3,
@@ -718,7 +716,7 @@ mod tests {
         );
         assert_eq!(call(&fed.native, "headless:kill", &json!(id)), Answer::Void);
         assert_eq!(fed.host.signals().len(), 4);
-        // One no record names: nothing, as the server answers it.
+        // One no record names: nothing.
         assert_eq!(
             call(&fed.native, "headless:kill", &json!("x")),
             Answer::Void
@@ -736,7 +734,7 @@ mod tests {
             call(&fed.native, "headless:create", &json!({})),
             bad_params("headless:create")
         );
-        // A remote host named runs the agent here, as the server ran it.
+        // A remote host named runs the agent here.
         let made = call(
             &fed.native,
             "headless:create",

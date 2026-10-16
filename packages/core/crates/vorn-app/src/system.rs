@@ -1,5 +1,4 @@
-//! What the desktop's main process does for settings, done here: starting
-//! at sign-in (`login-item.ts`), the way this platform does it. The `vorn`
+//! Starting at sign-in, the way this platform does it. The `vorn`
 //! command on PATH is `cli_link`'s.
 
 use std::path::{Path, PathBuf};
@@ -17,7 +16,7 @@ fn home() -> PathBuf {
         .map_or_else(PathBuf::new, PathBuf::from)
 }
 
-/// `loginItemFor`: what the OS record should say, or none to leave it
+/// What the OS record should say, or none to leave it
 /// alone (a dev build, or no config yet).
 pub fn login_item_for(config: &Value, packaged: bool) -> Option<bool> {
     if !packaged || !config.is_object() {
@@ -75,7 +74,7 @@ pub fn set_autostart_file(file: &Path, exe: &Path, on: bool, mac: bool) -> std::
     }
 }
 
-/// `applyLoginItem`: makes the OS record match the config.
+/// Makes the OS record match the config.
 pub fn apply_login_item(config: &Value) -> Result<(), String> {
     if cfg!(target_arch = "wasm32") {
         return Ok(());
@@ -131,7 +130,7 @@ pub fn http_get_json(port: u16, path: &str) -> Option<Value> {
 }
 
 /// The pid an older holder announced under `home`, if it still names
-/// `instance` (`readAnnouncement`).
+/// `instance`.
 pub fn announced_pid(home: &Path, instance: &str) -> Option<i64> {
     if instance.is_empty()
         || instance.len() > 32
@@ -153,7 +152,7 @@ pub fn announced_pid(home: &Path, instance: &str) -> Option<i64> {
     (field("instance")?.as_str() == instance).then_some(pid)
 }
 
-/// `endOlderHolder`: stops an older session holder vornd reports.
+/// Stops an older session holder vornd reports.
 pub fn end_older_holder(
     home: &Path,
     reported: &crate::settings::Holders,

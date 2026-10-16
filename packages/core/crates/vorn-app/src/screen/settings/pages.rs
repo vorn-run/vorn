@@ -243,7 +243,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
         )
 }
 
-/// `ShellGlyph`: the family's sigil in a 24 px frame.
+/// The family's sigil in a 24 px frame.
 fn shell_glyph(family: Option<&str>) -> El {
     div()
         .size(24.0, 24.0)
@@ -357,7 +357,7 @@ fn shell_picker(s: &Screen<'_>) -> El {
         .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_500)))
 }
 
-/// The shell picker's listbox (`ShellPicker`'s portal).
+/// The shell picker's listbox.
 pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
     let value = defaults(s)
         .and_then(|d| d.get("shell"))

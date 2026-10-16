@@ -1,5 +1,5 @@
 //! Vorn's desktop app for Windows and Linux (it runs on macOS too, for
-//! development): today's main screen on vornui, over a running vornd.
+//! development): the main screen on vornui, over a running vornd.
 //!
 //! - [`client`] speaks JSON-RPC to vornd and keeps its models current.
 //! - [`grid`] holds the terminals' screens over the grid endpoint.

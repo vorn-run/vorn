@@ -330,7 +330,7 @@ pub struct Shot {
 }
 
 /// The window a shot draws: `VORN_APP_SHOT_SIZE` (`1400x900`) and
-/// `VORN_APP_SHOT_SCALE`, to compare with captures of today's app.
+/// `VORN_APP_SHOT_SCALE`.
 fn shot_window() -> ((f32, f32), f32) {
     let size = std::env::var("VORN_APP_SHOT_SIZE")
         .ok()

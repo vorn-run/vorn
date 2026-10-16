@@ -1,6 +1,6 @@
-//! An open file's buffer (`FilePanel`): the text on disk and the text being
+//! An open file's buffer: the text on disk and the text being
 //! edited, whether it can be edited, the find bar, saving with its moved-file
-//! guard, and drafts (`editor-drafts.ts`) that outlive the app.
+//! guard, and drafts that outlive the app.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -36,7 +36,7 @@ pub enum EditAct {
     CancelDiscard,
 }
 
-/// What a file was when read: its size and modification time (`FileStamp`).
+/// What a file was when read: its size and modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stamp {
@@ -53,8 +53,8 @@ impl Stamp {
     }
 }
 
-/// `hasMoved`: no base never armed the guard; an unknown current stamp
-/// counts as moved.
+/// Whether the file moved since it was read: no base never armed the guard; an
+/// unknown current stamp counts as moved.
 pub fn has_moved(base: Option<Stamp>, current: Option<Stamp>) -> bool {
     match (base, current) {
         (None, _) => false,
@@ -63,7 +63,7 @@ pub fn has_moved(base: Option<Stamp>, current: Option<Stamp>) -> bool {
     }
 }
 
-/// `isTruncatedRead`: a capped read, which must not be saved over the file.
+/// A capped read, which must not be saved over the file.
 pub fn is_truncated(text: &str) -> bool {
     let Some(rest) = text
         .rfind("\n\n--- truncated")
@@ -79,7 +79,7 @@ pub fn is_truncated(text: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Why a file is shown but cannot be typed in (`ReadOnlyReason`).
+/// Why a file is shown but cannot be typed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadOnly {
     Binary,
@@ -101,7 +101,7 @@ pub struct Match {
     pub range: (usize, usize),
 }
 
-/// `computeMatches`: every case-insensitive, non-overlapping hit, line by
+/// Every case-insensitive, non-overlapping hit, line by
 /// line, in reading order.
 pub fn matches(text: &str, query: &str) -> Vec<Match> {
     if query.is_empty() {
@@ -259,7 +259,7 @@ impl Buffer {
     }
 }
 
-/// An edit never saved, kept so a quit does not throw it away (`EditorDraft`).
+/// An edit never saved, kept so a quit does not throw it away.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Draft {
@@ -296,7 +296,7 @@ impl Drafts {
         }
     }
 
-    /// `readDraft`: the draft this pane held, if still about `path`.
+    /// The draft this pane held, if still about `path`.
     pub fn read(&self, key: &str, path: &str) -> Option<&Draft> {
         self.all.get(key).filter(|d| d.file_path == path)
     }
@@ -320,7 +320,7 @@ impl Drafts {
         }
     }
 
-    /// `pruneDrafts`: drafts for panes that are gone.
+    /// Drafts for panes that are gone.
     pub fn prune(&mut self, live: impl Fn(&str) -> bool) {
         let n = self.all.len();
         self.all.retain(|k, _| live(k));
@@ -350,7 +350,7 @@ impl Editors {
     }
 }
 
-/// `relPath`: `path` under `cwd`, or whole.
+/// `path` under `cwd`, or whole.
 pub fn rel_path<'a>(cwd: &str, path: &'a str) -> &'a str {
     if !cwd.is_empty() {
         if let Some(rest) = path.strip_prefix(cwd) {

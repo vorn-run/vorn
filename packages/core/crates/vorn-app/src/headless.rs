@@ -1,6 +1,5 @@
 //! The headless agents the toolbar badge lists: `headless:list` polled and
-//! kept with what `headless:exit` and `headless:data` say between polls,
-//! as the renderer's terminals slice keeps them.
+//! kept with what `headless:exit` and `headless:data` say between polls.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,7 +15,7 @@ pub const PRUNE: std::time::Duration = std::time::Duration::from_secs(30);
 const LOG_CAP: usize = 100_000;
 const LOG_KEEP: usize = 80_000;
 
-/// `useFilteredHeadless` over the app's settings, project and workspace.
+/// The headless sessions shown, by the app's settings, project and workspace.
 pub fn shown<'a>(store: &crate::client::Store, st: &'a crate::state::State) -> Vec<&'a Headless> {
     let show = store
         .config
@@ -126,7 +125,7 @@ impl Headless {
     }
 }
 
-/// `formatDuration`: 45s, 3m12s, 3m, 1h5m.
+/// 45s, 3m12s, 3m, 1h5m.
 pub fn format_duration(ms: f64) -> String {
     let s = (ms / 1000.0).max(0.0) as u64;
     if s < 60 {
@@ -161,7 +160,7 @@ impl Tracker {
         self.list.iter()
     }
 
-    /// `setHeadlessSessions`: the server's list, keeping what it has
+    /// The server's list, keeping what it has
     /// dropped while running or since it exited.
     pub fn sync(&mut self, sessions: Vec<Headless>) {
         let ids: HashSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
@@ -219,14 +218,14 @@ impl Tracker {
         }
     }
 
-    /// `dismissHeadlessSession`: hidden, and not brought back by a poll.
+    /// Hidden, and not brought back by a poll.
     pub fn dismiss(&mut self, id: &str) {
         self.dismissed.insert(id.to_owned());
         self.list.retain(|s| s.id != id);
         self.forget_gone();
     }
 
-    /// `pruneExitedHeadless`: exited sessions older than `retention_ms` go.
+    /// Exited sessions older than `retention_ms` go.
     pub fn prune(&mut self, retention_ms: f64, now: f64) {
         let gone: Vec<String> = self
             .list
@@ -278,7 +277,7 @@ impl Tracker {
         self.logs.clear();
     }
 
-    /// `useFilteredHeadless`: hidden when the setting is off, else the
+    /// Hidden when the setting is off, else the
     /// active project's (or the workspace's) in the status filter.
     pub fn visible<'a>(
         &'a self,

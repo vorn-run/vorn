@@ -1,4 +1,4 @@
-//! The Remote Access page's model (`NetworkSettings`): sharing this machine,
+//! The Remote Access page's model: sharing this machine,
 //! pairing devices with a code, and using another machine from here.
 
 use web_time::{Duration, Instant};
@@ -17,7 +17,7 @@ pub const HOST_TOKEN: Id = Id(0x6e65_745f_746f_6b6e);
 /// Where "Add Tailscale" leads.
 pub const TAILSCALE_DOWNLOAD: &str = "https://tailscale.com/download";
 
-/// How long a copy button says "Copied" (`CopyButton`'s timeout).
+/// How long a copy button says "Copied".
 pub const COPIED_FOR: Duration = Duration::from_secs(2);
 
 /// How long after the share switch the addresses are asked again: vornd
@@ -258,7 +258,7 @@ impl Network {
             .is_some_and(|(t, at)| t == text && now.duration_since(*at) < COPIED_FOR)
     }
 
-    /// Puts away what the device list was doing (`closeAdding`).
+    /// Puts away what the device list was doing.
     pub fn close_adding(&mut self) {
         self.adding = None;
         self.asking = None;
@@ -271,7 +271,7 @@ impl Network {
     }
 }
 
-/// Which network an address reaches this machine over (`addressKind`).
+/// Which network an address reaches this machine over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressKind {
     /// Tailscale's 100.64.0.0/10, encrypted.
@@ -280,7 +280,7 @@ pub enum AddressKind {
     Lan,
 }
 
-/// `addressKind`: Tailscale hands out addresses from 100.64.0.0/10 and uses
+/// Tailscale hands out addresses from 100.64.0.0/10 and uses
 /// it for nothing else, so the split is exact.
 pub fn address_kind(url: &str) -> AddressKind {
     let Some(host) = hostname(url) else {
@@ -293,7 +293,7 @@ pub fn address_kind(url: &str) -> AddressKind {
     }
 }
 
-/// `addressHost`: the host alone, which tells two routes of one kind apart.
+/// The host alone, which tells two routes of one kind apart.
 pub fn address_host(url: &str) -> String {
     hostname(url).unwrap_or_else(|| url.to_owned())
 }
@@ -319,7 +319,7 @@ fn hostname(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
-/// `formatRemaining`: whole seconds left, rounded up, as `m:ss`.
+/// Whole seconds left, rounded up, as `m:ss`.
 pub fn format_remaining(ms: u64) -> String {
     let total = ms.div_ceil(1000);
     format!("{}:{:02}", total / 60, total % 60)

@@ -1,6 +1,6 @@
 //! The browser and device panes' side of the app: the tools vornd forwards
-//! from an agent (`browser:*`, `device:*`, which the desktop's main process
-//! answered), what the web views report, and what a pane's controls do.
+//! from an agent (`browser:*`, `device:*`), what the web views report, and
+//! what a pane's controls do.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -212,7 +212,7 @@ fn pick_message(sel: &Value) -> String {
     lines.join("\n") + "\n"
 }
 
-/// `deviceClaim`'s failure, by what went wrong.
+/// A failed device claim, by what went wrong.
 fn claim_failure(message: &str) -> Value {
     let reason = if message.starts_with("No simulator") {
         "gone"
@@ -313,7 +313,7 @@ impl App {
         );
     }
 
-    /// `showVersion`: tab `index` goes to `version` once its address is known.
+    /// Tab `index` goes to `version` once its address is known.
     fn show_version(&mut self, session: &str, index: usize, id: &str, version: u32) {
         self.call(
             Call::Pane(PaneCall::Version {
@@ -1285,7 +1285,7 @@ impl App {
         }
     }
 
-    /// `dropSelection`: the popover goes, and the page's own selection.
+    /// The popover goes, and the page's own selection.
     fn drop_selection(&mut self, session: &str) {
         let live = self.st.bench.live_mut(session);
         live.pending = None;
@@ -1936,7 +1936,7 @@ impl App {
         );
     }
 
-    /// `applyTweak`: shown at once, kept for the design's file, and
+    /// Shown at once, kept for the design's file, and
     /// written into every view of the page.
     fn apply_tweak(&mut self, session: &str, key: &str, value: Value) {
         let url = self

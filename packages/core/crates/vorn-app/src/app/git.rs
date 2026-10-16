@@ -1,5 +1,5 @@
-//! The git controls: what `useGitDiffPolling`, `RightPanel`, `CommitDialog`,
-//! `useBranchSwitcher` and `OpenInButton` do, with vornd answering the git.
+//! The git controls: diff polling, the right panel, commits, the branch
+//! switcher and open-in, with vornd answering the git.
 
 use web_time::Instant;
 

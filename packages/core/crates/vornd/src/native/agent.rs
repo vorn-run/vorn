@@ -1,4 +1,4 @@
-//! The `agent:*` calls and `sessions:getRecent`: what the server reads about
+//! The `agent:*` calls and `sessions:getRecent`: what vornd reads about
 //! the coding agents without starting one, answered by `vorn_agents` from
 //! the agents' adapters (`agent:list`).
 //!
@@ -38,7 +38,7 @@ pub(super) fn no_settings() -> Answer {
     Answer::Error("vornd could not read the settings".to_owned())
 }
 
-/// The error for a stored agent command of a shape the server's code would not read.
+/// The error for a stored agent command of an unreadable shape.
 pub(super) fn unreadable_command(agent: &Agent) -> Answer {
     Answer::Error(format!(
         "the {} command in the settings cannot be read",
@@ -164,7 +164,7 @@ fn path_of(env: &env::Env) -> Option<&str> {
     get("PATH").or_else(|| get("Path"))
 }
 
-/// JavaScript truthiness, for the flags a request carries.
+/// Whether a flag a request carries is set: not null, false, 0 or empty.
 fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
@@ -182,7 +182,7 @@ fn list_models(native: &Native, params: &Value) -> Answer {
     let project_path = match request.get("projectPath") {
         Some(Value::String(s)) => s.clone(),
         v if !truthy(v) => String::new(),
-        // Not a string: the server's handler throws on it.
+        // Not a string: refused.
         _ => return bad_params("agent:listModels"),
     };
     let agents = native.agents();
@@ -196,8 +196,7 @@ fn list_models(native: &Native, params: &Value) -> Answer {
         remote: truthy(request.get("remoteHostId")),
         refresh: truthy(request.get("refresh")),
     };
-    // Answered without settings when there is nothing to ask; a relative
-    // project would be resolved against the server's directory, not vornd's.
+    // Answered without settings when there is nothing to ask.
     let askable = request.agent.as_ref().is_some_and(Agent::selects_models)
         && !request.remote
         && !request.project_path.is_empty()
@@ -289,7 +288,7 @@ fn recent_sessions(native: &Native, params: &Value) -> Answer {
     let project = match params {
         Value::String(s) if !s.is_empty() => Some(s.as_str()),
         v if !truthy(Some(v)) => None,
-        // Not a path: the server's handler throws on it.
+        // Not a path: refused.
         _ => return bad_params("sessions:getRecent"),
     };
     let Some(homes) = Homes::from_env() else {

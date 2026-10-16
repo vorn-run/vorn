@@ -103,7 +103,7 @@ pub const METHODS: &[&str] = &[
     "sessions:clear",
     "shell:listExecutables",
     "shell:listInstalled",
-    // Answered from the copy of the server's records ([`crate::registry`]),
+    // Answered from the session records ([`crate::registry`]),
     // which vornd changes itself for the calls that change a terminal
     // ([`sessions`]) or start and stop a headless agent ([`headless`]);
     // the worktree manager's from it and the repositories ([`worktree`]).
@@ -133,7 +133,7 @@ pub const METHODS: &[&str] = &[
     "config:save",
 ];
 
-/// The desktop's main process claiming its connection ([`desktop`]).
+/// The desktop app claiming its connection ([`desktop`]).
 pub const IDENTIFY: &str = "bridge:identify";
 
 /// Where a call is answered.
@@ -265,7 +265,7 @@ pub struct Native {
     reach: reach::Reach,
     /// What the calls share beyond one connection ([`AppLink`]).
     link: OnceLock<Arc<AppLink>>,
-    /// The clients vornd serves itself, as the server: notifications go to them.
+    /// The clients vornd serves: notifications go to them.
     clients: OnceLock<Arc<crate::serve::clients::Clients>>,
     /// Raised when vornd itself changed the configuration.
     config_changed: tokio::sync::Notify,
@@ -275,7 +275,7 @@ pub struct Native {
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
     secrets: secrets::Secrets,
-    /// The agents' model lists, kept as the server keeps them.
+    /// The agents' model lists.
     catalog: vorn_agents::models::Catalog,
     /// The agents vornd runs, from their adapters; the engine's when it runs one.
     adapters: OnceLock<Arc<crate::adapters::Adapters>>,
@@ -283,7 +283,7 @@ pub struct Native {
     /// which `session.created` tells.
     models: Mutex<HashMap<String, String>>,
     shells: shell::Shells,
-    /// The copy of the server's session records, when vornd holds sessions.
+    /// The session registry, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
     /// The endpoint agents' hooks post to, once it listens ([`hooks`]).
     hooks: OnceLock<Arc<hooks::Hooks>>,
@@ -309,7 +309,7 @@ pub struct Native {
     polls: Arc<vorn_extensions::polls::Polls>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
-    /// The desktop's main process, which answers the browser and device calls.
+    /// The desktop app, which answers the browser and device calls.
     main: Arc<desktop::Desktop>,
     /// The one lifecycle every extension program and connector child runs under.
     lifecycle: Arc<vorn_extensions::lifecycle::Lifecycle>,
@@ -317,8 +317,8 @@ pub struct Native {
     events: Arc<vorn_extensions::events::Bus>,
 }
 
-/// How long a call about what runs waits for the copy to settle as vornd
-/// starts: the server's own wait for the holder (`HOLDER_WAIT_MS`).
+/// How long a call about what runs waits for the session records to settle
+/// as vornd starts.
 const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How long a session or script waits for the session holder to connect before it fails.
@@ -418,8 +418,7 @@ impl Native {
         self.adapters().agents()
     }
 
-    /// The copy of the server's session records to answer from, which this
-    /// asks the server to feed. Only the first one given is kept.
+    /// The session registry to answer from. Only the first one given is kept.
     pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
         registry.want();
         let _ = self.registry.set(registry);
@@ -601,7 +600,7 @@ impl Native {
         self.env.get()
     }
 
-    /// The desktop's main process, as vornd reaches it.
+    /// The desktop app, as vornd reaches it.
     pub fn main_process(&self) -> &Arc<desktop::Desktop> {
         &self.main
     }
@@ -1057,7 +1056,7 @@ impl Notifier {
     }
 }
 
-/// A record as the server's handler returns it. Serializing a plain struct
+/// A record as the answer carries it. Serializing a plain struct
 /// of strings and numbers does not fail.
 fn json_of<T: serde::Serialize>(record: T) -> Value {
     serde_json::to_value(record).unwrap_or(Value::Null)
@@ -1084,7 +1083,7 @@ pub(crate) fn bad_params(method: &str) -> Answer {
 }
 
 /// A string param that is an absolute path. A relative one would resolve
-/// against vornd's working directory rather than the server's.
+/// against vornd's working directory.
 fn absolute_str(v: &Value) -> Option<&str> {
     // A POSIX path is absolute anywhere: a remote host's paths are POSIX.
     v.as_str()
@@ -1166,7 +1165,7 @@ impl Conn {
         }
     }
 
-    /// Main claims this connection as its own and hears whether it holds it.
+    /// The app claims this connection as its own and hears whether it holds it.
     fn identify(&self, text: &str) {
         let claimed = self.native.main.claim(self.id, &self.reply);
         if let Some((id, _)) = request_of(text) {
@@ -1210,12 +1209,12 @@ impl Conn {
     }
 
     /// Whether `text`, a frame without a method, answers a call vornd made
-    /// of main; if so it is settled here.
+    /// of the app; if so it is settled here.
     pub fn settle_desktop(&self, text: &str) -> bool {
         self.native.main.settle(self.id, text)
     }
 
-    /// The client's side closed: main's calls fail now if this was main.
+    /// The client's side closed: the app's calls fail now if this was the app.
     pub fn closed(&self) {
         self.native.main.release(self.id);
         self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -1371,7 +1370,7 @@ mod tests {
             native.call("worktree:activeSessions", &json!("/w")),
             Answer::Result(json!({ "count": 1, "sessionIds": ["t"] }))
         );
-        // Params the server's handler would not expect.
+        // Params of an unexpected shape.
         assert_eq!(
             native.call("worktree:activeSessions", &json!({ "path": "/w" })),
             bad_params("worktree:activeSessions")
@@ -1390,7 +1389,7 @@ mod tests {
             native.call("git:getBranch", &json!(outside)),
             Answer::Result(Value::Null)
         );
-        // A relative path is read from where vornd runs, as the server read it from where it ran.
+        // A relative path is read from where vornd runs.
         assert_eq!(
             native.call("git:isGitRepo", &json!("vornd-no-such-dir")),
             Answer::Result(json!(false))
@@ -1399,7 +1398,7 @@ mod tests {
             native.call("git:isGitRepo", &json!(3)),
             bad_params("git:isGitRepo")
         );
-        // A host vornd cannot read is reached as this machine, as the server reaches it.
+        // A host vornd cannot read is reached as this machine.
         assert_eq!(
             native.call(
                 "file:stamp",

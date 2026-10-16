@@ -238,7 +238,7 @@ fn small_chip(s: &Screen<'_>, id: Option<crate::ui::Id>, label: &str) -> El {
     }
 }
 
-/// `ConnectorRow`: the name over one line, and its one move.
+/// The name over one line, and its one move.
 fn row(s: &Screen<'_>, l: &Listing) -> El {
     let status = describe(&s.st.plugins.state(l));
     let open = s

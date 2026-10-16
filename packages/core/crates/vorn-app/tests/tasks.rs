@@ -516,8 +516,8 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
     );
     assert_eq!(shot.ui.focus(), Some(image_id(Form::Detail)));
     shot.type_line(&mut app, &png.to_string_lossy());
-    // The store keeps no image list (the renderer's saves drop it too), so
-    // the file and the panel's form are what show it was attached.
+    // The store keeps no image list, so the file and the panel's form are what
+    // show it was attached.
     let name = shot.until(&mut app, "the image saved", |app, _| {
         app.st.tasks.detail_form.images.first().cloned()
     });

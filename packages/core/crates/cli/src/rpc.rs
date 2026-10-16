@@ -6,9 +6,8 @@
 //! server starts, so a cached one would go stale exactly when Vorn restarts.
 //!
 //! Every call opens a fresh WebSocket with the credential on the upgrade,
-//! sends one JSON-RPC request and waits for the answer with its id. That is
-//! the TypeScript client's contract, messages included, since scripts and
-//! people read them.
+//! sends one JSON-RPC request and waits for the answer with its id. Error
+//! messages are stable, since scripts and people read them.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -84,13 +83,13 @@ pub enum PortFile {
     Invalid,
 }
 
-/// Why a call did not get an answer, worded as the TypeScript client words it.
+/// Why a call did not get an answer.
 #[derive(Debug)]
 pub enum CallError {
     NoPortFile(PathBuf),
     InvalidPortFile(PathBuf),
     NoCredential(PathBuf),
-    /// The connection could not be made: the reason as Node words it.
+    /// The connection could not be made, and why.
     Connect(String),
     /// The socket closed before the answer, with this close code.
     Closed {
@@ -487,7 +486,8 @@ fn closed_error(err: tungstenite::Error, dir: &DataDir) -> CallError {
     }
 }
 
-/// What Node says when a connection is not made.
+/// The error for a connection that could not be made, e.g. `connect
+/// ECONNREFUSED`.
 fn connect_error(err: tungstenite::Error, port: f64) -> CallError {
     let port = crate::js::number(port);
     let reason = match err {

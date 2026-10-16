@@ -2083,7 +2083,7 @@ impl Connectors {
         }
     }
 
-    /// Settles every installed pack's implicit connection, as the server did at start.
+    /// Settles every installed pack's implicit connection; run at start.
     pub async fn reconcile(&self) {
         for pack in self.packs().list() {
             self.pack_changed(&pack.id).await;

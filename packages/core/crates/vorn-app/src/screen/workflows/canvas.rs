@@ -1,4 +1,4 @@
-//! `WorkflowCanvas`: the cards, loop frames and add buttons where the
+//! The cards, loop frames and add buttons where the
 //! layout or the stored positions put them, the edges between their ports,
 //! the dot grid, the zoom controls and the minimap, under a pan and zoom.
 
@@ -30,7 +30,7 @@ fn f(v: f64) -> f32 {
     v as f32
 }
 
-/// `liveNodeStatus`: the worst state each node is in across the runs
+/// The worst state each node is in across the runs
 /// going now; none when nothing runs.
 fn live_status(s: &Screen<'_>, d: &Draft) -> HashMap<String, String> {
     let rank = |st: &str| match st {
@@ -215,7 +215,7 @@ fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
     )
 }
 
-/// `ConnectorButton`: the round + that opens the library at `at`.
+/// The round + that opens the library at `at`.
 fn plus(s: &Screen<'_>, at: Anchor, active: bool) -> El {
     let id = s.acts.on("wf-plus", act(WfAct::Library(at)));
     kit::plus(id, "Add a step", active, s.ui.hover(id))
@@ -262,7 +262,7 @@ fn element(
     }
 }
 
-/// `AddTriggerNode`: the dashed spot where a trigger goes.
+/// The dashed spot where a trigger goes.
 fn add_trigger(s: &Screen<'_>) -> El {
     let at = Anchor {
         trigger: true,
@@ -421,7 +421,7 @@ fn step(
     wrap
 }
 
-/// `NodeHoverToolbar`: run to here, replace and delete, beside the card.
+/// Run to here, replace and delete, beside the card.
 fn hover_tools(
     s: &Screen<'_>,
     d: &Draft,
@@ -483,7 +483,7 @@ fn hover_tools(
     col.absolute(286.0, h / 2.0 - tall / 2.0)
 }
 
-/// `LoopNode`: the frame, its header, the body drawn over it, its + and
+/// The frame, its header, the body drawn over it, its + and
 /// footer.
 fn loop_frame(
     s: &Screen<'_>,

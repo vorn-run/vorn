@@ -1,6 +1,6 @@
-//! What the workflow canvas does with the pointer and the keys (the
-//! `WorkflowCanvas` handlers): pan, zoom, fit and tidy, drag cards, draw a
-//! connection or drop it on empty canvas, and undo the definition.
+//! What the workflow canvas does with the pointer and the keys: pan, zoom, fit
+//! and tidy, drag cards, draw a connection or drop it on empty canvas, and undo
+//! the definition.
 
 use std::collections::HashMap;
 
@@ -33,9 +33,9 @@ pub fn mini_id() -> Id {
     Id::new("wf-minimap")
 }
 
-/// React Flow's zoom step.
+/// The zoom step.
 const ZOOM_STEP: f64 = 1.2;
-/// `connectionRadius`, in screen pixels.
+/// How near a drag must end to a handle to connect, in screen pixels.
 const CONNECT_RADIUS: f64 = 60.0;
 
 /// The right panel's width (`w-[…]` of each panel).
@@ -146,7 +146,7 @@ impl App {
         self.zoom(zoom / v.zoom);
     }
 
-    /// `fitFromTop`.
+    /// Fits the workflow to the canvas, top-aligned.
     pub(super) fn fit(&mut self) {
         let (w, h) = self.canvas_size();
         let Some(next) = self.elements().and_then(|els| canvas::fit(&els, w, h)) else {
@@ -167,7 +167,7 @@ impl App {
         ))
     }
 
-    /// `openLibraryAppend`: after `after`, into its loop when it is in one.
+    /// After `after`, into its loop when it is in one.
     pub(super) fn library_after(
         &mut self,
         ui: &mut Ui,
@@ -376,7 +376,7 @@ impl App {
         }
     }
 
-    /// The canvas's keys (`handleKeyDown`): Tab adds after the leaf, + - 0
+    /// The canvas's keys: Tab adds after the leaf, + - 0
     /// and 1 zoom, Delete removes the selected step; and undo.
     pub(super) fn canvas_key(
         &mut self,

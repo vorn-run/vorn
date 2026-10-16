@@ -113,9 +113,8 @@ impl<'a> Context<'a> {
         self.rpc.call(method, params).await
     }
 
-    /// Two calls at once, as `Promise.all` makes them. When both fail, the
-    /// first one's error is the one reported: they time out at the same
-    /// moment, and Node's timers fire in the order they were set.
+    /// Two calls at once. When both fail, the first one's error is the one
+    /// reported.
     pub async fn call_both(
         &self,
         first: &str,

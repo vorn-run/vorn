@@ -1,10 +1,10 @@
-//! The tools, each ported from its TypeScript namesake in `packages/mcp/src/tools`.
+//! The tools, each matching its definition in `packages/mcp/src/tools`.
 //!
 //! A tool takes its arguments as the schema parsed them and answers with a
 //! `CallToolResult`. `Err` is a tool that threw: the SDK turns the message
-//! into an error result, and so does [`crate::server`]. Where the TypeScript
-//! reads a field off something that may not be an object, the port does the
-//! same through [`json::prop`], so even its TypeErrors read alike.
+//! into an error result, and so does [`crate::server`]. A field read off
+//! something that may not be an object goes through [`json::prop`], which
+//! fails with a TypeError message.
 
 mod artifacts;
 mod browser;
@@ -220,7 +220,8 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Opti
         "update_workspace" => workspaces::update_workspace(cx, &args).await,
         "delete_workspace" => workspaces::delete_workspace(cx, &args).await,
 
-        // A tool whose schema the TypeScript defines and a built-in extension contributes.
+        // A tool whose schema is generated and a built-in extension
+        // contributes.
         _ => return None,
     })
 }

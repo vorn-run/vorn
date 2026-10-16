@@ -1,7 +1,6 @@
-//! A session's browser pane, as the renderer's store keeps it
-//! (`ui-slice.ts`): tabs with the address each was asked for and what the
-//! page last said about itself, the address bar's rules
-//! (`shared/browser-url.ts`), and the panes saved between runs.
+//! A session's browser pane: tabs with the address each was asked for and
+//! what the page last said about itself, the address bar's rules, and the
+//! panes saved between runs.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -102,7 +101,7 @@ impl Panes {
             .unwrap_or_default()
     }
 
-    /// Writes the panes to `path`. As the renderer's `savePanes`, only what
+    /// Writes the panes to `path`. Only what
     /// was asked for is kept: what a page reported is seen again next run.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let body = serde_json::to_string(&self.clone().intent()).map_err(std::io::Error::other)?;
@@ -125,7 +124,7 @@ impl Panes {
         self.open.get(session)
     }
 
-    /// `openBrowserPane`: with a vetted `url`, the active tab goes there;
+    /// With a vetted `url`, the active tab goes there;
     /// without, the pane opens as it was left, or blank. False when nothing
     /// changed.
     pub fn open(&mut self, session: &str, url: Option<String>) -> bool {
@@ -153,7 +152,7 @@ impl Panes {
         true
     }
 
-    /// `closeBrowserPane`: its tabs are kept for the next open.
+    /// Its tabs are kept for the next open.
     pub fn close(&mut self, session: &str) -> bool {
         match self.open.remove(session) {
             Some(pane) => {
@@ -170,7 +169,7 @@ impl Panes {
         }
     }
 
-    /// `addBrowserTab`, with a vetted url or a blank tab.
+    /// Adds a tab, with a vetted url or a blank tab.
     pub fn add_tab(&mut self, session: &str, url: Option<String>) -> bool {
         let Some(pane) = self.open.get_mut(session) else {
             return false;
@@ -181,7 +180,7 @@ impl Panes {
         true
     }
 
-    /// `closeBrowserTab`: the last tab takes the pane with it, and leaves
+    /// The last tab takes the pane with it, and leaves
     /// nothing to reopen.
     pub fn close_tab(&mut self, session: &str, index: usize) -> bool {
         let Some(pane) = self.open.get_mut(session) else {
@@ -205,7 +204,7 @@ impl Panes {
         true
     }
 
-    /// `setActiveBrowserTab`.
+    /// Brings tab `index` to the front.
     pub fn select_tab(&mut self, session: &str, index: usize) -> bool {
         match self.open.get_mut(session) {
             Some(pane) if index < pane.tabs.len() && pane.active_tab != index => {
@@ -216,7 +215,7 @@ impl Panes {
         }
     }
 
-    /// `syncBrowserTab`: what the page in tab `index` reported. A new
+    /// What the page in tab `index` reported. A new
     /// address drops the old page's title.
     pub fn sync_tab(
         &mut self,
@@ -245,7 +244,7 @@ impl Panes {
         true
     }
 
-    /// `openArtifactTab`: the artifact's tab is replaced in place, or added.
+    /// The artifact's tab is replaced in place, or added.
     pub fn open_artifact(&mut self, session: &str, url: String, artifact: TabArtifact) {
         let mut pane = self
             .open
@@ -280,7 +279,7 @@ impl Panes {
         self.open.insert(session.to_owned(), pane);
     }
 
-    /// `setArtifactTabVersion`.
+    /// Points tab `index` at another version of its artifact.
     pub fn set_artifact_version(&mut self, session: &str, index: usize, url: String, version: u32) {
         let Some(tab) = self
             .open
@@ -355,7 +354,7 @@ fn looks_like_address(raw: &str) -> bool {
     host.contains('.') || host.eq_ignore_ascii_case("localhost") || host.starts_with('[')
 }
 
-/// `normalizeUrl`: what the address bar loads for what was typed, or `None`
+/// What the address bar loads for what was typed, or `None`
 /// for something it will not load. `file:` only with `allow_file`, with no
 /// host, and without its query and hash.
 pub fn normalize_url(input: &str, allow_file: bool) -> Option<String> {
@@ -447,7 +446,7 @@ fn is_local_host(value: &str) -> bool {
         || host.ends_with(".localhost")
 }
 
-/// `displayHost`: what a tab is called before its page has a title.
+/// What a tab is called before its page has a title.
 pub fn display_host(url: &str) -> String {
     if url == DEFAULT_URL {
         return "New tab".to_owned();
@@ -486,7 +485,7 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// `flattenPageText`: page text on one line, cut at `max` characters.
+/// Page text on one line, cut at `max` characters.
 pub fn flatten_page_text(raw: &str, max: usize) -> String {
     let spaced: String = raw
         .chars()
@@ -503,7 +502,7 @@ pub fn flatten_page_text(raw: &str, max: usize) -> String {
     }
 }
 
-/// `loadableUrl`: what the agent may load in a session whose directory is
+/// What the agent may load in a session whose directory is
 /// `root`. A `file:` address must resolve, links followed, inside the root,
 /// because an agent reads pages it did not choose.
 pub fn loadable_url(input: &str, root: Option<&Path>) -> Option<String> {
@@ -520,7 +519,7 @@ pub fn loadable_url(input: &str, root: Option<&Path>) -> Option<String> {
     real.starts_with(real_root?).then_some(normalized)
 }
 
-/// `parseCursor`: where a paged read resumes; a cursor from another page
+/// Where a paged read resumes; a cursor from another page
 /// generation starts over.
 pub fn parse_cursor(cursor: Option<&str>, generation: u32) -> usize {
     let Some((gen, at)) = cursor.and_then(|c| c.split_once(':')) else {

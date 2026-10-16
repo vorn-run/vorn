@@ -31,10 +31,9 @@
 //! ([`crate::size`]); the driver sends what it decides to sessiond, and
 //! tells every client who asked for each resize when its record comes back.
 //!
-//! With terminals native, [`Engine::decide_statuses`] has the
-//! copy of the server's session records ([`crate::registry`]) decide each
-//! terminal's status from what its session does: its screen's status, its
-//! output and its going quiet.
+//! [`Engine::decide_statuses`] has the session registry ([`crate::registry`])
+//! decide each terminal's status from what its session does: its screen's
+//! status, its output and its going quiet.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -350,7 +349,7 @@ impl Engine {
         &self.adapters
     }
 
-    /// Has the registry decide the server's terminals' statuses from now on
+    /// Has the registry decide the terminals' statuses from now on
     /// ([`crate::registry::Registry::decide_statuses`]), following what
     /// every session does on a task of its own. Needs a runtime; a second
     /// call does nothing.
@@ -366,7 +365,7 @@ impl Engine {
         runtime.spawn(follow_statuses(Arc::clone(self), self.subscribe()));
     }
 
-    /// Takes the server's records of an earlier run once
+    /// Takes the records of an earlier run once
     /// ([`SessionRegistry::carry_once`]): what the holder still runs from
     /// them is live again, the rest offered. Answers how many are offered.
     pub fn carry_old(&self, terminals: Vec<crate::registry::TerminalSession>) -> usize {
@@ -1890,7 +1889,7 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
     }
 }
 
-/// A headless record's exit code, as the server reads the exit effect
+/// A headless record's exit code, read from the exit effect
 /// ([`crate::streams::exit_code`]).
 fn ended_with(code: Option<i32>, signal: Option<i32>) -> i32 {
     i32::try_from(crate::streams::exit_code(code, signal)).unwrap_or(i32::MAX)

@@ -1,4 +1,4 @@
-//! ProjectSidebar: the header with the view modes, the sessions by
+//! The header with the view modes, the sessions by
 //! project, by group or flat (or the tasks' projects, or the workflows),
 //! and the footer.
 
@@ -30,7 +30,7 @@ pub(crate) fn project_icon(p: &ProjectConfig, size: f32, current: Rgba) -> El {
     stored_icon(p.icon.as_deref(), p.icon_color.as_deref(), size, current)
 }
 
-/// `ProjectIcon`: the `ICON_MAP` glyph in its colour (else `#6b7280`), or
+/// The `ICON_MAP` glyph in its colour (else `#6b7280`), or
 /// the drawn folder in its colour (else `current`, the row's text colour).
 pub(crate) fn stored_icon(icon: Option<&str>, color: Option<&str>, size: f32, current: Rgba) -> El {
     let color = stored_color(color);
@@ -233,7 +233,7 @@ pub(super) fn control(
     tooltip_at(s.ui, b, id, label, None, Place::Below)
 }
 
-/// SidebarNavItem: an icon (given the row's text colour), a label and a
+/// An icon (given the row's text colour), a label and a
 /// count.
 pub(super) fn nav_item(
     s: &Screen<'_>,
@@ -355,7 +355,7 @@ fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
 }
 
 /// A sidebar row's quick actions, drawn on hover with their tooltips to
-/// the right as today's `Tooltip position="right"`.
+/// the right.
 type Quick<'a> = (Act, &'a str, &'a str, f32);
 
 fn quick_hot(s: &Screen<'_>, place: &str, quick: &[Quick<'_>]) -> bool {
@@ -417,7 +417,7 @@ fn row_count(n: usize, size: f32) -> El {
         .silent()
 }
 
-/// ProjectItem: icon and name, its quick actions on hover, and under it
+/// Icon and name, its quick actions on hover, and under it
 /// while expanded its worktrees or sessions as the view mode arranges them.
 fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
     let view = s.st.sidebar_view;
@@ -564,7 +564,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
     col.child(kids)
 }
 
-/// `sortedWorktrees`: the linked worktrees with their sessions, through
+/// The linked worktrees with their sessions, through
 /// the worktree filter, by name or by their first session's last output.
 fn sorted_worktrees<'a, 's>(
     s: &Screen<'s>,
@@ -840,7 +840,7 @@ fn all_projects(s: &Screen<'_>, badge: Option<usize>) -> El {
     )
 }
 
-/// ProjectsSection: the projects, each with its sessions.
+/// The projects, each with its sessions.
 fn projects(s: &Screen<'_>) -> El {
     let open = !s.st.section_folded;
     let add = control(s, Act::AddProject, "folder-plus", "Add project", 13.0, 1.5);
@@ -870,7 +870,7 @@ fn projects(s: &Screen<'_>) -> El {
     col
 }
 
-/// `sortedProjects`: the workspace's projects through the filter, in the
+/// The workspace's projects through the filter, in the
 /// chosen order; recent activity is a project's latest output.
 fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
     use crate::sidebar_view::{ProjectSort, WorktreeFilter};
@@ -902,7 +902,7 @@ fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
     out
 }
 
-/// FlatSessionsSection: every session, newest activity first.
+/// Every session, newest activity first.
 fn flat(s: &Screen<'_>) -> El {
     let open = !s.st.section_folded;
     let mut col = div().col().gap(2.0).child(toggle_section(
@@ -934,7 +934,7 @@ fn flat(s: &Screen<'_>) -> El {
     col.child(list)
 }
 
-/// GroupSessionsSection: All Sessions, each group with its sessions, then
+/// All Sessions, each group with its sessions, then
 /// the sessions in none.
 fn groups(s: &Screen<'_>) -> El {
     let open = !s.st.section_folded;
@@ -997,7 +997,7 @@ fn groups(s: &Screen<'_>) -> El {
     col.child(list)
 }
 
-/// SessionGroupItem: its icon (a disclosure on hover), name and count, a
+/// Its icon (a disclosure on hover), name and count, a
 /// More button on hover; the name field while renaming.
 fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expanded: bool) -> El {
     let icon = |fg| stored_icon(g.icon.as_deref(), g.icon_color.as_deref(), 14.0, fg);
@@ -1128,7 +1128,7 @@ fn group_row(s: &Screen<'_>, g: &SessionGroupConfig, members: &[&Session], expan
     row
 }
 
-/// `WorkspaceIcon`: its stored glyph in its colour, else a gray user.
+/// Its stored glyph in its colour, else a gray user.
 fn workspace_icon(ws: &WorkspaceConfig, size: f32) -> El {
     workspace_glyph(ws.icon.as_deref(), ws.icon_color.as_deref(), size)
 }
@@ -1504,7 +1504,7 @@ pub(super) fn toggle_section(
         .child(div().row().items_center().gap(2.0).children(actions))
 }
 
-/// TasksProjectsSection: All Projects and each project, under a fold.
+/// All Projects and each project, under a fold.
 fn tasks_projects(s: &Screen<'_>) -> El {
     let open = !s.st.tasks.projects_folded;
     let mut col = div().col().gap(2.0).child(toggle_section(
@@ -1547,7 +1547,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
     col
 }
 
-/// SidebarFooter: the ready-update notice above the guide and settings
+/// The ready-update notice above the guide and settings
 /// buttons, or a dot on the gear once the notice is dismissed.
 fn footer(s: &Screen<'_>) -> El {
     use crate::settings::{describe_update, update_cost, SetAct, UpdateStatus};

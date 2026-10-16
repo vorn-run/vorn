@@ -1,5 +1,5 @@
 //! The file explorer's calls on this machine: list a directory, read, stamp
-//! and write a file, as the server's `file-utils` answers them.
+//! and write a file.
 //!
 //! A call naming a remote host is answered over SSH ([`super::remote`]) before it gets here.
 
@@ -48,8 +48,8 @@ impl FileEntry {
     }
 }
 
-/// `dir`'s entries, directories first and then by name as the server sorts
-/// them, without dotfiles (but `.github`) and without what git ignores.
+/// `dir`'s entries, directories first and then by name ([`locale_compare`]),
+/// without dotfiles (but `.github`) and without what git ignores.
 /// Empty when the directory cannot be read.
 pub fn list_dir(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Vec<FileEntry> {
     let ignored = git_ignored(dir, env, cache);
@@ -77,7 +77,7 @@ pub fn list_dir(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Vec<FileE
             is_directory,
         });
     }
-    // Stable, as the server's sort is: equal names keep the order read.
+    // Stable: equal names keep the order read.
     out.sort_by(|a, b| {
         b.is_directory
             .cmp(&a.is_directory)
@@ -190,8 +190,8 @@ pub fn stamp(path: &str) -> Option<Value> {
     Some(json!({ "size": meta.len(), "mtimeMs": ms }))
 }
 
-/// Writes `content` over the file, creating it; the error is worded as Node
-/// words it.
+/// Writes `content` over the file, creating it; the error names the failed
+/// call and the path.
 pub fn write_content(path: &str, content: &str) -> Value {
     match std::fs::write(path, content) {
         Ok(()) => json!({ "success": true }),
@@ -202,8 +202,8 @@ pub fn write_content(path: &str, content: &str) -> Value {
     }
 }
 
-/// The same calls for a remote host's files, each one ssh command as the
-/// server's `file-utils` runs them there; a failure reads as nothing there.
+/// The same calls for a remote host's files, each one ssh command; a failure
+/// reads as nothing there.
 pub mod remote {
     use std::time::Duration;
 
@@ -312,7 +312,7 @@ pub mod remote {
     }
 }
 
-/// Node's `path.join` for two parts: joined with the separator, then
+/// Two path parts joined with the separator, then
 /// normalised (`.` and `..` resolved, repeated separators collapsed).
 pub fn node_join(base: &str, child: &str) -> String {
     let joined = if base.is_empty() {
@@ -325,7 +325,8 @@ pub fn node_join(base: &str, child: &str) -> String {
     normalize(&joined)
 }
 
-/// Node's `path.posix.normalize`.
+/// A POSIX path normalised: `.` and `..` resolved, repeated separators
+/// collapsed.
 fn normalize(path: &str) -> String {
     if path.is_empty() {
         return ".".to_owned();
@@ -359,12 +360,12 @@ fn normalize(path: &str) -> String {
     out
 }
 
-/// `a.localeCompare(b)` as Node's default collation orders file names: by
-/// base letters first, ignoring case and accents; then by accents; then
-/// lower case before upper. Punctuation and symbols sort before digits and
-/// digits before letters, each in the root collation's order. Exact for
-/// ASCII and the accented Latin letters; other symbols sort before digits
-/// and other letters after the Latin ones, each by code point.
+/// File names in the default locale collation: by base letters first, ignoring
+/// case and accents; then by accents; then lower case before upper. Punctuation
+/// and symbols sort before digits and digits before letters, each in the root
+/// collation's order. Exact for ASCII and the accented Latin letters; other
+/// symbols sort before digits and other letters after the Latin ones, each by
+/// code point.
 pub fn locale_compare(a: &str, b: &str) -> Ordering {
     let ka: Vec<Weights> = a.chars().filter_map(weights).collect();
     let kb: Vec<Weights> = b.chars().filter_map(weights).collect();
@@ -498,7 +499,7 @@ mod tests {
 
     #[test]
     fn orders_ascii_as_node_does() {
-        // `[...printable ASCII].sort((a, b) => a.localeCompare(b))` in Node 22.
+        // Printable ASCII in the default collation's order.
         let node = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ";
         let mut chars: Vec<String> = (32u8..127).map(|b| (b as char).to_string()).collect();
         chars.sort_by(|a, b| locale_compare(a, b));
@@ -507,7 +508,7 @@ mod tests {
 
     #[test]
     fn compares_letters_before_accents_before_case() {
-        // Node 22's order for the same names.
+        // The default collation's order for the same names.
         assert_eq!(
             sorted(&[
                 "zz", "Zz", "b", "B", "ab", "Aa", "a-b", "a_b", "a.b", "a b", "ab1", "ab10", "ab2",
@@ -532,7 +533,7 @@ mod tests {
 
     #[test]
     fn ranks_accents_as_node_does() {
-        // Node 22's order for the same letters.
+        // The default collation's order for the same letters.
         assert_eq!(
             sorted(&[
                 "e", "é", "è", "ê", "ë", "ē", "E", "É", "È", "a", "á", "à", "â", "ä", "ã", "å",
@@ -573,7 +574,7 @@ mod tests {
             None
         );
         assert_eq!(read_content("/no/such/file", MAX_READ_BYTES), None);
-        // Invalid UTF-8 reads as replacement characters, as Node decodes it.
+        // Invalid UTF-8 reads as replacement characters.
         let odd = dir.path().join("odd.txt");
         std::fs::write(&odd, [b'a', 0xff, b'b']).unwrap();
         assert_eq!(

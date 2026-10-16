@@ -1,4 +1,4 @@
-//! `tools/sessions.ts`: terminal and headless sessions, over the server's RPCs.
+//! Terminal and headless sessions, over the server's RPCs.
 
 use serde_json::{json, Value};
 
@@ -175,7 +175,7 @@ pub async fn write_to_terminal<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     })
 }
 
-/// Named keys and the bytes they send, in the TypeScript's order.
+/// Named keys and the bytes they send.
 const KEY_MAP: [(&str, &str); 17] = [
     ("enter", "\r"),
     ("escape", "\x1b"),
@@ -200,7 +200,7 @@ const KEY_MAP: [(&str, &str); 17] = [
 ///
 /// `KEY_MAP` is a plain object, so two lower-case names reach its prototype:
 /// `constructor` (a function, which JSON leaves out) and `__proto__` (an empty
-/// object). The port sends what the TypeScript sends for them.
+/// object), and those are what they send.
 fn mapped(key: &str) -> Option<Option<Value>> {
     match key {
         "constructor" => Some(None),

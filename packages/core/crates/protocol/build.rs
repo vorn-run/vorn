@@ -1,6 +1,5 @@
 //! Generates the protocol types from `schema/store.json`, which
-//! `scripts/gen-store-schema.mjs` writes from the TypeScript in
-//! `packages/shared`.
+//! `scripts/gen-store-schema.mjs` writes from `packages/shared`.
 
 use std::path::Path;
 

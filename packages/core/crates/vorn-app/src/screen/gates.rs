@@ -1,5 +1,4 @@
-//! A waiting approval gate (`GateAsk`, `GateActions`, `GateComposer`,
-//! `GateEditor`, `GateJsonEditor`, `GateReviewModal`): what it asks, and
+//! A waiting approval gate: what it asks, and
 //! the answers a reviewer reaches for, in the run pane, under the step in a
 //! trace, and on the review page.
 
@@ -122,7 +121,7 @@ fn quiet(s: &Screen<'_>, place: &str, act: Act, label: &str, large: bool, disabl
     b
 }
 
-/// `GateAsk`: the message as it was filled in, or that it waits, and the
+/// The message as it was filled in, or that it waits, and the
 /// last change asked for.
 pub fn ask(state: &Value, config: Option<&Value>) -> El {
     let message = sv(state, "message")
@@ -254,7 +253,7 @@ pub fn actions(
     ))
 }
 
-/// `GateComposer`: the comment a request for changes needs, or the note a
+/// The comment a request for changes needs, or the note a
 /// rejection may carry.
 pub fn composer(
     s: &Screen<'_>,
@@ -383,7 +382,7 @@ pub fn composer(
     div().col().gap(8.0).child(boxed).child(hint).child(buttons)
 }
 
-/// `GateEditor`: prose in a text area, or a list of records as a table.
+/// Prose in a text area, or a list of records as a table.
 pub fn editor(s: &Screen<'_>, key: &str, e: &Editor, large: bool, approve: bool) -> El {
     if e.is_json() {
         return json_editor(s, key, e, large, approve);
@@ -504,7 +503,7 @@ fn edit_buttons(
     row
 }
 
-/// `GateJsonEditor`: the list as a table to trim and correct, its source
+/// The list as a table to trim and correct, its source
 /// one toggle away.
 fn json_editor(s: &Screen<'_>, key: &str, e: &Editor, large: bool, approve: bool) -> El {
     let invalid = e.invalid();
@@ -872,7 +871,7 @@ fn cell(s: &Screen<'_>, key: &str, row: usize, r: &gates::Row, col: &str) -> El 
     }
 }
 
-/// `GateReviewModal`: the step, the run and its round over the review
+/// The step, the run and its round over the review
 /// page, with the answers in its footer. The page itself opens in the
 /// browser until the app has a web view of its own.
 pub fn review(s: &Screen<'_>) -> Option<El> {

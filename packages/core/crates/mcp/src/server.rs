@@ -188,7 +188,8 @@ async fn tools_with_extensions<R: Rpc>(rpc: &R) -> Value {
     {
         tools.extend(added);
     }
-    // A built-in's tools stand where the TypeScript lists them; an installed extension's come last.
+    // A built-in's tools stand where the generated list puts them; an installed
+    // extension's come last.
     let at = |t: &Value| {
         t.get("name")
             .and_then(Value::as_str)
@@ -224,7 +225,8 @@ async fn call_tool<R: Rpc>(rpc: &R, caller: &Caller, params: &Value) -> Value {
     match tools::call(&cx, name, Args::new(args.clone())).await {
         Some(Ok(result)) => normalize_result(result),
         Some(Err(message)) => tool_error(message),
-        // Checked here as the TypeScript checks it, then answered by the built-in that adds it.
+        // Checked here against its schema, then answered by the built-in that
+        // adds it.
         None => contributed(rpc, name, args.unwrap_or_else(|| json!({}))).await,
     }
 }

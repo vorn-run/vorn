@@ -7,7 +7,7 @@
 //! is an RPC the app has always had. `vorn mcp` relays an agent's MCP over
 //! stdio to vornd.
 //!
-//! Its output is the TypeScript command's it replaced, pinned by `tests/native-cli.test.ts`.
+//! Its output is pinned by `tests/native-cli.test.ts`.
 //!
 //! [`run`] takes its argv and its output sinks as arguments and returns an
 //! exit code instead of writing to the process and exiting, so every command

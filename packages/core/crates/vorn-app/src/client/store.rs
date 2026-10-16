@@ -1,6 +1,6 @@
 //! What the main screen shows, as vornd last told it: the config, projects,
 //! sessions, tasks and workflows, loaded once and then kept current by
-//! folding notifications in, the way the renderer's stores do.
+//! folding notifications in.
 //!
 //! vornd's configuration carries neither tasks nor workflows; the app keeps
 //! them beside its copy of it, under `tasks` and `workflows`, so the screens
@@ -49,7 +49,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// `getDisplayName`: the name given, else the project's.
+    /// The name given, else the project's.
     pub fn title(&self) -> String {
         match self.info.display_name.as_deref().map(str::trim) {
             Some(name) if !name.is_empty() => name.to_owned(),
@@ -284,7 +284,7 @@ impl Store {
         p.workspace_id.as_deref().unwrap_or(WORKSPACE) == self.workspace()
     }
 
-    /// `useWorkspaceProjects`: the active workspace's projects, in order.
+    /// The active workspace's projects, in order.
     pub fn workspace_projects(&self) -> impl Iterator<Item = &ProjectConfig> {
         self.projects.iter().filter(|p| self.in_workspace(p))
     }
@@ -548,7 +548,7 @@ fn active_workspace(config: &Value) -> &str {
         .unwrap_or(WORKSPACE)
 }
 
-/// `useWorkspaceSessionGroups`: the active workspace's groups by `order`.
+/// The active workspace's groups by `order`.
 fn groups(config: &Value) -> Vec<SessionGroupConfig> {
     let workspace = active_workspace(config);
     let mut out: Vec<SessionGroupConfig> =

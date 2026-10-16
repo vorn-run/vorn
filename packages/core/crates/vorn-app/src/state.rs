@@ -12,7 +12,7 @@ use crate::client::{Session, Store};
 use crate::screen::{Composer, MainView};
 use vorn_protocol::TerminalSession;
 
-/// The grid's status filter (`StatusFilter`), Alt+1..5.
+/// The grid's status filter, Alt+1..5.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Filter {
     #[default]
@@ -53,7 +53,7 @@ impl Filter {
     }
 }
 
-/// The grid's order (`SortMode`).
+/// The grid's order.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Sort {
     #[default]
@@ -101,8 +101,8 @@ impl LayoutMode {
     }
 }
 
-/// How the sessions view's sidebar arranges its sessions
-/// (`SidebarViewMode`), worktrees and their sessions by default.
+/// How the sessions view's sidebar arranges its sessions: worktrees and
+/// their sessions by default.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -256,13 +256,13 @@ pub enum Dialog {
     AddTask,
     /// The task panel's CommitDialog.
     Commit,
-    /// LogReplayModal: a workflow step's full output.
+    /// A workflow step's full output.
     Output,
     /// SourcePromptDialog: what a run asks for first.
     RunPrompt,
     /// MissedSchedulesDialog.
     Missed,
-    /// GateReviewModal: the review page of a waiting gate.
+    /// The review page of a waiting gate.
     GateReview,
     /// The Changes panel's CommitDialog.
     GitCommit,
@@ -274,7 +274,7 @@ pub enum Dialog {
     Palette,
     /// Install…'s address or folder, and the sheet read before any extension installs or links.
     ExtInstall,
-    /// OnboardingModal: the welcome guide.
+    /// The welcome guide.
     Welcome,
     /// A connection's sign-in page, in its own profile.
     SignIn,
@@ -315,7 +315,7 @@ pub struct Recent {
 }
 
 impl Recent {
-    /// `formatRecentSessionActivity`: "3 messages".
+    /// "3 messages".
     pub fn activity_text(&self) -> String {
         let label = if self.activity_label.is_empty() {
             "message"
@@ -396,8 +396,7 @@ pub struct Launch {
 /// of the models it lists.
 #[derive(Debug, Default)]
 pub struct Models {
-    /// The model picked per agent; kept across launches, as today's
-    /// launch preferences.
+    /// The model picked per agent; kept across launches.
     pub picked: HashMap<String, String>,
     /// By agent and project path.
     pub lists: HashMap<(String, String), crate::models::Listing>,
@@ -501,8 +500,8 @@ pub struct State {
     pub installed: Option<Vec<String>>,
     /// Where each installed agent's program is.
     pub agent_paths: HashMap<String, String>,
-    /// The selected card's terminal takes the keys on the next frame, as
-    /// today's `term.focus()` after a jump or a new session.
+    /// The selected card's terminal takes the keys on the next frame, after
+    /// a jump or a new session.
     pub focus_terminal: bool,
     /// When each session last drew, for the recent sort.
     pub last_output: HashMap<String, Instant>,
@@ -616,8 +615,7 @@ impl State {
     }
 
     /// Whether the sessions view has no card to lay out and no filter to
-    /// blame, so the composer stands in for the grid (`PromptLauncher`
-    /// inline).
+    /// blame, so the composer stands in for the grid.
     pub fn composer_inline(&self, store: &Store) -> bool {
         store.sessions_known
             && self.view == MainView::Sessions
@@ -653,7 +651,7 @@ impl State {
     }
 }
 
-/// `timeAgo`: just now, 5m ago, 3h ago, 2d ago.
+/// Just now, 5m ago, 3h ago, 2d ago.
 pub fn time_ago(then_ms: f64, now_ms: f64) -> String {
     let s = ((now_ms - then_ms) / 1000.0).max(0.0) as u64;
     match s {

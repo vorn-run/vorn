@@ -1,5 +1,5 @@
 //! MCP connections: one child per connection, spoken to through the Rust MCP
-//! SDK, as the server's `connectors/mcp.ts` and `mcp-clients.ts` did.
+//! SDK.
 //!
 //! A connection's child starts on its first call and is kept until it exits.
 //! The server stops its child when the connection is edited; here each call
@@ -219,9 +219,9 @@ fn default_inherited() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The program to run. On Unix the child's PATH is searched as Node's spawn
-/// searches it; on Windows a bare name is looked up on that PATH with the
-/// extensions `PATHEXT` names, as cross-spawn does, so `npx` finds `npx.cmd`.
+/// The program to run. On Unix the child's PATH is searched at spawn; on
+/// Windows a bare name is looked up on that PATH with the extensions
+/// `PATHEXT` names, so `npx` finds `npx.cmd`.
 pub fn resolve(command: &str, env: &[(String, String)]) -> std::path::PathBuf {
     #[cfg(windows)]
     {
@@ -252,7 +252,7 @@ pub fn resolve(command: &str, env: &[(String, String)]) -> std::path::PathBuf {
     std::path::PathBuf::from(command)
 }
 
-/// A start that failed, worded as Node's spawn words it.
+/// A start that failed, as `spawn <command> ENOENT` and the like.
 fn spawn_error(command: &str, err: &std::io::Error) -> String {
     match err.kind() {
         std::io::ErrorKind::NotFound => format!("spawn {command} ENOENT"),

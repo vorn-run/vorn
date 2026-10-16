@@ -1,4 +1,4 @@
-//! The launcher's model picker (`ModelPicker`): what vornd's
+//! The launcher's model picker: what vornd's
 //! `agent:listModels` answer holds, the rows the menu lists for a query, its
 //! footer line, and the check a typed model id must pass.
 
@@ -9,7 +9,7 @@ pub const INVALID_ID: &str =
     "Enter a model id without spaces, control characters, or a leading dash.";
 
 /// A model id goes on a command line as one argument, so it must read as
-/// one (`validateModelId`).
+/// one.
 pub fn validate_id(value: &str) -> Result<&str, &'static str> {
     let id = value.trim();
     let bad = |c: char| c.is_whitespace() || c < ' ' || c == '\u{7f}';
@@ -45,7 +45,7 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// What a failed call reads as, as the renderer's hook words it.
+    /// What a failed call reads as.
     pub fn failed() -> Self {
         Self::unavailable("Could not list models.")
     }

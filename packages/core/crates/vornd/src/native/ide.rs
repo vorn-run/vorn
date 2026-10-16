@@ -1,5 +1,5 @@
-//! The editors and file managers a project can be opened in, as the server's
-//! `ide-detector` finds and starts them.
+//! The editors and file managers a project can be opened in: finding and
+//! starting them.
 
 use std::process::{Command, Stdio};
 use std::sync::{Arc, OnceLock};
@@ -105,7 +105,7 @@ const LINUX: &[Definition] = &[
     def("file-manager", "File Manager", None, "xdg-open"),
 ];
 
-/// The server's list for this platform; anything not Windows or Linux is a Mac.
+/// The list for this platform; anything not Windows or Linux is a Mac.
 fn definitions() -> &'static [Definition] {
     if cfg!(windows) {
         WINDOWS
@@ -124,8 +124,7 @@ pub struct Detected {
     pub command: &'static str,
 }
 
-/// The editors found, looked for once: the server keeps its first answer for
-/// as long as it runs, and so does vornd.
+/// The editors found, looked for once and kept for as long as vornd runs.
 #[derive(Debug, Default)]
 pub struct Ides {
     found: OnceLock<Vec<Detected>>,

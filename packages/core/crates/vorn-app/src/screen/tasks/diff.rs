@@ -1,6 +1,5 @@
-//! A diff (`DiffFileList`, `DiffContent`): the files, their lines with
-//! review comments, and the feedback bar, for the task panel and for a
-//! session's Changes panel alike.
+//! A diff: the files, their lines with review comments, and the feedback bar,
+//! for the task panel and for a session's Changes panel alike.
 
 use super::{faint, ink, primary, secondary};
 use crate::act::Act;
@@ -66,7 +65,7 @@ pub enum Row {
     Ctx(usize, String, usize, usize),
 }
 
-/// `parseDiffRows`: header lines dropped, hunks numbered.
+/// Header lines dropped, hunks numbered.
 pub fn rows(diff: &str) -> Vec<Row> {
     let mut out = Vec::new();
     let (mut old, mut new, mut in_hunk) = (0usize, 0usize, false);
@@ -526,7 +525,7 @@ fn body(line: &str) -> String {
     }
 }
 
-/// `DiffContent`: every file, or the selected one first.
+/// Every file, or the selected one first.
 pub(crate) fn content(s: &Screen<'_>, scope: Scope, files: &[DiffFile]) -> El {
     let mut col = div().col();
     let first = scope.diff(s).file.as_deref();

@@ -7,7 +7,7 @@
 //!
 //! The rules are [`vorn_extensions`]'s. This module runs them against what
 //! vornd has around it ([`Around`]): the session records, the session host,
-//! its own endpoint and the clients the server holds.
+//! its own endpoint and the clients it serves.
 
 pub mod builtin;
 pub mod routes;
@@ -148,7 +148,7 @@ impl Live {
 /// What the extensions need from the rest of vornd, behind one seam so the
 /// rules here are tested without a server, a holder or a socket.
 pub trait Around: Send + Sync + 'static {
-    /// The running terminals; `None` while vornd holds no copy of the records.
+    /// The running terminals; `None` while the records are not yet read.
     fn live(&self) -> Option<Vec<Live>>;
     /// Told whenever the records change.
     fn notes(&self) -> Option<broadcast::Receiver<Value>>;
@@ -786,7 +786,7 @@ impl Extensions {
         }
     }
 
-    /// The running session `id`, worded as the server words a missing one.
+    /// The running session `id`, or the error for a missing one.
     fn live(&self, id: &str) -> Result<Live, String> {
         self.session(id)
             .ok_or_else(|| format!("Session not found: {id}"))

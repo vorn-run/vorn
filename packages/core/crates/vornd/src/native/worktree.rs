@@ -1,6 +1,6 @@
-//! The worktree manager's calls vornd answers: the inventory, what is safe
-//! to remove, and the removal itself, read from its copy of the session
-//! records ([`crate::registry`]) and the repositories ([`vorn_worktrees`]).
+//! The worktree manager's calls vornd answers: the inventory, what is safe to
+//! remove, and the removal itself, read from the session records
+//! ([`crate::registry`]) and the repositories ([`vorn_worktrees`]).
 //!
 //! A project on a remote host is reached over ssh ([`super::remote`]).
 
@@ -17,7 +17,7 @@ use crate::registry::Registry;
 
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
-    // Removing one worktree asks nothing of the sessions, as the server's handler asks nothing.
+    // Removing one worktree asks nothing of the sessions.
     let fed = native.registry.get().and_then(|r| r.read(|_| ())).is_some();
     if !fed && method != "git:removeWorktree" {
         return Answer::Error("vornd has not read the sessions yet".to_owned());
@@ -144,8 +144,8 @@ fn inventory(
     Answer::Result(super::json_of(inventory))
 }
 
-/// `git:removeWorktree`, which the server answers without asking about
-/// sessions: a card closing its own session removes the worktree after it.
+/// `git:removeWorktree`, answered without asking about sessions: a card closing
+/// its own session removes the worktree after it.
 fn remove_one(native: &Native, method: &str, params: &Value) -> Answer {
     let (Some(project), Some(worktree)) = (
         params.get("projectPath").and_then(absolute_str),
@@ -166,7 +166,7 @@ fn remove_one(native: &Native, method: &str, params: &Value) -> Answer {
     Answer::Result(json!(removed))
 }
 
-/// A deleting call's params, as the server's handler reads them.
+/// A deleting call's params.
 enum Asked {
     Remove(Vec<RemoveItem>),
     Reclaim(Vec<String>),
@@ -264,7 +264,7 @@ impl Guard for Live<'_> {
     }
 }
 
-/// The server's `assertIdle`, in its words.
+/// Refuses a worktree that sessions are still active in.
 fn idle(r: &Registry, path: &str) -> Result<(), String> {
     let n = r.active_in_worktree(path).len();
     if n > 0 {
@@ -541,7 +541,7 @@ mod tests {
             },
             retention: None,
         };
-        // A host vornd cannot read is reached as this machine, as the server reaches it.
+        // A host vornd cannot read is reached as this machine.
         let listed = projects(&Native::new(), &settings);
         assert_eq!(
             (listed[0].remote.clone(), listed[1].host_ids.clone()),

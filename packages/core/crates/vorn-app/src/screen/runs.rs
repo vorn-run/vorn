@@ -38,7 +38,7 @@ pub fn node_icon(kind: &str) -> &'static str {
     }
 }
 
-/// `stepMeta`: what a step is set to do, in one line.
+/// What a step is set to do, in one line.
 pub fn step_meta(node: Option<&Value>) -> Option<String> {
     let node = node?;
     let str = |k: &str| {
@@ -64,7 +64,7 @@ pub fn step_meta(node: Option<&Value>) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join(" \u{b7} "))
 }
 
-/// `StatusDot`: eight pixels in the state's colour.
+/// Eight pixels in the state's colour.
 pub fn status_dot(status: &str) -> El {
     let (rgb, a) = runs::dot(status);
     div()
@@ -74,7 +74,7 @@ pub fn status_dot(status: &str) -> El {
         .role(Role::Image, runs::label(status))
 }
 
-/// `IconButton`: a neutral `p-1` icon button named by its tooltip.
+/// A neutral `p-1` icon button named by its tooltip.
 pub fn icon_button(s: &Screen<'_>, place: &str, act: Act, icon: &str, label: &str) -> El {
     let id = s.acts.on(place, act);
     let hot = s.ui.hover(id);
@@ -220,7 +220,7 @@ pub fn run_entry(
     frame
 }
 
-/// `RunStepsList`: the inputs, then each step, the trigger first when
+/// The inputs, then each step, the trigger first when
 /// `trigger` (the runs pane reads what fired the run there).
 pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str, trigger: bool) -> El {
     let tasks = task_values(s);

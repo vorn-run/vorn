@@ -15,8 +15,7 @@
 //!
 //! - `mixed`: an agent's TUI, a build log and a full-screen redraw at 60 Hz,
 //!   in turn.
-//! - `agent`: every pane an agent's TUI at `--agent-rate`, the feed the
-//!   renderer suite of `yarn bench` gives each terminal.
+//! - `agent`: every pane an agent's TUI at `--agent-rate`.
 //! - `hidden`: as `agent`, with the probe's card expanded, so the other
 //!   panes stream into cards that are not on screen.
 //! - `resize`: as `agent`, while the window is dragged between its size and
@@ -67,12 +66,11 @@ fn flag<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
         .map(|w| w[1].as_str())
 }
 
-/// The terminal output the workloads write, ported from
-/// `bench/lib/transcripts.ts` with its seeds, so both benches feed the same
-/// bytes.
+/// The terminal output the workloads write, generated from fixed seeds so
+/// every run feeds the same bytes.
 #[cfg(unix)]
 mod transcript {
-    /// mulberry32, as the TypeScript generator.
+    /// mulberry32.
     struct Rng(u32);
 
     impl Rng {
@@ -198,7 +196,7 @@ mod feed {
 
     use super::{flag, transcript};
 
-    /// The server's flush beat, on which the renderer suite feeds too.
+    /// The beat output is fed on.
     const BEAT: Duration = Duration::from_millis(8);
     const FRAME: Duration = Duration::from_micros(16_667);
 

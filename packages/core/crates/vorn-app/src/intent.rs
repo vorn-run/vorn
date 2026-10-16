@@ -46,7 +46,7 @@ pub fn history_file(data_dir: &Path) -> PathBuf {
     data_dir.join("desktop").join("command-history.json")
 }
 
-/// `isSubsequence`.
+/// Whether `query`'s characters appear in `text` in order.
 fn subsequence(query: &str, text: &str) -> bool {
     let mut q = query.chars().peekable();
     for c in text.chars() {
@@ -71,7 +71,7 @@ impl History {
         self.entries.iter().filter(|e| e.kind == "shell")
     }
 
-    /// `recordCommand`: to the front, once.
+    /// To the front, once.
     pub fn record(&mut self, text: &str, project: Option<&str>, now_ms: u64) {
         let text = text.trim();
         if text.is_empty() {
@@ -96,7 +96,7 @@ impl History {
         }
     }
 
-    /// `searchHistory`: prefix over substring over subsequence, this
+    /// Prefix over substring over subsequence, this
     /// project's and recent ones first; the most recent for no query.
     pub fn search(&self, query: &str, project: Option<&str>) -> Vec<Entry> {
         let q = query.trim().to_lowercase();
@@ -134,7 +134,7 @@ impl History {
             .collect()
     }
 
-    /// `ghostSuggestion`: the latest input that carries on from `input`.
+    /// The latest input that carries on from `input`.
     pub fn ghost(&self, input: &str, project: Option<&str>) -> Option<&str> {
         if input.is_empty() || input.contains('\n') {
             return None;
@@ -515,7 +515,7 @@ impl Sources {
     }
 }
 
-/// `escapeToken`: one shell word.
+/// One shell word.
 fn escape(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for c in name.chars() {
@@ -527,7 +527,7 @@ fn escape(name: &str) -> String {
     out
 }
 
-/// `prefixFilter`: names starting with `prefix`, any case, but not it.
+/// Names starting with `prefix`, any case, but not it.
 fn starts<'a>(names: impl Iterator<Item = &'a str>, prefix: &str) -> Vec<&'a str> {
     let lower = prefix.to_lowercase();
     names
@@ -591,7 +591,7 @@ fn paths(
         .collect()
 }
 
-/// `getCompletions` for the token at the end of `input`, from what
+/// The completions for the token at the end of `input`, from what
 /// `src` holds; and what it still has to fetch for a better answer.
 pub fn complete(
     input: &str,
@@ -724,7 +724,7 @@ pub fn complete(
     (out, wants)
 }
 
-/// `applyCompletion`: `input` with its last token replaced.
+/// `input` with its last token replaced.
 pub fn apply(input: &str, c: &Completion) -> String {
     let cut = input.rfind(char::is_whitespace).map_or(0, |i| {
         i + input[i..].chars().next().map_or(1, char::len_utf8)

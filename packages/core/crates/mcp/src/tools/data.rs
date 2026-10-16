@@ -14,7 +14,7 @@ use crate::json;
 use crate::rpc::Rpc;
 
 /// `get_config`: the whole configuration, its tasks and workflows read
-/// beside it and put back where the TypeScript's answer had them.
+/// beside it and put back in their usual place.
 pub async fn get_config<R: Rpc>(cx: &Cx<'_, R>) -> Outcome {
     let config = load(cx).await?;
     let Value::Object(config) = config else {
@@ -118,8 +118,7 @@ fn workflow_gone(id: &str) -> String {
     format!("workflow \"{id}\" not found")
 }
 
-/// One field of an update: `Some` sets it, `None` is the TypeScript's
-/// `undefined`, which a save drops.
+/// One field of an update: `Some` sets it, `None` leaves it out of the save.
 pub type Update = Vec<(&'static str, Option<Value>)>;
 
 /// `{ ...row, ...updates }`.

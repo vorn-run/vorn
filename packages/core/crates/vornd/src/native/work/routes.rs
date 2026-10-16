@@ -3,8 +3,7 @@
 //! (`/gate-view/<run>/<node>?t=`), and a workflow's webhook
 //! (`/wf-hooks/<workflow>/<token>`).
 //!
-//! The server's addresses for them stay valid: the server relays these
-//! paths here. Pages are served under a policy that lets them reach
+//! Pages are served under a policy that lets them reach
 //! nothing ([`vorn_work::gates::CSP`]); a webhook is taken from this machine
 //! only, and every miss is one 404, so the route confirms nothing about
 //! ids, tokens or configuration.
@@ -23,11 +22,11 @@ use super::Work;
 use crate::endpoint::{full, Body};
 use crate::pair::PEER_HEADER;
 
-/// The largest webhook body taken, the server's own limit.
+/// The largest webhook body taken.
 const MAX_BODY: usize = 1 << 20;
 
-/// The work model's path a request names, its first segment decoded as
-/// the server's router decodes it; `None` for any other path.
+/// The work model's path a request names, its first segment
+/// percent-decoded; `None` for any other path.
 pub fn route_path(path: &str) -> Option<String> {
     let rest = path.strip_prefix('/')?;
     let (first, tail) = rest.split_once('/')?;

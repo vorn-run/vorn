@@ -1,4 +1,4 @@
-//! The welcome guide's modal (`OnboardingModal`): a header with the
+//! The welcome guide's modal: a header with the
 //! progress bars and the step's title, the step's body, and a footer
 //! that moves between steps.
 
@@ -9,7 +9,7 @@ use crate::onboarding::{self, OnbAct, Then, EXPLORE, MCP_CAPS, STEPS};
 use crate::ui::{div, text, Action, El, Id, Rgba, Role};
 
 /// Tailwind v4's `emerald-400`, `cyan-400` and `violet-400`: the guide's
-/// status and demo tints, as the renderer draws them.
+/// status and demo tints.
 const EMERALD_400: u32 = 0x00d492;
 const CYAN_400: u32 = 0x00d3f2;
 const VIOLET_400: u32 = 0xa684ff;
@@ -89,7 +89,7 @@ fn card() -> El {
         .bg(c(look::SURFACE_SUNKEN))
 }
 
-/// `AccentButton`: a bronze label on a hairline, which closes the guide
+/// A bronze label on a hairline, which closes the guide
 /// and opens what it names.
 fn accent(s: &Screen<'_>, glyph: &str, label: &str, then: Then) -> El {
     let id = s.acts.on("onboard", onb(OnbAct::Then(then)));
@@ -145,7 +145,7 @@ fn tile(s: &Screen<'_>, agent: &str, box_: f32, glyph: f32, r: f32, bg: Rgba) ->
         .child(agent_icon(s, agent, glyph))
 }
 
-/// `CopyBtn`: copies a command, then shows a check for a moment.
+/// Copies a command, then shows a check for a moment.
 fn copy_btn(s: &Screen<'_>, command: &str) -> El {
     let id = s
         .acts

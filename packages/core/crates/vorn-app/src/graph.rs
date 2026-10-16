@@ -1,5 +1,4 @@
-//! A workflow's graph as the editor changes it (`workflow-helpers.ts` and
-//! the loop helpers of `workflow-graph.ts`): inserting, appending, forking,
+//! A workflow's graph as the editor changes it: inserting, appending, forking,
 //! looping and removing steps, and placing new steps beside arranged ones.
 //! Nodes and edges stay JSON, as the definition is stored.
 
@@ -44,7 +43,7 @@ pub fn edge(source: &str, target: &str, branch: Option<&str>) -> Value {
     e
 }
 
-/// `buildSuccessorsMap`: each node's targets, in edge order.
+/// Each node's targets, in edge order.
 pub fn successors(edges: &[Value]) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     for e in edges {
@@ -66,7 +65,7 @@ fn reach_all(start: &str, succ: &HashMap<String, Vec<String>>) -> HashSet<String
     seen
 }
 
-/// `findJoinPoint`: the first node, breadth first, that every branch reaches.
+/// The first node, breadth first, that every branch reaches.
 pub fn find_join(children: &[String], succ: &HashMap<String, Vec<String>>) -> Option<String> {
     if children.len() <= 1 {
         return None;
@@ -86,7 +85,7 @@ pub fn find_join(children: &[String], succ: &HashMap<String, Vec<String>>) -> Op
     None
 }
 
-/// `reachableFrom`: everything downstream of `start`, itself excluded.
+/// Everything downstream of `start`, itself excluded.
 pub fn reachable_from(start: &str, edges: &[Value]) -> HashSet<String> {
     let succ = successors(edges);
     let mut seen = HashSet::new();
@@ -224,7 +223,7 @@ fn collect_ids(rows: &[FlowRow], out: &mut HashSet<String>) {
     }
 }
 
-/// `computeFlowLayout`: the trigger's chain, forks with their branches side
+/// The trigger's chain, forks with their branches side
 /// by side, loops with their bodies, then whatever nothing reaches.
 pub fn compute_flow_layout(nodes: &[Value], edges: &[Value]) -> Vec<FlowRow> {
     if nodes.is_empty() {
@@ -253,7 +252,7 @@ pub fn compute_flow_layout(nodes: &[Value], edges: &[Value]) -> Vec<FlowRow> {
     rows
 }
 
-/// `buildFlowFromNode`.
+/// The steps from `start` down to `stop`, laid out as a flow.
 fn walk(
     start: &str,
     stop: Option<&str>,
@@ -315,7 +314,7 @@ fn walk(
     rows
 }
 
-/// `positionsAreSeed`: nobody has arranged the canvas (every x is 0).
+/// Nobody has arranged the canvas (every x is 0).
 pub fn positions_are_seed(nodes: &[Value]) -> bool {
     nodes.iter().all(|n| {
         n.pointer("/position/x")
@@ -325,7 +324,7 @@ pub fn positions_are_seed(nodes: &[Value]) -> bool {
     })
 }
 
-/// `snapToLattice`, with `Math.round`'s halves rounding up.
+/// A coordinate snapped to the lattice, halves rounding up.
 pub fn snap(v: f64) -> f64 {
     let r = (v / GRID + 0.5).floor() * GRID;
     if r == 0.0 {
@@ -351,7 +350,7 @@ fn set_position(n: &mut Value, (x, y): (f64, f64)) {
     n["position"] = json!({ "x": num(x), "y": num(y) });
 }
 
-/// Whole numbers written as integers, as JSON from the renderer has them.
+/// Whole numbers written as integers, as stored definitions have them.
 pub fn num(v: f64) -> Value {
     if v.fract() == 0.0 && v.abs() < 9.0e15 {
         json!(v as i64)
@@ -360,7 +359,7 @@ pub fn num(v: f64) -> Value {
     }
 }
 
-/// `nodeWidth`.
+/// A node's width on the canvas: wider for a loop.
 pub fn node_width(n: Option<&Value>) -> f64 {
     if n.is_some_and(|n| kind(n) == "loop") {
         LOOP_WIDTH
@@ -369,7 +368,7 @@ pub fn node_width(n: Option<&Value>) -> f64 {
     }
 }
 
-/// `autoLayoutNodes`: breadth first from the trigger, one pitch apart in
+/// Breadth first from the trigger, one pitch apart in
 /// the seed column.
 pub fn auto_layout(nodes: &[Value], edges: &[Value]) -> Vec<Value> {
     if nodes.is_empty() {
@@ -414,7 +413,7 @@ pub fn auto_layout(nodes: &[Value], edges: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// `placeNewNodes`: a seed canvas reflows; an arranged one keeps its
+/// A seed canvas reflows; an arranged one keeps its
 /// positions and places only the new steps, pushing down what they cover.
 pub fn place_new(prev: &[Value], next: Vec<Value>, edges: &[Value]) -> Vec<Value> {
     if positions_are_seed(prev) {
@@ -500,7 +499,7 @@ pub fn place_new(prev: &[Value], next: Vec<Value>, edges: &[Value]) -> Vec<Value
 /// The result of a structural edit.
 pub type Graph = (Vec<Value>, Vec<Value>);
 
-/// `insertNodeBetween`: the edge split, its branch tag on the first half.
+/// The edge split, its branch tag on the first half.
 pub fn insert_between(nodes: &[Value], edges: &[Value], edge_id: &str, new: Value) -> Graph {
     let Some(old) = edges.iter().find(|e| id(e) == edge_id) else {
         return (nodes.to_vec(), edges.to_vec());
@@ -518,7 +517,7 @@ pub fn insert_between(nodes: &[Value], edges: &[Value], edge_id: &str, new: Valu
     (place_new(nodes, next, &out), out)
 }
 
-/// `appendNodeAfter`.
+/// `new` appended after `after`, joined by an edge.
 pub fn append_after(nodes: &[Value], edges: &[Value], after: &str, new: Value) -> Graph {
     let mut out = edges.to_vec();
     out.push(edge(after, id(&new), None));
@@ -527,7 +526,7 @@ pub fn append_after(nodes: &[Value], edges: &[Value], after: &str, new: Value) -
     (place_new(nodes, next, &out), out)
 }
 
-/// `insertBeforeFork`: the new step takes over the fork's branches.
+/// The new step takes over the fork's branches.
 pub fn insert_before_fork(nodes: &[Value], edges: &[Value], fork: &str, new: Value) -> Graph {
     let nid = id(&new).to_owned();
     let mut out: Vec<Value> = edges
@@ -546,7 +545,7 @@ pub fn insert_before_fork(nodes: &[Value], edges: &[Value], fork: &str, new: Val
     (place_new(nodes, next, &out), out)
 }
 
-/// `addParallelBranch`: a sibling of `from`'s successors that rejoins
+/// A sibling of `from`'s successors that rejoins
 /// where they do.
 pub fn add_parallel_branch(nodes: &[Value], edges: &[Value], from: &str, new: Value) -> Graph {
     let succ = successors(edges);
@@ -588,7 +587,7 @@ pub fn add_parallel_branch(nodes: &[Value], edges: &[Value], from: &str, new: Va
     (place_new(nodes, next, &out), out)
 }
 
-/// `insertConditionBetween`: a condition whose placeholder branches rejoin
+/// A condition whose placeholder branches rejoin
 /// at `before`.
 pub fn insert_condition(
     nodes: &[Value],
@@ -644,7 +643,7 @@ fn without_members(nodes: Vec<Value>, gone: &HashSet<String>) -> Vec<Value> {
         .collect()
 }
 
-/// `removeNode`: a condition takes its branches up to their join; any
+/// A condition takes its branches up to their join; any
 /// other step is bridged.
 pub fn remove(nodes: &[Value], edges: &[Value], nid: &str) -> Graph {
     let target = nodes.iter().find(|n| id(n) == nid);
@@ -723,7 +722,7 @@ pub fn remove(nodes: &[Value], edges: &[Value], nid: &str) -> Graph {
     (place_new(nodes, rest, &out), out)
 }
 
-/// `appendToLoopBody`: the edge and the membership written together.
+/// The edge and the membership written together.
 pub fn append_to_loop_body(
     nodes: &[Value],
     edges: &[Value],
@@ -773,7 +772,7 @@ pub fn append_to_loop_body(
     (place_new(nodes, next, &out), out)
 }
 
-/// `loopOwningInsertPoint`: the loop itself, or the loop a body step is in.
+/// The loop itself, or the loop a body step is in.
 pub fn loop_owning<'a>(nodes: &'a [Value], after: &str) -> Option<&'a Value> {
     nodes
         .iter()
@@ -785,7 +784,7 @@ pub fn loop_owning<'a>(nodes: &'a [Value], after: &str) -> Option<&'a Value> {
         })
 }
 
-/// `adoptIntoLoopBody`: steps inserted inside a body join it.
+/// Steps inserted inside a body join it.
 pub fn adopt_into_loop_body(
     before: &[Value],
     result: Graph,
@@ -840,7 +839,7 @@ pub fn adopt_into_loop_body(
     (nodes, edges)
 }
 
-/// `nodesAfter`: what a loop may repeat, everything downstream of it.
+/// What a loop may repeat, everything downstream of it.
 pub fn nodes_after<'a>(nodes: &'a [Value], edges: &[Value], nid: &str) -> Vec<&'a Value> {
     let succ = successors(edges);
     let mut seen = HashSet::from([nid.to_owned()]);
@@ -909,7 +908,7 @@ pub fn agent_node(project: Option<(&str, &str)>, agent: &str, taken: &HashSet<St
     )
 }
 
-/// `createScriptNode`.
+/// A new script step.
 pub fn script_node(taken: &HashSet<String>) -> Value {
     unique(
         node(
@@ -921,7 +920,7 @@ pub fn script_node(taken: &HashSet<String>) -> Value {
     )
 }
 
-/// `createApprovalNode`.
+/// A new approval gate.
 pub fn approval_node(taken: &HashSet<String>) -> Value {
     unique(
         node("approval", "Approval Gate", json!({ "message": "" })),
@@ -929,7 +928,7 @@ pub fn approval_node(taken: &HashSet<String>) -> Value {
     )
 }
 
-/// `createLoopNode`.
+/// A new loop.
 pub fn loop_node(taken: &HashSet<String>) -> Value {
     unique(
         node(
@@ -941,7 +940,7 @@ pub fn loop_node(taken: &HashSet<String>) -> Value {
     )
 }
 
-/// `createCallConnectorActionNode`.
+/// A new connector action step.
 pub fn connector_action_node(taken: &HashSet<String>) -> Value {
     unique(
         node(
@@ -953,7 +952,7 @@ pub fn connector_action_node(taken: &HashSet<String>) -> Value {
     )
 }
 
-/// `createHttpRequestNode`.
+/// A new HTTP request step.
 pub fn http_node(taken: &HashSet<String>) -> Value {
     unique(
         node(
@@ -965,7 +964,7 @@ pub fn http_node(taken: &HashSet<String>) -> Value {
     )
 }
 
-/// `createConditionNode` (its slug made unique by the caller's next edit).
+/// A new condition (its slug made unique by the caller's next edit).
 pub fn condition_node() -> Value {
     node(
         "condition",
@@ -974,7 +973,7 @@ pub fn condition_node() -> Value {
     )
 }
 
-/// `createTriggerNode`, its label by kind.
+/// A new trigger, its label by kind.
 pub fn trigger_node(config: Value) -> Value {
     let label = match s(&config, "triggerType").unwrap_or("") {
         "manual" => "Manual Trigger",
@@ -995,7 +994,7 @@ pub fn trigger_node(config: Value) -> Value {
     })
 }
 
-/// `switchTriggerType`: a trigger kind's starting config.
+/// A trigger kind's starting config.
 pub fn trigger_config(kind: &str, now_iso: &str) -> Value {
     match kind {
         "once" => json!({ "triggerType": "once", "runAt": now_iso }),
@@ -1112,7 +1111,7 @@ mod tests {
             .iter()
             .map(|n| (id(n).to_owned(), position(n).1))
             .collect();
-        // `autoLayoutNodes` hands the nodes back in walk order.
+        // The layout hands the nodes back in walk order.
         assert_eq!(
             ys,
             [("t".into(), 0.0), ("m".into(), 144.0), ("b".into(), 288.0)]

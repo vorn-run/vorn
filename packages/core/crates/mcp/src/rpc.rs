@@ -1,8 +1,6 @@
 //! How a tool reaches the Vorn server: the host's half of every call.
 //!
-//! The TypeScript tools call `rpcCall` and `rpcNotify` from
-//! `packages/mcp/src/rpc-client`, which open a socket to the server per call.
-//! Here the host decides how a call travels; vornd sends it over one socket to
+//! The host decides how a call travels; vornd sends it over one socket to
 //! its own `/ws`, so it goes wherever any other client's would.
 
 use std::fmt;
@@ -11,14 +9,14 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-/// The ceiling the TypeScript client puts on an ordinary call.
+/// The ceiling on an ordinary call.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The ceiling for calls that start a connector package, which downloads it first.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// A call that failed, worded as the TypeScript client words the same failure,
-/// since a tool often passes the message on to the agent as it is.
+/// A call that failed, worded for the agent, since a tool often passes the
+/// message on as it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RpcError(pub String);
 
@@ -51,8 +49,8 @@ impl From<RpcError> for String {
     }
 }
 
-/// `explain` from the TypeScript client: a server without the method is older
-/// than the caller, and the message says so.
+/// A server without the method is older than the caller, and the message
+/// says so.
 fn explain(message: &str) -> String {
     let Some(method) = message.strip_prefix("Method not found:") else {
         return message.to_owned();
@@ -66,8 +64,8 @@ fn explain(message: &str) -> String {
 
 /// The Vorn server, as the tools see it.
 ///
-/// `params` of `None` is a call without params, which is what the TypeScript
-/// sends for `undefined`. A missing `result` in the answer reads as `null`.
+/// `params` of `None` is a call without params. A missing `result` in the
+/// answer reads as `null`.
 pub trait Rpc: Sync {
     /// A request, answered or failed within `timeout`.
     fn call(
@@ -85,11 +83,10 @@ pub trait Rpc: Sync {
     ) -> impl Future<Output = Result<(), RpcError>> + Send;
 }
 
-/// Who is calling: what the TypeScript server reads from its own process.
+/// Who is calling: the agent's working directory and session.
 ///
-/// It runs as a child of the agent, so `process.cwd()` and `VORN_SESSION_ID`
-/// are the agent's. A server shared by every agent has to be told them, which
-/// the relay in `packages/mcp` does with each request.
+/// A server shared by every agent has to be told them, which the relay does
+/// with each request.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Caller {
     /// The agent's working directory, absolute.

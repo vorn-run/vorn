@@ -1,6 +1,5 @@
-//! Today's look as values: colours and grays from vornui's tokens, sizes from the components'
-//! classes and the logo. Screens read these; nothing
-//! here is redesigned.
+//! The look as values: colours and grays from vornui's tokens, sizes and
+//! the logo. Screens read these.
 
 /// 0xRRGGBB.
 pub type Rgb = u32;
@@ -22,10 +21,10 @@ pub const WINDOW: (f32, f32) = (1440.0, 900.0);
 pub const TOP_BAR_H: f32 = 40.0;
 /// Room for the macOS traffic lights at a bar's left end (`TRAFFIC_LIGHT_PAD_PX`).
 pub const TRAFFIC_LIGHT_PAD: f32 = 80.0;
-/// Where the traffic lights sit (`trafficLightPosition`).
+/// Where the traffic lights sit.
 pub const TRAFFIC_LIGHTS: (f32, f32) = (16.0, 13.0);
 pub const SIDEBAR_W: f32 = 256.0;
-/// `useSidebarResize`'s bounds.
+/// The sidebar's width bounds, and the composer's widest.
 pub const SIDEBAR_MIN: f32 = 180.0;
 pub const SIDEBAR_MAX: f32 = 400.0;
 pub const COMPOSER_MAX_W: f32 = 800.0;
@@ -40,7 +39,7 @@ pub const CARD_FOOT_H: f32 = 6.0;
 pub const CARD_STATUS_H: f32 = 22.0;
 /// The terminal's `pt-0.5` inside the card body.
 pub const CARD_BODY_PT: f32 = 2.0;
-/// The renderer's `MIN_CARD_W` and `MIN_CARD_H` for the automatic layout.
+/// The smallest card the automatic layout allows.
 pub const MIN_CARD: (f32, f32) = (320.0, 280.0);
 
 pub const PLACEHOLDER: &str = "Describe your task...";
@@ -138,14 +137,14 @@ pub fn icon(name: &str, stroke: f32) -> Option<String> {
     crate::ui::icons::lucide(name, stroke)
 }
 
-/// The terminal's colours: the renderer's terminal theme.
+/// The terminal's colours.
 pub mod term {
     use super::Rgb;
 
     pub const FG: Rgb = 0xd4d4d8;
     pub const BG: Rgb = 0x141416;
     pub const CURSOR: Rgb = 0xd4d4d8;
-    /// Behind selected text, as the renderer's terminal theme has it.
+    /// Behind selected text.
     pub const SELECTION: Rgb = 0x3f3f46;
     pub const ANSI16: [Rgb; 16] = [
         0x27272a, 0xef4444, 0x22c55e, 0xeab308, 0x3b82f6, 0xa855f7, 0x06b6d4, 0xd4d4d8, 0x52525b,

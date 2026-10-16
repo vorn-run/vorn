@@ -1,9 +1,9 @@
-//! The desktop app's main process, which answers what only it can.
+//! The desktop app's bridge connection: the app answers what only it can.
 //!
-//! The browser pane's `<webview>` guests and the device registry live in the
-//! desktop's main process, so `browser:*` and `device:*` are asked of it over
+//! The browser pane's web views and the device registry live in the desktop
+//! app, so `browser:*` and `device:*` are asked of it over
 //! the socket it opened to vornd, as are the connectors' `session:*` calls
-//! ([`crate::bridge::Bridge`]). Main claims that socket with
+//! ([`crate::bridge::Bridge`]). The app claims that socket with
 //! `bridge:identify`; vornd sends each call down it as a request of its own
 //! and hands the answer to whoever asked.
 //!
@@ -12,7 +12,7 @@
 //!   claim over a closed one replaces it, and a claim again on the same
 //!   connection is a no-op that succeeds.
 //! - vornd's request ids are strings (`vornd-1`, ...), so they never meet
-//!   main's own ids (numbers), which share the socket.
+//!   the app's own ids (numbers), which share the socket.
 //! - Only the holder's connection can answer a pending request: any other
 //!   socket could otherwise settle one by guessing its id.
 
@@ -27,17 +27,17 @@ use tracing::{info, warn};
 
 use crate::streams::Forwarder;
 
-/// How long a call waits for main, as the server waited.
+/// How long a call waits for the app.
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// What a client hears with no main process connected, word for word.
+/// What a client hears with no app connected, word for word.
 pub const NOT_RUNNING: &str = "Vorn app is not running (no main process connected)";
-/// What a pending call hears when main's connection closes.
+/// What a pending call hears when the app's connection closes.
 pub const DISCONNECTED: &str = "Vorn main process disconnected";
 
 const ID_PREFIX: &str = "vornd-";
 
-/// The groups main answers.
+/// The groups the app answers.
 pub fn answers(method: &str) -> bool {
     matches!(
         method.split_once(':').map(|(g, _)| g),
@@ -54,7 +54,7 @@ struct Holder {
     reply: Forwarder,
 }
 
-/// The desktop's main process, as vornd reaches it.
+/// The desktop app, as vornd reaches it.
 #[derive(Debug, Default)]
 pub struct Desktop {
     holder: Mutex<Option<Holder>>,
@@ -63,7 +63,7 @@ pub struct Desktop {
 }
 
 impl Desktop {
-    /// Connection `conn` says it is main's. False when another open
+    /// Connection `conn` says it is the app's. False when another open
     /// connection already is.
     pub fn claim(&self, conn: u64, reply: &Forwarder) -> bool {
         let mut holder = self.holder.lock().unwrap_or_else(|e| e.into_inner());
@@ -85,8 +85,8 @@ impl Desktop {
         true
     }
 
-    /// Connection `conn` closed. When it was main's, every call waiting on
-    /// main fails now rather than at its timeout.
+    /// Connection `conn` closed. When it was the app's, every call waiting on
+    /// the app fails now rather than at its timeout.
     pub fn release(&self, conn: u64) {
         let mut holder = self.holder.lock().unwrap_or_else(|e| e.into_inner());
         if holder.as_ref().is_none_or(|h| h.conn != conn) {
@@ -97,7 +97,7 @@ impl Desktop {
         self.fail_pending(DISCONNECTED);
     }
 
-    /// Whether main's connection is open.
+    /// Whether the app's connection is open.
     pub fn connected(&self) -> bool {
         self.holder
             .lock()
@@ -106,7 +106,7 @@ impl Desktop {
             .is_some_and(|h| !h.reply.is_closed())
     }
 
-    /// Whether `conn` is main's connection.
+    /// Whether `conn` is the app's connection.
     pub fn holds(&self, conn: u64) -> bool {
         self.holder
             .lock()
@@ -115,8 +115,8 @@ impl Desktop {
             .is_some_and(|h| h.conn == conn)
     }
 
-    /// Asks main `method` with `params` and waits up to `timeout` for its
-    /// answer: `None` for one with no `result`, or main's error message.
+    /// Asks the app `method` with `params` and waits up to `timeout` for its
+    /// answer: `None` for one with no `result`, or the app's error message.
     pub async fn request(
         &self,
         method: &str,
@@ -152,7 +152,7 @@ impl Desktop {
     }
 
     /// Settles a pending call with `frame`, a frame connection `conn` sent
-    /// without a method. False when it was not an answer to vornd from main.
+    /// without a method. False when it was not an answer to vornd from the app.
     pub fn settle(&self, conn: u64, frame: &str) -> bool {
         if !frame.contains(ID_PREFIX) || !self.holds(conn) {
             return false;

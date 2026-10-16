@@ -1,6 +1,6 @@
-//! What the TypeScript connector code answered for seeded inputs, before it
-//! was removed (`tests/fixtures/js-reference/connector-functions.json`),
-//! replayed against the Rust that replaced it.
+//! Recorded answers for seeded inputs
+//! (`tests/fixtures/js-reference/connector-functions.json`), replayed against
+//! the connector functions.
 
 use std::collections::HashMap;
 

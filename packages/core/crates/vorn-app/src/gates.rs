@@ -1,5 +1,4 @@
-//! An approval gate as a reviewer answers it (`GateActions`,
-//! `GateComposer`, `GateEditor`, `GateJsonEditor`): the answer being
+//! An approval gate as a reviewer answers it: the answer being
 //! written, the rewrite kept until it is sent, and a list of records as a
 //! table that cannot produce broken JSON.
 
@@ -15,8 +14,7 @@ pub const MAX_ROUNDS: u64 = 10;
 /// `DEFAULT_GATE_ROUNDS`.
 pub const DEFAULT_ROUNDS: u64 = 3;
 
-/// Where a gate is answered; each keeps its own draft, as each component
-/// does in the renderer.
+/// Where a gate is answered; each keeps its own draft.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Place {
     /// The run pane's large actions.
@@ -138,7 +136,7 @@ pub fn can_request_changes(config: Option<&Value>, state: &Value) -> bool {
     sends_back(config) && round(state) < max_rounds(config)
 }
 
-/// `roundLabel`: "round 2 of 3" on a gate that takes changes.
+/// "round 2 of 3" on a gate that takes changes.
 pub fn round_label(config: Option<&Value>, state: &Value) -> Option<String> {
     sends_back(config).then(|| format!("round {} of {}", round(state), max_rounds(config)))
 }
@@ -290,7 +288,7 @@ pub fn parse_number(text: &str) -> Option<Value> {
 }
 
 impl Table {
-    /// `columnsOf`: every key any row has, first seen first.
+    /// Every key any row has, first seen first.
     pub fn columns(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for r in &self.rows {
@@ -303,7 +301,7 @@ impl Table {
         out
     }
 
-    /// `valueOf`: the kept rows, wrapped back where they came from.
+    /// The kept rows, wrapped back where they came from.
     pub fn value(&self) -> Value {
         let kept: Vec<Value> = self
             .rows
@@ -321,7 +319,7 @@ impl Table {
         }
     }
 
-    /// `badCell`: the first kept cell holding something other than a number.
+    /// The first kept cell holding something other than a number.
     pub fn bad_cell(&self) -> Option<String> {
         self.rows
             .iter()
@@ -465,7 +463,7 @@ impl Editor {
         (canonical(&text) != canonical(&self.original)).then_some(text)
     }
 
-    /// `toSource`.
+    /// Switches the editor to the source view.
     pub fn to_source(&mut self) {
         if self.source {
             return;
@@ -476,7 +474,7 @@ impl Editor {
         self.source = true;
     }
 
-    /// `toTable`: only from source that parses.
+    /// Switches to the table view, only from source that parses.
     pub fn to_table(&mut self) -> bool {
         if !self.source {
             return false;

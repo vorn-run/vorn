@@ -1,7 +1,7 @@
-//! The app's menus (`GridContextMenu`, `CardContextMenu`,
-//! `TerminalContextMenu`, the toolbar's popovers and the launcher's
-//! pickers): their entries as data, and one panel that draws any of them
-//! at a point, with a submenu beside the hovered entry.
+//! The app's menus (the grid's, a card's and a terminal's context menus, the
+//! toolbar's popovers and the launcher's pickers): their entries as data, and
+//! one panel that draws any of them at a point, with a submenu beside the
+//! hovered entry.
 
 use super::{c, ico, white, Screen};
 use crate::act::Act;
@@ -18,7 +18,7 @@ pub const SUB: Id = Id(0x6d65_6e75_0000_0003);
 /// One entry of a menu, its choice an [`Act`].
 pub type Item = crate::ui::menu::Item<Act>;
 
-/// How wide each menu is, as the renderer sizes them.
+/// How wide each menu is.
 pub fn width(kind: &MenuKind) -> f32 {
     if let Some(w) = super::workflows::menu_width(kind) {
         return w;
@@ -239,7 +239,7 @@ fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {
     out
 }
 
-/// `countSessionsByWorktree`: the sessions whose worktree path is `path`.
+/// The sessions whose worktree path is `path`.
 fn worktree_sessions(s: &Screen<'_>, path: &str) -> usize {
     s.store
         .sessions
@@ -488,7 +488,7 @@ fn project(s: &Screen<'_>, name: &str) -> Vec<Item> {
     ]
 }
 
-/// `ProjectsSectionToolbar`: Show, then Filter and Sort projects while
+/// Show, then Filter and Sort projects while
 /// the mode lists projects, and Sort worktrees while it lists worktrees.
 fn sidebar_options(s: &Screen<'_>) -> Vec<Item> {
     use crate::sidebar_view::{ProjectSort, WorktreeFilter, WorktreeSort};
@@ -554,7 +554,7 @@ fn group(s: &Screen<'_>, id: &str) -> Vec<Item> {
     ]
 }
 
-/// `SessionContextMenu`: the groups a session can move to, choosing its
+/// The groups a session can move to, choosing its
 /// own taking it out.
 fn session_groups(s: &Screen<'_>, sid: &str) -> Vec<Item> {
     let current = s.store.session(sid).and_then(|x| x.info.group_id.clone());

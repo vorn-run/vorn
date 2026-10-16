@@ -2,7 +2,7 @@
 //!
 //! The SDK validates a call's arguments with zod before a tool runs, and a
 //! refusal reaches the agent as the zod issues themselves, as JSON. So the
-//! schemas here are zod's, walked out of the TypeScript into
+//! schemas here are zod's, walked out of `packages/mcp` into
 //! `generated/schemas.json` by `scripts/gen-mcp-tools.mjs`, and [`parse`]
 //! follows zod 4's rules: which issue stops which check, the shape and key
 //! order of each issue, and what the parsed arguments look like (unknown keys
@@ -432,7 +432,7 @@ impl Parsed {
 pub struct Registry {
     defs: HashMap<String, Schema>,
     tools: BTreeMap<String, Option<Schema>>,
-    /// Every tool's name in the order the TypeScript lists them.
+    /// Every tool's name in the order the generated list has them.
     order: Vec<String>,
 }
 
@@ -442,7 +442,7 @@ static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
     Registry::from_json(&value).expect("generated/schemas.json is a schema file this build reads")
 });
 
-/// The schemas generated from the TypeScript.
+/// The schemas generated from `packages/mcp`.
 pub fn registry() -> &'static Registry {
     &REGISTRY
 }
@@ -502,7 +502,7 @@ impl Registry {
 
     /// A tool's argument schema: `None` for a tool nothing knows,
     /// `Some(None)` for one the SDK calls without looking at its arguments.
-    /// Where tool `name` stands in the TypeScript's list.
+    /// Where tool `name` stands in the generated list.
     pub fn position(&self, name: &str) -> Option<usize> {
         self.order.iter().position(|n| n == name)
     }
