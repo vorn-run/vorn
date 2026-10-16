@@ -1,0 +1,290 @@
+{
+  "task": {
+    "ok": true,
+    "task": {
+      "id": "task-1",
+      "projectName": "p",
+      "title": "First",
+      "description": "Do the first thing.",
+      "status": "todo",
+      "order": 0,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  "created": {
+    "runId": "<id1>",
+    "workflowId": "created",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "success",
+    "triggerTaskId": "task-1",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "seen",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "created First taskCreated\n",
+        "output": "created First taskCreated\n"
+      }
+    ]
+  },
+  "move": {
+    "ok": true
+  },
+  "moved": {
+    "runId": "<id2>",
+    "workflowId": "moved",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "success",
+    "triggerTaskId": "task-1",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "seen",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "moved First todo in_progress\n",
+        "output": "moved First todo in_progress\n"
+      }
+    ]
+  },
+  "byTask": [
+    {
+      "runId": "<id2>",
+      "workflowId": "moved",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-1",
+      "workflowName": "moved",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "moved First todo in_progress\n",
+          "output": "moved First todo in_progress\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id1>",
+      "workflowId": "created",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-1",
+      "workflowName": "created",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "created First taskCreated\n",
+          "output": "created First taskCreated\n"
+        }
+      ]
+    }
+  ],
+  "taker": {
+    "status": "success",
+    "steps": [
+      {
+        "nodeId": "t",
+        "status": "success",
+        "session": false,
+        "taskId": null,
+        "agentType": null,
+        "projectName": null
+      },
+      {
+        "nodeId": "agent",
+        "status": "success",
+        "session": true,
+        "taskId": "task-2",
+        "agentType": "codex",
+        "projectName": "p"
+      }
+    ]
+  },
+  "taken": {
+    "assignedAgent": "codex",
+    "assignedSessionId": "<id3>",
+    "createdAt": "<time>",
+    "description": "",
+    "id": "task-2",
+    "order": 1,
+    "projectName": "p",
+    "status": "in_progress",
+    "title": "Queued",
+    "updatedAt": "<time>"
+  },
+  "headless": {
+    "status": "error",
+    "steps": [
+      {
+        "nodeId": "t",
+        "status": "success",
+        "session": false,
+        "taskId": null,
+        "agentType": null,
+        "projectName": null
+      },
+      {
+        "nodeId": "agent",
+        "status": "error",
+        "session": true,
+        "taskId": "task-1",
+        "agentType": "codex",
+        "projectName": "p"
+      }
+    ]
+  },
+  "task1": {
+    "createdAt": "<time>",
+    "description": "Do the first thing.",
+    "id": "task-1",
+    "order": 0,
+    "projectName": "p",
+    "status": "todo",
+    "title": "First",
+    "updatedAt": "<time>"
+  },
+  "reopened": [
+    {
+      "runId": "<id4>",
+      "workflowId": "reopened",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-1",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "back First\n",
+          "output": "back First\n"
+        }
+      ]
+    }
+  ],
+  "movedAll": [
+    {
+      "runId": "<id5>",
+      "workflowId": "moved",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-2",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "moved Queued todo in_progress\n",
+          "output": "moved Queued todo in_progress\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id2>",
+      "workflowId": "moved",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-1",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "moved First todo in_progress\n",
+          "output": "moved First todo in_progress\n"
+        }
+      ]
+    }
+  ],
+  "createdAll": [
+    {
+      "runId": "<id6>",
+      "workflowId": "created",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-2",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "created Queued taskCreated\n",
+          "output": "created Queued taskCreated\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id1>",
+      "workflowId": "created",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "triggerTaskId": "task-1",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "seen",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "created First taskCreated\n",
+          "output": "created First taskCreated\n"
+        }
+      ]
+    }
+  ]
+}

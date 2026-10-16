@@ -1,0 +1,33 @@
+{
+  "stop": null,
+  "run": {
+    "runId": "<id1>",
+    "workflowId": "long",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "cancelled",
+    "connectorInboxDisposition": "processed",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "sleep",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "Stopped by user"
+      },
+      {
+        "nodeId": "later",
+        "status": "skipped",
+        "completedAt": "<time>",
+        "error": "Stopped by user"
+      }
+    ]
+  },
+  "all": {
+    "error": "vornd could not read the database"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "statuses": [202, 202, 404, 202],
+  "runs": [
+    {
+      "runId": "<id1>",
+      "workflowId": "hook",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "connectorItem": {
+        "connectionId": "webhook:hook",
+        "connectorId": "webhook",
+        "externalId": "<id2>",
+        "title": "Webhook POST",
+        "raw": {
+          "body": {
+            "n": 7
+          },
+          "headers": {
+            "host": "127.0.0.1:<port>",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "idempotency-key": "d2",
+            "accept": "*/*",
+            "accept-language": "*",
+            "sec-fetch-mode": "cors",
+            "user-agent": "node",
+            "accept-encoding": "gzip, deflate",
+            "content-length": "7"
+          },
+          "query": {
+            "q": "z"
+          },
+          "method": "POST",
+          "receivedAt": "<time>"
+        },
+        "inboxId": "<inbox>",
+        "inboxLeaseToken": "<id3>"
+      },
+      "connectorInboxId": "<inbox>",
+      "connectorInboxLeaseToken": "<id3>",
+      "connectorInboxDisposition": "processed",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "echo",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "got 7 z\n",
+          "output": "got 7 z\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id4>",
+      "workflowId": "hook",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "connectorItem": {
+        "connectionId": "webhook:hook",
+        "connectorId": "webhook",
+        "externalId": "<id5>",
+        "title": "Webhook POST",
+        "raw": {
+          "body": {
+            "n": 7
+          },
+          "headers": {
+            "host": "127.0.0.1:<port>",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "idempotency-key": "d1",
+            "accept": "*/*",
+            "accept-language": "*",
+            "sec-fetch-mode": "cors",
+            "user-agent": "node",
+            "accept-encoding": "gzip, deflate",
+            "content-length": "7"
+          },
+          "query": {
+            "q": "z"
+          },
+          "method": "POST",
+          "receivedAt": "<time>"
+        },
+        "inboxId": "<inbox>",
+        "inboxLeaseToken": "<id6>"
+      },
+      "connectorInboxId": "<inbox>",
+      "connectorInboxLeaseToken": "<id6>",
+      "connectorInboxDisposition": "processed",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "echo",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "got 7 z\n",
+          "output": "got 7 z\n"
+        }
+      ]
+    }
+  ]
+}

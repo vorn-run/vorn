@@ -1,0 +1,455 @@
+{
+  "started": {
+    "dedupeParams": "manual",
+    "workflowId": "gate",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "pending"
+      },
+      {
+        "nodeId": "review",
+        "status": "pending"
+      },
+      {
+        "nodeId": "ship",
+        "status": "pending"
+      }
+    ],
+    "runId": "<id1>",
+    "startedAt": "<time>",
+    "status": "running"
+  },
+  "asking": {
+    "runId": "<id1>",
+    "workflowId": "gate",
+    "startedAt": "<time>",
+    "status": "running",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft \n",
+        "output": "draft \n"
+      },
+      {
+        "nodeId": "review",
+        "status": "waiting",
+        "startedAt": "<time>",
+        "message": "Look at draft",
+        "viewToken": "<token1>",
+        "round": 1,
+        "editableText": "draft \n"
+      },
+      {
+        "nodeId": "ship",
+        "status": "pending"
+      }
+    ]
+  },
+  "waitingList": [
+    {
+      "runId": "<id1>",
+      "workflowId": "gate",
+      "startedAt": "<time>",
+      "status": "running",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "draft",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "draft \n",
+          "output": "draft \n"
+        },
+        {
+          "nodeId": "review",
+          "status": "waiting",
+          "startedAt": "<time>",
+          "message": "Look at draft",
+          "viewToken": "<token1>",
+          "round": 1,
+          "editableText": "draft \n"
+        },
+        {
+          "nodeId": "ship",
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "running": [
+    {
+      "runId": "<id1>",
+      "workflowId": "gate",
+      "startedAt": "<time>",
+      "status": "running",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "draft",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "draft \n",
+          "output": "draft \n"
+        },
+        {
+          "nodeId": "review",
+          "status": "waiting",
+          "startedAt": "<time>",
+          "message": "Look at draft",
+          "viewToken": "<token1>",
+          "round": 1,
+          "editableText": "draft \n"
+        },
+        {
+          "nodeId": "ship",
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "forGate": {
+    "artifact": {
+      "createdAt": "<time>",
+      "gateNodeId": "review",
+      "gateRunId": "<id1>",
+      "id": "<id2>",
+      "kind": "page",
+      "latestVersion": 1,
+      "projectName": null,
+      "sessionId": null,
+      "title": "review",
+      "updatedAt": "<time>"
+    },
+    "version": 1,
+    "url": "http://127.0.0.1:<port>/artifact/<id2>/1?t=<token2>"
+  },
+  "artifact": {
+    "artifact": {
+      "createdAt": "<time>",
+      "gateNodeId": "review",
+      "gateRunId": "<id1>",
+      "id": "<id2>",
+      "kind": "page",
+      "latestVersion": 1,
+      "projectName": null,
+      "sessionId": null,
+      "title": "review",
+      "updatedAt": "<time>"
+    },
+    "versions": [
+      {
+        "artifactId": "<id2>",
+        "author": "agent",
+        "createdAt": "<time>",
+        "version": 1
+      }
+    ],
+    "comments": [],
+    "queued": false
+  },
+  "shortcut": null,
+  "afterShortcut": {
+    "nodeId": "review",
+    "status": "waiting",
+    "startedAt": "<time>",
+    "message": "Look at draft",
+    "viewToken": "<token1>",
+    "round": 1,
+    "editableText": "draft \n"
+  },
+  "emptyChanges": {
+    "accepted": false
+  },
+  "comment": {
+    "anchor": {
+      "quote": "Read me"
+    },
+    "artifactId": "<id2>",
+    "body": "Shorter, please",
+    "createdAt": "<time>",
+    "id": "<id3>",
+    "state": "draft",
+    "updatedAt": "<time>",
+    "version": 1
+  },
+  "changes": {
+    "accepted": true
+  },
+  "round2": {
+    "runId": "<id1>",
+    "workflowId": "gate",
+    "startedAt": "<time>",
+    "status": "running",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft 2\n",
+        "output": "draft 2\n"
+      },
+      {
+        "nodeId": "review",
+        "status": "waiting",
+        "startedAt": "<time>",
+        "message": "Look at draft 2",
+        "viewToken": "<token3>",
+        "round": 2,
+        "feedback": [
+          {
+            "round": 1,
+            "decision": "changes",
+            "comment": "again",
+            "at": "<time>",
+            "comments": [
+              {
+                "comment": "Shorter, please"
+              }
+            ]
+          }
+        ],
+        "editableText": "draft 2\n"
+      },
+      {
+        "nodeId": "ship",
+        "status": "pending"
+      }
+    ]
+  },
+  "badEdit": {
+    "accepted": true
+  },
+  "approve": {
+    "accepted": true
+  },
+  "done": {
+    "runId": "<id1>",
+    "workflowId": "gate",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "success",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft 2\n",
+        "output": "draft 2\n"
+      },
+      {
+        "nodeId": "review",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "approvedAt": "<time>",
+        "message": "Look at draft 2",
+        "viewToken": "<token3>",
+        "round": 2,
+        "feedback": [
+          {
+            "round": 1,
+            "decision": "changes",
+            "comment": "again",
+            "at": "<time>",
+            "comments": [
+              {
+                "comment": "Shorter, please"
+              }
+            ]
+          },
+          {
+            "round": 2,
+            "decision": "approve",
+            "comment": "fine",
+            "at": "<time>",
+            "edited": "final words"
+          }
+        ],
+        "editableText": "draft 2\n",
+        "editedText": "final words"
+      },
+      {
+        "nodeId": "ship",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "shipped final words \n",
+        "output": "shipped final words \n"
+      }
+    ]
+  },
+  "notAsking": {
+    "accepted": true
+  },
+  "resolved": [
+    {
+      "runId": "<id1>",
+      "nodeId": "review",
+      "decision": "changes"
+    },
+    {
+      "runId": "<id1>",
+      "nodeId": "review",
+      "decision": "approve"
+    },
+    {
+      "runId": "<id1>",
+      "nodeId": "review",
+      "decision": "approve"
+    }
+  ],
+  "reject": {
+    "accepted": true
+  },
+  "rejected": {
+    "runId": "<id4>",
+    "workflowId": "gate",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "error",
+    "connectorInboxDisposition": "processed",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft \n",
+        "output": "draft \n"
+      },
+      {
+        "nodeId": "review",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "no",
+        "message": "Look at draft",
+        "viewToken": "<token4>",
+        "round": 1,
+        "feedback": [
+          {
+            "round": 1,
+            "decision": "reject",
+            "comment": "no",
+            "at": "<time>"
+          }
+        ],
+        "rejectedAt": "<time>",
+        "editableText": "draft \n"
+      },
+      {
+        "nodeId": "ship",
+        "status": "skipped",
+        "completedAt": "<time>"
+      }
+    ]
+  },
+  "timedOut": {
+    "runId": "<id5>",
+    "workflowId": "gate-timeout",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "error",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft \n",
+        "output": "draft \n"
+      },
+      {
+        "nodeId": "review",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "Approval timed out after 300ms",
+        "message": "Quick",
+        "round": 1
+      },
+      {
+        "nodeId": "ship",
+        "status": "skipped",
+        "completedAt": "<time>"
+      }
+    ]
+  },
+  "stop": null,
+  "stopped": {
+    "runId": "<id6>",
+    "workflowId": "gate-stop",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "cancelled",
+    "connectorInboxDisposition": "processed",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "draft",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "draft \n",
+        "output": "draft \n"
+      },
+      {
+        "nodeId": "review",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "Stopped by user",
+        "message": "Stop me",
+        "round": 1
+      },
+      {
+        "nodeId": "ship",
+        "status": "skipped",
+        "completedAt": "<time>",
+        "error": "Stopped by user"
+      }
+    ]
+  },
+  "byTask": []
+}

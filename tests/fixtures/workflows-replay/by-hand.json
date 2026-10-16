@@ -1,0 +1,1046 @@
+{
+  "started": {
+    "dedupeParams": "manual:inputs:[[\"name\",\"Ada\"]]",
+    "workflowId": "by-hand",
+    "inputs": {
+      "name": "Ada"
+    },
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "hello",
+        "status": "pending"
+      },
+      {
+        "nodeId": "check",
+        "status": "pending"
+      },
+      {
+        "nodeId": "yes",
+        "status": "pending"
+      },
+      {
+        "nodeId": "no",
+        "status": "pending"
+      },
+      {
+        "nodeId": "each",
+        "status": "pending"
+      },
+      {
+        "nodeId": "body",
+        "status": "pending"
+      },
+      {
+        "nodeId": "call",
+        "status": "pending"
+      },
+      {
+        "nodeId": "fails",
+        "status": "pending"
+      },
+      {
+        "nodeId": "after",
+        "status": "pending"
+      }
+    ],
+    "runId": "<id1>",
+    "startedAt": "<time>",
+    "status": "running"
+  },
+  "first": {
+    "runId": "<id1>",
+    "workflowId": "by-hand",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "success",
+    "inputs": {
+      "name": "Ada"
+    },
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "hello",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "hello Ada\n",
+        "output": "hello Ada\n"
+      },
+      {
+        "nodeId": "check",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "output": "true"
+      },
+      {
+        "nodeId": "yes",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "yes\n",
+        "output": "yes\n"
+      },
+      {
+        "nodeId": "no",
+        "status": "skipped",
+        "completedAt": "<time>"
+      },
+      {
+        "nodeId": "each",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "── item 1 of 2 ──\n  body: success\n── item 2 of 2 ──\n  body: success\nStopped after 2 item(s): went through all 2 item(s).",
+        "output": "2",
+        "structuredOutput": {
+          "passes": 2,
+          "count": 2,
+          "results": [
+            {
+              "index": 0,
+              "item": "x",
+              "status": "success",
+              "steps": {
+                "body": {
+                  "output": "item x 1\n",
+                  "status": "success",
+                  "error": ""
+                }
+              }
+            },
+            {
+              "index": 1,
+              "item": "y",
+              "status": "success",
+              "steps": {
+                "body": {
+                  "output": "item y 2\n",
+                  "status": "success",
+                  "error": ""
+                }
+              }
+            }
+          ],
+          "outputs": ["item x 1\n", "item y 2\n"]
+        },
+        "iteration": 2
+      },
+      {
+        "nodeId": "body",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "item y 2\n",
+        "output": "item y 2\n",
+        "iteration": 2
+      },
+      {
+        "nodeId": "call",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"status\": 200,\n    \"headers\": {\n      \"connection\": \"keep-alive\",\n      \"content-type\": \"application/json\",\n      \"date\": \"<date>\",\n      \"keep-alive\": \"timeout=5\",\n      \"transfer-encoding\": \"chunked\"\n    },\n    \"body\": {\n      \"ok\": true,\n      \"path\": \"/step/Ada\"\n    }\n  }\n}",
+        "output": "HTTP 200",
+        "structuredOutput": {
+          "status": 200,
+          "headers": {
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "date": "<date>",
+            "keep-alive": "timeout=5",
+            "transfer-encoding": "chunked"
+          },
+          "body": {
+            "ok": true,
+            "path": "/step/Ada"
+          }
+        }
+      },
+      {
+        "nodeId": "fails",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "broken\n",
+        "logs": "broken\n",
+        "output": "broken\n"
+      },
+      {
+        "nodeId": "after",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "after error HTTP 200\n",
+        "output": "after error HTTP 200\n"
+      }
+    ]
+  },
+  "manual": null,
+  "afterManual": [
+    {
+      "runId": "<id2>",
+      "workflowId": "by-hand",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "inputs": {
+        "name": "Grace"
+      },
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "hello",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "hello Grace\n",
+          "output": "hello Grace\n"
+        },
+        {
+          "nodeId": "check",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "output": "true"
+        },
+        {
+          "nodeId": "yes",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "yes\n",
+          "output": "yes\n"
+        },
+        {
+          "nodeId": "no",
+          "status": "skipped",
+          "completedAt": "<time>"
+        },
+        {
+          "nodeId": "each",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "── item 1 of 2 ──\n  body: success\n── item 2 of 2 ──\n  body: success\nStopped after 2 item(s): went through all 2 item(s).",
+          "output": "2",
+          "structuredOutput": {
+            "passes": 2,
+            "count": 2,
+            "results": [
+              {
+                "index": 0,
+                "item": "x",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item x 1\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "item": "y",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item y 2\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              }
+            ],
+            "outputs": ["item x 1\n", "item y 2\n"]
+          },
+          "iteration": 2
+        },
+        {
+          "nodeId": "body",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "item y 2\n",
+          "output": "item y 2\n",
+          "iteration": 2
+        },
+        {
+          "nodeId": "call",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"status\": 200,\n    \"headers\": {\n      \"connection\": \"keep-alive\",\n      \"content-type\": \"application/json\",\n      \"date\": \"<date>\",\n      \"keep-alive\": \"timeout=5\",\n      \"transfer-encoding\": \"chunked\"\n    },\n    \"body\": {\n      \"ok\": true,\n      \"path\": \"/step/Grace\"\n    }\n  }\n}",
+          "output": "HTTP 200",
+          "structuredOutput": {
+            "status": 200,
+            "headers": {
+              "connection": "keep-alive",
+              "content-type": "application/json",
+              "date": "<date>",
+              "keep-alive": "timeout=5",
+              "transfer-encoding": "chunked"
+            },
+            "body": {
+              "ok": true,
+              "path": "/step/Grace"
+            }
+          }
+        },
+        {
+          "nodeId": "fails",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "broken\n",
+          "logs": "broken\n",
+          "output": "broken\n"
+        },
+        {
+          "nodeId": "after",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "after error HTTP 200\n",
+          "output": "after error HTTP 200\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id1>",
+      "workflowId": "by-hand",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "inputs": {
+        "name": "Ada"
+      },
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "hello",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "hello Ada\n",
+          "output": "hello Ada\n"
+        },
+        {
+          "nodeId": "check",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "output": "true"
+        },
+        {
+          "nodeId": "yes",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "yes\n",
+          "output": "yes\n"
+        },
+        {
+          "nodeId": "no",
+          "status": "skipped",
+          "completedAt": "<time>"
+        },
+        {
+          "nodeId": "each",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "── item 1 of 2 ──\n  body: success\n── item 2 of 2 ──\n  body: success\nStopped after 2 item(s): went through all 2 item(s).",
+          "output": "2",
+          "structuredOutput": {
+            "passes": 2,
+            "count": 2,
+            "results": [
+              {
+                "index": 0,
+                "item": "x",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item x 1\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "item": "y",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item y 2\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              }
+            ],
+            "outputs": ["item x 1\n", "item y 2\n"]
+          },
+          "iteration": 2
+        },
+        {
+          "nodeId": "body",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "item y 2\n",
+          "output": "item y 2\n",
+          "iteration": 2
+        },
+        {
+          "nodeId": "call",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"status\": 200,\n    \"headers\": {\n      \"connection\": \"keep-alive\",\n      \"content-type\": \"application/json\",\n      \"date\": \"<date>\",\n      \"keep-alive\": \"timeout=5\",\n      \"transfer-encoding\": \"chunked\"\n    },\n    \"body\": {\n      \"ok\": true,\n      \"path\": \"/step/Ada\"\n    }\n  }\n}",
+          "output": "HTTP 200",
+          "structuredOutput": {
+            "status": 200,
+            "headers": {
+              "connection": "keep-alive",
+              "content-type": "application/json",
+              "date": "<date>",
+              "keep-alive": "timeout=5",
+              "transfer-encoding": "chunked"
+            },
+            "body": {
+              "ok": true,
+              "path": "/step/Ada"
+            }
+          }
+        },
+        {
+          "nodeId": "fails",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "broken\n",
+          "logs": "broken\n",
+          "output": "broken\n"
+        },
+        {
+          "nodeId": "after",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "after error HTTP 200\n",
+          "output": "after error HTTP 200\n"
+        }
+      ]
+    }
+  ],
+  "failed": {
+    "runId": "<id3>",
+    "workflowId": "fails",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "error",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "ok",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "ok\n",
+        "output": "ok\n"
+      },
+      {
+        "nodeId": "bad",
+        "status": "error",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "error": "bad\n",
+        "logs": "bad\n",
+        "output": "bad\n"
+      },
+      {
+        "nodeId": "never",
+        "status": "skipped",
+        "completedAt": "<time>",
+        "error": "Skipped: \"bad\" failed"
+      }
+    ]
+  },
+  "retried": {
+    "dedupeParams": "manual:retry:<id3>",
+    "workflowId": "fails",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "completedAt": "<time>",
+        "logs": "ok\n",
+        "nodeId": "ok",
+        "output": "ok\n",
+        "startedAt": "<time>",
+        "status": "success"
+      },
+      {
+        "nodeId": "bad",
+        "status": "pending"
+      },
+      {
+        "nodeId": "never",
+        "status": "pending"
+      }
+    ],
+    "retryOfRunId": "<id3>",
+    "runId": "<id4>",
+    "startedAt": "<time>",
+    "status": "running"
+  },
+  "rerun": {
+    "dedupeParams": "manual",
+    "workflowId": "fails",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "ok",
+        "status": "pending"
+      },
+      {
+        "nodeId": "bad",
+        "status": "pending"
+      },
+      {
+        "nodeId": "never",
+        "status": "pending"
+      }
+    ],
+    "runId": "<id5>",
+    "startedAt": "<time>",
+    "status": "running"
+  },
+  "all": [
+    {
+      "runId": "<id5>",
+      "workflowId": "fails",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "error",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "ok",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "ok\n",
+          "output": "ok\n"
+        },
+        {
+          "nodeId": "bad",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "bad\n",
+          "logs": "bad\n",
+          "output": "bad\n"
+        },
+        {
+          "nodeId": "never",
+          "status": "skipped",
+          "completedAt": "<time>",
+          "error": "Skipped: \"bad\" failed"
+        }
+      ]
+    },
+    {
+      "runId": "<id4>",
+      "workflowId": "fails",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "error",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "ok",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "ok\n",
+          "output": "ok\n"
+        },
+        {
+          "nodeId": "bad",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "bad\n",
+          "logs": "bad\n",
+          "output": "bad\n"
+        },
+        {
+          "nodeId": "never",
+          "status": "skipped",
+          "completedAt": "<time>",
+          "error": "Skipped: \"bad\" failed"
+        }
+      ]
+    },
+    {
+      "runId": "<id3>",
+      "workflowId": "fails",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "error",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "ok",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "ok\n",
+          "output": "ok\n"
+        },
+        {
+          "nodeId": "bad",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "bad\n",
+          "logs": "bad\n",
+          "output": "bad\n"
+        },
+        {
+          "nodeId": "never",
+          "status": "skipped",
+          "completedAt": "<time>",
+          "error": "Skipped: \"bad\" failed"
+        }
+      ]
+    }
+  ],
+  "target": {
+    "dedupeParams": "manual:target:hello",
+    "workflowId": "by-hand",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "hello",
+        "status": "pending"
+      },
+      {
+        "nodeId": "check",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "yes",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "no",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "each",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "body",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "call",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "fails",
+        "skipReason": "target",
+        "status": "skipped"
+      },
+      {
+        "nodeId": "after",
+        "skipReason": "target",
+        "status": "skipped"
+      }
+    ],
+    "partial": true,
+    "runId": "<id6>",
+    "startedAt": "<time>",
+    "status": "running"
+  },
+  "targeted": [
+    {
+      "runId": "<id6>",
+      "workflowId": "by-hand",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "hello",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "hello {{inputs.name}}\n",
+          "output": "hello {{inputs.name}}\n"
+        },
+        {
+          "nodeId": "check",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "yes",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "no",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "each",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "body",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "call",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "fails",
+          "status": "skipped"
+        },
+        {
+          "nodeId": "after",
+          "status": "skipped"
+        }
+      ]
+    },
+    {
+      "runId": "<id2>",
+      "workflowId": "by-hand",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "inputs": {
+        "name": "Grace"
+      },
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "hello",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "hello Grace\n",
+          "output": "hello Grace\n"
+        },
+        {
+          "nodeId": "check",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "output": "true"
+        },
+        {
+          "nodeId": "yes",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "yes\n",
+          "output": "yes\n"
+        },
+        {
+          "nodeId": "no",
+          "status": "skipped",
+          "completedAt": "<time>"
+        },
+        {
+          "nodeId": "each",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "── item 1 of 2 ──\n  body: success\n── item 2 of 2 ──\n  body: success\nStopped after 2 item(s): went through all 2 item(s).",
+          "output": "2",
+          "structuredOutput": {
+            "passes": 2,
+            "count": 2,
+            "results": [
+              {
+                "index": 0,
+                "item": "x",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item x 1\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "item": "y",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item y 2\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              }
+            ],
+            "outputs": ["item x 1\n", "item y 2\n"]
+          },
+          "iteration": 2
+        },
+        {
+          "nodeId": "body",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "item y 2\n",
+          "output": "item y 2\n",
+          "iteration": 2
+        },
+        {
+          "nodeId": "call",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"status\": 200,\n    \"headers\": {\n      \"connection\": \"keep-alive\",\n      \"content-type\": \"application/json\",\n      \"date\": \"<date>\",\n      \"keep-alive\": \"timeout=5\",\n      \"transfer-encoding\": \"chunked\"\n    },\n    \"body\": {\n      \"ok\": true,\n      \"path\": \"/step/Grace\"\n    }\n  }\n}",
+          "output": "HTTP 200",
+          "structuredOutput": {
+            "status": 200,
+            "headers": {
+              "connection": "keep-alive",
+              "content-type": "application/json",
+              "date": "<date>",
+              "keep-alive": "timeout=5",
+              "transfer-encoding": "chunked"
+            },
+            "body": {
+              "ok": true,
+              "path": "/step/Grace"
+            }
+          }
+        },
+        {
+          "nodeId": "fails",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "broken\n",
+          "logs": "broken\n",
+          "output": "broken\n"
+        },
+        {
+          "nodeId": "after",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "after error HTTP 200\n",
+          "output": "after error HTTP 200\n"
+        }
+      ]
+    },
+    {
+      "runId": "<id1>",
+      "workflowId": "by-hand",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "inputs": {
+        "name": "Ada"
+      },
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "hello",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "hello Ada\n",
+          "output": "hello Ada\n"
+        },
+        {
+          "nodeId": "check",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "output": "true"
+        },
+        {
+          "nodeId": "yes",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "yes\n",
+          "output": "yes\n"
+        },
+        {
+          "nodeId": "no",
+          "status": "skipped",
+          "completedAt": "<time>"
+        },
+        {
+          "nodeId": "each",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "── item 1 of 2 ──\n  body: success\n── item 2 of 2 ──\n  body: success\nStopped after 2 item(s): went through all 2 item(s).",
+          "output": "2",
+          "structuredOutput": {
+            "passes": 2,
+            "count": 2,
+            "results": [
+              {
+                "index": 0,
+                "item": "x",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item x 1\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              },
+              {
+                "index": 1,
+                "item": "y",
+                "status": "success",
+                "steps": {
+                  "body": {
+                    "output": "item y 2\n",
+                    "status": "success",
+                    "error": ""
+                  }
+                }
+              }
+            ],
+            "outputs": ["item x 1\n", "item y 2\n"]
+          },
+          "iteration": 2
+        },
+        {
+          "nodeId": "body",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "item y 2\n",
+          "output": "item y 2\n",
+          "iteration": 2
+        },
+        {
+          "nodeId": "call",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"status\": 200,\n    \"headers\": {\n      \"connection\": \"keep-alive\",\n      \"content-type\": \"application/json\",\n      \"date\": \"<date>\",\n      \"keep-alive\": \"timeout=5\",\n      \"transfer-encoding\": \"chunked\"\n    },\n    \"body\": {\n      \"ok\": true,\n      \"path\": \"/step/Ada\"\n    }\n  }\n}",
+          "output": "HTTP 200",
+          "structuredOutput": {
+            "status": 200,
+            "headers": {
+              "connection": "keep-alive",
+              "content-type": "application/json",
+              "date": "<date>",
+              "keep-alive": "timeout=5",
+              "transfer-encoding": "chunked"
+            },
+            "body": {
+              "ok": true,
+              "path": "/step/Ada"
+            }
+          }
+        },
+        {
+          "nodeId": "fails",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "broken\n",
+          "logs": "broken\n",
+          "output": "broken\n"
+        },
+        {
+          "nodeId": "after",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "after error HTTP 200\n",
+          "output": "after error HTTP 200\n"
+        }
+      ]
+    }
+  ],
+  "heard": [
+    {
+      "url": "/step/Ada",
+      "method": "POST",
+      "body": "{\"from\":\"hello Ada\n\"}"
+    },
+    {
+      "url": "/step/Grace",
+      "method": "POST",
+      "body": "{\"from\":\"hello Grace\n\"}"
+    }
+  ],
+  "noTrigger": {
+    "error": "Workflow notrigger not found"
+  }
+}

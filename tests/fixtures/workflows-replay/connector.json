@@ -1,0 +1,195 @@
+{
+  "install": {
+    "ok": true,
+    "pack": {
+      "id": "tickets",
+      "name": "Tickets",
+      "version": "1.0.0",
+      "protocol": 1,
+      "path": "<data>/connectors/tickets/1.0.0",
+      "installedAt": "<number>",
+      "bytes": 5245,
+      "triggers": [
+        {
+          "type": "items",
+          "label": "Items"
+        }
+      ],
+      "actions": [
+        {
+          "type": "create",
+          "label": "Create",
+          "inputs": [
+            {
+              "key": "title",
+              "label": "Title",
+              "type": "string",
+              "required": false
+            }
+          ]
+        }
+      ],
+      "env": [],
+      "api": "vorn:extension@0.9",
+      "source": {
+        "git": "<work>/tickets",
+        "rev": "<rev>"
+      },
+      "service": {
+        "command": ["node", "index.js"]
+      },
+      "declares": {
+        "network": ["tickets.example.com"]
+      }
+    }
+  },
+  "poll": {
+    "pages": 1
+  },
+  "again": {
+    "pages": 1
+  },
+  "runs": [
+    {
+      "runId": "<id1>",
+      "workflowId": "poll",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "status": "success",
+      "connectorItem": {
+        "connectionId": "<id2>",
+        "connectorId": "sdk",
+        "externalId": "1",
+        "externalUrl": "",
+        "title": "One",
+        "body": "",
+        "raw": {
+          "externalId": "1",
+          "title": "One",
+          "url": "",
+          "description": "",
+          "status": "open",
+          "labels": [],
+          "updatedAt": "<time>",
+          "cursor": null
+        },
+        "inboxId": "<inbox>",
+        "inboxLeaseToken": "<id3>"
+      },
+      "connectorInboxId": "<inbox>",
+      "connectorInboxLeaseToken": "<id3>",
+      "connectorInboxDisposition": "processed",
+      "nodeStates": [
+        {
+          "nodeId": "t",
+          "status": "success"
+        },
+        {
+          "nodeId": "make",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "Imported #1 \"One\"\nSource: \nTaskId: <id4>",
+          "taskId": "<id4>",
+          "output": "Imported #1 \"One\""
+        },
+        {
+          "nodeId": "act",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "{\n  \"success\": true,\n  \"output\": {\n    \"echo\": {\n      \"title\": \"One\",\n      \"n\": \"5\"\n    },\n    \"sessionCall\": null\n  }\n}",
+          "output": "create succeeded",
+          "structuredOutput": {
+            "echo": {
+              "title": "One",
+              "n": "5"
+            },
+            "sessionCall": null
+          }
+        },
+        {
+          "nodeId": "nope",
+          "status": "error",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "error": "the upstream said no",
+          "logs": "{\n  \"success\": false,\n  \"error\": \"the upstream said no\"\n}",
+          "output": "create failed"
+        },
+        {
+          "nodeId": "item",
+          "status": "success",
+          "startedAt": "<time>",
+          "completedAt": "<time>",
+          "logs": "One create succeeded\n",
+          "output": "One create succeeded\n"
+        }
+      ]
+    }
+  ],
+  "manual": {
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "make",
+        "status": "pending"
+      },
+      {
+        "nodeId": "act",
+        "status": "pending"
+      },
+      {
+        "nodeId": "nope",
+        "status": "pending"
+      },
+      {
+        "nodeId": "item",
+        "status": "pending"
+      }
+    ],
+    "runId": "pending:poll",
+    "startedAt": "<time>",
+    "status": "running",
+    "workflowId": "poll"
+  },
+  "tasks": [
+    {
+      "createdAt": "<time>",
+      "description": "Do the first thing.",
+      "id": "task-1",
+      "order": 0,
+      "projectName": "p",
+      "status": "todo",
+      "title": "First",
+      "updatedAt": "<time>"
+    },
+    {
+      "assignedAgent": "codex",
+      "assignedSessionId": "<id5>",
+      "createdAt": "<time>",
+      "description": "",
+      "id": "task-2",
+      "order": 1,
+      "projectName": "p",
+      "status": "in_progress",
+      "title": "Queued",
+      "updatedAt": "<time>"
+    },
+    {
+      "createdAt": "<time>",
+      "description": "",
+      "id": "<id4>",
+      "order": 2,
+      "projectName": "p",
+      "sourceConnectorId": "tickets",
+      "sourceExternalId": "1",
+      "status": "todo",
+      "title": "One",
+      "updatedAt": "<time>"
+    }
+  ]
+}
