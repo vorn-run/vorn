@@ -407,7 +407,7 @@ impl Reader<'_> {
         } else if has_config {
             out.insert("config".into(), Value::Object(config));
         }
-        (Value::Object(out), needs)
+        (Value::Object(in_step_order(out)), needs)
     }
 
     fn value(&mut self, node: &KdlNode) -> Value {
@@ -532,6 +532,20 @@ impl Reader<'_> {
 /// `@key`: a field of the node, not its config; `@@key` is a config key starting with `@`.
 fn is_field(name: &str) -> bool {
     name.starts_with('@') && !name.starts_with("@@") && name != "@-"
+}
+
+/// A step's keys in the order the editor and the seeds always stored them, the rest after.
+fn in_step_order(mut step: Map<String, Value>) -> Map<String, Value> {
+    let mut out = Map::new();
+    for k in [
+        "id", "type", "label", "slug", "onError", "position", "config",
+    ] {
+        if let Some(v) = step.shift_remove(k) {
+            out.insert(k.to_owned(), v);
+        }
+    }
+    out.extend(step);
+    out
 }
 
 /// `source[:branch][#id]` words, space between.

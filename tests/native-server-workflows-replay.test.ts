@@ -249,6 +249,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     let hooks: http.Server
     let hookPort = 0
     let work = ''
+    let fake = ''
     const heard: Array<{ url?: string; method?: string; body: string }> = []
     const dirs = (): Record<string, string> => ({
       data: served.dataDir,
@@ -317,9 +318,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       hookPort = (hooks.address() as { port: number }).port
       // An agent CLI of the test's own, so a step starts the same agent on every machine.
       const bin = servedDir('vorn-wf-replay-bin-')
-      fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "fake agent"\nexit 3\n', {
-        mode: 0o755
-      })
+      fake = path.join(bin, 'codex')
+      fs.writeFileSync(fake, '#!/bin/sh\necho "fake agent"\nexit 3\n', { mode: 0o755 })
       served = await startServed({
         credential: CREDENTIAL,
         sessiond: true,
@@ -332,7 +332,9 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       const config = (await client.result('config:load')) as Json
       await client.result('config:save', {
         ...config,
-        projects: [{ name: 'p', path: work, preferredAgents: [], workspaceId: 'personal' }]
+        projects: [{ name: 'p', path: work, preferredAgents: [], workspaceId: 'personal' }],
+        // The login shell's PATH comes first in vornd, so the fake is named outright.
+        agentCommands: { codex: { command: fake, args: [] } }
       })
     })
 
