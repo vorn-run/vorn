@@ -259,22 +259,23 @@ pub fn connect(v: &TestVornd) -> App {
     let mut config = rpc.call("config:load", Value::Null).expect("config");
     config["defaults"]["hasSeenOnboarding"] = json!(2);
     rpc.call("config:save", config).expect("saved");
-    link_test_agent(&rpc);
-    first_run(v)
+    let mut app = first_run(v);
+    link_test_agent(&mut app);
+    app
 }
 
 /// Links the test agent's adapter (`fixtures/acme-adapter`), as a person
 /// links a folder, so the tests run an agent without naming a real CLI.
-pub fn link_test_agent(rpc: &vorn_app::client::Rpc) {
+pub fn link_test_agent(app: &mut App) {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/acme-adapter");
+    if app.store.agents.get("acme").is_none() {
+        app.rpc()
+            .call("extension:link", json!({ "path": folder }))
+            .expect("the test agent's adapter links");
+    }
     wait_for("the test agent's adapter", || {
-        rpc.call("extension:link", json!({ "path": folder })).ok()?;
-        let agents = rpc.call("agent:list", Value::Null).ok()?;
-        agents
-            .as_array()?
-            .iter()
-            .any(|a| a["id"] == "acme")
-            .then_some(())
+        app.pump();
+        app.store.agents.get("acme").map(|_| ())
     });
 }
 
