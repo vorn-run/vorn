@@ -41,6 +41,7 @@ members = [
   "crates/logfile",
   "crates/spawn",
   "crates/view",
+  "crates/tree",
   "crates/layout",
   "bench/scale",
   "bench/workflows",

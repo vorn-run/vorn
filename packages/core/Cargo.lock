@@ -7036,6 +7036,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-tree"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vorn-vault"
 version = "0.8.0-beta.14"
 dependencies = [
