@@ -2662,8 +2662,8 @@ export interface ExtensionLinkMatch {
 /**
  * Where a connector is installed from: its git repository, and its folder when
  * the repository holds several; `staged` is one an inspection already
- * described. A `.vorn.tgz` pack of 0.8 (`file`, `url`) is refused, naming the
- * command that installs it from git.
+ * described. A `file` or `url` source is refused, naming the command that
+ * installs it from git.
  */
 export type ConnectorPackSource =
   | { kind: 'git'; url: string; path?: string; branch?: string }

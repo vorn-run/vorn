@@ -159,9 +159,9 @@ export interface ServerIdentity {
   dataDir: string
   pid: number
   /**
-   * A dev build and a packaged build deliberately share `~/.vorn` while keeping
-   * separate Electron user data, so without this a `yarn dev` launch would adopt
-   * the packaged app's bundled server, or the reverse.
+   * A dev build and a packaged build deliberately share `~/.vorn`, so without
+   * this a dev launch would adopt the packaged app's bundled server, or the
+   * reverse.
    */
   buildChannel: 'dev' | 'packaged'
   /**
@@ -1073,10 +1073,9 @@ export interface RequestMethods {
   // ─── Agent-controllable browser pane ──────────────────────────
   //
   // These are the one family of methods the server does not itself implement.
-  // A `<webview>` guest is only reachable from the Electron main process, so
-  // the server forwards each call back over the same bridge main uses to reach
-  // it (`native::desktop` in vornd) and main answers from its CDP
-  // registry. Every one is session-scoped by the *caller's* identity —
+  // The browser pane lives in the desktop app, so the server forwards each call
+  // over the desktop bridge (`native::desktop` in vornd) and the app answers.
+  // Every one is session-scoped by the *caller's* identity —
   // `VORN_SESSION_ID`, resolved in the MCP layer — and none of them accepts a
   // session argument, so one session cannot address another's pane.
   'browser:readPage': {
