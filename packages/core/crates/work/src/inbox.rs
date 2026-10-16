@@ -13,6 +13,7 @@ use vorn_store::Store;
 use crate::artifacts::call;
 use crate::js;
 use crate::receipts::{receive, Delivery};
+use crate::trigger::{Timing, Timings};
 
 /// How long a run holds a row before another may take it.
 pub const LEASE_MS: i64 = 5 * 60_000;
@@ -171,19 +172,21 @@ pub enum Received {
     NotFound,
 }
 
-/// The webhook trigger of a stored workflow, when it has one.
-fn webhook_trigger(workflow: &Value) -> Option<&Value> {
+/// The trigger of a stored workflow, when its type fires by webhook.
+fn webhook_trigger<'a>(workflow: &'a Value, timings: &Timings) -> Option<&'a Value> {
     let trigger = workflow
         .get("nodes")?
         .as_array()?
         .iter()
         .find(|n| n.get("type").and_then(Value::as_str) == Some("trigger"))?
         .get("config")?;
-    (trigger.get("triggerType").and_then(Value::as_str) == Some("webhook")).then_some(trigger)
+    let kind = trigger.get("triggerType").and_then(Value::as_str)?;
+    (timings.get(kind) == Some(&Timing::Webhook)).then_some(trigger)
 }
 
-/// Files a request to `/wf-hooks/<workflow>/<token>` in the inbox. A
-/// sender's repeat of one delivery id is received once.
+/// Files a request to `/wf-hooks/<workflow>/<token>` in the inbox, for a
+/// workflow whose trigger type `timings` says fires by webhook. A sender's
+/// repeat of one delivery id is received once.
 pub fn receive_webhook(
     store: &mut Store,
     workflow_id: &str,
@@ -191,10 +194,11 @@ pub fn receive_webhook(
     request: &Request,
     event_id: &str,
     now_ms: i64,
+    timings: &Timings,
 ) -> Received {
     let workflow = call(store, "dbGetWorkflow", json!([workflow_id])).unwrap_or(Value::Null);
     let enabled = crate::is_truthy(workflow.get("enabled"));
-    let Some(trigger) = webhook_trigger(&workflow).filter(|_| enabled) else {
+    let Some(trigger) = webhook_trigger(&workflow, timings).filter(|_| enabled) else {
         return Received::NotFound;
     };
     let token_ok = trigger
@@ -295,15 +299,39 @@ mod tests {
         hooked(&mut s);
         let now = 1_700_000_000_000;
         assert_eq!(
-            receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e1", now),
+            receive_webhook(
+                &mut s,
+                "wf",
+                "tok",
+                &post(Some("d1")),
+                "e1",
+                now,
+                &crate::trigger::tests::timings()
+            ),
             Received::Queued
         );
         assert_eq!(
-            receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e2", now),
+            receive_webhook(
+                &mut s,
+                "wf",
+                "tok",
+                &post(Some("d1")),
+                "e2",
+                now,
+                &crate::trigger::tests::timings()
+            ),
             Received::Repeat
         );
         assert_eq!(
-            receive_webhook(&mut s, "wf", "bad", &post(None), "e3", now),
+            receive_webhook(
+                &mut s,
+                "wf",
+                "bad",
+                &post(None),
+                "e3",
+                now,
+                &crate::trigger::tests::timings()
+            ),
             Received::NotFound
         );
         let get = Request {
@@ -311,11 +339,27 @@ mod tests {
             ..post(None)
         };
         assert_eq!(
-            receive_webhook(&mut s, "wf", "tok", &get, "e4", now),
+            receive_webhook(
+                &mut s,
+                "wf",
+                "tok",
+                &get,
+                "e4",
+                now,
+                &crate::trigger::tests::timings()
+            ),
             Received::NotFound
         );
         assert_eq!(
-            receive_webhook(&mut s, "nope", "tok", &post(None), "e5", now),
+            receive_webhook(
+                &mut s,
+                "nope",
+                "tok",
+                &post(None),
+                "e5",
+                now,
+                &crate::trigger::tests::timings()
+            ),
             Received::NotFound
         );
 
@@ -342,7 +386,15 @@ mod tests {
         let mut s = store(dir.path());
         hooked(&mut s);
         let now = 1_700_000_000_000;
-        receive_webhook(&mut s, "wf", "tok", &post(None), "e1", now);
+        receive_webhook(
+            &mut s,
+            "wf",
+            "tok",
+            &post(None),
+            "e1",
+            now,
+            &crate::trigger::tests::timings(),
+        );
         assert_eq!(claim_due(&mut s, now).len(), 1);
         release_leases(&mut s, now + 1);
         let again = claim_due(&mut s, now + 2);

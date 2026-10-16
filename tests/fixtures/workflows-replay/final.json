@@ -1,0 +1,1234 @@
+{
+  "workflows": [
+    {
+      "edges": [
+        {
+          "id": "e1",
+          "source": "trigger-1",
+          "target": "launch-1"
+        }
+      ],
+      "enabled": false,
+      "icon": "Play",
+      "iconColor": "#10b981",
+      "id": "system:default-task-workflow",
+      "name": "Default Task Workflow",
+      "nodes": [
+        {
+          "id": "trigger-1",
+          "type": "trigger",
+          "label": "When task moves to In Progress",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "taskStatusChanged",
+            "fromStatus": "todo",
+            "toStatus": "in_progress"
+          }
+        },
+        {
+          "id": "launch-1",
+          "type": "launchAgent",
+          "label": "Launch task agent",
+          "position": {
+            "x": 0,
+            "y": 120
+          },
+          "config": {
+            "agentType": "fromTask",
+            "projectName": "",
+            "projectPath": "",
+            "headless": true
+          }
+        }
+      ],
+      "workspaceId": "personal",
+      "lastRunAt": null
+    },
+    {
+      "edges": [
+        {
+          "id": "e1",
+          "source": "trigger-1",
+          "target": "script-1"
+        }
+      ],
+      "enabled": false,
+      "icon": "RotateCcw",
+      "iconColor": "#c9972a",
+      "id": "system:dev-server-on-restore",
+      "name": "Bring the dev server back",
+      "nodes": [
+        {
+          "id": "trigger-1",
+          "type": "trigger",
+          "label": "When a session is restored",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "sessionRestored"
+          }
+        },
+        {
+          "id": "script-1",
+          "type": "script",
+          "label": "Start the dev server",
+          "position": {
+            "x": 0,
+            "y": 120
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "yarn dev",
+            "cwd": "{{context.projectPath}}"
+          }
+        }
+      ],
+      "workspaceId": "personal",
+      "lastRunAt": null
+    },
+    {
+      "edges": [
+        {
+          "id": "t-hello",
+          "source": "t",
+          "target": "hello"
+        },
+        {
+          "id": "hello-check",
+          "source": "hello",
+          "target": "check"
+        },
+        {
+          "id": "check-yes",
+          "source": "check",
+          "target": "yes",
+          "conditionBranch": "true"
+        },
+        {
+          "id": "check-no",
+          "source": "check",
+          "target": "no",
+          "conditionBranch": "false"
+        },
+        {
+          "id": "yes-each",
+          "source": "yes",
+          "target": "each"
+        },
+        {
+          "id": "each-body",
+          "source": "each",
+          "target": "body"
+        },
+        {
+          "id": "each-call",
+          "source": "each",
+          "target": "call"
+        },
+        {
+          "id": "call-fails",
+          "source": "call",
+          "target": "fails"
+        },
+        {
+          "id": "fails-after",
+          "source": "fails",
+          "target": "after"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "by-hand",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "by-hand",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual",
+            "inputs": [
+              {
+                "key": "name",
+                "label": "Name",
+                "type": "text",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "hello",
+          "type": "script",
+          "label": "hello",
+          "slug": "hello",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"hello {{inputs.name}}\""
+          }
+        },
+        {
+          "id": "check",
+          "type": "condition",
+          "label": "check",
+          "slug": "check",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "variable": "{{steps.hello.output}}",
+            "operator": "contains",
+            "value": "hello"
+          }
+        },
+        {
+          "id": "yes",
+          "type": "script",
+          "label": "yes",
+          "slug": "yes",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo yes"
+          }
+        },
+        {
+          "id": "no",
+          "type": "script",
+          "label": "no",
+          "slug": "no",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo no"
+          }
+        },
+        {
+          "id": "each",
+          "type": "loop",
+          "label": "each",
+          "slug": "each",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "nodeType": "loop",
+            "mode": "forEach",
+            "items": "[\"x\",\"y\"]",
+            "bodyNodeIds": ["body"],
+            "maxIterations": 5
+          }
+        },
+        {
+          "id": "body",
+          "type": "script",
+          "label": "body",
+          "slug": "body",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"item {{loop.item}} {{loop.number}}\""
+          }
+        },
+        {
+          "id": "call",
+          "type": "httpRequest",
+          "label": "call",
+          "slug": "call",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "method": "POST",
+            "url": "http://127.0.0.1:<port>/step/{{inputs.name}}",
+            "headers": {
+              "x-run": "{{inputs.name}}"
+            },
+            "body": "{\"from\":\"{{steps.hello.output}}\"}"
+          }
+        },
+        {
+          "id": "fails",
+          "type": "script",
+          "label": "fails",
+          "slug": "fails",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo broken; exit 3"
+          },
+          "onError": "continue"
+        },
+        {
+          "id": "after",
+          "type": "script",
+          "label": "after",
+          "slug": "after",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"after {{steps.fails.status}} {{steps.call.output}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-ok",
+          "source": "t",
+          "target": "ok"
+        },
+        {
+          "id": "ok-bad",
+          "source": "ok",
+          "target": "bad"
+        },
+        {
+          "id": "bad-never",
+          "source": "bad",
+          "target": "never"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "fails",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "error",
+      "name": "fails",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "ok",
+          "type": "script",
+          "label": "ok",
+          "slug": "ok",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo ok"
+          }
+        },
+        {
+          "id": "bad",
+          "type": "script",
+          "label": "bad",
+          "slug": "bad",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo bad; exit 1"
+          }
+        },
+        {
+          "id": "never",
+          "type": "script",
+          "label": "never",
+          "slug": "never",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo never"
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-tick",
+          "source": "t",
+          "target": "tick"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "once",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "once",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "once",
+            "runAt": "<time>"
+          }
+        },
+        {
+          "id": "tick",
+          "type": "script",
+          "label": "tick",
+          "slug": "tick",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo tick"
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-tock",
+          "source": "t",
+          "target": "tock"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "every",
+      "name": "every",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "recurring",
+            "cron": "0 9 * * 1",
+            "timezone": "UTC"
+          }
+        },
+        {
+          "id": "tock",
+          "type": "script",
+          "label": "tock",
+          "slug": "tock",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo tock"
+          }
+        }
+      ],
+      "workspaceId": "personal",
+      "lastRunAt": null
+    },
+    {
+      "edges": [
+        {
+          "id": "t-echo",
+          "source": "t",
+          "target": "echo"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "hook",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "hook",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "webhook",
+            "method": "POST",
+            "token": "tok-1"
+          }
+        },
+        {
+          "id": "echo",
+          "type": "script",
+          "label": "echo",
+          "slug": "echo",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"got {{trigger.body.n}} {{trigger.query.q}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-draft",
+          "source": "t",
+          "target": "draft"
+        },
+        {
+          "id": "draft-review",
+          "source": "draft",
+          "target": "review"
+        },
+        {
+          "id": "review-ship",
+          "source": "review",
+          "target": "ship"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "gate",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "error",
+      "name": "gate",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "draft",
+          "type": "script",
+          "label": "draft",
+          "slug": "draft",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"draft {{steps.review.round}}\""
+          }
+        },
+        {
+          "id": "review",
+          "type": "approval",
+          "label": "review",
+          "slug": "review",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "message": "Look at {{steps.draft.output}}",
+            "view": "<h1>{{steps.draft.output}}</h1><p>Read me</p>",
+            "edit": "{{steps.draft.output}}",
+            "feedback": {
+              "from": "draft",
+              "maxRounds": 3
+            }
+          }
+        },
+        {
+          "id": "ship",
+          "type": "script",
+          "label": "ship",
+          "slug": "ship",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"shipped {{steps.review.text}} {{steps.review.comment}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-draft",
+          "source": "t",
+          "target": "draft"
+        },
+        {
+          "id": "draft-review",
+          "source": "draft",
+          "target": "review"
+        },
+        {
+          "id": "review-ship",
+          "source": "review",
+          "target": "ship"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "gate-timeout",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "error",
+      "name": "gate-timeout",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "draft",
+          "type": "script",
+          "label": "draft",
+          "slug": "draft",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"draft {{steps.review.round}}\""
+          }
+        },
+        {
+          "id": "review",
+          "type": "approval",
+          "label": "review",
+          "slug": "review",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "message": "Quick",
+            "timeoutMs": 300
+          }
+        },
+        {
+          "id": "ship",
+          "type": "script",
+          "label": "ship",
+          "slug": "ship",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"shipped {{steps.review.text}} {{steps.review.comment}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-draft",
+          "source": "t",
+          "target": "draft"
+        },
+        {
+          "id": "draft-review",
+          "source": "draft",
+          "target": "review"
+        },
+        {
+          "id": "review-ship",
+          "source": "review",
+          "target": "ship"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "gate-stop",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "cancelled",
+      "name": "gate-stop",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "draft",
+          "type": "script",
+          "label": "draft",
+          "slug": "draft",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"draft {{steps.review.round}}\""
+          }
+        },
+        {
+          "id": "review",
+          "type": "approval",
+          "label": "review",
+          "slug": "review",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "message": "Stop me"
+          }
+        },
+        {
+          "id": "ship",
+          "type": "script",
+          "label": "ship",
+          "slug": "ship",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"shipped {{steps.review.text}} {{steps.review.comment}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-sleep",
+          "source": "t",
+          "target": "sleep"
+        },
+        {
+          "id": "sleep-later",
+          "source": "sleep",
+          "target": "later"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "long",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "cancelled",
+      "name": "long",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "sleep",
+          "type": "script",
+          "label": "sleep",
+          "slug": "sleep",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "sleep 30"
+          }
+        },
+        {
+          "id": "later",
+          "type": "script",
+          "label": "later",
+          "slug": "later",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo later"
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-seen",
+          "source": "t",
+          "target": "seen"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "created",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "created",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "taskCreated",
+            "projectFilter": "p"
+          }
+        },
+        {
+          "id": "seen",
+          "type": "script",
+          "label": "seen",
+          "slug": "seen",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"created {{task.title}} {{trigger.type}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-seen",
+          "source": "t",
+          "target": "seen"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "moved",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "moved",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "taskStatusChanged",
+            "fromStatus": "todo",
+            "toStatus": "in_progress"
+          }
+        },
+        {
+          "id": "seen",
+          "type": "script",
+          "label": "seen",
+          "slug": "seen",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"moved {{task.title}} {{trigger.fromStatus}} {{trigger.toStatus}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-seen",
+          "source": "t",
+          "target": "seen"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "reopened",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "reopened",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "taskStatusChanged",
+            "toStatus": "todo"
+          }
+        },
+        {
+          "id": "seen",
+          "type": "script",
+          "label": "seen",
+          "slug": "seen",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"back {{task.title}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-agent",
+          "source": "t",
+          "target": "agent"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "taker",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "taker",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "agent",
+          "type": "launchAgent",
+          "label": "agent",
+          "slug": "agent",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "agentType": "codex",
+            "projectName": "p",
+            "taskFromQueue": true,
+            "prompt": ""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-agent",
+          "source": "t",
+          "target": "agent"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "headless",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "error",
+      "name": "headless",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "agent",
+          "type": "launchAgent",
+          "label": "agent",
+          "slug": "agent",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "agentType": "codex",
+            "projectName": "p",
+            "taskId": "task-1",
+            "headless": true,
+            "prompt": "Do it"
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    },
+    {
+      "edges": [
+        {
+          "id": "t-make",
+          "source": "t",
+          "target": "make"
+        },
+        {
+          "id": "make-act",
+          "source": "make",
+          "target": "act"
+        },
+        {
+          "id": "act-nope",
+          "source": "act",
+          "target": "nope"
+        },
+        {
+          "id": "nope-item",
+          "source": "nope",
+          "target": "item"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "poll",
+      "lastRunAt": "<time>",
+      "lastRunStatus": "success",
+      "name": "poll",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "connectorPoll",
+            "connectionId": "<id1>",
+            "event": "mcpPoll",
+            "cron": "0 0 1 1 *"
+          }
+        },
+        {
+          "id": "make",
+          "type": "createTaskFromItem",
+          "label": "make",
+          "slug": "make",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "project": "p",
+            "initialStatus": "todo"
+          }
+        },
+        {
+          "id": "act",
+          "type": "callConnectorAction",
+          "label": "act",
+          "slug": "act",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "connectionId": "<id1>",
+            "action": "create",
+            "args": {
+              "title": "{{connectorItem.title}}",
+              "n": 5
+            }
+          }
+        },
+        {
+          "id": "nope",
+          "type": "callConnectorAction",
+          "label": "nope",
+          "slug": "nope",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "connectionId": "<id1>",
+            "action": "create",
+            "args": {
+              "fail": true
+            }
+          },
+          "onError": "continue"
+        },
+        {
+          "id": "item",
+          "type": "script",
+          "label": "item",
+          "slug": "item",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo \"{{connectorItem.title}} {{steps.act.output}}\""
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    }
+  ],
+  "log": [
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 9,
+      "status": "success",
+      "workflowId": "by-hand",
+      "workflowName": "by-hand"
+    },
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 1,
+      "status": "success",
+      "workflowId": "once",
+      "workflowName": "once"
+    },
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 1,
+      "status": "success",
+      "workflowId": "hook",
+      "workflowName": "hook"
+    },
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 1,
+      "status": "success",
+      "workflowId": "hook",
+      "workflowName": "hook"
+    },
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 4,
+      "status": "success",
+      "workflowId": "poll",
+      "workflowName": "poll"
+    }
+  ]
+}

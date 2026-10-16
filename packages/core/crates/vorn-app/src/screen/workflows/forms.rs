@@ -1507,7 +1507,7 @@ pub fn node_panel(s: &Screen<'_>, d: &Draft, n: &Value) -> El {
         "createTaskFromItem" => create_task_form(s, &id, n),
         "httpRequest" => http_form(s, d, &id, n),
         "callConnectorAction" => action_form(s, d, &id, n),
-        _ => div(),
+        _ => contributed_form(s, &id, n),
     });
     if kind != "trigger" {
         let stop = sv(n, "onError").unwrap_or("stop") == "stop";
@@ -3157,6 +3157,75 @@ fn approval_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             help2("Auto-rejects the gate if nobody answers in time. Each round starts a new timeout."),
         ]),
     ])
+}
+
+/// A step of a node type an installed extension declares: a field for each
+/// property of its config's JSON Schema, its text taking `{{…}}` like any
+/// other step's.
+fn contributed_form(s: &Screen<'_>, id: &str, n: &Value) -> El {
+    let kind = sv(n, "type").unwrap_or("");
+    let Some(t) =
+        s.st.points
+            .node_types
+            .iter()
+            .find(|t| sv(t, "id") == Some(kind))
+    else {
+        return section(vec![help(
+            "No extension that is on runs this kind of step. Install or turn on the extension that adds it.",
+            0.0,
+        )]);
+    };
+    let mut blocks = Vec::new();
+    if let Some(summary) = t.pointer("/doc/summary").and_then(Value::as_str) {
+        let from = sv(t, "extensionName").unwrap_or("an extension");
+        blocks.push(help(&format!("{summary} From {from}."), 0.0));
+    }
+    let props = t
+        .pointer("/doc/configSchema/properties")
+        .and_then(Value::as_object);
+    for (key, p) in props.into_iter().flatten() {
+        let title = p.get("title").and_then(Value::as_str).unwrap_or(key);
+        let path = format!("config.{key}");
+        let current = n.pointer(&format!("/config/{key}"));
+        let mut b = vec![label(title)];
+        match p.get("type").and_then(Value::as_str) {
+            Some("boolean") => {
+                let on = current.and_then(Value::as_bool) == Some(true);
+                b.push(toggle(s, WfAct::Toggle(path), on, false, title));
+            }
+            Some("integer" | "number") => {
+                let text = current.map(|v| v.to_string()).unwrap_or_default();
+                b.push(input(
+                    s,
+                    bind(Some(id), &path, Conv::Count, false),
+                    &text,
+                    "",
+                    false,
+                    Wash::Strong,
+                    13.0,
+                    12.0,
+                ));
+            }
+            _ => {
+                let text = current.and_then(Value::as_str).unwrap_or("");
+                b.push(input(
+                    s,
+                    bind(Some(id), &path, Conv::Keep, true),
+                    text,
+                    "",
+                    false,
+                    Wash::Strong,
+                    13.0,
+                    12.0,
+                ));
+            }
+        }
+        if let Some(desc) = p.get("description").and_then(Value::as_str) {
+            b.push(help(desc, 6.0));
+        }
+        blocks.push(block(b));
+    }
+    section(blocks)
 }
 
 fn create_task_form(s: &Screen<'_>, id: &str, n: &Value) -> El {

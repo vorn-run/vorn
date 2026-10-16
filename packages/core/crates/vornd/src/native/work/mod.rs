@@ -11,9 +11,11 @@
 //! client; what it no longer does is run any of this.
 
 pub mod db;
+pub mod files;
 pub mod host;
 pub mod routes;
 pub mod schedule;
+pub mod types;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
@@ -72,6 +74,10 @@ pub const METHODS: &[&str] = &[
     "workflow:resolveGate",
     "workflow:sessionRestored",
     "workflow:executionComplete",
+    "workflow:describe",
+    "workflow:nodeTypes",
+    "workflow:saveToFile",
+    "workflow:files",
     "workflowRun:save",
     "workflowRun:list",
     "workflowRun:listByTask",
@@ -117,6 +123,8 @@ pub struct Work {
     pub(crate) rearm: Notify,
     /// Review batches waiting for their agent's prompt.
     queue: Mutex<Queue>,
+    /// The workflows that are files in a project.
+    pub(crate) files: files::Files,
 }
 
 fn param<'a>(params: &'a Value, key: &str) -> Option<&'a Value> {
@@ -147,6 +155,7 @@ impl Work {
             .parent()
             .map_or_else(|| PathBuf::from("."), PathBuf::from);
         let drain = Arc::new(Notify::new());
+        let workflow_files = files::Files::new(&data_dir);
         let host = VorndHost::new(
             db.clone(),
             data_dir,
@@ -161,6 +170,7 @@ impl Work {
             drain,
             rearm: Notify::new(),
             queue: Mutex::default(),
+            files: workflow_files,
         })
     }
 
@@ -168,13 +178,29 @@ impl Work {
         self.engine.host()
     }
 
+    /// Fills the engine's registry from the extensions that are on, and marks
+    /// the types of those that are off unavailable.
+    pub fn sync_types(self: &Arc<Self>) {
+        if let Some(native) = self.native.upgrade() {
+            types::sync(&native, self.engine.registry());
+            self.rearm.notify_one();
+            let shipped = types::contributed_workflows(&native);
+            if !shipped.is_empty() {
+                let work = Arc::clone(self);
+                tokio::spawn(async move { work.seed_contributed(shipped).await });
+            }
+        }
+    }
+
     /// Starts the scheduler, the inbox, the connection the engine listens
     /// on, and picks up what the last vornd left: gates waiting and runs
     /// still marked running.
     pub fn start(self: &Arc<Self>) {
+        self.sync_types();
         tokio::spawn(Arc::clone(self).listen());
         tokio::spawn(Arc::clone(self).schedule());
         tokio::spawn(Arc::clone(self).deliver_inbox());
+        tokio::spawn(Arc::clone(self).watch_files());
         let work = Arc::clone(self);
         tokio::spawn(async move { work.resume().await });
     }
@@ -306,9 +332,19 @@ impl Work {
         }
     }
 
+    /// Whether Artifacts is on.
+    fn artifacts_on(&self) -> bool {
+        self.native
+            .upgrade()
+            .is_none_or(|n| super::extensions::builtin::artifacts::on(&n))
+    }
+
     /// Answers one of the work model's own calls.
     pub async fn call(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
         match crate::native::group_of(method) {
+            "artifact" if !self.artifacts_on() => {
+                Answer::Error(super::extensions::builtin::artifacts::OFF.to_owned())
+            }
             "artifact" => self.artifact(method, params).await,
             _ => self.workflow(method, params).await,
         }
@@ -326,6 +362,7 @@ impl Work {
     async fn read(&self, method: &str, params: &Value) -> Answer {
         let (data_dir, port) = self.read_host();
         let (method, params) = (method.to_owned(), params.clone());
+        let timings = self.engine.registry().timings();
         let reply = self
             .db
             .run(move |store| {
@@ -335,6 +372,7 @@ impl Work {
                     server_port: port,
                     now_ms: now_ms(),
                     zone: &zone,
+                    timings: &timings,
                 };
                 reads::read(store, &host, &method, &params)
             })
@@ -375,6 +413,9 @@ impl Work {
     fn workflows_changed(&self) {
         self.host().signal_change();
         self.rearm.notify_one();
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            tokio::spawn(async move { editor.workflows_changed().await });
+        }
     }
 
     async fn workflow(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
@@ -416,6 +457,7 @@ impl Work {
                 else {
                     return Answer::Error("workflow:update needs an id and updates".into());
                 };
+                let written = id.clone();
                 let changed = self
                     .db
                     .run(move |s| {
@@ -434,6 +476,7 @@ impl Work {
                     Some(Ok((changed, there))) => {
                         if changed {
                             self.workflows_changed();
+                            self.write_back(&written).await;
                         }
                         Answer::Result(json!({ "ok": there }))
                     }
@@ -445,6 +488,7 @@ impl Work {
                 let Some(id) = text(params, "id") else {
                     return Answer::Error("workflow:delete needs an id".into());
                 };
+                let removed = id.clone();
                 let gone = self
                     .db
                     .run(move |s| {
@@ -460,6 +504,7 @@ impl Work {
                 match gone {
                     Some(Ok(had)) => {
                         if had {
+                            self.forget_file(&removed);
                             self.workflows_changed();
                         }
                         Answer::Result(json!({ "ok": had }))
@@ -470,6 +515,7 @@ impl Work {
             }
             "workflow:setEnabled" => {
                 let id = text(params, "id").unwrap_or_default();
+                let written = id.clone();
                 let enabled = params.get("enabled").cloned().unwrap_or(Value::Null);
                 let changed = self
                     .db
@@ -481,6 +527,7 @@ impl Work {
                 match changed {
                     Some(Ok(n)) if n.as_f64().unwrap_or(0.0) > 0.0 => {
                         self.workflows_changed();
+                        self.write_back(&written).await;
                         Answer::Result(json!({ "ok": true }))
                     }
                     Some(Ok(_)) => Answer::Result(json!({ "ok": false })),
@@ -541,6 +588,24 @@ impl Work {
                 Answer::Void
             }
             "workflow:resolveGate" => self.resolve_gate(params).await,
+            "workflow:describe" => Answer::Result(self.engine.registry().describe()),
+            "workflow:saveToFile" => {
+                let (Some(id), Some(project)) = (text(params, "id"), text(params, "projectName"))
+                else {
+                    return Answer::Error(
+                        "workflow:saveToFile needs an id and a projectName".into(),
+                    );
+                };
+                match self.save_to_file(&id, &project).await {
+                    Ok(v) => {
+                        self.workflows_changed();
+                        Answer::Result(v)
+                    }
+                    Err(e) => Answer::Error(e),
+                }
+            }
+            "workflow:files" => Answer::Result(self.files.listed()),
+            "workflow:nodeTypes" => Answer::Result(types::listed(self.engine.registry())),
             "workflow:sessionRestored" => {
                 let id = text(params, "sessionId").unwrap_or_default();
                 let session = self
@@ -553,9 +618,13 @@ impl Work {
                 if let Some(session) = session {
                     let restore = text(params, "restore").unwrap_or_else(|| "cold".into());
                     let environment = param(params, "environment").cloned();
-                    self.engine
-                        .fire_session_restored(&session, &restore, environment)
-                        .await;
+                    vorn_workflows::triggers::session_restored(
+                        &self.engine,
+                        &session,
+                        &restore,
+                        environment,
+                    )
+                    .await;
                 }
                 Answer::Void
             }
@@ -1124,8 +1193,11 @@ impl Work {
         }
     }
 
-    /// The page of an artifact version, for whoever holds its token.
+    /// The page of an artifact version, for whoever holds its token, while Artifacts is on.
     pub async fn artifact_page(&self, id: &str, version: u32, token: &str) -> Option<String> {
+        if !self.artifacts_on() {
+            return None;
+        }
         let (data_dir, id, token) = (
             self.host().data_dir.clone(),
             id.to_owned(),
@@ -1158,10 +1230,19 @@ impl Work {
     ) -> vorn_work::inbox::Received {
         let (wf, token) = (workflow_id.to_owned(), token.to_owned());
         let event = uuid::Uuid::new_v4().to_string();
+        let timings = self.engine.registry().timings();
         let received = self
             .db
             .run(move |s| {
-                vorn_work::inbox::receive_webhook(s, &wf, &token, &request, &event, now_ms())
+                vorn_work::inbox::receive_webhook(
+                    s,
+                    &wf,
+                    &token,
+                    &request,
+                    &event,
+                    now_ms(),
+                    &timings,
+                )
             })
             .await
             .unwrap_or(vorn_work::inbox::Received::NotFound);
@@ -1172,34 +1253,42 @@ impl Work {
         received
     }
 
-    /// A workflow trigger a configuration save fires: a task created or moved. It
-    /// is received once by its `effectId`, however often it is delivered.
-    pub async fn trigger(&self, params: &Value) -> Result<bool, String> {
-        let effect = text(params, "effectId").ok_or("a trigger needs an effectId")?;
-        let task = param(params, "task")
-            .cloned()
-            .filter(Value::is_object)
-            .ok_or("a trigger needs a task")?;
-        let first = self
-            .db
-            .run(move |s| vorn_work::receipts::receive(s, &effect, now_ms()))
-            .await
-            == Some(vorn_work::receipts::Delivery::First);
-        if !first {
-            return Ok(false);
+    /// `workflow.fire`: `caller` fires a trigger type it declares. A fire
+    /// with an `effectId` is received once, however often it is delivered;
+    /// every enabled workflow of that trigger type whose config takes the
+    /// fire's `fields` starts with its `context`.
+    pub async fn fire_api(&self, caller: &str, args: &Value) -> Result<Value, String> {
+        let kind = text(args, "trigger").ok_or("workflow.fire takes the trigger type to fire")?;
+        let declared = self
+            .engine
+            .registry()
+            .trigger(&kind)
+            .ok_or_else(|| format!("no extension that is on declares the trigger {kind}"))?;
+        if declared.provider != caller {
+            return Err(format!(
+                "{kind} is {}'s trigger to fire",
+                declared.provider_name
+            ));
         }
-        match text(params, "kind").as_deref() {
-            Some("taskCreated") => self.engine.fire_task_created(&task).await,
-            Some("taskStatusChanged") => {
-                let from = text(params, "from").unwrap_or_default();
-                let to = text(params, "to").unwrap_or_default();
-                self.engine
-                    .fire_task_status_changed(&task, &from, &to)
-                    .await;
+        if let Some(effect) = text(args, "effectId") {
+            let first = self
+                .db
+                .run(move |s| vorn_work::receipts::receive(s, &effect, now_ms()))
+                .await
+                == Some(vorn_work::receipts::Delivery::First);
+            if !first {
+                return Ok(json!({ "started": 0, "repeat": true }));
             }
-            other => warn!(kind = ?other, "a trigger of a kind vornd does not know"),
         }
-        Ok(true)
+        let fields = param(args, "fields")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let context = param(args, "context")
+            .and_then(Context::from_json)
+            .unwrap_or_default();
+        let started = self.engine.fire(&kind, &fields, context).await;
+        Ok(json!({ "started": started }))
     }
 
     /// A connection signed in again: the steps waiting for it run again.
@@ -1219,31 +1308,19 @@ impl Work {
         self.engine.resume_sign_in_waits(connection_id, runs).await;
     }
 
-    /// Fires the triggers tasks fire, from the public events vornd emits as
-    /// tasks are written, until vornd stops.
-    pub fn follow_tasks(self: &Arc<Self>, bus: &vorn_extensions::events::Bus) {
-        use vorn_extensions::events::{TASK_CREATED, TASK_STATUS_CHANGED};
-        let mut events = bus.subscribe("workflows", &[TASK_CREATED, TASK_STATUS_CHANGED]);
-        let work = Arc::downgrade(self);
-        tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                let Some(work) = work.upgrade() else { return };
-                if let Err(err) = work.trigger(&event.data).await {
-                    warn!(%err, "a task trigger was refused");
-                }
-            }
-        });
-    }
-
     /// The workflows changed elsewhere: the scheduler reads them again.
     pub fn workflows_changed_elsewhere(&self) {
         self.rearm.notify_one();
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            tokio::spawn(async move { editor.workflows_changed().await });
+        }
     }
 
     /// How many schedules are armed, which keeps an idle server up.
     pub async fn armed_schedules(&self) -> usize {
+        let timings = self.engine.registry().timings();
         self.db
-            .run(|s| {
+            .run(move |s| {
                 let list = s.call("dbListWorkflows", json!([])).ok()?;
                 let zone = TimeZone::system();
                 let workflows = workflows_of(&json!({ "workflows": list }));
@@ -1256,6 +1333,7 @@ impl Work {
                                     std::slice::from_ref(&w.raw),
                                     &zone,
                                     now_ms(),
+                                    &timings,
                                 )
                                 .arms(&w.id)
                         })
@@ -1384,6 +1462,7 @@ mod tests {
     async fn a_task_trigger_delivered_twice_starts_its_workflow_once() {
         let dir = tempfile::tempdir().unwrap();
         let (_native, work) = work(dir.path());
+        work.sync_types();
         let wf = conditional(
             "moved",
             json!({ "triggerType": "taskStatusChanged", "toStatus": "in_progress" }),
@@ -1394,14 +1473,23 @@ mod tests {
             "effectId": "task-status/t1/todo/in_progress/now", "kind": "taskStatusChanged",
             "task": { "id": "t1", "title": "Moved", "projectName": "p" }, "from": "todo", "to": "in_progress"
         });
-        assert_eq!(work.trigger(&trigger).await, Ok(true));
-        assert_eq!(work.trigger(&trigger).await, Ok(false));
+        let args = vorn_tasks::triggers::fire_args(&trigger).unwrap();
+        assert_eq!(
+            work.fire_api(vorn_tasks::ID, &args).await,
+            Ok(json!({ "started": 1 }))
+        );
+        assert_eq!(
+            work.fire_api(vorn_tasks::ID, &args).await,
+            Ok(json!({ "started": 0, "repeat": true }))
+        );
         let done = settled(&work, "moved", 1).await;
         assert_eq!(done[0]["triggerTaskId"], "t1");
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(runs(&work, "moved").await.len(), 1);
+        // Only the extension that declares a trigger type fires it.
+        assert!(work.fire_api("someone.else", &args).await.is_err());
         assert!(work
-            .trigger(&json!({ "kind": "taskCreated" }))
+            .fire_api(vorn_tasks::ID, &json!({ "trigger": "nothing" }))
             .await
             .is_err());
     }

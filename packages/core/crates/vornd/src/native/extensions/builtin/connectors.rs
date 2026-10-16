@@ -118,6 +118,23 @@ impl ConnectorsBuiltin {
         }
     }
 
+    /// A workflow step of a node type Connectors declares; refused while off.
+    pub async fn run_node(&self, node_type: &str, request: &Value) -> Result<Value, String> {
+        if !self.is_on() {
+            return Err(OFF.to_owned());
+        }
+        let call = |method: &'static str, params: Value| async move {
+            match self.answer(method, params).await {
+                Answer::Result(v) => Ok(v),
+                Answer::Void | Answer::Unanswered => Ok(Value::Null),
+                Answer::Error(e) => Err(e),
+            }
+        };
+        vorn_connectors::nodes::run(node_type, request, call)
+            .await
+            .ok_or_else(|| format!("Connectors runs no {node_type} steps"))
+    }
+
     /// Settles every installed connector's implicit connection, if it is on.
     pub async fn reconcile(&self) {
         if self.is_on() {

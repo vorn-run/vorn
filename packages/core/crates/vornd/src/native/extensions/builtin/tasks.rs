@@ -93,7 +93,19 @@ impl TasksBuiltin {
         }
     }
 
-    /// `task.importItems` and `task.sourceLink`, which connectors call; refused while off.
+    /// A workflow step of a node type Tasks declares; refused while off.
+    pub async fn run_node(&self, node_type: &str, request: &Value) -> Result<Value, String> {
+        if !self.is_on() {
+            return Err(builtin::OFF.to_owned());
+        }
+        self.inner
+            .run_node(node_type, request)
+            .await
+            .ok_or_else(|| format!("Tasks runs no {node_type} steps"))
+    }
+
+    /// `task.importItems`, `task.sourceLink`, `task.take` and `task.handBack`,
+    /// which the other built-ins call; refused while off.
     pub async fn api(&self, method: &str, args: Value) -> Result<Value, ExtError> {
         if !self.is_on() {
             return Err(ExtError::new("off", builtin::OFF));
@@ -101,6 +113,11 @@ impl TasksBuiltin {
         let failed = |e: String| ExtError::new("failed", e);
         match method {
             "task.importItems" => self.inner.import(args).await.map_err(failed),
+            "task.take" | "task.handBack" => self
+                .inner
+                .take_or_hand_back(method, &args)
+                .await
+                .map_err(failed),
             _ => {
                 let task = args
                     .get("taskId")

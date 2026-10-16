@@ -1,0 +1,80 @@
+{
+  "run": {
+    "runId": "<id1>",
+    "workflowId": "once",
+    "startedAt": "<time>",
+    "completedAt": "<time>",
+    "status": "success",
+    "nodeStates": [
+      {
+        "nodeId": "t",
+        "status": "success"
+      },
+      {
+        "nodeId": "tick",
+        "status": "success",
+        "startedAt": "<time>",
+        "completedAt": "<time>",
+        "logs": "tick\n",
+        "output": "tick\n"
+      }
+    ]
+  },
+  "log": [
+    {
+      "executedAt": "<time>",
+      "sessionsLaunched": 1,
+      "status": "success",
+      "workflowId": "once",
+      "workflowName": "once"
+    }
+  ],
+  "next": "0 9 * * 1",
+  "nextOnce": null,
+  "workflow": {
+    "edges": [
+      {
+        "id": "t-tick",
+        "source": "t",
+        "target": "tick"
+      }
+    ],
+    "enabled": true,
+    "icon": "Zap",
+    "iconColor": "#ffffff",
+    "id": "once",
+    "lastRunAt": "<time>",
+    "lastRunStatus": "success",
+    "name": "once",
+    "nodes": [
+      {
+        "id": "t",
+        "type": "trigger",
+        "label": "Trigger",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "config": {
+          "triggerType": "once",
+          "runAt": "<time>"
+        }
+      },
+      {
+        "id": "tick",
+        "type": "script",
+        "label": "tick",
+        "slug": "tick",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo tick"
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  }
+}

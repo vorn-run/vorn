@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 use tokio::sync::broadcast;
 use vorn_protocol::WorkflowExecution;
-use vorn_workflow::{Completion, Host, Note, TaskMove};
+use vorn_workflow::{Completion, Engine, Host, Note};
 
 #[derive(Default)]
 pub struct World {
@@ -274,17 +274,40 @@ impl Host for Fake {
         self.notes.subscribe()
     }
 
-    async fn take_task(&self, task_id: &str, session_id: &str, agent: &str) -> Option<TaskMove> {
-        self.record(
-            "task:start",
-            json!({ "id": task_id, "sessionId": session_id, "agentType": agent }),
-        );
-        None
+    /// Tasks' public methods, recorded under the names the reference cases use.
+    async fn api(&self, method: &str, args: Value) -> Result<Value, String> {
+        match method {
+            "task.take" => self.record(
+                "task:start",
+                json!({ "id": args["id"], "sessionId": args["sessionId"], "agentType": args["agent"] }),
+            ),
+            "task.handBack" => self.record("task:reopen", json!({ "id": args["id"] })),
+            other => return Err(format!("the test host has no {other}")),
+        }
+        Ok(Value::Null)
     }
 
-    async fn reopen_task(&self, task_id: &str) -> Option<TaskMove> {
-        self.record("task:reopen", json!({ "id": task_id }));
-        None
+    /// A step of Tasks' or Connectors' node types, run by their own code
+    /// with their core calls answered by this host.
+    async fn run_node(
+        &self,
+        provider: &str,
+        node_type: &str,
+        request: Value,
+    ) -> Result<Value, String> {
+        let call = |method: &'static str, params: Value| {
+            let host = self.clone();
+            async move {
+                let method = method.replacen("connection.", "connection:", 1);
+                host.call(&method, params).await
+            }
+        };
+        let answered = match provider {
+            "vorn.tasks" => vorn_tasks::nodes::run(node_type, &request, call).await,
+            "vorn.connectors" => vorn_connectors::nodes::run(node_type, &request, call).await,
+            _ => None,
+        };
+        answered.ok_or_else(|| format!("{provider} does not run {node_type}"))
     }
 
     fn gate_view(
@@ -382,6 +405,32 @@ impl Fake {
         let w = self.world();
         w.order.iter().map(|id| w.saved[id].clone()).collect()
     }
+}
+
+/// The engine on `fake`, with Vorn's node types and trigger types declared
+/// as vornd declares them while the built-ins are on.
+pub fn engine(fake: Fake) -> Engine<Fake> {
+    let engine = Engine::new(fake);
+    vorn_workflows::declare::declare_builtin(engine.registry());
+    for (manifest, docs) in [
+        (vorn_tasks::MANIFEST, vorn_tasks::NODE_DOCS),
+        (
+            vorn_connectors::builtin::MANIFEST,
+            vorn_connectors::builtin::NODE_DOCS,
+        ),
+    ] {
+        let manifest = vorn_extensions::manifest::file::parse_builtin(manifest).unwrap();
+        let docs = serde_json::from_str(docs).unwrap();
+        vorn_workflows::declare::declare(
+            engine.registry(),
+            &manifest,
+            &docs,
+            &std::collections::HashMap::new(),
+            &|_| None,
+            true,
+        );
+    }
+    engine
 }
 
 /// A temporary directory of its own.

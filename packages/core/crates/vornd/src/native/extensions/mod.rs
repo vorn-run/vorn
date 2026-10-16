@@ -197,6 +197,11 @@ pub trait Around: Send + Sync + 'static {
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {
         None
     }
+
+    /// What extension `id` contributes changed (installed, removed or switched),
+    /// or, with no id, every extension was read at start.
+    fn contributions_changed(&self, _id: &str) {}
+
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
@@ -358,6 +363,7 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
+        self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
         tokio::spawn(watch_views(Arc::downgrade(self)));
@@ -426,6 +432,25 @@ impl Extensions {
         out
     }
 
+    /// The installed extensions that declare workflow node types, trigger
+    /// types or workflows: each one's manifest and where its package is.
+    pub fn workflow_providers(&self) -> Vec<(vorn_extensions::manifest::Manifest, PathBuf)> {
+        let store = self.router.store();
+        let mut out = Vec::new();
+        for id in store.ids() {
+            let Ok(pack) = store.inspect_unmeasured(&id) else {
+                continue;
+            };
+            let declares = pack.manifest.contributes.as_ref().is_some_and(|c| {
+                !c.nodes().is_empty() || !c.triggers().is_empty() || !c.workflows().is_empty()
+            });
+            if declares {
+                out.push((pack.manifest.clone(), pack.path.clone()));
+            }
+        }
+        out
+    }
+
     /// The layouts installed extensions offer: `(extension id, layout id, title, file)`.
     pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf)> {
         let store = self.router.store();
@@ -450,6 +475,7 @@ impl Extensions {
     }
 
     fn contributions_changed(&self, extension: &str) {
+        self.around.contributions_changed(extension);
         self.around.broadcast(
             CONTRIBUTIONS_CHANGED,
             json!({ "extensionId": extension }),
@@ -1480,12 +1506,21 @@ impl Around for Wired {
             .into_iter()
             .collect();
         started.extend(native.tasks().map(builtin::tasks::entry));
+        started.extend(native.editor().map(builtin::editor::entry));
         started.extend(builtin::agents::entries(native.adapters()));
         started
     }
 
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {
         self.native.upgrade().map(|n| Arc::clone(n.adapters()))
+    }
+
+    fn contributions_changed(&self, _id: &str) {
+        if let Some(native) = self.native.upgrade() {
+            if let Some(work) = native.work() {
+                work.sync_types();
+            }
+        }
     }
 
     fn pack_changed(&self, id: &str) -> BoxFuture<'static, ()> {

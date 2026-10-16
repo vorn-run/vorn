@@ -11,7 +11,6 @@ use crate::state::{now_ms, time_ago, MenuKind};
 use crate::ui::widgets::{self, Pill, ToastKind};
 use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
 use crate::workflows::WfAct;
-use serde_json::Value;
 
 /// The toolbar's drag region; a double press maximizes.
 pub const TITLE_BAR: Id = Id(0x7469_746c_6562_6172);
@@ -122,62 +121,66 @@ pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
 /// The dock's popover, as the one menu open: a press outside closes it.
 pub const DOCK: Id = Id(0x646f_636b_706f_7076);
 
-/// One waiting approval gate (`useWaitingApprovals`): its run's key, the
-/// gate's key and its workflow, in the active workspace.
+/// One thing waiting for a person, as an extension's attention item says:
+/// what opens it and answers it, and what its pill says.
 struct Waiting<'a> {
-    run: String,
-    gate: String,
-    started: &'a str,
-    workflow: Option<&'a Value>,
+    open: Act,
+    approve: Act,
+    reject: Act,
+    title: &'a str,
+    icon: &'a str,
+    icon_color: Option<&'a str>,
     message: Option<&'a str>,
 }
 
+/// Everything waiting for a person in the active workspace, oldest first,
+/// from the extensions' attention items. A Workflow editor gate opens its
+/// run and is answered there, as the run pane answers it.
 fn waiting<'a>(s: &'a Screen<'_>) -> Vec<Waiting<'a>> {
-    let config = &s.store.config;
-    let ws = config
-        .pointer("/defaults/activeWorkspace")
-        .and_then(Value::as_str)
-        .unwrap_or("personal");
-    let workflows = config.get("workflows").and_then(Value::as_array);
-    let str_of = |v: &'a Value, k: &str| v.get(k).and_then(Value::as_str);
-    let mut out = Vec::new();
-    for run in s.store.runs.values() {
-        let workflow = str_of(run, "workflowId")
-            .and_then(|id| workflows?.iter().find(|w| str_of(w, "id") == Some(id)));
-        if workflow.is_some_and(|w| str_of(w, "workspaceId").unwrap_or("personal") != ws) {
-            continue;
-        }
-        let Some(states) = run.get("nodeStates").and_then(Value::as_array) else {
-            continue;
-        };
-        for ns in states {
-            if str_of(ns, "status") != Some("waiting") || str_of(ns, "waitingFor") == Some("signIn")
-            {
-                continue;
+    use crate::points::PointAct;
+    let ws = s.store.workspace();
+    s.st.points
+        .attention(ws)
+        .into_iter()
+        .map(|(p, row)| {
+            let text = |k: &str| row.str(k).filter(|v| !v.is_empty());
+            if p.extension == crate::workflows::EDITOR {
+                let run = text("run").unwrap_or_default().to_owned();
+                let node = text("node").unwrap_or_default();
+                let gate = crate::gates::key(crate::gates::Place::Pane, &run, node);
+                let workflow =
+                    text("workflow").and_then(|id| s.store.workflows.iter().find(|w| w.id == id));
+                return Waiting {
+                    open: Act::ShowRun(run),
+                    approve: Act::Gate(crate::gates::GateOp::Approve(gate.clone())),
+                    reject: Act::Gate(crate::gates::GateOp::Reject(gate)),
+                    title: workflow
+                        .map_or_else(|| text("subtitle").unwrap_or(""), |w| w.name.as_str()),
+                    icon: workflow
+                        .and_then(|w| look::icon_map(&w.icon))
+                        .unwrap_or("workflow"),
+                    icon_color: workflow.map(|w| w.icon_color.as_str()),
+                    message: text("message"),
+                };
             }
-            let node = str_of(ns, "nodeId").unwrap_or("");
-            let config_message = || {
-                let n = workflow?
-                    .get("nodes")?
-                    .as_array()?
-                    .iter()
-                    .find(|n| str_of(n, "id") == Some(node))?;
-                (str_of(n, "type") == Some("approval"))
-                    .then(|| n.pointer("/config/message").and_then(Value::as_str))
-                    .flatten()
+            let answer = |allow: bool| {
+                Act::Point(PointAct::Answer {
+                    key: p.key(),
+                    row: row.id.clone(),
+                    allow,
+                })
             };
-            let key = crate::runs::key(run);
-            out.push(Waiting {
-                gate: crate::gates::key(crate::gates::Place::Pane, &key, node),
-                run: key,
-                started: str_of(run, "startedAt").unwrap_or(""),
-                workflow,
-                message: str_of(ns, "message").or_else(config_message),
-            });
-        }
-    }
-    out.sort_by(|a, b| a.started.cmp(b.started).then_with(|| a.gate.cmp(&b.gate)));
-    out
+            Waiting {
+                open: answer(true),
+                approve: answer(true),
+                reject: answer(false),
+                title: text("title").unwrap_or(p.title.as_str()),
+                icon: "puzzle",
+                icon_color: None,
+                message: text("message").or_else(|| text("subtitle")),
+            }
+        })
+        .collect()
 }
 
 /// `SessionDock`: waiting approvals, then minimized cards; nothing when
@@ -190,24 +193,18 @@ fn dock(s: &Screen<'_>) -> Option<El> {
     use crate::components::Status;
     let mut items = Vec::new();
     for w in waiting(s) {
-        let field = |k: &str| w.workflow.and_then(|v| v.get(k)).and_then(Value::as_str);
         let ids = ApprovalIds {
-            open: s.acts.on("dock", Act::ShowRun(w.run.clone())),
-            approve: s.acts.on(
-                "dock",
-                Act::Gate(crate::gates::GateOp::Approve(w.gate.clone())),
-            ),
-            reject: s
-                .acts
-                .on("dock", Act::Gate(crate::gates::GateOp::Reject(w.gate))),
+            open: s.acts.on("dock", w.open),
+            approve: s.acts.on("dock", w.approve),
+            reject: s.acts.on("dock", w.reject),
         };
         let pill = approval_pill(
             s.ui,
             ids,
             &Approval {
-                workflow: field("name").unwrap_or(""),
-                icon: field("icon").and_then(look::icon_map).unwrap_or("workflow"),
-                icon_color: super::workflows::hex(field("iconColor")),
+                workflow: w.title,
+                icon: w.icon,
+                icon_color: super::workflows::hex(w.icon_color),
                 message: w.message,
             },
         );

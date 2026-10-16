@@ -6572,6 +6572,7 @@ dependencies = [
  "vorn-protocol",
  "vorn-spawn",
  "vorn-store",
+ "vorn-workflow-file",
 ]
 
 [[package]]
@@ -6603,6 +6604,7 @@ dependencies = [
  "vorn-spawn",
  "vorn-store",
  "vorn-vault",
+ "vorn-work",
 ]
 
 [[package]]
@@ -6856,6 +6858,7 @@ dependencies = [
  "vorn-adapters",
  "vorn-agents",
  "vorn-protocol",
+ "vorn-workflow-file",
 ]
 
 [[package]]
@@ -6968,6 +6971,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-workflow-file"
+version = "0.0.0"
+dependencies = [
+ "kdl",
+ "serde_json",
+]
+
+[[package]]
+name = "vorn-workflows"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vorn-connectors",
+ "vorn-extensions",
+ "vorn-protocol",
+ "vorn-tasks",
+ "vorn-work",
+ "vorn-workflow",
+]
+
+[[package]]
 name = "vorn-worktrees"
 version = "0.0.0"
 dependencies = [
@@ -7031,6 +7059,8 @@ dependencies = [
  "vorn-vault",
  "vorn-work",
  "vorn-workflow",
+ "vorn-workflow-file",
+ "vorn-workflows",
  "vorn-worktrees",
  "windows-sys 0.61.2",
 ]

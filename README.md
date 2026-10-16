@@ -111,6 +111,7 @@ vorn layout open dev
 vorn workflow list
 vorn workflow run "Nightly review" --input pr=42
 vorn workflow stop <run>
+vorn workflow check .vorn/workflows/*.kdl
 vorn server serve          # a server on its own, without the app
 ```
 
@@ -227,7 +228,7 @@ Manage tasks per project with a list view or a drag-and-drop kanban board. Tasks
 
 ### Workflow Automation
 
-Create multi-step workflows with a visual node editor. Chain together agent launches, script executions (Bash, Python, Node.js, PowerShell), and task queue operations. Schedule them manually, once at a specific time, or on a recurring cron. Workflows can also trigger automatically when tasks are created or change status.
+Create multi-step workflows with a visual node editor. Chain together agent launches, script executions (Bash, Python, Node.js, PowerShell), and task queue operations. Schedule them manually, once at a specific time, or on a recurring cron. Workflows can also trigger automatically when tasks are created or change status. A workflow can live as a file in its project's `.vorn/workflows/` folder, and extensions can add step types and triggers. See [docs/workflows.md](docs/workflows.md).
 
 <p align="center">
   <img src="docs/screenshots/workflows.png" alt="A pull request review workflow on the canvas" width="700" />

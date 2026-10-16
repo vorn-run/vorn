@@ -4,7 +4,8 @@
 //! agent, a terminal or a script, calling a connector, writing a task) goes
 //! through the host, which in vornd routes each call as a client's would be
 //! routed, so a session a workflow starts is started the way a person
-//! starts one.
+//! starts one; and a step an extension's node type runs by a call goes to
+//! that extension through it.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -51,14 +52,6 @@ pub struct Completion {
     pub status: String,
     pub sessions_launched: usize,
     pub source: Option<Source>,
-}
-
-/// A task a step took on or handed back, as it is now and the status it
-/// moved from, so the workflows watching for that move can start.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TaskMove {
-    pub task: Value,
-    pub from: String,
 }
 
 /// The process the engine runs in. Futures are `Send` so steps of one wave
@@ -138,16 +131,32 @@ pub trait Host: Send + Sync + 'static {
         None
     }
 
-    /// Marks a task in progress for a step's session.
-    fn take_task(
-        &self,
-        task_id: &str,
-        session_id: &str,
-        agent: &str,
-    ) -> impl Future<Output = Option<TaskMove>> + Send;
+    /// A method of the extension API, called as the extension whose node
+    /// types the engine runs in vornd: another extension's public method,
+    /// as `task.take`. The error is the message the call failed with.
+    fn api(&self, method: &str, args: Value) -> impl Future<Output = Result<Value, String>> + Send {
+        let method = method.to_owned();
+        let _ = args;
+        async move { Err(format!("this host offers no {method}")) }
+    }
 
-    /// Hands a task back to the queue, unassigned.
-    fn reopen_task(&self, task_id: &str) -> impl Future<Output = Option<TaskMove>> + Send;
+    /// Runs a step of `node_type` by a call to `provider`, the extension
+    /// that declares it: `request` is the step's node, resolved config and
+    /// context, and the answer the fields of its state.
+    fn run_node(
+        &self,
+        provider: &str,
+        node_type: &str,
+        request: Value,
+    ) -> impl Future<Output = Result<Value, String>> + Send {
+        let (provider, node_type) = (provider.to_owned(), node_type.to_owned());
+        let _ = request;
+        async move {
+            Err(format!(
+                "{provider} cannot be reached to run a {node_type} step"
+            ))
+        }
+    }
 
     /// Keeps a gate's review page for this round: the token that opens it,
     /// or why there is none.

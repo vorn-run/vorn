@@ -26,6 +26,8 @@ tokio = { version = "1", default-features = false, features = ["rt", "net", "io-
 tokio-tungstenite = "0.28"
 uuid = { version = "1", features = ["v4"] }
 vorn-protocol = { path = "../protocol" }
+# `vorn workflow check` reads a workflow file as vornd does.
+vorn-workflow-file = { path = "../workflow-file" }
 # The usage names the agents Vorn ships switched on.
 vorn-adapters = { path = "../adapters" }
 vorn-store = { path = "../store" }

@@ -90,7 +90,8 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 /// The board, the workflows, their inbox and the sign-in windows are what a
 /// connector feeds: items become tasks through `task.importItems`, polled
 /// pages go to the inbox with their cursor, and a window signed in again
-/// wakes the steps waiting on it.
+/// wakes the steps waiting on it. `workflow.fire` fires a trigger type the
+/// caller declares.
 pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
     ("sessions.get", Permission::SessionsRead),
@@ -116,6 +117,10 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("task.get", Permission::TasksRead),
     ("agents.list", Permission::SessionsRead),
     ("task.importItems", Permission::TasksWrite),
+    ("task.take", Permission::TasksWrite),
+    ("task.handBack", Permission::TasksWrite),
+    ("connection.upsertFromItem", Permission::TasksWrite),
+    ("workflow.fire", Permission::WorkflowsWrite),
     ("task.sourceLink", Permission::TasksRead),
     ("project.list", Permission::TasksRead),
     ("workflow.get", Permission::WorkflowsRead),
@@ -132,9 +137,14 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 
 /// The core methods open only to the extensions Vorn ships: they write the
 /// board, the workflows, their inbox and the sign-in windows of every
-/// connection, which no one installed extension owns.
+/// connection, which no one installed extension owns. `task.take` and
+/// `task.handBack` are Tasks' and `connection.upsertFromItem` Connectors',
+/// called by the other built-ins.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
+    "task.take",
+    "task.handBack",
+    "connection.upsertFromItem",
     "task.sourceLink",
     "workflow.get",
     "workflow.list",

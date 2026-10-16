@@ -1001,12 +1001,16 @@ pub async fn import_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     Ok(text(out))
 }
 
-/// `describe_workflow_nodes`: the reference, or the part of it for some types.
-pub fn describe_workflow_nodes(args: &Args) -> Value {
-    let reference = crate::workflow_nodes();
+/// `describe_workflow_nodes`: the reference, or the part of it for some
+/// types. vornd assembles it from the node types extensions declare.
+pub async fn describe_workflow_nodes<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
+    let reference = &match cx.call("workflow:describe", None).await {
+        Ok(r) => r,
+        Err(err) => return Ok(error_of(err)),
+    };
     let types = items(args.get("types"));
     if types.is_empty() {
-        return pretty(reference);
+        return Ok(pretty(reference));
     }
     let mut out = match reference {
         Value::Object(map) => map.clone(),
@@ -1028,7 +1032,7 @@ pub fn describe_workflow_nodes(args: &Args) -> Value {
         }
     }
     out.insert("nodeTypes".into(), Value::Object(chosen));
-    pretty(&Value::Object(out))
+    Ok(pretty(&Value::Object(out)))
 }
 
 #[cfg(test)]

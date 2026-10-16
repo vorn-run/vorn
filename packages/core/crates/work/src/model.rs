@@ -10,36 +10,35 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use vorn_protocol::{NodeExecutionState, NodeExecutionStatus, WorkflowExecution};
 
-/// What a node does.
+/// What a node does. The four the engine walks itself (where a run
+/// starts, a branch, a gate and a loop) are its own; every other kind is a
+/// step some extension's node type runs, by the type's id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeKind {
     Trigger,
-    LaunchAgent,
-    Script,
     Condition,
     Approval,
-    CreateTaskFromItem,
-    CallConnectorAction,
-    HttpRequest,
     Loop,
-    /// A kind this build does not know, which runs as an agent step: the
-    /// engine's last branch.
-    Other(String),
+    /// A step run by the node type of this id, from the registry.
+    Step(String),
 }
 
 impl NodeKind {
     pub fn parse(kind: &str) -> NodeKind {
         match kind {
             "trigger" => NodeKind::Trigger,
-            "launchAgent" => NodeKind::LaunchAgent,
-            "script" => NodeKind::Script,
             "condition" => NodeKind::Condition,
             "approval" => NodeKind::Approval,
-            "createTaskFromItem" => NodeKind::CreateTaskFromItem,
-            "callConnectorAction" => NodeKind::CallConnectorAction,
-            "httpRequest" => NodeKind::HttpRequest,
             "loop" => NodeKind::Loop,
-            other => NodeKind::Other(other.to_owned()),
+            other => NodeKind::Step(other.to_owned()),
+        }
+    }
+
+    /// The id of the node type that runs it, for a step.
+    pub fn step(&self) -> Option<&str> {
+        match self {
+            NodeKind::Step(id) => Some(id),
+            _ => None,
         }
     }
 }
@@ -393,9 +392,10 @@ mod tests {
         assert_eq!(wf.nodes.len(), 3);
         assert_eq!(wf.trigger_type(), Some("manual"));
         assert!(!wf.node("a").unwrap().stops_run_on_error());
+        assert_eq!(wf.node("x").unwrap().kind.step(), Some("teleport"));
         assert_eq!(
-            wf.node("x").unwrap().kind,
-            NodeKind::Other("teleport".into())
+            wf.node("a").unwrap().kind,
+            NodeKind::Step("launchAgent".into())
         );
         assert_eq!(wf.node("x").unwrap().slug, None);
         assert_eq!(wf.edges.len(), 1);

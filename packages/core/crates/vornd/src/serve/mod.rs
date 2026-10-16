@@ -110,20 +110,19 @@ fn owner_name() -> String {
         .unwrap_or_else(|| "owner".to_owned())
 }
 
-/// The workflows every install is given once.
+/// The workflows every install is given once: those the Workflows built-in
+/// ships as files.
 fn seed_workflows() -> Vec<vorn_store::SeedWorkflow> {
-    #[derive(serde::Deserialize)]
-    struct Seed {
-        flag: String,
-        workflow: vorn_protocol::WorkflowDefinition,
-    }
-    let seeds: Vec<Seed> = serde_json::from_str(include_str!("seed-workflows.json"))
-        .expect("the seeded workflows are workflows");
-    seeds
-        .into_iter()
-        .map(|s| vorn_store::SeedWorkflow {
-            flag: s.flag,
-            workflow: s.workflow,
+    vorn_workflows::SEEDS
+        .iter()
+        .map(|(file, flag, text)| {
+            let read = vorn_workflow_file::read(text, &Default::default())
+                .unwrap_or_else(|e| panic!("{file} does not read: {e:?}"));
+            vorn_store::SeedWorkflow {
+                flag: (*flag).to_owned(),
+                workflow: serde_json::from_value(read.workflow)
+                    .unwrap_or_else(|e| panic!("{file} is not a workflow: {e}")),
+            }
         })
         .collect()
 }

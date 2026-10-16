@@ -34,9 +34,10 @@ static TOOLS: LazyLock<Value> = LazyLock::new(|| {
         .expect("generated/tools.json is JSON")
 });
 
+// The engine's part of the reference, generated beside the engine: the format's limits the tools check by.
 static WORKFLOW_NODES: LazyLock<Value> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../generated/workflow-nodes.json"))
-        .expect("generated/workflow-nodes.json is JSON")
+    serde_json::from_str(include_str!("../../workflow/generated/reference.json"))
+        .expect("the workflow reference is JSON")
 });
 
 /// The `tools` of a `tools/list` answer, exactly as the TypeScript sends them.
@@ -49,7 +50,7 @@ pub fn tool_count() -> usize {
     TOOLS.as_array().map_or(0, Vec::len)
 }
 
-/// The reference `describe_workflow_nodes` answers with.
+/// The engine's part of the workflow reference: its limits among it.
 pub(crate) fn workflow_nodes() -> &'static Value {
     &WORKFLOW_NODES
 }

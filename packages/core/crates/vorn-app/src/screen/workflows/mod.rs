@@ -298,6 +298,43 @@ fn dot_status(run: &Value) -> &str {
     }
 }
 
+/// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
+pub fn is_off(s: &Screen<'_>) -> bool {
+    s.st.points.builtins.iter().any(|b| {
+        b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
+            && b.get("on") == Some(&Value::Bool(false))
+    })
+}
+
+/// What the view says while the Workflow editor is switched off: the
+/// workflows are kept and still run.
+pub fn off() -> El {
+    let faint = || Rgba::white(0.45);
+    div()
+        .col()
+        .grow()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .child(div().pb(12.0).child(ico("workflow", 40.0, 1.0, faint())))
+        .child(
+            div().pb(4.0).child(
+                text("The workflow editor is off", 14.0, faint())
+                    .line_height(20.0)
+                    .silent(),
+            ),
+        )
+        .child(
+            text(
+                "Your workflows are kept and still run. Turn the Workflow editor on in Settings \u{203a} Extensions.",
+                12.0,
+                faint(),
+            )
+            .line_height(16.0)
+            .silent(),
+        )
+}
+
 /// The view under the top bar: the run list and the selected run.
 pub fn landing(s: &Screen<'_>) -> El {
     let visible = s.st.wf.visible(&s.store.runs);
@@ -1204,6 +1241,11 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 "Export as file\u{2026}",
                 act(WfAct::Export(id.clone())),
             ));
+            out.push(Item::new(
+                "file-code",
+                "Save to project",
+                act(WfAct::SaveToFile(id.clone())),
+            ));
             out.push(danger(Item::new(
                 "trash-2",
                 "Delete Workflow",
@@ -1226,6 +1268,11 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                     "upload",
                     "Export as file\u{2026}",
                     act(WfAct::Export(id.clone())),
+                ));
+                out.push(Item::new(
+                    "file-code",
+                    "Save to project",
+                    act(WfAct::SaveToFile(id.clone())),
                 ));
                 out.push(
                     danger(Item::new(

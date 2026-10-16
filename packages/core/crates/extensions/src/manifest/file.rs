@@ -414,11 +414,85 @@ struct RawContributes {
     dialogs: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     views: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attention: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    nodes: Vec<RawNode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    triggers: Vec<RawTriggerType>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    workflows: Vec<RawWorkflow>,
+}
+
+/// `[[contributes.nodes]]`: a node type.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawNode {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    outputs: Vec<RawNodeOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rules: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawNodeOutput {
+    field: String,
+    #[serde(default)]
+    description: String,
+}
+
+/// `[[contributes.triggers]]`: a trigger type.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawTriggerType {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timing: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    poll: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config: Option<String>,
+}
+
+/// `[[contributes.workflows]]`: a workflow file it ships.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawWorkflow {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    file: String,
 }
 
 impl RawContributes {
     /// The template points, by place.
-    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 12] {
+    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 13] {
         use super::Place as P;
         [
             (P::Sidebar, &self.sidebar),
@@ -433,6 +507,7 @@ impl RawContributes {
             (P::Menus, &self.menus),
             (P::Dialogs, &self.dialogs),
             (P::Views, &self.views),
+            (P::Attention, &self.attention),
         ]
     }
 
@@ -451,6 +526,7 @@ impl RawContributes {
             P::Menus => &mut self.menus,
             P::Dialogs => &mut self.dialogs,
             P::Views => &mut self.views,
+            P::Attention => &mut self.attention,
             P::Panes => return None,
         })
     }
@@ -482,6 +558,10 @@ struct RawPoint {
     size: Option<[u16; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     raise: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rows: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deny: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -841,7 +921,8 @@ impl Raw {
             || self.contributes.is_some()
             || !self.mcp.is_empty()
             || self.agent.is_some();
-        if !does_something {
+        // A built-in's program is compiled into vornd: its switch alone may be what it adds.
+        if !does_something && !builtin {
             return Err(at(
                 "",
                 "declares no service, action, connector or contribution".into(),
@@ -1337,6 +1418,8 @@ impl RawContributes {
                     ("menu", &p.menu),
                     ("window", &p.window),
                     ("raise", &p.raise),
+                    ("rows", &p.rows),
+                    ("deny", &p.deny),
                 ] {
                     opt(&mut m, k, v.as_ref());
                 }
@@ -1366,12 +1449,78 @@ impl RawContributes {
                 out.insert(place.key().into(), Value::Array(list));
             }
         }
+        let mut flows: [(&str, Vec<Value>); 3] = [
+            ("nodes", Vec::new()),
+            ("triggers", Vec::new()),
+            ("workflows", Vec::new()),
+        ];
+        for (key, list) in &mut flows {
+            let raws: Vec<(String, Map<String, Value>)> = match *key {
+                "nodes" => self
+                    .nodes
+                    .iter()
+                    .map(|n| (n.id.clone(), node_json(n)))
+                    .collect(),
+                "triggers" => self
+                    .triggers
+                    .iter()
+                    .map(|t| (t.id.clone(), trigger_json(t)))
+                    .collect(),
+                _ => self
+                    .workflows
+                    .iter()
+                    .map(|w| {
+                        let mut m = Map::new();
+                        m.insert("file".into(), json!(w.file));
+                        (w.id.clone(), m)
+                    })
+                    .collect(),
+            };
+            let bases: Vec<(&Option<String>, &Option<String>, &Option<RawActivation>)> = match *key
+            {
+                "nodes" => self
+                    .nodes
+                    .iter()
+                    .map(|n| (&n.title, &n.description, &n.when))
+                    .collect(),
+                "triggers" => self
+                    .triggers
+                    .iter()
+                    .map(|t| (&t.title, &t.description, &t.when))
+                    .collect(),
+                _ => self
+                    .workflows
+                    .iter()
+                    .map(|w| (&w.title, &w.description, &w.when))
+                    .collect(),
+            };
+            for (i, ((id, extra), (title, description, when))) in raws.iter().zip(bases).enumerate()
+            {
+                let field = format!("contributes.{key}[{i}]");
+                let mut m = contribution_json(
+                    id,
+                    title.as_ref(),
+                    description.as_ref(),
+                    when.as_ref(),
+                    at,
+                    &field,
+                )?;
+                m.extend(extra.clone());
+                if let Some((sub, message)) = super::workflows::problem(key, &m) {
+                    return Err(at(&format!("{field}.{sub}"), message));
+                }
+                list.push(Value::Object(m));
+            }
+        }
         for (key, list) in [
             ("panes", panes),
             ("footers", footers),
             ("linkHandlers", links),
             ("layouts", layouts),
-        ] {
+        ]
+        .into_iter()
+        .chain(flows)
+        {
             if !list.is_empty() {
                 out.insert(key.into(), Value::Array(list));
             }
@@ -1381,6 +1530,36 @@ impl RawContributes {
         }
         Ok(Value::Object(out))
     }
+}
+
+fn node_json(n: &RawNode) -> Map<String, Value> {
+    let mut m = Map::new();
+    opt(&mut m, "icon", n.icon.as_ref());
+    opt(&mut m, "category", n.category.as_ref());
+    opt(&mut m, "config", n.config.as_ref());
+    if !n.outputs.is_empty() {
+        let outputs: Vec<Value> = n
+            .outputs
+            .iter()
+            .map(|o| json!({ "field": o.field, "description": o.description }))
+            .collect();
+        m.insert("outputs".into(), Value::Array(outputs));
+    }
+    if !n.rules.is_empty() {
+        m.insert("rules".into(), json!(n.rules));
+    }
+    m
+}
+
+fn trigger_json(t: &RawTriggerType) -> Map<String, Value> {
+    let mut m = Map::new();
+    opt(&mut m, "icon", t.icon.as_ref());
+    opt(&mut m, "timing", t.timing.as_ref());
+    if t.poll {
+        m.insert("poll".into(), json!(true));
+    }
+    opt(&mut m, "config", t.config.as_ref());
+    m
 }
 
 /// A place's table under `[contributes]`.
@@ -1572,9 +1751,59 @@ impl From<&Manifest> for Raw {
                         window: p.window.clone(),
                         size: p.size,
                         raise: p.raise.clone(),
+                        rows: p.rows.clone(),
+                        deny: p.deny.clone(),
                     }));
                 }
             }
+            let title = |b: &super::Contribution| (b.title != b.id).then(|| b.title.clone());
+            raw.nodes = c
+                .nodes()
+                .iter()
+                .map(|n| RawNode {
+                    id: n.base.id.clone(),
+                    title: title(&n.base),
+                    description: n.base.description.clone(),
+                    when: n.base.when.as_ref().map(when),
+                    icon: n.icon.clone(),
+                    category: n.category.clone(),
+                    config: n.config.clone(),
+                    outputs: n
+                        .outputs
+                        .iter()
+                        .map(|o| RawNodeOutput {
+                            field: o.field.clone(),
+                            description: o.description.clone(),
+                        })
+                        .collect(),
+                    rules: n.rules.clone(),
+                })
+                .collect();
+            raw.triggers = c
+                .triggers()
+                .iter()
+                .map(|t| RawTriggerType {
+                    id: t.base.id.clone(),
+                    title: title(&t.base),
+                    description: t.base.description.clone(),
+                    when: t.base.when.as_ref().map(when),
+                    icon: t.icon.clone(),
+                    timing: t.timing.map(|x| x.as_str().to_owned()),
+                    poll: t.poll,
+                    config: t.config.clone(),
+                })
+                .collect();
+            raw.workflows = c
+                .workflows()
+                .iter()
+                .map(|w| RawWorkflow {
+                    id: w.base.id.clone(),
+                    title: title(&w.base),
+                    description: w.base.description.clone(),
+                    when: w.base.when.as_ref().map(when),
+                    file: w.file.clone(),
+                })
+                .collect();
             raw
         });
         let uses = if m.declares.uses.is_empty() {
@@ -1894,7 +2123,7 @@ view = "views/pane.kdl"
         );
         assert_eq!(
             err("menu = \"worktree\"", "menu = \"file\""),
-            "vorn-extension.toml:26: contributes.menus[0].menu: is one of card, grid, view, worktree"
+            "vorn-extension.toml:26: contributes.menus[0].menu: is one of card, grid, terminal, view, worktree"
         );
         assert_eq!(
             err("view = \"views/checks.kdl\"", "view = \"views/../x.kdl\""),

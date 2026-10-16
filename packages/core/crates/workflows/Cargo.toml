@@ -1,0 +1,28 @@
+[package]
+name = "vorn-workflows"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The Workflows built-in for Vorn: the steps and triggers workflows are built from (agents, scripts, HTTP requests; manual runs, schedules, webhooks and restored sessions), declared on the public extension API and run by the core's engine"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+# Its manifest, and any extension's, read as the registry is filled.
+vorn-extensions = { path = "../extensions" }
+vorn-work = { path = "../work" }
+vorn-workflow = { path = "../workflow" }
+
+[dev-dependencies]
+regex = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "test-util"] }
+vorn-protocol = { path = "../protocol" }
+serde_json = { version = "1", features = ["preserve_order"] }
+# The node types Tasks and Connectors declare run in the reference cases beside the built-in's own.
+vorn-connectors = { path = "../connectors" }
+vorn-tasks = { path = "../tasks" }

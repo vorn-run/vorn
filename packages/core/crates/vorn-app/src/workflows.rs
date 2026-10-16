@@ -9,6 +9,10 @@ use serde_json::{json, Map, Value};
 use crate::graph;
 use crate::runs::{self, s};
 
+/// The Workflow editor built-in: its view, its Run workflow menu items and
+/// the gates it says are waiting are drawn here.
+pub const EDITOR: &str = "vorn.workflow-editor";
+
 /// The landing's two tabs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Tab {
@@ -1207,6 +1211,11 @@ pub enum Pick {
         connection: String,
         name: String,
     },
+    /// A step of a node type an extension declares, as its library row names it.
+    Contributed {
+        kind: String,
+        title: String,
+    },
 }
 
 impl Pick {
@@ -1233,6 +1242,7 @@ impl Pick {
             Pick::HttpProfile { connection, .. } => {
                 ("httpRequest", json!({ "profileConnectionId": connection }))
             }
+            Pick::Contributed { kind, .. } => (kind.as_str(), json!({})),
             _ => return None,
         })
     }
@@ -1268,7 +1278,9 @@ pub fn new_step(
             c["slug"] = json!(unique_slug("condition", &taken));
             c
         }
-        _ => return None,
+        "" | "trigger" => return None,
+        // A node type an extension declares: its config is the extension's to describe.
+        other => graph::contributed_node(other, &taken),
     })
 }
 
@@ -1424,7 +1436,7 @@ pub fn pick(
             agent,
         );
     }
-    insert(
+    let made = insert(
         d,
         &after,
         at.before.as_deref(),
@@ -1432,7 +1444,11 @@ pub fn pick(
         &preset,
         project,
         agent,
-    )
+    );
+    if let (Some(id), Pick::Contributed { title, .. }) = (&made, p) {
+        relabel(d, id, title);
+    }
+    made
 }
 
 /// `handleInsertNode`.
@@ -1907,6 +1923,8 @@ pub enum WfAct {
     Run(String),
     ToggleSchedule(String),
     Export(String),
+    /// Written to its project's `.vorn/workflows/` and kept there from then on.
+    SaveToFile(String),
     Import,
     Delete(String),
     /// The editor's controls.

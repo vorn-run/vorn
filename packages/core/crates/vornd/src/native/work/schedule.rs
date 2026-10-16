@@ -20,7 +20,6 @@ use std::time::Duration;
 use jiff::tz::TimeZone;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn};
-use vorn_connectors::builtin::POLL_TRIGGER;
 use vorn_extensions::polls::Polled;
 use vorn_work::receipts::{deliver_due, CATCH_UP_MS};
 use vorn_work::schedule::Schedule;
@@ -90,9 +89,10 @@ impl Work {
             if armed.as_ref().is_none_or(|(_, at)| now - at >= RELOAD_MS) {
                 let at = until;
                 let zone = zone.clone();
+                let timings = self.engine.registry().timings();
                 let read = self.db.run(move |store| {
                     let list = store.call("dbListWorkflows", json!([])).ok()?;
-                    Some(Schedule::arm(list.as_array()?, &zone, at))
+                    Some(Schedule::arm(list.as_array()?, &zone, at, &timings))
                 });
                 if let Some(Some(schedule)) = read.await {
                     armed = Some((schedule, now));
@@ -138,19 +138,20 @@ impl Work {
         let Some(workflow) = vorn_work::model::Workflow::from_json(row) else {
             return;
         };
-        if workflow.trigger_type() != Some(POLL_TRIGGER) {
+        if !self.engine.registry().fans_out(workflow.trigger_type()) {
             self.engine.run_scheduled_workflow(workflow, inputs);
             return;
         }
         let work = Arc::clone(self);
         let id = workflow.id.clone();
+        let kind = workflow.trigger_type().unwrap_or_default().to_owned();
         tokio::spawn(async move {
             let Some(native) = work.native.upgrade() else {
                 return;
             };
             let polls = Arc::clone(native.polls());
             let polled = polls
-                .run(POLL_TRIGGER, &id, POLL_LIMIT, |owner| {
+                .run(&kind, &id, POLL_LIMIT, |owner| {
                     let (native, id) = (Arc::clone(&native), id.clone());
                     async move { poll_with(&native, &owner, &id).await }
                 })

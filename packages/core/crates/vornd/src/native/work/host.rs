@@ -19,8 +19,7 @@ use tokio::sync::{broadcast, Notify};
 use tracing::{debug, warn};
 use vorn_mcp::Rpc;
 use vorn_protocol::WorkflowExecution;
-use vorn_work::js::iso_now;
-use vorn_workflow::{Completion, Host, Note, Source, TaskMove};
+use vorn_workflow::{Completion, Host, Note, Source};
 
 use super::db::Db;
 use crate::mcp::Loopback;
@@ -117,48 +116,6 @@ impl VorndHost {
         if let Err(err) = std::fs::write(self.data_dir.join(".db-signal"), now.to_string()) {
             debug!(%err, "could not signal a configuration change");
         }
-    }
-
-    /// Moves a task, as the engine's task writes do, and says where from.
-    async fn move_task(
-        &self,
-        id: &str,
-        change: impl FnOnce(&Value) -> serde_json::Map<String, Value> + Send + 'static,
-    ) -> Option<TaskMove> {
-        let id = id.to_owned();
-        let moved = self
-            .db
-            .run(move |store| {
-                let task = store
-                    .call("dbGetTask", json!([id]))
-                    .ok()
-                    .filter(|t| t.is_object())?;
-                let from = task["status"].as_str().unwrap_or("").to_owned();
-                let updates = change(&task);
-                let present: Vec<String> = updates
-                    .iter()
-                    .filter(|(_, v)| v.is_null())
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                store
-                    .call("dbUpdateTask", json!([id, updates, present]))
-                    .ok()?;
-                let after = store.call("dbGetTask", json!([id])).ok()?;
-                Some(TaskMove {
-                    task: vorn_work::js_numbers(after),
-                    from,
-                })
-            })
-            .await
-            .flatten()?;
-        if let Some(native) = self.native.upgrade() {
-            let rows = super::super::task_list::Change::Rows(vec![moved.task.clone()]);
-            super::super::task_list::told(&native, rows).await;
-            if let Some(tasks) = native.tasks().filter(|t| t.is_on()) {
-                tasks.inner().badges().await;
-            }
-        }
-        Some(moved)
     }
 }
 
@@ -274,6 +231,9 @@ impl Host for VorndHost {
 
     fn publish(&self, run: &WorkflowExecution) {
         self.broadcast("workflow:runUpdated", without_definition(run));
+        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
+            editor.run_changed(run);
+        }
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -293,32 +253,31 @@ impl Host for VorndHost {
         self.notes.subscribe()
     }
 
-    async fn take_task(&self, task_id: &str, session_id: &str, agent: &str) -> Option<TaskMove> {
-        let (session, agent) = (session_id.to_owned(), agent.to_owned());
-        self.move_task(task_id, move |_| {
-            let mut u = serde_json::Map::new();
-            u.insert("status".into(), json!("in_progress"));
-            u.insert("assignedSessionId".into(), json!(session));
-            u.insert("assignedAgent".into(), json!(agent));
-            u.insert("updatedAt".into(), json!(iso_now()));
-            u.insert("archivedAt".into(), Value::Null);
-            u
-        })
-        .await
+    /// A public method as the Workflows built-in, held to what its manifest declares.
+    async fn api(&self, method: &str, args: Value) -> Result<Value, String> {
+        use vorn_extensions::gate::{self, Caller, World};
+        gate::admit_call(&super::types::workflows_manifest(), method).map_err(|e| e.message)?;
+        let world = crate::native::extensions::world::Wired {
+            native: self.native.clone(),
+        };
+        let caller = Caller {
+            extension: vorn_workflows::ID.to_owned(),
+            project: None,
+        };
+        world
+            .call(&caller, method, args)
+            .await
+            .map_err(|e| e.message)
     }
 
-    async fn reopen_task(&self, task_id: &str) -> Option<TaskMove> {
-        self.move_task(task_id, |_| {
-            let mut u = serde_json::Map::new();
-            u.insert("status".into(), json!("todo"));
-            u.insert("updatedAt".into(), json!(iso_now()));
-            u.insert("completedAt".into(), Value::Null);
-            u.insert("archivedAt".into(), Value::Null);
-            u.insert("assignedSessionId".into(), Value::Null);
-            u.insert("assignedAgent".into(), Value::Null);
-            u
-        })
-        .await
+    async fn run_node(
+        &self,
+        provider: &str,
+        node_type: &str,
+        request: Value,
+    ) -> Result<Value, String> {
+        let native = self.native.upgrade().ok_or("vornd is stopping")?;
+        super::types::run_node(&native, provider, node_type, request).await
     }
 
     fn gate_view(
@@ -332,6 +291,14 @@ impl Host for VorndHost {
     }
 
     fn keep_gate_page(&self, run_id: &str, node_id: &str, title: &str, round: u32) {
+        // A gate's page is kept for comments by Artifacts, while it is on.
+        if !self
+            .native
+            .upgrade()
+            .is_none_or(|n| crate::native::extensions::builtin::artifacts::on(&n))
+        {
+            return;
+        }
         let file = vorn_work::gates::file(&self.data_dir, run_id, node_id, round);
         let (data_dir, run, node, title) = (
             self.data_dir.clone(),

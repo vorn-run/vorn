@@ -21,12 +21,13 @@ use vorn_work::claims::{Claim, Claims};
 use vorn_work::graph::{
     self, collapse_loop_bodies, collect_skipped_branch, dedupe_fingerprint, gate_edit_refusal,
     gate_key, is_sign_in_wait, loop_body_owners, nodes_between, run_ended_in_error,
-    seed_retry_states, webhook_trigger_from_item, worktree_mode, Graph, WorktreeMode, ABANDONED,
+    seed_retry_states, webhook_trigger_from_item, Graph, ABANDONED,
 };
 use vorn_work::js::iso_now;
 use vorn_work::model::{state, Context, NodeKind, RunExt, StateExt, Status, Workflow};
 
 use crate::host::{Completion, Host, Source};
+use crate::registry::{Registry, Resolved, Runner};
 use crate::waves::{Mode, Waves};
 
 /// A run, shared by the walk and whoever answers for it.
@@ -190,7 +191,7 @@ impl Batch {
     }
 }
 
-pub(crate) struct Inner<H> {
+pub(crate) struct Inner<H: Host> {
     pub(crate) host: H,
     saves: mpsc::UnboundedSender<Save>,
     pub(crate) active: Mutex<HashMap<String, Arc<Active>>>,
@@ -201,9 +202,10 @@ pub(crate) struct Inner<H> {
     /// Runs whose connector item a person settled, so it is not retried.
     terminal_decisions: Mutex<HashSet<String>>,
     published: Mutex<HashMap<String, (Instant, String)>>,
-    /// Restore-triggered runs, one at a time per project, in order.
-    pub(crate) restore_queues:
-        Mutex<HashMap<String, mpsc::UnboundedSender<crate::triggers::Queued>>>,
+    /// Runs started in turn, one at a time per key, in order.
+    pub(crate) turns: Mutex<HashMap<String, mpsc::UnboundedSender<crate::triggers::Queued>>>,
+    /// The node types and trigger types extensions declared.
+    pub(crate) registry: Registry<H>,
 }
 
 /// The workflow engine. Cloning shares it.
@@ -253,7 +255,8 @@ impl<H: Host> Engine<H> {
             monitors: Mutex::default(),
             terminal_decisions: Mutex::default(),
             published: Mutex::default(),
-            restore_queues: Mutex::default(),
+            turns: Mutex::default(),
+            registry: Registry::default(),
         });
         let weak = Arc::downgrade(&inner);
         tokio::spawn(async move {
@@ -277,6 +280,11 @@ impl<H: Host> Engine<H> {
 
     pub fn host(&self) -> &H {
         &self.inner.host
+    }
+
+    /// The node types and trigger types extensions declared.
+    pub fn registry(&self) -> &Registry<H> {
+        &self.inner.registry
     }
 
     /// Waits until every run handed to the writer is written.
@@ -399,8 +407,8 @@ impl<H: Host> Engine<H> {
         context: Option<Context>,
         options: Options,
     ) -> Result<Started, String> {
-        // A connector poll is the scheduler's to fan out; a click on Run asks it.
-        if workflow.trigger_type() == Some("connectorPoll")
+        // A trigger its extension fans out (a connector's poll) is the scheduler's; a click on Run asks it.
+        if self.inner.registry.fans_out(workflow.trigger_type())
             && context.as_ref().is_none_or(|c| c.connector_item.is_none())
             && options.source != Some(Source::Scheduler)
         {
@@ -903,9 +911,14 @@ impl<H: Host> Engine<H> {
                 let Some(node) = workflow.node(&s.node_id) else {
                     continue;
                 };
-                if node.kind != NodeKind::LaunchAgent
-                    || worktree_mode(&node.config) != WorktreeMode::New
-                {
+                let made =
+                    node.kind
+                        .step()
+                        .is_some_and(|kind| match self.inner.registry.resolve(kind) {
+                            Resolved::Run(_, Runner::Local(step)) => step.made_worktree(node),
+                            _ => false,
+                        });
+                if !made {
                     continue;
                 }
                 let project = s

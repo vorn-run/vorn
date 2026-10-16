@@ -23,6 +23,8 @@ use crate::ui::{Id, Ui, WindowRequest};
 #[derive(Debug)]
 pub(super) enum PointCall {
     List,
+    /// The node types and trigger types workflows can use, read with the list.
+    NodeTypes,
     Rows(String, String),
     /// A press or a choice; `holder` closes when the press asked it to.
     Called,
@@ -93,6 +95,20 @@ impl App {
                 let Some(p) = self.st.points.get(&key).cloned() else {
                     return;
                 };
+                // The Workflow editor's Run asks for a run's inputs and session here, as it always did.
+                if p.extension == crate::workflows::EDITOR && p.call.as_deref() == Some("run") {
+                    let args: Value = serde_json::from_str(&args).unwrap_or_default();
+                    let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
+                    if let Some(id) = text("id") {
+                        let source = text("sessionId");
+                        self.run(
+                            ui,
+                            crate::act::Act::RunWorkflow { id, source },
+                            Default::default(),
+                        );
+                    }
+                    return;
+                }
                 if let Some(w) = &p.window {
                     // Whichever of its extension's windows is open hides.
                     let mine = format!("{}/{}/", p.extension, kind::WINDOWS);
@@ -107,6 +123,21 @@ impl App {
                         self.close_window(&key);
                     }
                 } else if let Some(params) = points::choose_params(&p, &args) {
+                    self.call(Call::Point(PointCall::Called), "extension:call", params);
+                }
+            }
+            PointAct::Answer { key, row, allow } => {
+                let Some(p) = self.st.points.get(&key) else {
+                    return;
+                };
+                let action = if allow {
+                    p.call.clone()
+                } else {
+                    p.deny.clone()
+                };
+                if let Some(action) = action {
+                    let params =
+                        json!({ "id": p.extension, "action": action, "args": { "id": row } });
                     self.call(Call::Point(PointCall::Called), "extension:call", params);
                 }
             }
@@ -216,6 +247,16 @@ impl App {
                 // An older vornd has no contributions; ask no more.
                 Err(_) => self.st.points.listed(&[]),
             },
+            PointCall::NodeTypes => {
+                self.st.points.node_types = match answer {
+                    Ok(v) => v
+                        .get("nodes")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                };
+            }
             PointCall::Rows(ext, coll) => {
                 let rows = match &answer {
                     Ok(Value::Array(rows)) => Some(rows.as_slice()),
@@ -318,6 +359,11 @@ impl App {
                 "extension:contributions",
                 Value::Null,
             );
+            self.call(
+                Call::Point(PointCall::NodeTypes),
+                "workflow:nodeTypes",
+                Value::Null,
+            );
         }
         for (ext, coll) in self.st.points.to_ask() {
             self.call(
@@ -327,7 +373,8 @@ impl App {
             );
         }
         let palette = self.st.dialog == Some(crate::state::Dialog::Palette);
-        if !self.st.points.builtins_loaded && (self.st.settings.open || palette) {
+        let workflows = self.st.view == crate::screen::MainView::Workflows;
+        if !self.st.points.builtins_loaded && (self.st.settings.open || palette || workflows) {
             self.st.points.builtins_loaded = true;
             self.call(
                 Call::Point(PointCall::Builtins),

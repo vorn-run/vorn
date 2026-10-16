@@ -1,0 +1,55 @@
+{
+  "createTaskFromItem": {
+    "summary": "Creates a task from the connector item that started the run, or updates the one it created before.",
+    "configSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nodeType": {
+          "description": "Always createTaskFromItem",
+          "type": "string",
+          "const": "createTaskFromItem"
+        },
+        "project": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Project the task lands in, by name, or fromConnection to use the connection's execution project"
+        },
+        "initialStatus": {
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ],
+          "description": "Status of a newly created task. Re-syncing an existing one never changes its status"
+        }
+      },
+      "required": [
+        "project",
+        "initialStatus"
+      ],
+      "additionalProperties": {}
+    },
+    "outputs": [
+      {
+        "field": "output",
+        "description": "Imported or Updated, with the item id and title"
+      },
+      {
+        "field": "status",
+        "description": "success or error"
+      },
+      {
+        "field": "error",
+        "description": "Why it failed, or empty"
+      }
+    ],
+    "rules": [
+      "Needs {{connectorItem.*}}: put it after a connectorPoll trigger.",
+      "Re-syncing an item updates its title and description but never its status."
+    ]
+  }
+}

@@ -1,0 +1,322 @@
+[
+  {
+    "method": "workflow:create",
+    "params": {
+      "workflow": {
+        "id": "crud",
+        "name": "crud",
+        "icon": "Zap",
+        "iconColor": "#ffffff",
+        "enabled": true,
+        "nodes": [
+          {
+            "id": "t",
+            "type": "trigger",
+            "label": "Trigger",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "config": {
+              "triggerType": "manual"
+            }
+          },
+          {
+            "id": "a",
+            "type": "script",
+            "label": "a",
+            "slug": "a",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "config": {
+              "scriptType": "bash",
+              "scriptContent": "echo a"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "t-a",
+            "source": "t",
+            "target": "a"
+          }
+        ]
+      }
+    },
+    "answer": {
+      "id": "crud",
+      "name": "crud",
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "enabled": true,
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "a",
+          "type": "script",
+          "label": "a",
+          "slug": "a",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo a"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "t-a",
+          "source": "t",
+          "target": "a"
+        }
+      ]
+    }
+  },
+  {
+    "method": "workflow:create",
+    "params": {},
+    "answer": {
+      "error": "workflow:create needs a workflow"
+    }
+  },
+  {
+    "method": "workflow:get",
+    "params": {
+      "id": "crud"
+    },
+    "answer": {
+      "edges": [
+        {
+          "id": "t-a",
+          "source": "t",
+          "target": "a"
+        }
+      ],
+      "enabled": true,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "crud",
+      "name": "crud",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "a",
+          "type": "script",
+          "label": "a",
+          "slug": "a",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo a"
+          }
+        }
+      ],
+      "workspaceId": "personal"
+    }
+  },
+  {
+    "method": "workflow:get",
+    "params": {
+      "id": "ghost"
+    },
+    "answer": null
+  },
+  {
+    "method": "workflow:update",
+    "params": {
+      "id": "crud",
+      "updates": {
+        "name": "Renamed",
+        "staggerDelayMs": 5
+      }
+    },
+    "answer": {
+      "ok": true
+    }
+  },
+  {
+    "method": "workflow:update",
+    "params": {
+      "id": "crud",
+      "updates": {}
+    },
+    "answer": {
+      "ok": true
+    }
+  },
+  {
+    "method": "workflow:update",
+    "params": {
+      "id": "ghost",
+      "updates": {
+        "name": "x"
+      }
+    },
+    "answer": {
+      "ok": false
+    }
+  },
+  {
+    "method": "workflow:update",
+    "params": {
+      "id": "crud"
+    },
+    "answer": {
+      "error": "workflow:update needs an id and updates"
+    }
+  },
+  {
+    "method": "workflow:setEnabled",
+    "params": {
+      "id": "crud",
+      "enabled": false
+    },
+    "answer": {
+      "ok": true
+    }
+  },
+  {
+    "method": "workflow:setEnabled",
+    "params": {
+      "id": "ghost",
+      "enabled": true
+    },
+    "answer": {
+      "ok": false
+    }
+  },
+  {
+    "method": "workflow:get",
+    "params": {
+      "id": "crud"
+    },
+    "answer": {
+      "edges": [
+        {
+          "id": "t-a",
+          "source": "t",
+          "target": "a"
+        }
+      ],
+      "enabled": false,
+      "icon": "Zap",
+      "iconColor": "#ffffff",
+      "id": "crud",
+      "name": "Renamed",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "Trigger",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "a",
+          "type": "script",
+          "label": "a",
+          "slug": "a",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "echo a"
+          }
+        }
+      ],
+      "staggerDelayMs": 5,
+      "workspaceId": "personal"
+    }
+  },
+  {
+    "method": "workflow:delete",
+    "params": {
+      "id": "crud"
+    },
+    "answer": {
+      "ok": true
+    }
+  },
+  {
+    "method": "workflow:delete",
+    "params": {
+      "id": "crud"
+    },
+    "answer": {
+      "ok": false
+    }
+  },
+  {
+    "method": "workflow:delete",
+    "params": {},
+    "answer": {
+      "error": "workflow:delete needs an id"
+    }
+  },
+  {
+    "method": "workflow:run",
+    "params": {
+      "workflowId": "ghost"
+    },
+    "answer": null
+  },
+  {
+    "method": "workflow:runManual",
+    "params": {
+      "workflowId": "ghost"
+    },
+    "answer": {
+      "error": "Workflow ghost not found"
+    }
+  },
+  {
+    "method": "workflowRun:list",
+    "params": {
+      "workflowId": "ghost"
+    },
+    "answer": []
+  },
+  {
+    "method": "webhook:info",
+    "answer": {
+      "baseUrl": "http://127.0.0.1:<port>"
+    }
+  }
+]

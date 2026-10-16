@@ -16,11 +16,16 @@ pub const WORKFLOW_USAGE: &str = "Usage
   vorn workflow run <name or id> [--input key=value] [--wait] [--json]
   vorn workflow stop <run>
   vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]
+  vorn workflow check <file.kdl>...
 
 A run happens in the server, so it keeps going when nothing is watching. The
 command answers with the run rather than waiting for it to finish; with
 --wait it stays until the run ends, shows its progress to the terminal, and
 fails when the run does.
+
+check reads workflow files as Vorn does and names each problem by its file,
+line and column; with a server running it also checks that each step's type
+and each connection named is there.
 ";
 
 fn items(value: Value) -> Vec<Value> {
@@ -392,6 +397,105 @@ async fn list_runs(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> {
 }
 
 /// `vorn workflow ...`.
+/// What a server running here knows: the node types and trigger types that
+/// are on, and the connections by name. `None` when none answers.
+async fn known(ctx: &Context<'_>) -> Option<(Vec<String>, Vec<String>, Vec<(String, String)>)> {
+    let types = ctx.rpc.call("workflow:nodeTypes", None).await.ok()?;
+    let ids = |key: &str| -> Vec<String> {
+        items(types.get(key).cloned().unwrap_or(Value::Null))
+            .iter()
+            .filter_map(|t| t.get("id").and_then(Value::as_str).map(str::to_owned))
+            .collect()
+    };
+    let conns = ctx
+        .rpc
+        .call("connection:list", None)
+        .await
+        .ok()
+        .map(items)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| {
+            Some((
+                c.get("id")?.as_str()?.to_owned(),
+                c.get("name")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    Some((ids("nodes"), ids("triggers"), conns))
+}
+
+/// The kinds of step the engine runs itself, beside a trigger.
+const ENGINE_KINDS: [&str; 3] = ["condition", "approval", "loop"];
+
+/// `vorn workflow check`: each file read as Vorn reads it, each problem as `file:line:col: what`.
+async fn check(ctx: &mut Context<'_>, files: &[String]) -> ExitCode {
+    let known = known(ctx).await;
+    let mut problems = 0;
+    for file in files {
+        let text = match std::fs::read_to_string(file) {
+            Ok(t) => t,
+            Err(err) => {
+                ctx.io.write_err(&format!("{file}: {err}\n"));
+                problems += 1;
+                continue;
+            }
+        };
+        let conns = known.as_ref().map(|k| k.2.clone()).unwrap_or_default();
+        let bindings = vorn_workflow_file::Bindings {
+            connections: &conns,
+            project: None,
+        };
+        match vorn_workflow_file::read(&text, &bindings) {
+            Err(errors) => {
+                for e in errors {
+                    ctx.io.write_err(&format!("{file}:{e}\n"));
+                    problems += 1;
+                }
+            }
+            Ok(read) => {
+                if let Some((nodes, triggers, _)) = &known {
+                    for w in &read.warnings {
+                        ctx.io.write_err(&format!("{file}:{w}\n"));
+                        problems += 1;
+                    }
+                    for o in vorn_workflow_file::outline(&text) {
+                        let Some(kind) = o.kind else { continue };
+                        let ok = if o.trigger {
+                            triggers.contains(&kind)
+                        } else {
+                            ENGINE_KINDS.contains(&kind.as_str()) || nodes.contains(&kind)
+                        };
+                        if !ok {
+                            let what = if o.trigger { "trigger" } else { "step" };
+                            ctx.io.write_err(&format!(
+                                "{file}:{}:{}: no extension that is on here runs {what}s of type {kind}\n",
+                                o.at.0, o.at.1
+                            ));
+                            problems += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if known.is_none() {
+        ctx.io
+            .write_err("vorn: no server here, so step types and connections were not checked\n");
+    }
+    if problems == 0 {
+        let n = files.len();
+        ctx.io.write(&format!(
+            "{n} workflow file{} read{}\n",
+            if n == 1 { "" } else { "s" },
+            if known.is_some() { " and checked" } else { "" }
+        ));
+        ExitCode::Ok
+    } else {
+        ExitCode::Failure
+    }
+}
+
 pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
     let positionals = ctx.args.positionals.clone();
     let verb = positionals.get(1).map(String::as_str);
@@ -408,6 +512,13 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
         ctx.io.write_err(WORKFLOW_USAGE);
         return ExitCode::Usage;
     };
+    if verb == "check" {
+        let files: Vec<String> = positionals.iter().skip(2).cloned().collect();
+        if files.is_empty() {
+            return ctx.usage("workflow check needs a file", WORKFLOW_USAGE);
+        }
+        return check(ctx, &files).await;
+    }
     if !["list", "run", "runs", "stop"].contains(&verb) {
         return ctx.usage(
             &format!("unknown workflow command \"{verb}\""),

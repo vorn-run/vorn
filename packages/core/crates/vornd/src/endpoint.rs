@@ -131,6 +131,9 @@ impl Daemon {
             // The extension host's registry keeps the switch; until it starts, the file says.
             let on = switched_on(&dir.join("builtins.json"), vorn_tasks::ID, true);
             native.set_tasks(TasksBuiltin::new(native, on));
+            native.set_editor(crate::native::extensions::builtin::editor::Editor::new(
+                native,
+            ));
         }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),
@@ -152,7 +155,6 @@ impl Daemon {
         let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
         let work = Work::new(native, db, loopback);
         native.set_work(Arc::clone(&work));
-        work.follow_tasks(native.events());
         work.start();
     }
 

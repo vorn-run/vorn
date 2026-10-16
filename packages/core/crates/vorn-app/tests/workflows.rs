@@ -374,7 +374,12 @@ fn the_landing_answers_a_gate_and_the_prompt_asks_for_inputs() {
     );
     assert_eq!(
         app.menu_labels(&shot.ui),
-        ["Edit Workflow", "Export as file\u{2026}", "Delete Workflow"]
+        [
+            "Edit Workflow",
+            "Export as file\u{2026}",
+            "Save to project",
+            "Delete Workflow"
+        ]
     );
     shot.save(&mut app, "w-side-menu");
     shot.send(&mut app, key("Escape", 0, None));

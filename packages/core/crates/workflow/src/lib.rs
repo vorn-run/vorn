@@ -2,14 +2,18 @@
 //! [`Host`], in waves, with conditions, loops, approval gates that can send
 //! work back, sign-in waits, retries, partial runs and stops.
 //!
-//! The TypeScript engine that ran workflows before is the reference
-//! (`tests/fixtures/js-reference/workflow-engine.json`): each case's runs,
-//! the calls they made and the answers given are what that engine produced,
-//! and `tests/reference.rs` replays every case here. What decides rather
-//! than does lives in `vorn-work`; this crate waits, times and runs.
+//! The engine knows four kinds of node: where a run starts, a branch, a
+//! gate and a loop. Every other step is run by a node type an extension
+//! declares, and every trigger is fired by a trigger type one declares, both
+//! kept in the [`Registry`]. What decides rather than does lives in
+//! `vorn-work`; this crate waits, times and runs. The TypeScript engine that
+//! ran workflows before is the reference, replayed with Vorn's own node
+//! types by the Workflows built-in's tests.
 
 mod engine;
 mod host;
+pub mod registry;
+mod step;
 mod steps;
 mod triggers;
 mod waves;
@@ -18,4 +22,7 @@ pub use engine::{
     same_token, workflows_of, Answer, Decision, Engine, GateComment, Options, Run, Started,
     LEASE_RENEW_INTERVAL, RESTORED_POLL_INTERVAL,
 };
-pub use host::{Completion, Host, Note, Source, TaskMove};
+pub use host::{Completion, Host, Note, Source};
+pub use registry::{NodeType, Registry, Resolved, Runner, TriggerType};
+pub use step::{Step, StepCx};
+pub use waves::BoxFuture;

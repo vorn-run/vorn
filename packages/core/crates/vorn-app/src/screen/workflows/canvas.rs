@@ -7,15 +7,15 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::act;
+use vorn_components::graph as kit;
+
 use crate::app::canvas::{card_id, mini_id, pane_id, panel_width, port_id};
-use crate::canvas::{self, Card, Element, Elements, Viewport, LOOP_HEADER, PLUS};
+use crate::canvas::{self, Card, Element, Elements, LOOP_HEADER};
 use crate::look;
 use crate::runs::{self, s as sv};
 use crate::screen::dashed;
 use crate::screen::{c, ico, white, Screen};
-use crate::ui::{
-    div, shape, text, tooltip, tooltip_at, Action, Cursor, El, Id, Place, Rgba, Role, Sense,
-};
+use crate::ui::{div, text, Action, El, Id, Rgba, Role, Sense};
 use crate::workflows::{self as wf, Anchor, Draft, Gesture, Panel, WfAct};
 
 fn ink(a: f32) -> Rgba {
@@ -92,21 +92,31 @@ pub fn canvas(s: &Screen<'_>, d: &Draft) -> El {
         }
     }
     let status = live_status(s, d);
-    let z = f(view.zoom);
-    let center = (w / 2.0, h / 2.0);
-    let offset = (
-        f(view.x) - center.0 * (1.0 - z),
-        f(view.y) - center.1 * (1.0 - z),
-    );
-    let mut world = div().absolute(0.0, 0.0).size(w, h).transform(z, offset);
-    for e in &els.edges {
-        world = world.child_if(edge_line(&els, e));
+    // Only what the pane shows is drawn; the margin keeps hover tools and ports.
+    let (x0, y0, x1, y1) = kit::visible(view, (w, h), 96.0);
+    let shown = |l: f64, t: f64, r: f64, b: f64| r >= x0 && l <= x1 && b >= y0 && t <= y1;
+    let in_view = |e: &canvas::Element| shown(e.x, e.y, e.x + e.w, e.y + e.h);
+    let by_id: HashMap<&str, &canvas::Element> =
+        els.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let edge_in_view =
+        |e: &canvas::Edge| match (by_id.get(e.source.as_str()), by_id.get(e.target.as_str())) {
+            (Some(a), Some(b)) => shown(
+                a.x.min(b.x),
+                a.y.min(b.y),
+                (a.x + a.w).max(b.x + b.w),
+                (a.y + a.h).max(b.y + b.h),
+            ),
+            _ => true,
+        };
+    let mut world = Vec::new();
+    for e in els.edges.iter().filter(|e| edge_in_view(e)) {
+        world.extend(edge_line(&els, e));
     }
-    for e in &els.edges {
-        world = world.child_if(edge_pill(s, &els, e));
+    for e in els.edges.iter().filter(|e| edge_in_view(e)) {
+        world.extend(edge_pill(s, &els, e));
     }
-    for e in &els.nodes {
-        world = world.child(element(s, d, &els, e, &status));
+    for e in els.nodes.iter().filter(|e| in_view(e)) {
+        world.push(element(s, d, &els, e, &status));
     }
     if let Some(Gesture::Connect {
         source,
@@ -120,82 +130,24 @@ pub fn canvas(s: &Screen<'_>, d: &Draft) -> El {
             } else {
                 (src.x + src.w / 2.0, src.y + src.h)
             };
-            world = world.child_if(line(from, *to, None));
+            world.extend(kit::edge(from, *to));
         }
     }
     s.acts.bind(pane_id(), act(WfAct::Settings));
-    div()
-        .id(pane_id())
-        .on(Action::Click)
-        .sense(Sense::MOVE | Sense::WHEEL)
-        .grow()
-        .min_w0()
-        .min_h(0.0)
-        .h_full()
-        .clip()
-        .bg(c(look::SURFACE_BASE))
-        .role(Role::Group, "Workflow canvas")
-        .child(dots(view, (w, h)))
-        .child(world)
-        .child(controls(s, h))
-        .child(minimap(s, &els, view, (w, h)))
-}
-
-/// `Background` with dots: 20 apart at 100%, one pixel, white at 5%.
-fn dots(v: Viewport, (w, h): (f32, f32)) -> El {
-    let gap = 20.0 * v.zoom;
-    let mut layer = div().absolute(0.0, 0.0).size(w, h);
-    if gap < 8.0 {
-        return layer;
-    }
-    let size = f((1.0 * v.zoom).max(1.0));
-    let x0 = v.x.rem_euclid(gap);
-    let y0 = v.y.rem_euclid(gap);
-    let mut y = y0;
-    while y < f64::from(h) {
-        let mut x = x0;
-        while x < f64::from(w) {
-            layer = layer.child(
-                div()
-                    .absolute(f(x) - size / 2.0, f(y) - size / 2.0)
-                    .size(size, size)
-                    .rounded(size / 2.0)
-                    .bg(white(0.037)),
-            );
-            x += gap;
-        }
-        y += gap;
-    }
-    layer
-}
-
-/// An edge's line from `from` to `to`, as `stepEdgePath` draws it.
-fn line(from: (f64, f64), to: (f64, f64), _label: Option<()>) -> Option<El> {
-    let (pts, _) = canvas::edge_curve(from, to);
-    let pad = 2.0;
-    let x0 = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min) - pad;
-    let y0 = pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min) - pad;
-    let x1 = pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max) + pad;
-    let y1 = pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max) + pad;
-    let (bw, bh) = (x1 - x0, y1 - y0);
-    if bw <= 0.0 || bh <= 0.0 {
-        return None;
-    }
-    let p = |i: usize| format!("{:.2} {:.2}", pts[i].0 - x0, pts[i].1 - y0);
-    let d = if pts[1] == pts[0] && pts[2] == pts[3] {
-        format!("M {} L {}", p(0), p(3))
-    } else {
-        format!("M {} C {}, {}, {}", p(0), p(1), p(2), p(3))
-    };
-    let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{bw:.2}\" height=\"{bh:.2}\" viewBox=\"0 0 {bw:.2} {bh:.2}\"><path d=\"{d}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.5\"/></svg>"
-    );
-    Some(shape(svg, f(bw), f(bh), white(0.16)).absolute(f(x0), f(y0)))
+    let m = canvas::minimap(&els, view, (f64::from(w), f64::from(h)));
+    kit::surface(
+        pane_id(),
+        (w, h),
+        view,
+        world,
+        vec![controls(s, h), kit::minimap_view(mini_id(), &m, h)],
+    )
+    .role(Role::Group, "Workflow canvas")
 }
 
 fn edge_line(els: &Elements, e: &canvas::Edge) -> Option<El> {
     let (from, to) = els.ends(e)?;
-    line(from, to, None)
+    kit::edge(from, to)
 }
 
 /// The edge's anchor in the library, when the open library points at it.
@@ -207,7 +159,7 @@ fn anchored(s: &Screen<'_>, data: &canvas::EdgeData) -> bool {
 /// The branch pill and the + an edge shows on hover, centred on it.
 fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
     let (from, to) = els.ends(e)?;
-    let (_, mid) = canvas::edge_curve(from, to);
+    let (_, mid) = kit::edge_curve(from, to);
     let hit = Id::new("wf-edge").child(&e.id);
     let insertable = e.data.is_some();
     let plus_at = e.data.as_ref().map(|data| Anchor {
@@ -224,20 +176,7 @@ fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
     let hovered = s.ui.hovered(hit) || plus_id.is_some_and(|p| s.ui.hovered(p));
     let mut stack = div().col().items_center().gap(4.0);
     if let Some(l) = e.label {
-        stack = stack.child(
-            div()
-                .px(10.0)
-                .py(2.0)
-                .rounded(10.0)
-                .border(1.0, white(0.08))
-                .bg(c(look::SURFACE_BASE))
-                .child(
-                    text(l, 10.0, secondary())
-                        .weight(600)
-                        .line_height(15.0)
-                        .silent(),
-                ),
-        );
+        stack = stack.child(kit::edge_label(l));
     }
     if insertable && (hovered || on) {
         if let Some(a) = plus_at {
@@ -245,7 +184,11 @@ fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
         }
     }
     let (sw, sh) = (
-        if e.label.is_some() { 60.0 } else { PLUS as f32 },
+        if e.label.is_some() {
+            60.0
+        } else {
+            kit::PLUS as f32
+        },
         f32::from(u8::from(e.label.is_some())) * 23.0
             + if insertable && (hovered || on) {
                 26.0
@@ -275,26 +218,7 @@ fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
 /// `ConnectorButton`: the round + that opens the library at `at`.
 fn plus(s: &Screen<'_>, at: Anchor, active: bool) -> El {
     let id = s.acts.on("wf-plus", act(WfAct::Library(at)));
-    let hot = s.ui.hover(id);
-    let (fg, bg, border) = if active {
-        (c(look::WHITE), white(0.08), white(0.40))
-    } else {
-        (
-            c(look::GRAY_500).mix(c(look::WHITE), hot),
-            c(look::SURFACE_SUNKEN),
-            white(0.10).mix(white(0.20), hot),
-        )
-    };
-    div()
-        .id(id)
-        .on(Action::Click)
-        .size(PLUS as f32, PLUS as f32)
-        .rounded(11.0)
-        .center()
-        .bg(bg)
-        .border(1.0, border)
-        .role(Role::Button, "Add a step")
-        .child(ico("plus", 13.0, 2.5, fg))
+    kit::plus(id, "Add a step", active, s.ui.hover(id))
 }
 
 fn element(
@@ -368,36 +292,15 @@ fn add_trigger(s: &Screen<'_>) -> El {
         .child(text("Add a trigger", 13.0, fg).line_height(19.5).silent())
 }
 
-/// `HANDLE_CLASS`: a port, 7 px, ringed.
+/// An input port, as the kit draws one.
 fn handle(x: f32, y: f32) -> El {
-    div()
-        .absolute(x - 3.5, y - 3.5)
-        .size(7.0, 7.0)
-        .rounded(3.5)
-        .bg(c(look::SURFACE_BASE))
-        .border(1.0, white(0.35))
+    kit::handle(x, y)
 }
 
 /// An output port that a connection is drawn from.
 fn out_port(s: &Screen<'_>, node: &str, body: bool, x: f32, y: f32) -> El {
     let id = port_id(node, body);
-    let hot = s.ui.hover(id);
-    div()
-        .id(id)
-        .sense(Sense::MOVE | Sense::HOVER)
-        .cursor(Cursor::Pointer)
-        .absolute(x - 7.5, y - 7.5)
-        .size(15.0, 15.0)
-        .hit_slop(4.0, 4.0)
-        .center()
-        .role(Role::Button, "Connect")
-        .child(
-            div()
-                .size(7.0, 7.0)
-                .rounded(3.5)
-                .bg(c(look::SURFACE_BASE))
-                .border(1.0, white(0.35).mix(white(0.7), hot)),
-        )
+    kit::port(id, s.ui.hover(id), x, y)
 }
 
 fn status_dot_color(st: &str) -> Option<Rgba> {
@@ -409,6 +312,52 @@ fn status_dot_color(st: &str) -> Option<Rgba> {
         let (rgb, a) = runs::dot(st);
         Rgba::hexa(rgb, a)
     })
+}
+
+/// What a step's card says: its glyph, label and kind, and the start of what it runs or says.
+fn card_content(s: &Screen<'_>, n: &Value) -> El {
+    let label = sv(n, "label").unwrap_or("");
+    let kind = sv(n, "type").unwrap_or("");
+    let mut body = div().col().child(
+        div()
+            .row()
+            .items_center()
+            .gap(12.0)
+            .child(super::node_glyph(s, n, 18.0))
+            .child(
+                div()
+                    .col()
+                    .grow()
+                    .min_w0()
+                    .child(
+                        text(label, 13.0, c(look::WHITE))
+                            .weight(500)
+                            .line_height(19.5)
+                            .truncate()
+                            .silent(),
+                    )
+                    .child(
+                        text(wf::subtitle(n), 11.0, c(look::GRAY_500))
+                            .line_height(16.5)
+                            .truncate()
+                            .silent(),
+                    ),
+            ),
+    );
+    if let Some(foot) = wf::footer(n) {
+        let mono = matches!(
+            kind,
+            "script" | "condition" | "httpRequest" | "callConnectorAction"
+        );
+        let mut t = text(foot, 11.0, c(look::GRAY_600))
+            .line_height(16.5)
+            .truncate();
+        if mono {
+            t = t.mono();
+        }
+        body = body.child(div().mt(8.0).pt(8.0).border_top(1.0, white(0.06)).child(t));
+    }
+    body
 }
 
 /// `StepNode`: the card (`NodeShell`) with its ports and hover toolbar.
@@ -432,67 +381,15 @@ fn step(
         Id::new("wf-card-delete").child(id),
     ];
     let hovering = s.ui.hovered(cid) || tools.iter().any(|t| s.ui.hovered(*t));
-    let border = if selected {
-        white(0.40)
-    } else if status == Some("error") {
-        Rgba::hexa(look::DANGER, 0.6)
-    } else {
-        white(0.08)
-    };
     let draggable = e.draggable();
-    let mut card = div()
-        .id(cid)
-        .on(Action::Click)
-        .col()
-        .w(280.0)
-        .px(12.0)
-        .py(10.0)
-        .rounded(6.0)
-        .border(1.0, border)
-        .bg(c(look::SURFACE_SUNKEN).mix(white(0.02), if s.ui.hovered(cid) { 1.0 } else { 0.0 }))
-        .role(Role::Button, label)
-        .selected(selected)
-        .child(
-            div()
-                .row()
-                .items_center()
-                .gap(12.0)
-                .child(super::node_glyph(s, n, 18.0))
-                .child(
-                    div()
-                        .col()
-                        .grow()
-                        .min_w0()
-                        .child(
-                            text(label, 13.0, c(look::WHITE))
-                                .weight(500)
-                                .line_height(19.5)
-                                .truncate()
-                                .silent(),
-                        )
-                        .child(
-                            text(wf::subtitle(n), 11.0, c(look::GRAY_500))
-                                .line_height(16.5)
-                                .truncate()
-                                .silent(),
-                        ),
-                ),
-        );
+    let look = kit::CardLook {
+        selected,
+        failed: status == Some("error"),
+        hover: if s.ui.hovered(cid) { 1.0 } else { 0.0 },
+    };
+    let mut card = kit::card(cid, label, look, card_content(s, n));
     if draggable {
         card = card.sense(Sense::MOVE);
-    }
-    if let Some(foot) = wf::footer(n) {
-        let mono = matches!(
-            kind,
-            "script" | "condition" | "httpRequest" | "callConnectorAction"
-        );
-        let mut t = text(foot, 11.0, c(look::GRAY_600))
-            .line_height(16.5)
-            .truncate();
-        if mono {
-            t = t.mono();
-        }
-        card = card.child(div().mt(8.0).pt(8.0).border_top(1.0, white(0.06)).child(t));
     }
     if status == Some("running") {
         card = card.child(
@@ -540,22 +437,7 @@ fn hover_tools(
     let replaceable = crate::graph::replaceable(kind);
     let button = |bid: Id, a: WfAct, icon: &str, label: &str| {
         s.acts.bind(bid, act(a));
-        let hv = s.ui.hover(bid);
-        let b = div()
-            .id(bid)
-            .on(Action::Click)
-            .p(6.0)
-            .rounded(6.0)
-            .bg(c(look::SURFACE_OVERLAY))
-            .border(1.0, white(0.12).mix(white(0.20), hv))
-            .role(Role::Button, label)
-            .child(ico(
-                icon,
-                12.0,
-                2.0,
-                c(look::GRAY_400).mix(c(look::WHITE), hv),
-            ));
-        tooltip_at(s.ui, b, bid, label, None, Place::Right)
+        kit::side_button(s.ui, bid, icon, label, s.ui.hover(bid))
     };
     let mut col = div().col().gap(4.0);
     let mut count = 0.0;
@@ -780,81 +662,25 @@ fn loop_frame(
     wrap
 }
 
-/// React Flow's `Controls`: zoom in, zoom out, fit, tidy up.
+/// React Flow's `Controls`: zoom in, zoom out, fit, tidy up, on the kit's strip.
 fn controls(s: &Screen<'_>, h: f32) -> El {
-    let button = |a: WfAct, icon: &str, label: &str, last: bool| {
+    let control = |a: WfAct, icon: &'static str, label: &'static str| {
         let id = s.acts.on("wf-controls", act(a));
-        let hot = s.ui.hover(id);
-        let mut b = div()
-            .id(id)
-            .on(Action::Click)
-            .size(26.0, 26.0)
-            .center()
-            .bg(white(0.0).mix(white(0.06), hot))
-            .role(Role::Button, label)
-            .child(if matches!(icon, "plus" | "minus") {
-                // React Flow's own zoom marks: larger and near white.
-                ico(icon, 14.0, 2.75, c(look::GRAY_200).mix(c(look::WHITE), hot))
-            } else {
-                ico(icon, 12.0, 2.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
-            });
-        if !last {
-            b = b.border_bottom(1.0, white(0.08));
+        kit::Control {
+            id,
+            icon,
+            label,
+            hot: s.ui.hover(id),
         }
-        tooltip(s.ui, b, id, label, None)
     };
-    div()
-        .absolute(15.0, h - 15.0 - (4.0 * 26.0 + 3.0 + 2.0))
-        .col()
-        .rounded(6.0)
-        .border(1.0, white(0.12))
-        .bg(c(look::SURFACE_OVERLAY))
-        .clip()
-        .role(Role::Toolbar, "Canvas controls")
-        .child(button(WfAct::ZoomIn, "plus", "Zoom in", false))
-        .child(button(WfAct::ZoomOut, "minus", "Zoom out", false))
-        .child(button(WfAct::Fit, "maximize", "Fit the workflow", false))
-        .child(button(
-            WfAct::Tidy,
-            "align-vertical-space-around",
-            "Tidy up",
-            true,
-        ))
-}
-
-/// `MiniMap`: every element and the visible area, 96×64, draggable.
-fn minimap(_s: &Screen<'_>, els: &Elements, v: Viewport, (w, h): (f32, f32)) -> El {
-    let m = canvas::minimap(els, v, (f64::from(w), f64::from(h)));
-    let (mw, mh) = (f(canvas::MINI.0), f(canvas::MINI.1));
-    let rects: String = m
-        .nodes
-        .iter()
-        .map(|r| {
-            format!(
-                "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"1\"/>",
-                r.0, r.1, r.2, r.3
-            )
-        })
-        .collect();
-    let nodes = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{mw}\" height=\"{mh}\" viewBox=\"0 0 {mw} {mh}\" fill=\"#ffffff\">{rects}</svg>"
-    );
-    let vr = m.view;
-    let mask = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{mw}\" height=\"{mh}\" viewBox=\"0 0 {mw} {mh}\"><path fill-rule=\"evenodd\" fill=\"#ffffff\" d=\"M0 0 H{mw} V{mh} H0 Z M{:.2} {:.2} h{:.2} v{:.2} h{:.2} Z\"/></svg>",
-        vr.0, vr.1, vr.2, vr.3, -vr.2
-    );
-    div()
-        .id(mini_id())
-        .sense(Sense::MOVE)
-        .absolute_right(15.0, h - mh - 15.0 - 2.0)
-        .size(mw + 2.0, mh + 2.0)
-        .p(1.0)
-        .rounded(4.0)
-        .border(1.0, white(0.12))
-        .bg(c(look::SURFACE_PANEL))
-        .clip()
-        .role(Role::Image, "Mini map")
-        .child(shape(nodes, mw, mh, white(0.25)).absolute(1.0, 1.0))
-        .child(shape(mask, mw, mh, Rgba::hexa(0x000000, 0.55)).absolute(1.0, 1.0))
+    kit::controls(
+        s.ui,
+        &[
+            control(WfAct::ZoomIn, "plus", "Zoom in"),
+            control(WfAct::ZoomOut, "minus", "Zoom out"),
+            control(WfAct::Fit, "maximize", "Fit the workflow"),
+            control(WfAct::Tidy, "align-vertical-space-around", "Tidy up"),
+        ],
+        h,
+    )
 }

@@ -11,6 +11,7 @@ pub mod board;
 pub mod card;
 pub mod dock;
 pub mod glyph;
+pub mod graph;
 pub mod sidebar;
 pub mod status;
 pub mod template;

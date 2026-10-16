@@ -22,6 +22,8 @@ vorn-mcp = { path = "../mcp" }
 # Blocking HTTP over rustls with ring, so nothing needs a C toolchain to build.
 vorn-agents = { path = "../agents" }
 vorn-store = { path = "../store" }
+# JavaScript's string and JSON forms, as the step it runs wrote its outputs in them.
+vorn-work = { path = "../work" }
 url = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 serde_json = { version = "1", features = ["preserve_order"] }

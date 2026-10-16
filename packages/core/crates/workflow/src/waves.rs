@@ -19,7 +19,8 @@ use vorn_work::model::{state, Context, Edge, Node, NodeKind, RunExt, StateExt, S
 use crate::engine::{lock, Active, Engine, Run};
 use crate::host::Host;
 
-pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+/// A step's future, sent between workers.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The steps one walk schedules.
 pub(crate) struct Waves<'a> {

@@ -41,6 +41,9 @@ pub const ID: &str = "vorn.connectors";
 /// Its manifest: what it declares it uses and the MCP tools it adds.
 pub const MANIFEST: &str = include_str!("../vorn-extension.toml");
 
+/// What `describe_workflow_nodes` tells of the node types it declares, by id.
+pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
+
 /// The trigger type whose polls it answers.
 pub const POLL_TRIGGER: &str = "connectorPoll";
 
