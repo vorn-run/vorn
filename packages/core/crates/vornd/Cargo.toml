@@ -43,6 +43,8 @@ vorn-agents = { path = "../agents" }
 vorn-adapters = { path = "../adapters" }
 vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
+# Checks the element trees extensions answer ui.render with.
+vorn-tree = { path = "../tree" }
 vorn-layout = { path = "../layout" }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }

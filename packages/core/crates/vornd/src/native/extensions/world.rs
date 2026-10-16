@@ -127,7 +127,7 @@ async fn worktrees(
                 .collect();
             out.push(json!({
                 "projectPath": p["projectPath"], "projectName": p["projectName"],
-                "path": e["path"], "name": e["name"], "branch": e["branch"],
+                "base": p["defaultBranch"], "path": e["path"], "name": e["name"], "branch": e["branch"],
                 "main": e["isMain"], "orphan": e["kind"] == "orphan-dir",
                 "dirty": e["isDirty"], "merged": e["isMerged"],
                 "sizeBytes": e["sizeBytes"], "artifactBytes": e["artifactBytes"],

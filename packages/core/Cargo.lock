@@ -7208,6 +7208,7 @@ dependencies = [
  "vorn-store",
  "vorn-tasks",
  "vorn-term-proto",
+ "vorn-tree",
  "vorn-vault",
  "vorn-work",
  "vorn-workflow",
