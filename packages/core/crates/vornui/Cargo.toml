@@ -15,7 +15,7 @@ cosmic-text = { version = "0.19", default-features = false, features = ["std", "
 # std's clock on a desktop; the page's `performance.now()` in a browser.
 web-time = "1"
 taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
-etagere = "0.2"
+etagere = "0.3"
 resvg = { version = "0.48", default-features = false }
 png = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
