@@ -94,6 +94,8 @@ pub struct Ui {
     pub(crate) wake: Cell<Option<Instant>>,
     /// Set on a cells surface: layout is in cells and frames are recorded here.
     pub(crate) cells: Option<PaintList>,
+    /// Set on a native surface: each layout records its semantic tree here.
+    pub(crate) native: Option<crate::native::Node>,
 }
 
 enum Measure<'a> {
@@ -223,6 +225,7 @@ impl Ui {
             anon: 0,
             wake: Cell::new(None),
             cells: None,
+            native: None,
         }
     }
 
@@ -358,6 +361,7 @@ impl Ui {
     /// its custom boxes stays under them.
     pub fn layout(&mut self, root: El, size: (f32, f32)) -> Laid {
         self.viewport = size;
+        self.record_native(&root);
         let size = if self.is_cells() {
             use cells::units::{COL, ROW};
             ((size.0 / COL).round(), (size.1 / ROW).round())

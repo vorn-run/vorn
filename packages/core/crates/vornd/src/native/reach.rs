@@ -39,6 +39,8 @@ pub struct Reach {
     trusted: RwLock<TrustedHosts>,
     /// The server's port, which the URLs a browser uses name.
     server_port: OnceLock<u16>,
+    /// The certificate's fingerprint, which the addresses are shared with.
+    fingerprint: OnceLock<String>,
 }
 
 /// Who a credential authenticates as.
@@ -63,6 +65,10 @@ fn now_iso() -> String {
 impl Reach {
     pub fn set_server_port(&self, port: u16) {
         let _ = self.server_port.set(port);
+    }
+
+    pub fn set_fingerprint(&self, fingerprint: String) {
+        let _ = self.fingerprint.set(fingerprint);
     }
 
     pub(super) fn server_port(&self) -> Option<u16> {
@@ -289,6 +295,7 @@ impl Native {
             remote,
             &tailscale_ips,
             &lan,
+            self.reach.fingerprint.get().map(String::as_str),
         ))
     }
 
@@ -428,9 +435,9 @@ impl Native {
     }
 
     /// Who `raw` authenticates as: the owner for this machine's credential,
-    /// a device token's user otherwise, whose last use is recorded. `None`
-    /// when it is refused, or the database cannot say.
-    pub fn authenticate(&self, raw: &str) -> Option<Authenticated> {
+    /// a device token's user otherwise, whose last use and `peer` are
+    /// recorded. `None` when it is refused, or the database cannot say.
+    pub fn authenticate(&self, raw: &str, peer: std::net::IpAddr) -> Option<Authenticated> {
         let db = self.db.get()?;
         let tokens = DeviceTokens::open(db).ok()??;
         let desktop = self.desktop.get().map(Vec::as_slice);
@@ -448,7 +455,11 @@ impl Native {
         if row.revoked_at.is_some() || !token::secret_matches(parsed.secret, &row.token_hash) {
             return None;
         }
-        if let Err(err) = tokens.touch(&row.id, &vorn_store::now_iso()) {
+        if let Err(err) = tokens.touch(
+            &row.id,
+            &vorn_store::now_iso(),
+            &peer.to_canonical().to_string(),
+        ) {
             debug!(%err, "could not record a device token's use");
         }
         Some(Authenticated {

@@ -1,0 +1,8 @@
+column
+  bar label="Draft notes"
+  list
+    section label="Topic *"
+      field label="Tap to write"
+    section label="Go deep"
+      toggle label="Go deep" on=false
+    text label="Fill in the starred fields to run it." style="secondary"

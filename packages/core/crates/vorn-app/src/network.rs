@@ -109,6 +109,8 @@ pub struct Reachable {
     pub port: u16,
     /// vornd listens beyond loopback.
     pub remote: bool,
+    /// The SHA-256 of the certificate the urls are served with.
+    pub fingerprint: Option<String>,
 }
 
 /// `DeviceToken`, as `token:list` lists it.
@@ -121,14 +123,20 @@ pub struct DeviceToken {
     pub last_seen_at: Option<String>,
     #[serde(default)]
     pub revoked_at: Option<String>,
+    #[serde(default)]
+    pub last_address: Option<String>,
 }
 
 impl DeviceToken {
     /// The line under the device's name.
     pub fn seen(&self) -> String {
-        match self.last_seen_at.as_deref().filter(|s| !s.is_empty()) {
-            Some(at) => format!("Last seen {}", crate::tasks::locale_string(at)),
-            None => "Never connected".to_owned(),
+        let Some(at) = self.last_seen_at.as_deref().filter(|s| !s.is_empty()) else {
+            return "Never connected".to_owned();
+        };
+        let at = crate::tasks::locale_string(at);
+        match self.last_address.as_deref().filter(|s| !s.is_empty()) {
+            Some(from) => format!("Last seen {at} from {from}"),
+            None => format!("Last seen {at}"),
         }
     }
 }
@@ -235,6 +243,14 @@ impl Network {
             .or_else(|| urls.first().map(String::as_str))
     }
 
+    /// The certificate fingerprint a phone pins, while vornd shares this machine.
+    pub fn fingerprint(&self) -> Option<&str> {
+        self.reachable
+            .as_ref()
+            .and_then(|r| r.fingerprint.as_deref())
+            .filter(|f| !f.is_empty())
+    }
+
     /// Whether the copy button for `text` says "Copied" at `now`.
     pub fn copied(&self, text: &str, now: Instant) -> bool {
         self.copied
@@ -309,9 +325,24 @@ pub fn format_remaining(ms: u64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
-/// The link the pairing code stands for: `vorn://pair?url=…&code=…`.
-pub fn pair_link(url: &str, code: &str) -> String {
-    format!("vorn://pair?url={}&code={code}", crate::runs::encode(url))
+/// The link the pairing code stands for: `vorn://pair?url=…&code=…&fp=…`,
+/// `fp` the certificate the phone is to trust.
+pub fn pair_link(url: &str, code: &str, fingerprint: Option<&str>) -> String {
+    let link = format!("vorn://pair?url={}&code={code}", crate::runs::encode(url));
+    match fingerprint {
+        Some(fp) => format!("{link}&fp={fp}"),
+        None => link,
+    }
+}
+
+/// A fingerprint in groups of four, to compare by eye or type.
+pub fn grouped(fingerprint: &str) -> String {
+    fingerprint
+        .as_bytes()
+        .chunks(4)
+        .map(String::from_utf8_lossy)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The device list's heading: "Devices", with the count when there are any.
@@ -396,9 +427,14 @@ mod tests {
     #[test]
     fn the_pair_link_encodes_the_address() {
         assert_eq!(
-            pair_link("http://100.64.0.1:3000/app/", "AB12"),
+            pair_link("http://100.64.0.1:3000/app/", "AB12", None),
             "vorn://pair?url=http%3A%2F%2F100.64.0.1%3A3000%2Fapp%2F&code=AB12"
         );
+        assert_eq!(
+            pair_link("https://10.0.0.2:3000/app/", "AB12", Some("ab12cd")),
+            "vorn://pair?url=https%3A%2F%2F10.0.0.2%3A3000%2Fapp%2F&code=AB12&fp=ab12cd"
+        );
+        assert_eq!(grouped("0123456789"), "0123 4567 89");
     }
 
     #[test]
@@ -413,6 +449,7 @@ mod tests {
             name: "Phone".into(),
             last_seen_at: None,
             revoked_at: None,
+            last_address: None,
         };
         assert_eq!(never.seen(), "Never connected");
         let seen = DeviceToken {
@@ -420,6 +457,14 @@ mod tests {
             ..never
         };
         assert_eq!(seen.seen(), "Last seen 1/1/2030, 9:00:00 AM");
+        let from = DeviceToken {
+            last_address: Some("192.168.1.7".into()),
+            ..seen
+        };
+        assert_eq!(
+            from.seen(),
+            "Last seen 1/1/2030, 9:00:00 AM from 192.168.1.7"
+        );
     }
 
     #[test]
@@ -432,11 +477,13 @@ mod tests {
                 ],
                 port: 1,
                 remote: true,
+                fingerprint: Some("ab".repeat(32)),
             }),
             ..Network::default()
         };
         assert!(n.can_scan());
         assert_eq!(n.pair_url(), Some("http://100.64.0.1:1/app/"));
+        assert_eq!(n.fingerprint(), Some("ab".repeat(32).as_str()));
         n.chosen_url = Some("http://10.0.0.2:1/app/".into());
         assert_eq!(n.pair_url(), Some("http://10.0.0.2:1/app/"));
         n.chosen_url = Some("http://gone:1/app/".into());
@@ -453,6 +500,7 @@ mod tests {
             name: id.into(),
             last_seen_at: None,
             revoked_at: revoked.then(|| "2030-01-01T00:00:00Z".into()),
+            last_address: None,
         };
         let n = Network {
             tokens: Some(vec![t("a", false), t("b", true), t("c", false)]),

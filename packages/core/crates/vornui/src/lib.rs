@@ -18,6 +18,8 @@ pub mod cells;
 mod cpu;
 pub mod edit;
 pub mod element;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod embed;
 pub mod gpu;
 mod host;
 pub mod icons;
@@ -27,6 +29,7 @@ mod interact;
 mod macos;
 pub mod menu;
 pub mod motion;
+pub mod native;
 pub mod pace;
 mod render;
 pub mod scene;

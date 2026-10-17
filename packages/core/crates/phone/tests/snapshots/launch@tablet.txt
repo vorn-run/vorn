@@ -1,0 +1,23 @@
+column
+  bar label="New session"
+  list
+    section
+      choice label="Project"
+        option label="vorn" on=true
+        option label="site" on=false
+      choice label="Agent"
+        option label="Acme Code" on=true
+          icon label="<svg>" value="agent:acme"
+        option label="Beta CLI" on=false
+          icon label="<svg>" value="agent:beta"
+        option label="Shell" on=false
+          icon value="terminal"
+    section
+      choice label="Where it works"
+        option label="Main checkout" on=true
+        option label="New worktree" on=false
+      text label="Shares the files you have open" style="secondary"
+    section label="Prompt"
+      field label="What should it work on?" style="multiline"
+    button label="Start" style="primary"
+    text label="Create a worktree to give each agent an isolated working directory" style="secondary"

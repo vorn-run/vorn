@@ -19,6 +19,7 @@ pub mod http;
 pub mod idle;
 pub mod port;
 pub mod socket;
+pub mod tls;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -83,6 +84,8 @@ pub struct Serving {
     bound: Mutex<SocketAddr>,
     stop: Notify,
     stopping: AtomicBool,
+    /// What other machines connect over; `None` refuses them all.
+    tls: Option<tls::Tls>,
 }
 
 /// The database `dir` keeps, created, migrated and seeded as the app does.
@@ -155,6 +158,16 @@ impl Serving {
         if port::remember(config.port, remembered, fell_back) && remembered != Some(addr.port()) {
             remember_port(native, addr.port()).await;
         }
+        let tls = match tls::load(held.dir()) {
+            Ok(tls) => {
+                native.set_tls_fingerprint(tls.fingerprint.clone());
+                Some(tls)
+            }
+            Err(err) => {
+                error!(%err, "no certificate, so no other machine can connect");
+                None
+            }
+        };
         let (listener, _) = watch::channel(Some(Arc::new(listener)));
         let clients = Arc::new(Clients::default());
         native.set_clients(Arc::clone(&clients));
@@ -168,6 +181,7 @@ impl Serving {
             bound: Mutex::new(addr),
             stop: Notify::new(),
             stopping: AtomicBool::new(false),
+            tls,
         }))
     }
 
@@ -179,6 +193,11 @@ impl Serving {
     /// The listeners to accept on, as they change with Network Access.
     pub fn listeners(&self) -> watch::Receiver<Option<Arc<TcpListener>>> {
         self.listener.subscribe()
+    }
+
+    /// What other machines connect over, when the certificate could be made.
+    pub fn tls(&self) -> Option<&tls::Tls> {
+        self.tls.as_ref()
     }
 
     pub fn credential(&self) -> &[u8] {

@@ -6,10 +6,16 @@
 
 use serde_json::{json, Value};
 
-/// `{urls, port, remote}`: every address a browser on another machine can
-/// use, Tailscale's first (the only encrypted one), none while the server is
-/// bound to loopback (`remote` false).
-pub fn reachable_urls(port: u16, remote: bool, tailscale_ips: &[String], lan: &[String]) -> Value {
+/// `{urls, port, remote, fingerprint}`: every address another machine can
+/// use, over TLS with the certificate `fingerprint` names, Tailscale's
+/// first; none while the server is bound to loopback (`remote` false).
+pub fn reachable_urls(
+    port: u16,
+    remote: bool,
+    tailscale_ips: &[String],
+    lan: &[String],
+    fingerprint: Option<&str>,
+) -> Value {
     if !remote {
         return json!({ "urls": [], "port": port, "remote": false });
     }
@@ -24,9 +30,9 @@ pub fn reachable_urls(port: u16, remote: bool, tailscale_ips: &[String], lan: &[
             continue;
         }
         seen.push(host);
-        urls.push(format!("http://{host}:{port}/app/"));
+        urls.push(format!("https://{host}:{port}/app/"));
     }
-    json!({ "urls": urls, "port": port, "remote": true })
+    json!({ "urls": urls, "port": port, "remote": true, "fingerprint": fingerprint })
 }
 
 #[cfg(test)]
@@ -36,7 +42,13 @@ mod tests {
     #[test]
     fn nothing_while_bound_to_loopback() {
         assert_eq!(
-            reachable_urls(3456, false, &["100.1.1.1".into()], &["10.0.0.2".into()]),
+            reachable_urls(
+                3456,
+                false,
+                &["100.1.1.1".into()],
+                &["10.0.0.2".into()],
+                Some("ab")
+            ),
             json!({ "urls": [], "port": 3456, "remote": false })
         );
     }
@@ -48,16 +60,18 @@ mod tests {
                 3456,
                 true,
                 &["100.1.1.1".into(), String::new()],
-                &["10.0.0.2".into(), "100.1.1.1".into(), "192.168.0.4".into()]
+                &["10.0.0.2".into(), "100.1.1.1".into(), "192.168.0.4".into()],
+                Some("ab")
             ),
             json!({
                 "urls": [
-                    "http://100.1.1.1:3456/app/",
-                    "http://10.0.0.2:3456/app/",
-                    "http://192.168.0.4:3456/app/"
+                    "https://100.1.1.1:3456/app/",
+                    "https://10.0.0.2:3456/app/",
+                    "https://192.168.0.4:3456/app/"
                 ],
                 "port": 3456,
-                "remote": true
+                "remote": true,
+                "fingerprint": "ab"
             })
         );
     }

@@ -1,0 +1,26 @@
+column
+  bar label="View options"
+  list
+    section label="Group by"
+      option label="Status" on=true
+      option label="Project" on=false
+      option label="Worktree" on=false
+      option label="Nothing" on=false
+    section label="Order by"
+      option label="Recent" on=true
+        text label="last output" style="secondary"
+      option label="Created" on=false
+        text label="when it started" style="secondary"
+    section label="Show"
+      option label="All" on=true
+      option label="Running" on=false
+      option label="Waiting" on=false
+      option label="Idle" on=false
+      option label="Error" on=false
+    section label="Each row shows"
+      toggle label="Status" on=true
+      toggle label="Branch" on=true
+      toggle label="Time" on=true
+      toggle label="Project" on=false
+      toggle label="Worktree" on=false
+      toggle label="Agent" on=false

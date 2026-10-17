@@ -1,0 +1,15 @@
+column
+  bar label="Edit task"
+    button label="Save" style="primary"
+  list
+    field label="Untitled" value="Fix the build"
+    prose
+      field label="Nothing written yet." value="It fails on CI." style="multiline"
+      key label="H#" value="h#"
+      key label="B" value="bold"
+      key label="I" value="italic"
+      key label="</>" value="code"
+      key label="• list" value="bullet"
+      key label="☐ task" value="checkbox"
+      key label="link" value="link"
+      key label="“" value="quote"

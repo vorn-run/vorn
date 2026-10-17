@@ -1,0 +1,23 @@
+[package]
+name = "vorn-phone"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn on a phone: the compact screens over vornd, drawn whole or read as native views, behind a C API for the iOS host"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+vornui = { path = "../vornui" }
+vorn-components = { path = "../vorn-components" }
+vorn-app = { path = "../vorn-app", default-features = false }
+vorn-protocol = { path = "../protocol" }
+serde_json = "1"
+web-time = "1"
+
+[dev-dependencies]
+serde = "1"
+vorn-view = { path = "../view", features = ["kdl"] }

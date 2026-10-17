@@ -1,0 +1,18 @@
+column
+  bar label="vorn"
+    more
+      link value="rename:s#" style="sheet"
+        icon value="pencil"
+        text label="Rename" style="body"
+      button label="Smaller text, now ## point" value="minus"
+      button label="Larger text, now ## point" value="plus"
+      button label="End session" style="danger" confirm
+  icon label="<svg>" value="agent:acme"
+  status value="waiting" style="warn"
+  section label="Permission"
+    text label="Wants to use Bash" style="title"
+    text label="rm -rf build" style="mono"
+    row
+      button label="Allow" style="primary"
+      button label="Deny" style="danger"
+  drawn value="terminal"

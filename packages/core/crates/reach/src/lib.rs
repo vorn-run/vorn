@@ -6,6 +6,7 @@
 //! - [`tailscale`]: reading Tailscale's status.
 //! - [`reachable`]: the addresses a browser on the network can use.
 //! - [`sys`]: this machine's name and addresses.
+//! - `tls`: TLS pinned to vornd's own certificate (feature `tls`).
 //!
 //! No I/O beyond asking the system for its name and addresses: the caller
 //! runs programs and reads and writes the database.
@@ -15,4 +16,6 @@ pub mod pairing;
 pub mod reachable;
 pub mod sys;
 pub mod tailscale;
+#[cfg(feature = "tls")]
+pub mod tls;
 pub mod token;

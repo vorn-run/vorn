@@ -1,4 +1,5 @@
-//! vornd as the server: what it publishes, greeting and admission, topics, unknown calls, the default-dir guard.
+//! vornd as the server: what it publishes, greeting and admission, topics,
+//! unknown calls, the default-dir guard, TLS and revoking a device.
 
 use std::io::BufRead;
 use std::path::Path;
@@ -13,6 +14,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type TlsSocket = WebSocketStream<tokio_rustls::client::TlsStream<TcpStream>>;
 
 const CREDENTIAL: &str = "serve-test-credential";
 
@@ -66,7 +68,10 @@ async fn open(port: u16, bearer: Option<&str>, query: &str) -> Socket {
 }
 
 /// The next text frame, as JSON; `None` once the socket closed, with its code.
-async fn next(ws: &mut Socket) -> Result<Value, Option<u16>> {
+async fn next<S>(ws: &mut WebSocketStream<S>) -> Result<Value, Option<u16>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     loop {
         let msg = tokio::time::timeout(Duration::from_secs(15), ws.next())
             .await
@@ -81,7 +86,10 @@ async fn next(ws: &mut Socket) -> Result<Value, Option<u16>> {
 }
 
 /// The answer to call `id`, skipping notifications.
-async fn answer(ws: &mut Socket, id: u64) -> Value {
+async fn answer<S>(ws: &mut WebSocketStream<S>, id: u64) -> Value
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     loop {
         let frame = next(ws).await.expect("still open");
         if frame["id"] == json!(id) {
@@ -90,7 +98,10 @@ async fn answer(ws: &mut Socket, id: u64) -> Value {
     }
 }
 
-async fn send(ws: &mut Socket, frame: Value) {
+async fn send<S>(ws: &mut WebSocketStream<S>, frame: Value)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     ws.send(Message::text(frame.to_string())).await.unwrap();
 }
 
@@ -252,6 +263,119 @@ async fn refuses_a_socket_that_does_not_authenticate() {
         "Authentication failed"
     );
     assert_eq!(next(&mut bad).await.unwrap_err(), Some(4002));
+}
+
+/// A socket over TLS that trusts only the certificate `pin` names.
+async fn open_pinned(port: u16, pin: &str) -> Result<TlsSocket, String> {
+    let config = vorn_reach::tls::client_config(pin).map_err(|e| e.to_string())?;
+    let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let name = tokio_rustls::rustls::pki_types::ServerName::try_from("127.0.0.1").unwrap();
+    let tls = tokio_rustls::TlsConnector::from(config)
+        .connect(name, tcp)
+        .await
+        .map_err(|e| e.to_string())?;
+    let req = format!("wss://127.0.0.1:{port}/ws")
+        .into_client_request()
+        .unwrap();
+    let (ws, _) = tokio_tungstenite::client_async(req, tls)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(ws)
+}
+
+/// The fingerprint of the certificate vornd keeps in `data`.
+fn kept_fingerprint(data: &Path) -> String {
+    vorn_reach::tls::fingerprint(&std::fs::read(data.join("tls-cert.der")).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trusts_a_client_only_with_the_pinned_certificate() {
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let served = serve(data.path(), home.path());
+    let pin = kept_fingerprint(data.path());
+
+    let mut ws = open_pinned(served.port, &pin)
+        .await
+        .expect("the right pin connects");
+    assert_eq!(next(&mut ws).await.unwrap()["method"], "server:hello");
+
+    let wrong = vorn_reach::tls::fingerprint(b"another certificate");
+    let refused = open_pinned(served.port, &wrong).await.expect_err("refused");
+    assert!(refused.contains("certificate"), "{refused}");
+
+    // The certificate is kept, so a paired phone's pin holds after a restart.
+    drop(served);
+    let again = serve(data.path(), home.path());
+    assert_eq!(kept_fingerprint(data.path()), pin);
+    assert!(open_pinned(again.port, &pin).await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_revoked_device_is_closed_out_at_once() {
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let served = serve(data.path(), home.path());
+    let pin = kept_fingerprint(data.path());
+    let mut desktop = open(served.port, Some(CREDENTIAL), "").await;
+    send(&mut desktop, json!({ "jsonrpc": "2.0", "id": 1, "method": "token:create", "params": { "name": "Phone" } })).await;
+    let minted = answer(&mut desktop, 1).await["result"].clone();
+    let token = minted["plaintext"].as_str().unwrap().to_owned();
+    let id = minted["token"]["id"].as_str().unwrap().to_owned();
+
+    let mut phone = open_pinned(served.port, &pin).await.unwrap();
+    send(&mut phone, json!({ "jsonrpc": "2.0", "id": 1, "method": "auth:authenticate", "params": { "token": token } })).await;
+    assert_eq!(answer(&mut phone, 1).await["result"], json!({ "ok": true }));
+
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "token:list" }),
+    )
+    .await;
+    let listed = answer(&mut desktop, 2).await["result"].clone();
+    assert_eq!(listed[0]["lastAddress"], "127.0.0.1", "{listed}");
+
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "token:revoke", "params": id }),
+    )
+    .await;
+    assert_eq!(answer(&mut desktop, 3).await["result"]["revoked"], true);
+    let closed = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Err(code) = next(&mut phone).await {
+                return code;
+            }
+        }
+    })
+    .await
+    .expect("closed at once");
+    assert_eq!(closed, Some(4002));
+
+    let mut again = open_pinned(served.port, &pin).await.unwrap();
+    send(&mut again, json!({ "jsonrpc": "2.0", "id": 1, "method": "auth:authenticate", "params": { "token": token } })).await;
+    assert_eq!(
+        answer(&mut again, 1).await["error"]["message"],
+        "Authentication failed"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nothing_listens_on_the_lan_while_sharing_is_off() {
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let served = serve(data.path(), home.path());
+    let mut desktop = open(served.port, Some(CREDENTIAL), "").await;
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "server:reachableUrls" }),
+    )
+    .await;
+    let reachable = answer(&mut desktop, 1).await["result"].clone();
+    assert_eq!(reachable["remote"], false, "{reachable}");
+    assert_eq!(reachable["urls"], json!([]));
+    for lan in vorn_reach::sys::lan_addresses() {
+        let ip: std::net::IpAddr = lan.parse().unwrap();
+        let refused = TcpStream::connect((ip, served.port)).await;
+        assert!(refused.is_err(), "{lan}:{} answered", served.port);
+    }
 }
 
 #[test]

@@ -1,0 +1,6 @@
+column
+  bar label="Show workflows"
+  list
+    option label="All workflows" on=true
+    option label="Manual only" on=false
+    option label="Scheduled only" on=false

@@ -1,0 +1,32 @@
+column
+  bar label="Fix the build"
+    more
+      link value="task-edit:t#" style="sheet"
+        icon value="pencil"
+        text label="Edit" style="body"
+      button label="Delete this task" value="trash-#" style="danger" confirm
+  list
+    section
+      text label="Fix the build" style="title"
+      text label="VOR-T#" style="secondary"
+      choice label="Status"
+        option label="Todo" on=true
+        option label="In Progress" on=false
+        option label="In Review" on=false
+        option label="Done" on=false
+        option label="Cancelled" on=false
+    section label="Details"
+      row
+        text label="Project" style="body"
+        icon value="folder"
+        text label="vorn" style="secondary"
+      row
+        text label="Agent" style="body"
+        text label="Not set" style="secondary"
+      row
+        text label="Branch" style="body"
+        text label="feature/my-task" style="secondary"
+    section label="Description"
+      text label="It fails on CI." style="markdown"
+    section label="Runs"
+      text label="Loading runs." style="secondary"

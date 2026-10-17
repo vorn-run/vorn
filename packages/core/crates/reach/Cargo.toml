@@ -7,8 +7,17 @@ license = "MIT"
 publish = false
 description = "Who may reach a Vorn server and how: Origin checks, device tokens, pairing a phone, Tailscale status and the addresses a browser can use"
 
+[features]
+# TLS pinned to one certificate: vornd's listener and the phone's sockets.
+tls = ["dep:rustls"]
+# Making vornd's certificate, which only vornd does.
+mint = ["tls", "dep:rcgen"]
+
 [dependencies]
 data-encoding = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
+# Makes the self-signed certificate vornd presents; rustls cannot make one.
+rcgen = { version = "0.14", default-features = false, features = ["ring"], optional = true }
 getrandom = "0.4"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

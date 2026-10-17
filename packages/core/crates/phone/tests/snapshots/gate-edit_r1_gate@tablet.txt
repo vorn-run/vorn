@@ -1,0 +1,6 @@
+column
+  bar label="Edit the text"
+    button label="Save" style="primary"
+  list
+    field label="The text to approve" value="Draft text" style="multiline"
+    text label="Approving sends this text in place of the original." style="secondary"

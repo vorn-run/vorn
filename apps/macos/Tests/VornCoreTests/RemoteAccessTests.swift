@@ -36,6 +36,9 @@ struct RemoteAccessTests {
     @Test func pairingLinkEncodesTheUrlAsEncodeURIComponent() {
         #expect(RemoteAccess.pairingLink(url: "http://100.101.7.42:61601/app/", code: "K7Q-4MX")
             == "vorn://pair?url=http%3A%2F%2F100.101.7.42%3A61601%2Fapp%2F&code=K7Q-4MX")
+        #expect(RemoteAccess.pairingLink(url: "https://10.0.0.2:1/app/", code: "K7Q-4MX", fingerprint: "ab12")
+            == "vorn://pair?url=https%3A%2F%2F10.0.0.2%3A1%2Fapp%2F&code=K7Q-4MX&fp=ab12")
+        #expect(RemoteAccess.grouped("0123456789") == "0123 4567 89")
         #expect(RemoteAccess.encodeURIComponent("a b&c=d/é!~*'()") == "a%20b%26c%3Dd%2F%C3%A9!~*'()")
     }
 
@@ -80,6 +83,9 @@ struct RemoteAccessTests {
             "lastSeenAt": .null, "revokedAt": .null,
         ]]).decode([DeviceToken].self)
         #expect(tokens.first?.lastSeenAt == nil)
+        #expect(tokens.first?.seen == "Never connected")
+        let seen = DeviceToken(id: "t2", name: "Phone", createdAt: "", lastSeenAt: "2030-01-01T09:00:00.000Z", lastAddress: "192.168.1.7")
+        #expect(seen.seen.hasSuffix(" from 192.168.1.7"))
         let request = try JSONValue.object([
             "requestId": "r", "deviceName": "iPhone", "address": "192.168.1.31", "askedAt": 1_760_000_000_000, "status": "pending",
         ]).decode(PairingRequest.self)

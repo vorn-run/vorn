@@ -121,7 +121,7 @@ struct GitPanesLiveTests {
         #expect(await liveUntil { store.session(held) == nil && store.session(owner.id) == nil })
     }
 
-    @Test func worktreeCleanupIsOfferedWhenItsLastSessionEnds() async throws {
+    @Test(.disabled("Cleanup is a built-in extension since #825; the paused Mac app is not ported to it")) func worktreeCleanupIsOfferedWhenItsLastSessionEnds() async throws {
         guard let server = try TestVornd.launch() else { return }
         defer { server.stop() }
         let (store, model, actions) = try await connect(server)

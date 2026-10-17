@@ -56,6 +56,11 @@ struct LiveAppTests {
             return stored.filter { $0.projectName == project }.sorted { $0.order < $1.order }.map(\.id) == [second, first]
         })
 
+        // The seeded workflow launches the task's agent and reopens the task when it fails, as it does on CI without one.
+        if var seeded = try await client.workflow(id: "system:default-task-workflow") {
+            seeded.enabled = false
+            try await client.updateWorkflow(id: seeded.id, updates: seeded)
+        }
         tasks.drop(taskId: first, on: .inProgress)
         #expect(await until { (try? await client.getTask(id: first))??.status == .inProgress })
         await tasks.reload()

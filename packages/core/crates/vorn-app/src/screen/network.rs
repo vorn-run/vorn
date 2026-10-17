@@ -9,8 +9,9 @@ use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
 use crate::network::{
-    address_host, address_kind, devices_label, format_remaining, others_label, pair_link, Adding,
-    AddressKind, Mode, NetAct, Network, DEVICE_NAME, HOST_TOKEN, HOST_URL, TAILSCALE_DOWNLOAD,
+    address_host, address_kind, devices_label, format_remaining, grouped, others_label, pair_link,
+    Adding, AddressKind, Mode, NetAct, Network, DEVICE_NAME, HOST_TOKEN, HOST_URL,
+    TAILSCALE_DOWNLOAD,
 };
 use crate::ui::theme::color::AMBER_500;
 use crate::ui::{div, field, text, Action, El, Id, Role, TextStyle};
@@ -460,6 +461,7 @@ fn minted(s: &Screen<'_>, n: &Network, name: &str, plaintext: &str) -> El {
                 )
                 .child(copy_button(s, n, plaintext)),
         )
+        .children(n.fingerprint().map(fingerprint))
         .child(
             div()
                 .row()
@@ -540,7 +542,7 @@ fn asking_panel(s: &Screen<'_>, device: &str, address: &str) -> El {
 /// The code to type, the link it stands for, and which address it carries.
 fn scan(s: &Screen<'_>, n: &Network, pair_url: &str, code: &str, left: u64) -> El {
     let urls = n.reachable.as_ref().map_or(&[][..], |r| &r.urls[..]);
-    let link_text = pair_link(pair_url, code);
+    let link_text = pair_link(pair_url, code, n.fingerprint());
     let mut col = div()
         .col()
         .min_w0()
@@ -608,8 +610,8 @@ fn scan(s: &Screen<'_>, n: &Network, pair_url: &str, code: &str, left: u64) -> E
                 )
         });
         let kind = match address_kind(pair_url) {
-            AddressKind::Tailnet => "Encrypted. The phone must be on your tailnet.",
-            AddressKind::Lan => "Unencrypted. The phone must be able to reach this address.",
+            AddressKind::Tailnet => "The phone must be on your tailnet.",
+            AddressKind::Lan => "The phone must be able to reach this address.",
         };
         col = col.child(
             div()
@@ -645,6 +647,7 @@ fn scan(s: &Screen<'_>, n: &Network, pair_url: &str, code: &str, left: u64) -> E
             .mt(4.0)
             .silent(),
         )
+        .children(n.fingerprint().map(fingerprint))
         .child(
             div()
                 .col()
@@ -767,6 +770,21 @@ fn card() -> El {
         .rounded(8.0)
         .border(1.0, white(0.06))
         .bg(white(0.02))
+}
+
+/// The certificate a phone will trust, for typing when pairing by hand.
+fn fingerprint(fp: &str) -> El {
+    div()
+        .col()
+        .mt(12.0)
+        .child(caption("Certificate fingerprint").mb(2.0))
+        .child(
+            text(grouped(fp), 11.0, c(look::GRAY_400))
+                .mono()
+                .line_height(16.0)
+                .wrapping()
+                .role(Role::Label, "Certificate fingerprint"),
+        )
 }
 
 /// `text-[10px] uppercase tracking-wider font-medium text-gray-600`.

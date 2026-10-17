@@ -70,7 +70,7 @@ fn to_secret(row: &Row<'_>) -> Result<DeviceTokenSecret> {
 
 pub(crate) fn list(conn: &Connection) -> Result<Vec<DeviceToken>> {
     let mut stmt = conn.prepare(
-        "SELECT id, user_id, name, created_at, last_seen_at, revoked_at
+        "SELECT id, user_id, name, created_at, last_seen_at, last_address, revoked_at
        FROM device_tokens ORDER BY created_at",
     )?;
     let mut rows = stmt.query([])?;
@@ -82,6 +82,7 @@ pub(crate) fn list(conn: &Connection) -> Result<Vec<DeviceToken>> {
             name: get_text(row, "name")?,
             created_at: get_text(row, "created_at")?,
             last_seen_at: get_opt_text(row, "last_seen_at")?,
+            last_address: get_opt_text(row, "last_address")?,
             revoked_at: get_opt_text(row, "revoked_at")?,
         });
     }
@@ -103,10 +104,16 @@ pub(crate) fn revoke(conn: &Connection, id: &str, revoked_at: &str) -> Result<bo
     Ok(changed > 0)
 }
 
-pub(crate) fn touch(conn: &Connection, id: &str, seen_at: &str) -> Result<()> {
+/// Records a use; `address` replaces where it came from when known.
+pub(crate) fn touch(
+    conn: &Connection,
+    id: &str,
+    seen_at: &str,
+    address: Option<&str>,
+) -> Result<()> {
     conn.execute(
-        "UPDATE device_tokens SET last_seen_at = ? WHERE id = ?",
-        params![seen_at, id],
+        "UPDATE device_tokens SET last_seen_at = ?, last_address = COALESCE(?, last_address) WHERE id = ?",
+        params![seen_at, address, id],
     )?;
     Ok(())
 }
@@ -162,9 +169,9 @@ impl DeviceTokens {
         list(&self.conn)
     }
 
-    /// Records that token `id` was just used.
-    pub fn touch(&self, id: &str, seen_at: &str) -> Result<()> {
-        touch(&self.conn, id, seen_at)
+    /// Records that token `id` was just used, from `address`.
+    pub fn touch(&self, id: &str, seen_at: &str, address: &str) -> Result<()> {
+        touch(&self.conn, id, seen_at, Some(address))
     }
 
     /// False when `id` is unknown or was already revoked.
@@ -209,6 +216,18 @@ mod tests {
             json(beside.list().unwrap())[0]["lastSeenAt"],
             serde_json::Value::Null
         );
+        beside
+            .touch("t1", "2026-10-05T00:00:00.500Z", "192.168.1.7")
+            .unwrap();
+        store
+            .db_touch_device_token("t1", "2026-10-05T00:00:00.600Z")
+            .unwrap();
+        let listed = json(beside.list().unwrap());
+        assert_eq!(
+            listed[0]["lastAddress"], "192.168.1.7",
+            "kept when not said"
+        );
+        assert_eq!(listed[0]["lastSeenAt"], "2026-10-05T00:00:00.600Z");
         assert_eq!(beside.secret("t1").unwrap().unwrap().token_hash, "ab");
         assert!(beside.revoke("t1", "2026-10-05T00:00:01.000Z").unwrap());
         assert!(!beside.revoke("t1", "2026-10-05T00:00:02.000Z").unwrap());

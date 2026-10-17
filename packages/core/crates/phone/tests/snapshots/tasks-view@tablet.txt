@@ -1,0 +1,23 @@
+column
+  bar label="View options"
+  list
+    section label="Group by"
+      option label="Project" on=false
+      option label="None" on=true
+    section label="Order by"
+      option label="Newest" on=false
+        text label="most recently written" style="secondary"
+      option label="Oldest" on=false
+        text label="written longest ago" style="secondary"
+      option label="Manual" on=true
+        text label="the order they are dragged into" style="secondary"
+    section label="Each row shows"
+      toggle label="Project" on=true
+      toggle label="Date" on=true
+      toggle label="Status" on=false
+      toggle label="Agent" on=false
+      toggle label="Branch" on=false
+      toggle label="Source" on=false
+      toggle label="ID" on=false
+    section label="Also show"
+      toggle label="Archived" on=false

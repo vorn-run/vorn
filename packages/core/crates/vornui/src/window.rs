@@ -239,7 +239,9 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         let (present, mut ui) = match adapter {
             Some(a) if mode.wants_device(&a) => {
                 let gpu = Gpu::open(instance, a)?;
-                let (surface, config) = configure(&gpu, surface, &window, o.transparent)?;
+                let px = window.inner_size();
+                let (surface, config) =
+                    configure(&gpu, surface, (px.width, px.height), o.transparent)?;
                 let ui = Ui::new(Some(gpu), RenderMode::Gpu, config.format, &cfg);
                 (Present::Gpu { surface, config }, ui)
             }
@@ -668,11 +670,11 @@ impl<A: App> Live<A> {
     }
 }
 
-/// Picks the surface's format and mode for `gpu` and configures it.
-fn configure(
+/// Picks the surface's format and mode for `gpu` and configures it at `px`.
+pub(crate) fn configure(
     gpu: &Gpu,
     surface: wgpu::Surface<'static>,
-    window: &Window,
+    px: (u32, u32),
     transparent: bool,
 ) -> Result<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration), String> {
     let caps = surface.get_capabilities(&gpu.adapter);
@@ -690,7 +692,6 @@ fn configure(
     } else {
         wgpu::PresentMode::Fifo
     };
-    let px = window.inner_size();
     // See-through only where the compositor blends the frame's alpha.
     let alpha_mode = [
         wgpu::CompositeAlphaMode::PreMultiplied,
@@ -706,8 +707,8 @@ fn configure(
     let config = wgpu::SurfaceConfiguration {
         usage,
         format,
-        width: px.width.max(1),
-        height: px.height.max(1),
+        width: px.0.max(1),
+        height: px.1.max(1),
         present_mode,
         desired_maximum_frame_latency: 1,
         alpha_mode,

@@ -247,6 +247,19 @@ pub mod radius {
     pub const FULL: f32 = 9999.0;
 }
 
+/// Which layout a window gets, chosen by its width rather than its platform.
+pub mod layout {
+    /// Below this many logical pixels wide a window lays out in one column.
+    pub const COMPACT_BELOW: f32 = 600.0;
+    /// The smallest box a finger can hit, in points.
+    pub const TOUCH: f32 = 44.0;
+
+    /// Whether a window `width` logical pixels wide gets the compact layout.
+    pub fn compact(width: f32) -> bool {
+        width < COMPACT_BELOW
+    }
+}
+
 /// `transition-colors`: Tailwind's default duration and easing.
 pub const TRANSITION: Duration = Duration::from_millis(150);
 

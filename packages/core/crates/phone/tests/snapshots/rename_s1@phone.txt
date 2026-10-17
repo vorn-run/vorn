@@ -1,0 +1,5 @@
+column
+  bar label="Rename"
+    button label="Save" style="primary"
+  list
+    field label="Session name" value="vorn"

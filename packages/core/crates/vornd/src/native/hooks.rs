@@ -51,7 +51,11 @@ use crate::endpoint::{full, Body};
 use crate::registry::{HookStatus, Patch, TerminalSession};
 
 /// Every call this module answers.
-pub const METHODS: &[&str] = &["permission:resolve", "permission:resolve-top"];
+pub const METHODS: &[&str] = &[
+    "permission:resolve",
+    "permission:resolve-top",
+    "permission:list",
+];
 
 /// Tried first, so the settings entry naming it stays the same across restarts.
 const PREFERRED_PORT: u16 = 56432;
@@ -73,6 +77,8 @@ struct Pending {
     suggestions: Vec<Value>,
     /// The tool's input, which answers to its questions are added to.
     input: Value,
+    /// What clients are told of it: `permission:list` and `permission:requested`.
+    info: Value,
     reply: oneshot::Sender<String>,
 }
 
@@ -506,6 +512,7 @@ impl Hooks {
             );
         }
         let id = uuid::Uuid::new_v4().to_string();
+        let info = permission::info(&id, &event, &about(&native, &resolved.terminal));
         lock(&self.pending).push(Pending {
             id: id.clone(),
             session: event.session().to_owned(),
@@ -518,17 +525,16 @@ impl Hooks {
             input: (event.get("tool_input").filter(|v| v.is_object()))
                 .cloned()
                 .unwrap_or_else(|| json!({})),
+            info: info.clone(),
             reply: tx,
         });
         if let Some(registry) = native.registry.get() {
             registry.asking(&resolved.terminal, true);
         }
         hook_status(&native, &resolved.terminal, None, true);
-        let about = about(&native, &resolved.terminal);
         info!(request = %id, tool = event.tool_name(), terminal = %resolved.terminal, "a permission request");
-        native
-            .events()
-            .emit(AGENT_PERMISSION, || permission::info(&id, &event, &about));
+        native.broadcast("permission:requested", info.clone());
+        native.events().emit(AGENT_PERMISSION, || info);
         hook_status(&native, &resolved.terminal, Some(Status::Waiting), false);
         (Some(id), rx)
     }
@@ -642,19 +648,30 @@ impl Hooks {
     }
 }
 
-/// Tells subscribers request `id` of `terminal` is no longer open.
+/// Tells subscribers and clients request `id` of `terminal` is no longer open.
 fn closed(native: &Native, id: &str, terminal: &str) {
+    native.broadcast(
+        "permission:closed",
+        json!({ "requestId": id, "terminalId": terminal }),
+    );
     native.events().emit(
         AGENT_PERMISSION_CLOSED,
         || json!({ "requestId": id, "terminalId": terminal }),
     );
 }
 
-/// Answers `permission:resolve` and `permission:resolve-top`.
+/// Answers `permission:resolve`, `permission:resolve-top` and `permission:list`.
 pub fn answer(native: &Native, method: &str, params: &Value) -> Answer {
     let Some(hooks) = native.hooks.get() else {
         return Answer::Error("vornd has no hook endpoint".to_owned());
     };
+    if method == "permission:list" {
+        let open = lock(&hooks.pending)
+            .iter()
+            .map(|p| p.info.clone())
+            .collect();
+        return Answer::Result(Value::Array(open));
+    }
     hooks.resolve(params, method == "permission:resolve-top");
     Answer::Void
 }
@@ -1024,6 +1041,7 @@ mod tests {
             terminal: String::new(),
             suggestions: vec![json!({ "type": "setMode", "mode": "plan" })],
             input: json!({ "questions": [] }),
+            info: Value::Null,
             reply,
         };
         let (rules, input) = picked(&p, &json!({ "suggestion": 0, "answers": { "0": "Dark" } }));
