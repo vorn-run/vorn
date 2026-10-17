@@ -27,8 +27,12 @@ impl World for Core {
                   "branch": "main", "main": true, "orphan": false, "dirty": false,
                   "sizeBytes": 0, "artifactBytes": 0, "sessionIds": [], "verdict": "keep", "reasons": "main" },
                 { "projectPath": "/p", "projectName": "p", "path": "/p/.vorn-worktrees/fix", "name": "fix",
-                  "branch": "fix", "main": false, "orphan": false, "dirty": true,
-                  "sizeBytes": 2048, "artifactBytes": 0, "sessionIds": ["t1"], "verdict": "review", "reasons": "dirty" }
+                  "branch": "fix", "main": false, "orphan": false, "dirty": true, "base": "main", "idleDays": 0,
+                  "sizeBytes": 2048, "artifactBytes": 0, "sessionIds": ["t1"], "verdict": "review", "reasons": "dirty" },
+                { "projectPath": "/p", "projectName": "p", "path": "/p/.vorn-worktrees/old", "name": "old",
+                  "branch": "feat/old", "main": false, "orphan": false, "dirty": false, "base": "main", "idleDays": 20,
+                  "sizeBytes": 4096, "artifactBytes": 1024, "sessionIds": [], "verdict": "remove",
+                  "reasons": "merged; idle 20 days" }
             ]),
             "worktrees.remove" => json!({ "removed": true }),
             "sessions.list" => json!([
@@ -199,21 +203,63 @@ async fn lists_every_worktree_for_settings() {
         .await
         .unwrap()
         .unwrap();
-    // The main checkout is not one to clean up, so only the worktree is listed.
+    // The main checkout is not one to clean up, so only the worktrees are listed, largest first.
     let rows = s.router.rows("vorn.worktrees", "worktrees");
-    assert_eq!(rows.len(), 1);
-    let fix = &rows[0];
+    assert_eq!(rows.len(), 2);
+    let (old, fix) = (&rows[0], &rows[1]);
     assert_eq!(
-        (&fix["name"], &fix["size"], &fix["detail"]),
-        (&json!("fix"), &json!("2 KB"), &json!("dirty"))
+        (&fix["name"], &fix["size"], &fix["detail"], &fix["branch"]),
+        (
+            &json!("fix"),
+            &json!("2 KB"),
+            &json!("today · dirty"),
+            &json!("fix")
+        )
     );
     assert_eq!(
-        (&fix["project"], &fix["project_path"], &fix["project_size"]),
-        (&json!("p"), &json!("/p"), &json!("2 KB"))
+        (
+            &fix["project"],
+            &fix["project_path"],
+            &fix["project_size"],
+            &fix["against"]
+        ),
+        (&json!("p"), &json!("/p"), &json!("6 KB"), &json!("vs main"))
     );
     assert_eq!(
-        (&fix["remove_clean"], &fix["remove_dirty"]),
-        (&json!(false), &json!(true))
+        (
+            &fix["remove_clean"],
+            &fix["remove_dirty"],
+            &fix["verdict_label"]
+        ),
+        (&json!(false), &json!(true), &json!("Review"))
+    );
+    // Its age is said once, though the verdict's reasons say it too.
+    assert_eq!(
+        (
+            &old["detail"],
+            &old["verdict_label"],
+            &old["artifact_bytes"]
+        ),
+        (
+            &json!("idle 20 days · merged"),
+            &json!("Removable"),
+            &json!(1024)
+        )
+    );
+    // The totals leave out what a session holds: fix's 2 KB counts on disk only.
+    let sum = &s.router.rows("vorn.worktrees", "summary")[0];
+    assert_eq!(
+        (
+            &sum["total"],
+            &sum["build"],
+            &sum["removable"],
+            &sum["reclaimable"]
+        ),
+        (&json!("6 KB"), &json!("1 KB"), &json!("4 KB"), &json!(true))
+    );
+    assert_eq!(
+        sum["reclaim_confirm"],
+        "Delete the build output in 1 worktree? This frees 1 KB."
     );
     let scan = s.router.rows("vorn.worktrees", "scan");
     assert_eq!(
@@ -364,4 +410,86 @@ async fn the_widget_keeps_an_offered_rule_and_answers_questions() {
         json!({ "requestId": "r2", "allow": true, "answers": { "0": "Light", "1": "Yes" } })
     );
     assert!(rows("permissions").is_empty() && rows("options").is_empty());
+}
+
+#[tokio::test]
+async fn reclaims_and_removes_the_worktrees_settings_checks() {
+    let s = setup();
+    s.builtins
+        .call("vorn.worktrees", "scan", Value::Null)
+        .await
+        .unwrap()
+        .unwrap();
+    let done = s
+        .builtins
+        .call("vorn.worktrees", "reclaim_all", Value::Null)
+        .await
+        .unwrap()
+        .unwrap();
+    // fix has no build output and a session, so only old's goes.
+    assert_eq!(done["reclaimed"], 1);
+    assert_eq!(
+        s.core.asked("worktrees.reclaim"),
+        [json!({ "worktree": "/p/.vorn-worktrees/old" })]
+    );
+    let ids = json!({ "ids": ["/p/.vorn-worktrees/old"] });
+    let done = s
+        .builtins
+        .call("vorn.worktrees", "remove_many", ids)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(done["toast"], "Removed 1 worktree");
+    let removed = s.core.asked("worktrees.remove");
+    assert_eq!(removed[0]["worktree"], "/p/.vorn-worktrees/old");
+    assert_eq!(removed[0]["force"], false);
+    let none = s
+        .builtins
+        .call("vorn.worktrees", "remove_many", json!({ "ids": [] }))
+        .await
+        .unwrap();
+    assert!(none.is_err());
+}
+
+#[tokio::test]
+async fn the_worktrees_page_is_a_tree_whose_bulk_remove_takes_the_checked() {
+    let s = setup();
+    s.builtins
+        .call("vorn.worktrees", "scan", Value::Null)
+        .await
+        .unwrap()
+        .unwrap();
+    let render = json!({ "point": "worktrees", "surface": { "cells": false } });
+    let answer = s
+        .builtins
+        .call("vorn.worktrees", vorn_tree::RENDER, render)
+        .await
+        .unwrap()
+        .unwrap();
+    let page = vorn_tree::read(&answer).expect("a tree the client draws");
+    let text = serde_json::to_string(&page.tree).unwrap();
+    for said in [
+        "Build output, rebuilt by a reinstall",
+        "vs main",
+        "feat/old",
+        "Removable",
+    ] {
+        assert!(text.contains(said), "{said} in {text}");
+    }
+    let event = json!({ "point": "worktrees", "event": {
+        "id": "remove_many", "kind": "click", "selected": ["/p/.vorn-worktrees/old"] } });
+    let done = s
+        .builtins
+        .call("vorn.worktrees", vorn_tree::EVENT, event)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(done["toast"], "Removed 1 worktree");
+    let stray = json!({ "point": "worktrees", "event": { "id": "confirm", "kind": "click" } });
+    let refused = s
+        .builtins
+        .call("vorn.worktrees", vorn_tree::EVENT, stray)
+        .await
+        .unwrap();
+    assert!(refused.is_err(), "a click runs only the page's own buttons");
 }

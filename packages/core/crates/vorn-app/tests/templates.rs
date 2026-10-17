@@ -366,10 +366,8 @@ fn every_template_kind_draws_on_every_surface() {
     );
     assert_eq!(app.st.settings.ext_page.as_deref(), Some(CONNECTIONS_PAGE));
     shot.until(&mut app, "the connections read", |a, _| {
-        a.st.points
-            .rows_of("vorn.connectors")
-            .contains_key("connections")
-            .then_some(())
+        let tree = a.st.points.trees.get(CONNECTIONS_PAGE)?;
+        tree.as_ref().ok().map(|_| ())
     });
     every_surface(
         &mut shot,

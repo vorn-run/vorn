@@ -544,6 +544,8 @@ struct RawPoint {
     when: Option<RawActivation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tree: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1426,6 +1428,9 @@ impl RawContributes {
                 if let Some(size) = p.size {
                     m.insert("size".into(), json!(size));
                 }
+                if p.tree {
+                    m.insert("tree".into(), json!(true));
+                }
                 let value = Value::Object(m);
                 if let Some(problem) = super::point_problem(place, &value) {
                     return Err(at(&format!("{field}{}", problem.0), problem.1));
@@ -1744,6 +1749,7 @@ impl From<&Manifest> for Raw {
                         description: p.base.description.clone(),
                         when: p.base.when.as_ref().map(when),
                         view: p.view.clone(),
+                        tree: p.tree,
                         icon: p.icon.clone(),
                         key: p.key.clone(),
                         call: p.call.clone(),
@@ -2133,6 +2139,41 @@ view = "views/pane.kdl"
             err("vorn:extension@0.9", "vorn:connector@1"),
             "vorn-extension.toml:4: api: `vorn:connector@1` is retired; set api = \"vorn:extension@0.9\" and keep auth, triggers and actions under a [connector] section"
         );
+    }
+
+    #[test]
+    fn a_settings_page_draws_from_a_tree() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[[contributes.settings]]
+id = "page"
+title = "Page"
+tree = true
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let page = &c.points(super::super::Place::Settings)[0];
+        assert!(page.tree && page.view.is_none());
+        assert_eq!(c.views().count(), 0);
+        assert_eq!(
+            serde_json::to_value(c).unwrap()["settings"][0]["tree"],
+            true
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert_eq!(
+            err("tree = true", "tree = true\nview = \"views/page.kdl\""),
+            "vorn-extension.toml:9: contributes.settings[0].tree: draws in place of a view; give one of them"
+        );
+        assert_eq!(
+            err("contributes.settings", "contributes.sidebar"),
+            "vorn-extension.toml:9: contributes.sidebar[0].tree: draws a settings page"
+        );
+        assert!(err("tree = true", "").contains("needs a view"));
     }
 
     #[test]

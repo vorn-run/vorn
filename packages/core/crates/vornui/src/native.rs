@@ -59,6 +59,10 @@ pub enum Sem {
     },
     /// A button that puts its text on the clipboard, saying so once it has.
     Copy(String),
+    /// A one-line text field titled `label` (its placeholder when empty); Return submits it.
+    Field(String),
+    /// A box a tap checks or unchecks, as a list's rows are picked; its name and state are its role's.
+    Select,
     /// A field that writes Markdown, its key bar's [`Sem::Key`]s after it.
     Prose,
     /// A key on a field's key bar: its label shows, `value` names what it applies.
@@ -253,6 +257,35 @@ impl Ui {
                     });
                     return;
                 }
+                Sem::Field(title) => {
+                    let (placeholder, secret) = match &el.content {
+                        Content::Edit(look) => (look.placeholder.as_str(), look.secure),
+                        _ => ("", false),
+                    };
+                    let value = el.id.filter(|_| !secret).map(|id| self.edit_text(id));
+                    out.push(Node {
+                        id: el.id,
+                        label: if title.is_empty() {
+                            placeholder
+                        } else {
+                            title.as_str()
+                        }
+                        .to_owned(),
+                        value: value.unwrap_or_default().to_owned(),
+                        secret,
+                        ..Node::of("field")
+                    });
+                    return;
+                }
+                Sem::Select => {
+                    out.push(Node {
+                        id: el.id,
+                        label,
+                        on: Some(el.a11y.toggled.unwrap_or(false)),
+                        ..Node::of("select")
+                    });
+                    return;
+                }
                 Sem::Divider => Node::of("divider"),
                 Sem::Prose => Node::of("prose"),
                 Sem::Key(key) => {
@@ -438,6 +471,36 @@ impl Backend for Native {
 mod tests {
     use super::*;
     use crate::{div, text, widgets, Action, UiConfig};
+
+    #[test]
+    fn reads_a_one_line_field_and_a_box_a_tap_checks() {
+        let mut ui = Ui::native(&UiConfig::system(1.0, 13.0));
+        let (f, c) = (Id::new("f"), Id::new("c"));
+        let root = div()
+            .col()
+            .child(widgets::text_input(&ui, f, "Name", "A name").sem(Sem::Field("Name".into())))
+            .child(
+                div()
+                    .id(c)
+                    .on(Action::Click)
+                    .role(Role::CheckBox, "Select feat")
+                    .toggled(true)
+                    .sem(Sem::Select),
+            );
+        ui.set_edit_text(f, "acme");
+        ui.begin(crate::Rgba::TRANSPARENT);
+        ui.layout(root, (390.0, 844.0));
+        let tree = ui.native_tree().unwrap();
+        let field = &tree.children[0];
+        assert_eq!((field.kind, field.label.as_str()), ("field", "Name"));
+        assert_eq!((field.value.as_str(), field.style), ("acme", ""));
+        let pick = &tree.children[1];
+        assert_eq!(
+            (pick.kind, pick.id, pick.on),
+            ("select", Some(c), Some(true))
+        );
+        assert_eq!(pick.label, "Select feat");
+    }
 
     #[test]
     fn reads_controls_from_roles_and_structure_from_tags() {

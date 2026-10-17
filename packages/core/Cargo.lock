@@ -6662,6 +6662,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-mirror",
  "vorn-term-proto",
+ "vorn-tree",
  "vorn-view",
  "vornui",
  "wasm-bindgen",
@@ -6707,6 +6708,7 @@ name = "vorn-components"
 version = "0.8.0-beta.14"
 dependencies = [
  "serde_json",
+ "vorn-tree",
  "vorn-view",
  "vornui",
 ]
@@ -6730,6 +6732,7 @@ dependencies = [
  "vorn-mcp",
  "vorn-spawn",
  "vorn-store",
+ "vorn-tree",
  "vorn-vault",
  "vorn-work",
 ]
@@ -6853,6 +6856,7 @@ dependencies = [
  "vorn-app",
  "vorn-components",
  "vorn-protocol",
+ "vorn-tree",
  "vorn-view",
  "vornui",
  "web-time",
@@ -7037,6 +7041,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-tree"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vorn-vault"
 version = "0.8.0-beta.14"
 dependencies = [
@@ -7200,6 +7212,7 @@ dependencies = [
  "vorn-store",
  "vorn-tasks",
  "vorn-term-proto",
+ "vorn-tree",
  "vorn-vault",
  "vorn-work",
  "vorn-workflow",

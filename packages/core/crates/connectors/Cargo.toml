@@ -11,6 +11,8 @@ description = "The Connectors built-in for Vorn: connections, the catalog, polls
 [dependencies]
 # The pack store, the child and the manifest every package carries.
 vorn-extensions = { path = "../extensions" }
+# The Connections page, drawn as an element tree.
+vorn-tree = { path = "../tree" }
 vorn-spawn = { path = "../spawn", features = ["tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # The MCP SDK an MCP connection's child is spoken to with.

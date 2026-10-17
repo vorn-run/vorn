@@ -1,7 +1,7 @@
 //! Worktree cleanup: once a worktree's last session ends it is offered for
 //! removal in the sidebar, a worktree's menu removes one (asking first when
 //! sessions or changes are at stake), and Settings lists every worktree with
-//! what removing it frees.
+//! what removing it frees, drawn as an element tree.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,12 +17,16 @@ use vorn_extensions::events::WORKTREE_IDLE;
 use super::{arg, unknown, Api, Builtin};
 use crate::native::extensions::guard;
 
+mod page;
+
 const NAME: &str = "Worktree cleanup";
 const IDLE: &str = "idle";
 const ASKED: &str = "asked";
 const ALL: &str = "worktrees";
 /// The settings page's scan: whether the first is under way, and why the last failed.
 const SCAN: &str = "scan";
+/// The settings page's totals: what is on disk, what is build output, what can go.
+const SUMMARY: &str = "summary";
 /// How often a first scan is tried before the page says it failed: vornd
 /// may not have read its sessions yet when the page first asks.
 const FIRST_TRIES: u32 = 3;
@@ -79,40 +83,111 @@ impl Found {
         self.0["sizeBytes"].as_u64().unwrap_or(0)
     }
 
-    /// Its branch and why it is kept or can go: `fix-login · merged · idle 11 days`.
+    fn artifacts(&self) -> u64 {
+        self.0["artifactBytes"].as_u64().unwrap_or(0)
+    }
+
+    /// No session holds it, so the page may act on it in bulk.
+    fn free(&self) -> bool {
+        !self.flag("main") && self.sessions().is_empty()
+    }
+
+    /// Its build output can go: it has some and is a worktree git knows.
+    fn reclaimable(&self) -> bool {
+        self.artifacts() > 0 && !self.flag("orphan")
+    }
+
+    /// Removing it is what the inventory advises.
+    fn advised(&self) -> bool {
+        matches!(self.0["verdict"].as_str(), Some("remove" | "orphan"))
+    }
+
+    /// How long it has sat idle, then why it is kept or can go: `today · uncommitted changes`.
     fn detail(&self) -> String {
+        let age = match self.0["idleDays"].as_u64() {
+            Some(0) => Some("today".to_owned()),
+            Some(1) => Some("idle 1 day".to_owned()),
+            Some(n) => Some(format!("idle {n} days")),
+            None => None,
+        };
         let reasons = self.0["reasons"].as_str().unwrap_or_default();
-        let branch = self.branch();
-        // The title already reads as the branch when the folder is named for it.
-        Some(branch.as_str())
-            .filter(|b| *b != self.name())
-            .into_iter()
-            .chain(reasons.split("; ").filter(|r| !r.is_empty()))
+        age.into_iter()
+            .chain(
+                reasons
+                    .split("; ")
+                    .filter(|r| !r.is_empty() && !r.starts_with("idle "))
+                    .map(str::to_owned),
+            )
             .collect::<Vec<_>>()
             .join(" · ")
     }
 
+    fn verdict_label(&self) -> &'static str {
+        match self.0["verdict"].as_str() {
+            Some("remove") => "Removable",
+            Some("reclaim") => "Build output only",
+            Some("review") => "Review",
+            Some("orphan") => "Orphan folder",
+            _ => "Keep",
+        }
+    }
+
     fn settings_row(&self, project_size: u64) -> Value {
-        let artifacts = self.0["artifactBytes"].as_u64().unwrap_or(0);
         let dirty = self.flag("dirty");
+        let against = self.0["base"]
+            .as_str()
+            .filter(|b| !b.is_empty())
+            .map(|b| format!("vs {b}"))
+            .unwrap_or_default();
         json!({
             "id": self.path(),
             "name": self.name(),
             "project": self.0["projectName"],
             "project_path": self.project(),
             "project_size": bytes(project_size),
+            "against": against,
             "branch": self.branch(),
             "size": bytes(self.size()),
+            "size_bytes": self.size(),
+            "artifact_bytes": self.artifacts(),
             "detail": self.detail(),
             "verdict": self.0["verdict"],
+            "verdict_label": self.verdict_label(),
             "reasons": self.0["reasons"],
             "dirty": dirty,
             "orphan": self.flag("orphan"),
-            "reclaimable": artifacts > 0 && !self.flag("orphan"),
+            "reclaimable": self.reclaimable(),
+            "held": !self.free(),
             "remove_dirty": self.removable() && dirty,
             "remove_clean": self.removable() && !dirty,
         })
     }
+}
+
+/// The page's totals: all on disk, and of what no session holds, build output and removable.
+fn summary_row(shown: &[&Found]) -> Value {
+    let total: u64 = shown.iter().map(|f| f.size()).sum();
+    let free: Vec<&&Found> = shown.iter().filter(|f| f.free()).collect();
+    let targets: Vec<&&Found> = free.iter().copied().filter(|f| f.reclaimable()).collect();
+    let build: u64 = targets.iter().map(|f| f.artifacts()).sum();
+    let removable: u64 = free.iter().filter(|f| f.advised()).map(|f| f.size()).sum();
+    let n = targets.len();
+    json!({
+        "id": SUMMARY,
+        "total": bytes(total),
+        "total_bytes": total,
+        "build": bytes(build),
+        "build_bytes": build,
+        "removable": bytes(removable),
+        "removable_bytes": removable,
+        "reclaimable": n > 0,
+        "reclaim_label": format!("Reclaim {} of build output", bytes(build)),
+        "reclaim_confirm": format!(
+            "Delete the build output in {n} worktree{}? This frees {}.",
+            if n == 1 { "" } else { "s" },
+            bytes(build)
+        ),
+    })
 }
 
 /// `1.2 GB`, `340 MB`, `12 KB`.
@@ -192,9 +267,8 @@ async fn remove(api: &Api, path: &str, project: &str) -> Result<Value, ExtError>
     Ok(json!({ "removed": path, "toast": "Worktree removed" }))
 }
 
-/// The settings page's rows: every worktree but the projects' own
-/// checkouts, by project in the order listed, the largest first in each.
-fn settings_rows(found: &[Found]) -> Vec<Value> {
+/// The settings page's rows, by project with the largest first, and its totals.
+fn settings_rows(found: &[Found]) -> (Vec<Value>, Value) {
     let mut shown: Vec<&Found> = found.iter().filter(|f| !f.flag("main")).collect();
     let mut order: Vec<&str> = Vec::new();
     for f in &shown {
@@ -215,10 +289,11 @@ fn settings_rows(found: &[Found]) -> Vec<Value> {
             .map(|f| f.size())
             .sum()
     };
-    shown
+    let rows = shown
         .iter()
         .map(|f| f.settings_row(total(f.project())))
-        .collect()
+        .collect();
+    (rows, summary_row(&shown))
 }
 
 fn scan_state(api: &Api, busy: bool, error: Option<String>) {
@@ -228,10 +303,74 @@ fn scan_state(api: &Api, busy: bool, error: Option<String>) {
 
 async fn scan(api: &Api, refresh: bool) -> Result<Value, ExtError> {
     let found = list(api, None, refresh).await?;
+    let (rows, summary) = settings_rows(&found);
     let mut ops = vec![RowOp::Clear];
-    ops.extend(settings_rows(&found).into_iter().map(RowOp::Upsert));
+    ops.extend(rows.into_iter().map(RowOp::Upsert));
     api.publish(ALL, ops);
+    api.publish(SUMMARY, vec![RowOp::Clear, RowOp::Upsert(summary)]);
     Ok(json!({ "worktrees": found.len() }))
+}
+
+/// Deletes the build output of every worktree no session holds.
+async fn reclaim_all(api: &Api) -> Result<Value, ExtError> {
+    let found = list(api, None, false).await?;
+    let mut done = 0;
+    for f in found.iter().filter(|f| f.free() && f.reclaimable()) {
+        api.call("worktrees.reclaim", json!({ "worktree": f.path() }))
+            .await?;
+        done += 1;
+    }
+    scan(api, false).await?;
+    let toast = format!(
+        "Deleted the build output in {done} worktree{}",
+        if done == 1 { "" } else { "s" }
+    );
+    Ok(json!({ "reclaimed": done, "toast": toast }))
+}
+
+/// Removes the checked worktrees; one that fails stops the rest, then the list is rescanned.
+async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
+    let ids: Vec<String> = args["ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    if ids.is_empty() {
+        return Err(ExtError::new("bad_args", "remove_many needs ids"));
+    }
+    let rows = api.rows(ALL);
+    let mut done = 0;
+    let mut failed = None;
+    for id in &ids {
+        let Some(row) = rows.iter().find(|r| r["id"] == id.as_str()) else {
+            continue;
+        };
+        let result = if row["orphan"].as_bool() == Some(true) {
+            api.call("worktrees.prune", json!({ "worktree": id }))
+                .await
+                .map(|_| ())
+        } else {
+            let project = row["project_path"].as_str().unwrap_or_default();
+            remove(api, id, project).await.map(|_| ())
+        };
+        match result {
+            Ok(()) => done += 1,
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
+        }
+    }
+    scan(api, false).await?;
+    if let Some(e) = failed {
+        return Err(e);
+    }
+    let toast = format!(
+        "Removed {done} worktree{}",
+        if done == 1 { "" } else { "s" }
+    );
+    Ok(json!({ "removed": done, "toast": toast }))
 }
 
 impl Cleanup {
@@ -339,12 +478,21 @@ impl Cleanup {
                 remove(api, &path, &project).await
             }
             "scan" => self.scan(api, false).await,
+            "reclaim_all" => reclaim_all(api).await,
+            "remove_many" => remove_many(api, &args).await,
             "refresh" => self.scan(api, true).await,
             "reclaim" | "prune" => {
                 let (path, _) = row()?;
                 api.call(&format!("worktrees.{action}"), json!({ "worktree": path }))
                     .await?;
                 scan(api, false).await
+            }
+            vorn_tree::RENDER => page::render(api),
+            vorn_tree::EVENT => {
+                let event: vorn_tree::Event = serde_json::from_value(args["event"].clone())
+                    .map_err(|e| ExtError::new("bad_args", format!("ui.event: {e}")))?;
+                let (does, args) = page::event(&event)?;
+                Box::pin(self.act(api, does, args)).await
             }
             other => Err(unknown(NAME, other)),
         }
@@ -360,7 +508,6 @@ impl Builtin for Cleanup {
         &[
             ("views/idle.kdl", include_str!("views/idle.kdl")),
             ("views/confirm.kdl", include_str!("views/confirm.kdl")),
-            ("views/settings.kdl", include_str!("views/settings.kdl")),
         ]
     }
 

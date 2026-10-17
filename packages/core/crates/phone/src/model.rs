@@ -61,6 +61,10 @@ pub enum For {
     Enable(String, bool),
     /// An answer nothing waits on; a failure shows as the screen's error.
     Quiet,
+    /// Tree point `key`'s tree.
+    Render(String),
+    /// What tree point `key`'s extension answered an event with.
+    Told(String),
 }
 
 /// A read's answer so far.
@@ -226,6 +230,16 @@ impl Model {
                 }
             }
             (For::Quiet, Ok(_)) => {}
+            (For::Render(key), answer) => {
+                self.points
+                    .rendered(&key, answer.as_ref().map_err(Clone::clone));
+            }
+            (For::Told(key), answer) => {
+                self.points.told(&key, answer.as_ref().ok());
+                if let Err(e) = answer {
+                    self.errors.insert("quiet".into(), e);
+                }
+            }
             (what, Err(e)) => {
                 let key = match what {
                     For::Launch => "launch".to_owned(),
@@ -311,6 +325,7 @@ impl Model {
                         };
                         let ops = params["ops"].as_array().cloned().unwrap_or_default();
                         self.points.changed(ext, coll, &ops);
+                        self.points.trees_changed(ext);
                     }
                     "extension:contributionsChanged" => stale = true,
                     "permission:requested" => self.permissions.push(params),
@@ -370,7 +385,25 @@ impl Model {
         }
     }
 
-    /// A template control was pressed.
+    /// Asks for tree point `key`'s tree when it has none or its rows changed, once at a time.
+    pub fn want_tree(&mut self, key: &str) {
+        let asking = |w: &For| matches!(w, For::Render(k) if k == key);
+        if self.rpc.is_none() || self.calls.borrow().iter().any(|(w, _)| asking(w)) {
+            return;
+        }
+        if let Some(params) = self.points.render(key, false) {
+            self.call(For::Render(key.to_owned()), "extension:call", params);
+        }
+    }
+
+    /// Tells tree point `key`'s extension `event` happened.
+    fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
+        if let Some(params) = self.points.tell(key, event) {
+            self.call(For::Told(key.to_owned()), "extension:call", params);
+        }
+    }
+
+    /// A template or tree control was pressed.
     pub fn click(&mut self, id: Id) {
         let Some(Act::Point(a)) = self.acts.clicked(id) else {
             return;
@@ -385,6 +418,17 @@ impl Model {
             }
             PointAct::Ask(id) => self.points.asking = id,
             PointAct::More(id) => self.points.more = id,
+            PointAct::Tree { key, event } => {
+                self.points.asking = None;
+                self.points.more = None;
+                self.tell(&key, &event);
+            }
+            PointAct::TreeCheck {
+                key,
+                list,
+                rows,
+                on,
+            } => self.points.check(&key, &list, &rows, on),
             _ => {}
         }
     }
@@ -396,8 +440,18 @@ impl Model {
         }
     }
 
-    /// A template field's Return: its call with what the field holds.
-    pub fn submit(&self, ui: &Ui, id: Id) {
+    /// A template or tree field's Return: its call with what the field holds.
+    pub fn submit(&mut self, ui: &Ui, id: Id) {
+        if let Some(Act::Point(PointAct::TreeField { key, node })) = self.acts.text_of(id) {
+            let event = vorn_tree::Event {
+                id: node,
+                kind: vorn_tree::EventKind::Submit,
+                value: ui.edit_text(id).to_owned(),
+                selected: Vec::new(),
+            };
+            self.tell(&key, &event);
+            return;
+        }
         let (
             Some(rpc),
             Some(Act::Point(PointAct::Field {

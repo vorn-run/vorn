@@ -2,6 +2,7 @@
 //! lays them out with the kit's one template renderer.
 
 use vorn_components::template::{self, Bind, Press};
+use vorn_components::tree::{self, Ev, TreeBind};
 use vorn_view::Row;
 
 use super::Screen;
@@ -102,16 +103,111 @@ impl Bind for Binder<'_> {
         self.base(slot, row).child("entry")
     }
 
-    /// `connector:<id>`: a connector's mark, a plug for one without.
     fn icon(&self, name: &str, size: f32) -> Option<El> {
-        let id = name.strip_prefix("connector:")?;
-        let name = match id {
-            "http" => "globe",
-            "mcp" | "sdk" => "mcp",
-            other if crate::look::icon(other, 2.0).is_some() => other,
-            _ => "plug",
-        };
-        Some(super::ico(name, size, 2.0, k::GRAY_400))
+        connector_icon(name, size)
+    }
+}
+
+/// `connector:<id>`: a connector's mark, a plug for one without.
+fn connector_icon(name: &str, size: f32) -> Option<El> {
+    let id = name.strip_prefix("connector:")?;
+    let name = match id {
+        "http" => "globe",
+        "mcp" | "sdk" => "mcp",
+        other if crate::look::icon(other, 2.0).is_some() => other,
+        _ => "plug",
+    };
+    Some(super::ico(name, size, 2.0, k::GRAY_400))
+}
+
+/// Binds a tree page's controls to the app's acts.
+struct TreeBinder<'a> {
+    acts: &'a Acts,
+    points: &'a Points,
+    key: &'a str,
+}
+
+impl TreeBinder<'_> {
+    fn base(&self) -> Id {
+        Id::new(self.key).child("tree")
+    }
+
+    fn act(&self, a: PointAct) -> Act {
+        Act::Point(a)
+    }
+}
+
+impl TreeBind for TreeBinder<'_> {
+    fn on(&self, ev: Ev) -> Id {
+        let key = self.key.to_owned();
+        match ev {
+            Ev::Send { event, ask } => {
+                let id = self.base().child(&event.id).child(&event.value);
+                let act = self.act(PointAct::Tree { key, event });
+                if !ask {
+                    self.acts.bind(id, act);
+                } else if self.points.asking == Some(id.0) {
+                    self.acts.bind(id, Act::Point(PointAct::Ask(None)));
+                    self.acts
+                        .bind(id.child("no"), Act::Point(PointAct::Ask(None)));
+                    self.acts.bind(id.child("ok"), act);
+                } else {
+                    self.acts.bind(id, Act::Point(PointAct::Ask(Some(id.0))));
+                }
+                id
+            }
+            Ev::Field { node, value } => {
+                let id = self.base().child("field").child(&node);
+                self.acts
+                    .text(id, self.act(PointAct::TreeField { key, node }), value);
+                id
+            }
+            Ev::Check {
+                list,
+                rows,
+                on,
+                all,
+            } => {
+                let id = self.base().child("check").child(&list);
+                let id = match rows.first() {
+                    Some(row) if !all => id.child(row),
+                    _ => id.child("all"),
+                };
+                let act = self.act(PointAct::TreeCheck {
+                    key,
+                    list,
+                    rows,
+                    on,
+                });
+                self.acts.bind(id, act);
+                id
+            }
+            Ev::Menu { node } => {
+                let id = self.base().child("more").child(&node);
+                let open = self.points.more == Some(id.0);
+                self.acts
+                    .bind(id, Act::Point(PointAct::More((!open).then_some(id.0))));
+                id
+            }
+            Ev::Hover { node } => self.base().child("entry").child(&node),
+            Ev::Scroll { list } => self.base().child("scroll").child(&list),
+        }
+    }
+
+    fn confirming(&self, id: Id) -> Option<(Id, Id)> {
+        (self.points.asking == Some(id.0)).then(|| (id.child("ok"), id.child("no")))
+    }
+
+    fn menu_open(&self, id: Id) -> bool {
+        self.points.more == Some(id.0)
+    }
+
+    fn checked(&self, list: &str, row: &str) -> bool {
+        self.points.is_checked(self.key, list, row)
+    }
+
+    fn icon(&self, name: &str, size: f32) -> Option<El> {
+        connector_icon(name, size)
     }
 }
 
@@ -143,8 +239,42 @@ pub fn draw(
     }
 }
 
-/// Point `p`'s template as a page: its toolbar apart, for the page's header, and its body.
+/// Tree point `p`'s tree whole, toolbar first, or its error box; nothing until it renders or for a template.
+pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El> {
+    if !p.tree {
+        return None;
+    }
+    let key = p.key();
+    match points.trees.get(&key)? {
+        Ok(t) => {
+            let bind = TreeBinder {
+                acts,
+                points,
+                key: &key,
+            };
+            Some(tree::view(ui, t, &bind))
+        }
+        Err(errors) => Some(template::invalid(&p.place(), errors)),
+    }
+}
+
+/// Point `p`'s template or tree as a page: its toolbar apart, for the page's header, and its body.
 fn draw_page(s: &Screen<'_>, p: &Point) -> (Option<El>, Option<El>) {
+    if p.tree {
+        let key = p.key();
+        return match s.st.points.trees.get(&key) {
+            Some(Ok(t)) => {
+                let bind = TreeBinder {
+                    acts: s.acts,
+                    points: &s.st.points,
+                    key: &key,
+                };
+                tree::page(s.ui, t, &bind)
+            }
+            Some(Err(errors)) => (None, Some(template::invalid(&p.place(), errors))),
+            None => (None, None),
+        };
+    }
     match &p.template {
         Ok(Some(t)) => {
             let bind = Binder::whole(s.acts, &s.st.points, p);

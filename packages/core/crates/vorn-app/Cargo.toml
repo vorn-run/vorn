@@ -33,6 +33,8 @@ vornui = { path = "../vornui" }
 vorn-components = { path = "../vorn-components" }
 # Extension templates and their rows, checked as vornd sends them.
 vorn-view = { path = "../view" }
+# Extension pages drawn from element trees.
+vorn-tree = { path = "../tree" }
 vorn-protocol = { path = "../protocol" }
 vorn-grid-client = { path = "../grid-client" }
 vorn-term-mirror = { path = "../term-mirror" }

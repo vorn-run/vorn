@@ -1,0 +1,13 @@
+[package]
+name = "vorn-tree"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Extension UI as an element tree: the designed components a client draws, checked the same whether built in Rust, in Wasm or sent as JSON by a program"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

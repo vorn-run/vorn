@@ -1,0 +1,32 @@
+package vorn:extension@1.0.0;
+
+/// Extension UI as an element tree, sent as the JSON `vorn-tree` checks for every kind of extension.
+interface tree {
+  /// Where the tree draws.
+  record surface {
+    /// A terminal's cells rather than pixels.
+    cells: bool,
+    width: f32,
+    height: f32,
+  }
+
+  /// The colour token set this build knows; a tree names the one it was made for.
+  tokens: func() -> u32;
+}
+
+/// What a Wasm extension with UI exports, and the one call it may make back.
+world ui {
+  use tree.{surface};
+
+  /// Runs one of the extension's actions on the host, as `rows` or a command.
+  import call: func(action: string, args: string) -> result<string, string>;
+  /// Changes `point`'s tree without a render: a JSON list of `{id, node?}`, no `node` removing it.
+  import patch: func(point: string, patches: string) -> result<_, string>;
+
+  /// Rows the host has for this extension, as JSON, before a render.
+  export data: func(rows: string);
+  /// `{tokens, tree}` for `point` on `surface`.
+  export render: func(point: string, surface: surface) -> result<string, string>;
+  /// What `event` on `point` did: `{toast?, open?, patch?}`.
+  export event: func(point: string, event: string) -> result<string, string>;
+}

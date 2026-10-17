@@ -296,6 +296,17 @@ fn home_path(typed: &str) -> String {
     }
 }
 
+/// A `ui.render` answer the client can draw, or every reason it cannot.
+fn tree_checked(id: &str, answer: Value) -> Result<Value, String> {
+    match vorn_tree::read(&answer) {
+        Ok(_) => Ok(answer),
+        Err(errors) => Err(format!(
+            "{id} answered ui.render with a tree that cannot be drawn: {}",
+            errors.join("; ")
+        )),
+    }
+}
+
 fn text<'a>(params: &'a Value, key: &str) -> &'a str {
     params.get(key).and_then(Value::as_str).unwrap_or_default()
 }
@@ -551,13 +562,17 @@ impl Extensions {
                 };
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
                 let (id, action) = (text(params, "id"), text(params, "action"));
-                match self.builtins.call(id, action, args.clone()).await {
+                let answer = match self.builtins.call(id, action, args.clone()).await {
                     Some(answered) => answered.map_err(|e| e.message),
                     None => self
                         .router
                         .call(id, action, args, ctx)
                         .await
                         .map_err(|e| e.message),
+                };
+                match answer {
+                    Ok(tree) if action == vorn_tree::RENDER => tree_checked(id, tree),
+                    other => other,
                 }
             }
             "extension:contributions" => match self.me.upgrade() {

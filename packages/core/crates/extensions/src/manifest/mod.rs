@@ -572,6 +572,9 @@ pub struct Point {
     /// `views/<name>.kdl`, inside the package.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
+    /// Drawn from the element tree the extension answers `ui.render` with.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tree: bool,
     /// A kit icon by name, as `trash-2`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -1627,7 +1630,18 @@ fn read_point(
             "is not a template under views/ ending in .kdl".into(),
         ));
     }
-    if place.needs_view() && view.is_none() {
+    let tree = match raw.get("tree") {
+        None | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(("tree", "is true or false".into())),
+    };
+    if tree && place != Place::Settings {
+        return Err(("tree", "draws a settings page".into()));
+    }
+    if tree && view.is_some() {
+        return Err(("tree", "draws in place of a view; give one of them".into()));
+    }
+    if place.needs_view() && view.is_none() && !tree {
         return Err((
             "",
             "needs a view: a template under views/ ending in .kdl".into(),
@@ -1733,6 +1747,7 @@ fn read_point(
         deny,
         base,
         view,
+        tree,
         icon,
         key,
         call,

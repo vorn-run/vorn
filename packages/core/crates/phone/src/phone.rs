@@ -509,6 +509,9 @@ impl vornui::App for Phone {
         );
         self.model.acts.clear();
         self.dirty = false;
+        if let Some(Some(key)) = self.settings.clone() {
+            self.model.want_tree(&key);
+        }
         screens::root(self, ui)
     }
 
