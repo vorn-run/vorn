@@ -48,7 +48,7 @@ impl Viewer {
     }
 
     /// The key its own settings are kept under; the CLI and agents' tools keep none.
-    fn key(&self) -> Option<String> {
+    pub(crate) fn key(&self) -> Option<String> {
         match self {
             Viewer::Desktop => Some("desktop".to_owned()),
             Viewer::Device(id) => Some(format!("token:{id}")),

@@ -147,14 +147,11 @@ impl App {
 
     /// A flexible divider dragged: the tree follows it, saved once it is let go.
     pub(super) fn flex_resized(&mut self, ui: &Ui, id: Id, ratio: f32, end: bool) -> bool {
-        let Some(path) = self
-            .flex_tree()
-            .and_then(|t| {
-                t.splits()
-                    .into_iter()
-                    .find(|p| crate::screen::flex_divider_id(*p) == id)
-            })
-        else {
+        let Some(path) = self.flex_tree().and_then(|t| {
+            t.splits()
+                .into_iter()
+                .find(|p| crate::screen::flex_divider_id(*p) == id)
+        }) else {
             return false;
         };
         if end {
@@ -189,9 +186,11 @@ impl App {
         match s {
             Shortcut::PaneFocus(side) => {
                 let shown = self.flex_shown();
-                let Some(tree) = self.flex_tree().cloned().and_then(|t| {
-                    t.retain(&|id| shown.iter().any(|(s, _)| s == id))
-                }) else {
+                let Some(tree) = self
+                    .flex_tree()
+                    .cloned()
+                    .and_then(|t| t.retain(&|id| shown.iter().any(|(s, _)| s == id)))
+                else {
                     return;
                 };
                 let rects = tree.rects(area);

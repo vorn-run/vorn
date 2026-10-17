@@ -122,7 +122,10 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         return Some(Shortcut::PaneEqualize);
     }
     for (with, make) in [
-        (MOD() | mods::ALT, Shortcut::PaneFocus as fn(crate::flex::Side) -> Shortcut),
+        (
+            MOD() | mods::ALT,
+            Shortcut::PaneFocus as fn(crate::flex::Side) -> Shortcut,
+        ),
         (MOD() | mods::ALT | mods::SHIFT, Shortcut::PaneResize),
     ] {
         if only(with) {
@@ -558,7 +561,8 @@ impl App {
             cli_launch: None,
             cli_prompt: None,
         };
-        app.st.grids = crate::flex::grids_from_json(app.store.config.pointer("/defaults/gridLayout"));
+        app.st.grids =
+            crate::flex::grids_from_json(app.store.config.pointer("/defaults/gridLayout"));
         app.load_columns();
         app.see_projects();
         // Asked, not waited on: vornd holds it back while its session holder catches up.
@@ -3548,6 +3552,19 @@ mod tests {
             Some(Shortcut::Prompt(true))
         );
         assert_eq!(shortcut("ArrowDown", MOD()), None);
+        use crate::flex::Side;
+        assert_eq!(
+            shortcut("ArrowLeft", MOD() | mods::ALT),
+            Some(Shortcut::PaneFocus(Side::Left))
+        );
+        assert_eq!(
+            shortcut("ArrowDown", MOD() | mods::ALT | mods::SHIFT),
+            Some(Shortcut::PaneResize(Side::Down))
+        );
+        assert_eq!(
+            shortcut("Equal", MOD() | mods::ALT),
+            Some(Shortcut::PaneEqualize)
+        );
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
         assert_eq!(shortcut("Slash", MOD()), Some(Shortcut::Shortcuts));
         assert_eq!(shortcut("KeyK", MOD()), Some(Shortcut::Palette));

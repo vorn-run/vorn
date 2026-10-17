@@ -6,19 +6,24 @@
 //! its browser panes with `browser:openPane`, so a session started from a
 //! layout is a session like any other.
 //!
-//! The tree maps onto the app's arrangement as its leaves in order: sessions
-//! are started in tree order, which is the order the grid and tabs show them
-//! in. Split directions and ratios are kept in the file but the server has no
-//! per-card size to set, so they do not change what opens.
+//! Sessions are started in tree order. The layout's view (`flexible`,
+//! `grid` or `tabs`) is then set for the project's workspace: flexible lays
+//! the cards out as the tree, each split's direction and ratio as written.
+//! It is kept in the viewer's `gridLayout` and `layoutMode` settings (the
+//! desktop app's for the CLI) and told to the apps (`layout:opened`).
+//! Saving reads them back: the sessions in the grid's tree, in its view.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde_json::{json, Value};
-use vorn_agents::launch::{Platform, Quoting};
-use vorn_layout::{Direction, Launch, Layout, Leaf, Node, Pane, Session};
+use std::collections::HashMap;
 
-use super::config::Viewer;
+use serde_json::{json, Map, Value};
+use tracing::warn;
+use vorn_agents::launch::{Platform, Quoting};
+use vorn_layout::{Direction, Launch, Layout, Leaf, Node, Pane, Session, View};
+
+use super::config::{with_store, Viewer};
 use super::{Answer, Native};
 use crate::registry::Registry;
 
@@ -179,12 +184,18 @@ fn list(native: &Native) -> Answer {
     Answer::Result(Value::Array(rows))
 }
 
+/// A project found for a layout.
+struct Project {
+    name: String,
+    path: String,
+    /// Whether Vorn knows it, not just its path.
+    registered: bool,
+    /// The workspace its sessions show in.
+    workspace: String,
+}
+
 /// A project's name and path from `wanted` (a name, or a path), against the configured projects.
-async fn project(
-    native: &Arc<Native>,
-    wanted: &str,
-    viewer: &Viewer,
-) -> Result<(String, String, bool), String> {
+async fn project(native: &Arc<Native>, wanted: &str, viewer: &Viewer) -> Result<Project, String> {
     let config = match native
         .answer("config:load".into(), Value::Null, viewer)
         .await
@@ -199,6 +210,11 @@ async fn project(
         .flatten()
         .collect();
     let field = |p: &Value, k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+    let workspace = |p: Option<&&Value>| {
+        p.map(|p| field(p, "workspaceId"))
+            .filter(|w| !w.is_empty())
+            .unwrap_or_else(|| "personal".to_owned())
+    };
     let is_path = wanted.contains(['/', '\\']) || wanted.starts_with('~');
     if is_path {
         if !Path::new(wanted).is_absolute() {
@@ -210,12 +226,22 @@ async fn project(
                 .file_name()
                 .map_or_else(|| wanted.to_owned(), |n| n.to_string_lossy().into_owned())
         });
-        return Ok((name, wanted.to_owned(), registered.is_some()));
+        return Ok(Project {
+            name,
+            path: wanted.to_owned(),
+            registered: registered.is_some(),
+            workspace: workspace(registered),
+        });
     }
     known
         .iter()
         .find(|p| field(p, "name") == wanted)
-        .map(|p| (field(p, "name"), field(p, "path"), true))
+        .map(|p| Project {
+            name: field(p, "name"),
+            path: field(p, "path"),
+            registered: true,
+            workspace: workspace(Some(p)),
+        })
         .ok_or_else(|| format!("no project named \"{wanted}\""))
 }
 
@@ -262,10 +288,17 @@ async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
             found.name
         ));
     };
-    let (project_name, project_path, _) = match project(native, wanted, viewer).await {
+    let Project {
+        name: project_name,
+        path: project_path,
+        workspace,
+        ..
+    } = match project(native, wanted, viewer).await {
         Ok(p) => p,
         Err(e) => return Answer::Error(e),
     };
+    // Each leaf's session, none for a pane or one that did not start.
+    let mut started: Vec<Option<String>> = Vec::new();
     let mut sessions = Vec::new();
     let mut panes = Vec::new();
     let mut errors: Vec<String> = Vec::new();
@@ -308,22 +341,226 @@ async fn open(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
                             "id": id, "label": label,
                             "agent": record.get("agentType"), "cwd": cwd,
                         }));
+                        started.push(Some(id.clone()));
                         last = Some(id);
                     }
-                    Answer::Error(e) => errors.push(format!("{}: {e}", describe(s))),
-                    _ => errors.push(format!("{}: not started", describe(s))),
+                    Answer::Error(e) => {
+                        started.push(None);
+                        errors.push(format!("{}: {e}", describe(s)));
+                    }
+                    _ => {
+                        started.push(None);
+                        errors.push(format!("{}: not started", describe(s)));
+                    }
                 }
             }
             Leaf::Pane(p) => {
+                started.push(None);
                 panes.push(open_pane(native, p, last.as_deref(), viewer, &mut errors).await)
             }
         }
     }
+    let view = layout.view();
+    if let Some(view) = view {
+        let tree = tree_json(&layout.root, &mut started.iter());
+        let shown = Shown {
+            workspace,
+            view,
+            columns: layout.columns,
+            tree,
+        };
+        set_view(native, viewer, &shown).await;
+    }
     Answer::Result(json!({
         "layout": found.name, "source": found.source,
         "project": { "name": project_name, "path": project_path },
+        "view": view.map(View::word),
         "sessions": sessions, "panes": panes, "errors": errors,
     }))
+}
+
+/// The key the grid a layout sets is kept under: the viewer's own, the
+/// desktop app's for the CLI and agents' tools.
+fn grid_owner(viewer: &Viewer) -> String {
+    viewer.key().unwrap_or_else(|| "desktop".to_owned())
+}
+
+/// How a workspace's grid shows its sessions.
+struct Shown {
+    workspace: String,
+    view: View,
+    columns: Option<u32>,
+    /// The app's tree (`{"id"}` leaves, `{"split", "ratio", "children"}`).
+    tree: Option<Value>,
+}
+
+/// The layout's tree with each leaf its started session: a pane or a session
+/// that did not start gives its room to the rest.
+fn tree_json<'a>(
+    node: &Node,
+    started: &mut impl Iterator<Item = &'a Option<String>>,
+) -> Option<Value> {
+    match node {
+        Node::Leaf(_) => started.next()?.as_ref().map(|id| json!({ "id": id })),
+        Node::Split {
+            direction,
+            ratio,
+            children,
+        } => {
+            let kids: Vec<Option<Value>> = children.iter().map(|c| tree_json(c, started)).collect();
+            let first = kids.first().is_some_and(Option::is_some);
+            let mut kept: Vec<Value> = kids.into_iter().flatten().collect();
+            if kept.len() < 2 {
+                return kept.pop();
+            }
+            let mut split = json!({ "split": direction.word(), "children": kept });
+            // Without its first child the ratio means nothing; the rest share equally.
+            if first {
+                split["ratio"] = json!(ratio);
+            }
+            Some(split)
+        }
+    }
+}
+
+/// Writes the grid `shown` sets into the viewer's settings and tells the apps.
+async fn set_view(native: &Arc<Native>, viewer: &Viewer, shown: &Shown) {
+    let (n, key) = (Arc::clone(native), grid_owner(viewer));
+    let (ws, view, columns, tree) = (
+        shown.workspace.clone(),
+        shown.view,
+        shown.columns,
+        shown.tree.clone(),
+    );
+    let wrote = super::config::blocking("layout:open", move || {
+        with_store(&n, |store| {
+            let own = store.viewer_settings(&key)?;
+            let mut grids = own
+                .get("gridLayout")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let mut grid = grids
+                .get(&ws)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            match view {
+                View::Flexible => {
+                    grid.insert("view".into(), json!("flexible"));
+                    match tree {
+                        Some(tree) => grid.insert("tree".into(), tree),
+                        None => grid.remove("tree"),
+                    };
+                }
+                View::Grid => {
+                    grid.insert("view".into(), json!("grid"));
+                    grid.insert("columns".into(), json!(columns.unwrap_or(0)));
+                }
+                View::Tabs => {}
+            }
+            grids.insert(ws, Value::Object(grid));
+            let mut put = Map::new();
+            put.insert("gridLayout".into(), Value::Object(grids));
+            let mode = if view == View::Tabs { "tabs" } else { "grid" };
+            put.insert("layoutMode".into(), json!(mode));
+            store.save_viewer_settings(&key, &put)
+        })
+    })
+    .await;
+    if let Err(err) = wrote {
+        warn!(%err, "could not keep the layout's view");
+    }
+    native.broadcast(
+        "layout:opened",
+        json!({
+            "workspace": shown.workspace,
+            "view": shown.view.word(),
+            "columns": shown.columns.unwrap_or(0),
+            "tree": shown.tree,
+        }),
+    );
+}
+
+/// The view the viewer's grid shows `workspace` in, and its tree.
+async fn get_view(native: &Arc<Native>, viewer: &Viewer, workspace: &str) -> Option<Shown> {
+    let (n, key) = (Arc::clone(native), grid_owner(viewer));
+    let own = super::config::blocking("layout:save", move || {
+        with_store(&n, |store| store.viewer_settings(&key))
+    })
+    .await
+    .ok()?;
+    let grid = own.get("gridLayout").and_then(|g| g.get(workspace));
+    let field = |k: &str| grid.and_then(|g| g.get(k));
+    let tabs = own.get("layoutMode").and_then(Value::as_str) == Some("tabs");
+    let flexible = field("view").and_then(Value::as_str) == Some("flexible");
+    let columns = field("columns")
+        .and_then(Value::as_u64)
+        .and_then(|c| u32::try_from(c).ok())
+        .filter(|c| (1..=vorn_layout::MAX_COLUMNS).contains(c));
+    Some(Shown {
+        workspace: workspace.to_owned(),
+        view: if tabs {
+            View::Tabs
+        } else if flexible {
+            View::Flexible
+        } else {
+            View::Grid
+        },
+        columns,
+        tree: field("tree").cloned(),
+    })
+}
+
+/// The app's tree as a layout's, each `{"id"}` the session `leaves` has for
+/// it; one it lacks (another project's, a popped-out card) is left out. A
+/// run of equal splits one way reads back as one split of several children.
+fn layout_tree(v: &Value, leaves: &mut HashMap<String, Node>) -> Option<Node> {
+    if let Some(id) = v.get("id").and_then(Value::as_str) {
+        return leaves.remove(id);
+    }
+    let direction = match v.get("split")?.as_str()? {
+        "horizontal" => Direction::Horizontal,
+        "vertical" => Direction::Vertical,
+        _ => return None,
+    };
+    let kids: Vec<Option<Node>> = v
+        .get("children")?
+        .as_array()?
+        .iter()
+        .map(|c| layout_tree(c, leaves))
+        .collect();
+    let first = kids.first().is_some_and(Option::is_some);
+    let mut kept: Vec<Node> = kids.into_iter().flatten().collect();
+    if kept.len() < 2 {
+        return kept.pop();
+    }
+    let equal = 1.0 / kept.len() as f64;
+    let ratio = v
+        .get("ratio")
+        .and_then(Value::as_f64)
+        .filter(|r| first && *r > 0.0 && *r < 1.0)
+        .unwrap_or(equal);
+    if kept.len() == 2 {
+        if let Node::Split {
+            direction: d,
+            ratio: r,
+            children,
+        } = &kept[1]
+        {
+            if *d == direction && (r - 1.0 / children.len() as f64).abs() < 1e-3 {
+                let Some(Node::Split { children, .. }) = kept.pop() else {
+                    unreachable!("matched above")
+                };
+                kept.extend(children);
+            }
+        }
+    }
+    Some(Node::Split {
+        direction,
+        ratio: (ratio * 10_000.0).round() / 10_000.0,
+        children: kept,
+    })
 }
 
 fn describe(s: &Session) -> String {
@@ -362,7 +599,8 @@ async fn open_pane(
     }
 }
 
-/// `layout:save {name, project, overwrite?}`: the project's open sessions, in order.
+/// `layout:save {name, project, overwrite?}`: the project's open sessions in
+/// the view the grid shows them in, as its tree when that is flexible.
 async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     if !vorn_layout::valid_name(name) {
@@ -375,7 +613,12 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     else {
         return Answer::Error("layout:save needs project".to_owned());
     };
-    let (project_name, project_path, registered) = match project(native, wanted, viewer).await {
+    let Project {
+        name: project_name,
+        path: project_path,
+        registered,
+        workspace,
+    } = match project(native, wanted, viewer).await {
         Ok(p) => p,
         Err(e) => return Answer::Error(e),
     };
@@ -399,6 +642,7 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
                 .filter(|t| Path::new(&t.project_path).starts_with(&project_path))
                 .map(|t| {
                     (
+                        t.id.clone(),
                         t.agent_type.clone(),
                         t.display_name.clone(),
                         t.shell_cwd.clone(),
@@ -412,9 +656,9 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     if open.is_empty() {
         return Answer::Error(format!("no sessions are open in {project_name}"));
     }
-    let leaves: Vec<Node> = open
+    let leaves: Vec<(String, Node)> = open
         .into_iter()
-        .map(|(agent, label, cwd)| {
+        .map(|(id, agent, label, cwd)| {
             let launch = if vorn_agents::is_known(&agent) {
                 Launch::Agent(agent)
             } else {
@@ -426,22 +670,32 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
                     .strip_prefix(&project_path)
                     .map_or(c.clone(), |r| r.to_string_lossy().into_owned())
             });
-            Node::Leaf(Leaf::Session(Session { launch, cwd, label }))
+            (
+                id,
+                Node::Leaf(Leaf::Session(Session { launch, cwd, label })),
+            )
         })
         .collect();
     let count = leaves.len();
-    let root = if count == 1 {
-        leaves
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unreachable!("one leaf"))
-    } else {
-        Node::Split {
-            direction: Direction::Horizontal,
-            ratio: 1.0 / count as f64,
-            children: leaves,
+    let shown = get_view(native, viewer, &workspace).await;
+    let order: Vec<String> = leaves.iter().map(|(id, _)| id.clone()).collect();
+    let mut by_id: HashMap<String, Node> = leaves.into_iter().collect();
+    let tree = shown
+        .as_ref()
+        .filter(|s| s.view == View::Flexible)
+        .and_then(|s| s.tree.as_ref())
+        .and_then(|t| layout_tree(t, &mut by_id));
+    // Sessions the tree does not hold (it was laid out elsewhere) follow it.
+    let mut rest: Vec<Node> = order.iter().filter_map(|id| by_id.remove(id)).collect();
+    let root = match tree {
+        Some(tree) if rest.is_empty() => tree,
+        Some(tree) => {
+            rest.insert(0, tree);
+            flat(rest)
         }
+        None => flat(rest),
     };
+    let view = shown.as_ref().map(|s| s.view);
     let layout = Layout {
         name: Some(name.to_owned()),
         // A project Vorn does not know is kept by its path, which names it anywhere.
@@ -450,6 +704,11 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
         } else {
             project_path.clone()
         }),
+        view,
+        columns: shown
+            .as_ref()
+            .filter(|s| s.view == View::Grid)
+            .and_then(|s| s.columns),
         root,
     };
     let (text, to) = (layout.to_toml(), file.clone());
@@ -461,8 +720,104 @@ async fn save(native: &Arc<Native>, params: &Value, viewer: &Viewer) -> Answer {
     match wrote {
         Ok(Ok(())) => Answer::Result(json!({
             "name": name, "path": file.to_string_lossy(), "sessions": count,
+            "view": view.map(View::word),
         })),
         Ok(Err(e)) => Answer::Error(format!("could not write {}: {e}", file.display())),
         Err(e) => Answer::Error(e.to_string()),
+    }
+}
+
+/// `nodes` side by side in equal shares; one node is itself.
+fn flat(mut nodes: Vec<Node>) -> Node {
+    if nodes.len() == 1 {
+        return nodes.remove(0);
+    }
+    Node::Split {
+        direction: Direction::Horizontal,
+        ratio: 1.0 / nodes.len() as f64,
+        children: nodes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shell(label: &str) -> Node {
+        Node::Leaf(Leaf::Session(Session {
+            launch: Launch::Shell,
+            cwd: None,
+            label: Some(label.to_owned()),
+        }))
+    }
+
+    #[test]
+    fn an_opened_tree_drops_what_did_not_start() {
+        let root = Node::Split {
+            direction: Direction::Horizontal,
+            ratio: 0.7,
+            children: vec![
+                shell("a"),
+                Node::Split {
+                    direction: Direction::Vertical,
+                    ratio: 0.5,
+                    children: vec![shell("b"), shell("c")],
+                },
+            ],
+        };
+        let started = [Some("1".to_owned()), Some("2".to_owned()), None];
+        let tree = tree_json(&root, &mut started.iter()).unwrap();
+        assert_eq!(
+            tree,
+            json!({"split": "horizontal", "ratio": 0.7, "children": [{"id": "1"}, {"id": "2"}]})
+        );
+        let started = [None, Some("2".to_owned()), Some("3".to_owned())];
+        let tree = tree_json(&root, &mut started.iter()).unwrap();
+        assert_eq!(tree["split"], "vertical");
+    }
+
+    #[test]
+    fn a_saved_tree_is_the_grids_with_equal_runs_joined() {
+        // The app's binary tree: a | (b / c) at 0.7, then d and e equal below.
+        let app = json!({"split": "vertical", "ratio": 0.6, "children": [
+            {"split": "horizontal", "ratio": 0.7, "children": [
+                {"id": "a"},
+                {"split": "vertical", "ratio": 0.5, "children": [{"id": "b"}, {"id": "c"}]},
+            ]},
+            {"split": "horizontal", "ratio": 0.3333, "children": [
+                {"id": "d"},
+                {"split": "horizontal", "ratio": 0.5, "children": [{"id": "e"}, {"id": "f"}]},
+            ]},
+        ]});
+        let mut leaves: HashMap<String, Node> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|id| ((*id).to_owned(), shell(id)))
+            .collect();
+        let node = layout_tree(&app, &mut leaves).unwrap();
+        let Node::Split {
+            ratio, children, ..
+        } = &node
+        else {
+            panic!("{node:?}")
+        };
+        assert!((ratio - 0.6).abs() < 1e-9);
+        assert!(matches!(&children[0], Node::Split { ratio, children, .. }
+            if (*ratio - 0.7).abs() < 1e-9 && children.len() == 2));
+        // "f" is not this project's: d and e split the row equally.
+        assert!(matches!(&children[1], Node::Split { ratio, children, .. }
+            if (*ratio - 0.3333).abs() < 1e-9 && children.len() == 2));
+        assert!(leaves.is_empty());
+
+        // A run of equal splits one way is one split of three.
+        let run = json!({"split": "horizontal", "ratio": 0.3333, "children": [
+            {"id": "a"},
+            {"split": "horizontal", "ratio": 0.5, "children": [{"id": "b"}, {"id": "c"}]},
+        ]});
+        let mut leaves: HashMap<String, Node> = ["a", "b", "c"]
+            .iter()
+            .map(|id| ((*id).to_owned(), shell(id)))
+            .collect();
+        let node = layout_tree(&run, &mut leaves).unwrap();
+        assert!(matches!(&node, Node::Split { children, .. } if children.len() == 3));
     }
 }

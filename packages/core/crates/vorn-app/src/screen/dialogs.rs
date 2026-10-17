@@ -36,6 +36,20 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
             ],
         ),
         (
+            "Flexible grid",
+            vec![
+                (
+                    "Move to the pane beside",
+                    format!("{m}{a}\u{2190}\u{2191}\u{2192}\u{2193}"),
+                ),
+                (
+                    "Move the divider",
+                    format!("{m}{a}\u{21e7}\u{2190}\u{2191}\u{2192}\u{2193}"),
+                ),
+                ("Equal pane sizes", format!("{m}{a}=")),
+            ],
+        ),
+        (
             "Sessions",
             vec![
                 ("New session", format!("{m}N")),

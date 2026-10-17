@@ -63,8 +63,13 @@ fn route(input: Input) -> Key {
     let ours =
         OURS.contains(&code.as_str()) || code.strip_prefix("Digit").is_some_and(|d| d != "0");
     let shifted = matches!(code.as_str(), "KeyW" | "KeyA" | "KeyD");
+    let pane = code.starts_with("Arrow") || code == "Equal";
     let chord = match m {
         mods::ALT if ours => MOD(),
+        // Ctrl+Alt reaches a terminal where the window's modifier cannot.
+        _ if pane && m & !mods::SHIFT == mods::CTRL | mods::ALT => {
+            MOD() | mods::ALT | (m & mods::SHIFT)
+        }
         _ if m == mods::ALT | mods::SHIFT && shifted => MOD() | mods::SHIFT,
         _ => m,
     };
@@ -192,6 +197,19 @@ mod tests {
         assert_eq!(
             route(key("KeyK", mods::ALT | mods::SHIFT)),
             Key::App(key("KeyK", mods::ALT | mods::SHIFT))
+        );
+        let pane = mods::CTRL | mods::ALT;
+        assert_eq!(
+            route(key("ArrowLeft", pane)),
+            Key::App(key("ArrowLeft", MOD() | mods::ALT))
+        );
+        assert_eq!(
+            route(key("ArrowUp", pane | mods::SHIFT)),
+            Key::App(key("ArrowUp", MOD() | mods::ALT | mods::SHIFT))
+        );
+        assert_eq!(
+            route(key("ArrowUp", mods::ALT)),
+            Key::App(key("ArrowUp", mods::ALT))
         );
     }
 }
