@@ -19,7 +19,7 @@ etagere = "0.2"
 resvg = { version = "0.48", default-features = false }
 png = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
-pollster = "0.4"
+pollster = "1.0"
 unicode-segmentation = "1"
 rayon = "1"
 unicode-width = "0.2"
