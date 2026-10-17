@@ -5,7 +5,9 @@
 //! or linked in place ([`install`], [`pack`]). Its program speaks the
 //! extension API, defined in `wit/extension.wit` and generated into [`api`],
 //! or, under a `[connector]` section, the connector protocol that API
-//! version includes ([`connector`], [`host`]). Every program
+//! version includes ([`connector`], [`host`]). A service may be a Wasm
+//! component in place of a program ([`component`], and the `wasm` feature's
+//! runtime), sandboxed in the host. Every program
 //! runs under one [`lifecycle`]: started when first needed, stopped when
 //! idle, and held to a cap. The [`router`] carries calls and events to them
 //! and answers what they ask through the [`gate`].
@@ -15,8 +17,10 @@
 
 pub mod activation;
 pub mod api;
+pub mod blobs;
 pub mod bridge;
 pub mod child;
+pub mod component;
 pub mod connector;
 pub mod events;
 pub mod footer;
@@ -38,6 +42,8 @@ pub mod signin;
 pub mod token;
 pub mod usage;
 pub mod views;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 #[cfg(test)]
 pub(crate) mod testing {

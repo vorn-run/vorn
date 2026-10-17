@@ -3,9 +3,11 @@
 //!
 //! An action the manifest gives a command of its own runs one-shot: a
 //! process per call, sent one `guest.handle`. Anything else goes to the
-//! service, started by the [`Lifecycle`] on its first call or event. Each
-//! program's requests are answered on tasks of their own, so a program
-//! waiting on the network holds up nobody else.
+//! service, a program or a Wasm component, started by the [`Lifecycle`] on
+//! its first call or event. Each program's requests are answered on tasks of
+//! their own, so a program waiting on the network holds up nobody else; a
+//! component's imports are answered by the same [`answer`] on its own thread.
+//! The extensions Vorn ships as components ([`Bundled`]) run the same way.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,11 +19,13 @@ use tokio::sync::{mpsc, Semaphore};
 use tracing::{debug, error, info, warn};
 
 use crate::api::types::{CallCtx, Event, InitCtx, Level, RowOp};
+use crate::blobs::{BlobAnswer, BlobCall, BlobStore};
+use crate::component::{Bundled, Compiler, Source};
 use crate::api::{params, ExtError, Method, Side};
 use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
 use crate::events::{self, Bus, Queue, Tally};
 use crate::gate::{self, Caller, StorageCall, World};
-use crate::lifecycle::{Lifecycle, Running, ServiceKey};
+use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
 use crate::sandbox;
@@ -37,6 +41,10 @@ pub struct RouterSettings {
     pub call_timeout: Duration,
     /// How long a service may take to answer `guest.init`.
     pub start_timeout: Duration,
+    /// Where each extension's own files are kept (`blobs.*`); none keeps none.
+    pub blobs: Option<PathBuf>,
+    /// What compiles a Wasm component into the cache when it is not there.
+    pub compiler: Compiler,
 }
 
 impl RouterSettings {
@@ -46,6 +54,8 @@ impl RouterSettings {
             version: version.into(),
             call_timeout: Duration::from_secs(60),
             start_timeout: Duration::from_secs(15),
+            blobs: None,
+            compiler: Compiler::None,
         }
     }
 }
@@ -60,15 +70,86 @@ const MAX_ROWS: usize = 10_000;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
-/// A service speaking the extension API.
+/// A service speaking the extension API: a program, or a Wasm component in its place.
 #[derive(Debug)]
-pub struct Program {
-    child: Child,
+pub enum Program {
+    Child(Child),
+    #[cfg(feature = "wasm")]
+    Component(crate::wasm::Service),
 }
 
 impl Running for Program {
-    fn child(&self) -> &Child {
-        &self.child
+    fn name(&self) -> &str {
+        match self {
+            Program::Child(c) => c.name(),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.name(),
+        }
+    }
+
+    fn exited(&self) -> bool {
+        match self {
+            Program::Child(c) => c.exited(),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.exited(),
+        }
+    }
+
+    fn close(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        match self {
+            Program::Child(c) => Box::pin(c.close()),
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.close(),
+        }
+    }
+}
+
+impl Program {
+    async fn handle(
+        &self,
+        params: params::GuestHandle,
+        timeout: Duration,
+    ) -> Result<Value, CallError> {
+        match self {
+            Program::Child(c) => {
+                c.request(Method::GuestHandle.name(), json!(params), timeout)
+                    .await
+            }
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => {
+                c.handle(params.method, params.args, params.ctx, timeout)
+                    .await
+            }
+        }
+    }
+
+    async fn on_event(&self, params: params::GuestOnEvent, timeout: Duration) -> Result<(), CallError> {
+        match self {
+            Program::Child(c) => {
+                let _ = timeout;
+                c.notify(Method::GuestOnEvent.name(), json!(params)).await
+            }
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => c.on_event(params.batch, timeout).await,
+        }
+    }
+
+    /// The process id of a program; `None` for a component, which runs in the host.
+    pub fn pid(&self) -> Option<u32> {
+        match self {
+            Program::Child(c) => c.pid(),
+            #[cfg(feature = "wasm")]
+            Program::Component(_) => None,
+        }
+    }
+
+    /// The most linear memory a component's instance has held; `None` for a program.
+    pub fn component_memory(&self) -> Option<usize> {
+        match self {
+            Program::Child(_) => None,
+            #[cfg(feature = "wasm")]
+            Program::Component(c) => Some(c.memory()),
+        }
     }
 }
 
@@ -88,6 +169,7 @@ pub struct Router {
     bus: Arc<Bus>,
     /// Each subscribed extension's queue, read by its own delivery task.
     queues: Mutex<HashMap<String, Queue>>,
+    blobs: Option<BlobStore>,
     me: Weak<Router>,
 }
 
@@ -124,6 +206,7 @@ impl Router {
         settings: RouterSettings,
         bus: Arc<Bus>,
     ) -> Arc<Router> {
+        let blobs = settings.blobs.clone().map(BlobStore::new);
         Arc::new_cyclic(|me| Router {
             store,
             lifecycle,
@@ -133,6 +216,7 @@ impl Router {
             packs: Mutex::default(),
             bus,
             queues: Mutex::default(),
+            blobs,
             me: me.clone(),
         })
     }
@@ -286,26 +370,100 @@ impl Router {
             .get_or_start(&key, || self.start_service(&pack))
             .await
             .map_err(|e| ExtError::new("start", e))?;
+        self.serve(&key, lease, action, args, ctx).await
+    }
+
+    /// Calls `action` of the extension Vorn ships as component `bundled`.
+    pub async fn call_bundled(
+        &self,
+        bundled: &Bundled,
+        action: &str,
+        args: Value,
+        ctx: CallCtx,
+    ) -> Result<Value, ExtError> {
+        let key = ServiceKey::new(bundled.manifest.id.as_str(), "");
+        let lease = self
+            .lifecycle
+            .get_or_start(&key, || self.start_bundled(bundled))
+            .await
+            .map_err(|e| ExtError::new("start", e))?;
+        self.serve(&key, lease, action, args, ctx).await
+    }
+
+    /// Hands `batch` to the extension Vorn ships as component `bundled`, starting it for the first.
+    pub async fn hand_bundled(&self, bundled: &Bundled, batch: &[Arc<Event>]) {
+        let key = ServiceKey::new(bundled.manifest.id.as_str(), "");
+        match self
+            .lifecycle
+            .get_or_start(&key, || self.start_bundled(bundled))
+            .await
+        {
+            Ok(lease) => self.deliver_to(&key.extension, &lease, batch).await,
+            Err(err) => warn!(
+                "[extensions] {} missed {} events: {err}",
+                key.extension,
+                batch.len()
+            ),
+        }
+    }
+
+    /// Compiles `bundled` into the cache unless it is there, without starting it.
+    pub async fn prepare_bundled(&self, bundled: &Bundled) -> Result<(), String> {
+        self.prepare(&Source::Bundled(bundled.wasm), &bundled.manifest.name)
+            .await
+    }
+
+    /// Compiles installed extension `id`'s component into the cache unless it
+    /// is there, so its first start waits for nothing; nothing to do for a program.
+    pub async fn prepare_installed(&self, id: &str) -> Result<(), String> {
+        let pack = self.pack(id)?;
+        let Some(component) = pack.manifest.service.as_ref().and_then(|s| s.component.clone())
+        else {
+            return Ok(());
+        };
+        self.prepare(&Source::File(pack.path.join(component)), pack.name())
+            .await
+    }
+
+    #[cfg(feature = "wasm")]
+    async fn prepare(&self, source: &Source, name: &str) -> Result<(), String> {
+        let cache = self.store.root().join(crate::component::COMPILED);
+        crate::wasm::prepare(source, name, &cache, &self.settings.compiler).await
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[allow(clippy::unused_async)]
+    async fn prepare(&self, _source: &Source, name: &str) -> Result<(), String> {
+        Err(format!("{name} is a Wasm component, and this Vorn runs none"))
+    }
+
+    /// Stops the service of extension `id`, whatever it runs as.
+    pub async fn stop(&self, id: &str) {
+        self.lifecycle.stop(&ServiceKey::new(id, "")).await;
+    }
+
+    /// `guest.handle(action)` on a running service, which a timeout stops.
+    async fn serve(
+        &self,
+        key: &ServiceKey,
+        lease: Lease<Program>,
+        action: &str,
+        args: Value,
+        ctx: CallCtx,
+    ) -> Result<Value, ExtError> {
         let params = params::GuestHandle {
             method: action.to_owned(),
             args,
             ctx,
         };
-        let answer = lease
-            .child
-            .request(
-                Method::GuestHandle.name(),
-                json!(params),
-                self.settings.call_timeout,
-            )
-            .await;
+        let answer = lease.handle(params, self.settings.call_timeout).await;
         drop(lease);
         match answer {
             Ok(value) => Ok(value),
             Err(err @ CallError::Timeout(_)) => {
-                // A program that let a call time out may be wedged; the next call starts it fresh.
-                warn!("[extensions] {id} timed out; stopping it");
-                self.lifecycle.stop(&key).await;
+                // A service that let a call time out may be wedged; the next call starts it fresh.
+                warn!("[extensions] {} timed out; stopping it", key.extension);
+                self.lifecycle.stop(key).await;
                 Err(ext_error(err))
             }
             Err(err) => Err(ext_error(err)),
@@ -324,6 +482,33 @@ impl Router {
             .get(&(id.to_owned(), collection.to_owned()))
             .map(|rows| rows.values().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Removes every file extension `id` keeps in its own store; blocks on the disk.
+    pub fn forget_files(&self, id: &str) -> std::io::Result<()> {
+        match &self.blobs {
+            Some(store) => store.forget(id),
+            None => Ok(()),
+        }
+    }
+
+    /// Runs `call` on extension `id`'s own files, off the runtime.
+    async fn blobs(&self, id: &str, call: BlobCall) -> Result<Value, ExtError> {
+        let store = self
+            .blobs
+            .clone()
+            .ok_or_else(|| ExtError::new("unsupported", "this Vorn keeps no extension files"))?;
+        let id = id.to_owned();
+        let answer = tokio::task::spawn_blocking(move || store.run(&id, call))
+            .await
+            .map_err(|e| ExtError::new("failed", e.to_string()))??;
+        Ok(match answer {
+            BlobAnswer::Put => Value::Null,
+            BlobAnswer::Got(Some(bytes)) => crate::api::base64::encode(&bytes),
+            BlobAnswer::Got(None) => Value::Null,
+            BlobAnswer::Listed(blobs) => json!(blobs),
+            BlobAnswer::Deleted(was) => Value::Bool(was),
+        })
     }
 
     /// Stops extension `id` and drops what it published.
@@ -373,20 +558,24 @@ impl Router {
     }
 
     async fn start_service(&self, pack: &InstalledPack) -> Result<Program, String> {
-        let argv = pack
+        let service = pack
             .manifest
             .service
             .as_ref()
-            .map(|s| s.command.clone())
             .ok_or_else(|| format!("{} has no service", pack.name()))?;
-        let child = self.spawn_program(pack, &argv)?;
-        let init = params::GuestInit {
-            ctx: InitCtx {
-                id: pack.id.clone(),
-                version: pack.version.clone(),
-                vorn: self.settings.version.clone(),
-            },
+        let ctx = InitCtx {
+            id: pack.id.clone(),
+            version: pack.version.clone(),
+            vorn: self.settings.version.clone(),
         };
+        if let Some(component) = &service.component {
+            let source = Source::File(pack.path.join(component));
+            return self
+                .start_component(source, Arc::new(pack.manifest.clone()), ctx)
+                .await;
+        }
+        let child = self.spawn_program(pack, &service.command)?;
+        let init = params::GuestInit { ctx };
         let answered = child
             .request(
                 Method::GuestInit.name(),
@@ -399,7 +588,65 @@ impl Router {
             return Err(format!("{} did not start: {}", pack.name(), ext_error(err)));
         }
         info!("[extensions] {} started", pack.name());
-        Ok(Program { child })
+        Ok(Program::Child(child))
+    }
+
+    async fn start_bundled(&self, bundled: &Bundled) -> Result<Program, String> {
+        let m = &bundled.manifest;
+        let ctx = InitCtx {
+            id: m.id.clone(),
+            version: m.version.clone(),
+            vorn: self.settings.version.clone(),
+        };
+        self.start_component(Source::Bundled(bundled.wasm), Arc::clone(m), ctx)
+            .await
+    }
+
+    #[cfg(feature = "wasm")]
+    async fn start_component(
+        &self,
+        source: Source,
+        manifest: Arc<Manifest>,
+        init: InitCtx,
+    ) -> Result<Program, String> {
+        let name = format!("[extensions] {}", manifest.name);
+        let caller = Caller {
+            extension: manifest.id.clone(),
+            project: None,
+        };
+        let start = crate::wasm::Start {
+            source,
+            cache: self.store.root().join(crate::component::COMPILED),
+            compiler: self.settings.compiler.clone(),
+            name,
+            init,
+            start_timeout: self.settings.start_timeout,
+            router: self.me.clone(),
+            manifest: Arc::clone(&manifest),
+            caller,
+        };
+        let service = crate::wasm::Service::start(start).await?;
+        info!("[extensions] {} started as a component", manifest.name);
+        Ok(Program::Component(service))
+    }
+
+    #[cfg(not(feature = "wasm"))]
+    #[allow(clippy::unused_async)]
+    async fn start_component(
+        &self,
+        _source: Source,
+        manifest: Arc<Manifest>,
+        _init: InitCtx,
+    ) -> Result<Program, String> {
+        Err(format!(
+            "{} is a Wasm component, and this Vorn runs none",
+            manifest.name
+        ))
+    }
+
+    /// The running service of extension `id`, without starting it.
+    pub fn running(&self, id: &str) -> Option<Lease<Program>> {
+        self.lifecycle.get(&ServiceKey::new(id, ""))
     }
 
     async fn one_shot(
@@ -511,14 +758,14 @@ impl Router {
                 return;
             }
         };
+        self.deliver_to(id, &lease, batch).await;
+    }
+
+    async fn deliver_to(&self, id: &str, lease: &Lease<Program>, batch: &[Arc<Event>]) {
         let params = params::GuestOnEvent {
             batch: batch.iter().map(|e| Event::clone(e)).collect(),
         };
-        if let Err(err) = lease
-            .child
-            .notify(Method::GuestOnEvent.name(), json!(params))
-            .await
-        {
+        if let Err(err) = lease.on_event(params, self.settings.start_timeout).await {
             warn!(
                 "[extensions] {id} missed {} events: {}",
                 batch.len(),
@@ -586,7 +833,41 @@ fn storage_call(method: Method, params: Value) -> Result<StorageCall, serde_json
                 value: p.value,
             }
         }
+        Method::StorageTransaction => {
+            let p: params::StorageTransaction = serde_json::from_value(params)?;
+            StorageCall::Transaction(
+                p.statements
+                    .into_iter()
+                    .map(|s| (s.sql, s.params))
+                    .collect(),
+            )
+        }
         _ => StorageCall::Prefix,
+    })
+}
+
+/// A `blobs.*` request's params, read.
+fn blob_call(method: Method, params: Value) -> Result<BlobCall, serde_json::Error> {
+    Ok(match method {
+        Method::BlobsPut => {
+            let p: params::BlobsPut = serde_json::from_value(params)?;
+            BlobCall::Put {
+                name: p.name,
+                data: p.data,
+            }
+        }
+        Method::BlobsGet => {
+            let p: params::BlobsGet = serde_json::from_value(params)?;
+            BlobCall::Get { name: p.name }
+        }
+        Method::BlobsList => {
+            let p: params::BlobsList = serde_json::from_value(params)?;
+            BlobCall::List { prefix: p.prefix }
+        }
+        _ => {
+            let p: params::BlobsDelete = serde_json::from_value(params)?;
+            BlobCall::Delete { name: p.name }
+        }
     })
 }
 
@@ -602,8 +883,8 @@ fn from_ext(result: Result<Value, ExtError>) -> Option<Reply> {
     Some(result.map_err(|e| e.to_rpc()))
 }
 
-/// One request a program made; `None` for one that is not answered.
-async fn answer(
+/// One request a program made, or one import a component called; `None` for one that is not answered.
+pub(crate) async fn answer(
     router: &Router,
     manifest: &Manifest,
     caller: &Caller,
@@ -662,6 +943,30 @@ async fn answer(
             }
             None
         }
+        Method::HostRows => {
+            let p: params::HostRows = match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => return invalid(method, &e),
+            };
+            Some(Ok(Value::Array(
+                router.rows(&caller.extension, &p.collection),
+            )))
+        }
+        Method::HostStartSession => {
+            let p: params::HostStartSession = match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => return invalid(method, &e),
+            };
+            let result = match gate::admit_start(manifest) {
+                Ok(()) => router
+                    .world
+                    .start_session(caller, p.req)
+                    .await
+                    .map(Value::String),
+                Err(e) => Err(e),
+            };
+            from_ext(result)
+        }
         Method::NetFetch => {
             let p: params::NetFetch = match serde_json::from_value(params) {
                 Ok(p) => p,
@@ -676,7 +981,8 @@ async fn answer(
         | Method::StorageQuery
         | Method::StorageExec
         | Method::StorageGet
-        | Method::StorageSet => {
+        | Method::StorageSet
+        | Method::StorageTransaction => {
             let call = match storage_call(method, params) {
                 Ok(call) => call,
                 Err(e) => return invalid(method, &e),
@@ -688,6 +994,17 @@ async fn answer(
                         .and_then(|p| p.migrations());
                     router.world.storage(caller, migrations, call).await
                 }
+                Err(e) => Err(e),
+            };
+            from_ext(result)
+        }
+        Method::BlobsPut | Method::BlobsGet | Method::BlobsList | Method::BlobsDelete => {
+            let call = match blob_call(method, params) {
+                Ok(call) => call,
+                Err(e) => return invalid(method, &e),
+            };
+            let result = match gate::admit_storage(manifest) {
+                Ok(()) => router.blobs(&caller.extension, call).await,
                 Err(e) => Err(e),
             };
             from_ext(result)

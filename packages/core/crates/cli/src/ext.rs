@@ -1,9 +1,13 @@
-//! `vorn ext install|link|remove|list|pack`: extensions in the running server.
+//! `vorn ext install|link|remove|list|pack|new|compile`: extensions in the running server.
 //!
 //! An install shows the sheet the server read from the repository before
 //! anything of it runs, and installs only once the person types the
-//! extension's id, or gave it with `--confirm`. `pack` needs no server: it
-//! checks the manifest where the author works and runs the recorded checks.
+//! extension's id, or gave it with `--confirm`. `pack`, `new` and `compile`
+//! need no server: `pack` checks the manifest where the author works and runs
+//! the recorded checks, `new` writes a package, and `compile` compiles a Wasm
+//! component into the cache vornd runs components from (vornd holds no
+//! compiler). `link` of a component builds it first, and with `--watch`
+//! builds and reloads it on every save.
 
 use std::path::{Path, PathBuf};
 
@@ -18,17 +22,24 @@ const WORK_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 
 pub const EXT_USAGE: &str = "Usage
   vorn ext install <git url> [--branch <name>] [--confirm <id>] [--json]
-  vorn ext link <folder> [--json]
+  vorn ext link <folder> [--watch] [--json]
   vorn ext remove <id>
   vorn ext list [--json]
   vorn ext sandbox <id> on|off
   vorn ext pack [<folder>] [--out <file>] [--json]
+  vorn ext new <id> [--wasm] [--path <folder>] [--sdk <folder>]
+  vorn ext compile <file.wasm> --into <folder>
 
 An extension runs as you. install shows what it runs, the hosts it reaches,
 the Vorn methods it uses and what it adds, and runs nothing of it until you
 type its id. --confirm <id> types it for a script that has read the sheet.
 On macOS, sandbox on starts its programs with no network of their own and
 writes only inside its folder.
+
+new writes a package for extension <id> in ./<id>, or --path: a program, or
+with --wasm a Rust crate built as a sandboxed Wasm component. link builds a
+component first; --watch builds and reloads it on every save until Ctrl-C.
+compile is what Vorn runs to compile a component into its cache.
 ";
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -178,24 +189,183 @@ fn absolute(folder: &str) -> PathBuf {
     }
 }
 
+/// The build a component's package runs before it links: its `[build]`, when its service is a component.
+fn component_build(folder: &Path) -> Result<Option<Vec<String>>, String> {
+    let at = folder.join("vorn-extension.toml");
+    let text = std::fs::read_to_string(&at).map_err(|e| format!("{}: {e}", at.display()))?;
+    let m = vorn_extensions::manifest::file::parse(&text).map_err(|e| e.to_string())?;
+    let component = m.service.as_ref().is_some_and(|s| s.component.is_some());
+    Ok(m.build.filter(|_| component))
+}
+
+/// Runs `build` in `folder` as the person would; answers the tail of what it said when it fails.
+async fn run_build(folder: &Path, build: &[String]) -> Result<(), String> {
+    let (program, args) = build
+        .split_first()
+        .ok_or_else(|| "build.command is empty".to_owned())?;
+    let output = tokio::process::Command::new(program)
+        .args(args)
+        .current_dir(folder)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("{} could not run: {e}", build.join(" ")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&output.stderr);
+    let lines: Vec<&str> = said.lines().collect();
+    Err(format!(
+        "{} failed:\n{}",
+        build.join(" "),
+        lines[lines.len().saturating_sub(30)..].join("\n")
+    ))
+}
+
+/// The newest change under `folder`, its build output and history left out.
+fn newest_change(folder: &Path) -> Option<std::time::SystemTime> {
+    const SKIPPED: [&str; 3] = ["target", ".git", "node_modules"];
+    let mut newest = None;
+    let mut pending = vec![folder.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+            let name = entry.file_name();
+            if SKIPPED.iter().any(|s| name == *s) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                pending.push(entry.path());
+            } else if let Ok(at) = meta.modified() {
+                newest = newest.max(Some(at));
+            }
+        }
+    }
+    newest
+}
+
+/// How often `--watch` looks for a save.
+const WATCH_EVERY: std::time::Duration = std::time::Duration::from_millis(400);
+
 async fn link(ctx: &mut Context<'_>, folder: Option<&str>) -> Result<ExitCode, CommandError> {
     let folder = absolute(folder.unwrap_or("."));
-    let pack = ctx
-        .call(
-            "extension:link",
-            Some(json!({ "path": folder.to_string_lossy() })),
-        )
-        .await?;
+    let build = match component_build(&folder) {
+        Ok(build) => build,
+        Err(err) => {
+            ctx.io.write_err(&format!("vorn: {err}\n"));
+            return Ok(ExitCode::Failure);
+        }
+    };
+    if let Some(build) = &build {
+        ctx.io.write_err(&format!("Building: {}\n", build.join(" ")));
+        if let Err(err) = run_build(&folder, build).await {
+            ctx.io.write_err(&format!("vorn: {err}\n"));
+            if !ctx.args.watch {
+                return Ok(ExitCode::Failure);
+            }
+        }
+    }
+    let params = json!({ "path": folder.to_string_lossy() });
+    let pack = ctx.call("extension:link", Some(params.clone())).await?;
     if ctx.args.json {
         ctx.io.write(&format!("{pack}\n"));
     } else {
+        let live = if build.is_some() {
+            "it is rebuilt by vorn ext link"
+        } else {
+            "edits are live"
+        };
         ctx.io.write(&format!(
-            "Linked {} from {}; edits are live\n",
+            "Linked {} from {}; {live}\n",
             text(&pack, "id"),
             folder.display()
         ));
     }
-    Ok(ExitCode::Ok)
+    if !ctx.args.watch {
+        return Ok(ExitCode::Ok);
+    }
+    let Some(build) = build else {
+        ctx.io
+            .write_err("Its edits are live already; --watch rebuilds a Wasm component.\n");
+        return Ok(ExitCode::Ok);
+    };
+    ctx.io.write_err(&format!(
+        "Watching {}; a save rebuilds and reloads it. Ctrl-C stops watching; the link stays.\n",
+        folder.display()
+    ));
+    let scan = |folder: PathBuf| async move {
+        tokio::task::spawn_blocking(move || newest_change(&folder))
+            .await
+            .ok()
+            .flatten()
+    };
+    let mut seen = scan(folder.clone()).await;
+    loop {
+        tokio::time::sleep(WATCH_EVERY).await;
+        let now = scan(folder.clone()).await;
+        if now <= seen {
+            continue;
+        }
+        seen = now;
+        match run_build(&folder, &build).await {
+            Ok(()) => {
+                ctx.call("extension:link", Some(params.clone())).await?;
+                ctx.io.write_err("Rebuilt and reloaded\n");
+            }
+            Err(err) => ctx.io.write_err(&format!("vorn: {err}\n")),
+        }
+        // What the build wrote is not a save.
+        seen = scan(folder.clone()).await.max(seen);
+    }
+}
+
+fn new_package(ctx: &mut Context<'_>, id: Option<&str>) -> ExitCode {
+    let Some(id) = id.filter(|i| !i.is_empty()) else {
+        return ctx.usage("ext new needs the extension's id, as acme.hello", EXT_USAGE);
+    };
+    let folder = absolute(ctx.args.path.as_deref().unwrap_or(id));
+    let sdk = ctx.args.sdk.as_deref().map(absolute);
+    let version = env!("CARGO_PKG_VERSION");
+    match crate::scaffold::write(&folder, id, ctx.args.wasm, sdk.as_deref(), version) {
+        Ok(files) => {
+            for f in &files {
+                ctx.io.write_err(&format!(
+                    "  {}\n",
+                    f.strip_prefix(&folder).unwrap_or(f).display()
+                ));
+            }
+            let next = if ctx.args.wasm {
+                "cargo test, then vorn ext link --watch"
+            } else {
+                "vorn ext link"
+            };
+            ctx.io.write(&format!(
+                "Wrote {id} in {}; next: cd there and run {next}\n",
+                folder.display()
+            ));
+            ExitCode::Ok
+        }
+        Err(err) => {
+            ctx.io.write_err(&format!("vorn: {err}\n"));
+            ExitCode::Failure
+        }
+    }
+}
+
+fn compile(ctx: &mut Context<'_>, wasm: Option<&str>) -> ExitCode {
+    let (Some(wasm), Some(into)) = (wasm.filter(|w| !w.is_empty()), ctx.args.into.clone()) else {
+        return ctx.usage("ext compile needs a .wasm file and --into <folder>", EXT_USAGE);
+    };
+    match vorn_extensions::wasm::precompile(&absolute(wasm), &absolute(&into)) {
+        Ok(out) => {
+            ctx.io.write(&format!("{}\n", out.display()));
+            ExitCode::Ok
+        }
+        Err(err) => {
+            ctx.io.write_err(&format!("vorn: {err}\n"));
+            ExitCode::Failure
+        }
+    }
 }
 
 async fn remove(ctx: &mut Context<'_>, id: Option<&str>) -> Result<ExitCode, CommandError> {
@@ -335,8 +505,11 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
         ctx.io.write_err(EXT_USAGE);
         return ExitCode::Usage;
     };
-    if verb == "pack" {
-        return pack(ctx, first).await;
+    match verb {
+        "pack" => return pack(ctx, first).await,
+        "new" => return new_package(ctx, first),
+        "compile" => return compile(ctx, first),
+        _ => {}
     }
     if !["install", "link", "remove", "list", "sandbox"].contains(&verb) {
         return ctx.usage(&format!("unknown ext command \"{verb}\""), EXT_USAGE);

@@ -280,6 +280,49 @@ impl ExtensionTables {
         Ok(u64::try_from(changed).unwrap_or(u64::MAX))
     }
 
+    /// One statement of a transaction: its rows when it reads any, else how many rows it changed.
+    fn statement(&self, sql: &str, params: &[Value]) -> Result<Value> {
+        let mut stmt = self.conn.prepare(sql).map_err(|e| self.named(e))?;
+        if stmt.column_count() == 0 {
+            let changed = stmt
+                .execute(params_from_iter(params.iter().map(to_sql)))
+                .map_err(|e| self.named(e))?;
+            return Ok(Value::from(u64::try_from(changed).unwrap_or(u64::MAX)));
+        }
+        drop(stmt);
+        self.query(sql, params).map(Value::Array)
+    }
+
+    /// Runs `statements` in order as one transaction, each under the
+    /// authorizer: all of them hold, or none does. Answers each statement's
+    /// rows when it reads any, else how many rows it changed.
+    pub fn transaction(&self, statements: &[(String, Vec<Value>)]) -> Result<Vec<Value>> {
+        // The authorizer refuses BEGIN to a statement, so the host opens it.
+        self.guard(false)?;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let ran = self.guard(true).and_then(|()| {
+            let mut out = Vec::with_capacity(statements.len());
+            for (index, (sql, params)) in statements.iter().enumerate() {
+                let answered = self.statement(sql, params).map_err(|e| Error::Statement {
+                    index,
+                    error: Box::new(e),
+                })?;
+                out.push(answered);
+            }
+            Ok(out)
+        });
+        self.guard(false)?;
+        let done = match ran {
+            Ok(out) => self.conn.execute_batch("COMMIT").map(|()| out).map_err(Error::from),
+            Err(e) => Err(e),
+        };
+        if done.is_err() {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        self.guard(true)?;
+        done
+    }
+
     /// Runs the `.sql` files in `dir` not yet run, in name order, each in a
     /// transaction of its own; answers the ones it ran.
     pub fn migrate(&self, dir: &Path) -> Result<Vec<String>> {
@@ -511,6 +554,54 @@ mod tests {
                 .starts_with(&format!("test.y may not read the table {rows}")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_transaction_holds_whole_or_not_at_all() {
+        let (_dir, path) = db();
+        let t = ExtensionTables::open(&path, "test.x").unwrap();
+        let rows = format!("{}rows", t.prefix());
+        let s = |sql: &str, params: Vec<Value>| (sql.to_owned(), params);
+        let out = t
+            .transaction(&[
+                s(&format!("CREATE TABLE {rows} (id INTEGER PRIMARY KEY, n INTEGER)"), vec![]),
+                s(&format!("INSERT INTO {rows} (n) VALUES (?), (?)"), vec![json!(1), json!(2)]),
+                s(&format!("SELECT sum(n) AS total FROM {rows}"), vec![]),
+            ])
+            .unwrap();
+        assert_eq!(out, [json!(0), json!(2), json!([{ "total": 3 }])]);
+        // The second statement fails, so the first does not hold.
+        let err = t
+            .transaction(&[
+                s(&format!("UPDATE {rows} SET n = n + 10"), vec![]),
+                s(&format!("INSERT INTO {rows} (id, n) VALUES (1, 0)"), vec![]),
+            ])
+            .unwrap_err();
+        assert!(err.to_string().starts_with("statement 1: "), "{err}");
+        assert!(!err.is_refused());
+        assert_eq!(
+            t.query(&format!("SELECT sum(n) AS total FROM {rows}"), &[]).unwrap(),
+            [json!({ "total": 3 })]
+        );
+        // A statement on another table is refused by name, and nothing of it holds.
+        let err = t
+            .transaction(&[
+                s(&format!("DELETE FROM {rows}"), vec![]),
+                s("DELETE FROM tasks", vec![]),
+            ])
+            .unwrap_err();
+        assert!(err.is_refused());
+        assert_eq!(
+            err.to_string(),
+            "statement 1: test.x may not write the table tasks: its tables are named x_test_0x_…"
+        );
+        assert_eq!(t.query(&format!("SELECT id FROM {rows}"), &[]).unwrap().len(), 2);
+        for sql in ["COMMIT", "BEGIN", "ROLLBACK"] {
+            let err = t.transaction(&[s(sql, vec![])]).unwrap_err();
+            assert!(err.is_refused(), "{sql}: {err}");
+        }
+        // The connection is usable after every failure.
+        assert_eq!(t.transaction(&[]).unwrap(), Vec::<Value>::new());
     }
 
     #[test]

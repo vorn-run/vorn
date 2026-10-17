@@ -2,24 +2,22 @@
 //! removal in the sidebar, a worktree's menu removes one (asking first when
 //! sessions or changes are at stake), and Settings lists every worktree with
 //! what removing it frees, drawn as an element tree.
+//!
+//! Vorn ships it as a Wasm component (`vorn-extension.toml` beside this
+//! crate): everything it knows comes through the extension API, and what it
+//! shows lives in the rows it publishes, so a restart of its instance loses
+//! nothing a person sees.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures_util::future::BoxFuture;
-use futures_util::FutureExt;
-use serde_json::{json, Value};
-use vorn_extensions::api::types::{Event, RowOp};
-use vorn_extensions::api::ExtError;
-use vorn_extensions::events::WORKTREE_IDLE;
-
-use super::{arg, unknown, Api, Builtin};
-use crate::native::extensions::guard;
+use vorn_extension_sdk::tree::{self, Surface};
+use vorn_extension_sdk::{arg, json, Ctx, Error, Event, Extension, Host, Init, Op, Value};
 
 mod page;
 
 const NAME: &str = "Worktree cleanup";
+/// The event a worktree's last session ending sends.
+const WORKTREE_IDLE: &str = "worktree.idle";
 const IDLE: &str = "idle";
 const ASKED: &str = "asked";
 const ALL: &str = "worktrees";
@@ -34,12 +32,11 @@ const RETRY: Duration = Duration::from_secs(1);
 /// How long a closed session's processes get to let go of the worktree.
 const SETTLE: Duration = Duration::from_millis(500);
 
-#[derive(Default)]
+/// The extension. The worktree its dialog asks about is the `asked` row.
+#[derive(Debug, Default)]
 pub struct Cleanup {
-    /// The worktree the confirm dialog asks about.
-    asked: Mutex<Option<(String, String)>>,
     /// Whether a scan has listed the worktrees once.
-    scanned: AtomicBool,
+    scanned: bool,
 }
 
 /// A worktree as `worktrees.list` gives it.
@@ -207,62 +204,56 @@ fn bytes(n: u64) -> String {
     }
 }
 
-async fn list(api: &Api, project: Option<&str>, refresh: bool) -> Result<Vec<Found>, ExtError> {
-    let all = api
-        .call(
-            "worktrees.list",
-            json!({ "project": project, "refresh": refresh }),
-        )
-        .await?;
-    Ok(all
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|v| Found(v.clone()))
-        .collect())
+fn list(host: &mut dyn Host, project: Option<&str>, refresh: bool) -> Result<Vec<Found>, Error> {
+    let all = host.call(
+        "worktrees.list",
+        json!({ "project": project, "refresh": refresh }),
+    )?;
+    Ok(match all {
+        Value::Array(found) => found.into_iter().map(Found).collect(),
+        _ => Vec::new(),
+    })
 }
 
-async fn find(api: &Api, path: &str, project: &str) -> Result<Found, ExtError> {
-    list(api, Some(project), false)
-        .await?
+fn find(host: &mut dyn Host, path: &str, project: &str) -> Result<Found, Error> {
+    list(host, Some(project), false)?
         .into_iter()
         .find(|f| f.path() == path)
-        .ok_or_else(|| ExtError::new("gone", format!("{path} is no longer a worktree")))
+        .ok_or_else(|| Error::new("gone", format!("{path} is no longer a worktree")))
 }
 
 /// The project a row in any of the collections names for worktree `path`.
-fn project_of(api: &Api, path: &str) -> Option<String> {
+fn project_of(host: &mut dyn Host, path: &str) -> Option<String> {
     [IDLE, ALL, ASKED]
         .iter()
-        .flat_map(|c| api.rows(c))
+        .flat_map(|c| host.rows(c).unwrap_or_default())
         .find(|r| r["id"] == path)
         .and_then(|r| r["project_path"].as_str().map(str::to_owned))
 }
 
 /// Closes the worktree's sessions, then removes it, its changes with it.
-async fn remove(api: &Api, path: &str, project: &str) -> Result<Value, ExtError> {
-    let found = find(api, path, project).await?;
+fn remove(host: &mut dyn Host, path: &str, project: &str) -> Result<Value, Error> {
+    let found = find(host, path, project)?;
     if !found.removable() {
-        return Err(ExtError::new(
+        return Err(Error::new(
             "refused",
             format!("{} is not a worktree Vorn removes", found.name()),
         ));
     }
     let sessions = found.sessions();
     for id in &sessions {
-        api.call("sessions.close", json!({ "sessionId": id }))
-            .await?;
+        host.call("sessions.close", json!({ "sessionId": id }))?;
     }
     if !sessions.is_empty() {
-        tokio::time::sleep(SETTLE).await;
+        std::thread::sleep(SETTLE);
     }
     let args = json!({ "worktree": path, "project": project, "force": found.flag("dirty") });
-    let answer = api.call("worktrees.remove", args).await?;
+    let answer = host.call("worktrees.remove", args)?;
     if answer["removed"].as_bool() != Some(true) {
-        return Err(ExtError::new("failed", "Failed to remove worktree"));
+        return Err(Error::new("failed", "Failed to remove worktree"));
     }
     for c in [IDLE, ALL] {
-        api.publish(c, vec![RowOp::Delete(path.to_owned())]);
+        host.publish(c, vec![Op::Delete(path.to_owned())]);
     }
     Ok(json!({ "removed": path, "toast": "Worktree removed" }))
 }
@@ -296,31 +287,30 @@ fn settings_rows(found: &[Found]) -> (Vec<Value>, Value) {
     (rows, summary_row(&shown))
 }
 
-fn scan_state(api: &Api, busy: bool, error: Option<String>) {
+fn scan_state(host: &mut dyn Host, busy: bool, error: Option<String>) {
     let row = json!({ "id": SCAN, "busy": busy, "error": error.unwrap_or_default() });
-    api.publish(SCAN, vec![RowOp::Clear, RowOp::Upsert(row)]);
+    host.publish(SCAN, vec![Op::Clear, Op::Upsert(row)]);
 }
 
-async fn scan(api: &Api, refresh: bool) -> Result<Value, ExtError> {
-    let found = list(api, None, refresh).await?;
+fn scan(host: &mut dyn Host, refresh: bool) -> Result<Value, Error> {
+    let found = list(host, None, refresh)?;
     let (rows, summary) = settings_rows(&found);
-    let mut ops = vec![RowOp::Clear];
-    ops.extend(rows.into_iter().map(RowOp::Upsert));
-    api.publish(ALL, ops);
-    api.publish(SUMMARY, vec![RowOp::Clear, RowOp::Upsert(summary)]);
+    let mut ops = vec![Op::Clear];
+    ops.extend(rows.into_iter().map(Op::Upsert));
+    host.publish(ALL, ops);
+    host.publish(SUMMARY, vec![Op::Clear, Op::Upsert(summary)]);
     Ok(json!({ "worktrees": found.len() }))
 }
 
 /// Deletes the build output of every worktree no session holds.
-async fn reclaim_all(api: &Api) -> Result<Value, ExtError> {
-    let found = list(api, None, false).await?;
+fn reclaim_all(host: &mut dyn Host) -> Result<Value, Error> {
+    let found = list(host, None, false)?;
     let mut done = 0;
     for f in found.iter().filter(|f| f.free() && f.reclaimable()) {
-        api.call("worktrees.reclaim", json!({ "worktree": f.path() }))
-            .await?;
+        host.call("worktrees.reclaim", json!({ "worktree": f.path() }))?;
         done += 1;
     }
-    scan(api, false).await?;
+    scan(host, false)?;
     let toast = format!(
         "Deleted the build output in {done} worktree{}",
         if done == 1 { "" } else { "s" }
@@ -329,7 +319,7 @@ async fn reclaim_all(api: &Api) -> Result<Value, ExtError> {
 }
 
 /// Removes the checked worktrees; one that fails stops the rest, then the list is rescanned.
-async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
+fn remove_many(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     let ids: Vec<String> = args["ids"]
         .as_array()
         .into_iter()
@@ -337,9 +327,9 @@ async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect();
     if ids.is_empty() {
-        return Err(ExtError::new("bad_args", "remove_many needs ids"));
+        return Err(Error::new("bad_args", "remove_many needs ids"));
     }
-    let rows = api.rows(ALL);
+    let rows = host.rows(ALL)?;
     let mut done = 0;
     let mut failed = None;
     for id in &ids {
@@ -347,12 +337,11 @@ async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
             continue;
         };
         let result = if row["orphan"].as_bool() == Some(true) {
-            api.call("worktrees.prune", json!({ "worktree": id }))
-                .await
+            host.call("worktrees.prune", json!({ "worktree": id }))
                 .map(|_| ())
         } else {
             let project = row["project_path"].as_str().unwrap_or_default();
-            remove(api, id, project).await.map(|_| ())
+            remove(host, id, project).map(|_| ())
         };
         match result {
             Ok(()) => done += 1,
@@ -362,7 +351,7 @@ async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
             }
         }
     }
-    scan(api, false).await?;
+    scan(host, false)?;
     if let Some(e) = failed {
         return Err(e);
     }
@@ -376,41 +365,41 @@ async fn remove_many(api: &Api, args: &Value) -> Result<Value, ExtError> {
 impl Cleanup {
     /// Scans for the settings page, trying a first scan again before it
     /// says why it failed; until one lists, the page says it is measuring.
-    async fn scan(&self, api: &Api, refresh: bool) -> Result<Value, ExtError> {
-        let first = !self.scanned.load(Ordering::Relaxed);
+    fn scan(&mut self, host: &mut dyn Host, refresh: bool) -> Result<Value, Error> {
+        let first = !self.scanned;
         if first {
-            scan_state(api, true, None);
+            scan_state(host, true, None);
         }
         let tries = if first { FIRST_TRIES } else { 1 };
         let mut tried = 0;
         loop {
             tried += 1;
-            match scan(api, refresh).await {
+            match scan(host, refresh) {
                 Ok(v) => {
-                    self.scanned.store(true, Ordering::Relaxed);
-                    scan_state(api, false, None);
+                    self.scanned = true;
+                    scan_state(host, false, None);
                     return Ok(v);
                 }
-                Err(_) if tried < tries => tokio::time::sleep(RETRY).await,
+                Err(_) if tried < tries => std::thread::sleep(RETRY),
                 Err(e) => {
                     let why = format!(
                         "Could not measure the worktrees: {}. Refresh to try again.",
                         e.message.trim_end_matches('.')
                     );
-                    scan_state(api, false, Some(why));
+                    scan_state(host, false, Some(why));
                     return Err(e);
                 }
             }
         }
     }
 
-    async fn idle(&self, api: &Api, data: &Value) {
+    fn idle(host: &mut dyn Host, data: &Value) {
         let (Some(path), Some(project)) =
             (data["worktreePath"].as_str(), data["projectPath"].as_str())
         else {
             return;
         };
-        let Ok(found) = find(api, path, project).await else {
+        let Ok(found) = find(host, path, project) else {
             return;
         };
         if !found.removable() || !found.sessions().is_empty() {
@@ -423,18 +412,17 @@ impl Cleanup {
             "project_path": project,
             "dirty": found.flag("dirty"),
         });
-        api.publish(IDLE, vec![RowOp::Upsert(row)]);
+        host.publish(IDLE, vec![Op::Upsert(row)]);
     }
 
-    async fn ask(&self, api: &Api, args: &Value) -> Result<Value, ExtError> {
+    fn ask(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
         let path = arg(args, "worktree", "ask")?;
         let project = arg(args, "project", "ask")?;
-        let found = find(api, path, project).await?;
+        let found = find(host, path, project)?;
         let sessions = found.sessions().len();
         if sessions == 0 && !found.flag("dirty") {
-            return remove(api, path, project).await;
+            return remove(host, path, project);
         }
-        *guard(&self.asked) = Some((path.to_owned(), project.to_owned()));
         let row = json!({
             "id": path,
             "name": found.name(),
@@ -443,115 +431,96 @@ impl Cleanup {
             "sessions": sessions,
             "dirty": found.flag("dirty"),
         });
-        api.publish(ASKED, vec![RowOp::Clear, RowOp::Upsert(row)]);
+        host.publish(ASKED, vec![Op::Clear, Op::Upsert(row)]);
         Ok(json!({ "open": "confirm" }))
     }
 
-    async fn act(&self, api: &Api, action: &str, args: Value) -> Result<Value, ExtError> {
-        let row = || {
-            let path = arg(&args, "id", action)?.to_owned();
-            let project = project_of(api, &path)
-                .ok_or_else(|| ExtError::new("gone", format!("{path} is not listed")))?;
-            Ok::<_, ExtError>((path, project))
+    /// The worktree the dialog asks about, which the `asked` row holds.
+    fn asked(host: &mut dyn Host) -> Option<(String, String)> {
+        let row = host.rows(ASKED).ok()?.into_iter().next()?;
+        let path = row["id"].as_str()?.to_owned();
+        let project = row["project_path"].as_str()?.to_owned();
+        Some((path, project))
+    }
+
+    fn act(&mut self, host: &mut dyn Host, action: &str, args: &Value) -> Result<Value, Error> {
+        let row = |host: &mut dyn Host| {
+            let path = arg(args, "id", action)?.to_owned();
+            let project = project_of(host, &path)
+                .ok_or_else(|| Error::new("gone", format!("{path} is not listed")))?;
+            Ok::<_, Error>((path, project))
         };
         match action {
-            "ask" => self.ask(api, &args).await,
+            "ask" => Cleanup::ask(host, args),
             "confirm" => {
-                let asked = guard(&self.asked).take();
-                api.publish(ASKED, vec![RowOp::Clear]);
+                let asked = Cleanup::asked(host);
+                host.publish(ASKED, vec![Op::Clear]);
                 let (path, project) =
-                    asked.ok_or_else(|| ExtError::new("gone", "Nothing is asked"))?;
-                remove(api, &path, &project).await
+                    asked.ok_or_else(|| Error::new("gone", "Nothing is asked"))?;
+                remove(host, &path, &project)
             }
             "cancel" => {
-                guard(&self.asked).take();
-                api.publish(ASKED, vec![RowOp::Clear]);
+                host.publish(ASKED, vec![Op::Clear]);
                 Ok(Value::Null)
             }
             "keep" => {
-                let path = arg(&args, "id", action)?;
-                api.publish(IDLE, vec![RowOp::Delete(path.to_owned())]);
+                let path = arg(args, "id", action)?;
+                host.publish(IDLE, vec![Op::Delete(path.to_owned())]);
                 Ok(Value::Null)
             }
             "remove" => {
-                let (path, project) = row()?;
-                remove(api, &path, &project).await
+                let (path, project) = row(host)?;
+                remove(host, &path, &project)
             }
-            "scan" => self.scan(api, false).await,
-            "reclaim_all" => reclaim_all(api).await,
-            "remove_many" => remove_many(api, &args).await,
-            "refresh" => self.scan(api, true).await,
+            "scan" => self.scan(host, false),
+            "reclaim_all" => reclaim_all(host),
+            "remove_many" => remove_many(host, args),
+            "refresh" => self.scan(host, true),
             "reclaim" | "prune" => {
-                let (path, _) = row()?;
-                api.call(&format!("worktrees.{action}"), json!({ "worktree": path }))
-                    .await?;
-                scan(api, false).await
+                let (path, _) = row(host)?;
+                host.call(&format!("worktrees.{action}"), json!({ "worktree": path }))?;
+                scan(host, false)
             }
-            vorn_tree::RENDER => page::render(api),
-            vorn_tree::EVENT => {
-                let event: vorn_tree::Event = serde_json::from_value(args["event"].clone())
-                    .map_err(|e| ExtError::new("bad_args", format!("ui.event: {e}")))?;
-                let (does, args) = page::event(&event)?;
-                Box::pin(self.act(api, does, args)).await
-            }
-            other => Err(unknown(NAME, other)),
+            other => Err(Error::new(
+                "unknown-action",
+                format!("{NAME} has no action {other}"),
+            )),
         }
     }
 }
 
-impl Builtin for Cleanup {
-    fn manifest(&self) -> &'static str {
-        include_str!("worktrees.toml")
+impl Extension for Cleanup {
+    fn init(_: &Init, _: &mut dyn Host) -> Result<Cleanup, Error> {
+        Ok(Cleanup::default())
     }
 
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &[
-            ("views/idle.kdl", include_str!("views/idle.kdl")),
-            ("views/confirm.kdl", include_str!("views/confirm.kdl")),
-        ]
-    }
-
-    fn events(&self) -> &'static [&'static str] {
-        &[WORKTREE_IDLE]
-    }
-
-    fn on_by_default(&self) -> bool {
-        true
-    }
-
-    fn start<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
-        async {}.boxed()
-    }
-
-    fn handle<'a>(
-        &'a self,
-        api: &'a Api,
-        action: &'a str,
+    fn handle(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
         args: Value,
-    ) -> BoxFuture<'a, Result<Value, ExtError>> {
-        self.act(api, action, args).boxed()
+        _: &Ctx,
+    ) -> Result<Value, Error> {
+        self.act(host, method, &args)
     }
 
-    fn on_events<'a>(&'a self, api: &'a Api, batch: Vec<Arc<Event>>) -> BoxFuture<'a, ()> {
-        async move {
-            for event in batch.iter().filter(|e| e.name == WORKTREE_IDLE) {
-                self.idle(api, &event.data).await;
-            }
+    fn on_events(&mut self, host: &mut dyn Host, batch: Vec<Event>) {
+        for event in batch.iter().filter(|e| e.name == WORKTREE_IDLE) {
+            Cleanup::idle(host, &event.data);
         }
-        .boxed()
+    }
+
+    fn render(&mut self, host: &mut dyn Host, _: &str, _: Surface) -> Result<tree::Node, Error> {
+        page::render(host)
+    }
+
+    fn event(&mut self, host: &mut dyn Host, _: &str, event: tree::Event) -> Result<Value, Error> {
+        let (does, args) = page::event(&event)?;
+        self.act(host, does, &args)
     }
 }
+
+vorn_extension_sdk::export!(Cleanup);
 
 #[cfg(test)]
-mod tests {
-    use super::bytes;
-
-    #[test]
-    fn sizes_read_in_the_largest_whole_unit() {
-        assert_eq!(bytes(512), "512 B");
-        assert_eq!(bytes(12 * 1024), "12 KB");
-        assert_eq!(bytes(340 * 1024 * 1024), "340 MB");
-        assert_eq!(bytes(9 * 1024 * 1024), "9.0 MB");
-        assert_eq!(bytes(1288 * 1024 * 1024), "1.3 GB");
-    }
-}
+mod tests;

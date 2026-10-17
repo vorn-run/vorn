@@ -43,6 +43,10 @@ members = [
   "crates/view",
   "crates/tree",
   "crates/layout",
+  "crates/extension-sdk",
+  "crates/guest-build",
+  "crates/extensions/tests/probe",
+  "extensions/worktrees",
   "bench/scale",
   "bench/workflows",
 ]

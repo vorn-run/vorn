@@ -1,0 +1,15 @@
+[package]
+name = "vorn-ext-probe"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The Wasm component vorn-extensions' tests load: every import of the extension world, and the ways a component can misbehave"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../../extension-sdk" }

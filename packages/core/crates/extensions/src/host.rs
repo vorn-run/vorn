@@ -18,7 +18,7 @@ use tracing::info;
 use crate::child::{Child, Launch};
 use crate::footer::{read_items, Item};
 use crate::js;
-use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
+use crate::lifecycle::{Lease, Lifecycle, ServiceKey};
 use crate::links::MAX_CLICKED_TEXT;
 use crate::pack::{InstalledPack, PackStore};
 use crate::token;
@@ -130,11 +130,7 @@ impl Host {
     }
 }
 
-impl Running for Host {
-    fn child(&self) -> &Child {
-        &self.child
-    }
-}
+crate::running_child!(Host, child);
 
 /// What every host is started with.
 #[derive(Debug, Clone)]

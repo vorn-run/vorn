@@ -738,6 +738,10 @@ impl Extensions {
         self.router.forget(id).await;
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
+        let (router, owned) = (Arc::clone(&self.router), id.to_owned());
+        if let Err(err) = blocking(move || router.forget_files(&owned).map_err(|e| e.to_string())).await {
+            warn!("[extensions] could not remove the files of {id}: {err}");
+        }
         self.sync_adapters();
         self.around.pack_removed(id).await;
         self.contributions_changed(id);
@@ -749,6 +753,10 @@ impl Extensions {
         self.pack_changed(id).await;
         self.sync_adapters();
         self.router.lifecycle().stop_extension(id).await;
+        // A component is compiled now, by the vorn command, so its first use waits for nothing.
+        if let Err(err) = self.router.prepare_installed(id).await {
+            warn!("[extensions] {err}");
+        }
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);

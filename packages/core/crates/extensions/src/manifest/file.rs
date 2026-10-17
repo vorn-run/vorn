@@ -152,7 +152,10 @@ struct RawCommand {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RawService {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    component: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     events: Vec<String>,
 }
@@ -742,7 +745,22 @@ impl Raw {
             check_command(at, "checks.command", &checks.command)?;
         }
         if let Some(service) = &self.service {
-            check_command(at, "service.command", &service.command)?;
+            match &service.component {
+                None => check_command(at, "service.command", &service.command)?,
+                Some(_) if !service.command.is_empty() => {
+                    return Err(at(
+                        "service.component",
+                        "runs in place of service.command; name one of them".into(),
+                    ))
+                }
+                Some(c) if !is_relative_path(c) || !c.ends_with(".wasm") => {
+                    return Err(at(
+                        "service.component",
+                        "names a .wasm file inside the package".into(),
+                    ))
+                }
+                Some(_) => {}
+            }
             for (i, event) in service.events.iter().enumerate() {
                 if !is_event(event) {
                     return Err(at(
@@ -1008,6 +1026,7 @@ impl Raw {
         manifest.build = self.build.map(|b| b.command);
         manifest.service = self.service.map(|s| Service {
             command: s.command,
+            component: s.component,
             events: s.events,
         });
         manifest.runs = self
@@ -1809,6 +1828,7 @@ impl From<&Manifest> for Raw {
             build: m.build.clone().map(|command| RawCommand { command }),
             service: m.service.as_ref().map(|s| RawService {
                 command: s.command.clone(),
+                component: s.component.clone(),
                 events: s.events.clone(),
             }),
             actions: m

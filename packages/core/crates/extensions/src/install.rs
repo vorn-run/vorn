@@ -362,7 +362,13 @@ impl Installs {
             command("build".into(), build);
         }
         if let Some(service) = &m.service {
-            command("service".into(), &service.command);
+            match &service.component {
+                Some(c) => command(
+                    "service, a sandboxed component".into(),
+                    std::slice::from_ref(c),
+                ),
+                None => command("service".into(), &service.command),
+            }
         }
         for run in &m.runs {
             command(format!("action {}", run.id), &run.command);

@@ -61,6 +61,8 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     string("workflow"),
     string("confirm"),
     string("out"),
+    string("into"),
+    string("sdk"),
     OptionSpec {
         name: "input",
         kind: Kind::String,
@@ -85,6 +87,8 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     boolean("recent"),
     boolean("raw"),
     boolean("json"),
+    boolean("wasm"),
+    boolean("watch"),
     HELP,
 ];
 
@@ -406,6 +410,14 @@ pub struct ClientArgs {
     pub confirm: Option<String>,
     /// `vorn ext pack --out <file>`: where the bundle goes.
     pub out: Option<String>,
+    /// `vorn ext compile --into <dir>`: the cache compiled components go in.
+    pub into: Option<String>,
+    /// `vorn ext new --sdk <folder>`: the SDK a new Rust extension builds against, in place of the release's.
+    pub sdk: Option<String>,
+    /// `vorn ext new --wasm`: a Rust extension built as a Wasm component.
+    pub wasm: bool,
+    /// `vorn ext link --watch`: rebuild and reload on every save.
+    pub watch: bool,
     /// `--input key=value`, in the order given; a repeated key keeps its last value.
     pub inputs: Option<serde_json::Map<String, serde_json::Value>>,
     pub data_dir: Option<String>,
@@ -562,6 +574,10 @@ impl ClientArgs {
             workflow: owned("workflow"),
             confirm: owned("confirm"),
             out: owned("out"),
+            into: owned("into"),
+            sdk: owned("sdk"),
+            wasm: parsed.flag("wasm"),
+            watch: parsed.flag("watch"),
             inputs,
             data_dir,
             lines: positive_int(parsed.str("lines"), "--lines")?,

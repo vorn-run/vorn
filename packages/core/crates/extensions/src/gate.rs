@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::api::types::{Header, Request, Response};
+use crate::api::types::{Header, Request, Response, SessionStart};
 use crate::api::ExtError;
 use crate::manifest::{Manifest, Permission};
 
@@ -51,6 +51,15 @@ pub trait World: Send + Sync + 'static {
             ))
         })
     }
+    /// A session to start, the gate having checked `sessions.launch`; answers its id.
+    fn start_session(&self, _caller: &Caller, _req: SessionStart) -> Answer<String> {
+        Box::pin(async {
+            Err(ExtError::new(
+                "unsupported",
+                "this Vorn starts no sessions for extensions",
+            ))
+        })
+    }
 }
 
 /// One `storage.*` call, read.
@@ -61,9 +70,16 @@ pub enum StorageCall {
     Exec { sql: String, params: Vec<Value> },
     Get { key: String },
     Set { key: String, value: Value },
+    /// Statements run as one transaction, each `(sql, params)`.
+    Transaction(Vec<(String, Vec<Value>)>),
 }
 
-/// `storage.*`: refused unless the manifest declares `storage`.
+/// `host.start-session` and `sessions.launch`: refused unless the manifest declares `sessions.launch`.
+pub fn admit_start(manifest: &Manifest) -> Result<(), ExtError> {
+    admit_call(manifest, "sessions.launch").map(drop)
+}
+
+/// `storage.*` and `blobs.*`: refused unless the manifest declares `storage`.
 pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
     let declared = manifest
         .permissions
@@ -76,7 +92,7 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
     Err(ExtError::new(
         "denied",
         format!(
-            "{} does not declare storage, which storage.* needs",
+            "{} does not declare storage, which storage.* and blobs.* need",
             manifest.id
         ),
     ))
@@ -444,7 +460,7 @@ header = "Authorization: Bearer {token}"
             (err.code.as_str(), err.message.as_str()),
             (
                 "denied",
-                "x does not declare storage, which storage.* needs"
+                "x does not declare storage, which storage.* and blobs.* need"
             )
         );
         let mut m = manifest();

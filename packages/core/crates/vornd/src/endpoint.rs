@@ -251,11 +251,14 @@ impl Daemon {
         let world = Arc::new(crate::native::extensions::world::Wired {
             native: Arc::downgrade(native),
         });
+        let mut router_settings = RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION"));
+        router_settings.blobs = Some(db_dir.join("extension-files"));
+        router_settings.compiler = wasm_compiler();
         let router = Router::new(
             store.clone(),
             lifecycle,
             world,
-            RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION")),
+            router_settings,
             Arc::clone(native.events()),
         );
         let installs = native.installs(&db_dir);
@@ -846,6 +849,16 @@ fn plain(status: StatusCode, message: &'static str) -> Response<Body> {
     res
 }
 
+/// What compiles a Wasm extension into the cache: `VORN_WASM_COMPILER`, a
+/// `vorn` program, else the `vorn` shipped beside vornd. vornd holds no compiler.
+fn wasm_compiler() -> vorn_extensions::component::Compiler {
+    use vorn_extensions::component::Compiler;
+    match std::env::var_os("VORN_WASM_COMPILER").filter(|p| !p.is_empty()) {
+        Some(path) => Compiler::Program(path.into()),
+        None => Compiler::beside_this_program(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -874,3 +887,4 @@ mod tests {
         assert!(is_websocket_upgrade(&headers));
     }
 }
+
