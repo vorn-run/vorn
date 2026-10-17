@@ -1,7 +1,7 @@
 //! What an extension adds to workflows: node types (steps a workflow can
 //! use, which the extension runs), trigger types (what starts one, which
 //! the extension fires or the core times), and workflows it ships as KDL
-//! files. Read from `manifest.json`'s `nodes`, `triggers` and `workflows`,
+//! files. Read from the manifest's `nodes`, `triggers` and `workflows`,
 //! as `[[contributes.nodes]]`, `[[contributes.triggers]]` and
 //! `[[contributes.workflows]]` write them.
 
@@ -175,7 +175,7 @@ pub fn problem(kind: &str, raw: &Map<String, Value>) -> Option<(&'static str, St
     }
 }
 
-/// The node types of `manifest.json`'s `nodes`, those that read.
+/// The node types of the manifest's `nodes`, those that read.
 pub fn nodes<'a>(declared: impl Iterator<Item = &'a Map<String, Value>>) -> Vec<NodeDecl> {
     declared
         .filter(|raw| problem("nodes", raw).is_none())
@@ -214,7 +214,7 @@ pub fn nodes<'a>(declared: impl Iterator<Item = &'a Map<String, Value>>) -> Vec<
         .collect()
 }
 
-/// The trigger types of `manifest.json`'s `triggers`, those that read.
+/// The trigger types of the manifest's `triggers`, those that read.
 pub fn triggers<'a>(declared: impl Iterator<Item = &'a Map<String, Value>>) -> Vec<TriggerDecl> {
     declared
         .filter(|raw| problem("triggers", raw).is_none())
@@ -233,7 +233,7 @@ pub fn triggers<'a>(declared: impl Iterator<Item = &'a Map<String, Value>>) -> V
         .collect()
 }
 
-/// The workflows of `manifest.json`'s `workflows`, those that read.
+/// The workflows of the manifest's `workflows`, those that read.
 pub fn workflows<'a>(declared: impl Iterator<Item = &'a Map<String, Value>>) -> Vec<WorkflowDecl> {
     declared
         .filter(|raw| problem("workflows", raw).is_none())
