@@ -2,14 +2,13 @@
 //! the rest, with a switch, but its logic is a component compiled into vornd
 //! that runs through the router as an installed component does: the same
 //! gate, lifecycle and crash budget, compiled into the cache by the vorn
-//! command the first time it is switched on.
+//! command the first time it is used.
 
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use serde_json::Value;
-use tracing::warn;
 use vorn_extensions::api::types::{CallCtx, Event};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::component::Bundled;
@@ -75,14 +74,10 @@ impl Builtin for Component {
         self.on_by_default
     }
 
-    /// Compiles it into the cache, so its first use waits for nothing.
-    fn start<'a>(&'a self, api: &'a Api) -> BoxFuture<'a, ()> {
-        async move {
-            if let Err(err) = api.router.prepare_bundled(&self.bundled(api)).await {
-                warn!("[extensions] {err}");
-            }
-        }
-        .boxed()
+    /// Nothing until it is used: every vornd start would otherwise compile it,
+    /// and the first call or event compiles it into the cache in its place.
+    fn start<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
+        async {}.boxed()
     }
 
     fn handle<'a>(
