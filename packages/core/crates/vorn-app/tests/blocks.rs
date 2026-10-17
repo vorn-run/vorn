@@ -132,6 +132,12 @@ fn jumps_between_commands_by_their_prompts() {
             .is_some_and(|sh| sh.integrated())
             .then_some(())
     });
+    // The card sizes the terminal once it is painted; a resize later pulls
+    // history onto the screen and moves every line the jump counts from.
+    shot.until(&mut app, "the terminal at its card's size", |app, ui| {
+        let rows = (app.term_box(&id)?.h / ui.text.cell().h).floor() as u16;
+        (app.grid()?.lines(&id)?.rows == rows.max(1)).then_some(())
+    });
     shot.type_line(&mut app, "seq 1 120; seq 2 121; echo the-$((40+2))");
     shot.until(&mut app, "the commands' output", |app, _| {
         let p = app.pane(&id)?;
@@ -150,7 +156,17 @@ fn jumps_between_commands_by_their_prompts() {
             .then_some(())
     });
     let at = |app: &vorn_app::App| app.pane(&id).map(|p| (p.line0, p.live_line));
-    let (_, live) = at(&app).expect("a view");
+    // The jump reads the prompts the client holds and the live screen's top,
+    // so it waits for the last command's prompt to be drawn and marked.
+    let live = shot.until(&mut app, "the prompt after the last command", |app, _| {
+        let lines = app.grid()?.lines(&id)?;
+        let (_, live) = at(app)?;
+        let at_prompt = lines
+            .prompts
+            .last()
+            .is_some_and(|&p| p >= lines.top && p <= lines.top + u64::from(lines.cursor_y));
+        (!lines.alt && lines.prompts.len() >= 4 && at_prompt && live == lines.top).then_some(live)
+    });
     let up = key("ArrowUp", MOD() | mods::SHIFT, None);
     let down = key("ArrowDown", MOD() | mods::SHIFT, None);
     shot.send(&mut app, up.clone());

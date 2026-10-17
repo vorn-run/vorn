@@ -123,6 +123,10 @@ pub struct Session {
     /// not keep it alive.
     #[cfg_attr(windows, allow(dead_code))]
     me: Weak<Session>,
+    /// Held from the write that was taken until it is reported, so two
+    /// flushes never report out of order.
+    #[cfg(unix)]
+    report_order: Mutex<()>,
     /// Signalled when a blocked reader may find room.
     #[cfg(windows)]
     room: Condvar,
@@ -319,6 +323,8 @@ impl Session {
             state: Mutex::new(state),
             changed: Notify::new(),
             me: me.clone(),
+            #[cfg(unix)]
+            report_order: Mutex::new(()),
             #[cfg(windows)]
             room: Condvar::new(),
             #[cfg(windows)]
@@ -868,12 +874,17 @@ impl Session {
             *inflight -= 1;
         }
         let report = st.on_written.clone();
+        // Taken before the state lock is let go: a flush that comes next
+        // writes and reports after this one has reported what it wrote.
+        let order =
+            (!done.is_empty()).then(|| self.report_order.lock().unwrap_or_else(|e| e.into_inner()));
         drop(st);
         if let Some(report) = report {
             for w in done {
                 report(&self.id, w);
             }
         }
+        drop(order);
     }
 
     /// Reap our own program `pid` when the hub hears it exit, or, on a
@@ -1739,6 +1750,69 @@ mod tests {
             blob_crc32: crc32fast::hash(&blob),
             blob,
         }
+    }
+
+    /// Input is reported in the order it was numbered: a flush that comes
+    /// while another is still reporting waits for it, so the acknowledgements
+    /// vornd sends never run ahead of an earlier input's.
+    #[test]
+    fn written_input_is_reported_in_order() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc;
+        let dir = tempfile::tempdir().unwrap();
+        let spec = SpawnSpec {
+            argv: ["sh", "-c", "stty raw -echo; exec cat >/dev/null"]
+                .map(String::from)
+                .to_vec(),
+            cwd: dir.path().join("gone").to_string_lossy().into_owned(),
+            env: Vec::new(),
+            io: Io::Pty { cols: 80, rows: 24 },
+            ring_bytes: None,
+        };
+        let (reported, seen) = mpsc::channel();
+        let (holding, held) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let (first, released) = (AtomicBool::new(true), Mutex::new(released));
+        let s = Session::spawn(
+            "t".into(),
+            &spec,
+            dir.path(),
+            SpoolPool::new(0),
+            move |_, w| {
+                // The first report stalls, as a thread preempted before it would.
+                if first.swap(false, Ordering::SeqCst) {
+                    let _ = holding.send(());
+                    let _ = released
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10));
+                }
+                let _ = reported.send(w.input_seq);
+            },
+        )
+        .unwrap();
+        let one = {
+            let s = Arc::clone(&s);
+            thread::spawn(move || s.write(1, b"a".to_vec()))
+        };
+        held.recv_timeout(Duration::from_secs(10))
+            .expect("the first write is reported");
+        let two = {
+            let s = Arc::clone(&s);
+            thread::spawn(move || s.write(2, b"b".to_vec()))
+        };
+        // Nothing can be told while the first report is stalled.
+        assert_eq!(
+            seen.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout),
+            "input 2 was reported before input 1"
+        );
+        release.send(()).unwrap();
+        for want in [1, 2] {
+            assert_eq!(seen.recv_timeout(Duration::from_secs(10)), Ok(want));
+        }
+        one.join().unwrap();
+        two.join().unwrap();
     }
 
     /// A terminal session reads what the program printed, records a
