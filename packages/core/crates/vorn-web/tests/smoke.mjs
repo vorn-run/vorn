@@ -9,7 +9,8 @@
 // of that agent, posts a hook event as the agent would, and waits for the
 // footer to show it. `phone-chromium` and `phone-webkit` do the templates run
 // at a phone's size (390x844 at 3x, touch) and check every control fits the width.
-//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [phone-chromium] [phone-webkit]
+// `board` opens the Tasks board with a card in each column and opens a card's menu.
+//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [board] [phone-chromium] [phone-webkit]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
 import { execFileSync, spawn } from 'node:child_process'
@@ -291,6 +292,30 @@ async function adapterSession(vornd, server) {
     })
 }
 
+/** The Tasks board, a card in each column, and a card's menu open. */
+async function board(page, server) {
+  const statuses = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
+  for (const [i, status] of statuses.entries()) {
+    await server.call('task:create', { projectName: 'smoke', title: `Card ${i + 1}`, status })
+  }
+  await press(page, '[role="tab"][aria-label="Tasks"]', 'the Tasks tab')
+  await press(page, '[role="button"][aria-label="View options"]', 'the view options')
+  await press(page, '[role="button"][aria-label="Board"]', 'the board mode')
+  await page.keyboard.press('Escape')
+  for (const column of ['Todo', 'In Progress', 'In Review', 'Done', 'Cancelled']) {
+    await until(`the ${column} column`, () =>
+      page.locator(`[role="group"][aria-label="${column}"]`).count()
+    )
+  }
+  const card = await page.locator('[role="button"][aria-label="Card 1"]').boundingBox()
+  await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2)
+  await page.waitForTimeout(300)
+  await press(page, '[role="button"][aria-label="More"]', "the card's menu")
+  await until('the menu', () =>
+    page.locator('[role="menuitem"][aria-label="Edit"]').count()
+  )
+}
+
 /** The bottom strip of the card named `name`, as pixels: where its footer draws. */
 async function cardFoot(page, name) {
   const card = await until('the card', async () => {
@@ -339,6 +364,9 @@ async function run(what, vornd, server) {
   try {
     if (what === 'pair') {
       await pair(page, vornd, server)
+    } else if (what === 'board') {
+      const device = (await server.call('token:create', { name: 'smoke board' })).plaintext
+      await page.goto(`http://127.0.0.1:${vornd.port}/app/#token=${device}`)
     } else if (what === 'adapters') {
       const device = (await server.call('token:create', { name: 'smoke adapters' })).plaintext
       postToolCall = await adapterSession(vornd, server)
@@ -372,6 +400,12 @@ async function run(what, vornd, server) {
       await until('the footer', async () => !(await cardFoot(page, 'smoke')).equals(before))
       if (shots) await page.screenshot({ path: join(shots, 'web-adapters.png') })
       console.log(`ok adapters (${used})`)
+      return
+    }
+    if (what === 'board') {
+      await board(page, server)
+      if (shots) await page.screenshot({ path: join(shots, 'web-board.png') })
+      console.log(`ok board (${used})`)
       return
     }
     if (what === 'templates' || phone) {
