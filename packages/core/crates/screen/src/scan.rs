@@ -73,6 +73,8 @@ pub(crate) struct Scan {
     osc: Option<(Osc, Vec<u8>)>,
     /// ED 3, DECSED 3 and RIS seen.
     pub(crate) clears: u64,
+    /// OSC 133 marks seen.
+    pub(crate) marks: u64,
 }
 
 impl Scan {
@@ -157,6 +159,7 @@ impl Scan {
         };
         extend(&mut payload, &rest[..len]);
         if matches!(rest[len], 0x07 | 0x1b) {
+            self.marks += u64::from(kind == Osc::Mark);
             report(kind, &payload);
         }
         Some(begin + len)
@@ -164,10 +167,10 @@ impl Scan {
 
     /// Rebuilds the state from Ghostty's continuation, the bytes since its parser left ground.
     pub(crate) fn reseed(&mut self, continuation: &[u8]) {
-        let clears = self.clears;
+        let (clears, marks) = (self.clears, self.marks);
         *self = Scan::default();
         self.feed(continuation, |_, _| {});
-        self.clears = clears;
+        (self.clears, self.marks) = (clears, marks);
     }
 }
 

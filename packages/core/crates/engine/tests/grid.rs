@@ -1179,3 +1179,87 @@ fn the_last_frame_goes_out_with_the_exit() {
         .iter()
         .any(|(_, k)| matches!(k, EventKind::Exit { code: Some(0), .. })));
 }
+
+/// The prompts a client holds, as the app reads them: the marked rows of the
+/// cached history then of the screen, with their absolute lines.
+fn prompts_held(m: &vorn_term_mirror::Mirror) -> Vec<(u64, String)> {
+    let marked = |r: &&vorn_term_proto::screen::Row| {
+        r.flags & row_flags::PROMPT != 0 && r.flags & row_flags::PROMPT_CONTINUATION == 0
+    };
+    m.history()
+        .iter()
+        .chain(m.rows())
+        .filter(marked)
+        .map(|r| (r.line, row_text(r)))
+        .collect()
+}
+
+/// Prompt marks survive output that changes nothing else on their row and
+/// resizes that reflow the primary screen, shrinking and growing, with
+/// history pulled onto the screen and pushed off it. Prompts are empty, as a
+/// shell with a minimal prompt draws them: the mark is the only thing on
+/// its row until a command is typed. After the client asks again for the
+/// history a new epoch dropped, it holds every prompt at its row's line.
+#[test]
+fn prompt_marks_survive_resizes() {
+    let size = (40u16, 8u16);
+    let mut pieces = Vec::new();
+    for n in 1..=6 {
+        let out: String = (0..9).map(|i| format!("out {n}.{i}\r\n")).collect();
+        pieces.push("\x1b]133;A\x07".to_owned());
+        pieces.push(format!("cmd {n}\r\n{out}"));
+    }
+    pieces.push("\x1b]133;A\x07".to_owned());
+    let mut expected: Vec<String> = (1..=6).map(|n| format!("cmd {n}")).collect();
+    expected.push(String::new());
+    let mut b = LogBuilder::new(Size::new(size.0, size.1));
+    for p in &pieces {
+        b.data(p.clone());
+    }
+    // Rows pulled onto the screen, pushed off it, and pulled back.
+    for rows in [24u16, 5, 50, 8] {
+        b.resize(Size::new(size.0, rows));
+    }
+    let entries = b.build().entries;
+    let mut rig = Rig::new(size, SCROLLBACK);
+    rig.attach(1, 1, true, None);
+    // One chunk at a time, so a mark arrives alone, on a row already sent.
+    for (i, e) in entries.iter().enumerate() {
+        rig.feed(std::slice::from_ref(e));
+        rig.settle();
+        // What the app does on a new epoch: ask again for the history held.
+        let t = rig.mirror(1, 1).term().clone();
+        rig.grid(GridIn::FetchHistory {
+            peer: P1,
+            req: 1,
+            sb_epoch: t.sb_epoch,
+            from_line: t.top_line - t.history_lines,
+            count: t.history_lines as u16,
+        });
+        rig.settle();
+        let m = rig.mirror(1, 1);
+        assert_same(rig.em(), m, &format!("entry {i}"));
+        let held = prompts_held(m);
+        // Each prompt is marked, and its row reads the command once typed.
+        let marked = if i < pieces.len() { i / 2 + 1 } else { 7 };
+        let mut want: Vec<&str> = expected.iter().take(marked).map(String::as_str).collect();
+        if i < pieces.len() && i % 2 == 0 {
+            *want.last_mut().expect("a prompt is marked") = "";
+        }
+        let texts: Vec<&str> = held.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(texts, want, "entry {i}: {:?}", m.text());
+        let top = m.term().top_line;
+        for (line, text) in &held {
+            let row = if *line < top {
+                m.history_line(*line)
+            } else {
+                m.rows().get((*line - top) as usize)
+            };
+            assert_eq!(
+                row.map(row_text).as_deref(),
+                Some(text.as_str()),
+                "entry {i}: line {line}"
+            );
+        }
+    }
+}
