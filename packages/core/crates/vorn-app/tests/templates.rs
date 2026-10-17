@@ -180,7 +180,7 @@ fn every_template_kind_draws_on_every_surface() {
     shot.until(&mut app, "a finished turn", |a, _| {
         let counted = a.st.points.session_tree(&badge, &sid).is_some()
             && a.st.points.session_tree(&footer, &sid).is_some();
-        (counted && tree_says(a, &finished, &format!("show:{sid}"))).then_some(())
+        (counted && tree_says(a, &finished, &format!("turn:{sid}-"))).then_some(())
     });
     app.st.selected = Some(sid.clone());
     // First seen without sessions, the project starts folded.

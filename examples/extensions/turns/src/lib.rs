@@ -229,7 +229,8 @@ mod draw {
                 icon("check").tone(Tone::Good),
                 text(s(f, "name")).grow(),
                 text(format!("#{} {}", n(f, "turn"), s(f, "at"))).style(TextStyle::Mono),
-                button(format!("show:{}", s(f, "session")), "Show"),
+                // One per finished turn, so a session's turns each name their own button.
+                button(format!("turn:{}", s(f, "id")), "Show"),
             ])
         }))
         .gap(4.0)
@@ -439,6 +440,12 @@ impl Extension for Turns {
         let (does, id) = e.id.split_once(':').unwrap_or((e.id.as_str(), ""));
         match (does, e.kind) {
             ("show", _) => Ok(json!({ "focus": id })),
+            ("turn", _) => {
+                let finished = host.rows(FINISHED)?;
+                let turn = finished.iter().find(|f| s(f, "id") == id);
+                let session = turn.map(|f| s(f, "session")).unwrap_or_default();
+                Ok(json!({ "focus": session }))
+            }
             ("vorn", _) => Ok(json!({ "show": true })),
             ("reset", _) => Turns::reset(host, id),
             ("ask-clear", _) => Ok(json!({ "open": "clear" })),

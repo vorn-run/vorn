@@ -75,8 +75,27 @@ fn a_finished_turn_counts_on_its_card_and_lists_in_the_sidebar() {
     assert!(tree::for_session(&badges, "t2").is_none(), "no turn yet");
     let footer = drawn(&mut t, &mut h, "last");
     assert!(tree::for_session(&footer, "t1").is_some_and(|f| says(f, "reset:t1")));
-    assert!(says(&drawn(&mut t, &mut h, "finished"), "show:t1"));
-    assert!(says(&drawn(&mut t, &mut h, "summary"), "Finished turns: 1"));
+    assert!(says(&drawn(&mut t, &mut h, "finished"), "turn:t1-1"));
+    // A second turn of the same session lists beside the first, and each shows the session.
+    t.on_events(
+        &mut h,
+        vec![
+            event(
+                "session.status",
+                json!({ "sessionId": "t1", "status": "running" }),
+            ),
+            event(
+                "session.status",
+                json!({ "sessionId": "t1", "status": "idle" }),
+            ),
+        ],
+    );
+    assert!(says(&drawn(&mut t, &mut h, "finished"), "turn:t1-2"));
+    assert_eq!(
+        told(&mut t, &mut h, "turn:t1-1", "click", ""),
+        json!({ "focus": "t1" })
+    );
+    assert!(says(&drawn(&mut t, &mut h, "summary"), "Finished turns: 2"));
     assert!(says(&drawn(&mut t, &mut h, "all"), "At work: 1 of 2"));
     assert!(says(&drawn(&mut t, &mut h, "turns"), "At work: 1 of 2"));
 }
