@@ -27,6 +27,7 @@ pub mod output;
 pub mod paths;
 pub mod render;
 pub mod rpc;
+pub mod scaffold;
 pub mod server;
 pub mod session;
 pub mod status;

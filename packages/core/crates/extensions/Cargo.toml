@@ -30,11 +30,30 @@ vorn-agents = { path = "../agents" }
 # `pack` reads a manifest's agent rules against the adapters Vorn ships.
 vorn-adapters = { path = "../adapters" }
 
+# Services as sandboxed Wasm components: Wasmtime's runtime and component
+# model, and WASI preview 2 with nothing granted. The compiler is a separate
+# feature that only the vorn command turns on, so vornd runs only components
+# Vorn already compiled into its cache.
+wasmtime = { version = "=49.0.2", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
+wasmtime-wasi = { version = "=49.0.2", optional = true, default-features = false, features = ["p2"] }
+# Names a compiled component by the bytes it was compiled from; already in the tree.
+sha2 = { version = "0.10", optional = true, default-features = false }
+
+[features]
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:sha2"]
+wasm-compile = ["wasm", "wasmtime/cranelift"]
+
 [target.'cfg(unix)'.dependencies]
 # SIGTERM for a child that does not leave when its stdin closes.
 libc = "0.2"
 
 [dev-dependencies]
+# The Wasm tests compile their component in process.
+vorn-extensions = { path = ".", features = ["wasm-compile"] }
+# Builds the test component for wasm32-wasip2.
+vorn-guest-build = { path = "../guest-build" }
+# Reads the trees a component draws.
+vorn-tree = { path = "../tree" }
 criterion = { version = "0.5", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros", "test-util"] }

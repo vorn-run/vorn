@@ -1,7 +1,8 @@
 //! The extensions Vorn ships with, written against the API a package speaks
 //! (a manifest, templates, core calls held to the declared permissions,
 //! published rows and subscribed events) and compiled in rather than started
-//! as a program. Each has a switch; off, it subscribes to nothing, publishes
+//! as a program: as Rust in vornd, or as a Wasm component vornd carries
+//! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
 pub mod agents;
@@ -9,9 +10,9 @@ pub mod artifacts;
 pub mod connectors;
 pub mod editor;
 pub mod tasks;
+pub mod wasm;
 pub mod widget;
 pub mod workflows;
-pub mod worktrees;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -149,7 +150,7 @@ impl std::fmt::Debug for Builtins {
 /// those vornd starts before the extension host (Connectors) after them.
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
-        Arc::new(worktrees::Cleanup::default()),
+        Arc::new(wasm::worktrees()),
         Arc::new(widget::Widget),
         Arc::new(workflows::Workflows),
         Arc::new(artifacts::Artifacts),

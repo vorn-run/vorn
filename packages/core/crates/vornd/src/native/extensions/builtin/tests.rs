@@ -72,11 +72,14 @@ struct Setup {
 fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let core = Arc::new(Core::default());
+    let mut settings = RouterSettings::new(Vec::new(), "test");
+    // Worktree cleanup is a component; vornd's own build compiles it with the vorn command.
+    settings.compiler = vorn_extensions::component::Compiler::InProcess;
     let router = Router::new(
         PackStore::new(dir.path().join("connectors")),
         Lifecycle::new(Policy::default()),
         Arc::clone(&core) as Arc<dyn World>,
-        RouterSettings::new(Vec::new(), "test"),
+        settings,
         vorn_extensions::events::Bus::new(),
     );
     let builtins = Builtins::new(

@@ -1,0 +1,27 @@
+//! Builds the extensions Vorn ships as Wasm components, which vornd carries
+//! as bytes ([`crate::native::extensions::builtin`]): each one's crate is
+//! built for wasm32-wasip2 and its `.wasm` copied into `OUT_DIR`.
+
+use std::path::PathBuf;
+
+/// `(workspace package, its folder, the name it is kept under)`.
+const SHIPPED: [(&str, &str, &str); 1] = [(
+    "vorn-ext-worktrees",
+    "extensions/worktrees",
+    "worktrees.wasm",
+)];
+
+fn main() {
+    let workspace = vorn_guest_build::workspace();
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let sdk = workspace.join("crates/extension-sdk");
+    let wit = workspace.join("crates/extensions/wit");
+    let tree = workspace.join("crates/tree");
+    for (package, folder, name) in SHIPPED {
+        let folder = workspace.join(folder);
+        vorn_guest_build::rerun_if_changed(&[&folder, &sdk, &wit, &tree]);
+        let built = vorn_guest_build::component(package).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::copy(&built, out.join(name))
+            .unwrap_or_else(|e| panic!("{}: {e}", built.display()));
+    }
+}

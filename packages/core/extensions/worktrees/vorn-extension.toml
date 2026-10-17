@@ -7,6 +7,10 @@ description = "Offers to remove a worktree once its last session ends, and lists
 [declares]
 uses = ["git.read", "git.write", "sessions.launch"]
 
+[service]
+component = "worktrees.wasm"
+events = ["worktree.idle"]
+
 [[contributes.sidebar]]
 id = "idle"
 title = "Idle worktrees"

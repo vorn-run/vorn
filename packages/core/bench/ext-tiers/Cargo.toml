@@ -1,0 +1,23 @@
+[package]
+name = "vorn-bench-ext-tiers"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Measures Worktree cleanup as the Wasm component Vorn ships: start, restart, calls, events and memory, through the router vornd runs"
+
+[[bin]]
+name = "ext-tiers"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+# The compiler too: the bench compiles the component vornd only loads.
+vorn-extensions = { path = "../../crates/extensions", features = ["wasm-compile"] }
+vorn-guest-build = { path = "../../crates/guest-build" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

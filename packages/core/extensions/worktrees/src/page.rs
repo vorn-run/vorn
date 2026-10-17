@@ -1,11 +1,10 @@
 //! The Worktrees settings page as an element tree: totals, then each project's worktrees.
 
-use serde_json::{json, Value};
-use vorn_extensions::api::ExtError;
-use vorn_tree::sdk::*;
-use vorn_tree::{Event, Node, Rendered, Tone};
+use vorn_extension_sdk::tree::sdk::*;
+use vorn_extension_sdk::tree::{Event, Node, Tone};
+use vorn_extension_sdk::{json, Error, Host, Value};
 
-use super::{Api, ALL, SCAN, SUMMARY};
+use super::{ALL, SCAN, SUMMARY};
 
 /// What the page's buttons run, by the id before the first `:`; after it is the worktree.
 const DOES: [&str; 6] = [
@@ -17,20 +16,19 @@ const DOES: [&str; 6] = [
     "remove",
 ];
 
-pub(super) fn render(api: &Api) -> Result<Value, ExtError> {
-    let scan = api.rows(SCAN).into_iter().next().unwrap_or(Value::Null);
-    let summary = api.rows(SUMMARY).into_iter().next();
-    let tree = page(&api.rows(ALL), &scan, summary.as_ref());
-    Ok(json!(Rendered::new(tree)))
+pub(super) fn render(host: &mut dyn Host) -> Result<Node, Error> {
+    let scan = host.rows(SCAN)?.into_iter().next().unwrap_or(Value::Null);
+    let summary = host.rows(SUMMARY)?.into_iter().next();
+    Ok(page(&host.rows(ALL)?, &scan, summary.as_ref()))
 }
 
 /// The action a click on the page runs, and its args.
-pub(super) fn event(e: &Event) -> Result<(&'static str, Value), ExtError> {
+pub(super) fn event(e: &Event) -> Result<(&'static str, Value), Error> {
     let (does, path) = e.id.split_once(':').unwrap_or((e.id.as_str(), ""));
     let does = DOES
         .into_iter()
         .find(|d| *d == does)
-        .ok_or_else(|| ExtError::new("bad_args", format!("no button is '{}'", e.id)))?;
+        .ok_or_else(|| Error::new("bad_args", format!("no button is '{}'", e.id)))?;
     let args = match (path, does) {
         ("", "remove_many") => json!({ "ids": e.selected }),
         ("", _) => Value::Null,
@@ -199,8 +197,8 @@ mod tests {
         let sum = json!({ "total_bytes": 90, "total": "90 MB", "reclaimable": true,
             "reclaim_label": "Reclaim 60 MB of build output", "reclaim_confirm": "Delete?" });
         let tree = page(&rows, &Value::Null, Some(&sum));
-        vorn_tree::check(&tree).expect("a tree the client draws");
-        let json = serde_json::to_string(&tree).unwrap();
+        vorn_extension_sdk::tree::check(&tree).expect("a tree the client draws");
+        let json = vorn_extension_sdk::serde_json::to_string(&tree).unwrap();
         for said in [
             "acme",
             "vs main",
@@ -216,7 +214,7 @@ mod tests {
     fn a_click_names_its_action_and_rows() {
         let click = |id: &str, selected: &[&str]| Event {
             id: id.into(),
-            kind: vorn_tree::EventKind::Click,
+            kind: vorn_extension_sdk::tree::EventKind::Click,
             value: String::new(),
             selected: selected.iter().map(|s| (*s).to_owned()).collect(),
         };

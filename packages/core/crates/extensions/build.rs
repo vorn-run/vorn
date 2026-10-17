@@ -165,7 +165,9 @@ impl<'a> Parser<'a> {
 
     fn ident(&mut self) -> Result<String, Fail> {
         let line = self.line();
+        // `%list` is the name `list`, escaped from the keyword.
         let t = self.next()?;
+        let t = t.strip_prefix('%').unwrap_or(t);
         let ok = t.chars().next().is_some_and(|c| c.is_ascii_lowercase())
             && t.chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
@@ -467,6 +469,15 @@ impl Package {
         }
     }
 
+    /// `list<u8>`, by name or not: it travels over stdio as a base64 string.
+    fn is_bytes(&self, t: &Ty) -> bool {
+        match t {
+            Ty::List(i) => **i == Ty::Prim("u8".into()),
+            Ty::Named(n) => matches!(self.types.get(n), Some(Def::Alias(a)) if self.is_bytes(a)),
+            _ => false,
+        }
+    }
+
     fn field(&self, out: &mut String, name: &str, t: &Ty, public: bool) {
         let rust = snake(name);
         if rust != name {
@@ -483,6 +494,9 @@ impl Package {
                 let _ = writeln!(out, "    #[serde(default)]");
             }
             _ => {}
+        }
+        if self.is_bytes(t) {
+            let _ = writeln!(out, "    #[serde(with = \"crate::api::base64\")]");
         }
         let vis = if public { "pub " } else { "" };
         let _ = writeln!(out, "    {vis}{}: {},", rust, self.rust_ty(t));
@@ -683,6 +697,9 @@ impl Package {
             .map(|n| {
                 let body = match &self.types[n] {
                     Def::Alias(_) if n == "json" => "{ \"inline\": \"any JSON value\" }".to_owned(),
+                    Def::Alias(t) if self.is_bytes(t) => {
+                        "{ \"inline\": \"a base64 string\" }".to_owned()
+                    }
                     Def::Alias(t) => format!("{{ \"alias\": \"{}\" }}", t.wit()),
                     Def::Record(fields) => format!(
                         "{{ \"record\": [{}] }}",

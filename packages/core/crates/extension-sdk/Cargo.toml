@@ -1,0 +1,17 @@
+[package]
+name = "vorn-extension-sdk"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Write a Vorn extension in Rust as a Wasm component: the extension API's calls, events, storage, files and sessions, and the element tree its UI is drawn from"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The element tree an extension's UI is, and its builder.
+vorn-tree = { path = "../tree" }
+# The guest side of the component model, generated from wit/extension.wit.
+wit-bindgen = { version = "0.62", default-features = false, features = ["macros", "realloc", "std"] }

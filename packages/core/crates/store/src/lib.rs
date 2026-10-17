@@ -80,6 +80,22 @@ pub enum Error {
     /// cannot be opened (`Artifact not found: <id>`).
     Refused(String),
     Io(std::io::Error),
+    /// Statement `index` (from 0) of a transaction failed, so none of it held.
+    Statement {
+        index: usize,
+        error: Box<Error>,
+    },
+}
+
+impl Error {
+    /// Whether it is a refusal, in a statement of a transaction or not.
+    pub fn is_refused(&self) -> bool {
+        match self {
+            Error::Refused(_) => true,
+            Error::Statement { error, .. } => error.is_refused(),
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -91,6 +107,7 @@ impl std::fmt::Display for Error {
             Error::BadArguments { call, error } => write!(f, "{call}: {error}"),
             Error::Refused(message) => f.write_str(message),
             Error::Io(err) => write!(f, "{err}"),
+            Error::Statement { index, error } => write!(f, "statement {index}: {error}"),
         }
     }
 }
@@ -101,6 +118,7 @@ impl std::error::Error for Error {
             Error::Sqlite(err) => Some(err),
             Error::Json(err) | Error::BadArguments { error: err, .. } => Some(err),
             Error::Io(err) => Some(err),
+            Error::Statement { error, .. } => Some(error.as_ref()),
             Error::UnknownCall(_) | Error::Refused(_) => None,
         }
     }

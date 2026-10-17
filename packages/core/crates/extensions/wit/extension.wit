@@ -28,6 +28,18 @@
 // `vorn/hello`, says which role a process plays. Templates are files in their
 // own format, `vorn:view@1`, not an API.
 //
+// A service is a program (`[service] command`) or a Wasm component
+// (`[service] component = "x.wasm"`) built for this world on
+// `wasm32-wasip2`. A component imports these interfaces instead of speaking
+// JSON-RPC, and vornd answers each import exactly as it answers the method of
+// the same name over stdio. It is given WASI preview 2 with nothing granted:
+// no files, network or environment beyond what it asks through these imports.
+//
+// UI is an element tree (`vorn-tree`): a `tree = true` contribution is drawn
+// from what `guest.handle` answers `ui.render` with, `{point, surface}` in
+// and `{tokens, tree}` out, and `ui.event` with `{point, event}` tells the
+// extension what was clicked, typed or chosen there.
+//
 // An `[agent]` section makes the package an agent adapter: everything Vorn
 // needs to run one agent CLI, as data, with no program. Its fields (checked
 // against `vorn_agents::AgentSpec`; docs/adding-an-agent.md walks through
@@ -139,17 +151,59 @@ interface types {
     warn,
     error,
   }
+
+  /// Bytes; over stdio a base64 string (standard alphabet, padded).
+  type bytes = list<u8>;
+
+  /// One statement of a transaction, with its `?` params.
+  record statement {
+    sql: string,
+    params: list<json>,
+  }
+
+  /// A file in the extension's own file store.
+  record blob {
+    /// Its name: segments of letters, digits, `.`, `_` and `-`, joined by `/`.
+    name: string,
+    size: u64,
+    /// When it was last written, in milliseconds since the Unix epoch.
+    modified: u64,
+  }
+
+  /// A session to start, as the app and the MCP tools start one.
+  record session-start {
+    /// The folder of the project it runs in.
+    project: string,
+    /// An agent type as `agents.list` names it; none starts a shell.
+    agent: option<string>,
+    /// What an agent is asked first.
+    prompt: option<string>,
+    /// Starts it in a new worktree of the project.
+    worktree: bool,
+    /// The new worktree's branch.
+    branch: option<string>,
+    /// The card's name.
+    name: option<string>,
+    /// An agent run with no terminal; what it prints is read by Vorn.
+    headless: bool,
+  }
 }
 
 /// What vornd answers, checked against the manifest's declared uses.
 interface host {
-  use types.{json, ext-error, level, row-op};
+  use types.{json, ext-error, level, row-op, session-start};
 
   /// A core method, such as `sessions.list`, if the manifest declares the permission it needs.
   call: func(method: string, args: json) -> result<json, ext-error>;
   /// Changes the rows of a collection the extension's templates draw.
   publish: func(collection: string, ops: list<row-op>);
   log: func(level: level, message: string);
+  /// The rows it published to `collection`, in the order they came; they
+  /// outlive a restart of its service, so state a template draws lives there.
+  rows: func(collection: string) -> result<list<json>, ext-error>;
+  /// Starts a session the way the app and the MCP tools do, under the
+  /// `sessions.launch` permission; answers the new session's id.
+  start-session: func(req: session-start) -> result<string, ext-error>;
 }
 
 /// HTTP made by vornd: only to the manifest's declared hosts, with the
@@ -165,7 +219,7 @@ interface net {
 /// `init-ctx` does not carry: `storage.prefix` answers it. A statement on any
 /// other table fails, naming it.
 interface storage {
-  use types.{json, ext-error};
+  use types.{json, ext-error, statement};
 
   /// The prefix its tables are named with.
   prefix: func() -> result<string, ext-error>;
@@ -177,6 +231,25 @@ interface storage {
   get: func(key: string) -> result<option<json>, ext-error>;
   /// Keeps a value under a key; null removes it.
   set: func(key: string, value: json) -> result<_, ext-error>;
+  /// Runs `statements` in order as one transaction: all of them, or none
+  /// when one fails. Answers each one's rows when it reads any, else how
+  /// many rows it changed.
+  transaction: func(statements: list<statement>) -> result<list<json>, ext-error>;
+}
+
+/// The extension's own files, kept by Vorn under the `storage` permission:
+/// up to 8 MiB a file and 256 MiB in all. They go when the extension is removed.
+interface blobs {
+  use types.{bytes, blob, ext-error};
+
+  /// Writes `data` as `name`, whole or not at all.
+  put: func(name: string, data: bytes) -> result<_, ext-error>;
+  /// The file `name`, or none.
+  get: func(name: string) -> result<option<bytes>, ext-error>;
+  /// The files whose names start with `prefix`, by name.
+  %list: func(prefix: string) -> result<list<blob>, ext-error>;
+  /// Removes `name`; answers whether there was one.
+  delete: func(name: string) -> result<bool, ext-error>;
 }
 
 /// What the extension answers.
@@ -198,5 +271,6 @@ world extension {
   import host;
   import net;
   import storage;
+  import blobs;
   export guest;
 }

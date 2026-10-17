@@ -79,6 +79,9 @@ impl World for Fake {
             StorageCall::Exec { .. } => json!(1),
             StorageCall::Get { key } => json!({ "key": key }),
             StorageCall::Set { .. } => Value::Null,
+            StorageCall::Transaction(statements) => {
+                Value::Array(statements.iter().map(|_| json!(1)).collect())
+            }
         };
         Box::pin(async move { Ok(answer) })
     }
@@ -152,6 +155,7 @@ fn bench(ids: &[&str], policy: Policy, call_timeout: Duration) -> Bench {
         "test",
     );
     settings.call_timeout = call_timeout;
+    settings.blobs = Some(packs.path().join(".files"));
     let router = Router::new(
         store,
         Arc::clone(&lifecycle),
@@ -300,10 +304,32 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 | Method::StorageQuery
                 | Method::StorageExec
                 | Method::StorageGet
-                | Method::StorageSet,
+                | Method::StorageSet
+                | Method::StorageTransaction,
             ) => {
                 let answered = b.relay(method, sample.clone()).await;
                 check(doc.result.as_deref().unwrap(), &answered["result"]);
+            }
+            (Side::Host, Method::HostRows) => {
+                let answered = b.relay(method, json!({ "collection": "x" })).await;
+                check(doc.result.as_deref().unwrap(), &answered["result"]);
+            }
+            (Side::Host, Method::HostStartSession) => {
+                // `a` declares no sessions.launch, so the gate refuses it.
+                let refused = b.relay(method, sample).await;
+                check_error(&refused);
+                assert_eq!(refused["error"]["data"]["code"], "denied");
+            }
+            (
+                Side::Host,
+                Method::BlobsPut | Method::BlobsGet | Method::BlobsList | Method::BlobsDelete,
+            ) => {
+                // The sample names file `x`, which a put of `eA==` writes as `x`'s bytes.
+                let answered = b.relay(method, sample.clone()).await;
+                check(doc.result.as_deref().unwrap(), &answered["result"]);
+                if method == Method::BlobsGet {
+                    assert_eq!(answered["result"], json!("eA=="), "{answered}");
+                }
             }
             (side, method) => {
                 panic!("{method:?} is answered by {side:?}, which nothing here drives")

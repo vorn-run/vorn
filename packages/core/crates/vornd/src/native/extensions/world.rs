@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
-use vorn_extensions::api::types::{Header, Request, Response};
+use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_store::extension::ExtensionTables;
@@ -93,6 +93,91 @@ async fn on_store(
         .await
         .map_err(|e| ExtError::new("failed", e.to_string()))?;
     answered.map_err(|e| ExtError::new("failed", format!("{method}: {e}")))
+}
+
+/// Starts `req` for extension `extension` the way the app and the MCP tools
+/// do: a shell through `shell:create`, an agent through `terminal:create`, or
+/// `headless:create` naming the extension as what started it.
+async fn start_session(
+    native: &Arc<Native>,
+    extension: &str,
+    req: SessionStart,
+) -> Result<String, ExtError> {
+    let project = req.project.trim().to_owned();
+    if !std::path::Path::new(&project).is_absolute() {
+        return Err(ExtError::new(
+            "bad-request",
+            format!("a session starts in a project's absolute folder, not \"{project}\""),
+        ));
+    }
+    let given = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+    let (agent, prompt, branch, name) = (
+        given(req.agent).filter(|a| a != "shell"),
+        given(req.prompt),
+        given(req.branch),
+        given(req.name),
+    );
+    let started = match agent {
+        None => {
+            if req.worktree || req.headless || prompt.is_some() || branch.is_some() {
+                return Err(ExtError::new(
+                    "bad-request",
+                    "a shell starts in the project's folder; a worktree, a branch, a prompt and headless are for an agent",
+                ));
+            }
+            let mut params = json!({ "cwd": project });
+            if let Some(name) = name {
+                params["displayName"] = json!(name);
+            }
+            ask(native, "shell:create", params).await?
+        }
+        Some(agent) => {
+            let project_name = std::path::Path::new(&project)
+                .file_name()
+                .map_or_else(|| project.clone(), |n| n.to_string_lossy().into_owned());
+            let mut params = json!({
+                "agentType": agent, "projectName": project_name, "projectPath": project,
+            });
+            for (key, value) in [
+                ("initialPrompt", prompt),
+                ("branch", branch),
+                ("displayName", name),
+            ] {
+                if let Some(v) = value {
+                    params[key] = json!(v);
+                }
+            }
+            if req.worktree {
+                params["useWorktree"] = json!(true);
+            }
+            if req.headless {
+                params["origin"] = json!({ "extension": extension, "id": "", "label": extension });
+                ask(native, "headless:create", params).await?
+            } else {
+                ask(native, "terminal:create", params).await?
+            }
+        }
+    };
+    started
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| ExtError::new("failed", "Vorn started no session"))
+}
+
+/// `sessions.launch`'s args as the session to start, its project the call's when it names none.
+fn launch_args(args: &Value, project: Option<String>) -> Result<SessionStart, ExtError> {
+    let project = project.ok_or_else(|| needs("sessions.launch", "the project to start it in"))?;
+    let flag = |k: &str| args.get(k).and_then(Value::as_bool).unwrap_or(false);
+    Ok(SessionStart {
+        project,
+        agent: text(args, "agent"),
+        prompt: text(args, "prompt"),
+        worktree: flag("worktree"),
+        branch: text(args, "branch"),
+        name: text(args, "name"),
+        headless: flag("headless"),
+    })
 }
 
 /// A running session as `sessions.list` and `sessions.get` describe it.
@@ -184,19 +269,9 @@ impl World for Wired {
                         })
                 }
                 "sessions.launch" => {
-                    let project = project.ok_or_else(|| needs(m, "the project to start it in"))?;
-                    let agent = text(&args, "agent").unwrap_or_else(|| "shell".to_owned());
-                    let started = if agent == "shell" {
-                        ask(&native, "shell:create", json!(project)).await?
-                    } else {
-                        let name = std::path::Path::new(&project)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| project.clone());
-                        let params = json!({ "agentType": agent, "projectName": name, "projectPath": project });
-                        ask(&native, "terminal:create", params).await?
-                    };
-                    Ok(json!({ "sessionId": started.get("id").cloned().unwrap_or(Value::Null) }))
+                    let req = launch_args(&args, project)?;
+                    let id = start_session(&native, &extension, req).await?;
+                    Ok(json!({ "sessionId": id }))
                 }
                 "terminal.read" | "terminal.send" | "terminal.selection" | "card.rename"
                 | "agent.usage" => {
@@ -532,14 +607,25 @@ impl World for Wired {
                         tables.set(&key, &value)?;
                         Value::Null
                     }
+                    StorageCall::Transaction(statements) => {
+                        Value::Array(tables.transaction(&statements)?)
+                    }
                 })
             })
             .await
             .map_err(|e| ExtError::new("failed", e.to_string()))?;
-            done.map_err(|e| match e {
-                vorn_store::Error::Refused(message) => ExtError::new("denied", message),
-                other => ExtError::new("failed", other.to_string()),
+            done.map_err(|e| {
+                let code = if e.is_refused() { "denied" } else { "failed" };
+                ExtError::new(code, e.to_string())
             })
+        })
+    }
+
+    fn start_session(&self, caller: &Caller, req: SessionStart) -> Answer<String> {
+        let (native, extension) = (self.native.upgrade(), caller.extension.clone());
+        Box::pin(async move {
+            let native = native.ok_or_else(stopping)?;
+            start_session(&native, &extension, req).await
         })
     }
 

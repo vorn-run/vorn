@@ -42,7 +42,8 @@ vorn-agents = { path = "../agents" }
 # The agent adapters Vorn ships, as data.
 vorn-adapters = { path = "../adapters" }
 vorn-git = { path = "../vorn-git" }
-vorn-extensions = { path = "../extensions" }
+# The Wasm runtime only: a component runs once the vorn command has compiled it.
+vorn-extensions = { path = "../extensions", features = ["wasm"] }
 # Checks the element trees extensions answer ui.render with.
 vorn-tree = { path = "../tree" }
 vorn-layout = { path = "../layout" }
@@ -78,7 +79,13 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
+# Builds the extensions Vorn ships as Wasm components, which vornd carries.
+[build-dependencies]
+vorn-guest-build = { path = "../guest-build" }
+
 [dev-dependencies]
+# The built-ins' tests compile their components in process.
+vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.
 rusqlite = { version = "0.40", features = ["bundled"] }
 # What the /mcp test posts with.

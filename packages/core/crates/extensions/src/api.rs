@@ -55,6 +55,35 @@ impl std::error::Error for types::ExtError {}
 
 pub use types::ExtError;
 
+/// `bytes` as stdio carries them: a base64 string, standard alphabet, padded.
+pub mod base64 {
+    use data_encoding::BASE64;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&BASE64.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        BASE64
+            .decode(text.as_bytes())
+            .map_err(|e| serde::de::Error::custom(format!("not base64: {e}")))
+    }
+
+    /// `bytes` as JSON, for an answer built by hand.
+    pub fn encode(bytes: &[u8]) -> serde_json::Value {
+        serde_json::Value::String(BASE64.encode(bytes))
+    }
+
+    /// The bytes a base64 string holds.
+    pub fn decode(text: &str) -> Result<Vec<u8>, String> {
+        BASE64
+            .decode(text.as_bytes())
+            .map_err(|e| format!("not base64: {e}"))
+    }
+}
+
 /// One type of the mapping, as `stdio.json` describes it.
 #[derive(Debug, Clone, PartialEq)]
 enum Def {
@@ -167,6 +196,7 @@ impl Mapping {
             "u8" | "u16" | "u32" | "u64" | "s32" | "s64" => json!(200),
             "f64" => json!(1.5),
             "json" => json!({ "id": "x", "n": 1 }),
+            "bytes" => json!("eA=="),
             "_" => Value::Null,
             name => match self.types.get(name) {
                 Some(Def::Alias(t)) => self.sample(t),
@@ -224,6 +254,10 @@ impl Mapping {
             "s32" | "s64" if value.is_i64() => Ok(()),
             "f64" if value.is_number() => Ok(()),
             "json" => Ok(()),
+            "bytes" => match value.as_str().map(base64::decode) {
+                Some(Ok(_)) => Ok(()),
+                _ => fail(),
+            },
             "_" if value.is_null() => Ok(()),
             "string" | "bool" | "u8" | "u16" | "u32" | "u64" | "s32" | "s64" | "f64" | "_" => {
                 fail()
@@ -282,12 +316,19 @@ mod tests {
                 "host.call",
                 "host.publish",
                 "host.log",
+                "host.rows",
+                "host.start-session",
                 "net.fetch",
                 "storage.prefix",
                 "storage.query",
                 "storage.exec",
                 "storage.get",
                 "storage.set",
+                "storage.transaction",
+                "blobs.put",
+                "blobs.get",
+                "blobs.list",
+                "blobs.delete",
                 "guest.init",
                 "guest.handle",
                 "guest.on-event"
@@ -344,6 +385,15 @@ mod tests {
         let publish: params::HostPublish =
             serde_json::from_value(m.sample_params(Method::HostPublish)).unwrap();
         assert!(matches!(publish.ops[0], types::RowOp::Upsert(_)));
+        let put: params::BlobsPut =
+            serde_json::from_value(m.sample_params(Method::BlobsPut)).unwrap();
+        assert_eq!(put.data, b"x");
+        assert_eq!(
+            serde_json::to_value(&put).unwrap()["data"],
+            json!("eA=="),
+            "bytes travel as base64"
+        );
+        assert!(m.check("bytes", &json!("not base64!")).is_err());
     }
 
     #[test]

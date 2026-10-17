@@ -31,8 +31,9 @@ vorn-workflow-file = { path = "../workflow-file" }
 # The usage names the agents Vorn ships switched on.
 vorn-adapters = { path = "../adapters" }
 vorn-store = { path = "../store" }
-# `vorn ext pack` reads and checks a manifest where the author works, without a server.
-vorn-extensions = { path = "../extensions" }
+# `vorn ext pack` reads and checks a manifest where the author works, without a server;
+# `vorn ext compile` holds the Wasm compiler vornd leaves out.
+vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # `vorn layout check` reads a layout file where the author works, without a server.
 vorn-layout = { path = "../layout" }
 

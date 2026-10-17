@@ -1,0 +1,11 @@
+[package]
+name = "vorn-guest-build"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Builds a crate of this workspace as a Wasm component for wasm32-wasip2: what vornd ships compiled in, and what the Wasm tests load"
+
+[dependencies]

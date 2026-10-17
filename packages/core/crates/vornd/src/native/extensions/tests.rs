@@ -251,11 +251,13 @@ fn world() -> World {
     let store = PackStore::new(packs.path());
     let lifecycle = Lifecycle::new(Policy::default());
     let hosts = Hosts::new(Arc::clone(&lifecycle), store.clone(), settings);
+    let mut router_settings = RouterSettings::new(Vec::new(), "test");
+    router_settings.compiler = vorn_extensions::component::Compiler::InProcess;
     let router = Router::new(
         store.clone(),
         lifecycle,
         Arc::new(NoWorld),
-        RouterSettings::new(Vec::new(), "test"),
+        router_settings,
         vorn_extensions::events::Bus::new(),
     );
     let installs = Arc::new(Installs::new(store, "git", Vec::new()));
