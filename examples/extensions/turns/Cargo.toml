@@ -1,0 +1,16 @@
+[package]
+name = "vorn-example-turns"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "An example extension: counts each agent's turns and draws them as element trees in every place an extension can draw"
+# Built and tested with Vorn's own crates; outside this repository it is a package of its own.
+workspace = "../../../packages/core"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../../packages/core/crates/extension-sdk" }

@@ -21,4 +21,6 @@ web-time = "1"
 
 [dev-dependencies]
 serde = "1"
-vorn-view = { path = "../view", features = ["kdl"] }
+# The example extension whose settings page the tests draw, and the fake Vorn it runs against.
+vorn-example-turns = { path = "../../../../examples/extensions/turns" }
+vorn-extension-sdk = { path = "../extension-sdk" }

@@ -11,7 +11,7 @@ the same API and the same permissions:
   machine: no files, no network, no environment. It asks Vorn for what it
   needs through the API's imports, and Vorn holds each call to what the
   manifest declares. Fit for logic that reacts to events, keeps its own data
-  and draws a UI. Worktree cleanup, which Vorn ships, is one.
+  and draws a UI. Worktree cleanup and the Widget, which Vorn ships, are two.
 
 Both are written against `wit/extension.wit` in
 `packages/core/crates/extensions`, the only definition of the API.
@@ -109,7 +109,7 @@ Every call back into Vorn goes through the `Host` it is handed:
 | `Host`                                     | API                                                | permission           |
 | ------------------------------------------ | -------------------------------------------------- | -------------------- |
 | `call(method, args)`                       | `host.call`: a core method such as `sessions.list` | the method's own     |
-| `publish(collection, ops)`                 | `host.publish`: rows its templates and trees draw  | none                 |
+| `publish(collection, ops)`                 | `host.publish`: rows its trees draw                | none                 |
 | `rows(collection)`                         | `host.rows`: the rows it published                 | none                 |
 | `start_session(req)`                       | `host.start-session`                               | `sessions.launch`    |
 | `fetch(req, connection)`                   | `net.fetch`: HTTPS to a declared host              | `[declares] network` |
@@ -137,13 +137,45 @@ its `asked` row for that reason.
 
 ## UI: the element tree
 
-An extension's UI is an element tree (`vorn-tree`): lists with grouping and
-selection, boards, sections, toolbars, stats, meters and badges, built with
-`tree::sdk`. A program answers the same tree as JSON. A `tree = true`
-contribution is asked for it with `ui.render` (`{point, surface}` in,
-`{tokens, tree}` out) and told what happened with `ui.event` (`{point,
-event}` in, `{toast?, open?, patch?}` out). The host draws it on every
-client: the desktop, the web client, and a terminal's cells (`surface.cells`).
+An extension's UI is an element tree (`vorn-tree`), built with `tree::sdk`:
+boxes, text, icons, status dots, buttons, toggles, fields, choices, badges,
+notices, stats, meters, sections, toolbars, lists with grouping and
+selection, and boards. A program answers the same tree as JSON. The host
+draws it on every client: the desktop, the web client, a terminal's cells
+(`surface.cells`) and the phone.
+
+Any contribution that draws says `tree = true`: a sidebar section, a card's
+badges and footer, a sidebar row's marks (`decorations`), a pane, the
+composer's strip, a settings page, a window and a dialog. Each is asked for
+its tree with `ui.render` (`{point, surface}` in, `{tokens, tree}` out),
+`point` being the contribution's id, so a tree contribution's id is unique
+in its manifest. The host asks again whenever the extension's rows change,
+and when the place shows.
+
+A badge, a card footer and a sidebar row's marks draw once per session: the
+tree's root is a box holding one child per session, its id the session's
+id, and each card draws its own. `per_session` builds it; a session with no
+child draws nothing. A sidebar section whose tree is an empty box does not
+show.
+
+A click, a toggle, a choice or a field's Return comes back as `ui.event`
+(`{point, event}` in). Its answer, every field optional, says what follows:
+
+| field    | does                                                                        |
+| -------- | --------------------------------------------------------------------------- |
+| `toast`  | a line that says what happened                                              |
+| `error`  | a line that says what failed                                                |
+| `patch`  | nodes changed in place, without a render                                    |
+| `open`   | opens one of its dialogs, by id                                             |
+| `window` | opens one of its windows by id, in place of the one open                    |
+| `close`  | `true` closes the dialog or window the tree is in                           |
+| `focus`  | a session to show in the main window, which comes forward                   |
+| `show`   | `true` brings the main window forward                                       |
+| `url`    | an `https:` page to open in the browser                                     |
+| `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id` |
+
+`examples/extensions/turns` draws a tree in every place, and
+`examples/extensions/agent-footer` a card footer.
 
 ## The new API
 

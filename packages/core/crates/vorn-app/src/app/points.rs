@@ -311,8 +311,11 @@ impl App {
                 self.st.points.rendered(&key, answer);
             }
             PointCall::Told(key) => {
-                self.st.points.told(&key, answer.as_ref().ok());
-                self.point_answered(PointCall::Called, answer);
+                let said = self.st.points.told(&key, answer.as_ref().ok());
+                match answer {
+                    Ok(_) => self.follow(&key, said),
+                    Err(e) => self.st.toast(e.to_string(), true),
+                }
             }
             PointCall::Called => match answer {
                 Ok(v) => {
@@ -359,6 +362,56 @@ impl App {
         }
     }
 
+    /// Does what tree point `key`'s answer asks: a toast, another window or a dialog, its own
+    /// dialog or window closed, a session or the window brought forward, a page or a sign-in.
+    fn follow(&mut self, key: &str, a: vorn_tree::Answer) {
+        let Some(ext) = self.st.points.get(key).map(|p| p.extension.clone()) else {
+            return;
+        };
+        if let Some(t) = a.toast {
+            self.st.toast(t, false);
+        }
+        if let Some(e) = a.error {
+            self.st.toast(e, true);
+        }
+        if a.close {
+            if self.st.points.dialog.as_deref() == Some(key) {
+                self.st.points.dialog = None;
+            }
+            self.close_window(key);
+        }
+        if let Some(id) = a.window {
+            match self.st.points.window_key(&ext, &id) {
+                Some(w) => self.open_window(&w),
+                None => self.st.toast(format!("No window named {id}"), true),
+            }
+        }
+        if let Some(id) = a.open {
+            self.open_dialog(Some(&ext), &id);
+        }
+        if let Some(id) = a.focus {
+            if self.store.session(&id).is_some() {
+                self.st.view = crate::screen::MainView::Sessions;
+                self.st.selected = Some(id);
+            }
+            self.come_forward = true;
+        }
+        self.come_forward |= a.show;
+        if let Some(url) = a.url.filter(|u| u.starts_with("https://")) {
+            super::tasks::open_url(&url);
+        }
+        if let Some(target) = a.signin {
+            let id = target
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if let Some(e) = self.open_signin(&id, &target, crate::signin::From::Page) {
+                self.st.toast(e, true);
+            }
+        }
+    }
+
     /// The extension a dialog answer came from: its `extension`, else the one dialog of that id.
     fn called_extension(&self, answer: &Value) -> Option<String> {
         s(answer, "extension").map(str::to_owned)
@@ -372,7 +425,7 @@ impl App {
             .find(|p| p.id == id && extension.is_none_or(|e| p.extension == e))
             .map(points::Point::key);
         match found {
-            Some(key) => self.st.points.dialog = Some(key),
+            Some(key) => self.st.points.show_dialog(key),
             None => self.st.toast(format!("No dialog named {id}"), true),
         }
     }
@@ -444,6 +497,9 @@ impl App {
         self.show_calls();
         self.render_trees(ui.is_cells());
         self.window_tick(ui);
+        if std::mem::take(&mut self.come_forward) {
+            ui.request(WindowRequest::Focus);
+        }
     }
 
     /// A settings page's `call` runs each time the page shows.
@@ -472,29 +528,56 @@ impl App {
         }
     }
 
-    /// Asks for the tree of the settings page showing, when it has none or its rows changed.
+    /// Asks for the trees of the places showing, each when it has none or its rows changed.
     fn render_trees(&mut self, cells: bool) {
-        let Some(key) = self
+        for key in self.trees_shown() {
+            let asking = |c: &Call| matches!(c, Call::Point(PointCall::Render(k)) if *k == key);
+            if self.calls.iter().any(|(c, _)| asking(c)) {
+                continue;
+            }
+            let Some(params) = self.st.points.render(&key, cells) else {
+                continue;
+            };
+            self.call(
+                Call::Point(PointCall::Render(key)),
+                "extension:call",
+                params,
+            );
+        }
+    }
+
+    /// The tree points whose place shows now: the sidebar's sections and the cards' parts
+    /// always, the composer's strip while it is open, and the settings page, panes, dialog
+    /// and floating windows open.
+    fn trees_shown(&self) -> Vec<String> {
+        let pts = &self.st.points;
+        let composing = self.st.composer_open || self.composing();
+        let page = self
             .st
             .settings
             .open
-            .then(|| self.st.settings.ext_page.clone())
-            .flatten()
-        else {
-            return;
-        };
-        let asking = |c: &Call| matches!(c, Call::Point(PointCall::Render(k)) if *k == key);
-        if self.calls.iter().any(|(c, _)| asking(c)) {
-            return;
+            .then(|| self.st.settings.ext_page.clone());
+        let mut out: Vec<String> = pts
+            .all
+            .iter()
+            .filter(|p| p.tree)
+            .filter(|p| match p.kind.as_str() {
+                kind::SIDEBAR | kind::BADGES | kind::CARD_FOOTERS | kind::DECORATIONS => true,
+                kind::COMPOSER => composing,
+                _ => false,
+            })
+            .map(points::Point::key)
+            .collect();
+        out.extend(page.flatten());
+        out.extend(self.open_panes());
+        out.extend(pts.dialog.clone());
+        if pts.floating {
+            out.extend(pts.windows.iter().cloned());
         }
-        let Some(params) = self.st.points.render(&key, cells) else {
-            return;
-        };
-        self.call(
-            Call::Point(PointCall::Render(key)),
-            "extension:call",
-            params,
-        );
+        out.retain(|k| pts.get(k).is_some_and(|p| p.tree));
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// The template panes open on cards, by point key.

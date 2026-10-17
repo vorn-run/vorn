@@ -14,7 +14,7 @@ events = ["worktree.idle"]
 [[contributes.sidebar]]
 id = "idle"
 title = "Idle worktrees"
-view = "views/idle.kdl"
+tree = true
 
 [[contributes.menus]]
 id = "remove"
@@ -26,7 +26,7 @@ icon = "trash-2"
 [[contributes.dialogs]]
 id = "confirm"
 title = "Remove Worktree"
-view = "views/confirm.kdl"
+tree = true
 
 [[contributes.settings]]
 id = "worktrees"

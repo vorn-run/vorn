@@ -1,5 +1,5 @@
 # An example extension: counts each agent's turns and shows them where Vorn
-# lets an extension draw, with a template for every place that takes one.
+# lets an extension draw, with an element tree for every place that takes one.
 id = "example.turns"
 name = "Turns"
 version = "1.0.0"
@@ -9,53 +9,56 @@ description = "Counts each agent's turns, shows them on its card and lists the l
 [declares]
 uses = ["sessions.read"]
 
+[build]
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+
 [service]
-command = ["node", "program.mjs"]
+component = "target/wasm32-wasip2/release/vorn_example_turns.wasm"
 events = ["session.created", "session.status", "session.exited"]
 
 [[contributes.sidebar]]
 id = "finished"
 title = "Finished turns"
-view = "views/finished.kdl"
+tree = true
 
 [[contributes.badges]]
 id = "count"
-view = "views/badge.kdl"
+tree = true
 
 [[contributes.card_footers]]
 id = "last"
-view = "views/footer.kdl"
+tree = true
 
 [[contributes.decorations]]
 id = "line"
-view = "views/decoration.kdl"
+tree = true
 
 [[contributes.panes]]
 id = "all"
 title = "Turns"
-view = "views/pane.kdl"
+tree = true
 
 [[contributes.composer]]
 id = "summary"
-view = "views/composer.kdl"
+tree = true
 
 [[contributes.settings]]
 id = "prefs"
 title = "Turns"
 description = "What Turns counts, and the list it keeps."
 icon = "history"
-view = "views/settings.kdl"
+tree = true
 
 [[contributes.windows]]
 id = "turns"
 title = "Turns"
-view = "views/window.kdl"
+tree = true
 size = [300, 360]
 
 [[contributes.dialogs]]
 id = "clear"
 title = "Clear Finished Turns"
-view = "views/clear.kdl"
+tree = true
 
 [[contributes.commands]]
 id = "toggle"

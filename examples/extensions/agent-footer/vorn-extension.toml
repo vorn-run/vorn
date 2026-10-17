@@ -9,10 +9,13 @@ description = "Shows each agent's model and its last tool call under its card."
 [declares]
 uses = ["sessions.read"]
 
+[build]
+command = ["cargo", "build", "--release", "--target", "wasm32-wasip2", "--target-dir", "target"]
+
 [service]
-command = ["node", "program.mjs"]
+component = "target/wasm32-wasip2/release/vorn_example_agent_footer.wasm"
 events = ["session.created", "session.exited", "agent.hook"]
 
 [[contributes.card_footers]]
 id = "tools"
-view = "views/footer.kdl"
+tree = true

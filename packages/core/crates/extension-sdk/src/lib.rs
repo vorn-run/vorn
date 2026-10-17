@@ -294,7 +294,7 @@ pub trait Extension: Sized + 'static {
         ))
     }
 
-    /// Something happened on `point`'s tree: answers `{toast?, open?, patch?}`.
+    /// Something happened on `point`'s tree: answers what follows, a [`tree::Answer`] as JSON.
     fn event(
         &mut self,
         _host: &mut dyn Host,

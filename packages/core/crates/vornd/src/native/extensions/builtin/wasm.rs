@@ -32,19 +32,30 @@ pub struct Component {
 pub fn worktrees() -> Component {
     Component {
         manifest: include_str!("../../../../../../extensions/worktrees/vorn-extension.toml"),
-        views: &[
-            (
-                "views/idle.kdl",
-                include_str!("../../../../../../extensions/worktrees/views/idle.kdl"),
-            ),
-            (
-                "views/confirm.kdl",
-                include_str!("../../../../../../extensions/worktrees/views/confirm.kdl"),
-            ),
-        ],
+        views: &[],
         events: &[vorn_extensions::events::WORKTREE_IDLE],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/worktrees.wasm")),
         on_by_default: true,
+    }
+}
+
+/// The Widget (`packages/core/extensions/widget`).
+pub fn widget() -> Component {
+    use vorn_extensions::events::{
+        AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_CREATED, SESSION_EXITED, SESSION_STATUS,
+    };
+    Component {
+        manifest: include_str!("../../../../../../extensions/widget/vorn-extension.toml"),
+        views: &[],
+        events: &[
+            SESSION_CREATED,
+            SESSION_STATUS,
+            SESSION_EXITED,
+            AGENT_PERMISSION,
+            AGENT_PERMISSION_CLOSED,
+        ],
+        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/widget.wasm")),
+        on_by_default: false,
     }
 }
 

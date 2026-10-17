@@ -97,6 +97,8 @@ pub fn tone(t: Tone) -> Rgba {
         Tone::Bad => color::RED_400,
         Tone::Info => color::SKY_400,
         Tone::Accent => color::STATUS_BLUE,
+        Tone::Busy => color::BRONZO,
+        Tone::Muted => color::INK_FAINT,
     }
 }
 
@@ -162,6 +164,8 @@ impl Cx<'_> {
                         div().row().justify_end().w(NUMBER_WIDTH).shrink0().child(e)
                     }
                     TextStyle::Heading => e.role(Role::Heading, t.as_str()),
+                    // Growing, it takes the room left and still cuts short in it.
+                    _ if n.props.grow => div().min_w0().child(e),
                     _ if *wrap => e,
                     _ => e.shrink0(),
                 }
@@ -228,6 +232,43 @@ impl Cx<'_> {
                 value: b.text.clone(),
                 tone: sem_tone(b.tone),
             }),
+            Kind::Dot { tone: t } => {
+                let ink = tone(*t);
+                let d = if self.ui.is_cells() {
+                    text("●", 12.0, ink).line_height(16.0).silent()
+                } else {
+                    div().size(6.0, 6.0).rounded(3.0).bg(ink)
+                };
+                let name = n.props.label.as_deref().unwrap_or(tone_name(*t));
+                self.sem(d.shrink0().role(Role::Status, name), || Sem::Status {
+                    value: name.to_owned(),
+                    tone: sem_tone(*t),
+                })
+            }
+            Kind::Toggle { label, on } => {
+                let node = n.id.clone().unwrap_or_default();
+                let event = Event {
+                    id: node,
+                    kind: EventKind::Toggle,
+                    value: (!on).to_string(),
+                    selected: Vec::new(),
+                };
+                let id = self.bind.on(Ev::Send { event, ask: false });
+                let name = n.props.label.as_deref().unwrap_or(label);
+                let switch = widgets::toggle(self.ui, id, name, *on, false).shrink0();
+                if label.is_empty() {
+                    switch
+                } else {
+                    let words = styled(label, TextStyle::Body, None).truncate();
+                    div()
+                        .row()
+                        .items_center()
+                        .gap(8.0)
+                        .min_w0()
+                        .child(div().grow().min_w0().child(self.sem(words, || Sem::Hidden)))
+                        .child(switch)
+                }
+            }
             Kind::Notice { text: t, tone: tn } => {
                 self.sem(notice(t, *tn), || Sem::Notice(tn.map_or("", sem_tone)))
             }
@@ -1454,6 +1495,8 @@ fn sem_tone(t: Tone) -> &'static str {
         Tone::Bad => "bad",
         Tone::Info => "busy",
         Tone::Accent => "lit",
+        Tone::Busy => "busy",
+        Tone::Muted => "muted",
     }
 }
 
@@ -1485,6 +1528,8 @@ fn tone_name(t: Tone) -> &'static str {
         Tone::Bad => "Problem",
         Tone::Info => "Info",
         Tone::Accent => "Active",
+        Tone::Busy => "Busy",
+        Tone::Muted => "Quiet",
     }
 }
 

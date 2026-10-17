@@ -1,7 +1,8 @@
-//! A real extension (examples/extensions/turns) with a template for every
-//! place that takes one, drawn by the one renderer on each surface: the
-//! window (Pixels) and the terminal (Cells) at 120x36 and 80x24. Its views
-//! also redraw live as their files change. The Widget built-in draws the same way.
+//! A real extension (examples/extensions/turns, a Wasm component) with an
+//! element tree for every place that takes one, drawn by the one renderer on
+//! each surface: the window (Pixels) and the terminal (Cells) at 120x36 and
+//! 80x24. The Widget built-in, a component too, draws the same way and
+//! answers an agent's real permission requests.
 //! `VORN_APP_SHOT=<prefix>` saves each state: a PNG, and the terminal's
 //! cells as HTML and text.
 
@@ -12,10 +13,9 @@ mod support;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use serde_json::json;
-use support::{add_project, connect, key, wait_for, Shot, TestVornd};
+use support::{add_project, connect, example, key, post_hook, tree_says, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::plugins::PlugAct;
@@ -28,37 +28,12 @@ use vorn_app::ui::backend::{Backend, Cells};
 use vorn_app::ui::{cells::units, item_id, mods, Id, Ui};
 use vorn_app::{ui_config, App};
 
-const EXAMPLE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../../examples/extensions/turns"
-);
 const ID: &str = "example.turns";
 const SIZES: [(u16, u16); 2] = [(120, 36), (80, 24)];
 
-fn copy_dir(from: &Path, to: &Path) {
-    fs::create_dir_all(to).expect("dir");
-    for e in fs::read_dir(from).expect("example") {
-        let e = e.expect("entry");
-        let at = to.join(e.file_name());
-        if e.file_type().expect("type").is_dir() {
-            copy_dir(&e.path(), &at);
-        } else {
-            fs::copy(e.path(), at).expect("copy");
-        }
-    }
-}
-
-fn has_node() -> bool {
-    std::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-/// Links a copy of the example, so the test may edit its views.
+/// Links a copy of the example, its component built.
 fn link(app: &App, home: &Path) -> PathBuf {
-    let dir = home.join("turns");
-    copy_dir(Path::new(EXAMPLE), &dir);
+    let dir = example(home, "turns");
     let linked = app
         .rpc()
         .call("extension:link", json!({ "path": dir }))
@@ -150,10 +125,6 @@ fn every_template_kind_draws_on_every_surface() {
     let Some(v) = TestVornd::start() else {
         return;
     };
-    if !has_node() {
-        eprintln!("skipped: no node for the example's program");
-        return;
-    }
     let mut app = connect(&v);
     let project = add_project(&mut app, &v, "api", json!({}));
     let dir = link(&app, &v.home);
@@ -177,6 +148,11 @@ fn every_template_kind_draws_on_every_surface() {
             .all(|k| a.st.points.get(k).is_some_and(|p| p.template.is_ok()))
             .then_some(())
     });
+    let drawing = all
+        .iter()
+        .filter(|k| app.st.points.get(k).is_some_and(|p| p.tree))
+        .count();
+    assert_eq!(drawing, 9, "every place that draws, draws a tree");
 
     // No session yet: the empty state's launcher.
     every_surface(
@@ -196,14 +172,15 @@ fn every_template_kind_draws_on_every_surface() {
         )
         .expect("an agent");
     let sid = info["id"].as_str().expect("id").to_owned();
+    let (badge, footer, finished) = (
+        point("badges", "count"),
+        point("cardFooters", "last"),
+        point("sidebar", "finished"),
+    );
     shot.until(&mut app, "a finished turn", |a, _| {
-        let rows = a.st.points.rows_of(ID);
-        let counted = rows
-            .get("sessions")?
-            .iter()
-            .any(|r| r.id == sid && r.fields.get("turns").and_then(|t| t.as_f64()) >= Some(1.0));
-        let listed = rows.get("finished").is_some_and(|f| !f.is_empty());
-        (counted && listed).then_some(())
+        let counted = a.st.points.session_tree(&badge, &sid).is_some()
+            && a.st.points.session_tree(&footer, &sid).is_some();
+        (counted && tree_says(a, &finished, &format!("turn:{sid}-"))).then_some(())
     });
     app.st.selected = Some(sid.clone());
     // First seen without sessions, the project starts folded.
@@ -219,6 +196,10 @@ fn every_template_kind_draws_on_every_surface() {
     // The new-session composer: its strip over the prompt, its launcher under it.
     shot.send(&mut app, key("KeyN", MOD(), Some("n")));
     assert!(app.st.composer_open);
+    let summary = point("composer", "summary");
+    shot.until(&mut app, "the composer's strip", |a, _| {
+        tree_says(a, &summary, "Finished turns: ").then_some(())
+    });
     every_surface(
         &mut shot,
         &mut app,
@@ -235,8 +216,10 @@ fn every_template_kind_draws_on_every_surface() {
     let labels = app.menu_labels(&shot.ui);
     assert!(labels.iter().any(|l| l == "Reset Turn Count"), "{labels:?}");
     choose(&mut shot, &mut app, "Turns");
-    shot.until(&mut app, "the template pane", |a, _| {
-        a.st.ext.panes.get(&sid).map(|_| ())
+    let all_pane = point("panes", "all");
+    shot.until(&mut app, "the tree pane", |a, _| {
+        a.st.ext.panes.get(&sid)?;
+        tree_says(a, &all_pane, "At work: 0 of 1").then_some(())
     });
     every_surface(
         &mut shot,
@@ -261,11 +244,7 @@ fn every_template_kind_draws_on_every_surface() {
         ),
     );
     shot.until(&mut app, "the prefs", |a, _| {
-        a.st.points
-            .rows_of(ID)
-            .get("prefs")
-            .is_some_and(|p| !p.is_empty())
-            .then_some(())
+        tree_says(a, &page, "Count shells too").then_some(())
     });
     every_surface(
         &mut shot,
@@ -286,12 +265,12 @@ fn every_template_kind_draws_on_every_surface() {
         .expect("the plan choice");
     shot.click(&mut app, team);
     shot.until(&mut app, "the plan picked", |a, _| {
-        a.st.points
-            .rows_of(ID)
-            .get("plans")?
-            .iter()
-            .any(|r| r.id == "team" && r.fields.get("selected") == Some(&json!(true)))
-            .then_some(())
+        tree_says(
+            a,
+            &page,
+            r#""id":"team","label":"Team plan","selected":true"#,
+        )
+        .then_some(())
     });
     // A more menu holds the actions a row does not show; one asks before it runs.
     let more = shot.button(&mut app, "More").expect("the more button");
@@ -453,7 +432,8 @@ fn every_template_kind_draws_on_every_surface() {
         &mut app,
         "t-install-sheet",
         &["Install Turns", "Runs", "to install", "Cancel"],
-        &["Install Turns", "to install"],
+        // A component's build and service take more lines than a program's command.
+        &["Install Turns", "a sandboxed component"],
     );
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
@@ -471,7 +451,7 @@ fn every_template_kind_draws_on_every_surface() {
         &mut app,
         "t-link-sheet",
         &["Link Turns", "runs in place", "to link", "Link"],
-        &["Link Turns", "to link"],
+        &["Link Turns", "a sandboxed component"],
     );
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
@@ -536,7 +516,8 @@ fn every_template_kind_draws_on_every_surface() {
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     let dialog = point("dialogs", "clear");
     shot.until(&mut app, "the dialog", |a, _| {
-        (a.st.points.dialog.as_deref() == Some(dialog.as_str())).then_some(())
+        let open = a.st.points.dialog.as_deref() == Some(dialog.as_str());
+        (open && tree_says(a, &dialog, "Clear finished turns?")).then_some(())
     });
     every_surface(
         &mut shot,
@@ -548,19 +529,22 @@ fn every_template_kind_draws_on_every_surface() {
     let clear = shot.button(&mut app, "Clear").expect("the dialog's Clear");
     shot.click(&mut app, clear);
     shot.until(&mut app, "the list cleared", |a, _| {
-        a.st.points
-            .rows_of(ID)
-            .get("finished")?
-            .is_empty()
-            .then_some(())
+        let blank =
+            a.st.points
+                .trees
+                .get(&finished)?
+                .as_ref()
+                .ok()
+                .is_some_and(vorn_tree::is_blank);
+        (blank && a.st.points.dialog.is_none()).then_some(())
     });
-    assert_eq!(app.st.points.dialog, None);
 
     // Its key opens its window, which floats in a window without its own.
     let window = point("windows", "turns");
     shot.send(&mut app, key("KeyT", MOD() | mods::ALT, None));
     shot.until(&mut app, "the window", |a, _| {
-        a.st.points.windows.contains(&window).then_some(())
+        let open = a.st.points.windows.contains(&window);
+        (open && tree_says(a, &window, "At work: 0 of 1")).then_some(())
     });
     every_surface(
         &mut shot,
@@ -577,15 +561,14 @@ fn every_template_kind_draws_on_every_surface() {
     open_card_menu(&mut shot, &mut app, &sid);
     choose(&mut shot, &mut app, "Reset Turn Count");
     shot.until(&mut app, "the count reset", |a, _| {
-        let rows = a.st.points.rows_of(ID).get("sessions")?;
-        rows.iter()
-            .any(|r| r.id == sid && r.fields.get("turns").and_then(|t| t.as_f64()) == Some(0.0))
-            .then_some(())
+        let reset = a.st.points.trees.contains_key(&badge)
+            && a.st.points.session_tree(&badge, &sid).is_none();
+        reset.then_some(())
     });
 
-    // Last, as linking again restarts the program: confirming links the folder.
+    // Last, as linking again restarts the component: confirming links the folder.
     link_again(&mut shot, &mut app, &turns);
-    live_preview(&mut shot, &mut app, &dir);
+    let _ = dir;
 }
 
 /// Install… › Link a folder… on the folder the picker answers, confirmed by its id;
@@ -640,68 +623,17 @@ fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
     assert!(!app.st.settings.open);
 }
 
-/// A saved view redraws at once; a broken one shows where and why instead.
-fn live_preview(shot: &mut Shot, app: &mut App, dir: &Path) {
-    let view = dir.join("views/settings.kdl");
-    let was = fs::read_to_string(&view).expect("view");
-    shot.send(app, key("Comma", MOD(), None));
-    let page = point("settings", "prefs");
-    shot.click(
-        app,
-        App::control(
-            "settings-nav-ext",
-            &Act::Point(vorn_app::points::PointAct::Settings(page.clone())),
-        ),
-    );
-    // Timed to the frame that has the new template; the terminal's text then shows it.
-    let redraw = |shot: &mut Shot, app: &mut App, text: &str, what: &str| {
-        let t = Instant::now();
-        wait_for(what, || {
-            shot.frame(app);
-            let p = app.st.points.get(&page)?;
-            let now = match &p.template {
-                Ok(t) => format!("{t:?}"),
-                Err(e) => e.join("\n"),
-            };
-            now.contains(text).then_some(())
-        });
-        let took = t.elapsed();
-        let [w, _] = cells(app, "t-live", None);
-        // A section's heading reads in capitals.
-        assert!(
-            w.contains(text) || w.contains(&text.to_uppercase()),
-            "{what} shows {text:?}:\n{w}"
-        );
-        took
-    };
-    fs::write(&view, was.replace("Counting", "What counts")).expect("edit");
-    let took = redraw(shot, app, "What counts", "the edited view");
-    eprintln!("live preview: {took:?}");
-    assert!(took < Duration::from_millis(250), "redrawn in {took:?}");
-
-    fs::write(
-        &view,
-        was.replace("section \"Counting\"", "sectoin \"Counting\""),
-    )
-    .expect("break");
-    redraw(shot, app, "views/settings.kdl:", "the error box");
-    let [w, _] = cells(app, "t-error", None);
-    assert!(w.contains("sectoin"), "the error names what is wrong:\n{w}");
-    shot.save(app, "t-error");
-
-    fs::write(&view, &was).expect("fix");
-    redraw(shot, app, "Counting", "the fixed view");
-}
-
-/// The Widget built-in: a request's suggestions and an agent's questions in its
-/// window, which folds to a line of counts and back, on every surface.
+/// The Widget built-in, a Wasm component: an agent's real permission request
+/// with the rules it offers and a question it asks, answered from its window,
+/// which folds to a line of counts and back, on every surface.
 #[test]
-fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
+fn the_widget_answers_requests_and_folds_to_a_line_on_every_surface() {
     let Some(v) = TestVornd::start() else {
         return;
     };
     const W: &str = "vorn.widget";
     let mut app = connect(&v);
+    let project = add_project(&mut app, &v, "api", json!({}));
     app.rpc()
         .call("extension:setBuiltin", json!({ "id": W, "on": true }))
         .expect("the widget on");
@@ -711,75 +643,91 @@ fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
     );
     let mut shot = Shot::new();
     shot.until(&mut app, "the widget's windows", |a, _| {
-        let drawn = [&full, &compact]
+        [&full, &compact]
             .iter()
-            .all(|k| a.st.points.get(k).is_some_and(|p| p.template.is_ok()));
-        let read = ["agents", "permissions", "suggestions", "options"]
-            .iter()
-            .all(|c| a.st.points.rows_of(W).contains_key(*c));
-        (drawn && read).then_some(())
+            .all(|k| a.st.points.get(k).is_some_and(|p| p.tree))
+            .then_some(())
     });
-    let up = |row: serde_json::Value| json!({ "op": "upsert", "row": row });
-    let rows = [
-        (
-            "permissions",
-            vec![
-                up(
-                    json!({ "id": "p1", "tool": "Bash", "agent": "api", "description": "npm test", "question": false, "ready": false }),
-                ),
-                up(
-                    json!({ "id": "p2", "tool": "AskUserQuestion", "agent": "web", "description": "", "question": true, "ready": false }),
-                ),
-            ],
-        ),
-        (
-            "suggestions",
-            vec![
-                up(json!({ "id": "p1:0", "request": "p1", "label": "Always allow `npm test`" })),
-                up(json!({ "id": "p1:1", "request": "p1", "label": "Allow Bash in src/" })),
-            ],
-        ),
-        (
-            "options",
-            vec![
-                up(
-                    json!({ "id": "p2:0:0", "request": "p2", "ask": "COLOUR: Which theme?", "label": "Dark", "picked": true }),
-                ),
-                up(
-                    json!({ "id": "p2:0:1", "request": "p2", "ask": "", "label": "Light", "picked": false }),
-                ),
-            ],
-        ),
-    ];
-    for (collection, ops) in rows {
-        app.st.points.changed(W, collection, &ops);
-    }
+    let info = app
+        .rpc()
+        .call(
+            "terminal:create",
+            json!({ "agentType": "acme", "projectName": "api", "projectPath": project }),
+        )
+        .expect("an agent");
+    let sid = info["id"].as_str().expect("id").to_owned();
+    // Each request waits on its hook for the answer the widget gives.
+    let ask = |body: serde_json::Value| {
+        let home = v.home.clone();
+        std::thread::spawn(move || post_hook(&home, &body))
+    };
+    let rule = |r: &str| json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": r }] });
+    let bash = ask(json!({
+        "hook_event_name": "PermissionRequest", "session_id": "conv", "cwd": project,
+        "tool_name": "Bash", "tool_input": { "command": "npm test" },
+        "permission_suggestions": [rule("npm test"), rule("src/**")],
+        "vorn_terminal_id": sid,
+    }));
+    // The question comes second, so the window lists them in that order.
+    shot.until(&mut app, "the first request", |a, _| {
+        let asked = a.st.points.rows_of(W).get("permissions")?;
+        asked.iter().any(|r| r.text("tool") == "Bash").then_some(())
+    });
+    let question = ask(json!({
+        "hook_event_name": "PermissionRequest", "session_id": "conv", "cwd": project,
+        "tool_name": "AskUserQuestion",
+        "tool_input": { "questions": [{ "header": "Colour", "question": "Which theme?",
+                                        "options": [{ "label": "Dark" }, { "label": "Light" }] }] },
+        "vorn_terminal_id": sid,
+    }));
 
     shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
-    shot.until(&mut app, "the widget", |a, _| {
-        a.st.points.windows.contains(&full).then_some(())
-    });
     let asks = [
         "npm test",
         "Always allow `npm test`",
         "Allow Bash in src/",
         "COLOUR: Which theme?",
-        "Dark",
+        "Light",
     ];
+    shot.until(&mut app, "the widget", |a, _| {
+        let open = a.st.points.windows.contains(&full);
+        (open && asks.iter().all(|t| tree_says(a, &full, t))).then_some(())
+    });
     every_surface(&mut shot, &mut app, "w-widget", &asks, &asks[..3]);
+
+    let keep = shot
+        .button(&mut app, "Always allow `npm test`")
+        .expect("the offered rule");
+    shot.click(&mut app, keep);
+    let told = bash.join().expect("the hook's answer");
+    assert!(told.contains(r#""behavior":"allow""#), "{told}");
+    assert!(told.contains("updatedPermissions"), "{told}");
+    shot.until(&mut app, "the request gone", |a, _| {
+        (!tree_says(a, &full, "npm test")).then_some(())
+    });
+    let light = shot.button(&mut app, "Light").expect("the option");
+    shot.click(&mut app, light);
+    shot.until(&mut app, "Submit", |a, _| {
+        tree_says(a, &full, "submit:").then_some(())
+    });
+    let submit = shot.button(&mut app, "Submit").expect("Submit");
+    shot.click(&mut app, submit);
+    let told = question.join().expect("the hook's answer");
+    assert!(told.contains(r#""behavior":"allow""#), "{told}");
 
     let collapse = shot.button(&mut app, "Collapse").expect("Collapse");
     shot.click(&mut app, collapse);
     shot.until(&mut app, "the line", |a, _| {
         let w = &a.st.points.windows;
-        (w.contains(&compact) && !w.contains(&full)).then_some(())
+        let drawn = a.st.points.trees.get(&compact).is_some_and(|t| t.is_ok());
+        (w.contains(&compact) && !w.contains(&full) && drawn).then_some(())
     });
     every_surface(
         &mut shot,
         &mut app,
         "w-compact",
-        &["No active agents", "Expand"],
-        &["No active agents", "Expand"],
+        &["Expand", "Vorn", "1"],
+        &["Expand", "Vorn"],
     );
 
     let expand = shot.button(&mut app, "Expand").expect("Expand");
@@ -787,6 +735,13 @@ fn the_widget_asks_and_folds_to_a_line_on_every_surface() {
     shot.until(&mut app, "the widget again", |a, _| {
         let w = &a.st.points.windows;
         (w.contains(&full) && !w.contains(&compact)).then_some(())
+    });
+    // Show brings the agent's card forward.
+    app.st.selected = None;
+    let show = shot.button(&mut app, "Show").expect("the agent's Show");
+    shot.click(&mut app, show);
+    shot.until(&mut app, "the agent shown", |a, _| {
+        (a.st.selected.as_deref() == Some(sid.as_str())).then_some(())
     });
     shot.send(&mut app, key("KeyW", MOD() | mods::ALT, None));
     shot.frame(&mut app);

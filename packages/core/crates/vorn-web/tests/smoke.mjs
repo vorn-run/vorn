@@ -1,8 +1,9 @@
 // Loads the browser client against a test vornd in a headless Chromium, once
 // per renderer: it signs in, opens a terminal, types, and waits for the echo.
 // `pair` pairs a fresh browser with a code instead, as a phone does.
-// `templates` opens the example extension's settings page and works its
-// choice, secret field, Sign in button and more menu, then Settings ›
+// `templates` opens the example extension's settings page (an element tree
+// from its Wasm component) and works its choice, secret field, Sign in
+// button and more menu, then Settings ›
 // Extensions and the Connectors built-in's Connections page. `adapters`
 // links a test agent's adapter and the example card footer, starts a session
 // of that agent, posts a hook event as the agent would, and waits for the
@@ -11,9 +12,9 @@
 //   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [phone-chromium] [phone-webkit]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +27,25 @@ const shots = process.env.SHOTS
 const runs = process.argv.slice(2).length
   ? process.argv.slice(2)
   : ['webgpu', 'webgl', 'pair', 'templates', 'adapters']
-const turns = join(core, '../../examples/extensions/turns')
+const examples = join(core, '../../examples/extensions')
+
+/** A copy of example extension `name` in `home`, its component built where its manifest names it. */
+function example(home, name) {
+  const pkg = `vorn-example-${name}`
+  const out = join(core, 'target/wasm-guests')
+  execFileSync(
+    'cargo',
+    ['build', '--locked', '--target', 'wasm32-wasip2', '--profile', 'release', '-p', pkg],
+    { cwd: core, stdio: 'inherit', env: { ...process.env, CARGO_TARGET_DIR: out } }
+  )
+  const dir = join(home, name)
+  cpSync(join(examples, name), dir, { recursive: true, filter: (p) => !p.includes('/target') })
+  const wasm = `${pkg.replaceAll('-', '_')}.wasm`
+  const at = join(dir, 'target/wasm32-wasip2/release')
+  mkdirSync(at, { recursive: true })
+  cpSync(join(out, 'wasm32-wasip2/release', wasm), join(at, wasm))
+  return dir
+}
 const engines = await import(process.env.PLAYWRIGHT ?? 'playwright-core')
 const PHONE = { width: 390, height: 844 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -244,14 +263,13 @@ async function postHook(vornd, body) {
   if (status !== 200) throw new Error(`the hook answered ${status}`)
 }
 
-const footerExample = join(core, '../../examples/extensions/agent-footer')
 const testAgent = join(core, 'crates/vorn-app/tests/fixtures/acme-adapter')
 
 /** A session of a linked test agent under the example card footer; answers how to post its tool call. */
 async function adapterSession(vornd, server) {
   await server.call('extension:link', { path: testAgent })
-  await server.call('extension:link', { path: footerExample })
-  // Its program starts on its first call or event; this call starts it.
+  await server.call('extension:link', { path: example(vornd.home, 'agent-footer') })
+  // Its component starts on its first call or event; this call starts it.
   await server.call('extension:call', { id: 'example.agent-footer', action: 'start', args: {} })
   const cfg = await server.call('config:load')
   cfg.agentCommands = { ...cfg.agentCommands, acme: { command: '/bin/sh', args: [] } }
@@ -328,8 +346,8 @@ async function run(what, vornd, server) {
     } else if (what === 'templates' || phone) {
       const device = (await server.call('token:create', { name: 'smoke templates' })).plaintext
       // Linked once; a later run finds it there already.
-      await server.call('extension:link', { path: turns }).catch(() => {})
-      // Its program starts on its first call or event; this call starts it.
+      await server.call('extension:link', { path: example(vornd.home, 'turns') }).catch(() => {})
+      // Its component starts on its first call or event; this call starts it.
       await server.call('extension:call', {
         id: 'example.turns',
         action: 'plan',

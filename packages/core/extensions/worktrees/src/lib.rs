@@ -14,6 +14,7 @@ use vorn_extension_sdk::tree::{self, Surface};
 use vorn_extension_sdk::{arg, json, Ctx, Error, Event, Extension, Host, Init, Op, Value};
 
 mod page;
+mod side;
 
 const NAME: &str = "Worktree cleanup";
 /// The event a worktree's last session ending sends.
@@ -510,13 +511,47 @@ impl Extension for Cleanup {
         }
     }
 
-    fn render(&mut self, host: &mut dyn Host, _: &str, _: Surface) -> Result<tree::Node, Error> {
-        page::render(host)
+    fn render(
+        &mut self,
+        host: &mut dyn Host,
+        point: &str,
+        _: Surface,
+    ) -> Result<tree::Node, Error> {
+        match point {
+            IDLE => Ok(side::idle(&host.rows(IDLE)?)),
+            "confirm" => Ok(side::confirm(host.rows(ASKED)?.first())),
+            _ => page::render(host),
+        }
     }
 
-    fn event(&mut self, host: &mut dyn Host, _: &str, event: tree::Event) -> Result<Value, Error> {
-        let (does, args) = page::event(&event)?;
-        self.act(host, does, &args)
+    fn event(
+        &mut self,
+        host: &mut dyn Host,
+        point: &str,
+        event: tree::Event,
+    ) -> Result<Value, Error> {
+        match point {
+            IDLE => {
+                let (does, args) = side::idle_event(&event)?;
+                self.act(host, does, &args)
+            }
+            // The dialog closes whatever the answer, as a failure is said in its place.
+            "confirm" => {
+                let does = side::confirm_event(&event)?;
+                Ok(match self.act(host, does, &Value::Null) {
+                    Ok(Value::Object(mut done)) => {
+                        done.insert("close".into(), json!(true));
+                        Value::Object(done)
+                    }
+                    Ok(_) => json!({ "close": true }),
+                    Err(e) => json!({ "close": true, "error": e.message }),
+                })
+            }
+            _ => {
+                let (does, args) = page::event(&event)?;
+                self.act(host, does, &args)
+            }
+        }
     }
 }
 

@@ -11,7 +11,6 @@ pub mod connectors;
 pub mod editor;
 pub mod tasks;
 pub mod wasm;
-pub mod widget;
 pub mod workflows;
 
 use std::collections::BTreeMap;
@@ -151,7 +150,7 @@ impl std::fmt::Debug for Builtins {
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
         Arc::new(wasm::worktrees()),
-        Arc::new(widget::Widget),
+        Arc::new(wasm::widget()),
         Arc::new(workflows::Workflows),
         Arc::new(artifacts::Artifacts),
     ];
@@ -389,3 +388,5 @@ pub(crate) fn unknown(name: &str, action: &str) -> ExtError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod widget_tiers;

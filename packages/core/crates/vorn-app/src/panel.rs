@@ -1,5 +1,6 @@
 //! A window point in a window of its own (`vorn-app panel --point KEY`):
-//! its template on its own connection to vornd, floating over other apps.
+//! its template or element tree on its own connection to vornd, floating
+//! over other apps.
 //! It tells the app that started it what to do with one line on stdout
 //! per request: `focus <terminal>`, `show`, `hide`.
 
@@ -8,7 +9,7 @@ use std::sync::mpsc::Receiver;
 use serde_json::{json, Value};
 
 use crate::act::{Act, Acts};
-use crate::client::rpc::{Event as RpcEvent, Rpc};
+use crate::client::rpc::{Event as RpcEvent, Pending, Rpc};
 use crate::client::Endpoint;
 use crate::points::{self, line, Holder, PointAct, Points, Press, Request};
 use crate::runs::s;
@@ -27,6 +28,10 @@ pub struct Panel {
     acts: Acts,
     /// Requests for the app, written by the caller.
     pub out: Vec<Request>,
+    /// The tree's `ui.render` on its way.
+    rendering: Option<Pending>,
+    /// What its tree's events answered, still on their way.
+    told: Vec<Pending>,
 }
 
 impl Panel {
@@ -49,6 +54,8 @@ impl Panel {
             points: Points::default(),
             acts: Acts::default(),
             out: Vec::new(),
+            rendering: None,
+            told: Vec::new(),
         };
         p.reload();
         if p.points.get(key).is_none() {
@@ -99,6 +106,7 @@ impl Panel {
                     {
                         let ops = params["ops"].as_array().cloned().unwrap_or_default();
                         self.points.changed(ext, coll, &ops);
+                        self.points.trees_changed(ext);
                     }
                 }
                 "extension:contributionsChanged" => stale = true,
@@ -110,6 +118,59 @@ impl Panel {
             if self.points.get(&self.key).is_none() {
                 self.out.push(Request::Hide);
             }
+        }
+        self.trees();
+    }
+
+    /// Asks for its tree when it has none or its rows changed, and takes in what came back.
+    fn trees(&mut self) {
+        if let Some(answer) = self.rendering.as_ref().and_then(Pending::poll) {
+            self.rendering = None;
+            let key = self.key.clone();
+            match &answer {
+                Ok(v) => self.points.rendered(&key, Ok(v)),
+                Err(e) => self.points.rendered(&key, Err(e.to_string())),
+            }
+        }
+        let key = self.key.clone();
+        let mut told = std::mem::take(&mut self.told);
+        told.retain(|p| match p.poll() {
+            None => true,
+            Some(answer) => {
+                let said = self.points.told(&key, answer.as_ref().ok());
+                self.follow(said);
+                false
+            }
+        });
+        self.told.extend(told);
+        if self.rendering.is_none() {
+            if let Some(params) = self.points.render(&key, false) {
+                self.rendering = Some(self.rpc.request("extension:call", params));
+            }
+        }
+    }
+
+    /// What its tree's answer asks of the app; a toast has nowhere to show here.
+    fn follow(&mut self, a: vorn_tree::Answer) {
+        if let Some(id) = a.focus {
+            self.out.push(Request::Focus(id));
+        } else if a.show {
+            self.out.push(Request::Show);
+        }
+        if let Some(w) = a.window {
+            let ext = self.points.get(&self.key).map(|p| p.extension.clone());
+            if let Some(key) = ext.and_then(|e| self.points.window_key(&e, &w)) {
+                self.out.push(Request::Open(key));
+            }
+        }
+        if a.close {
+            self.out.push(Request::Hide);
+        }
+    }
+
+    fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
+        if let Some(params) = self.points.tell(key, event) {
+            self.told.push(self.rpc.request("extension:call", params));
         }
     }
 
@@ -145,11 +206,32 @@ impl Panel {
             }
             PointAct::Ask(id) => self.points.asking = id,
             PointAct::More(id) => self.points.more = id,
+            PointAct::Tree { key, event } => {
+                self.points.asking = None;
+                self.points.more = None;
+                self.tell(&key, &event);
+            }
+            PointAct::TreeCheck {
+                key,
+                list,
+                rows,
+                on,
+            } => self.points.check(&key, &list, &rows, on),
             _ => {}
         }
     }
 
     pub fn submit(&mut self, ui: &Ui, id: Id) {
+        if let Some(Act::Point(PointAct::TreeField { key, node })) = self.acts.text_of(id) {
+            let event = vorn_tree::Event {
+                id: node,
+                kind: vorn_tree::EventKind::Submit,
+                value: ui.edit_text(id).to_owned(),
+                selected: Vec::new(),
+            };
+            self.tell(&key, &event);
+            return;
+        }
         let Some(Act::Point(PointAct::Field {
             extension,
             call,

@@ -221,6 +221,9 @@ pub fn draw(
     row: Option<&Row>,
     holder: Option<Holder>,
 ) -> Option<El> {
+    if p.tree {
+        return draw_tree(ui, acts, points, p);
+    }
     match &p.template {
         Ok(Some(t)) => {
             let bind = Binder {
@@ -239,13 +242,15 @@ pub fn draw(
     }
 }
 
-/// Tree point `p`'s tree whole, toolbar first, or its error box; nothing until it renders or for a template.
+/// Tree point `p`'s tree whole, or its error box; nothing until it renders, when it is an
+/// empty box, or for a template.
 pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El> {
     if !p.tree {
         return None;
     }
     let key = p.key();
     match points.trees.get(&key)? {
+        Ok(t) if vorn_tree::is_blank(t) => None,
         Ok(t) => {
             let bind = TreeBinder {
                 acts,
@@ -256,6 +261,21 @@ pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El>
         }
         Err(errors) => Some(template::invalid(&p.place(), errors)),
     }
+}
+
+/// What per-session tree point `p` draws for `session`: its child for that session.
+fn session_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point, session: &str) -> Option<El> {
+    let key = p.key();
+    let part = points.session_tree(&key, session)?;
+    if vorn_tree::is_blank(part) {
+        return None;
+    }
+    let bind = TreeBinder {
+        acts,
+        points,
+        key: &key,
+    };
+    Some(tree::view(ui, part, &bind))
 }
 
 /// Point `p`'s template or tree as a page: its toolbar apart, for the page's header, and its body.
@@ -302,6 +322,16 @@ fn for_session(s: &Screen<'_>, at: &str, session: &str) -> Vec<El> {
     s.st.points
         .at(at)
         .filter_map(|p| {
+            if p.tree {
+                return match s.st.points.trees.get(&p.key())? {
+                    Ok(_) => session_tree(s.ui, s.acts, &s.st.points, p, session),
+                    // A tree that cannot be drawn says so once, on the selected card.
+                    Err(e) if s.st.selected.as_deref() == Some(session) => {
+                        Some(template::invalid(&p.place(), e))
+                    }
+                    Err(_) => None,
+                };
+            }
             let row = s.st.points.session_row(p, session)?;
             drawn(s, p, Some(row), None)
         })
@@ -316,7 +346,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> Option<El> {
         let Some(body) = drawn(s, p, None, None) else {
             continue;
         };
-        if !has_rows(s, p) && p.template.is_ok() {
+        if !p.tree && !has_rows(s, p) && p.template.is_ok() {
             continue;
         }
         any = true;

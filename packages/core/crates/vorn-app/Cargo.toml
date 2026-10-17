@@ -17,6 +17,8 @@ default = ["webview"]
 webview = ["dep:wry", "dep:gtk"]
 
 [dev-dependencies]
+# Builds the example extensions' Wasm components the tests link.
+vorn-guest-build = { path = "../guest-build" }
 # The board bench writes its tasks straight into vornd's database.
 vorn-store = { path = "../store" }
 # A certificate for the pinned socket's test to be served with.
