@@ -1,0 +1,20 @@
+# Run it by hand: it shouts what you give it.
+name = "Try Shout"
+id = "try-shout"
+enabled = true
+
+[trigger]
+id = "start"
+type = "manual"
+
+[[trigger.inputs]]
+key = "words"
+label = "Words"
+type = "text"
+
+[[step]]
+id = "loud"
+type = "shout"
+slug = "loud"
+text = "{{inputs.words}}"
+times = 2

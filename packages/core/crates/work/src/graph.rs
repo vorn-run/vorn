@@ -25,6 +25,11 @@ pub const ABANDONED: &str = "Run abandoned (no session id recorded)";
 /// How much of each step's output a loop keeps per pass.
 pub const LOOP_RESULT_OUTPUT_CHARS: usize = 8000;
 
+/// The id a body step runs under for item `number` of a loop run in parallel.
+pub fn item_node_id(step: &str, number: u32) -> String {
+    format!("{step}#{number}")
+}
+
 /// Ceiling on `maxIterations`, whatever a workflow asks for.
 pub const MAX_LOOP_ITERATIONS: u32 = 10;
 
@@ -156,6 +161,9 @@ pub fn step_outputs(execution: &WorkflowExecution, workflow: &Workflow) -> StepO
         let mut entry = Map::new();
         if settled {
             spread(&mut entry, ns.structured_output.as_ref());
+            if let Some(json) = printed_json(node, ns) {
+                entry.insert("json".into(), json);
+            }
             entry.insert(
                 "output".into(),
                 Value::String(output_or_logs(ns).to_owned()),
@@ -176,6 +184,54 @@ pub fn step_outputs(execution: &WorkflowExecution, workflow: &Workflow) -> StepO
         outputs.insert(slug.clone(), Value::Object(entry));
     }
     outputs
+}
+
+/// A script's printed output when all of it is one JSON value (colours dropped): `{{steps.<slug>.json.*}}`.
+pub fn printed_json(node: &Node, ns: &NodeExecutionState) -> Option<Value> {
+    if node.kind.step() != Some("script") {
+        return None;
+    }
+    let text = ns.output.as_deref()?;
+    let plain = if text.contains('\x1b') {
+        std::borrow::Cow::Owned(without_escapes(text))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    let trimmed = plain.trim();
+    if !trimmed.starts_with(['{', '[']) {
+        return None;
+    }
+    serde_json::from_str(trimmed).ok()
+}
+
+/// `text` without its terminal escape sequences: CSI, OSC and two-byte ones.
+fn without_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// `ns.output || ns.logs || ''`.
@@ -427,7 +483,7 @@ pub fn run_ended_in_error(
             return true;
         }
         workflow
-            .node(&ns.node_id)
+            .state_node(&ns.node_id)
             .is_none_or(Node::stops_run_on_error)
     })
 }
@@ -933,6 +989,53 @@ mod tests {
         );
         assert_eq!(out["g"]["round"], json!(2));
         assert!(!out.contains_key("p"));
+    }
+
+    #[test]
+    fn a_script_that_prints_json_offers_its_fields() {
+        let w = wf(
+            json!([
+                { "id": "f", "type": "script", "slug": "fetch" },
+                { "id": "t", "type": "script", "slug": "text" },
+                { "id": "c", "type": "script", "slug": "coloured" },
+                { "id": "a", "type": "launchAgent", "slug": "agent" }
+            ]),
+            json!([]),
+        );
+        let mut run = run_of(&["f", "t", "c", "a"]);
+        let printed = [
+            (
+                "f",
+                "{\"items\": [{\"name\": \"a\"}, {\"name\": \"b\"}]}\r\n",
+            ),
+            ("t", "not json {\"items\": []}"),
+            (
+                "c",
+                "\x1b[1;39m{\x1b[0m\n  \x1b[34;1m\"n\"\x1b[0m: 1\n}\x1b]0;title\x07",
+            ),
+            ("a", "{\"x\": 1}"),
+        ];
+        for (id, out) in printed {
+            run.update_all(id, |s| {
+                s.set_status(Status::Success);
+                s.output = Some(out.into());
+            });
+        }
+        let out = step_outputs(&run, &w);
+        assert_eq!(out["fetch"]["json"]["items"][1]["name"], "b");
+        assert_eq!(out["fetch"]["output"], printed[0].1);
+        assert!(out["text"].get("json").is_none());
+        assert_eq!(out["coloured"]["json"], json!({ "n": 1 }));
+        assert!(
+            out["agent"].get("json").is_none(),
+            "only a script's output is read as JSON"
+        );
+        let resolved = resolve(
+            "{{steps.fetch.json.items.0.name}} of {{steps.fetch.json.items.length}}",
+            None,
+            Some(&out),
+        );
+        assert_eq!(resolved, "a of 2");
     }
 
     trait UpdateAll {

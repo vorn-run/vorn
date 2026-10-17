@@ -111,7 +111,7 @@ vorn layout open dev
 vorn workflow list
 vorn workflow run "Nightly review" --input pr=42
 vorn workflow stop <run>
-vorn workflow check .vorn/workflows/*.kdl
+vorn workflow check .vorn/workflows/*.toml
 vorn server serve          # a server on its own, without the app
 ```
 

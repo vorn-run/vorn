@@ -94,7 +94,7 @@ pub struct TriggerDecl {
     pub config: Option<String>,
 }
 
-/// A workflow the extension ships: `workflows/<name>.kdl` in the package,
+/// A workflow the extension ships: `workflows/<name>.toml` in the package,
 /// added once when the extension is installed or switched on.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WorkflowDecl {
@@ -108,9 +108,9 @@ pub fn is_schema_path(path: &str) -> bool {
     in_folder(path, "nodes/", ".json")
 }
 
-/// `workflows/<name>.kdl`, never climbing out of the package.
+/// `workflows/<name>.toml`, never climbing out of the package.
 pub fn is_workflow_path(path: &str) -> bool {
-    in_folder(path, "workflows/", ".kdl")
+    in_folder(path, "workflows/", ".toml")
 }
 
 fn in_folder(path: &str, folder: &str, ext: &str) -> bool {
@@ -154,7 +154,7 @@ pub fn problem(kind: &str, raw: &Map<String, Value>) -> Option<(&'static str, St
     match kind {
         "workflows" if !is_workflow_path(&path("file")) => Some((
             "file",
-            "is not a file under workflows/ ending in .kdl".into(),
+            "is not a file under workflows/ ending in .toml".into(),
         )),
         "nodes" | "triggers" if raw.get("config").is_some() && !is_schema_path(&path("config")) => {
             Some((
@@ -252,11 +252,11 @@ mod tests {
 
     #[test]
     fn files_stay_in_their_folder() {
-        assert!(is_workflow_path("workflows/review.kdl"));
-        assert!(is_workflow_path("workflows/team/review.kdl"));
-        assert!(!is_workflow_path("workflows/../x.kdl"));
-        assert!(!is_workflow_path("workflows/.kdl"));
-        assert!(!is_workflow_path("review.kdl"));
+        assert!(is_workflow_path("workflows/review.toml"));
+        assert!(is_workflow_path("workflows/team/review.toml"));
+        assert!(!is_workflow_path("workflows/../x.toml"));
+        assert!(!is_workflow_path("workflows/.toml"));
+        assert!(!is_workflow_path("review.toml"));
         assert!(is_schema_path("nodes/deploy.json"));
         assert!(!is_schema_path("nodes/deploy.kdl"));
     }

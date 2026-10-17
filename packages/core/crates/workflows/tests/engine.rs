@@ -445,3 +445,141 @@ async fn a_type_stays_with_the_extension_that_declared_it_first() {
         Some("vorn.tasks".to_owned())
     );
 }
+
+/// A script that prints `items` as JSON, a loop over them run in
+/// parallel, its body, and a step after it.
+fn fan_out(loop_config: Value) -> Value {
+    let mut config = json!({ "mode": "forEach", "items": "{{steps.fetch.json.items}}", "bodyNodeIds": ["body"], "parallel": true });
+    for (k, v) in loop_config.as_object().unwrap() {
+        config[k] = v.clone();
+    }
+    json!({
+        "id": "fan", "name": "fan", "icon": "x", "iconColor": "#000", "enabled": true,
+        "nodes": [
+            { "id": "t", "type": "trigger", "label": "T", "config": { "triggerType": "manual" } },
+            { "id": "fetch", "type": "script", "label": "Fetch", "slug": "fetch", "config": { "scriptType": "bash", "scriptContent": "fetch" } },
+            { "id": "each", "type": "loop", "label": "Each", "slug": "each", "config": config },
+            { "id": "body", "type": "script", "label": "Body", "slug": "body", "config": { "scriptType": "bash", "scriptContent": "echo {{loop.item.n}} of {{loop.count}}" } },
+            { "id": "after", "type": "script", "label": "After", "slug": "after", "config": { "scriptType": "bash", "scriptContent": "after {{steps.body.output}}" } }
+        ],
+        "edges": [
+            { "id": "e1", "source": "t", "target": "fetch" },
+            { "id": "e2", "source": "fetch", "target": "each" },
+            { "id": "e3", "source": "each", "target": "body" },
+            { "id": "e4", "source": "body", "target": "after" }
+        ]
+    })
+}
+
+/// Replies for the fetch and for each item, item 1 the slowest, so the items finish in reverse.
+fn fan_replies(count: u64, fail: Option<u64>) -> Value {
+    let items: Vec<Value> = (1..=count).map(|n| json!({ "n": n })).collect();
+    let mut scripts = vec![json!({
+        "when": { "scriptContent": "fetch" },
+        "result": { "success": true, "output": format!("\u{1b}[0m{}\r\n", json!({ "items": items })) }
+    })];
+    for n in 1..=count {
+        let ok = fail != Some(n);
+        scripts.push(json!({
+            "when": { "scriptContent": format!("echo {n} of {count}") },
+            "delayMs": 20 + (count - n) * 15,
+            "result": { "success": ok, "output": format!("item {n}"), "error": if ok { Value::Null } else { json!("broke") } }
+        }));
+    }
+    json!({ "script:execute": scripts })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_loop_in_parallel_runs_each_item_as_steps_of_its_own_at_most_its_limit_at_once() {
+    let fake = host(
+        vec![fan_out(json!({ "concurrency": 2 }))],
+        fan_replies(5, None),
+    );
+    let engine = common::engine(fake.clone());
+    engine.run_scheduled("fan", None).await;
+    let run = finished(&fake, 1).await.remove(0);
+    assert_eq!(run.status, "success", "{run:#?}");
+    assert_eq!(fake.world().most_scripts, 2);
+    let state = |id: &str| {
+        run.node_states
+            .iter()
+            .find(|s| s.node_id == id)
+            .unwrap_or_else(|| panic!("no state for {id}"))
+    };
+    for n in 1..=5u32 {
+        let item = state(&format!("body#{n}"));
+        assert_eq!(item.status.0, "success");
+        assert_eq!(item.output.as_deref(), Some(format!("item {n}").as_str()));
+        assert_eq!(item.iteration, Some(f64::from(n)));
+    }
+    // Kept in the list's order, though item 5 finished first.
+    let each = state("each").structured_output.clone().unwrap();
+    let items: Vec<Value> = each["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["item"]["n"].clone())
+        .collect();
+    assert_eq!(items, [1, 2, 3, 4, 5].map(|n| json!(n)));
+    assert_eq!(each["outputs"][2], "item 3");
+    assert_eq!(each["results"][0]["steps"]["body"]["output"], "item 1");
+    assert_eq!(state("each").output.as_deref(), Some("5"));
+    // The body step itself holds what the last item left, for the steps after.
+    assert_eq!(state("body").output.as_deref(), Some("item 5"));
+    assert!(fake
+        .calls_of("script:execute")
+        .iter()
+        .any(|c| c["scriptContent"] == "after item 5"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failing_item_stops_the_items_not_yet_started() {
+    let fake = host(
+        vec![fan_out(json!({ "concurrency": 1 }))],
+        fan_replies(4, Some(2)),
+    );
+    let engine = common::engine(fake.clone());
+    engine.run_scheduled("fan", None).await;
+    let run = finished(&fake, 1).await.remove(0);
+    assert_eq!(run.status, "error");
+    let state = |id: &str| run.node_states.iter().find(|s| s.node_id == id).unwrap();
+    assert_eq!(state("body#1").status.0, "success");
+    assert_eq!(state("body#2").status.0, "error");
+    for id in ["body#3", "body#4"] {
+        assert_eq!(state(id).status.0, "skipped");
+        assert_eq!(
+            state(id).error.as_deref(),
+            Some("Skipped: an earlier item failed")
+        );
+    }
+    assert_eq!(state("each").status.0, "error");
+    assert_eq!(
+        state("each").error.as_deref(),
+        Some("\"Body\" failed on item 2")
+    );
+    assert_eq!(fake.calls_of("script:execute").len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_loop_in_parallel_cannot_stop_on_a_condition() {
+    let fake = host(
+        vec![fan_out(
+            json!({ "until": { "variable": "{{steps.body.output}}", "operator": "equals", "value": "x" } }),
+        )],
+        fan_replies(2, None),
+    );
+    let engine = common::engine(fake.clone());
+    engine.run_scheduled("fan", None).await;
+    let run = finished(&fake, 1).await.remove(0);
+    let each = run
+        .node_states
+        .iter()
+        .find(|s| s.node_id == "each")
+        .unwrap();
+    assert_eq!(each.status.0, "error");
+    assert!(each
+        .error
+        .as_deref()
+        .unwrap()
+        .starts_with("A loop that runs in parallel goes through every item"));
+}

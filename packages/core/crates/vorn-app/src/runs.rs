@@ -95,16 +95,31 @@ pub fn states(run: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
-/// The workflow node `id` among `nodes`.
+/// The workflow node `id` among `nodes`; for a parallel loop's item (`<step>#<n>`), its step.
 pub fn node<'a>(nodes: &'a Value, id: &str) -> Option<&'a Value> {
-    nodes.as_array()?.iter().find(|n| s(n, "id") == Some(id))
+    let list = nodes.as_array()?;
+    let find = |id: &str| list.iter().find(|n| s(n, "id") == Some(id));
+    find(id).or_else(|| find(item_of(id)?.0))
 }
 
-/// `nodeLabel`: the node's label, else its id's first eight characters.
+/// A step run for one item of a parallel loop: the step's id and the item's number.
+pub fn item_of(id: &str) -> Option<(&str, u32)> {
+    let (step, n) = id.rsplit_once('#')?;
+    Some((step, n.parse().ok()?))
+}
+
+/// `nodeLabel`: the node's label, else its id's first eight characters; an item says which.
 pub fn node_label(node: Option<&Value>, id: &str) -> String {
-    node.and_then(|n| s(n, "label"))
+    let label = node
+        .and_then(|n| s(n, "label"))
         .filter(|l| !l.is_empty())
-        .map_or_else(|| id.chars().take(8).collect(), str::to_owned)
+        .map_or_else(|| id.chars().take(8).collect(), str::to_owned);
+    match (node, item_of(id)) {
+        (Some(n), Some((step, k))) if s(n, "id") == Some(step) => {
+            format!("{label} \u{b7} item {k}")
+        }
+        _ => label,
+    }
 }
 
 /// The steps a run list shows: all but the trigger.
@@ -425,6 +440,7 @@ mod tests {
         assert_eq!(shown.len(), 1);
         assert_eq!(focus(&run), Some("a"));
         assert_eq!(node_label(node(&nodes, "a"), "a"), "Fix");
+        assert_eq!(node_label(node(&nodes, "a#3"), "a#3"), "Fix \u{b7} item 3");
         assert_eq!(
             node_label(node(&nodes, "t0123456789"), "t0123456789"),
             "t0123456"

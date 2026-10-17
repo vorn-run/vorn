@@ -1,60 +1,112 @@
 # Workflow files and step types
 
 A workflow can live in a file in your project, next to the code it works on. Vorn reads every
-`.kdl` file in a project's `.vorn/workflows/` folder, watches the folder, and runs what it finds
+`.toml` file in a project's `.vorn/workflows/` folder, watches the folder, and runs what it finds
 the same way it runs a workflow made in the editor. Edits made in the editor go back into the
 file.
 
+Workflow files are TOML, like extension manifests and layouts.
+
 ## The file
 
-A workflow file holds one `workflow` node named after the workflow. Inside it are the
-workflow's fields, its trigger, and its steps in order.
+A workflow file starts with the workflow's fields. Then come its trigger, `[trigger]`, and its
+steps in order, one `[[step]]` table each.
 
-```kdl
-// Reviews each pull request it is given.
-workflow "Review a pull request" {
-    id "review"
-    icon "GitPullRequest"
-    iconColor "#6366f1"
-    enabled #true
-    trigger "manual" id="start" {
-        inputs {
-            - {
-                key "pullRequest"
-                label "Pull request"
-                type "text"
-            }
-        }
-    }
-    step "script" id="fetch" {
-        scriptType "bash"
-        scriptContent "gh pr diff {{inputs.pullRequest}}"
-    }
-    step "condition" id="big" needs="fetch" {
-        variable "{{steps.fetch.output}}"
-        operator "isNotEmpty"
-    }
-    step "launchAgent" id="review" needs="big:true" {
-        agentType "claude"
-        projectName (project)"."
-        prompt """
-            Review this diff.
-            {{steps.fetch.output}}
-            """
-    }
-}
+```toml
+# Triages open issues: an agent reads each one, and a person approves the plans.
+name = "Triage issues"
+id = "triage-issues"
+icon = "ListChecks"
+iconColor = "#6366f1"
+enabled = true
+
+[trigger]
+id = "start"
+type = "manual"
+
+[[trigger.inputs]]
+key = "repo"
+label = "Repository"
+type = "text"
+required = true
+
+# Prints {"items": [...]}, so later steps can read its fields.
+[[step]]
+id = "fetch"
+type = "script"
+label = "Fetch open issues"
+slug = "fetch"
+scriptType = "bash"
+scriptContent = """
+gh issue list --repo {{inputs.repo}} --state open --limit 20 --json number,title,body --jq '{items: .}'
+"""
+
+[[step]]
+id = "any"
+type = "condition"
+label = "Any open?"
+variable = "{{steps.fetch.json.items.length}}"
+operator = "notEquals"
+value = "0"
+
+[[step]]
+id = "each"
+type = "loop"
+label = "Each issue"
+slug = "each"
+needs = ["any:true"]
+mode = "forEach"
+items = "{{steps.fetch.json.items}}"
+bodyNodeIds = ["triage"]
+parallel = true
+concurrency = 3
+
+[[step]]
+id = "triage"
+type = "launchAgent"
+label = "Triage one issue"
+slug = "triage"
+agentType = "claude"
+headless = true
+projectName = { "@project-name" = "app" }
+projectPath = { "@project" = "." }
+prompt = """
+Read issue #{{loop.item.number}}: {{loop.item.title}}
+
+{{loop.item.body}}
+
+Say in two lines how you would fix it.
+"""
+
+[[step]]
+id = "approve"
+type = "approval"
+label = "Approve the plans"
+slug = "approve"
+message = """
+The plans, one per issue:
+{{steps.each.outputs}}
+"""
 ```
 
-- A step runs after the step before it unless it says what it `needs=`. Give several ids
-  separated by spaces to wait for all of them. `needs="big:true"` follows the true branch of a
-  condition; `needs=#null` starts a step with nothing before it.
-- A step's config is its children: a key and its value, an object as a block of keys, a list as
-  a block of `-` items.
-- A connection is written by name, `connectionId (connection)"workspace-eng"`. A file shared with
-  someone else runs against their connection of that name.
-- A path inside the file's project is written relative to it, `(project)"src/app"`, and the
-  project itself is `(project)"."`. `(project-name)"web"` names the project the file is in.
-- `x=` and `y=` on a step keep its place on the canvas.
+- A step's table holds its own fields, `id`, `type`, `label`, `slug`, `onError`, `x`, `y` and
+  `needs`, and beside them its settings: what the editor shows in the step's panel.
+- A step runs after the step before it unless it says what it `needs`. List several ids to wait
+  for all of them. `"any:true"` follows the true branch of a condition, and `needs = []` starts
+  a step with nothing before it. An edge with an id of its own is written `"fetch#e1"`.
+- A list of objects is a list of tables, as `[[trigger.inputs]]` above; an object is a table,
+  `[step.headers]`, or written inline, `headers = { Accept = "text/plain" }`.
+- Text across several lines goes between `"""`. Use `'''` instead when the text has
+  backslashes, so they stay as written.
+- A connection is written by name, `connectionId = { "@connection" = "workspace-eng" }`. A file
+  shared with someone else runs against their connection of that name.
+- A path inside the file's project is written relative to it, `{ "@project" = "src/app" }`, and
+  the project itself is `{ "@project" = "." }`. `{ "@project-name" = "web" }` names the project
+  the file is in.
+- `x` and `y` keep a step's place on the canvas.
+- Keys starting with `@` belong to the file format. TOML has no null, so a null value is
+  `{ "@json" = "null" }`. You will rarely write these yourself; Vorn writes them so that every
+  workflow reads back exactly as it was stored.
 - Comments stay. When the editor writes a change back, it rewrites only the steps and fields
   that changed.
 
@@ -63,6 +115,38 @@ changes. When they change the same field, the file wins.
 
 Removing a file removes its workflow, and deleting a file-backed workflow in the app removes its
 file.
+
+### Reading a script's JSON
+
+When everything a script step prints is one JSON value, later steps can read its fields with
+`{{steps.<slug>.json.<path>}}`. A path goes into objects by key and into lists by index, and
+`.length` counts a list:
+
+```text
+{{steps.fetch.json.items}}            the whole list
+{{steps.fetch.json.items.0.title}}    the first item's title
+{{steps.fetch.json.items.length}}     how many items there are
+```
+
+`{{steps.<slug>.output}}` is still the printed text. Output that is not JSON, or that has other
+text around the JSON, has no `json` field. Terminal colours are removed before the output is
+read, so `jq` works as it does in a terminal.
+
+### Loops in parallel
+
+A loop that goes through a list (`mode = "forEach"`) can run its items side by side. Set
+`parallel = true`, and `concurrency` to the number of items that may run at once: 4 when it is
+not set, at most 16. In the editor, turn on **Run in parallel** in the loop's panel.
+
+- Each item runs the loop's steps as steps of its own. The run shows them as separate rows,
+  for example "Triage one issue · item 3".
+- `{{steps.<loop>.results}}` and `{{steps.<loop>.outputs}}` keep the list's order, whatever
+  order the items finish in.
+- When an item fails, items that have not started do not start, and the loop fails. Items
+  already running finish.
+- After the loop, each of its steps holds what the last item left, as after a loop that runs one
+  item at a time.
+- A loop in parallel cannot stop early with **Stop early when**, because every item starts.
 
 ### From the app
 
@@ -73,12 +157,13 @@ active project.
 ### Checking a file
 
 ```bash
-vorn workflow check .vorn/workflows/*.kdl
+vorn workflow check .vorn/workflows/*.toml
 ```
 
 prints each mistake as `file:line:column: message`, for example
-`review.kdl:14:26: unknown property lable=; did you mean label=?`. It also names step types and
-connections this machine does not have. It exits 1 when any file has a mistake.
+``triage.toml:14:1: needs `fetch`, which no step here is``. It also names step types and
+connections this machine does not have, and hints at a setting whose name is a misspelt step
+field, such as `lable`. It exits 1 when any file has a mistake.
 
 ## Step types and triggers from extensions
 
@@ -111,7 +196,7 @@ A trigger is declared with `[[contributes.triggers]]`, with `timing = "cron"`, `
 fires it itself with `workflow.fire`.
 
 An extension can also ship workflows with `[[contributes.workflows]]` and
-`file = "workflows/try.kdl"`. Each one is added once, when the extension is installed.
+`file = "workflows/try.toml"`. Each one is added once, when the extension is installed.
 
 When an extension is off, its step types stay known. A step of that type fails with a message
 saying which extension to turn on.

@@ -1,5 +1,5 @@
 //! Workflows as files ([`vorn_workflow_file`]): each project's
-//! `.vorn/workflows/*.kdl`, read into the stored workflows and watched, so
+//! `.vorn/workflows/*.toml`, read into the stored workflows and watched, so
 //! editing a file changes its workflow; a workflow from a file written back
 //! to it when the editor changes it, keeping the file's comments; a workflow
 //! made in Vorn saved to a project's folder in one call; and the workflows
@@ -183,7 +183,7 @@ async fn projects(work: &Work) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The `.kdl` files in a project's workflow folder.
+/// The `.toml` files in a project's workflow folder.
 fn listed_files(project_path: &str) -> Vec<PathBuf> {
     let dir = Path::new(project_path).join(FOLDER);
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -192,7 +192,11 @@ fn listed_files(project_path: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "kdl") && p.is_file())
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|e| e == vorn_workflow_file::EXTENSION)
+                && p.is_file()
+        })
         .collect();
     out.sort();
     out
@@ -292,7 +296,7 @@ impl Work {
                 return false;
             }
         };
-        for w in &read.warnings {
+        for w in read.warnings.iter().chain(&read.hints) {
             warn!(file = %file.display(), "{}", w);
         }
         let mut wf = read.workflow;
@@ -510,11 +514,12 @@ impl Work {
             .ok_or_else(|| format!("Workflow {id} not found"))?;
         let dir = Path::new(&path).join(FOLDER);
         let base = vorn_workflow_file::file_name(row["name"].as_str().unwrap_or("workflow"));
-        let stem = base.trim_end_matches(".kdl").to_owned();
+        let ext = format!(".{}", vorn_workflow_file::EXTENSION);
+        let stem = base.trim_end_matches(&ext).to_owned();
         let mut file = dir.join(&base);
         let mut n = 2;
         while file.exists() {
-            file = dir.join(format!("{stem}-{n}.kdl"));
+            file = dir.join(format!("{stem}-{n}{ext}"));
             n += 1;
         }
         let conns = connections(self).await;

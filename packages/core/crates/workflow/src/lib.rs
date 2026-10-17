@@ -12,6 +12,7 @@
 
 mod engine;
 mod host;
+pub mod parallel;
 pub mod registry;
 mod step;
 mod steps;

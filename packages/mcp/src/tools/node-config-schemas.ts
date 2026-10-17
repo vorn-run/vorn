@@ -494,7 +494,17 @@ const loopConfigSchema = z
       .optional()
       .describe(
         'Checked after each pass; the loop stops early once it holds, e.g. {{steps.review.approved}} equals true'
-      )
+      ),
+    parallel: z
+      .boolean()
+      .optional()
+      .describe(
+        'For forEach: run the items side by side instead of one after another. Each item runs the body as steps of its own; until is not allowed'
+      ),
+    concurrency: z
+      .number()
+      .optional()
+      .describe('For a parallel forEach: how many items run at once, 1 to 16 (default 4)')
   })
   .loose()
   // A loop that cannot say what it walks, or how often it repeats, cannot

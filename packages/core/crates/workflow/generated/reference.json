@@ -554,6 +554,14 @@
               "operator"
             ],
             "additionalProperties": {}
+          },
+          "parallel": {
+            "description": "For forEach: run the items side by side instead of one after another. Each item runs the body as steps of its own; until is not allowed",
+            "type": "boolean"
+          },
+          "concurrency": {
+            "description": "For a parallel forEach: how many items run at once, 1 to 16 (default 4)",
+            "type": "number"
           }
         },
         "required": [
@@ -598,6 +606,7 @@
         "repeat needs maxIterations, 1 to 10. forEach needs items and has no cap.",
         "Body steps read {{loop.item}} / {{loop.item.<field>}} (forEach), {{loop.index}} from 0, {{loop.number}} from 1 and {{loop.count}}.",
         "A body step that fails ends the loop there, unless that step has onError: continue.",
+        "forEach with parallel: true runs the items side by side, at most concurrency at once (default 4, up to 16). Each item runs the body as steps of its own (<step id>#<item number>), results keep the list order, a failing item stops the items not yet started, and until is not allowed.",
         "Inside the body, {{steps.<slug>.*}} of a body step is this pass. After the loop, read the passes through {{steps.<loop>.results}} or .outputs."
       ]
     }

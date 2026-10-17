@@ -225,6 +225,10 @@
         "description": "What the script printed to stdout"
       },
       {
+        "field": "json",
+        "description": "When all it printed is one JSON value: that value, so {{steps.<slug>.json.<path>}} reads a field (e.g. .json.items, .json.items.0.name, .json.items.length)"
+      },
+      {
         "field": "status",
         "description": "success or error"
       },

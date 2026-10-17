@@ -1,10 +1,10 @@
 //! A workflow file read into the stored workflow, every error at its line
 //! and column.
 
-use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use serde_json::{Map, Number, Value};
+use toml_edit::{Document, Item, Table};
 
-use crate::write::default_id;
+use crate::write::{default_id, EDGE_KEYS, TAGS};
 use crate::{Bindings, FileError};
 
 /// A file read: the workflow, and what it names that this machine lacks.
@@ -14,34 +14,31 @@ pub struct Read {
     /// A connection no connection here is called, kept by its name: the
     /// step that uses it fails until one is.
     pub warnings: Vec<FileError>,
+    /// A setting named a letter away from a step field: likely a typo, read as a setting all the same.
+    pub hints: Vec<FileError>,
 }
 
 /// Reads workflow file `text`, its connections and paths as `bindings` name them.
 pub fn read(text: &str, bindings: &Bindings<'_>) -> Result<Read, Vec<FileError>> {
-    let doc = KdlDocument::parse_v2(text).map_err(|e| {
-        e.diagnostics
-            .iter()
-            .map(|d| FileError {
-                at: line_col(text, d.span.offset()),
-                message: [d.message.as_deref(), d.help.as_deref()]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            })
-            .collect::<Vec<_>>()
+    let doc = Document::parse(text).map_err(|e| {
+        vec![FileError {
+            at: line_col(text, e.span().map_or(0, |s| s.start)),
+            message: e.message().trim().to_owned(),
+        }]
     })?;
     let mut r = Reader {
         text,
         bindings,
         errors: Vec::new(),
         warnings: Vec::new(),
+        hints: Vec::new(),
     };
-    let workflow = r.document(&doc);
+    let workflow = r.document(doc.as_table());
     if r.errors.is_empty() {
         Ok(Read {
             workflow,
             warnings: r.warnings,
+            hints: r.hints,
         })
     } else {
         r.errors.sort_by_key(|e| e.at);
@@ -51,17 +48,21 @@ pub fn read(text: &str, bindings: &Bindings<'_>) -> Result<Read, Vec<FileError>>
 
 /// Line and column, from 1, of byte `offset` of `text`.
 pub(crate) fn line_col(text: &str, offset: usize) -> (usize, usize) {
-    let before = &text[..offset.min(text.len())];
+    let mut offset = offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let before = &text[..offset];
     let line = before.matches('\n').count() + 1;
     let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
     (line, col)
 }
 
-/// The node properties a step or trigger takes.
-const NODE_PROPS: [&str; 7] = ["id", "label", "slug", "onError", "x", "y", "needs"];
+/// The fields a typo of which is worth a hint: long enough to tell apart.
+const HINTED: [&str; 4] = ["label", "slug", "onError", "needs"];
 
-/// The closest of `known` to `word`, when one is near.
-fn near<'a>(word: &str, known: &[&'a str]) -> Option<&'a str> {
+/// The step field `word` is one letter away from, when there is one.
+fn near(word: &str) -> Option<&'static str> {
     fn distance(a: &str, b: &str) -> usize {
         let b: Vec<char> = b.chars().collect();
         let mut row: Vec<usize> = (0..=b.len()).collect();
@@ -78,12 +79,18 @@ fn near<'a>(word: &str, known: &[&'a str]) -> Option<&'a str> {
         }
         row[b.len()]
     }
-    known
-        .iter()
-        .map(|k| (distance(word, k), *k))
-        .filter(|(d, _)| *d <= 2)
-        .min_by_key(|(d, _)| *d)
-        .map(|(_, k)| k)
+    // A swap of two letters is one slip too.
+    let swapped = |a: &str, b: &str| {
+        let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+        let diff: Vec<usize> = (0..a.len()).filter(|&i| a.get(i) != b.get(i)).collect();
+        a.len() == b.len()
+            && diff.len() == 2
+            && a[diff[0]] == b[diff[1]]
+            && a[diff[1]] == b[diff[0]]
+    };
+    HINTED
+        .into_iter()
+        .find(|k| *k != word && (distance(word, k) == 1 || swapped(word, k)))
 }
 
 /// A key as the file wrote it, back as the stored key: one `@` less.
@@ -91,283 +98,290 @@ fn unescape(name: &str) -> &str {
     name.strip_prefix('@').unwrap_or(name)
 }
 
+/// Where an item starts in the file, when it came from one.
+fn start(item: &Item) -> Option<usize> {
+    match item {
+        Item::Value(v) => v.span(),
+        Item::Table(t) => t.span(),
+        Item::ArrayOfTables(a) => a.span(),
+        Item::None => None,
+    }
+    .map(|s| s.start)
+}
+
+/// An item as a table: a `[header]` one or an inline `{ … }` one.
+fn table_of(item: &Item) -> Option<Table> {
+    match item {
+        Item::Table(t) => Some(t.clone()),
+        Item::Value(toml_edit::Value::InlineTable(t)) => Some(t.clone().into_table()),
+        _ => None,
+    }
+}
+
+/// An item as a list of tables: `[[header]]` ones or a list of inline ones.
+fn tables_of(item: &Item) -> Option<Vec<Table>> {
+    match item {
+        Item::ArrayOfTables(a) => Some(a.iter().cloned().collect()),
+        Item::Value(toml_edit::Value::Array(a)) => a
+            .iter()
+            .map(|v| match v {
+                toml_edit::Value::InlineTable(t) => Some(t.clone().into_table()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 struct Reader<'a> {
     text: &'a str,
     bindings: &'a Bindings<'a>,
     errors: Vec<FileError>,
     warnings: Vec<FileError>,
+    hints: Vec<FileError>,
 }
 
-/// One word of `needs=`: the step needed, the branch of it, and the edge's own id.
+/// One word of `needs`: the step needed, the branch of it, and the edge's own id.
 type Need = (String, Option<String>, Option<String>);
 
-/// A step's edges as its `needs=` gives them.
+/// A step's edges as its `needs` gives them.
 enum Needs {
     /// None said: the step before.
     Before,
-    /// `needs=#null`: none.
-    Nothing,
     List(Vec<Need>),
 }
 
 impl Reader<'_> {
-    fn err(&mut self, offset: usize, message: impl Into<String>) {
+    fn err(&mut self, offset: Option<usize>, message: impl Into<String>) {
         self.errors.push(FileError {
-            at: line_col(self.text, offset),
+            at: line_col(self.text, offset.unwrap_or(0)),
             message: message.into(),
         });
     }
 
-    fn document(&mut self, doc: &KdlDocument) -> Value {
-        let nodes = doc.nodes();
-        let Some(first) = nodes.first() else {
-            self.err(0, "a workflow file holds one workflow node");
-            return Value::Null;
-        };
-        for extra in &nodes[1..] {
-            self.err(
-                extra.span().offset(),
-                format!(
-                    "`{}`: a workflow file holds one workflow node, and this is a second",
-                    extra.name().value()
-                ),
-            );
-        }
-        if first.name().value() != "workflow" {
-            self.err(
-                first.name().span().offset(),
-                format!(
-                    "`{}`: a workflow file starts with `workflow \"Its name\" {{`",
-                    first.name().value()
-                ),
-            );
-            return Value::Null;
-        }
-        self.workflow(first)
+    /// Where key `key` of `table` is, else where its value is.
+    fn key_at(table: &Table, key: &str) -> Option<usize> {
+        table
+            .key(key)
+            .and_then(toml_edit::Key::span)
+            .map(|s| s.start)
+            .or_else(|| table.get(key).and_then(start))
     }
 
-    fn workflow(&mut self, wf: &KdlNode) -> Value {
+    fn document(&mut self, root: &Table) -> Value {
         let mut out = Map::new();
-        for entry in wf.entries() {
-            match (entry.name(), entry.value()) {
-                (None, KdlValue::String(name)) if !out.contains_key("name") => {
-                    out.insert("name".into(), Value::String(name.clone()));
-                }
-                _ => self.err(
-                    entry.span().offset(),
-                    "a workflow takes its name, and nothing else on its line",
-                ),
-            }
-        }
-        let mut nodes: Vec<Value> = Vec::new();
-        let mut needs: Vec<(usize, Option<String>, Needs)> = Vec::new();
+        let mut nodes: Vec<(Option<usize>, Value, Needs)> = Vec::new();
         let mut whole: Vec<Value> = Vec::new();
-        let mut order: Option<(usize, Vec<usize>)> = None;
+        let mut order: Option<(Option<usize>, Vec<usize>)> = None;
         let mut raw_nodes: Option<Value> = None;
         let mut raw_edges: Option<Value> = None;
-        for child in wf.children().map(KdlDocument::nodes).unwrap_or_default() {
-            let name = child.name().value();
-            match name {
-                "trigger" | "step" => {
-                    let (node, said) = self.node(child, name == "trigger");
-                    let id = node.get("id").and_then(Value::as_str).map(str::to_owned);
-                    needs.push((child.span().offset(), id, said));
-                    nodes.push(node);
-                }
-                "edge" => whole.push(self.edge(child)),
-                "edge-order" => {
-                    let places = child
-                        .entries()
-                        .iter()
-                        .filter_map(|e| match e.value() {
-                            KdlValue::Integer(i) => usize::try_from(*i).ok(),
-                            _ => None,
-                        })
-                        .collect();
-                    order = Some((child.span().offset(), places));
-                }
-                "@nodes" => raw_nodes = Some(self.value(child)),
-                "@edges" => raw_edges = Some(self.value(child)),
-                _ => {
-                    let value = self.value(child);
-                    out.insert(unescape(name).to_owned(), value);
-                }
-            }
-        }
-        let mut edges: Vec<Value> = Vec::new();
-        let mut previous: Option<String> = None;
-        let ids: Vec<Option<String>> = needs.iter().map(|(_, id, _)| id.clone()).collect();
-        for (at, id, said) in needs {
-            let target = id.clone();
-            let mut push = |source: &str, branch: Option<String>, edge_id: Option<String>| {
-                let Some(target) = &target else { return };
-                let mut e = Map::new();
-                e.insert(
-                    "id".into(),
-                    Value::String(edge_id.unwrap_or_else(|| default_id(source, target))),
-                );
-                e.insert("source".into(), Value::String(source.to_owned()));
-                e.insert("target".into(), Value::String(target.clone()));
-                if let Some(b) = branch {
-                    e.insert("conditionBranch".into(), Value::String(b));
-                }
-                edges.push(Value::Object(e));
-            };
-            match said {
-                Needs::Before => {
-                    if let (Some(p), Some(_)) = (&previous, &id) {
-                        push(p, None, None);
+        for (key, item) in root.iter() {
+            let at = Self::key_at(root, key);
+            match key {
+                "trigger" => match table_of(item) {
+                    Some(t) => {
+                        let (node, needs) = self.node(&t, true);
+                        nodes.insert(0, (t.span().map(|s| s.start).or(at), node, needs));
                     }
-                }
-                Needs::Nothing => {}
-                Needs::List(list) => {
-                    if id.is_none() {
-                        self.err(at, "a step that needs another has an id=");
-                    }
-                    for (source, branch, edge_id) in list {
-                        if !ids.iter().any(|i| i.as_deref() == Some(source.as_str())) {
-                            self.err(at, format!("needs `{source}`, which no step here is"));
+                    None => self.err(
+                        at,
+                        "trigger is a table: [trigger], then its type and settings",
+                    ),
+                },
+                "step" => match tables_of(item) {
+                    Some(steps) => {
+                        for t in steps {
+                            let (node, needs) = self.node(&t, false);
+                            nodes.push((t.span().map(|s| s.start).or(at), node, needs));
                         }
-                        push(&source, branch, edge_id);
+                    }
+                    None => self.err(at, "step is a list of tables: one [[step]] for each"),
+                },
+                "edge" => match tables_of(item) {
+                    Some(edges) => {
+                        for t in edges {
+                            let edge = self.edge(&t);
+                            whole.push(edge);
+                        }
+                    }
+                    None => self.err(at, "edge is a list of tables: one [[edge]] for each"),
+                },
+                "edgeOrder" => {
+                    let places = item.as_array().map(|a| {
+                        a.iter()
+                            .map(|v| v.as_integer().and_then(|i| usize::try_from(i).ok()))
+                            .collect::<Option<Vec<usize>>>()
+                    });
+                    match places.flatten() {
+                        Some(p) => order = Some((at, p)),
+                        None => self.err(at, "edgeOrder is a list of the edges' places, from 0"),
                     }
                 }
+                "@nodes" => raw_nodes = Some(self.value(item, false)),
+                "@edges" => raw_edges = Some(self.value(item, false)),
+                other => {
+                    let value = self.value(item, false);
+                    out.insert(unescape(other).to_owned(), value);
+                }
             }
-            previous = id;
         }
+        let mut edges = self.edges(&nodes);
         edges.extend(whole);
         if let Some((at, places)) = order {
             let mut sorted = places.clone();
             sorted.sort_unstable();
-            if sorted != (0..edges.len()).collect::<Vec<_>>() {
+            if sorted == (0..edges.len()).collect::<Vec<_>>() {
+                edges = places.iter().map(|&p| edges[p].clone()).collect();
+            } else {
                 self.err(
                     at,
-                    format!("edge-order places each of the {} edges once", edges.len()),
+                    format!("edgeOrder places each of the {} edges once", edges.len()),
                 );
-            } else {
-                edges = places.iter().map(|&p| edges[p].clone()).collect();
             }
         }
-        out.insert(
-            "nodes".into(),
-            raw_nodes.unwrap_or_else(|| Value::Array(nodes)),
-        );
-        out.insert(
-            "edges".into(),
-            raw_edges.unwrap_or_else(|| Value::Array(edges)),
-        );
+        let nodes = nodes.into_iter().map(|(_, node, _)| node).collect();
+        out.insert("nodes".into(), raw_nodes.unwrap_or(Value::Array(nodes)));
+        out.insert("edges".into(), raw_edges.unwrap_or(Value::Array(edges)));
         Value::Object(out)
     }
 
-    fn edge(&mut self, node: &KdlNode) -> Value {
-        let mut out = Map::new();
-        for entry in node.entries() {
-            let key = match entry.name().map(|n| n.value()) {
-                Some("id") => "id",
-                Some("from") => "source",
-                Some("to") => "target",
-                Some("branch") => "conditionBranch",
-                other => {
-                    self.err(
-                        entry.span().offset(),
-                        format!(
-                            "an edge takes from=, to=, id= and branch=, not {}",
-                            other.unwrap_or("a value")
-                        ),
-                    );
-                    continue;
+    /// The edges the steps' `needs` say, in step order.
+    fn edges(&mut self, nodes: &[(Option<usize>, Value, Needs)]) -> Vec<Value> {
+        let ids: Vec<Option<&str>> = nodes
+            .iter()
+            .map(|(_, n, _)| n.get("id").and_then(Value::as_str))
+            .collect();
+        let mut edges = Vec::new();
+        let mut previous: Option<&str> = None;
+        for (i, (at, _, needs)) in nodes.iter().enumerate() {
+            let target = ids[i];
+            let mut push = |source: &str, branch: Option<&String>, edge_id: Option<&String>| {
+                let Some(target) = target else { return };
+                let mut e = Map::new();
+                let id = edge_id
+                    .cloned()
+                    .unwrap_or_else(|| default_id(source, target));
+                e.insert("id".into(), Value::String(id));
+                e.insert("source".into(), Value::String(source.to_owned()));
+                e.insert("target".into(), Value::String(target.to_owned()));
+                if let Some(b) = branch {
+                    e.insert("conditionBranch".into(), Value::String(b.clone()));
                 }
+                edges.push(Value::Object(e));
             };
-            match entry.value().as_string() {
-                Some(s) => {
-                    out.insert(key.into(), Value::String(s.to_owned()));
+            match needs {
+                Needs::Before => {
+                    if let Some(p) = previous {
+                        push(p, None, None);
+                    }
                 }
-                None => self.err(entry.span().offset(), format!("{key} is a string")),
+                Needs::List(list) => {
+                    for (source, branch, edge_id) in list {
+                        push(source, branch.as_ref(), edge_id.as_ref());
+                    }
+                    if target.is_none() && !list.is_empty() {
+                        self.err(*at, "a step that needs another has an id");
+                    }
+                    for (source, _, _) in list {
+                        if !ids.contains(&Some(source.as_str())) {
+                            self.err(*at, format!("needs `{source}`, which no step here is"));
+                        }
+                    }
+                }
             }
+            previous = target;
         }
-        for child in node.children().map(KdlDocument::nodes).unwrap_or_default() {
-            let value = self.value(child);
-            out.insert(unescape(child.name().value()).to_owned(), value);
+        edges
+    }
+
+    fn edge(&mut self, table: &Table) -> Value {
+        let mut out = Map::new();
+        for (key, item) in table.iter() {
+            let at = Self::key_at(table, key);
+            if let Some((_, stored)) = EDGE_KEYS.iter().find(|(file, _)| *file == key) {
+                match item.as_str() {
+                    Some(s) => {
+                        out.insert((*stored).to_owned(), Value::String(s.to_owned()));
+                    }
+                    None => self.err(at, format!("an edge's {key} is a string")),
+                }
+                continue;
+            }
+            let value = self.value(item, false);
+            out.insert(unescape(key).to_owned(), value);
         }
         Value::Object(out)
     }
 
     /// A step or the trigger, and what it needs.
-    fn node(&mut self, node: &KdlNode, trigger: bool) -> (Value, Needs) {
+    fn node(&mut self, table: &Table, trigger: bool) -> (Value, Needs) {
         let mut out = Map::new();
         let mut config = Map::new();
-        let mut typed = false;
+        let mut trigger_type: Option<Value> = None;
+        let mut explicit: Option<(Option<usize>, Option<Value>)> = None;
         let mut position: (Option<Value>, Option<Value>) = (None, None);
         let mut needs = Needs::Before;
-        for entry in node.entries() {
-            let at = entry.span().offset();
-            let Some(name) = entry.name().map(|n| n.value()) else {
-                match (entry.value(), trigger, typed) {
-                    (KdlValue::String(t), true, false) => {
-                        config.insert("triggerType".into(), Value::String(t.clone()));
-                        typed = true;
+        for (key, item) in table.iter() {
+            let at = Self::key_at(table, key);
+            match key {
+                "id" | "label" | "slug" | "onError" | "type" => match item.as_str() {
+                    Some(s) if trigger && key == "type" => {
+                        trigger_type = Some(Value::String(s.to_owned()));
                     }
-                    (KdlValue::String(t), false, false) => {
-                        out.insert("type".into(), Value::String(t.clone()));
-                        typed = true;
-                    }
-                    _ => self.err(
-                        at,
-                        if trigger {
-                            "a trigger takes its type, as `trigger \"manual\"`, and properties"
-                        } else {
-                            "a step takes its type, as `step \"script\"`, and properties"
-                        },
-                    ),
-                }
-                continue;
-            };
-            match name {
-                "id" | "label" | "slug" | "onError" => match entry.value().as_string() {
                     Some(s) => {
-                        out.insert(name.into(), Value::String(s.to_owned()));
+                        out.insert(key.into(), Value::String(s.to_owned()));
                     }
-                    None => self.err(at, format!("{name}= is a string")),
+                    None => self.err(at, format!("{key} is a string")),
                 },
-                "x" | "y" => match number(entry.value()) {
+                "x" | "y" => match self.number(item) {
                     Some(n) => {
-                        let slot = if name == "x" {
+                        let slot = if key == "x" {
                             &mut position.0
                         } else {
                             &mut position.1
                         };
                         *slot = Some(Value::Number(n));
                     }
-                    None => self.err(at, format!("{name}= is a number")),
+                    None => self.err(at, format!("{key} is a number")),
                 },
-                "needs" => {
-                    needs = match entry.value() {
-                        KdlValue::Null => Needs::Nothing,
-                        KdlValue::String(list) => match tokens(list) {
-                            Ok(t) => Needs::List(t),
-                            Err(bad) => {
-                                self.err(at, format!("needs= names steps, as \"fetch check:true\"; `{bad}` is not one"));
-                                Needs::Nothing
-                            }
-                        },
-                        _ => {
-                            self.err(
-                                at,
-                                "needs= names the steps it needs, as \"fetch check:true\"",
-                            );
-                            Needs::Nothing
-                        }
-                    }
+                "needs" => needs = Needs::List(self.needs(item, at)),
+                "@config" => {
+                    let absent = table_of(item).is_some_and(|t| {
+                        t.len() == 1 && t.get("@json").and_then(Item::as_str) == Some("")
+                    });
+                    let value = (!absent).then(|| self.value(item, true));
+                    explicit = Some((at, value));
                 }
-                other => {
-                    let hint = near(other, &NODE_PROPS)
-                        .map(|k| format!("; did you mean {k}=?"))
-                        .unwrap_or_default();
-                    self.err(at, format!("unknown property {other}={hint}"));
+                field if field.starts_with('@') => {
+                    let value = self.value(item, false);
+                    out.insert(unescape(field).to_owned(), value);
+                }
+                setting => {
+                    if let Some(field) = near(setting) {
+                        self.hints.push(FileError {
+                            at: line_col(self.text, at.unwrap_or(0)),
+                            message: format!(
+                                "`{setting}` is read as a setting of the step; did you mean {field}?"
+                            ),
+                        });
+                    }
+                    let value = self.value(item, true);
+                    config.insert(setting.to_owned(), value);
                 }
             }
         }
+        let header = table.span().map(|s| s.start);
         if trigger {
             out.insert("type".into(), Value::String("trigger".into()));
+            match trigger_type {
+                Some(t) => {
+                    let mut typed = Map::new();
+                    typed.insert("triggerType".into(), t);
+                    typed.extend(config);
+                    config = typed;
+                }
+                None => self.err(header, "a trigger says its type, as type = \"manual\""),
+            }
         }
         match position {
             (Some(x), Some(y)) => {
@@ -377,161 +391,170 @@ impl Reader<'_> {
                 out.insert("position".into(), Value::Object(p));
             }
             (None, None) => {}
-            _ => self.err(
-                node.span().offset(),
-                "a step has both x= and y=, or neither",
+            _ => self.err(header, "a step has both x and y, or neither"),
+        }
+        match explicit {
+            Some((at, _)) if !config.is_empty() => self.err(
+                at,
+                "a step with \"@config\" keeps all its settings there, and none beside it",
             ),
-        }
-        let children = node.children();
-        let mut has_config = typed && trigger;
-        let mut explicit: Option<Value> = None;
-        if let Some(block) = children {
-            let plain = block.nodes().iter().any(|c| !is_field(c.name().value()));
-            if block.nodes().is_empty() || plain {
-                has_config = true;
+            Some((_, Some(c))) => {
+                out.insert("config".into(), c);
             }
-            for child in block.nodes() {
-                let name = child.name().value();
-                let value = self.value_in(child, true);
-                if name == "@config" {
-                    explicit = Some(value);
-                } else if is_field(name) {
-                    out.insert(name[1..].to_owned(), value);
-                } else {
-                    config.insert(unescape(name).to_owned(), value);
-                }
+            Some((_, None)) => {}
+            None => {
+                out.insert("config".into(), Value::Object(config));
             }
-        }
-        if let Some(c) = explicit {
-            out.insert("config".into(), c);
-        } else if has_config {
-            out.insert("config".into(), Value::Object(config));
         }
         (Value::Object(in_step_order(out)), needs)
     }
 
-    fn value(&mut self, node: &KdlNode) -> Value {
-        self.value_in(node, false)
-    }
-
-    /// A key's value: its one argument, a block of keys, or a block of `-` items.
-    fn value_in(&mut self, node: &KdlNode, config: bool) -> Value {
-        let at = node.span().offset();
-        let ty = node.ty().map(|t| t.value());
-        let args: Vec<&KdlEntry> = node.entries().iter().collect();
-        if let Some(e) = args.iter().find(|e| e.name().is_some()) {
+    /// `needs = ["fetch", "check:true"]`: each word, `source[:branch][#id]`.
+    fn needs(&mut self, item: &Item, at: Option<usize>) -> Vec<Need> {
+        let Some(list) = item.as_array() else {
             self.err(
-                e.span().offset(),
-                format!("`{}` holds a value, not properties", node.name().value()),
+                at,
+                "needs is a list of the steps it needs, as [\"fetch\", \"check:true\"]",
             );
-            return Value::Null;
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for v in list {
+            let here = v.span().map(|s| s.start).or(at);
+            match v.as_str().map(token) {
+                Some(Ok(need)) => out.push(need),
+                Some(Err(bad)) => self.err(
+                    here,
+                    format!(
+                        "needs names steps, as \"fetch\" or \"check:true\"; `{bad}` is not one"
+                    ),
+                ),
+                None => self.err(here, "needs names steps by their id, as strings"),
+            }
         }
-        match (ty, args.as_slice(), node.children()) {
-            (Some("list"), [], None) => Value::Array(Vec::new()),
-            (Some(other), _, _) if other != "list" => {
-                self.err(at, format!("({other}) is not a kind of value; (list) is"));
-                Value::Null
-            }
-            (_, [one], None) => self.scalar(one, config),
-            (_, [], Some(block)) => {
-                let items = block.nodes();
-                let list = !items.is_empty() && items.iter().all(|c| c.name().value() == "-");
-                if list {
-                    Value::Array(items.iter().map(|c| self.value_in(c, config)).collect())
-                } else {
-                    let mut map = Map::new();
-                    for c in items {
-                        let v = self.value_in(c, config);
-                        map.insert(unescape(c.name().value()).to_owned(), v);
-                    }
-                    Value::Object(map)
-                }
-            }
-            (_, [], None) => {
-                self.err(
-                    at,
-                    format!(
-                        "`{}` has no value: give it one, #null, or {{}} for an empty block",
-                        node.name().value()
-                    ),
-                );
-                Value::Null
-            }
-            _ => {
-                self.err(
-                    at,
-                    format!(
-                        "`{}` holds one value, or a block, not both or several",
-                        node.name().value()
-                    ),
-                );
-                Value::Null
+        out
+    }
+
+    fn number(&mut self, item: &Item) -> Option<Number> {
+        match item.as_value()? {
+            toml_edit::Value::Integer(i) => Some(Number::from(*i.value())),
+            toml_edit::Value::Float(f) => Number::from_f64(*f.value()),
+            _ => None,
+        }
+    }
+
+    /// An item as JSON; `config` marks a step's settings, where tags name connections and paths.
+    fn value(&mut self, item: &Item, config: bool) -> Value {
+        match item {
+            Item::None => Value::Null,
+            Item::Value(v) => self.plain(v, config),
+            Item::Table(t) => self.object(t, config),
+            Item::ArrayOfTables(a) => {
+                Value::Array(a.iter().map(|t| self.object(t, config)).collect())
             }
         }
     }
 
-    fn scalar(&mut self, entry: &KdlEntry, config: bool) -> Value {
-        let at = entry.span().offset();
-        let ty = entry.ty().map(|t| t.value());
-        let value = entry.value();
-        match (ty, value) {
-            (None, v) => match plain(v) {
-                Some(v) => v,
+    fn plain(&mut self, v: &toml_edit::Value, config: bool) -> Value {
+        let at = v.span().map(|s| s.start);
+        match v {
+            toml_edit::Value::String(s) => Value::String(s.value().clone()),
+            toml_edit::Value::Integer(i) => Value::from(*i.value()),
+            toml_edit::Value::Float(f) => match Number::from_f64(*f.value()) {
+                Some(n) => Value::Number(n),
                 None => {
                     self.err(at, "a number JSON cannot hold");
                     Value::Null
                 }
             },
-            (Some("connection"), KdlValue::String(name)) if config => {
+            toml_edit::Value::Boolean(b) => Value::Bool(*b.value()),
+            toml_edit::Value::Datetime(d) => Value::String(d.value().to_string()),
+            toml_edit::Value::Array(a) => {
+                Value::Array(a.iter().map(|v| self.plain(v, config)).collect())
+            }
+            toml_edit::Value::InlineTable(t) => self.object(&t.clone().into_table(), config),
+        }
+    }
+
+    /// A table as an object, or the value its one tag stands for.
+    fn object(&mut self, table: &Table, config: bool) -> Value {
+        let mut iter = table.iter();
+        if let (Some((tag, item)), None) = (iter.next(), iter.next()) {
+            if TAGS.contains(&tag) {
+                return self.tag(tag, item, Self::key_at(table, tag), config);
+            }
+        }
+        let mut map = Map::new();
+        for (key, item) in table.iter() {
+            let value = self.value(item, config);
+            map.insert(unescape(key).to_owned(), value);
+        }
+        Value::Object(map)
+    }
+
+    fn tag(&mut self, tag: &str, item: &Item, at: Option<usize>, config: bool) -> Value {
+        let Some(text) = item.as_str() else {
+            self.err(at, format!("{tag} holds a string"));
+            return Value::Null;
+        };
+        if tag == "@json" {
+            return match serde_json::from_str(text) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.err(at, format!("@json holds JSON: {e}"));
+                    Value::Null
+                }
+            };
+        }
+        if !config {
+            self.err(
+                at,
+                format!("{tag} names something only in a step's settings"),
+            );
+            return Value::Null;
+        }
+        let name = text.to_owned();
+        match tag {
+            "@connection" => {
                 let found: Vec<&(String, String)> = self
                     .bindings
                     .connections
                     .iter()
-                    .filter(|(_, n)| n == name)
+                    .filter(|(_, n)| *n == name)
                     .collect();
                 match found.as_slice() {
                     [(id, _)] => Value::String(id.clone()),
                     [] => {
-                        self.warnings.push(FileError {
-                            at: line_col(self.text, at),
-                            message: format!("no connection here is called {name}"),
-                        });
-                        Value::String(name.clone())
+                        self.warn(at, format!("no connection here is called {name}"));
+                        Value::String(name)
                     }
                     _ => {
-                        self.warnings.push(FileError {
-                            at: line_col(self.text, at),
-                            message: format!("more than one connection here is called {name}"),
-                        });
-                        Value::String(name.clone())
+                        self.warn(
+                            at,
+                            format!("more than one connection here is called {name}"),
+                        );
+                        Value::String(name)
                     }
                 }
             }
-            (Some("project"), KdlValue::String(rest)) if config => match self.bindings.project {
-                Some((_, path)) if rest == "." => Value::String(path.to_owned()),
-                Some((_, path)) => Value::String(format!("{path}/{rest}")),
-                None => Value::String(rest.clone()),
+            "@project" => match self.bindings.project {
+                Some((_, path)) if name == "." => Value::String(path.to_owned()),
+                Some((_, path)) => Value::String(format!("{path}/{name}")),
+                None => Value::String(name),
             },
-            (Some("project-name"), KdlValue::String(written)) if config => {
-                match self.bindings.project {
-                    Some((name, _)) => Value::String(name.to_owned()),
-                    None => Value::String(written.clone()),
-                }
-            }
-            (Some(other), _) => {
-                self.err(
-                    at,
-                    format!("({other}) is not a kind of value a step's config takes; (connection) and (project) are"),
-                );
-                Value::Null
-            }
+            _ => match self.bindings.project {
+                Some((project, _)) => Value::String(project.to_owned()),
+                None => Value::String(name),
+            },
         }
     }
-}
 
-/// `@key`: a field of the node, not its config; `@@key` is a config key starting with `@`.
-fn is_field(name: &str) -> bool {
-    name.starts_with('@') && !name.starts_with("@@") && name != "@-"
+    fn warn(&mut self, at: Option<usize>, message: String) {
+        self.warnings.push(FileError {
+            at: line_col(self.text, at.unwrap_or(0)),
+            message,
+        });
+    }
 }
 
 /// A step's keys in the order the editor and the seeds always stored them, the rest after.
@@ -548,81 +571,61 @@ fn in_step_order(mut step: Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-/// `source[:branch][#id]` words, space between.
-fn tokens(list: &str) -> Result<Vec<Need>, String> {
-    list.split_whitespace()
-        .map(|word| {
-            let (head, id) = match word.split_once('#') {
-                Some((h, id)) if !id.is_empty() => (h, Some(id.to_owned())),
-                Some(_) => return Err(word.to_owned()),
-                None => (word, None),
-            };
-            let (source, branch) = match head.split_once(':') {
-                Some((s, b)) if !b.is_empty() => (s, Some(b.to_owned())),
-                Some(_) => return Err(word.to_owned()),
-                None => (head, None),
-            };
-            if source.is_empty() {
-                return Err(word.to_owned());
-            }
-            Ok((source.to_owned(), branch, id))
-        })
-        .collect()
-}
-
-fn number(v: &KdlValue) -> Option<Number> {
-    match plain(v)? {
-        Value::Number(n) => Some(n),
-        _ => None,
+/// `source[:branch][#id]`.
+fn token(word: &str) -> Result<Need, String> {
+    let (head, id) = match word.split_once('#') {
+        Some((h, id)) if !id.is_empty() => (h, Some(id.to_owned())),
+        Some(_) => return Err(word.to_owned()),
+        None => (word, None),
+    };
+    let (source, branch) = match head.split_once(':') {
+        Some((s, b)) if !b.is_empty() => (s, Some(b.to_owned())),
+        Some(_) => return Err(word.to_owned()),
+        None => (head, None),
+    };
+    if source.is_empty() || source.contains(char::is_whitespace) {
+        return Err(word.to_owned());
     }
-}
-
-/// A KDL value as JSON: `None` for a number JSON cannot hold.
-fn plain(v: &KdlValue) -> Option<Value> {
-    Some(match v {
-        KdlValue::String(s) => Value::String(s.clone()),
-        KdlValue::Integer(i) => {
-            if let Ok(n) = i64::try_from(*i) {
-                Value::from(n)
-            } else {
-                Value::from(u64::try_from(*i).ok()?)
-            }
-        }
-        KdlValue::Float(f) => Value::Number(Number::from_f64(*f)?),
-        KdlValue::Bool(b) => Value::Bool(*b),
-        KdlValue::Null => Value::Null,
-    })
+    Ok((source.to_owned(), branch, id))
 }
 
 /// One step or trigger of a file, where it is: what a check of its type reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outlined {
     pub trigger: bool,
-    /// The step's type, or the trigger's `triggerType`.
+    /// The step's type, or the trigger's.
     pub kind: Option<String>,
     pub at: (usize, usize),
 }
 
 /// The steps and trigger of a file that parses, in order, each where it is.
 pub fn outline(text: &str) -> Vec<Outlined> {
-    let Ok(doc) = KdlDocument::parse_v2(text) else {
+    let Ok(doc) = Document::parse(text) else {
         return Vec::new();
     };
-    let Some(wf) = doc.nodes().first().and_then(KdlNode::children) else {
-        return Vec::new();
-    };
-    wf.nodes()
-        .iter()
-        .filter(|n| matches!(n.name().value(), "trigger" | "step"))
-        .map(|n| Outlined {
-            trigger: n.name().value() == "trigger",
-            kind: n
-                .entries()
-                .iter()
-                .find(|e| e.name().is_none())
-                .and_then(|e| e.value().as_string())
-                .map(str::to_owned),
-            at: line_col(text, n.span().offset()),
-        })
-        .collect()
+    let root = doc.as_table();
+    let at = |t: &Table| line_col(text, t.span().map_or(0, |s| s.start));
+    let text_of = |t: &Table, k: &str| t.get(k).and_then(Item::as_str).map(str::to_owned);
+    let mut out = Vec::new();
+    if let Some(t) = root.get("trigger").and_then(table_of) {
+        out.push(Outlined {
+            trigger: true,
+            kind: text_of(&t, "type"),
+            at: at(&t),
+        });
+    }
+    for t in root.get("step").and_then(tables_of).unwrap_or_default() {
+        let kind = text_of(&t, "type");
+        let trigger = kind.as_deref() == Some("trigger");
+        out.push(Outlined {
+            trigger,
+            kind: if trigger {
+                text_of(&t, "triggerType")
+            } else {
+                kind
+            },
+            at: at(&t),
+        });
+    }
+    out
 }

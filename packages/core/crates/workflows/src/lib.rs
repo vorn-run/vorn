@@ -35,14 +35,14 @@ pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
 /// that records an install was given it once: `(file, flag, text)`.
 pub const SEEDS: &[(&str, &str, &str)] = &[
     (
-        "workflows/default-task.kdl",
+        "workflows/default-task.toml",
         "hasSeededDefaultTaskWorkflow",
-        include_str!("../workflows/default-task.kdl"),
+        include_str!("../workflows/default-task.toml"),
     ),
     (
-        "workflows/dev-server.kdl",
+        "workflows/dev-server.toml",
         "hasSeededDevServerWorkflow",
-        include_str!("../workflows/dev-server.kdl"),
+        include_str!("../workflows/dev-server.toml"),
     ),
 ];
 

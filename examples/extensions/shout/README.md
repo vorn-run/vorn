@@ -16,6 +16,6 @@ and the answer is the step's state: `status` (`success`, `error`,
 `skipped`, or `waiting` to park it), and any of `output`, `logs`, `error`,
 `structuredOutput`, `taskId` and `sessionId`.
 
-`workflows/try-shout.kdl` is a workflow the extension ships
+`workflows/try-shout.toml` is a workflow the extension ships
 (`[[contributes.workflows]]`): it is added once when the extension is
 installed. Install it from a git repository with `vorn ext install <url>`.

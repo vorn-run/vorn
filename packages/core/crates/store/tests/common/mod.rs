@@ -10,11 +10,11 @@ use vorn_store::{Opened, SeedWorkflow, Store, StoreOptions};
 const SEED_WORKFLOWS: [(&str, &str); 2] = [
     (
         "hasSeededDefaultTaskWorkflow",
-        include_str!("../../../workflows/workflows/default-task.kdl"),
+        include_str!("../../../workflows/workflows/default-task.toml"),
     ),
     (
         "hasSeededDevServerWorkflow",
-        include_str!("../../../workflows/workflows/dev-server.kdl"),
+        include_str!("../../../workflows/workflows/dev-server.toml"),
     ),
 ];
 

@@ -401,10 +401,10 @@ fn save_to_project_writes_the_workflow_into_its_projects_folder() {
         .position(|l| l == "Save to project")
         .unwrap_or_else(|| panic!("Save to project in {labels:?}"));
     shot.click(&mut app, item_id(MENU, at));
-    let file = root.join(".vorn/workflows/keep-me.kdl");
+    let file = root.join(".vorn/workflows/keep-me.toml");
     shot.until(&mut app, "the file", |_, _| file.is_file().then_some(()));
     let text = std::fs::read_to_string(&file).expect("read");
-    assert!(text.starts_with("workflow \"Keep me\""), "{text}");
+    assert!(text.starts_with("name = \"Keep me\""), "{text}");
     shot.until(&mut app, "the toast", |app, _| {
         app.st
             .toasts

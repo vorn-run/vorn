@@ -67,6 +67,11 @@ const DOCS: Record<NodeType, NodeTypeDoc> = {
     summary: 'Runs a bash, python, node or powershell script.',
     outputs: [
       { field: 'output', description: 'What the script printed to stdout' },
+      {
+        field: 'json',
+        description:
+          'When all it printed is one JSON value: that value, so {{steps.<slug>.json.<path>}} reads a field (e.g. .json.items, .json.items.0.name, .json.items.length)'
+      },
       ...COMMON_OUTPUTS
     ],
     rules: [
@@ -190,6 +195,7 @@ const DOCS: Record<NodeType, NodeTypeDoc> = {
       `repeat needs maxIterations, 1 to ${MAX_LOOP_ITERATIONS}. forEach needs items and has no cap.`,
       'Body steps read {{loop.item}} / {{loop.item.<field>}} (forEach), {{loop.index}} from 0, {{loop.number}} from 1 and {{loop.count}}.',
       'A body step that fails ends the loop there, unless that step has onError: continue.',
+      'forEach with parallel: true runs the items side by side, at most concurrency at once (default 4, up to 16). Each item runs the body as steps of its own (<step id>#<item number>), results keep the list order, a failing item stops the items not yet started, and until is not allowed.',
       'Inside the body, {{steps.<slug>.*}} of a body step is this pass. After the loop, read the passes through {{steps.<loop>.results}} or .outputs.'
     ]
   }
