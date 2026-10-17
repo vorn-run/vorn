@@ -401,7 +401,7 @@ async fn a_layout_opens_saves_and_reopens_its_sessions() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_layouts_view_and_splits_open_and_save_as_written() {
-    let mut r = rig!();
+    let r = rig!();
     let project = tempfile::tempdir().unwrap();
     let project_path = project.path().canonicalize().unwrap();
     let p = project_path.to_str().unwrap();

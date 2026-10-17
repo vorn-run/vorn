@@ -470,6 +470,8 @@ pub struct State {
     pub flex_anchor: Option<String>,
     /// The flexible divider being dragged, until it is let go.
     pub flex_drag: Option<crate::flex::Path>,
+    /// A layout just set the tree: the workspace's other cards go beside it, not into it.
+    pub flex_beside: bool,
     pub layout: LayoutMode,
     pub menu: Option<Menu>,
     pub dialog: Option<Dialog>,

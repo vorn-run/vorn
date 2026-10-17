@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::{App, Call, Shortcut};
-use crate::flex::{self, Grid, Node, Rect};
+use crate::flex::{self, Dir, Grid, Node, Rect};
 use crate::state::LayoutMode;
 use crate::ui::{Id, Ui};
 
@@ -114,6 +114,7 @@ impl App {
             let leaves = t.leaves();
             leaves.len() == members.len() && members.iter().all(|(m, _)| leaves.contains(&&**m))
         });
+        let beside = std::mem::take(&mut self.st.flex_beside);
         if in_step {
             return;
         }
@@ -124,6 +125,19 @@ impl App {
             .tree
             .take()
             .and_then(|t| t.retain(&|id| members.iter().any(|(m, _)| m == id)));
+        if let Some(t) = tree.take().filter(|_| beside) {
+            let held = t.leaves().len();
+            let rest: Vec<Node> = members
+                .iter()
+                .filter(|(m, _)| !t.contains(m))
+                .map(|(m, _)| Node::leaf(m))
+                .collect();
+            let share = held as f32 / (held + rest.len()) as f32;
+            tree = Some(match flex::chain(Dir::Row, rest) {
+                Some(rest) => Node::split(Dir::Row, share, t, rest),
+                None => t,
+            });
+        }
         for (id, owner) in &members {
             match &mut tree {
                 Some(t) if t.contains(id) => {}
@@ -227,12 +241,14 @@ impl App {
             return;
         };
         let view = params.get("view").and_then(Value::as_str);
+        let mut set_tree = false;
         let grid = self.st.grids.entry(ws.to_owned()).or_default();
         match view {
             Some("flexible") => {
                 grid.flexible = true;
                 if let Some(tree) = params.get("tree").and_then(Node::from_json) {
                     grid.tree = Some(tree);
+                    set_tree = true;
                 }
             }
             Some("grid") => {
@@ -249,6 +265,7 @@ impl App {
             _ => None,
         };
         if ws == self.store.workspace() {
+            self.st.flex_beside = set_tree;
             self.load_columns();
             if let Some(mode) = mode {
                 self.st.layout = mode;

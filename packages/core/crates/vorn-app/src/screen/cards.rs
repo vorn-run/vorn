@@ -1367,15 +1367,19 @@ fn flex_node(
             } else {
                 div().col()
             };
-            Some(
-                el.id(Id::new("flex-box").child(path))
-                    .grow()
-                    .min_w0()
-                    .min_h(0.0)
-                    .child(ea.flex(*ratio))
-                    .child(flex_divider(s, path, *dir))
-                    .child(eb.flex(1.0 - *ratio)),
-            )
+            let el = el
+                .id(Id::new("flex-box").child(path))
+                .grow()
+                .min_w0()
+                .min_h(0.0)
+                .child(ea.flex(*ratio));
+            // A row is dear on a terminal: stacked cards share their rule there.
+            let el = if *dir == Dir::Col && s.ui.is_cells() {
+                el
+            } else {
+                el.child(flex_divider(s, path, *dir))
+            };
+            Some(el.child(eb.flex(1.0 - *ratio)))
         }
     }
 }
