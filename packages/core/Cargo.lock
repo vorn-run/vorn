@@ -7186,7 +7186,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-example-agent-footer"
+version = "1.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-example-turns"
+version = "1.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-probe"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-ext-widget"
 version = "0.0.0"
 dependencies = [
  "vorn-extension-sdk",

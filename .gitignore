@@ -26,6 +26,7 @@ bench/results/
 
 # Rust core build output
 packages/core/target/
+examples/extensions/*/target/
 packages/core/vornd
 packages/core/vornd.exe
 packages/core/vorn-sessiond

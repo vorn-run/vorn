@@ -195,3 +195,44 @@ fn chained_patches_cannot_nest_past_the_limit() {
     assert!(err[0].contains("deeper"), "{err:?}");
     assert_eq!(tree, col([text("Leaf").id("p0")]));
 }
+
+#[test]
+fn a_per_session_tree_finds_each_sessions_child() {
+    let t = per_session([("t1", badge("1 done", Tone::Neutral)), ("t2", text("x"))]);
+    check(&t).unwrap();
+    assert!(matches!(for_session(&t, "t1").map(|n| &n.kind), Some(Kind::Badge(_))));
+    assert!(for_session(&t, "t3").is_none());
+    assert!(is_blank(&per_session(Vec::<(String, Node)>::new())));
+    assert!(is_blank(&col([col([])])));
+    assert!(!is_blank(&t));
+}
+
+#[test]
+fn a_toggle_needs_an_id_and_a_dot_takes_a_tone() {
+    let mut t = toggle("pref", "Count shells", true);
+    check(&t).unwrap();
+    t.id = None;
+    assert_eq!(check(&t).unwrap_err(), ["$: a toggle needs an id"]);
+    let d = dot(Tone::Neutral).tone(Tone::Busy).label("running");
+    let json = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({ "kind": "dot", "tone": "busy", "props": { "label": "running" } })
+    );
+    let e: Event = serde_json::from_value(serde_json::json!({ "id": "pref", "kind": "toggle", "value": "false" })).unwrap();
+    assert_eq!(e.kind, EventKind::Toggle);
+}
+
+#[test]
+fn an_answer_reads_what_it_says_and_nothing_else() {
+    let a = Answer::read(&serde_json::json!({
+        "toast": "Done", "close": true, "focus": "t1", "window": "compact",
+        "patch": [{ "id": "a" }], "later": 1
+    }));
+    assert_eq!(a.toast.as_deref(), Some("Done"));
+    assert!(a.close && !a.show);
+    assert_eq!((a.focus.as_deref(), a.window.as_deref()), (Some("t1"), Some("compact")));
+    assert_eq!(a.patch.len(), 1);
+    assert_eq!(Answer::read(&serde_json::Value::Null), Answer::default());
+    assert_eq!(Answer::read(&serde_json::json!({ "close": "yes" })), Answer::default());
+}

@@ -1006,7 +1006,7 @@ impl Extensions {
                 let terminal = self.start_program(ext, &key, argv, session).await?;
                 grant.terminal_id = Some(terminal);
             }
-            PaneDraws::View(_) => {
+            PaneDraws::View(_) | PaneDraws::Tree => {
                 return Err(format!(
                     "The pane \"{pane_id}\" draws a template, which the client draws"
                 ));

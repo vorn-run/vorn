@@ -106,7 +106,7 @@ async fn until(mut done: impl FnMut() -> bool) {
 }
 
 #[tokio::test]
-async fn every_shipped_template_reads_without_an_error() {
+async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     let s = setup();
     s.builtins.set("vorn.widget", true).unwrap();
     let listed = s.builtins.contributions();
@@ -134,7 +134,26 @@ async fn every_shipped_template_reads_without_an_error() {
     for c in &listed {
         assert_eq!(c["errors"], json!([]), "{c}");
         assert_eq!(c["builtin"], true);
+        assert_eq!(c["view"], Value::Null, "no template is left: {c}");
+        let draws = !matches!(c["kind"].as_str(), Some("menus" | "commands"));
+        assert_eq!(c["tree"] == true, draws, "{c}");
     }
+}
+
+/// Starts the Widget's component, as a window asking for its tree does.
+async fn widget_drawn(s: &Setup, point: &str) -> String {
+    let answer = s
+        .builtins
+        .call(
+            "vorn.widget",
+            vorn_tree::RENDER,
+            json!({ "point": point, "surface": {} }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let tree = vorn_tree::read(&answer).expect("a tree the client draws");
+    serde_json::to_string(&tree.tree).unwrap()
 }
 
 #[tokio::test]
@@ -308,6 +327,7 @@ async fn the_widget_is_off_until_switched_on_and_kept_so() {
         .all(|c| c["extension"] != "vorn.widget"));
 
     s.builtins.set("vorn.widget", true).unwrap();
+    assert!(widget_drawn(&s, "compact").await.contains("waiting"));
     until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
     s.router.bus().emit(AGENT_PERMISSION, || {
         json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
@@ -319,8 +339,10 @@ async fn the_widget_is_off_until_switched_on_and_kept_so() {
         (row["agent"].clone(), row["description"].clone()),
         (json!("api"), json!("cargo test"))
     );
+    assert!(widget_drawn(&s, "widget").await.contains("allow:r1"));
+    let click = json!({ "point": "widget", "event": { "id": "allow:r1", "kind": "click" } });
     s.builtins
-        .call("vorn.widget", "allow", json!({ "id": "r1" }))
+        .call("vorn.widget", vorn_tree::EVENT, click)
         .await
         .unwrap()
         .unwrap();
@@ -360,6 +382,7 @@ async fn the_widget_keeps_an_offered_rule_and_answers_questions() {
     let s = setup();
     s.builtins.start();
     s.builtins.set("vorn.widget", true).unwrap();
+    widget_drawn(&s, "widget").await;
     until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
     let rows = |c: &str| s.router.rows("vorn.widget", c);
     s.router.bus().emit(AGENT_PERMISSION, || {
@@ -495,4 +518,63 @@ async fn the_worktrees_page_is_a_tree_whose_bulk_remove_takes_the_checked() {
         .await
         .unwrap();
     assert!(refused.is_err(), "a click runs only the page's own buttons");
+}
+
+#[tokio::test]
+async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
+    let s = setup();
+    s.builtins.start();
+    let drawn = |point: &'static str| {
+        s.builtins.call(
+            "vorn.worktrees",
+            vorn_tree::RENDER,
+            json!({ "point": point, "surface": {} }),
+        )
+    };
+    let tell = |point: &'static str, id: &'static str| {
+        s.builtins.call(
+            "vorn.worktrees",
+            vorn_tree::EVENT,
+            json!({ "point": point, "event": { "id": id, "kind": "click" } }),
+        )
+    };
+    let empty = drawn("idle").await.unwrap().unwrap();
+    assert!(vorn_tree::is_blank(&vorn_tree::read(&empty).unwrap().tree));
+    s.router.bus().emit(WORKTREE_IDLE, || {
+        json!({ "sessionId": "t9", "projectPath": "/p", "worktreePath": "/p/.vorn-worktrees/old" })
+    });
+    until(|| !s.router.rows("vorn.worktrees", "idle").is_empty()).await;
+    let idle = drawn("idle").await.unwrap().unwrap();
+    let text = idle.to_string();
+    assert!(text.contains("keep:/p/.vorn-worktrees/old") && text.contains("old"), "{text}");
+    assert_eq!(tell("idle", "keep:/p/.vorn-worktrees/old").await.unwrap().unwrap(), Value::Null);
+    assert!(s.router.rows("vorn.worktrees", "idle").is_empty());
+
+    s.builtins
+        .call(
+            "vorn.worktrees",
+            "ask",
+            json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let dialog = drawn("confirm").await.unwrap().unwrap().to_string();
+    for said in ["Remove fix?", "Branch fix", "Its 1 running sessions are closed first.", "uncommitted changes"] {
+        assert!(dialog.contains(said), "{said} in {dialog}");
+    }
+    let cancelled = tell("confirm", "cancel").await.unwrap().unwrap();
+    assert_eq!(cancelled, json!({ "close": true }));
+    assert!(s.router.rows("vorn.worktrees", "asked").is_empty());
+    s.builtins
+        .call(
+            "vorn.worktrees",
+            "ask",
+            json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let removed = tell("confirm", "confirm").await.unwrap().unwrap();
+    assert_eq!((removed["close"].clone(), removed["toast"].clone()), (json!(true), json!("Worktree removed")));
 }

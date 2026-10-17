@@ -7,17 +7,21 @@ description = "A small window over the others: every agent's status, and Allow o
 [declares]
 uses = ["sessions.read", "agent.permissions"]
 
+[service]
+component = "widget.wasm"
+events = ["session.created", "session.status", "session.exited", "agent.permission", "agent.permissionClosed"]
+
 [[contributes.windows]]
 id = "widget"
 title = "Vorn"
-view = "views/widget.kdl"
+tree = true
 size = [280, 400]
 raise = "permissions"
 
 [[contributes.windows]]
 id = "compact"
 title = "Vorn"
-view = "views/compact.kdl"
+tree = true
 size = [296, 84]
 
 [[contributes.commands]]

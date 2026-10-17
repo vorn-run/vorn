@@ -8,7 +8,7 @@ mod tests;
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
 pub const RENDER: &str = "ui.render";
-/// Tells an extension what happened: args `{point, event}`, answer `{toast?, open?, patch?}`.
+/// Tells an extension what happened: args `{point, event}`, answer an [`Answer`].
 pub const EVENT: &str = "ui.event";
 /// The colour tokens this build knows; a tree names the set it was made for.
 pub const TOKENS: u32 = 1;
@@ -87,6 +87,14 @@ pub enum Kind {
         options: Vec<Choose>,
     },
     Badge(Badge),
+    /// A status dot in a tone; its `label` prop names the state it shows.
+    Dot { tone: Tone },
+    /// A switch beside its label: reports `toggle` with the state it switches to, `true` or `false`.
+    Toggle {
+        #[serde(default)]
+        label: String,
+        on: bool,
+    },
     /// A line that stands out, as an error says what happened.
     Notice {
         text: String,
@@ -229,6 +237,10 @@ pub enum Tone {
     Bad,
     Info,
     Accent,
+    /// At work, as a running agent.
+    Busy,
+    /// Quiet, as an idle one.
+    Muted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -373,6 +385,7 @@ pub enum EventKind {
     Click,
     Submit,
     Select,
+    Toggle,
 }
 
 /// Something that happened to node `id`.
@@ -380,12 +393,72 @@ pub enum EventKind {
 pub struct Event {
     pub id: String,
     pub kind: EventKind,
-    /// A field's text, or the option chosen.
+    /// A field's text, the option chosen, or the state a toggle switches to.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub value: String,
     /// A bulk button's list's checked ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
+}
+
+/// What `ui.event` answers: what follows the event, each part optional.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Answer {
+    /// A line that says what happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toast: Option<String>,
+    /// A line that says what failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Nodes changed in place, without a render.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patch: Vec<Patch>,
+    /// One of the extension's dialogs to open, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<String>,
+    /// One of its windows to open, by id, in place of the one open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    /// Closes the dialog or window the tree is in.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub close: bool,
+    /// A session to show in the main window, which comes forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<String>,
+    /// Brings the main window forward.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub show: bool,
+    /// An `https:` page to open in the browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Vorn's sign-in window to open: the target a `signin` method answers, with the `id` it signs in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signin: Option<serde_json::Value>,
+}
+
+impl Answer {
+    /// An answer as an extension sent it; one that does not read is an empty one.
+    pub fn read(v: &serde_json::Value) -> Answer {
+        if v.is_object() {
+            serde_json::from_value(v.clone()).unwrap_or_default()
+        } else {
+            Answer::default()
+        }
+    }
+}
+
+/// The child of a per-session tree (a badge's, a card footer's, a sidebar row's marks) drawn for `session`.
+///
+/// Such a tree is a box holding one child per session, its id the session's id.
+pub fn for_session<'a>(tree: &'a Node, session: &str) -> Option<&'a Node> {
+    tree.children
+        .iter()
+        .find(|c| c.id.as_deref() == Some(session))
+}
+
+/// Whether `tree` draws nothing: a box with nothing in it.
+pub fn is_blank(tree: &Node) -> bool {
+    matches!(tree.kind, Kind::Box) && tree.children.iter().all(is_blank)
 }
 
 /// A change to a drawn tree: node `id` becomes `node`, or goes when there is none.
@@ -620,6 +693,10 @@ impl Checker {
             Kind::Field { value, .. } => {
                 self.named(n, at, "field");
                 self.text(at, "value", value);
+            }
+            Kind::Toggle { label, .. } => {
+                self.named(n, at, "toggle");
+                self.text(at, "label", label);
             }
             Kind::Choice { options } => {
                 self.named(n, at, "choice");

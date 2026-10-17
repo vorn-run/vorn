@@ -405,6 +405,8 @@ pub struct App {
     panels: HashMap<String, points::Running>,
     /// Window points a new row asked to bring up.
     raised: Vec<String>,
+    /// A tree's answer asked for the main window to come forward.
+    come_forward: bool,
     /// The OS file picker, what it is for, while it is open.
     picking: Option<(
         Picked,
@@ -551,6 +553,7 @@ impl App {
             windowed: false,
             panels: HashMap::new(),
             raised: Vec::new(),
+            come_forward: false,
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),

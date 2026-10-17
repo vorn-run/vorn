@@ -233,11 +233,35 @@ note = "Restart Acme to load the tools."
 
 ## 10. Optional: read a headless stream
 
-A CLI whose headless output is a stream of JSON events can tell Vorn the conversation it took and what it does. Give the package a `[service]`, and set `stream = true` under `[agent.headless]`. Vorn calls the service's `guest.handle` with method `agent.stream` and `{session, lines}`. It answers `{conversation?, events?: [{event, tool?}]}`, with events named as hooks name them.
+A CLI whose headless output is a stream of JSON events can tell Vorn the conversation it took and what it does. Give the package a `[service]`, and set `stream = true` under `[agent.headless]`. Vorn calls the service with method `agent.stream` and `{session, lines}`, a batch of what the run printed, one line each. It answers `{conversation?, events?: [{event, tool?}]}`, with events named as hooks name them.
+
+The reader is best written as a Wasm component (see `docs/wasm-extensions.md`): it parses text and reaches nothing else, so it runs sandboxed inside vornd at the cost of a function call. With `vorn-extension-sdk`, it is an `Extension` whose `handle` reads the lines:
+
+```rust
+fn handle(&mut self, _: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+    if method != "agent.stream" {
+        return Err(Error::unknown(method));
+    }
+    let mut conversation = None;
+    let mut events = Vec::new();
+    for line in args["lines"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        let Ok(said) = serde_json::from_str::<Value>(line) else { continue };
+        if let Some(id) = said["session_id"].as_str() {
+            conversation = Some(id.to_owned());
+        }
+        if said["type"] == "tool_use" {
+            events.push(json!({ "event": "PreToolUse", "tool": said["name"] }));
+        }
+    }
+    Ok(json!({ "conversation": conversation, "events": events }))
+}
+```
+
+A program works the same way, answering `guest.handle` over stdio.
 
 ## 11. Draw on its cards
 
-An adapter is an extension, so it can add templates, such as a card footer with `when = { agent = ["acme"] }`, and fill them as any extension does. `examples/extensions/agent-footer` is one: a footer on each agent's card with the model it was started with and the tools its hooks report, read from the `session.created` and `agent.hook` events.
+An adapter is an extension, so it can draw element trees, such as a card footer with `tree = true` and `when = { agent = ["acme"] }`, and fill them as any extension does. `examples/extensions/agent-footer` is one: a footer on each agent's card with the model it was started with and the tools its hooks report, read from the `session.created` and `agent.hook` events.
 
 ## 12. Try it
 

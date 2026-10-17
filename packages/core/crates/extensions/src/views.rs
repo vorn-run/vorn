@@ -48,7 +48,7 @@ pub fn read(path: &str, text: &str, place: Place) -> Loaded {
 }
 
 /// Every contribution of `manifest` that a client draws or lists from a
-/// template, flat and in place order: `{extension, kind, id, title, ..., view, errors}`,
+/// template or a tree, flat and in place order: `{extension, kind, id, title, ..., view, errors}`,
 /// `view` the checked template or null with its `errors`. `load` reads one template.
 pub fn listed(manifest: &Manifest, load: &dyn Fn(&str, Place) -> Loaded) -> Vec<Value> {
     let Some(c) = &manifest.contributes else {
@@ -69,9 +69,15 @@ pub fn listed(manifest: &Manifest, load: &dyn Fn(&str, Place) -> Loaded) -> Vec<
     };
     let mut out = Vec::new();
     for pane in c.panes() {
-        if let PaneDraws::View(path) = &pane.draws {
-            let v = json!({ "id": pane.base.id, "title": pane.base.title });
-            out.push(entry(Place::Panes, v, Some(path)));
+        let v = json!({ "id": pane.base.id, "title": pane.base.title });
+        match &pane.draws {
+            PaneDraws::View(path) => out.push(entry(Place::Panes, v, Some(path))),
+            PaneDraws::Tree => {
+                let mut v = entry(Place::Panes, v, None);
+                v["tree"] = json!(true);
+                out.push(v);
+            }
+            PaneDraws::Web(_) | PaneDraws::Command(_) => {}
         }
     }
     for place in Place::POINTS {

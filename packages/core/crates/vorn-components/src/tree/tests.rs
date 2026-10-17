@@ -553,3 +553,54 @@ fn native_lists_rows_checks_and_menus() {
     let n = native(&list("big", many).lazy(), &Rec::default());
     has(&n, "entry", "Row 499");
 }
+
+#[test]
+fn dots_in_every_tone_and_a_growing_line_between_them() {
+    let t = row([
+        dot(Tone::Busy).label("running"),
+        text("api, a long name that is cut short").grow(),
+        dot(Tone::Muted).label("idle"),
+        button("show", "Show"),
+    ]);
+    both("dot", t.clone(), Role::Status, "running", "●");
+    let laid = pixels(&t, &Rec::default());
+    assert!(named(&laid, Role::Status, "idle"));
+    assert!(named(&laid, Role::Button, "Show"), "the growing text leaves its room");
+    let text = cells(&t, &Rec::default());
+    assert!(text.contains("Show"), "{text}");
+}
+
+#[test]
+fn a_toggle_reports_the_state_it_switches_to() {
+    let t = col([
+        toggle("shells", "Count shells too", true),
+        toggle("tools", "Count tool calls", false),
+    ]);
+    both("toggle", t.clone(), Role::Switch, "Count shells too", "Count shells too");
+    let bind = Rec::default();
+    let laid = pixels(&t, &bind);
+    let on = laid
+        .tree
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Switch && n.label() == Some("Count shells too"));
+    assert_eq!(on.and_then(|(_, n)| n.toggled()), Some(Toggled::True));
+    let sent = |id: &str, to: &str| {
+        bind.any(|e| {
+            matches!(e, Ev::Send { event, .. }
+                if event.id == id && event.kind == EventKind::Toggle && event.value == to)
+        })
+    };
+    assert!(sent("shells", "false") && sent("tools", "true"));
+    let n = native(&t, &Rec::default());
+    assert_eq!(has(&n, "toggle", "Count shells too").on, Some(true));
+}
+
+#[test]
+fn a_per_session_tree_draws_one_sessions_child() {
+    let t = per_session([("t1", badge("2 done", Tone::Neutral)), ("t2", badge("5 done", Tone::Neutral))]);
+    let one = vorn_tree::for_session(&t, "t2").expect("t2's");
+    both("badge", one.clone(), Role::Label, "5 done", "5 done");
+    let text = cells(one, &Rec::default());
+    assert!(!text.contains("2 done"), "{text}");
+}

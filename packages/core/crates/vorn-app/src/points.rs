@@ -117,6 +117,14 @@ impl Point {
         })
     }
 
+    /// Drawn once per session (a card's badge or footer, a sidebar row's marks).
+    pub fn per_session(&self) -> bool {
+        matches!(
+            self.kind.as_str(),
+            kind::BADGES | kind::CARD_FOOTERS | kind::DECORATIONS
+        )
+    }
+
     /// `extension/kind/id`: the point's name in ids and error boxes.
     pub fn key(&self) -> String {
         format!("{}/{}/{}", self.extension, self.kind, self.id)
@@ -274,6 +282,8 @@ pub struct Points {
     pub node_types: Vec<Value>,
     /// Tree points' last `ui.render`, by point key, or why it cannot be drawn.
     pub trees: HashMap<String, Result<vorn_tree::Node, Vec<String>>>,
+    /// Per-session tree points' children by session id, as indices into their tree, so a card finds its own at once.
+    pub sessions: HashMap<String, HashMap<String, usize>>,
     /// Tree points to render again, as their extension's rows changed.
     pub stale_trees: BTreeSet<String>,
     /// Rows checked in a tree's lists, by point key and list id.
@@ -382,7 +392,33 @@ impl Points {
                 }
             }
         }
+        self.index(key, tree.as_ref().ok());
         self.trees.insert(key.to_owned(), tree);
+    }
+
+    /// Indexes a per-session tree's children by their session's id.
+    fn index(&mut self, key: &str, tree: Option<&vorn_tree::Node>) {
+        let per_session = self.get(key).is_some_and(Point::per_session);
+        match tree.filter(|_| per_session) {
+            Some(t) => {
+                let by = t
+                    .children
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| Some((c.id.clone()?, i)))
+                    .collect();
+                self.sessions.insert(key.to_owned(), by);
+            }
+            None => {
+                self.sessions.remove(key);
+            }
+        }
+    }
+
+    /// The part of per-session tree point `key` that `session` draws, if it has one.
+    pub fn session_tree(&self, key: &str, session: &str) -> Option<&vorn_tree::Node> {
+        let i = *self.sessions.get(key)?.get(session)?;
+        self.trees.get(key)?.as_ref().ok()?.children.get(i)
     }
 
     /// What telling tree point `key`'s extension `event` asks of vornd; a bulk button's checks go with it.
@@ -394,18 +430,36 @@ impl Points {
         Some(params)
     }
 
-    /// The answer to telling tree point `key`: its patch applied, or the tree marked to render again.
-    pub fn told(&mut self, key: &str, answer: Option<&Value>) {
-        let patched = answer.and_then(|v| v.get("patch")).is_some_and(|p| {
-            let patches = serde_json::from_value::<Vec<vorn_tree::Patch>>(p.clone());
-            match (self.trees.get_mut(key), patches) {
-                (Some(Ok(tree)), Ok(patches)) => vorn_tree::patch(tree, &patches).is_ok(),
+    /// The answer to telling tree point `key`: its patch applied, or the tree marked to render
+    /// again; what else it asks of the client is answered for the caller to do.
+    pub fn told(&mut self, key: &str, answer: Option<&Value>) -> vorn_tree::Answer {
+        let answer = answer.map(vorn_tree::Answer::read).unwrap_or_default();
+        let patched = !answer.patch.is_empty()
+            && match self.trees.get_mut(key) {
+                Some(Ok(tree)) => vorn_tree::patch(tree, &answer.patch).is_ok(),
                 _ => false,
-            }
-        });
-        if !patched {
+            };
+        if patched {
+            let tree = self.trees.get(key).and_then(|t| t.as_ref().ok()).cloned();
+            self.index(key, tree.as_ref());
+        } else {
             self.stale_trees.insert(key.to_owned());
         }
+        answer
+    }
+
+    /// The key of window `id` of `extension`, when it contributes one.
+    pub fn window_key(&self, extension: &str, id: &str) -> Option<String> {
+        self.find(extension, kind::WINDOWS, id).map(Point::key)
+    }
+
+    /// Shows dialog point `key` drawn afresh, not from the tree it last answered.
+    pub fn show_dialog(&mut self, key: String) {
+        if self.get(&key).is_some_and(|p| p.tree) {
+            self.trees.remove(&key);
+            self.sessions.remove(&key);
+        }
+        self.dialog = Some(key);
     }
 
     /// What asking for tree point `key`'s tree asks of vornd, when it has none or its rows changed.
@@ -441,6 +495,7 @@ impl Points {
         let keys: BTreeSet<String> = self.all.iter().map(Point::key).collect();
         self.windows.retain(|k| keys.contains(k));
         self.trees.retain(|k, _| keys.contains(k));
+        self.sessions.retain(|k, _| keys.contains(k));
         self.checked.retain(|(k, _), _| keys.contains(k));
         self.stale_trees.extend(self.trees.keys().cloned());
         if self.dialog.as_ref().is_some_and(|d| !keys.contains(d)) {

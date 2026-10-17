@@ -566,6 +566,8 @@ struct RawPane {
     command: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tree: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -884,11 +886,11 @@ impl Raw {
             if !c.footers.is_empty() && !c.card_footers.is_empty() {
                 return Err(at(
                     "contributes.footers",
-                    "are retired where card_footers draw from templates; draw each footer as a card_footers template".into(),
+                    "are retired where card_footers draw from templates or trees; draw each footer as a card_footers tree".into(),
                 ));
             }
             let (viewed, unviewed) = c.panes.iter().fold((0, 0), |(v, u), p| {
-                if p.view.is_some() {
+                if p.view.is_some() || p.tree {
                     (v + 1, u)
                 } else {
                     (v, u + 1)
@@ -897,14 +899,14 @@ impl Raw {
             if viewed > 0 && unviewed > 0 {
                 return Err(at(
                     "contributes.panes",
-                    "mix panes drawn from templates with panes the program serves; give every pane a view".into(),
+                    "mix panes drawn from templates or trees with panes the program serves; give every pane a view or a tree".into(),
                 ));
             }
             let legacy = !c.footers.is_empty() || unviewed > 0;
             if legacy && self.connector.is_none() {
                 return Err(at(
                     "contributes",
-                    "footers and panes without a view are drawn through the connector protocol; add a [connector] section or give each a view".into(),
+                    "footers and panes without a view or a tree are drawn through the connector protocol; add a [connector] section or give each a view or a tree".into(),
                 ));
             }
         }
@@ -1314,12 +1316,15 @@ impl RawContributes {
                 m.insert("command".into(), json!(command));
             }
             opt(&mut m, "view", p.view.as_ref());
+            if p.tree {
+                m.insert("tree".into(), json!(true));
+            }
             let value = Value::Object(m);
-            let draws = [p.web.is_some(), p.command.is_some(), p.view.is_some()];
+            let draws = [p.web.is_some(), p.command.is_some(), p.view.is_some(), p.tree];
             if kept("panes", value.clone()).is_none() || draws.iter().filter(|d| **d).count() != 1 {
                 return Err(at(
                     &field,
-                    "needs an id, and one of a page under web/ ending in .html, a command or a view under views/ ending in .kdl".into(),
+                    "needs an id, and one of a page under web/ ending in .html, a command, a view under views/ ending in .kdl or tree = true".into(),
                 ));
             }
             panes.push(value);
@@ -1698,6 +1703,7 @@ impl From<&Manifest> for Raw {
                             super::PaneDraws::Web(w) => (Some(w.clone()), None, None),
                             super::PaneDraws::Command(c) => (None, Some(c.clone()), None),
                             super::PaneDraws::View(v) => (None, None, Some(v.clone())),
+                            super::PaneDraws::Tree => (None, None, None),
                         };
                         RawPane {
                             id: p.base.id.clone(),
@@ -1708,6 +1714,7 @@ impl From<&Manifest> for Raw {
                             web,
                             command,
                             view,
+                            tree: matches!(p.draws, super::PaneDraws::Tree),
                         }
                     })
                     .collect(),
@@ -2165,11 +2172,39 @@ tree = true
             err("tree = true", "tree = true\nview = \"views/page.kdl\""),
             "vorn-extension.toml:9: contributes.settings[0].tree: draws in place of a view; give one of them"
         );
+        assert!(err("contributes.settings", "contributes.launchers")
+            .starts_with("vorn-extension.toml:9: contributes.launchers[0].tree: draws in a place that shows one"));
         assert_eq!(
-            err("contributes.settings", "contributes.sidebar"),
-            "vorn-extension.toml:9: contributes.sidebar[0].tree: draws a settings page"
+            err("contributes.settings", "contributes.views"),
+            "vorn-extension.toml:9: contributes.views[0].tree: draws no main view; a main view is a template"
         );
         assert!(err("tree = true", "").contains("needs a view"));
+    }
+
+    #[test]
+    fn every_place_that_shows_one_and_a_pane_draw_from_a_tree() {
+        let mut text = String::from(
+            "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n",
+        );
+        let places = [
+            "sidebar", "badges", "card_footers", "decorations", "composer", "windows", "dialogs",
+        ];
+        for (i, place) in places.iter().enumerate() {
+            text.push_str(&format!("\n[[contributes.{place}]]\nid = \"p{i}\"\ntree = true\n"));
+        }
+        text.push_str("\n[[contributes.panes]]\nid = \"pane\"\ntitle = \"Pane\"\ntree = true\n");
+        let m = parse(&text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        assert_eq!(c.points.values().flatten().filter(|p| p.tree).count(), places.len());
+        assert_eq!(c.panes()[0].draws, super::super::PaneDraws::Tree);
+        assert!(c.templated() && c.templated_only());
+        assert_eq!(serde_json::to_value(c).unwrap()["panes"][0]["tree"], true);
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+        // A tree is asked for by its id alone: a point may not take a tree pane's.
+        let twice = text.replace("id = \"p0\"", "id = \"pane\"");
+        let m = parse(&twice).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        assert!(c.points(super::super::Place::Sidebar).is_empty());
     }
 
     #[test]

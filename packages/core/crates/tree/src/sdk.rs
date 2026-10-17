@@ -110,6 +110,25 @@ pub fn badge(text: impl Into<String>, tone: Tone) -> Node {
     }))
 }
 
+/// A status dot in `tone`; `.label()` names the state.
+pub fn dot(tone: Tone) -> Node {
+    node(Kind::Dot { tone })
+}
+
+/// A switch beside `label`, on or off.
+pub fn toggle(id: impl Into<String>, label: impl Into<String>, on: bool) -> Node {
+    node(Kind::Toggle {
+        label: label.into(),
+        on,
+    })
+    .id(id)
+}
+
+/// A tree drawn once per session (a badge, a card footer, a sidebar row's marks): each child for its session's id.
+pub fn per_session<S: Into<String>>(children: impl IntoIterator<Item = (S, Node)>) -> Node {
+    col(children.into_iter().map(|(session, n)| n.id(session)))
+}
+
 pub fn notice(text: impl Into<String>, tone: Tone) -> Node {
     node(Kind::Notice {
         text: text.into(),
@@ -344,6 +363,7 @@ impl Node {
             | Kind::Stat { tone, .. }
             | Kind::Column { tone, .. } => *tone = Some(t),
             Kind::Badge(b) => b.tone = t,
+            Kind::Dot { tone } => *tone = t,
             Kind::Entry(e) => e.status = Some(t),
             _ => {}
         }

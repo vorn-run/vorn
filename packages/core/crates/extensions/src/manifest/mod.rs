@@ -414,18 +414,20 @@ impl Contributions {
         points.chain(panes)
     }
 
-    /// Whether it draws only from templates, as a program on the extension API does.
+    /// Whether it draws only from templates and trees, as a program on the extension API does.
     pub fn templated_only(&self) -> bool {
         self.footers().is_empty()
             && self
                 .panes()
                 .iter()
-                .all(|p| matches!(p.draws, PaneDraws::View(_)))
+                .all(|p| matches!(p.draws, PaneDraws::View(_) | PaneDraws::Tree))
     }
 
-    /// Whether it uses anything only the extension API can fill: a template.
+    /// Whether it uses anything only the extension API can fill: a template or a tree.
     pub fn templated(&self) -> bool {
-        !self.points.is_empty() || self.views().next().is_some()
+        !self.points.is_empty()
+            || self.views().next().is_some()
+            || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
     }
 
     /// Every contribution's own rule, of every kind.
@@ -572,7 +574,7 @@ pub struct Point {
     /// `views/<name>.kdl`, inside the package.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
-    /// Drawn from the element tree the extension answers `ui.render` with.
+    /// Drawn from the element tree the extension answers `ui.render` with, asked for by its id.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub tree: bool,
     /// A kit icon by name, as `trash-2`.
@@ -639,16 +641,23 @@ pub struct Pane {
     pub draws: PaneDraws,
 }
 
-/// A pane is a page inside the pack, a program run in a terminal or a template, one of them.
+/// A pane is a page inside the pack, a program run in a terminal, a template or an element tree, one of them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneDraws {
+    /// The element tree its extension answers `ui.render` with.
+    #[serde(serialize_with = "yes")]
+    Tree,
     /// A path under `web/` ending in `.html`.
     Web(String),
     /// Argv, every element non-empty.
     Command(Vec<String>),
     /// A path under `views/` ending in `.kdl`.
     View(String),
+}
+
+fn yes<S: serde::Serializer>(s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_bool(true)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1435,6 +1444,8 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
                 PaneDraws::Command(command)
             } else if is_view_path(&view) {
                 PaneDraws::View(view)
+            } else if raw.get("tree") == Some(&Value::Bool(true)) {
+                PaneDraws::Tree
             } else {
                 return None;
             };
@@ -1493,7 +1504,12 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
     let flows = workflows::workflows(raw_of("workflows"));
 
     let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
-    let mut ids: Vec<String> = Vec::new();
+    // `ui.render` names a tree by its id alone, so a tree pane's id is taken too.
+    let mut ids: Vec<String> = panes
+        .iter()
+        .filter(|p| p.draws == PaneDraws::Tree)
+        .map(|p| p.base.id.clone())
+        .collect();
     for place in Place::POINTS {
         let kept: Vec<Point> = declared(place.key())
             .filter_map(|(base, raw)| point(place, base, raw))
@@ -1635,8 +1651,14 @@ fn read_point(
         Some(Value::Bool(true)) => true,
         Some(_) => return Err(("tree", "is true or false".into())),
     };
-    if tree && place != Place::Settings {
-        return Err(("tree", "draws a settings page".into()));
+    if tree && !place.needs_view() {
+        return Err((
+            "tree",
+            "draws in a place that shows one: a sidebar section, a badge, a card footer, a decoration, the composer, a settings page, a window or a dialog".into(),
+        ));
+    }
+    if tree && place == Place::Views {
+        return Err(("tree", "draws no main view; a main view is a template".into()));
     }
     if tree && view.is_some() {
         return Err(("tree", "draws in place of a view; give one of them".into()));
@@ -1644,7 +1666,7 @@ fn read_point(
     if place.needs_view() && view.is_none() && !tree {
         return Err((
             "",
-            "needs a view: a template under views/ ending in .kdl".into(),
+            "needs a view (a template under views/ ending in .kdl) or tree = true".into(),
         ));
     }
     let icon = opt("icon");
