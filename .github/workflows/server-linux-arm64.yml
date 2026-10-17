@@ -80,9 +80,12 @@ jobs:
       - name: Sync crate versions
         run: bash scripts/sync-versions.sh
 
+      # vornd on its own: built with vorn, cargo would link vorn's Wasm compiler into it too.
       - name: Build
         working-directory: packages/core
-        run: cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-cli
+        run: |
+          cargo build --release --locked -p vornd
+          cargo build --release --locked -p vorn-sessiond -p vorn-cli
 
       - name: Package
         run: node packages/core/scripts/package-native.mjs --package server

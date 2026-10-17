@@ -52,19 +52,11 @@ function copyOut(name, as) {
 
 // --no-ghostty builds vornd without its session engine, which parses with libghostty-vt.
 const exe = process.platform === 'win32' ? '.exe' : ''
-const daemonArgs = [
-  'build',
-  '--locked',
-  ...profileArgs,
-  '-p',
-  'vornd',
-  '-p',
-  'vorn-sessiond',
-  '-p',
-  'vorn-cli'
-]
-if (args.has('--no-ghostty')) daemonArgs.push('--no-default-features')
-cargo(daemonArgs)
+const features = args.has('--no-ghostty') ? ['--no-default-features'] : []
+// vorn carries the Wasm compiler vornd leaves out. Built together, cargo would
+// unify their features and link the compiler into vornd too.
+cargo(['build', '--locked', ...profileArgs, '-p', 'vornd', ...features])
+cargo(['build', '--locked', ...profileArgs, '-p', 'vorn-sessiond', '-p', 'vorn-cli', ...features])
 for (const daemon of ['vornd', 'vorn-sessiond', 'vorn']) copyOut(daemon + exe, daemon + exe)
 
 // vorn-sessiond hosts Windows sessions in the ConPTY shipped beside it.

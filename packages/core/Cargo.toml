@@ -49,6 +49,7 @@ members = [
   "extensions/worktrees",
   "bench/scale",
   "bench/workflows",
+  "bench/ext-tiers",
 ]
 exclude = ["vendor"]
 

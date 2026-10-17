@@ -7091,6 +7091,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-bench-ext-tiers"
+version = "0.8.0-beta.15"
+dependencies = [
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "vorn-extensions",
+ "vorn-guest-build",
+]
+
+[[package]]
 name = "vorn-cli"
 version = "0.8.0-beta.15"
 dependencies = [

@@ -11,6 +11,7 @@
     "build:web": "sh packages/core/scripts/build-web.sh",
     "build:core": "yarn workspace @vornrun/core build",
     "bench:panes": "sh packages/core/scripts/many-pane-bench.sh",
+    "bench:ext-tiers": "sh packages/core/scripts/ext-tiers-bench.sh",
     "bench:board": "sh packages/core/scripts/board-bench.sh",
     "bench:startup": "bash packages/core/scripts/startup-bench.sh",
     "lint": "eslint .",

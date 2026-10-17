@@ -12,8 +12,6 @@ pub const RENDER: &str = "ui.render";
 pub const EVENT: &str = "ui.event";
 /// The colour tokens this build knows; a tree names the set it was made for.
 pub const TOKENS: u32 = 1;
-/// The WIT world a Wasm extension's UI exports.
-pub const WIT: &str = include_str!("../wit/tree.wit");
 
 /// Past these a tree is a mistake, not a page.
 pub const MAX_NODES: usize = 20_000;

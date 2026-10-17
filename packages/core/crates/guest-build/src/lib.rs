@@ -11,8 +11,9 @@ use std::process::Command;
 
 /// The target every component is built for.
 pub const TARGET: &str = "wasm32-wasip2";
-/// The workspace profile components build with: small, and abort on panic.
-pub const PROFILE: &str = "wasm";
+/// The workspace profile components build with: the speed vornd's own code
+/// gets, which runs JSON through a component about half again as fast as `opt-level = "z"`.
+pub const PROFILE: &str = "release";
 
 /// The workspace this crate is in: `packages/core`.
 pub fn workspace() -> PathBuf {
