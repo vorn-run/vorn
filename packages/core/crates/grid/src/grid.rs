@@ -115,6 +115,11 @@ pub struct Grid {
     /// update. History can be cleared and refilled between two counts of
     /// scrolled lines, so a clear starts a new epoch whatever the count.
     clears: Option<u64>,
+    /// The emulator's count of OSC 133 marks at the last update.
+    marks: Option<u64>,
+    /// A mark came since the last update: row flags are read from the terminal, since the
+    /// render state keeps its copy of a row Ghostty did not dirty.
+    marked: bool,
     writer: RowWriter,
     columns: Columns,
     /// A never-written cell as Ghostty stores it. Most of a row is cells
@@ -171,6 +176,8 @@ impl Grid {
             lines: Lines::default(),
             full: true,
             clears: None,
+            marks: None,
+            marked: false,
             writer: RowWriter::new(),
             columns: Columns::default(),
             blank: blank_cell(),
@@ -237,6 +244,13 @@ impl Grid {
             self.lines.new_epoch(t);
         }
         self.clears = Some(clears);
+        // A mark flags its row without dirtying it, so every row is read again.
+        let marks = em.prompt_marks();
+        if self.marks.is_some_and(|m| m != marks) {
+            self.full = true;
+            self.marked = true;
+        }
+        self.marks = Some(marks);
     }
 
     /// One render update from the terminal, stamped with `resume`: the
@@ -282,6 +296,7 @@ impl Grid {
         }
 
         let top_line = self.lines.top_line();
+        let marked = std::mem::take(&mut self.marked);
         let Grid {
             rs,
             rows_it,
@@ -324,7 +339,10 @@ impl Grid {
                 let line = line_of(y);
                 if all || row.dirty()? || cached.line != line {
                     let raw = row.raw_row()?;
-                    let flags = row_flags_of(raw)?;
+                    let mut flags = row_flags_of(raw)?;
+                    if marked {
+                        flags = with_prompt_of(flags, t, y);
+                    }
                     let link_row = raw.has_hyperlink()?;
                     let graphemes = raw.has_grapheme_cluster()?;
                     scratch.clear();
@@ -779,6 +797,28 @@ fn row_flags_of(raw: libghostty_vt::screen::Row) -> Result<u8, Error> {
     Ok(f)
 }
 
+/// `flags` with the prompt bits of viewport row `y` as the terminal holds them now.
+fn with_prompt_of(flags: u8, t: &Term, y: u16) -> u8 {
+    let at = Point::Viewport(PointCoordinate {
+        x: 0,
+        y: u32::from(y),
+    });
+    let Some(mark) = t
+        .grid_ref(at)
+        .ok()
+        .and_then(|g| g.row().ok())
+        .and_then(|r| r.semantic_prompt().ok())
+    else {
+        return flags;
+    };
+    let flags = flags & !(row_flags::PROMPT | row_flags::PROMPT_CONTINUATION);
+    match mark {
+        RowSemanticPrompt::Prompt => flags | row_flags::PROMPT,
+        RowSemanticPrompt::Continuation => flags | row_flags::PROMPT_CONTINUATION,
+        RowSemanticPrompt::None => flags,
+    }
+}
+
 /// The background of a cell that holds only a background colour, which
 /// Ghostty keeps in the cell rather than in its style.
 pub(crate) fn bg_only(c: libghostty_vt::screen::Cell) -> Result<Option<Color>, Error> {
@@ -879,6 +919,28 @@ mod tests {
             grid.snapshot(Vec::new()).rows,
             fresh.snapshot(Vec::new()).rows
         );
+    }
+
+    /// A prompt mark flags a row that holds no text without Ghostty calling it dirty,
+    /// and a later one that clears it (C at column 0) is seen too.
+    #[test]
+    fn a_prompt_mark_on_an_empty_row_reaches_the_update() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"out\r\n", &mut fx);
+        let mut grid = Grid::new().unwrap();
+        grid.update(&em, AT).unwrap();
+        for (bytes, want) in [
+            (&b"\x1b]133;A\x07"[..], row_flags::PROMPT),
+            (b"\x1b]133;C\x07", 0),
+        ] {
+            let held = grid.held();
+            em.feed(bytes, &mut fx);
+            assert!(grid.update(&em, AT).unwrap(), "{bytes:?}");
+            let delta = grid.delta(&held).unwrap();
+            let flags: Vec<_> = delta.rows.iter().map(|r| (r.y, r.flags)).collect();
+            assert_eq!(flags, [(1, want)], "{bytes:?}");
+        }
     }
 
     /// A zero-width codepoint joins the cell before it, on a row nothing

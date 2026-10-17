@@ -413,6 +413,12 @@ impl Emulator {
         self.scan.clears
     }
 
+    /// OSC 133 marks seen. A mark flags the cursor's row without touching its cells, so Ghostty
+    /// does not call that row dirty: a reader that skips clean rows must look again when this moves.
+    pub fn prompt_marks(&self) -> u64 {
+        self.scan.marks
+    }
+
     /// The theme colour queries are answered with and renderers draw defaults in; `None` unsets it.
     pub fn set_theme(&mut self, theme: Option<&Theme>) -> Result<()> {
         let rgb = |c: [u8; 3]| RgbColor {
@@ -733,6 +739,22 @@ mod tests {
         em.rows_text(4, 3, &mut rows);
         assert!(rows.is_empty());
         assert_eq!(em.cursor(), (5, 11, false));
+    }
+
+    /// Every OSC 133 mark counts, split across feeds or not; other sequences do not.
+    #[test]
+    fn prompt_marks_are_counted() {
+        let mut em = Emulator::with_scrollback(10, 3, 1 << 16).unwrap();
+        let mut fx = Vec::new();
+        for (bytes, want) in [
+            (&b"\x1b]133;A\x07"[..], 1),
+            (b"\x1b]5522;cwd;/tmp\x07\x1b[2J", 1),
+            (b"\x1b]13", 1),
+            (b"3;C\x1b\\\x1b]133;D;0\x07", 3),
+        ] {
+            em.feed(bytes, &mut fx);
+            assert_eq!(em.prompt_marks(), want, "{bytes:?}");
+        }
     }
 
     /// ED 3, DECSED 3 and RIS each count as a scrollback clear; ED 2 does not.
