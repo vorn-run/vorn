@@ -138,7 +138,11 @@ async fn start_session(
             let mut params = json!({
                 "agentType": agent, "projectName": project_name, "projectPath": project,
             });
-            for (key, value) in [("initialPrompt", prompt), ("branch", branch), ("displayName", name)] {
+            for (key, value) in [
+                ("initialPrompt", prompt),
+                ("branch", branch),
+                ("displayName", name),
+            ] {
                 if let Some(v) = value {
                     params[key] = json!(v);
                 }
@@ -163,8 +167,7 @@ async fn start_session(
 
 /// `sessions.launch`'s args as the session to start, its project the call's when it names none.
 fn launch_args(args: &Value, project: Option<String>) -> Result<SessionStart, ExtError> {
-    let project =
-        project.ok_or_else(|| needs("sessions.launch", "the project to start it in"))?;
+    let project = project.ok_or_else(|| needs("sessions.launch", "the project to start it in"))?;
     let flag = |k: &str| args.get(k).and_then(Value::as_bool).unwrap_or(false);
     Ok(SessionStart {
         project,

@@ -341,7 +341,11 @@ pub fn dispatch<E: Extension>(
             tree::check(&node).map_err(|errors| {
                 Error::new(
                     "failed",
-                    format!("the tree for {} cannot be drawn: {}", a.point, errors.join("; ")),
+                    format!(
+                        "the tree for {} cannot be drawn: {}",
+                        a.point,
+                        errors.join("; ")
+                    ),
                 )
             })?;
             serde_json::to_value(tree::Rendered::new(node))
@@ -399,6 +403,14 @@ macro_rules! export {
 
         #[cfg(target_arch = "wasm32")]
         $crate::bindings::__export_extension!(__VornGuest with_types_in $crate::bindings);
+
+        // Off Wasm the extension is still the crate's entry, so none of it reads as unused.
+        #[cfg(not(target_arch = "wasm32"))]
+        const _: () = {
+            let _ = $crate::guest::init::<$ty>;
+            let _ = $crate::guest::handle::<$ty>;
+            let _ = $crate::guest::on_event::<$ty>;
+        };
     };
 }
 
@@ -417,14 +429,25 @@ mod tests {
             Ok(Page { clicks: 0 })
         }
 
-        fn render(&mut self, _: &mut dyn Host, point: &str, s: tree::Surface) -> Result<tree::Node, Error> {
+        fn render(
+            &mut self,
+            _: &mut dyn Host,
+            point: &str,
+            s: tree::Surface,
+        ) -> Result<tree::Node, Error> {
             let label = if s.cells { "cells" } else { "pixels" };
-            Ok(col([text(format!("{point} on {label}")), button("go", "Go")]))
+            Ok(col([
+                text(format!("{point} on {label}")),
+                button("go", "Go"),
+            ]))
         }
 
         fn event(&mut self, host: &mut dyn Host, _: &str, e: tree::Event) -> Result<Value, Error> {
             self.clicks += 1;
-            host.publish("clicks", vec![Op::Upsert(json!({ "id": e.id, "n": self.clicks }))]);
+            host.publish(
+                "clicks",
+                vec![Op::Upsert(json!({ "id": e.id, "n": self.clicks }))],
+            );
             Ok(json!({ "toast": "Clicked" }))
         }
     }
@@ -437,11 +460,16 @@ mod tests {
         let args = json!({ "point": "settings/p", "surface": { "cells": true } });
         let drawn = dispatch(&mut page, &mut host, tree::RENDER, args, &ctx).unwrap();
         let read = tree::read(&drawn).expect("a tree the host draws");
-        assert!(serde_json::to_string(&read.tree).unwrap().contains("settings/p on cells"));
+        assert!(serde_json::to_string(&read.tree)
+            .unwrap()
+            .contains("settings/p on cells"));
         let click = json!({ "point": "settings/p", "event": { "id": "go", "kind": "click" } });
         let done = dispatch(&mut page, &mut host, tree::EVENT, click, &ctx).unwrap();
         assert_eq!(done, json!({ "toast": "Clicked" }));
-        assert_eq!(host.rows("clicks").unwrap(), [json!({ "id": "go", "n": 1 })]);
+        assert_eq!(
+            host.rows("clicks").unwrap(),
+            [json!({ "id": "go", "n": 1 })]
+        );
         let err = dispatch(&mut page, &mut host, "other", Value::Null, &ctx).unwrap_err();
         assert_eq!(err.code, "unknown-action");
         let bad = dispatch(&mut page, &mut host, tree::EVENT, json!({}), &ctx).unwrap_err();
@@ -453,7 +481,10 @@ mod tests {
         let args = json!({ "id": "a", "empty": "", "n": 1 });
         assert_eq!(arg(&args, "id", "go").unwrap(), "a");
         for key in ["empty", "n", "missing"] {
-            assert_eq!(arg(&args, key, "go").unwrap_err().message, format!("go takes {key}"));
+            assert_eq!(
+                arg(&args, key, "go").unwrap_err().message,
+                format!("go takes {key}")
+            );
         }
     }
 }

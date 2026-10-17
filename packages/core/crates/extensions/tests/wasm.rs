@@ -155,15 +155,25 @@ async fn a_component_answers_publishes_and_reads_back_through_the_bridge() {
     )
     .await
     .unwrap();
-    assert_eq!(rig.router.rows(ID, "c"), [json!({ "id": "a" }), json!({ "id": "b", "n": 1 })]);
-    let read = rig.call("rows", json!({ "collection": "c" })).await.unwrap();
+    assert_eq!(
+        rig.router.rows(ID, "c"),
+        [json!({ "id": "a" }), json!({ "id": "b", "n": 1 })]
+    );
+    let read = rig
+        .call("rows", json!({ "collection": "c" }))
+        .await
+        .unwrap();
     assert_eq!(read, json!([{ "id": "a" }, { "id": "b", "n": 1 }]));
     // Events reach it in a batch, and what it published survives a restart.
-    rig.router.emit("session.status", json!({ "sessionId": "s1" }));
+    rig.router
+        .emit("session.status", json!({ "sessionId": "s1" }));
     rig.router.settled(ID).await;
     assert_eq!(rig.router.rows(ID, "events")[0]["id"], "session.status");
     rig.router.stop(ID).await;
-    let read = rig.call("rows", json!({ "collection": "c" })).await.unwrap();
+    let read = rig
+        .call("rows", json!({ "collection": "c" }))
+        .await
+        .unwrap();
     assert_eq!(read.as_array().unwrap().len(), 2);
     // Only Vorn's compiled copy runs, never the package's own.
     let cache = rig.root.path().join("extensions").join(COMPILED);
@@ -176,32 +186,51 @@ async fn a_component_answers_publishes_and_reads_back_through_the_bridge() {
 async fn starts_sessions_keeps_files_and_runs_transactions() {
     let rig = rig(ALL, Policy::default(), Duration::from_secs(10));
     let id = rig
-        .call("start", json!({ "project": "/p", "agent": "claude", "prompt": "hi" }))
+        .call(
+            "start",
+            json!({ "project": "/p", "agent": "claude", "prompt": "hi" }),
+        )
         .await
         .unwrap();
     assert_eq!(id, json!("s1"));
     let started = rig.core.started.lock().unwrap().clone();
     assert_eq!(started[0].0, ID);
     assert_eq!(
-        (started[0].1.project.as_str(), started[0].1.agent.as_deref(), started[0].1.prompt.as_deref()),
+        (
+            started[0].1.project.as_str(),
+            started[0].1.agent.as_deref(),
+            started[0].1.prompt.as_deref()
+        ),
         ("/p", Some("claude"), Some("hi"))
     );
 
     rig.call("put", json!({ "name": "notes/a.txt", "text": "héllo" }))
         .await
         .unwrap();
-    rig.call("put", json!({ "name": "b.bin", "text": "x" })).await.unwrap();
+    rig.call("put", json!({ "name": "b.bin", "text": "x" }))
+        .await
+        .unwrap();
     assert_eq!(
-        rig.call("get", json!({ "name": "notes/a.txt" })).await.unwrap(),
+        rig.call("get", json!({ "name": "notes/a.txt" }))
+            .await
+            .unwrap(),
         json!("héllo")
     );
-    assert_eq!(rig.call("get", json!({ "name": "nope" })).await.unwrap(), Value::Null);
+    assert_eq!(
+        rig.call("get", json!({ "name": "nope" })).await.unwrap(),
+        Value::Null
+    );
     let listed = rig.call("list", json!({ "prefix": "" })).await.unwrap();
     assert_eq!(
         listed,
         json!([{ "name": "b.bin", "size": 1 }, { "name": "notes/a.txt", "size": 6 }])
     );
-    assert_eq!(rig.call("delete", json!({ "name": "b.bin" })).await.unwrap(), json!(true));
+    assert_eq!(
+        rig.call("delete", json!({ "name": "b.bin" }))
+            .await
+            .unwrap(),
+        json!(true)
+    );
     let escape = rig
         .call("put", json!({ "name": "../../etc/x", "text": "x" }))
         .await
@@ -209,7 +238,10 @@ async fn starts_sessions_keeps_files_and_runs_transactions() {
     assert_eq!(escape.code, "bad-request", "{}", escape.message);
     // Its files go when it is removed.
     rig.router.forget_files(ID).unwrap();
-    assert_eq!(rig.call("list", json!({ "prefix": "" })).await.unwrap(), json!([]));
+    assert_eq!(
+        rig.call("list", json!({ "prefix": "" })).await.unwrap(),
+        json!([])
+    );
 
     let done = rig
         .call(
@@ -219,7 +251,10 @@ async fn starts_sessions_keeps_files_and_runs_transactions() {
         .await
         .unwrap();
     assert_eq!(done, json!([8, 6]));
-    assert_eq!(rig.call("prefix", Value::Null).await.unwrap(), json!("x_test.probe_"));
+    assert_eq!(
+        rig.call("prefix", Value::Null).await.unwrap(),
+        json!("x_test.probe_")
+    );
     rig.router.lifecycle().stop_all().await;
 }
 
@@ -232,9 +267,16 @@ async fn the_gate_refuses_a_component_what_its_manifest_does_not_declare() {
         .unwrap_err();
     assert_eq!(call.code, "denied", "{}", call.message);
     assert!(call.message.contains("sessions.read"), "{}", call.message);
-    let start = rig.call("start", json!({ "project": "/p" })).await.unwrap_err();
+    let start = rig
+        .call("start", json!({ "project": "/p" }))
+        .await
+        .unwrap_err();
     assert_eq!(start.code, "denied");
-    assert!(start.message.contains("sessions.launch"), "{}", start.message);
+    assert!(
+        start.message.contains("sessions.launch"),
+        "{}",
+        start.message
+    );
     for (action, args) in [
         ("put", json!({ "name": "a", "text": "x" })),
         ("tx", json!({ "statements": [] })),
@@ -280,7 +322,10 @@ async fn a_trap_a_runaway_loop_and_a_memory_grab_are_survived_within_the_crash_b
     assert_eq!(grabbed.code, "exited", "{}", grabbed.message);
     assert_eq!(rig.call("echo", echo.clone()).await.unwrap(), echo);
     // Within it, a grab is fine.
-    assert_eq!(rig.call("grow", json!({ "mb": 8 })).await.unwrap(), json!(8 << 20));
+    assert_eq!(
+        rig.call("grow", json!({ "mb": 8 })).await.unwrap(),
+        json!(8 << 20)
+    );
 
     let trapped = rig.call("crash", Value::Null).await.unwrap_err();
     assert_eq!(trapped.code, "exited", "{}", trapped.message);
@@ -336,7 +381,10 @@ async fn a_bundled_component_runs_through_the_same_router_and_draws_a_tree() {
         .await
         .unwrap();
     assert_eq!(done, json!({ "toast": "hello clicked" }));
-    assert_eq!(rig.router.rows("vorn.probe", "clicked"), [json!({ "id": "hello" })]);
+    assert_eq!(
+        rig.router.rows("vorn.probe", "clicked"),
+        [json!({ "id": "hello" })]
+    );
     rig.router.lifecycle().stop_all().await;
 }
 
@@ -359,11 +407,21 @@ async fn without_a_compiler_only_what_the_cache_holds_runs() {
     );
     let err = bare.call(ID, "echo", json!(1), ctx()).await.unwrap_err();
     assert_eq!(err.code, "start");
-    assert!(err.message.contains("nothing here compiles it"), "{}", err.message);
+    assert!(
+        err.message.contains("nothing here compiles it"),
+        "{}",
+        err.message
+    );
     // The vorn command fills the cache; then it runs.
-    vorn_extensions::wasm::precompile(&folder.path().join("probe.wasm"), &root.path().join(COMPILED))
-        .unwrap();
-    assert_eq!(bare.call(ID, "echo", json!(1), ctx()).await.unwrap(), json!(1));
+    vorn_extensions::wasm::precompile(
+        &folder.path().join("probe.wasm"),
+        &root.path().join(COMPILED),
+    )
+    .unwrap();
+    assert_eq!(
+        bare.call(ID, "echo", json!(1), ctx()).await.unwrap(),
+        json!(1)
+    );
     bare.lifecycle().stop_all().await;
     rig.router.lifecycle().stop_all().await;
 }

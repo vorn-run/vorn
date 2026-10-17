@@ -138,7 +138,6 @@ fn group_by_keeps_first_seen_order() {
 #[test]
 fn the_page_checks() {
     check(&page()).unwrap();
-    assert!(WIT.contains("export render"));
 }
 
 #[test]

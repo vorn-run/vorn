@@ -81,7 +81,10 @@ pub enum Error {
     Refused(String),
     Io(std::io::Error),
     /// Statement `index` (from 0) of a transaction failed, so none of it held.
-    Statement { index: usize, error: Box<Error> },
+    Statement {
+        index: usize,
+        error: Box<Error>,
+    },
 }
 
 impl Error {

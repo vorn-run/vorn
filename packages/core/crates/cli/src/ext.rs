@@ -179,7 +179,11 @@ async fn install(ctx: &mut Context<'_>, url: Option<&str>) -> Result<ExitCode, C
 }
 
 fn absolute(folder: &str) -> PathBuf {
+    let folder = folder.strip_suffix("/.").unwrap_or(folder);
     let path = Path::new(folder);
+    if folder == "." {
+        return std::env::current_dir().unwrap_or_else(|_| path.to_path_buf());
+    }
     if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -257,7 +261,8 @@ async fn link(ctx: &mut Context<'_>, folder: Option<&str>) -> Result<ExitCode, C
         }
     };
     if let Some(build) = &build {
-        ctx.io.write_err(&format!("Building: {}\n", build.join(" ")));
+        ctx.io
+            .write_err(&format!("Building: {}\n", build.join(" ")));
         if let Err(err) = run_build(&folder, build).await {
             ctx.io.write_err(&format!("vorn: {err}\n"));
             if !ctx.args.watch {
@@ -354,7 +359,10 @@ fn new_package(ctx: &mut Context<'_>, id: Option<&str>) -> ExitCode {
 
 fn compile(ctx: &mut Context<'_>, wasm: Option<&str>) -> ExitCode {
     let (Some(wasm), Some(into)) = (wasm.filter(|w| !w.is_empty()), ctx.args.into.clone()) else {
-        return ctx.usage("ext compile needs a .wasm file and --into <folder>", EXT_USAGE);
+        return ctx.usage(
+            "ext compile needs a .wasm file and --into <folder>",
+            EXT_USAGE,
+        );
     };
     match vorn_extensions::wasm::precompile(&absolute(wasm), &absolute(&into)) {
         Ok(out) => {

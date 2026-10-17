@@ -320,7 +320,10 @@ async fn the_conformance_suite_drives_every_method_over_stdio() {
                 check_error(&refused);
                 assert_eq!(refused["error"]["data"]["code"], "denied");
             }
-            (Side::Host, Method::BlobsPut | Method::BlobsGet | Method::BlobsList | Method::BlobsDelete) => {
+            (
+                Side::Host,
+                Method::BlobsPut | Method::BlobsGet | Method::BlobsList | Method::BlobsDelete,
+            ) => {
                 // The sample names file `x`, which a put of `eA==` writes as `x`'s bytes.
                 let answered = b.relay(method, sample.clone()).await;
                 check(doc.result.as_deref().unwrap(), &answered["result"]);

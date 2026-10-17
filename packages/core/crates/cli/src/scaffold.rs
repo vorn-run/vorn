@@ -308,7 +308,10 @@ mod tests {
         assert_eq!(m.name, "Hello world");
         let cargo = std::fs::read_to_string(at.join("Cargo.toml")).unwrap();
         assert!(cargo.contains("name = \"acme-hello-world\""), "{cargo}");
-        assert!(cargo.contains(&format!("path = {:?}", sdk.to_string_lossy())), "{cargo}");
+        assert!(
+            cargo.contains(&format!("path = {:?}", sdk.to_string_lossy())),
+            "{cargo}"
+        );
         assert!(write(&at, "acme.hello", true, None, "0.8.0")
             .unwrap_err()
             .contains("is not empty"));

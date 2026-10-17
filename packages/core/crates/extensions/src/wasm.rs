@@ -66,6 +66,9 @@ const TAIL_LINES: usize = 12;
 const MAX_LINE: usize = 2048;
 /// Compiled components kept loaded; past this the oldest is let go.
 const LOADED: usize = 32;
+/// How long past its deadline a call is waited for: a guest blocked in an
+/// import cannot be interrupted until the import returns.
+const GRACE: Duration = Duration::from_secs(2);
 
 /// The engine settings a `.cwasm` is compiled and loaded with; they must agree.
 fn config() -> Config {
@@ -203,7 +206,29 @@ fn compile_bytes(name: &str, bytes: &[u8], cache: &Path) -> Result<PathBuf, Stri
     let out = compiled(cache, bytes);
     std::fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
     write_whole(&out, &code).map_err(|e| format!("{}: {e}", out.display()))?;
+    prune(cache);
     Ok(out)
+}
+
+/// The compiled components a cache keeps; a live rebuild adds one per save.
+#[cfg(feature = "wasm-compile")]
+const KEPT: usize = 64;
+
+/// Removes all but the [`KEPT`] newest compiled components; one removed is compiled again when next used.
+#[cfg(feature = "wasm-compile")]
+fn prune(cache: &Path) {
+    let Ok(entries) = std::fs::read_dir(cache) else {
+        return;
+    };
+    let mut compiled: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "cwasm"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    compiled.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, old) in compiled.into_iter().skip(KEPT) {
+        let _ = std::fs::remove_file(old);
+    }
 }
 
 /// Runs `vorn ext compile` on a copy of `bytes` in `cache`, so what it
@@ -248,7 +273,12 @@ async fn compile_with(vorn: &Path, name: &str, bytes: &[u8], cache: &Path) -> Re
 }
 
 /// Fills `cache` with the compiled form of `bytes`, by `compiler`.
-async fn compile(compiler: &Compiler, name: &str, bytes: &[u8], cache: &Path) -> Result<(), String> {
+async fn compile(
+    compiler: &Compiler,
+    name: &str,
+    bytes: &[u8],
+    cache: &Path,
+) -> Result<(), String> {
     match compiler {
         Compiler::None => Err(format!(
             "{name} is not compiled for this Vorn, and nothing here compiles it: \
@@ -274,15 +304,15 @@ fn deserialize(rt: &Runtime, code: &Path) -> Result<Component, String> {
     unsafe { Component::deserialize_file(&rt.engine, code) }.map_err(|e| format!("{e:#}"))
 }
 
-/// The bytes of `source`.
-async fn read(source: &Source) -> Result<Arc<[u8]>, String> {
+/// The bytes of `source`: borrowed when they are compiled into the host.
+async fn read(source: &Source) -> Result<std::borrow::Cow<'static, [u8]>, String> {
     match source {
-        Source::Bundled(bytes) => Ok(Arc::from(*bytes)),
+        Source::Bundled(bytes) => Ok(std::borrow::Cow::Borrowed(*bytes)),
         Source::File(path) => {
             let path = path.clone();
             tokio::task::spawn_blocking(move || {
                 std::fs::read(&path)
-                    .map(Arc::from)
+                    .map(std::borrow::Cow::Owned)
                     .map_err(|e| format!("{}: {e}", path.display()))
             })
             .await
@@ -292,14 +322,19 @@ async fn read(source: &Source) -> Result<Arc<[u8]>, String> {
 }
 
 /// The component `source`, compiled into `cache` first when it is not there.
-async fn load(source: &Source, name: &str, cache: &Path, compiler: &Compiler) -> Result<Component, String> {
+async fn load(
+    source: &Source,
+    name: &str,
+    cache: &Path,
+    compiler: &Compiler,
+) -> Result<Component, String> {
     let rt = runtime()?;
     let bytes = read(source).await?;
     let d = digest(&bytes);
     if let Some(c) = rt.loaded(&d) {
         return Ok(c);
     }
-    let code = compiled(cache, &bytes);
+    let code = cache.join(format!("{}.cwasm", hex(&d)));
     let mapped = {
         let code = code.clone();
         tokio::task::spawn_blocking(move || {
@@ -333,7 +368,12 @@ async fn load(source: &Source, name: &str, cache: &Path, compiler: &Compiler) ->
 
 /// Compiles `source` into `cache` unless it is there, without starting it:
 /// done once an extension is installed or switched on, so its first use waits for nothing.
-pub async fn prepare(source: &Source, name: &str, cache: &Path, compiler: &Compiler) -> Result<(), String> {
+pub async fn prepare(
+    source: &Source,
+    name: &str,
+    cache: &Path,
+    compiler: &Compiler,
+) -> Result<(), String> {
     load(source, name, cache, compiler).await.map(drop)
 }
 
@@ -393,7 +433,11 @@ impl Lines {
 }
 
 impl tokio::io::AsyncWrite for Lines {
-    fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
         let me = self.get_mut();
         let mut rest = buf;
         while let Some(at) = rest.iter().position(|b| *b == b'\n') {
@@ -493,8 +537,12 @@ fn parsed(s: &str) -> Value {
 
 /// A JSON answer read as `T`, or the error that says it did not read.
 fn typed<T: serde::de::DeserializeOwned>(method: Method, v: Value) -> Result<T, wit::ExtError> {
-    serde_json::from_value(v)
-        .map_err(|e| wit_err("failed", format!("{} answered what does not read: {e}", method.name())))
+    serde_json::from_value(v).map_err(|e| {
+        wit_err(
+            "failed",
+            format!("{} answered what does not read: {e}", method.name()),
+        )
+    })
 }
 
 impl State {
@@ -654,7 +702,10 @@ impl bindings::vorn::extension::storage::Host for State {
         .map(drop)
     }
 
-    fn transaction(&mut self, statements: Vec<wit::Statement>) -> Result<Vec<String>, wit::ExtError> {
+    fn transaction(
+        &mut self,
+        statements: Vec<wit::Statement>,
+    ) -> Result<Vec<String>, wit::ExtError> {
         let statements: Vec<Value> = statements
             .iter()
             .map(|s| {
@@ -782,7 +833,7 @@ impl Service {
         let ended = Arc::new(AtomicBool::new(false));
         let memory = Arc::new(AtomicUsize::new(0));
         let stderr = Stderr {
-            name: Arc::from(s.name.as_str()),
+            name: Arc::from(s.name.trim_start_matches("[extensions] ")),
             tail: Arc::default(),
         };
         let state = State {
@@ -858,12 +909,17 @@ impl Service {
             deadline,
             reply,
         })?;
-        answer.await.unwrap_or_else(|_| {
-            Err(transport(format!(
+        match tokio::time::timeout(deadline + GRACE, answer).await {
+            Ok(Ok(answered)) => answered,
+            Ok(Err(_)) => Err(transport(format!(
                 "{} stopped before it answered",
                 self.name
-            )))
-        })
+            ))),
+            Err(_) => Err(CallError::Timeout(format!(
+                "{} ran past its deadline and was stopped",
+                self.name
+            ))),
+        }
     }
 
     /// `guest.on-event`; nothing answers it, but it resolves only once the guest is done with it.
@@ -874,7 +930,7 @@ impl Service {
             deadline,
             done,
         })?;
-        let _ = handled.await;
+        let _ = tokio::time::timeout(deadline + GRACE, handled).await;
         Ok(())
     }
 
@@ -966,7 +1022,10 @@ fn run(
         }
         Err(e) => {
             let why = stopped(name, &e, stderr);
-            let _ = ready.send(Err(format!("{name} did not start: {}", crate::router::ext_error(why))));
+            let _ = ready.send(Err(format!(
+                "{name} did not start: {}",
+                crate::router::ext_error(why)
+            )));
             return;
         }
     };
@@ -1036,7 +1095,10 @@ fn run(
                 if let Err(trap) = handled {
                     ended.store(true, Ordering::Release);
                     drop(done);
-                    warn!("[extensions] {}", crate::router::ext_error(stopped(name, &trap, stderr)));
+                    warn!(
+                        "[extensions] {}",
+                        crate::router::ext_error(stopped(name, &trap, stderr))
+                    );
                     return;
                 }
                 drop(done);
@@ -1073,6 +1135,25 @@ mod tests {
         }
         assert_eq!(guard(&stderr.tail).len(), TAIL_LINES);
         assert!(stderr.said().ends_with(&format!("{}", TAIL_LINES + 4)));
+    }
+
+    #[cfg(feature = "wasm-compile")]
+    #[test]
+    fn the_cache_keeps_the_newest_compiled_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        for i in 0..KEPT + 3 {
+            let path = dir.path().join(format!("{i:03}.cwasm"));
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_modified(start + Duration::from_secs(u64::try_from(i).unwrap()))
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("other.txt"), b"x").unwrap();
+        prune(dir.path());
+        let left = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(left, KEPT + 1);
+        assert!(!dir.path().join("000.cwasm").exists(), "the oldest went");
+        assert!(dir.path().join(format!("{:03}.cwasm", KEPT + 2)).exists());
     }
 
     #[test]

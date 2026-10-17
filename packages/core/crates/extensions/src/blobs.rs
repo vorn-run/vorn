@@ -62,9 +62,7 @@ fn failed(what: &str, e: &std::io::Error) -> ExtError {
 fn named(dir: &Path, name: &str) -> Result<PathBuf, ExtError> {
     let bad = |why: &str| ExtError::new("bad-request", format!("\"{name}\" {why}"));
     if name.is_empty() || name.len() > MAX_NAME {
-        return Err(bad(&format!(
-            "is not a file name: 1 to {MAX_NAME} bytes"
-        )));
+        return Err(bad(&format!("is not a file name: 1 to {MAX_NAME} bytes")));
     }
     let mut path = dir.to_path_buf();
     for segment in name.split('/') {
@@ -165,7 +163,9 @@ impl BlobStore {
                 let path = named(&dir, &name)?;
                 match fs::read(&path) {
                     Ok(bytes) => Ok(BlobAnswer::Got(Some(bytes))),
-                    Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+                    Err(e)
+                        if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) =>
+                    {
                         Ok(BlobAnswer::Got(None))
                     }
                     Err(e) => Err(failed(&format!("reading {name}"), &e)),
@@ -191,7 +191,9 @@ impl BlobStore {
                         prune_empty(&dir, &path);
                         Ok(BlobAnswer::Deleted(true))
                     }
-                    Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+                    Err(e)
+                        if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) =>
+                    {
                         Ok(BlobAnswer::Deleted(false))
                     }
                     Err(e) => Err(failed(&format!("removing {name}"), &e)),
@@ -321,8 +323,14 @@ mod tests {
         assert!(names(&s, "a.c", "").is_empty());
         assert_eq!(get(&s, "a.c", "notes.txt"), None);
         let deleted = |name: &str| s.run("a.b", BlobCall::Delete { name: name.into() });
-        assert_eq!(deleted("images/t1/one.png").unwrap(), BlobAnswer::Deleted(true));
-        assert_eq!(deleted("images/t1/one.png").unwrap(), BlobAnswer::Deleted(false));
+        assert_eq!(
+            deleted("images/t1/one.png").unwrap(),
+            BlobAnswer::Deleted(true)
+        );
+        assert_eq!(
+            deleted("images/t1/one.png").unwrap(),
+            BlobAnswer::Deleted(false)
+        );
         assert!(!s.dir("a.b").join("images").exists(), "empty folders go");
         s.forget("a.b").unwrap();
         assert!(names(&s, "a.b", "").is_empty());

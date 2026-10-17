@@ -10,8 +10,8 @@ pub mod artifacts;
 pub mod connectors;
 pub mod editor;
 pub mod tasks;
-pub mod widget;
 pub mod wasm;
+pub mod widget;
 pub mod workflows;
 
 use std::collections::BTreeMap;

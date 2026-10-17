@@ -160,7 +160,10 @@ mod tests {
                 Op::Upsert(json!({ "no": "id" })),
             ],
         );
-        assert_eq!(h.rows("c").unwrap(), [json!({ "id": "a", "n": 2 }), json!({ "id": "b" })]);
+        assert_eq!(
+            h.rows("c").unwrap(),
+            [json!({ "id": "a", "n": 2 }), json!({ "id": "b" })]
+        );
         h.publish("c", vec![Op::Delete("a".into())]);
         assert_eq!(h.rows("c").unwrap(), [json!({ "id": "b" })]);
         h.publish("c", vec![Op::Clear]);
@@ -171,7 +174,10 @@ mod tests {
     fn answers_what_it_is_told_and_refuses_the_rest() {
         let mut h = FakeHost::default().answer("sessions.list", |_| Ok(json!([])));
         assert_eq!(h.call("sessions.list", Value::Null).unwrap(), json!([]));
-        assert_eq!(h.call("git.status", json!({})).unwrap_err().code, "unknown-method");
+        assert_eq!(
+            h.call("git.status", json!({})).unwrap_err().code,
+            "unknown-method"
+        );
         assert_eq!(h.asked("git.status"), [json!({})]);
         assert_eq!(h.query("SELECT 1", &[]).unwrap_err().code, "unsupported");
     }

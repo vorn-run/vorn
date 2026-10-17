@@ -4,8 +4,7 @@
 use vorn_extension_sdk::tree::sdk::*;
 use vorn_extension_sdk::tree::{self, Surface};
 use vorn_extension_sdk::{
-    arg, export, json, Ctx, Error, Event, Extension, Host, Init, Op, SessionStart, Statement,
-    Value,
+    arg, export, json, Ctx, Error, Event, Extension, Host, Init, Op, SessionStart, Statement, Value,
 };
 
 struct Probe {
@@ -25,7 +24,13 @@ impl Extension for Probe {
         })
     }
 
-    fn handle(&mut self, host: &mut dyn Host, method: &str, args: Value, ctx: &Ctx) -> Result<Value, Error> {
+    fn handle(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
+        args: Value,
+        ctx: &Ctx,
+    ) -> Result<Value, Error> {
         match method {
             "echo" => Ok(args),
             "whoami" => Ok(json!({
@@ -45,7 +50,9 @@ impl Extension for Probe {
             }
             "crash" => panic!("the probe was asked to crash"),
             "sleep" => {
-                std::thread::sleep(std::time::Duration::from_millis(args["ms"].as_u64().unwrap_or(10)));
+                std::thread::sleep(std::time::Duration::from_millis(
+                    args["ms"].as_u64().unwrap_or(10),
+                ));
                 Ok(Value::Null)
             }
             "call" => host.call(arg(&args, "method", method)?, args["args"].clone()),
@@ -59,7 +66,9 @@ impl Extension for Probe {
                 host.publish(arg(&args, "collection", method)?, ops);
                 Ok(Value::Null)
             }
-            "rows" => host.rows(arg(&args, "collection", method)?).map(Value::from),
+            "rows" => host
+                .rows(arg(&args, "collection", method)?)
+                .map(Value::from),
             "start" => {
                 let req = SessionStart {
                     project: text(&args, "project"),
@@ -73,9 +82,9 @@ impl Extension for Probe {
             "put" => host
                 .put_file(&text(&args, "name"), text(&args, "text").as_bytes())
                 .map(|()| Value::Null),
-            "get" => Ok(host
-                .file(&text(&args, "name"))?
-                .map_or(Value::Null, |b| Value::from(String::from_utf8_lossy(&b).into_owned()))),
+            "get" => Ok(host.file(&text(&args, "name"))?.map_or(Value::Null, |b| {
+                Value::from(String::from_utf8_lossy(&b).into_owned())
+            })),
             "list" => Ok(json!(host
                 .files(&text(&args, "prefix"))?
                 .into_iter()
@@ -97,7 +106,9 @@ impl Extension for Probe {
                 host.transaction(&statements).map(Value::from)
             }
             "prefix" => host.prefix().map(Value::from),
-            "set" => host.set(&text(&args, "key"), &args["value"]).map(|()| Value::Null),
+            "set" => host
+                .set(&text(&args, "key"), &args["value"])
+                .map(|()| Value::Null),
             "kv" => Ok(host.get(&text(&args, "key"))?.unwrap_or(Value::Null)),
             "fs" => Ok(json!({
                 "root": std::fs::read_dir("/").map(|_| "read").unwrap_or("refused"),
@@ -118,7 +129,12 @@ impl Extension for Probe {
         host.publish("events", ops);
     }
 
-    fn render(&mut self, host: &mut dyn Host, point: &str, s: Surface) -> Result<tree::Node, Error> {
+    fn render(
+        &mut self,
+        host: &mut dyn Host,
+        point: &str,
+        s: Surface,
+    ) -> Result<tree::Node, Error> {
         let n = host.rows("events")?.len();
         let on = if s.cells { "cells" } else { "pixels" };
         Ok(col([

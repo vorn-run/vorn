@@ -19,10 +19,10 @@ use tokio::sync::{mpsc, Semaphore};
 use tracing::{debug, error, info, warn};
 
 use crate::api::types::{CallCtx, Event, InitCtx, Level, RowOp};
-use crate::blobs::{BlobAnswer, BlobCall, BlobStore};
-use crate::component::{Bundled, Compiler, Source};
 use crate::api::{params, ExtError, Method, Side};
+use crate::blobs::{BlobAnswer, BlobCall, BlobStore};
 use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
+use crate::component::{Bundled, Compiler, Source};
 use crate::events::{self, Bus, Queue, Tally};
 use crate::gate::{self, Caller, StorageCall, World};
 use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
@@ -123,7 +123,11 @@ impl Program {
         }
     }
 
-    async fn on_event(&self, params: params::GuestOnEvent, timeout: Duration) -> Result<(), CallError> {
+    async fn on_event(
+        &self,
+        params: params::GuestOnEvent,
+        timeout: Duration,
+    ) -> Result<(), CallError> {
         match self {
             Program::Child(c) => {
                 let _ = timeout;
@@ -319,7 +323,11 @@ impl Router {
         if pack.manifest.service.is_none() && pack.manifest.runs.is_empty() {
             return Err(format!("{} runs no program to hold", pack.name()));
         }
-        let component = pack.manifest.service.as_ref().is_some_and(|s| s.component.is_some());
+        let component = pack
+            .manifest
+            .service
+            .as_ref()
+            .is_some_and(|s| s.component.is_some());
         if component && pack.manifest.runs.is_empty() {
             return Err(format!(
                 "{} runs as a Wasm component, which Vorn sandboxes always",
@@ -424,7 +432,11 @@ impl Router {
     /// is there, so its first start waits for nothing; nothing to do for a program.
     pub async fn prepare_installed(&self, id: &str) -> Result<(), String> {
         let pack = self.pack(id)?;
-        let Some(component) = pack.manifest.service.as_ref().and_then(|s| s.component.clone())
+        let Some(component) = pack
+            .manifest
+            .service
+            .as_ref()
+            .and_then(|s| s.component.clone())
         else {
             return Ok(());
         };
@@ -441,7 +453,9 @@ impl Router {
     #[cfg(not(feature = "wasm"))]
     #[allow(clippy::unused_async)]
     async fn prepare(&self, _source: &Source, name: &str) -> Result<(), String> {
-        Err(format!("{name} is a Wasm component, and this Vorn runs none"))
+        Err(format!(
+            "{name} is a Wasm component, and this Vorn runs none"
+        ))
     }
 
     /// Stops the service of extension `id`, whatever it runs as.

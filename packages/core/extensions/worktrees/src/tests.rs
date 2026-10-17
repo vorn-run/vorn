@@ -49,15 +49,26 @@ fn offers_an_idle_worktree_only_once_no_session_holds_it_and_forgets_it_when_kep
     let mut h = host();
     let mut c = started(&mut h);
     c.on_events(&mut h, vec![idle("/p/.vorn-worktrees/fix"), idle("/p")]);
-    assert!(h.rows(IDLE).unwrap().is_empty(), "held, or the main checkout");
+    assert!(
+        h.rows(IDLE).unwrap().is_empty(),
+        "held, or the main checkout"
+    );
     c.on_events(&mut h, vec![idle("/p/.vorn-worktrees/old")]);
     let rows = h.rows(IDLE).unwrap();
     assert_eq!(
         rows,
-        [json!({ "id": "/p/.vorn-worktrees/old", "name": "old", "project": "p",
-                 "project_path": "/p", "dirty": false })]
+        [
+            json!({ "id": "/p/.vorn-worktrees/old", "name": "old", "project": "p",
+                 "project_path": "/p", "dirty": false })
+        ]
     );
-    call(&mut c, &mut h, "keep", json!({ "id": "/p/.vorn-worktrees/old" })).unwrap();
+    call(
+        &mut c,
+        &mut h,
+        "keep",
+        json!({ "id": "/p/.vorn-worktrees/old" }),
+    )
+    .unwrap();
     assert!(h.rows(IDLE).unwrap().is_empty());
 }
 
@@ -71,7 +82,10 @@ fn asks_before_removing_a_worktree_with_a_session_and_removes_it_once_confirmed(
         json!({ "open": "confirm" })
     );
     let asked = &h.rows(ASKED).unwrap()[0];
-    assert_eq!((&asked["sessions"], &asked["dirty"]), (&json!(1), &json!(true)));
+    assert_eq!(
+        (&asked["sessions"], &asked["dirty"]),
+        (&json!(1), &json!(true))
+    );
     assert!(h.asked("worktrees.remove").is_empty());
 
     // The dialog's worktree lives in the row, so a fresh instance confirms it too.
@@ -85,7 +99,10 @@ fn asks_before_removing_a_worktree_with_a_session_and_removes_it_once_confirmed(
     );
     assert!(h.rows(ASKED).unwrap().is_empty());
     let err = call(&mut fresh, &mut h, "confirm", Value::Null).unwrap_err();
-    assert_eq!((err.code.as_str(), err.message.as_str()), ("gone", "Nothing is asked"));
+    assert_eq!(
+        (err.code.as_str(), err.message.as_str()),
+        ("gone", "Nothing is asked")
+    );
 }
 
 #[test]
@@ -96,8 +113,16 @@ fn removes_a_clean_unheld_worktree_without_asking_and_never_the_main_checkout() 
     let done = call(&mut c, &mut h, "ask", ask).unwrap();
     assert_eq!(done["toast"], "Worktree removed");
     assert!(h.asked("sessions.close").is_empty());
-    let main = call(&mut c, &mut h, "ask", json!({ "worktree": "/p", "project": "/p" }));
-    assert!(main.unwrap_err().message.contains("not a worktree Vorn removes"));
+    let main = call(
+        &mut c,
+        &mut h,
+        "ask",
+        json!({ "worktree": "/p", "project": "/p" }),
+    );
+    assert!(main
+        .unwrap_err()
+        .message
+        .contains("not a worktree Vorn removes"));
     call(&mut c, &mut h, "cancel", Value::Null).unwrap();
     let missing = call(&mut c, &mut h, "ask", json!({ "worktree": "/p/x" })).unwrap_err();
     assert_eq!(missing.message, "ask takes project");
@@ -107,7 +132,10 @@ fn removes_a_clean_unheld_worktree_without_asking_and_never_the_main_checkout() 
 fn lists_every_worktree_but_the_main_checkout_largest_first_with_totals() {
     let mut h = host();
     let mut c = started(&mut h);
-    assert_eq!(call(&mut c, &mut h, "scan", Value::Null).unwrap(), json!({ "worktrees": 3 }));
+    assert_eq!(
+        call(&mut c, &mut h, "scan", Value::Null).unwrap(),
+        json!({ "worktrees": 3 })
+    );
     let rows = h.rows(ALL).unwrap();
     let names: Vec<&str> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["old", "fix"]);
@@ -119,7 +147,10 @@ fn lists_every_worktree_but_the_main_checkout_largest_first_with_totals() {
     assert_eq!(summary["total"], "6 KB");
     assert_eq!(summary["build"], "1 KB");
     assert_eq!(summary["removable"], "4 KB");
-    assert_eq!(summary["reclaim_confirm"], "Delete the build output in 1 worktree? This frees 1 KB.");
+    assert_eq!(
+        summary["reclaim_confirm"],
+        "Delete the build output in 1 worktree? This frees 1 KB."
+    );
     assert_eq!(h.rows(SCAN).unwrap()[0]["busy"], false);
     call(&mut c, &mut h, "refresh", Value::Null).unwrap();
     assert_eq!(h.asked("worktrees.list")[1]["refresh"], true);
@@ -133,7 +164,10 @@ fn a_first_scan_that_keeps_failing_says_why_on_the_page() {
     let mut c = started(&mut h);
     let err = call(&mut c, &mut h, "scan", Value::Null).unwrap_err();
     assert_eq!(err.code, "failed");
-    assert_eq!(h.asked("worktrees.list").len(), usize::try_from(FIRST_TRIES).unwrap());
+    assert_eq!(
+        h.asked("worktrees.list").len(),
+        usize::try_from(FIRST_TRIES).unwrap()
+    );
     let state = &h.rows(SCAN).unwrap()[0];
     assert_eq!(state["busy"], false);
     assert_eq!(
@@ -150,7 +184,10 @@ fn reclaims_and_removes_what_the_page_checks() {
     let done = call(&mut c, &mut h, "reclaim_all", Value::Null).unwrap();
     // fix has no build output and a session, so only old's goes.
     assert_eq!(done["reclaimed"], 1);
-    assert_eq!(h.asked("worktrees.reclaim"), [json!({ "worktree": "/p/.vorn-worktrees/old" })]);
+    assert_eq!(
+        h.asked("worktrees.reclaim"),
+        [json!({ "worktree": "/p/.vorn-worktrees/old" })]
+    );
     let done = call(
         &mut c,
         &mut h,
@@ -178,7 +215,12 @@ fn the_page_is_a_tree_whose_bulk_remove_takes_the_checked() {
     let answer = call(&mut c, &mut h, tree::RENDER, render).unwrap();
     let page = tree::read(&answer).expect("a tree the client draws");
     let text = vorn_extension_sdk::serde_json::to_string(&page.tree).unwrap();
-    for said in ["Build output, rebuilt by a reinstall", "vs main", "feat/old", "Removable"] {
+    for said in [
+        "Build output, rebuilt by a reinstall",
+        "vs main",
+        "feat/old",
+        "Removable",
+    ] {
         assert!(text.contains(said), "{said} in {text}");
     }
     let click = json!({ "point": "worktrees", "event": {

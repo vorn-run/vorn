@@ -313,7 +313,11 @@ impl ExtensionTables {
         });
         self.guard(false)?;
         let done = match ran {
-            Ok(out) => self.conn.execute_batch("COMMIT").map(|()| out).map_err(Error::from),
+            Ok(out) => self
+                .conn
+                .execute_batch("COMMIT")
+                .map(|()| out)
+                .map_err(Error::from),
             Err(e) => Err(e),
         };
         if done.is_err() {
@@ -564,8 +568,14 @@ mod tests {
         let s = |sql: &str, params: Vec<Value>| (sql.to_owned(), params);
         let out = t
             .transaction(&[
-                s(&format!("CREATE TABLE {rows} (id INTEGER PRIMARY KEY, n INTEGER)"), vec![]),
-                s(&format!("INSERT INTO {rows} (n) VALUES (?), (?)"), vec![json!(1), json!(2)]),
+                s(
+                    &format!("CREATE TABLE {rows} (id INTEGER PRIMARY KEY, n INTEGER)"),
+                    vec![],
+                ),
+                s(
+                    &format!("INSERT INTO {rows} (n) VALUES (?), (?)"),
+                    vec![json!(1), json!(2)],
+                ),
                 s(&format!("SELECT sum(n) AS total FROM {rows}"), vec![]),
             ])
             .unwrap();
@@ -580,7 +590,8 @@ mod tests {
         assert!(err.to_string().starts_with("statement 1: "), "{err}");
         assert!(!err.is_refused());
         assert_eq!(
-            t.query(&format!("SELECT sum(n) AS total FROM {rows}"), &[]).unwrap(),
+            t.query(&format!("SELECT sum(n) AS total FROM {rows}"), &[])
+                .unwrap(),
             [json!({ "total": 3 })]
         );
         // A statement on another table is refused by name, and nothing of it holds.
@@ -595,7 +606,12 @@ mod tests {
             err.to_string(),
             "statement 1: test.x may not write the table tasks: its tables are named x_test_0x_…"
         );
-        assert_eq!(t.query(&format!("SELECT id FROM {rows}"), &[]).unwrap().len(), 2);
+        assert_eq!(
+            t.query(&format!("SELECT id FROM {rows}"), &[])
+                .unwrap()
+                .len(),
+            2
+        );
         for sql in ["COMMIT", "BEGIN", "ROLLBACK"] {
             let err = t.transaction(&[s(sql, vec![])]).unwrap_err();
             assert!(err.is_refused(), "{sql}: {err}");

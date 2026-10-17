@@ -66,10 +66,21 @@ pub trait World: Send + Sync + 'static {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageCall {
     Prefix,
-    Query { sql: String, params: Vec<Value> },
-    Exec { sql: String, params: Vec<Value> },
-    Get { key: String },
-    Set { key: String, value: Value },
+    Query {
+        sql: String,
+        params: Vec<Value>,
+    },
+    Exec {
+        sql: String,
+        params: Vec<Value>,
+    },
+    Get {
+        key: String,
+    },
+    Set {
+        key: String,
+        value: Value,
+    },
     /// Statements run as one transaction, each `(sql, params)`.
     Transaction(Vec<(String, Vec<Value>)>),
 }

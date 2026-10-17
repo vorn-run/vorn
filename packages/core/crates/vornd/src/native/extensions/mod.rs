@@ -739,7 +739,9 @@ impl Extensions {
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
         let (router, owned) = (Arc::clone(&self.router), id.to_owned());
-        if let Err(err) = blocking(move || router.forget_files(&owned).map_err(|e| e.to_string())).await {
+        if let Err(err) =
+            blocking(move || router.forget_files(&owned).map_err(|e| e.to_string())).await
+        {
             warn!("[extensions] could not remove the files of {id}: {err}");
         }
         self.sync_adapters();

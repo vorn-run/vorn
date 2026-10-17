@@ -5,7 +5,11 @@
 use std::path::PathBuf;
 
 /// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 1] = [("vorn-ext-worktrees", "extensions/worktrees", "worktrees.wasm")];
+const SHIPPED: [(&str, &str, &str); 1] = [(
+    "vorn-ext-worktrees",
+    "extensions/worktrees",
+    "worktrees.wasm",
+)];
 
 fn main() {
     let workspace = vorn_guest_build::workspace();

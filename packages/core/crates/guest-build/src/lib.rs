@@ -68,7 +68,15 @@ pub fn component(package: &str) -> Result<PathBuf, String> {
     }
     command
         .current_dir(workspace())
-        .args(["build", "--locked", "--target", TARGET, "--profile", PROFILE, "-p"])
+        .args([
+            "build",
+            "--locked",
+            "--target",
+            TARGET,
+            "--profile",
+            PROFILE,
+            "-p",
+        ])
         .arg(package)
         .arg("--target-dir")
         .arg(&target_dir);
@@ -106,7 +114,10 @@ pub fn rerun_if_changed(folders: &[&Path]) {
     for folder in folders {
         println!("cargo:rerun-if-changed={}", folder.display());
     }
-    println!("cargo:rerun-if-changed={}", workspace().join("Cargo.lock").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace().join("Cargo.lock").display()
+    );
 }
 
 fn tail(text: &str, lines: usize) -> String {
@@ -120,7 +131,13 @@ mod tests {
 
     #[test]
     fn keeps_what_a_nested_cargo_needs_and_drops_the_hosts_build_settings() {
-        for kept in ["CARGO_HOME", "CARGO_NET_OFFLINE", "CARGO_REGISTRIES_X_INDEX", "PATH", "RUSTUP_TOOLCHAIN"] {
+        for kept in [
+            "CARGO_HOME",
+            "CARGO_NET_OFFLINE",
+            "CARGO_REGISTRIES_X_INDEX",
+            "PATH",
+            "RUSTUP_TOOLCHAIN",
+        ] {
             assert!(!host_only(kept), "{kept}");
         }
         for dropped in [

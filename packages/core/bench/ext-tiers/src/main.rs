@@ -51,7 +51,11 @@ struct Fake {
 }
 
 fn worktree(i: usize) -> Value {
-    let project = if i.is_multiple_of(2) { "/p/api" } else { "/p/web" };
+    let project = if i.is_multiple_of(2) {
+        "/p/api"
+    } else {
+        "/p/web"
+    };
     let sessions: Vec<String> = if i.is_multiple_of(5) {
         vec![format!("s{i}")]
     } else {
@@ -89,7 +93,10 @@ impl Fake {
 impl World for Fake {
     fn call(&self, _: &Caller, method: &str, args: Value) -> Answer<Value> {
         self.calls.fetch_add(1, Ordering::Relaxed);
-        let worktrees = self.worktrees.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let worktrees = self
+            .worktrees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let answer = match method {
             "sessions.list" => Ok(Value::Array(self.sessions.clone())),
             "worktrees.list" => {
@@ -102,7 +109,10 @@ impl World for Fake {
                         .collect(),
                 ))
             }
-            other => Err(ExtError::new("unknown-method", format!("the bench has no {other}"))),
+            other => Err(ExtError::new(
+                "unknown-method",
+                format!("the bench has no {other}"),
+            )),
         };
         Box::pin(async move { answer })
     }
@@ -141,7 +151,10 @@ impl Rig {
         let root = tempfile::tempdir().expect("a temp dir");
         let compiled = root.path().join(COMPILED);
         std::fs::create_dir_all(&compiled).expect("the cache");
-        for entry in std::fs::read_dir(cache).expect("the compiled cache").flatten() {
+        for entry in std::fs::read_dir(cache)
+            .expect("the compiled cache")
+            .flatten()
+        {
             std::fs::copy(entry.path(), compiled.join(entry.file_name())).expect("copied");
         }
         let world = Arc::new(Fake::new());
@@ -155,7 +168,8 @@ impl Rig {
             settings,
             vorn_extensions::events::Bus::new(),
         );
-        let manifest = vorn_extensions::manifest::file::parse_builtin(MANIFEST).expect("the manifest");
+        let manifest =
+            vorn_extensions::manifest::file::parse_builtin(MANIFEST).expect("the manifest");
         Rig {
             router,
             world,
@@ -187,12 +201,18 @@ impl Rig {
     #[allow(clippy::cast_precision_loss)]
     fn linear_mb(&self) -> Option<f64> {
         let lease = self.router.running(ID)?;
-        lease.component_memory().map(|b| stats::round(b as f64 / (1024.0 * 1024.0)))
+        lease
+            .component_memory()
+            .map(|b| stats::round(b as f64 / (1024.0 * 1024.0)))
     }
 }
 
 fn idle(i: usize) -> Event {
-    let project = if i.is_multiple_of(2) { "/p/api" } else { "/p/web" };
+    let project = if i.is_multiple_of(2) {
+        "/p/api"
+    } else {
+        "/p/web"
+    };
     let w = (i % 20) | 1;
     Event {
         name: "worktree.idle".into(),
@@ -236,7 +256,10 @@ async fn run(wasm: &'static [u8], cache: &Path) -> Value {
         let before = rig.world.published.load(Ordering::SeqCst);
         let t = Instant::now();
         rig.events(vec![idle(1)]).await;
-        assert!(rig.world.published.load(Ordering::SeqCst) > before, "the idle worktree was offered");
+        assert!(
+            rig.world.published.load(Ordering::SeqCst) > before,
+            "the idle worktree was offered"
+        );
         to_publish.push(ms(t.elapsed()));
     }
     let mut call = Vec::new();
@@ -251,7 +274,10 @@ async fn run(wasm: &'static [u8], cache: &Path) -> Value {
         rig.call("scan", Value::Null).await;
         scan.push(us(t.elapsed()));
     }
-    let (cpu0, calls0) = (sys::cpu(me()).unwrap_or(0.0), rig.world.calls.load(Ordering::Relaxed));
+    let (cpu0, calls0) = (
+        sys::cpu(me()).unwrap_or(0.0),
+        rig.world.calls.load(Ordering::Relaxed),
+    );
     let t = Instant::now();
     let events: Vec<Event> = (0..5000).map(idle).collect();
     for batch in events.chunks(BATCH) {
@@ -294,7 +320,10 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 fn median(runs: &[Value], pointer: &str) -> Value {
-    let mut v: Vec<f64> = runs.iter().filter_map(|r| r.pointer(pointer)?.as_f64()).collect();
+    let mut v: Vec<f64> = runs
+        .iter()
+        .filter_map(|r| r.pointer(pointer)?.as_f64())
+        .collect();
     if v.is_empty() {
         return Value::Null;
     }
@@ -305,23 +334,35 @@ fn median(runs: &[Value], pointer: &str) -> Value {
 fn table(runs: &[Value], wasm_bytes: u64, cwasm_bytes: u64) -> String {
     let row = |label: &str, pointer: &str| {
         let v = median(runs, pointer);
-        format!("| {label} | {} |\n", v.as_f64().map_or("—".to_owned(), |n| format!("{n:.2}")))
+        format!(
+            "| {label} | {} |\n",
+            v.as_f64().map_or("—".to_owned(), |n| format!("{n:.2}"))
+        )
     };
     let mut out = String::from("| Worktree cleanup, Wasm (shipped) | median |\n|---|---:|\n");
     for (label, pointer) in [
         ("first start (ms)", "/first_start_ms"),
         ("restart p50 (ms)", "/restart_ms/p50"),
-        ("cold start: event → first publish p50 (ms)", "/event_to_publish_ms/p50"),
+        (
+            "cold start: event → first publish p50 (ms)",
+            "/event_to_publish_ms/p50",
+        ),
         ("call round trip p50 (µs)", "/call_us/p50"),
         ("call round trip p99 (µs)", "/call_us/p99"),
         ("scan p50 (µs)", "/scan_us/p50"),
         ("scan p99 (µs)", "/scan_us/p99"),
         ("settings page render (µs)", "/render_us"),
         ("5k worktree.idle: events/s", "/idle_events/events_per_s"),
-        ("5k worktree.idle: CPU µs/event", "/idle_events/cpu_us_per_event"),
+        (
+            "5k worktree.idle: CPU µs/event",
+            "/idle_events/cpu_us_per_event",
+        ),
         ("memory idle (MB)", "/memory_idle/host_delta_mb"),
         ("memory busy (MB)", "/memory_busy/host_delta_mb"),
-        ("of which linear memory, busy (MB)", "/memory_busy/linear_mb"),
+        (
+            "of which linear memory, busy (MB)",
+            "/memory_busy/linear_mb",
+        ),
     ] {
         out.push_str(&row(label, pointer));
     }
@@ -342,17 +383,23 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("run") {
         let wasm_path = PathBuf::from(flag(&args, "--component").expect("--component"));
         let cache = PathBuf::from(flag(&args, "--cache").expect("--cache"));
-        let wasm: &'static [u8] =
-            Box::leak(std::fs::read(&wasm_path).expect("the component").into_boxed_slice());
+        let wasm: &'static [u8] = Box::leak(
+            std::fs::read(&wasm_path)
+                .expect("the component")
+                .into_boxed_slice(),
+        );
         let result = rt.block_on(run(wasm, &cache));
         println!("{result}");
         return;
     }
-    let reps: usize = flag(&args, "--reps").and_then(|n| n.parse().ok()).unwrap_or(5);
+    let reps: usize = flag(&args, "--reps")
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(5);
     let out = flag(&args, "--out").map(PathBuf::from);
     let wasm = vorn_guest_build::component("vorn-ext-worktrees").unwrap_or_else(|e| panic!("{e}"));
     let cache = tempfile::tempdir().expect("a temp dir");
-    let compiled = vorn_extensions::wasm::precompile(&wasm, cache.path()).unwrap_or_else(|e| panic!("{e}"));
+    let compiled =
+        vorn_extensions::wasm::precompile(&wasm, cache.path()).unwrap_or_else(|e| panic!("{e}"));
     let size = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
     let mut runs = Vec::with_capacity(reps);
     for rep in 0..reps {
@@ -376,7 +423,8 @@ fn main() {
     println!("{md}");
     if let Some(dir) = out {
         std::fs::create_dir_all(&dir).expect("the out dir");
-        let raw = json!({ "runs": runs, "wasm_bytes": size(&wasm), "cwasm_bytes": size(&compiled) });
+        let raw =
+            json!({ "runs": runs, "wasm_bytes": size(&wasm), "cwasm_bytes": size(&compiled) });
         std::fs::write(dir.join("results.json"), format!("{raw:#}\n")).expect("written");
         std::fs::write(dir.join("summary.md"), md).expect("written");
     }

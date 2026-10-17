@@ -251,7 +251,8 @@ impl Daemon {
         let world = Arc::new(crate::native::extensions::world::Wired {
             native: Arc::downgrade(native),
         });
-        let mut router_settings = RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION"));
+        let mut router_settings =
+            RouterSettings::new(native.child_env(), env!("CARGO_PKG_VERSION"));
         router_settings.blobs = Some(db_dir.join("extension-files"));
         router_settings.compiler = wasm_compiler();
         let router = Router::new(
@@ -887,4 +888,3 @@ mod tests {
         assert!(is_websocket_upgrade(&headers));
     }
 }
-

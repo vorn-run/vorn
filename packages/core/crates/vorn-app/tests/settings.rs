@@ -77,7 +77,10 @@ fn the_worktrees_page_a_wasm_component_draws_shows_on_cells() {
         (entry_titled(tree, "feature-greet").is_some() && shown.contains("feature-greet"))
             .then_some(())
     });
-    assert!(shown.contains("ON DISK") && shown.contains("Removable"), "{shown}");
+    assert!(
+        shown.contains("ON DISK") && shown.contains("Removable"),
+        "{shown}"
+    );
 }
 
 #[test]
