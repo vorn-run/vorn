@@ -568,7 +568,10 @@ mod tests {
     fn the_shortcuts_panel_lists_every_category() {
         let groups = shortcut_groups();
         let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
-        assert_eq!(names, ["Navigation", "Sessions", "View", "Filters"]);
-        assert_eq!(groups[3].1.len(), 5);
+        assert_eq!(
+            names,
+            ["Navigation", "Flexible grid", "Sessions", "View", "Filters"]
+        );
+        assert_eq!(groups[4].1.len(), 5);
     }
 }

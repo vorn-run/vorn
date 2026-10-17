@@ -400,6 +400,86 @@ async fn a_layout_opens_saves_and_reopens_its_sessions() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_layouts_view_and_splits_open_and_save_as_written() {
+    let mut r = rig!();
+    let project = tempfile::tempdir().unwrap();
+    let project_path = project.path().canonicalize().unwrap();
+    let p = project_path.to_str().unwrap();
+    write_layout(
+        &r,
+        "flex",
+        &format!(
+            "name = \"flex\"\nproject = \"{p}\"\nview = \"flexible\"\nsplit = \"horizontal\"\nratio = 0.7\n\n[[children]]\nshell = true\nlabel = \"a\"\n\n[[children]]\nsplit = \"vertical\"\nratio = 0.4\n\n[[children.children]]\nshell = true\nlabel = \"b\"\n\n[[children.children]]\nshell = true\nlabel = \"c\"\n"
+        ),
+    );
+    let (code, out, err) = r.vorn(&["layout", "open", "flex", "--json"]).await;
+    assert_eq!(code, 0, "{err}\n{}", r.v.log());
+    let done: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(done["view"], "flexible");
+    assert_eq!(done["sessions"].as_array().unwrap().len(), 3);
+
+    // The grid it set saves back as the same tree, splits and ratios.
+    let saved = |name: &str| {
+        std::fs::read_to_string(r.v.home.path().join("layouts").join(format!("{name}.toml")))
+            .unwrap()
+    };
+    let (code, _, err) = r
+        .vorn(&["layout", "save", "flexcopy", "--project", p])
+        .await;
+    assert_eq!(code, 0, "{err}\n{}", r.v.log());
+    let copy = saved("flexcopy");
+    for line in [
+        "view = \"flexible\"",
+        "split = \"horizontal\"",
+        "ratio = 0.7",
+        "split = \"vertical\"",
+        "ratio = 0.4",
+    ] {
+        assert!(copy.contains(line), "{line} in\n{copy}");
+    }
+    assert!(!copy.contains("columns"), "{copy}");
+    let labels: Vec<&str> = copy
+        .lines()
+        .filter_map(|l| l.strip_prefix("label = "))
+        .collect();
+    assert_eq!(labels, ["\"a\"", "\"b\"", "\"c\""]);
+
+    // A grid of columns, and tabs, round-trip too.
+    write_layout(
+        &r,
+        "cols",
+        &format!(
+            "name = \"cols\"\nproject = \"{p}\"\nview = \"grid\"\ncolumns = 3\nshell = true\n"
+        ),
+    );
+    let (code, out, err) = r.vorn(&["layout", "open", "cols", "--json"]).await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["view"], "grid");
+    let (code, _, err) = r
+        .vorn(&["layout", "save", "colscopy", "--project", p])
+        .await;
+    assert_eq!(code, 0, "{err}");
+    let copy = saved("colscopy");
+    assert!(
+        copy.contains("view = \"grid\"") && copy.contains("columns = 3"),
+        "{copy}"
+    );
+
+    write_layout(
+        &r,
+        "tabs",
+        &format!("name = \"tabs\"\nproject = \"{p}\"\nview = \"tabs\"\nshell = true\n"),
+    );
+    let (code, _, err) = r.vorn(&["layout", "open", "tabs"]).await;
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = r
+        .vorn(&["layout", "save", "tabscopy", "--project", p])
+        .await;
+    assert_eq!(code, 0, "{err}");
+    assert!(saved("tabscopy").contains("view = \"tabs\""));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn check_names_the_line_and_an_extensions_layout_is_listed() {
     let mut r = rig!();
     let bad = r.v.home.path().join("bad.toml");
