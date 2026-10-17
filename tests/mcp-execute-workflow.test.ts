@@ -198,19 +198,6 @@ describe('resolveWorkflowId', () => {
     expect(resolveWorkflowId({ workflow_id: 'abc' })).toEqual({ id: 'abc' })
   })
 
-  it('still accepts the deprecated id, so existing callers keep working', () => {
-    expect(resolveWorkflowId({ id: 'abc' })).toEqual({ id: 'abc' })
-  })
-
-  it('accepts both when they agree', () => {
-    expect(resolveWorkflowId({ workflow_id: 'abc', id: 'abc' })).toEqual({ id: 'abc' })
-  })
-
-  it('refuses two different ids rather than guessing which was meant', () => {
-    const result = resolveWorkflowId({ workflow_id: 'abc', id: 'xyz' })
-    expect(result).toEqual({ error: 'workflow_id and id disagree — pass only workflow_id' })
-  })
-
   it('reports a missing id', () => {
     expect(resolveWorkflowId({})).toEqual({ error: 'provide workflow_id' })
   })

@@ -3078,27 +3078,6 @@
           }
         ],
         [
-          "id",
-          {
-            "t": "optional",
-            "inner": {
-              "t": "string",
-              "checks": [
-                {
-                  "k": "min",
-                  "value": 1,
-                  "message": "ID must not be empty"
-                },
-                {
-                  "k": "max",
-                  "value": 100,
-                  "message": "ID must be 100 characters or less"
-                }
-              ]
-            }
-          }
-        ],
-        [
           "name",
           {
             "t": "optional",
@@ -3204,27 +3183,6 @@
       "shape": [
         [
           "workflow_id",
-          {
-            "t": "optional",
-            "inner": {
-              "t": "string",
-              "checks": [
-                {
-                  "k": "min",
-                  "value": 1,
-                  "message": "ID must not be empty"
-                },
-                {
-                  "k": "max",
-                  "value": 100,
-                  "message": "ID must be 100 characters or less"
-                }
-              ]
-            }
-          }
-        ],
-        [
-          "id",
           {
             "t": "optional",
             "inner": {
@@ -3571,27 +3529,6 @@
       "shape": [
         [
           "workflow_id",
-          {
-            "t": "optional",
-            "inner": {
-              "t": "string",
-              "checks": [
-                {
-                  "k": "min",
-                  "value": 1,
-                  "message": "ID must not be empty"
-                },
-                {
-                  "k": "max",
-                  "value": 100,
-                  "message": "ID must be 100 characters or less"
-                }
-              ]
-            }
-          }
-        ],
-        [
-          "id",
           {
             "t": "optional",
             "inner": {

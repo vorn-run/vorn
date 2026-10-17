@@ -8,7 +8,7 @@
       "protocol": 1,
       "path": "<data>/connectors/tickets/1.0.0",
       "installedAt": "<number>",
-      "bytes": 5245,
+      "bytes": 5174,
       "triggers": [
         {
           "type": "items",
