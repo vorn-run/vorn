@@ -62,7 +62,7 @@ softbuffer = { version = "0.4", default-features = false, features = ["x11", "x1
 # The traffic lights' place, image drops and the clipboard's image, through
 # the AppKit bindings winit already uses.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.5"
+objc2 = "0.6"
 objc2-app-kit = { version = "0.2.2", default-features = false, features = ["std", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSDragging", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.2.2", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSGeometry", "NSString"] }
 
