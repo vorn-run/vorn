@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use super::{App, Call};
 use crate::client::RpcError;
-use crate::points::{self, kind, Holder, PointAct, Press, Request};
+use crate::points::{self, kind, PointAct, Request};
 use crate::runs::s;
 use crate::ui::{Id, Ui, WindowRequest};
 
@@ -33,8 +33,6 @@ pub(super) enum PointCall {
     /// What an event in tree point `key` did.
     Told(String),
     Builtins,
-    /// A sign-in action's window target, asked of the extension; the key it opens for.
-    SignIn(String),
     /// A built-in switched; it goes back to `was` if vornd refuses.
     SetBuiltin {
         id: String,
@@ -63,24 +61,6 @@ impl App {
 
     pub(super) fn run_point(&mut self, ui: &mut Ui, a: PointAct) {
         match a {
-            PointAct::Press {
-                extension,
-                press,
-                holder,
-            } => {
-                self.st.points.asking = None;
-                if self.st.points.more.take().is_some() {
-                    ui.close_menu();
-                }
-                self.press(ui, &extension, &press);
-                if press.close {
-                    match holder {
-                        Some(Holder::Dialog) => self.st.points.dialog = None,
-                        Some(Holder::Window(key)) => self.close_window(&key),
-                        None => {}
-                    }
-                }
-            }
             PointAct::Ask(id) => {
                 if self.st.points.more.take().is_some() {
                     ui.close_menu();
@@ -153,15 +133,6 @@ impl App {
                 }
             }
             PointAct::CloseDialog => self.st.points.dialog = None,
-            PointAct::Field {
-                extension,
-                call,
-                row,
-            } => {
-                let id = ui.focus();
-                let text = id.map(|id| ui.edit_text(id).to_owned()).unwrap_or_default();
-                self.point_field(&extension, &call, row.as_deref(), &text);
-            }
             PointAct::Settings(key) => {
                 self.st.settings.ext_page = Some(key);
                 self.st.settings.open = true;
@@ -213,43 +184,6 @@ impl App {
         }
     }
 
-    /// What a template's button or toggle asks for, in the order the template reads.
-    fn press(&mut self, ui: &mut Ui, extension: &str, press: &Press) {
-        // The board's menus and add buttons are the app's, as the board always was.
-        if extension == crate::screen::tasks::board::TASKS {
-            if let Some(act) = crate::tasks::board_press(press) {
-                self.run_task(ui, act);
-                return;
-            }
-        }
-        if let Some(params) = points::call_params(extension, press) {
-            self.call(Call::Point(PointCall::Called), "extension:call", params);
-        }
-        if let Some(url) = press.open.as_deref().filter(|u| u.starts_with("https://")) {
-            super::tasks::open_url(url);
-        }
-        if let Some(id) = press.focus.as_deref() {
-            if self.store.session(id).is_some() {
-                self.st.view = crate::screen::MainView::Sessions;
-                self.st.selected = Some(id.to_owned());
-            }
-        }
-        if press.show || press.focus.is_some() {
-            ui.request(WindowRequest::Focus);
-        }
-        if let Some(w) = &press.window {
-            self.open_window(&format!("{extension}/{}/{w}", kind::WINDOWS));
-        }
-        // The extension says where the window signs in; the client holds the window.
-        if let Some(key) = press.signin.as_deref().filter(|k| !k.is_empty()) {
-            self.call(
-                Call::Point(PointCall::SignIn(key.to_owned())),
-                "extension:call",
-                json!({ "id": extension, "action": "signin", "args": { "id": key } }),
-            );
-        }
-    }
-
     /// Tells tree point `key`'s extension what happened; a bulk button's checks go with it.
     fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
         let Some(params) = self.st.points.tell(key, event) else {
@@ -259,25 +193,6 @@ impl App {
             Call::Point(PointCall::Told(key.to_owned())),
             "extension:call",
             params,
-        );
-    }
-
-    /// A one-line field's Return, with what it holds.
-    pub(super) fn point_field(
-        &mut self,
-        extension: &str,
-        call: &str,
-        row: Option<&str>,
-        text: &str,
-    ) {
-        let mut args = json!({ "value": text });
-        if let Some(id) = row {
-            args["id"] = json!(id);
-        }
-        self.call(
-            Call::Point(PointCall::Called),
-            "extension:call",
-            json!({ "id": extension, "action": call, "args": args }),
         );
     }
 
@@ -330,15 +245,6 @@ impl App {
                 }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
-            PointCall::SignIn(key) => {
-                let failed = match answer {
-                    Ok(target) => self.open_signin(&key, &target, crate::signin::From::Page),
-                    Err(e) => Some(e.to_string()),
-                };
-                if let Some(e) = failed {
-                    self.st.toast(e, true);
-                }
-            }
             PointCall::SetBuiltin { id, was } => {
                 let pts = &mut self.st.points;
                 pts.switching = None;
@@ -546,8 +452,8 @@ impl App {
         }
     }
 
-    /// The tree points whose place shows now: the sidebar's sections and the cards' parts
-    /// always, the composer's strip while it is open, and the settings page, panes, dialog
+    /// The tree points whose place shows now: the sidebar's sections, the cards' parts
+    /// and the main views always, the composer's strip while it is open, and the settings page, panes, dialog
     /// and floating windows open.
     fn trees_shown(&self) -> Vec<String> {
         let pts = &self.st.points;
@@ -562,7 +468,12 @@ impl App {
             .iter()
             .filter(|p| p.tree)
             .filter(|p| match p.kind.as_str() {
-                kind::SIDEBAR | kind::BADGES | kind::CARD_FOOTERS | kind::DECORATIONS => true,
+                // Main views are few and kept, so a view shows its tree at once.
+                kind::SIDEBAR
+                | kind::BADGES
+                | kind::CARD_FOOTERS
+                | kind::DECORATIONS
+                | kind::VIEWS => true,
                 kind::COMPOSER => composing,
                 _ => false,
             })

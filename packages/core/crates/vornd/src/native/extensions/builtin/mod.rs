@@ -1,5 +1,5 @@
 //! The extensions Vorn ships with, written against the API a package speaks
-//! (a manifest, templates, core calls held to the declared permissions,
+//! (a manifest, trees, core calls held to the declared permissions,
 //! published rows and subscribed events) and compiled in rather than started
 //! as a program: as Rust in vornd, or as a Wasm component vornd carries
 //! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
@@ -28,7 +28,7 @@ use vorn_extensions::events::{Owner, Queue, QUEUE};
 use vorn_extensions::gate::{self, Caller};
 use vorn_extensions::manifest::{file, Manifest};
 use vorn_extensions::router::Router;
-use vorn_extensions::views;
+use vorn_extensions::points;
 
 use super::guard;
 
@@ -69,8 +69,6 @@ impl Api {
 pub trait Builtin: Send + Sync + 'static {
     /// Its `vorn-extension.toml`.
     fn manifest(&self) -> &'static str;
-    /// Its templates, as `("views/x.kdl", text)`.
-    fn views(&self) -> &[(&'static str, &'static str)];
     /// The public events it subscribes to.
     fn events(&self) -> &'static [&'static str];
     /// Whether it is on before the person switches it.
@@ -319,15 +317,11 @@ impl Builtins {
         )
     }
 
-    /// What the built-ins that are on contribute, as [`views::listed`] gives it.
+    /// What the built-ins that are on contribute, as [`points::listed`] gives it.
     pub fn contributions(&self) -> Vec<Value> {
         let mut out = Vec::new();
         for e in self.entries.iter().filter(|e| self.is_on(e.id())) {
-            let template = |path: &str, place| {
-                let text = e.builtin.views().iter().find(|(p, _)| *p == path);
-                views::read(path, text.map_or("", |(_, t)| t), place)
-            };
-            for mut c in views::listed(&e.manifest, &template) {
+            for mut c in points::listed(&e.manifest) {
                 c["extensionName"] = json!(e.manifest.name);
                 c["builtin"] = json!(true);
                 out.push(c);

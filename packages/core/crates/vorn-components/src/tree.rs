@@ -1,7 +1,7 @@
 //! An extension's element tree ([`vorn_tree`]) drawn with the kit on pixels and cells; the caller binds ids.
 
 use vorn_tree::{
-    ButtonStyle, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token, Tone,
+    ButtonStyle, Cards, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token, Tone,
 };
 use vornui::accesskit::Role;
 use vornui::native::Sem;
@@ -9,7 +9,10 @@ use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
 use vornui::{div, text, Action, El, Id, Place, Rgba, Sense, Ui};
 
-use crate::template::NUMBER_WIDTH;
+use crate::board::{Board, Lane};
+
+/// How wide a `number` text's column is, so figures line up down a list.
+pub const NUMBER_WIDTH: f32 = 80.0;
 
 /// What a control of the tree does, for the caller to bind.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,6 +50,16 @@ pub trait TreeBind {
     /// An icon the client draws for a name not in the kit's set; `None` draws the kit's.
     fn icon(&self, name: &str, size: f32) -> Option<El> {
         let _ = (name, size);
+        None
+    }
+    /// A board whose cards the client reads itself, drawn with the kit's
+    /// [`Board`] over the client's cards; `None` draws its columns empty.
+    fn board(&self, cards: Cards, lanes: &[Lane<'_>], empty: Option<&str>) -> Option<El> {
+        let _ = (cards, lanes, empty);
+        None
+    }
+    /// The workflow editor's canvas, which the client draws; `None` draws nothing.
+    fn graph(&self) -> Option<El> {
         None
     }
 }
@@ -99,6 +112,7 @@ pub fn tone(t: Tone) -> Rgba {
         Tone::Accent => color::STATUS_BLUE,
         Tone::Busy => color::BRONZO,
         Tone::Muted => color::INK_FAINT,
+        Tone::Idle => color::STATUS_SLATE,
     }
 }
 
@@ -327,12 +341,46 @@ impl Cx<'_> {
                 self.group(n, &l)
             }
             Kind::Entry(e) => self.entry(n, e, None),
-            Kind::Board => div()
+            Kind::Board {
+                cards: Some(cards),
+                empty,
+            } => {
+                let lanes: Vec<Lane<'_>> = n
+                    .children
+                    .iter()
+                    .filter_map(|c| match &c.kind {
+                        Kind::Column { title, tone, icon } => Some(Lane {
+                            value: c.id.as_deref().unwrap_or_default(),
+                            title,
+                            icon: icon.as_deref(),
+                            tone: *tone,
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+                match self.bind.board(*cards, &lanes, empty.as_deref()) {
+                    Some(drawn) => drawn,
+                    None => Board {
+                        ui: self.ui,
+                        name: "tree",
+                        lanes: &lanes,
+                        empty: empty.as_deref(),
+                        cards: &Unread,
+                        bind: &Unbound,
+                    }
+                    .view(),
+                }
+            }
+            Kind::Board { cards: None, .. } => div()
                 .row()
                 .items_start()
                 .gap(12.0)
                 .min_w0()
                 .children(n.children.iter().map(|c| self.column(c))),
+            Kind::Graph => self
+                .bind
+                .graph()
+                .unwrap_or_else(|| div().sem(Sem::Hidden)),
             Kind::Column { .. } => self.column(n),
             Kind::Divider => div()
                 .w_full()
@@ -1398,7 +1446,10 @@ impl Cx<'_> {
 
     /// A board's column: its title, a count, and each child on a card.
     fn column(&self, n: &Node) -> El {
-        let Kind::Column { title, tone: t } = &n.kind else {
+        let Kind::Column {
+            title, tone: t, ..
+        } = &n.kind
+        else {
             return self.node(n);
         };
         let ink = t.map_or(color::GRAY_500, tone);
@@ -1486,7 +1537,50 @@ fn ask_tone(style: ButtonStyle) -> ConfirmTone {
     }
 }
 
+/// A board whose client reads no cards: its columns, empty.
+struct Unread;
+
+impl crate::board::Cards for Unread {
+    fn placed(&self) -> &[(String, String)] {
+        &[]
+    }
+    fn card(&self, _: usize) -> Option<crate::board::Card> {
+        None
+    }
+}
+
+/// The ids of a board whose client binds nothing.
+struct Unbound;
+
+impl crate::board::BoardBind for Unbound {
+    fn card(&self, card: &str) -> Id {
+        crate::board::card_id("tree", card)
+    }
+    fn dragging(&self) -> Option<(String, Option<String>)> {
+        None
+    }
+    fn add(&self, lane: &str, foot: bool) -> Id {
+        Id::new("tree-board-add").child(lane).child(foot)
+    }
+    fn menu(&self, card: &str) -> Id {
+        Id::new("tree-board-menu").child(card)
+    }
+    fn menu_open(&self, _: Id) -> bool {
+        false
+    }
+    fn action(&self, card: &str, a: &crate::board::CardAction) -> Id {
+        Id::new("tree-board-action").child(card).child(a.id)
+    }
+    fn confirming(&self, _: Id) -> Option<(Id, Id)> {
+        None
+    }
+}
+
 /// Tone `t` as a native backend names it.
+pub fn native_tone(t: Tone) -> &'static str {
+    sem_tone(t)
+}
+
 fn sem_tone(t: Tone) -> &'static str {
     match t {
         Tone::Neutral => "muted",
@@ -1497,6 +1591,7 @@ fn sem_tone(t: Tone) -> &'static str {
         Tone::Accent => "lit",
         Tone::Busy => "busy",
         Tone::Muted => "muted",
+        Tone::Idle => "idle",
     }
 }
 
@@ -1530,6 +1625,7 @@ fn tone_name(t: Tone) -> &'static str {
         Tone::Accent => "Active",
         Tone::Busy => "Busy",
         Tone::Muted => "Quiet",
+        Tone::Idle => "Waiting",
     }
 }
 
@@ -1639,3 +1735,30 @@ fn state(copy: &str) -> El {
 
 #[cfg(test)]
 mod tests;
+
+/// The box drawn in place of a tree that cannot be drawn: which place, and each reason.
+pub fn invalid(place: &str, errors: &[String]) -> El {
+    let mut b = div()
+        .col()
+        .gap(4.0)
+        .px(8.0)
+        .py(6.0)
+        .rounded(radius::SM)
+        .border(1.0, color::DANGER)
+        .role(Role::Alert, place)
+        .child(
+            text(format!("{place} cannot be drawn"), size::XS.0, color::RED_300)
+                .line_height(size::XS.1)
+                .weight(600)
+                .wrapping(),
+        );
+    for e in errors {
+        b = b.child(
+            text(e, 11.0, color::RED_300)
+                .mono()
+                .line_height(16.0)
+                .wrapping(),
+        );
+    }
+    b
+}

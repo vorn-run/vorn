@@ -41,7 +41,7 @@ pub mod sandbox;
 pub mod signin;
 pub mod token;
 pub mod usage;
-pub mod views;
+pub mod points;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

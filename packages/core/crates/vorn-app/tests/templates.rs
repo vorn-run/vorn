@@ -145,7 +145,7 @@ fn every_template_kind_draws_on_every_surface() {
     ];
     shot.until(&mut app, "every contribution", |a, _| {
         all.iter()
-            .all(|k| a.st.points.get(k).is_some_and(|p| p.template.is_ok()))
+            .all(|k| a.st.points.get(k).is_some())
             .then_some(())
     });
     let drawing = all

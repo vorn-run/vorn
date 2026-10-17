@@ -37,10 +37,6 @@ impl Builtin for Artifacts {
         include_str!("artifacts.toml")
     }
 
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &[]
-    }
-
     fn events(&self) -> &'static [&'static str] {
         &[]
     }

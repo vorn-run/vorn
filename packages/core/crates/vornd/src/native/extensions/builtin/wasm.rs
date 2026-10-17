@@ -19,8 +19,6 @@ use super::{Api, Builtin};
 pub struct Component {
     /// Its `vorn-extension.toml`.
     pub manifest: &'static str,
-    /// Its templates, as `("views/x.kdl", text)`.
-    pub views: &'static [(&'static str, &'static str)],
     /// The events its manifest's `[service]` subscribes to.
     pub events: &'static [&'static str],
     /// The component, built for wasm32-wasip2.
@@ -32,7 +30,6 @@ pub struct Component {
 pub fn worktrees() -> Component {
     Component {
         manifest: include_str!("../../../../../../extensions/worktrees/vorn-extension.toml"),
-        views: &[],
         events: &[vorn_extensions::events::WORKTREE_IDLE],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/worktrees.wasm")),
         on_by_default: true,
@@ -46,7 +43,6 @@ pub fn widget() -> Component {
     };
     Component {
         manifest: include_str!("../../../../../../extensions/widget/vorn-extension.toml"),
-        views: &[],
         events: &[
             SESSION_CREATED,
             SESSION_STATUS,
@@ -71,10 +67,6 @@ impl Component {
 impl Builtin for Component {
     fn manifest(&self) -> &'static str {
         self.manifest
-    }
-
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        self.views
     }
 
     fn events(&self) -> &'static [&'static str] {

@@ -400,33 +400,18 @@ impl Contributions {
         self.points.get(&place).map_or(&[], Vec::as_slice)
     }
 
-    /// Every template it draws: each point with a view, and each pane drawn from one.
-    pub fn views(&self) -> impl Iterator<Item = (Place, &str)> {
-        let points = self
-            .points
-            .iter()
-            .flat_map(|(place, ps)| ps.iter().map(move |p| (*place, p)))
-            .filter_map(|(place, p)| Some((place, p.view.as_deref()?)));
-        let panes = self.panes().iter().filter_map(|p| match &p.draws {
-            PaneDraws::View(v) => Some((Place::Panes, v.as_str())),
-            _ => None,
-        });
-        points.chain(panes)
-    }
-
-    /// Whether it draws only from templates and trees, as a program on the extension API does.
+    /// Whether it draws only from trees, as a program on the extension API does.
     pub fn templated_only(&self) -> bool {
         self.footers().is_empty()
             && self
                 .panes()
                 .iter()
-                .all(|p| matches!(p.draws, PaneDraws::View(_) | PaneDraws::Tree))
+                .all(|p| p.draws == PaneDraws::Tree)
     }
 
-    /// Whether it uses anything only the extension API can fill: a template or a tree.
+    /// Whether it uses anything only the extension API can fill: a tree, or rows a menu or attention lists.
     pub fn templated(&self) -> bool {
         !self.points.is_empty()
-            || self.views().next().is_some()
             || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
     }
 
@@ -462,7 +447,7 @@ pub enum Place {
     Badges,
     /// A line under a session's card.
     CardFooters,
-    /// A pane beside the terminal, as `[[contributes.panes]]` with a `view`.
+    /// A pane beside the terminal, as `[[contributes.panes]]` drawn from a tree.
     Panes,
     /// A command in the palette, with a key.
     Commands,
@@ -489,7 +474,7 @@ pub enum Place {
 }
 
 impl Place {
-    /// Every place a `points` entry may be, panes aside (they are `panes` with a view).
+    /// Every place a `points` entry may be, panes aside (they are `panes`).
     pub const POINTS: [Place; 13] = [
         Place::Sidebar,
         Place::Badges,
@@ -554,7 +539,7 @@ impl Place {
         )
     }
 
-    /// Whether every entry must name a template.
+    /// Whether every entry draws, and so is a tree.
     fn needs_view(self) -> bool {
         !matches!(
             self,
@@ -571,9 +556,6 @@ pub const MENUS: [&str; 5] = ["card", "grid", "terminal", "view", "worktree"];
 pub struct Point {
     #[serde(flatten)]
     pub base: Contribution,
-    /// `views/<name>.kdl`, inside the package.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub view: Option<String>,
     /// Drawn from the element tree the extension answers `ui.render` with, asked for by its id.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub tree: bool,
@@ -652,8 +634,6 @@ pub enum PaneDraws {
     Web(String),
     /// Argv, every element non-empty.
     Command(Vec<String>),
-    /// A path under `views/` ending in `.kdl`.
-    View(String),
 }
 
 fn yes<S: serde::Serializer>(s: S) -> Result<S::Ok, S::Error> {
@@ -868,7 +848,6 @@ pattern!(path_data, r"^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$");
 pattern!(view_box, r"^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$");
 pattern!(layout_entry, r"^layouts\/[A-Za-z0-9._/-]+\.toml$");
 pattern!(web_entry, r"^web\/[A-Za-z0-9._/-]+\.html$");
-pattern!(view_entry, r"^views\/[A-Za-z0-9._/-]+\.kdl$");
 pattern!(contribution_id, r"^[a-zA-Z][a-zA-Z0-9_-]*$");
 pattern!(group_open, r"^\((\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>))?");
 pattern!(
@@ -1434,7 +1413,6 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
                 .take(MAX_CONTRIBUTIONS)
                 .map(|a| js::slice16(a, MAX_TEXT_LENGTH).to_owned())
                 .collect();
-            let view = js::trim(&text(raw.get("view"), "")).to_owned();
             let draws = if !web.is_empty()
                 && js::test(web_entry(), &web)
                 && !web.split('/').any(|s| s == "..")
@@ -1442,8 +1420,6 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
                 PaneDraws::Web(web)
             } else if !command.is_empty() && command.iter().all(|a| !a.is_empty()) {
                 PaneDraws::Command(command)
-            } else if is_view_path(&view) {
-                PaneDraws::View(view)
             } else if raw.get("tree") == Some(&Value::Bool(true)) {
                 PaneDraws::Tree
             } else {
@@ -1558,11 +1534,6 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
     })
 }
 
-/// `views/<name>.kdl`, never climbing out of the package.
-pub fn is_view_path(path: &str) -> bool {
-    js::test(view_entry(), path) && !path.split('/').any(|s| s == ".." || s == ".")
-}
-
 /// `Mod+Shift+W`: modifiers, then one key; at least one of Mod, Ctrl and Alt.
 pub fn is_key(key: &str) -> bool {
     let parts: Vec<&str> = key.split('+').collect();
@@ -1639,13 +1610,6 @@ fn read_point(
             .map(|s| js::trim(s).to_owned())
             .filter(|s| !s.is_empty())
     };
-    let view = opt("view");
-    if view.as_deref().is_some_and(|v| !is_view_path(v)) {
-        return Err((
-            "view",
-            "is not a template under views/ ending in .kdl".into(),
-        ));
-    }
     let tree = match raw.get("tree") {
         None | Some(Value::Bool(false)) => false,
         Some(Value::Bool(true)) => true,
@@ -1657,19 +1621,10 @@ fn read_point(
             "draws in a place that shows one: a sidebar section, a badge, a card footer, a decoration, the composer, a settings page, a window or a dialog".into(),
         ));
     }
-    if tree && place == Place::Views {
-        return Err((
-            "tree",
-            "draws no main view; a main view is a template".into(),
-        ));
-    }
-    if tree && view.is_some() {
-        return Err(("tree", "draws in place of a view; give one of them".into()));
-    }
-    if place.needs_view() && view.is_none() && !tree {
+    if place.needs_view() && !tree {
         return Err((
             "",
-            "needs a view (a template under views/ ending in .kdl) or tree = true".into(),
+            "draws from the element tree its extension answers ui.render with: give it tree = true".into(),
         ));
     }
     let icon = opt("icon");
@@ -1713,15 +1668,12 @@ fn read_point(
             }
         }
     };
-    let does = [call.is_some(), window.is_some(), view.is_some()]
+    let does = [call.is_some(), window.is_some()]
         .iter()
         .filter(|x| **x)
         .count();
     match place {
-        Place::Commands | Place::Menus if does != 1 => {
-            return Err(("", "does one of call, window and view".into()));
-        }
-        Place::Launchers if view.is_some() || does != 1 => {
+        Place::Commands | Place::Menus | Place::Launchers if does != 1 => {
             return Err(("", "does one of call and window".into()));
         }
         Place::Commands | Place::Menus | Place::Launchers => {}
@@ -1771,7 +1723,6 @@ fn read_point(
         rows,
         deny,
         base,
-        view,
         tree,
         icon,
         key,

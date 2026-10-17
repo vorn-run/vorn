@@ -28,13 +28,13 @@ fn install(root: &Path, id: &str, manifest: &str) {
 }
 
 /// An extension's manifest, drawn through the connector protocol or, without
-/// it, from a template only the extension API fills.
+/// it, from a tree only the extension API fills.
 fn extension(id: &str, connector: bool) -> String {
     let name = id.to_uppercase();
     let draws = if connector {
         "[connector]\n[[contributes.footers]]\nid = \"f\"\nevery = 5.0\n"
     } else {
-        "[[contributes.sidebar]]\nid = \"s\"\nview = \"views/s.kdl\"\n"
+        "[[contributes.sidebar]]\nid = \"s\"\ntree = true\n"
     };
     format!(
         "id = \"{id}\"\nname = \"{name}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\

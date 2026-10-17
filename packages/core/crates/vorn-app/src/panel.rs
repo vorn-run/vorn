@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::act::{Act, Acts};
 use crate::client::rpc::{Event as RpcEvent, Pending, Rpc};
 use crate::client::Endpoint;
-use crate::points::{self, line, Holder, PointAct, Points, Press, Request};
+use crate::points::{line, PointAct, Points, Request};
 use crate::runs::s;
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, El, Event, Id, Rgba, Role, Sense, Ui, WindowRequest};
@@ -174,36 +174,11 @@ impl Panel {
         }
     }
 
-    fn press(&mut self, extension: &str, press: &Press) {
-        if let Some(params) = points::call_params(extension, press) {
-            let _ = self.rpc.request("extension:call", params);
-        }
-        if let Some(id) = &press.focus {
-            self.out.push(Request::Focus(id.clone()));
-        } else if press.show {
-            self.out.push(Request::Show);
-        }
-        if let Some(w) = &press.window {
-            let key = format!("{extension}/{}/{w}", points::kind::WINDOWS);
-            self.out.push(Request::Open(key));
-        }
-        if press.close {
-            self.out.push(Request::Hide);
-        }
-    }
-
     pub fn click(&mut self, id: Id) {
         let Some(Act::Point(a)) = self.acts.clicked(id) else {
             return;
         };
         match a {
-            PointAct::Press {
-                extension, press, ..
-            } => {
-                self.points.asking = None;
-                self.points.more = None;
-                self.press(&extension, &press);
-            }
             PointAct::Ask(id) => self.points.asking = id,
             PointAct::More(id) => self.points.more = id,
             PointAct::Tree { key, event } => {
@@ -230,24 +205,7 @@ impl Panel {
                 selected: Vec::new(),
             };
             self.tell(&key, &event);
-            return;
         }
-        let Some(Act::Point(PointAct::Field {
-            extension,
-            call,
-            row,
-        })) = self.acts.text_of(id)
-        else {
-            return;
-        };
-        let mut args = json!({ "value": ui.edit_text(id) });
-        if let Some(r) = row {
-            args["id"] = json!(r);
-        }
-        let _ = self.rpc.request(
-            "extension:call",
-            json!({ "id": extension, "action": call, "args": args }),
-        );
     }
 
     pub fn view(&mut self, ui: &mut Ui) -> El {
@@ -255,15 +213,8 @@ impl Panel {
         let Some(p) = self.points.get(&self.key) else {
             return div();
         };
-        let body = crate::screen::points::draw(
-            ui,
-            &self.acts,
-            &self.points,
-            p,
-            None,
-            Some(Holder::Window(self.key.clone())),
-        )
-        .unwrap_or_else(div);
+        let body = crate::screen::points::draw_tree(ui, &self.acts, &self.points, p)
+            .unwrap_or_else(div);
         let hide = Id::new("panel-hide");
         self.acts.bind(
             hide,

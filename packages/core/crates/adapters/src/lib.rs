@@ -1,6 +1,6 @@
 //! The agent adapters Vorn ships. Each is an extension package of its own
 //! under `agents/<name>/`: a `vorn-extension.toml` whose `[agent]` section
-//! says how to run one agent CLI, its mark, and any templates it draws.
+//! says how to run one agent CLI and its mark.
 //! Vorn reads them through the same format an installed package uses; none
 //! of them carries code.
 
@@ -13,7 +13,7 @@ pub struct Shipped {
     pub manifest: &'static str,
     /// Whether it is on before the person switches it.
     pub on_by_default: bool,
-    /// Every other file, by its path in the package, as `views/footer.kdl`.
+    /// Every other file, by its path in the package, as `icon.svg`.
     pub files: &'static [(&'static str, &'static [u8])],
 }
 
@@ -21,15 +21,6 @@ impl Shipped {
     /// The file at `path` in the package, if it ships one.
     pub fn file(&self, path: &str) -> Option<&'static [u8]> {
         self.files.iter().find(|(p, _)| *p == path).map(|(_, b)| *b)
-    }
-
-    /// Its templates, as `("views/x.kdl", text)`.
-    pub fn views(&self) -> Vec<(&'static str, &'static str)> {
-        self.files
-            .iter()
-            .filter(|(p, _)| p.starts_with("views/") && p.ends_with(".kdl"))
-            .filter_map(|(p, b)| Some((*p, std::str::from_utf8(b).ok()?)))
-            .collect()
     }
 }
 

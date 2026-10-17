@@ -40,7 +40,6 @@ members = [
   "crates/hooks",
   "crates/logfile",
   "crates/spawn",
-  "crates/view",
   "crates/tree",
   "crates/layout",
   "crates/extension-sdk",

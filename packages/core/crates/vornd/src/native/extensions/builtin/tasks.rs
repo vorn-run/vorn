@@ -181,10 +181,6 @@ impl Builtin for Entry {
         builtin::MANIFEST
     }
 
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        vorn_tasks::VIEWS
-    }
-
     fn events(&self) -> &'static [&'static str] {
         // It follows its events itself, from vornd's start.
         &[]

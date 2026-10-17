@@ -9,15 +9,11 @@ description = "Vorn's composed components (agent and status icons, session card 
 
 [dependencies]
 vornui = { path = "../vornui" }
-# Extension templates, drawn by `template`.
-vorn-view = { path = "../view" }
 # Extension element trees, drawn by `tree`.
 vorn-tree = { path = "../tree" }
 
 [dev-dependencies]
-# Templates and rows, written as clients receive them.
 serde_json = "1"
-vorn-view = { path = "../view", features = ["kdl"] }
 
 [[example]]
 name = "gallery"

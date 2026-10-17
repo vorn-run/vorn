@@ -160,10 +160,6 @@ impl Builtin for Entry {
         builtin::MANIFEST
     }
 
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &[]
-    }
-
     fn events(&self) -> &'static [&'static str] {
         &[]
     }

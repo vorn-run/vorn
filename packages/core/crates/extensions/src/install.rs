@@ -286,7 +286,6 @@ impl Installs {
         };
         let staged = copied.and_then(|source| {
             let manifest = read_staged_manifest(&dir)?;
-            crate::views::refuse(&manifest, &dir)?;
             Ok((source, manifest))
         });
         let (source, manifest) = match staged {
@@ -599,10 +598,6 @@ impl Installs {
     /// Runs `folder` in place as its manifest's extension; edits are live.
     pub fn link(&self, folder: &Path) -> Result<InstalledPack, String> {
         let (folder, manifest) = linkable(folder)?;
-        // A linked folder is being written: its template errors show where it draws.
-        for e in crate::views::check(&manifest, &folder) {
-            tracing::warn!("[extensions] {}: {e}", manifest.id);
-        }
         let home = self.store.root().join(&manifest.id);
         if let Some(current) = read_current(&home) {
             if current.get("linked").and_then(Value::as_str).map(Path::new) != Some(&folder) {
@@ -783,7 +778,6 @@ pub fn pack(
 ) -> Result<Packed, String> {
     know_agents(installed);
     let manifest = read_dir_manifest(folder)?;
-    crate::views::refuse(&manifest, folder)?;
     let checks = match &manifest.checks {
         Some(argv) => {
             let (program, args) = argv

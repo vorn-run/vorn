@@ -11,7 +11,7 @@ use vorn_app::client::link::Socket;
 use vorn_app::client::rpc::{Event as RpcEvent, Pending, Rpc, Wake};
 use vorn_app::client::store::{Store, TOPICS};
 use vorn_app::grid::Grid;
-use vorn_app::points::{self, kind, Point, PointAct, Points, Press};
+use vorn_app::points::{kind, Point, PointAct, Points};
 use vorn_app::view::PaneView;
 use vornui::{Id, Ui};
 
@@ -403,19 +403,12 @@ impl Model {
         }
     }
 
-    /// A template or tree control was pressed.
+    /// A tree control was pressed.
     pub fn click(&mut self, id: Id) {
         let Some(Act::Point(a)) = self.acts.clicked(id) else {
             return;
         };
         match a {
-            PointAct::Press {
-                extension, press, ..
-            } => {
-                self.points.asking = None;
-                self.points.more = None;
-                self.press(&extension, &press);
-            }
             PointAct::Ask(id) => self.points.asking = id,
             PointAct::More(id) => self.points.more = id,
             PointAct::Tree { key, event } => {
@@ -433,14 +426,7 @@ impl Model {
         }
     }
 
-    fn press(&self, extension: &str, press: &Press) {
-        let Some(rpc) = &self.rpc else { return };
-        if let Some(params) = points::call_params(extension, press) {
-            let _ = rpc.request("extension:call", params);
-        }
-    }
-
-    /// A template or tree field's Return: its call with what the field holds.
+    /// A tree field's Return: the extension is told what the field holds.
     pub fn submit(&mut self, ui: &Ui, id: Id) {
         if let Some(Act::Point(PointAct::TreeField { key, node })) = self.acts.text_of(id) {
             let event = vorn_tree::Event {
@@ -450,27 +436,7 @@ impl Model {
                 selected: Vec::new(),
             };
             self.tell(&key, &event);
-            return;
         }
-        let (
-            Some(rpc),
-            Some(Act::Point(PointAct::Field {
-                extension,
-                call,
-                row,
-            })),
-        ) = (&self.rpc, self.acts.text_of(id))
-        else {
-            return;
-        };
-        let mut args = json!({ "value": ui.edit_text(id) });
-        if let Some(r) = row {
-            args["id"] = json!(r);
-        }
-        let _ = rpc.request(
-            "extension:call",
-            json!({ "id": extension, "action": call, "args": args }),
-        );
     }
 
     /// Sends `text` to `session` as typed.

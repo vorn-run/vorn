@@ -1,16 +1,54 @@
 //! What extensions contribute to the screens (`extension:contributions`):
-//! each point with its checked template, the rows its templates draw, and
+//! each point, the trees they draw, the rows menus and attention list, and
 //! which dialog and windows are open. The pure half; the RPC glue is
 //! `app::points` and the drawing `screen::points`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use serde_json::{json, Value};
-use vorn_view::{Options, Row, Template};
-
-pub use vorn_components::template::Press;
+use serde_json::{json, Map, Value};
 
 use crate::runs::s;
+
+/// A row an extension published: its `id` and its other fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub id: String,
+    pub fields: Map<String, Value>,
+}
+
+impl Row {
+    /// A published row, if it has a string `id`.
+    pub fn from_value(v: &Value) -> Option<Row> {
+        let o = v.as_object()?;
+        let id = o.get("id")?.as_str()?.to_owned();
+        let fields = o
+            .iter()
+            .filter(|(k, _)| *k != "id")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        Some(Row { id, fields })
+    }
+
+    /// A string field as it is held; `None` for any other.
+    pub fn str(&self, field: &str) -> Option<&str> {
+        if field == "id" {
+            return Some(&self.id);
+        }
+        self.fields.get(field).and_then(Value::as_str)
+    }
+
+    /// A field as text; an absent or null field is empty.
+    pub fn text(&self, field: &str) -> String {
+        if field == "id" {
+            return self.id.clone();
+        }
+        match self.fields.get(field) {
+            Some(Value::String(s)) => s.clone(),
+            None | Some(Value::Null) => String::new(),
+            Some(other) => other.to_string(),
+        }
+    }
+}
 
 /// Where contributions show, as `extension:contributions` names them.
 pub mod kind {
@@ -30,7 +68,7 @@ pub mod kind {
     pub const ATTENTION: &str = "attention";
 }
 
-/// One contribution and its template, or why the template does not check.
+/// One contribution: where it shows, and what choosing it does.
 #[derive(Debug, Clone)]
 pub struct Point {
     pub extension: String,
@@ -53,42 +91,11 @@ pub struct Point {
     pub deny: Option<String>,
     /// Drawn from the element tree its extension answers `ui.render` with.
     pub tree: bool,
-    /// `Ok(None)` for a point with no template (a command, a menu item).
-    pub template: Result<Option<Template>, Vec<String>>,
 }
 
 impl Point {
     pub fn from_value(v: &Value) -> Option<Point> {
         let kind = s(v, "kind")?.to_owned();
-        let errors: Vec<String> = v
-            .get("errors")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let per_session = matches!(
-            kind.as_str(),
-            kind::BADGES | kind::CARD_FOOTERS | kind::DECORATIONS
-        );
-        let template = if !errors.is_empty() {
-            Err(errors)
-        } else {
-            match v.get("view").filter(|t| !t.is_null()) {
-                None => Ok(None),
-                Some(t) => vorn_view::parse_value(
-                    t,
-                    Options {
-                        session_row: per_session,
-                    },
-                )
-                .map(Some)
-                .map_err(|e| e.iter().map(ToString::to_string).collect()),
-            }
-        };
         let size = v
             .get("size")
             .and_then(Value::as_array)
@@ -113,7 +120,6 @@ impl Point {
             rows: text("rows"),
             deny: text("deny"),
             tree: v.get("tree").and_then(Value::as_bool) == Some(true),
-            template,
         })
     }
 
@@ -140,16 +146,9 @@ impl Point {
         format!("{} › {}", self.extension_name, title)
     }
 
-    /// The collections its template draws, and the rows a menu item or attention lists.
+    /// The rows a menu item or attention lists.
     pub fn collections(&self) -> Vec<String> {
-        let mut out: Vec<String> = match &self.template {
-            Ok(Some(t)) => t.collections.iter().map(|(n, _)| n.clone()).collect(),
-            _ => Vec::new(),
-        };
-        if let Some(r) = self.rows.as_ref().filter(|r| !out.contains(r)) {
-            out.push(r.clone());
-        }
-        out
+        self.rows.iter().cloned().collect()
     }
 }
 
@@ -177,22 +176,10 @@ pub fn apply(rows: &mut Vec<Row>, op: &Value) {
 /// What the screens' extension controls do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PointAct {
-    /// A template's button or toggle; `holder` is the dialog or window it sits in.
-    Press {
-        extension: String,
-        press: Press,
-        holder: Option<Holder>,
-    },
     /// Asks before button `id` runs, or stops asking.
     Ask(Option<u64>),
-    /// Opens a template's more menu `id`, or closes it.
+    /// Opens a more menu `id`, or closes it.
     More(Option<u64>),
-    /// A one-line field's Return calls `call` with what it holds.
-    Field {
-        extension: String,
-        call: String,
-        row: Option<String>,
-    },
     /// Shows the settings page of point `key`.
     Settings(String),
     /// Chooses a command, menu item or launcher; `args` is the menu's context.
@@ -237,14 +224,7 @@ pub enum PointAct {
     },
 }
 
-/// The dialog or window a template is drawn in.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Holder {
-    Dialog,
-    Window(String),
-}
-
-/// Every contribution, the rows its templates draw, and what is open.
+/// Every contribution, the trees and rows they draw, and what is open.
 #[derive(Debug, Default)]
 pub struct Points {
     pub all: Vec<Point>,
@@ -263,7 +243,7 @@ pub struct Points {
     pub windows: BTreeSet<String>,
     /// The button asking before it runs.
     pub asking: Option<u64>,
-    /// The template more menu open.
+    /// The more menu open.
     pub more: Option<u64>,
     /// Built-in extensions: `{id, name, description, on}`.
     pub builtins: Vec<Value>,
@@ -318,7 +298,7 @@ impl Points {
             .find(|p| p.extension == extension && p.kind == kind && p.id == id)
     }
 
-    /// An extension's rows, as its templates read them.
+    /// An extension's rows.
     pub fn rows_of(&self, extension: &str) -> &BTreeMap<String, Vec<Row>> {
         self.rows.get(extension).unwrap_or(&NONE)
     }
@@ -484,7 +464,7 @@ impl Points {
         self.stale_trees.extend(keys);
     }
 
-    /// A fresh list: rows of collections no template draws any more go.
+    /// A fresh list: rows of extensions no longer listed go.
     pub fn listed(&mut self, list: &[Value]) {
         self.all = list.iter().filter_map(Point::from_value).collect();
         self.loaded = true;
@@ -562,17 +542,6 @@ impl Points {
             .map(Point::key)
             .collect()
     }
-
-    /// The row of `session` in the first collection of `p`'s template, for a per-session place.
-    pub fn session_row<'a>(&'a self, p: &Point, session: &str) -> Option<&'a Row> {
-        let Ok(Some(t)) = &p.template else {
-            return None;
-        };
-        self.rows_of(&p.extension)
-            .get(t.first()?)?
-            .iter()
-            .find(|r| r.id == session)
-    }
 }
 
 /// Whether key `spec` (`Mod+Shift+W`) is the key pressed: `code` with modifiers `m`.
@@ -636,19 +605,6 @@ pub fn tree_render_params(p: &Point, cells: bool) -> Value {
     })
 }
 
-/// What a press asks of vornd: `extension:call`'s params, when it calls.
-pub fn call_params(extension: &str, press: &Press) -> Option<Value> {
-    let action = press.call.as_ref()?;
-    let mut args = json!({});
-    if let Some(id) = &press.row {
-        args["id"] = json!(id);
-    }
-    if let Some(v) = press.value {
-        args["value"] = json!(v);
-    }
-    Some(json!({ "id": extension, "action": action, "args": args }))
-}
-
 /// A choice's call: a command, menu item or launcher with its context.
 pub fn choose_params(p: &Point, args: &str) -> Option<Value> {
     let action = p.call.as_ref()?;
@@ -700,24 +656,18 @@ pub enum Request {
 mod tests {
     use super::*;
 
-    fn point(kind: &str, view: Value) -> Value {
+    fn point(kind: &str) -> Value {
         json!({ "extension": "x", "extensionName": "X", "kind": kind, "id": "p",
-                "title": "P", "view": view, "errors": [] })
-    }
-
-    fn template() -> Value {
-        json!({ "schema": "vorn:view@1",
-                "rows": { "items": { "name": "string" } },
-                "view": { "list": { "rows": "items", "item": { "text": { "value": "{row.name}" } } } } })
+                "title": "P", "rows": "items", "call": "run" })
     }
 
     #[test]
     fn rows_follow_their_ops_in_place_and_raise_windows_on_new_ones() {
         let mut pts = Points::default();
-        let mut w = point(kind::WINDOWS, template());
+        let mut w = point(kind::WINDOWS);
         w["raise"] = json!("items");
-        pts.listed(&[point(kind::SIDEBAR, template()), w]);
-        assert!(pts.all[0].template.as_ref().is_ok_and(Option::is_some));
+        w["id"] = json!("w");
+        pts.listed(&[point(kind::MENUS), w]);
         assert_eq!(pts.to_ask(), [("x".to_owned(), "items".to_owned())]);
         assert!(pts.to_ask().is_empty());
         pts.fill("x", "items", Some(&[json!({ "id": "a", "name": "A" })]));
@@ -729,7 +679,7 @@ mod tests {
                 json!({ "op": "upsert", "row": { "id": "a", "name": "A2" } }),
             ],
         );
-        assert_eq!(raised, ["x/windows/p"]);
+        assert_eq!(raised, ["x/windows/w"]);
         let rows = &pts.rows_of("x")["items"];
         assert_eq!(
             rows.iter().map(|r| r.text("name")).collect::<Vec<_>>(),
@@ -745,7 +695,7 @@ mod tests {
     #[test]
     fn an_answer_older_than_a_change_is_asked_again() {
         let mut pts = Points::default();
-        pts.listed(&[point(kind::SIDEBAR, template())]);
+        pts.listed(&[point(kind::MENUS)]);
         assert_eq!(pts.to_ask().len(), 1);
         let row = json!({ "op": "upsert", "row": { "id": "a", "name": "A" } });
         pts.changed("x", "items", &[row]);
@@ -757,12 +707,10 @@ mod tests {
     }
 
     #[test]
-    fn a_template_with_errors_keeps_them_to_show() {
-        let mut v = point(kind::SIDEBAR, Value::Null);
-        v["errors"] = json!(["views/a.kdl:2:1: unknown node 'buton'; did you mean 'button'?"]);
-        let p = Point::from_value(&v).expect("a point");
-        assert_eq!(p.template.as_ref().unwrap_err().len(), 1);
+    fn a_point_is_named_by_its_extension_and_title() {
+        let p = Point::from_value(&point(kind::SIDEBAR)).expect("a point");
         assert_eq!(p.place(), "X › P");
+        assert_eq!(p.key(), "x/sidebar/p");
     }
 
     #[test]
@@ -781,18 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn presses_call_with_the_row_and_the_toggles_value() {
-        let press = Press {
-            call: Some("keep".into()),
-            row: Some("r1".into()),
-            value: Some(true),
-            ..Press::default()
-        };
-        assert_eq!(
-            call_params("x", &press),
-            Some(json!({ "id": "x", "action": "keep", "args": { "id": "r1", "value": true } }))
-        );
-        assert_eq!(call_params("x", &Press::default()), None);
+    fn an_answer_says_what_to_open_and_toast() {
         assert_eq!(
             answered(&json!({ "open": "confirm", "toast": "Done" })),
             (Some("confirm".into()), Some("Done".into()))
