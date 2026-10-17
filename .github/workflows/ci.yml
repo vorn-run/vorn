@@ -102,9 +102,10 @@ jobs:
       - name: Build the web client
         run: yarn build:web
 
-      - name: Build vornd and vorn-sessiond
+      # The vorn command beside vornd compiles the example extensions' components when they link.
+      - name: Build vornd, vorn-sessiond and vorn
         working-directory: packages/core
-        run: cargo build --locked --profile ci -p vornd -p vorn-sessiond
+        run: cargo build --locked --profile ci -p vornd -p vorn-sessiond -p vorn-cli
 
       - name: Chromium
         run: yarn playwright-core install --with-deps chromium

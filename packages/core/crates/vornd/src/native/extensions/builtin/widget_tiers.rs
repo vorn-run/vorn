@@ -39,7 +39,7 @@ impl World for Core {
 }
 
 fn rss_mb() -> f64 {
-    let out = std::process::Command::new("ps")
+    let out = vorn_spawn::command("ps")
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
         .expect("ps");
