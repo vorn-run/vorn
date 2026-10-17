@@ -4895,6 +4895,24 @@
               "name": "nodeConfig.condition"
             }
           }
+        ],
+        [
+          "parallel",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "concurrency",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
         ]
       ],
       "checks": [

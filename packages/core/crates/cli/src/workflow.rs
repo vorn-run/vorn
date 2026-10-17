@@ -455,7 +455,10 @@ async fn check(ctx: &mut Context<'_>, files: &[String]) -> ExitCode {
             }
             Ok(read) => {
                 for h in &read.hints {
-                    ctx.io.write_err(&format!("{file}:{}:{}: hint: {}\n", h.at.0, h.at.1, h.message));
+                    ctx.io.write_err(&format!(
+                        "{file}:{}:{}: hint: {}\n",
+                        h.at.0, h.at.1, h.message
+                    ));
                 }
                 if let Some((nodes, triggers, _)) = &known {
                     for w in &read.warnings {

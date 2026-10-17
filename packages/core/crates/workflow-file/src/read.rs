@@ -14,8 +14,7 @@ pub struct Read {
     /// A connection no connection here is called, kept by its name: the
     /// step that uses it fails until one is.
     pub warnings: Vec<FileError>,
-    /// A setting whose name is a step field's but for a letter: most likely
-    /// a typo, read as a setting all the same.
+    /// A setting named a letter away from a step field: likely a typo, read as a setting all the same.
     pub hints: Vec<FileError>,
 }
 
@@ -84,7 +83,10 @@ fn near(word: &str) -> Option<&'static str> {
     let swapped = |a: &str, b: &str| {
         let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
         let diff: Vec<usize> = (0..a.len()).filter(|&i| a.get(i) != b.get(i)).collect();
-        a.len() == b.len() && diff.len() == 2 && a[diff[0]] == b[diff[1]] && a[diff[1]] == b[diff[0]]
+        a.len() == b.len()
+            && diff.len() == 2
+            && a[diff[0]] == b[diff[1]]
+            && a[diff[1]] == b[diff[0]]
     };
     HINTED
         .into_iter()
@@ -181,7 +183,10 @@ impl Reader<'_> {
                         let (node, needs) = self.node(&t, true);
                         nodes.insert(0, (t.span().map(|s| s.start).or(at), node, needs));
                     }
-                    None => self.err(at, "trigger is a table: [trigger], then its type and settings"),
+                    None => self.err(
+                        at,
+                        "trigger is a table: [trigger], then its type and settings",
+                    ),
                 },
                 "step" => match tables_of(item) {
                     Some(steps) => {
@@ -253,7 +258,9 @@ impl Reader<'_> {
             let mut push = |source: &str, branch: Option<&String>, edge_id: Option<&String>| {
                 let Some(target) = target else { return };
                 let mut e = Map::new();
-                let id = edge_id.cloned().unwrap_or_else(|| default_id(source, target));
+                let id = edge_id
+                    .cloned()
+                    .unwrap_or_else(|| default_id(source, target));
                 e.insert("id".into(), Value::String(id));
                 e.insert("source".into(), Value::String(source.to_owned()));
                 e.insert("target".into(), Value::String(target.to_owned()));
@@ -418,7 +425,9 @@ impl Reader<'_> {
                 Some(Ok(need)) => out.push(need),
                 Some(Err(bad)) => self.err(
                     here,
-                    format!("needs names steps, as \"fetch\" or \"check:true\"; `{bad}` is not one"),
+                    format!(
+                        "needs names steps, as \"fetch\" or \"check:true\"; `{bad}` is not one"
+                    ),
                 ),
                 None => self.err(here, "needs names steps by their id, as strings"),
             }
@@ -434,8 +443,7 @@ impl Reader<'_> {
         }
     }
 
-    /// An item as JSON. `config` marks a step's settings, where tags name
-    /// a connection or a path in the project.
+    /// An item as JSON; `config` marks a step's settings, where tags name connections and paths.
     fn value(&mut self, item: &Item, config: bool) -> Value {
         match item {
             Item::None => Value::Null,
@@ -521,7 +529,10 @@ impl Reader<'_> {
                         Value::String(name)
                     }
                     _ => {
-                        self.warn(at, format!("more than one connection here is called {name}"));
+                        self.warn(
+                            at,
+                            format!("more than one connection here is called {name}"),
+                        );
                         Value::String(name)
                     }
                 }

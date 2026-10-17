@@ -65,16 +65,28 @@ fn a_workflow_reads_back_as_it_was_written() {
 #[test]
 fn a_step_after_the_one_before_says_nothing_and_a_branch_says_where_from() {
     let text = write(&sample(), &none());
-    assert!(text.starts_with("name = \"Review a pull request\"\n"), "{text}");
-    assert!(text.contains("\n[trigger]\nid = \"start\"\ntype = \"manual\"\n"), "{text}");
-    assert!(text.contains("\n[[trigger.inputs]]\nkey = \"pr\"\n"), "{text}");
+    assert!(
+        text.starts_with("name = \"Review a pull request\"\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n[trigger]\nid = \"start\"\ntype = \"manual\"\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n[[trigger.inputs]]\nkey = \"pr\"\n"),
+        "{text}"
+    );
     assert!(
         text.contains("\n[[step]]\nid = \"fetch\"\ntype = \"script\"\nlabel = \"Fetch\"\nslug = \"fetch\"\nx = 0\ny = 110.5\nscriptType"),
         "{text}"
     );
     assert!(text.contains("needs = [\"big:true#e3\"]"), "{text}");
     assert!(text.contains("needs = [\"big:false\"]"), "{text}");
-    assert!(text.contains("prompt = \"\"\"\nReview \"this\"\n{{steps.fetch.output}}\n\"\"\""), "{text}");
+    assert!(
+        text.contains("prompt = \"\"\"\nReview \"this\"\n{{steps.fetch.output}}\n\"\"\""),
+        "{text}"
+    );
     assert!(!text.contains("lastRunAt"), "{text}");
 }
 
@@ -85,8 +97,14 @@ fn a_script_with_backslashes_is_written_literally() {
         { "id": "t", "type": "script", "config": { "scriptContent": "printf \"%s\\n\" it" } }
     ], "edges": [{ "id": "s-t", "source": "s", "target": "t" }] });
     let text = write(&def, &none());
-    assert!(text.contains("scriptContent = '''\ngrep -E '^a' \\\n  file.txt\n'''"), "{text}");
-    assert!(text.contains("scriptContent = 'printf \"%s\\n\" it'"), "{text}");
+    assert!(
+        text.contains("scriptContent = '''\ngrep -E '^a' \\\n  file.txt\n'''"),
+        "{text}"
+    );
+    assert!(
+        text.contains("scriptContent = 'printf \"%s\\n\" it'"),
+        "{text}"
+    );
     assert_eq!(back(&def, &none()), def);
 }
 
@@ -95,11 +113,16 @@ fn edges_keep_their_order_and_odd_edges_are_written_whole() {
     let mut def = sample();
     let edges = def["edges"].as_array_mut().unwrap();
     edges.reverse();
-    edges.push(json!({ "id": "x y", "source": "fetch", "target": "skip", "weight": 2, "from": "odd" }));
+    edges.push(
+        json!({ "id": "x y", "source": "fetch", "target": "skip", "weight": 2, "from": "odd" }),
+    );
     edges.push(json!({ "source": "skip", "target": "body" }));
     let text = write(&def, &none());
     assert!(text.contains("edgeOrder = ["), "{text}");
-    assert!(text.contains("[[edge]]\nfrom = \"skip\"\nto = \"body\""), "{text}");
+    assert!(
+        text.contains("[[edge]]\nfrom = \"skip\"\nto = \"body\""),
+        "{text}"
+    );
     assert!(text.contains("\"@from\" = \"odd\""), "{text}");
     assert_eq!(back(&def, &none()), stored(def));
 }
@@ -114,8 +137,14 @@ fn what_toml_has_no_word_for_still_reads_back() {
     ], "edges": [] });
     let text = write(&def, &none());
     assert!(text.contains("value = { \"@json\" = \"null\" }"), "{text}");
-    assert!(text.contains("\"@config\" = { \"@json\" = \"\" }"), "{text}");
-    assert!(!text.contains("[trigger]"), "a trigger whose settings say type is a step: {text}");
+    assert!(
+        text.contains("\"@config\" = { \"@json\" = \"\" }"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("[trigger]"),
+        "a trigger whose settings say type is a step: {text}"
+    );
     assert_eq!(back(&def, &none()), def);
 }
 
@@ -142,9 +171,15 @@ fn connections_go_by_name_and_paths_by_their_place_in_the_project() {
     );
     // Two connections share the name: the id stays, so nothing is lost.
     assert!(text.contains("connectionId = \"c-2\""), "{text}");
-    assert!(text.contains("projectPath = { \"@project\" = \".\" }"), "{text}");
+    assert!(
+        text.contains("projectPath = { \"@project\" = \".\" }"),
+        "{text}"
+    );
     assert!(text.contains("cwd = { \"@project\" = \"src\" }"), "{text}");
-    assert!(text.contains("projectName = { \"@project-name\" = \"app\" }"), "{text}");
+    assert!(
+        text.contains("projectName = { \"@project-name\" = \"app\" }"),
+        "{text}"
+    );
     assert_eq!(back(&def, &here), def);
 
     // The same file on another machine, in another place, with its own connection of that name.
@@ -266,21 +301,33 @@ fn a_file_written_by_hand_keeps_its_layout_where_nothing_changed() {
     changed["nodes"][1]["config"]["scriptContent"] = json!("echo bye");
     let updated = update(text, &changed, &none());
     assert!(updated.contains("type = \"manual\" # by hand"), "{updated}");
-    assert!(updated.contains("headers = { a = 1 }   # inline, as I like it"), "{updated}");
-    assert!(updated.contains("scriptContent = \"echo bye\""), "{updated}");
+    assert!(
+        updated.contains("headers = { a = 1 }   # inline, as I like it"),
+        "{updated}"
+    );
+    assert!(
+        updated.contains("scriptContent = \"echo bye\""),
+        "{updated}"
+    );
     assert_eq!(read(&updated, &none()).unwrap().workflow, changed);
 }
 
 #[test]
 fn an_editor_edit_and_a_file_edit_meet_and_the_file_is_written_with_both() {
     let base = sample();
-    let file_text = write(&base, &none()).replace("label = \"Big?\"", "# Asked of every diff.\nlabel = \"Is it big?\"");
+    let file_text = write(&base, &none()).replace(
+        "label = \"Big?\"",
+        "# Asked of every diff.\nlabel = \"Is it big?\"",
+    );
     let theirs = read(&file_text, &none()).unwrap().workflow;
     let mut ours = stored(base.clone());
     ours["nodes"][6]["config"]["scriptContent"] = json!("echo {{loop.item.name}}");
     let met = meet(&stored(base), &ours, &theirs);
     assert_eq!(met["nodes"][2]["label"], "Is it big?");
-    assert_eq!(met["nodes"][6]["config"]["scriptContent"], "echo {{loop.item.name}}");
+    assert_eq!(
+        met["nodes"][6]["config"]["scriptContent"],
+        "echo {{loop.item.name}}"
+    );
     let written = update(&file_text, &met, &none());
     assert!(written.contains("# Asked of every diff."), "{written}");
     assert_eq!(read(&written, &none()).unwrap().workflow, met);

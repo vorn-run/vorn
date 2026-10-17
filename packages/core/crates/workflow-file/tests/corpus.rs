@@ -95,3 +95,60 @@ fn a_folder_of_ones_own_workflows_reads_back_unchanged() {
         assert_eq!(back.workflow, without_runtime(wf), "{:?}", entry.path());
     }
 }
+
+/// The workflows Vorn and its examples ship, and the one the docs show, each
+/// read as written and written back the same.
+#[test]
+fn every_shipped_and_documented_workflow_file_reads() {
+    let mut files: Vec<(String, String)> = Vec::new();
+    for dir in [
+        "packages/core/crates/workflows/workflows",
+        "examples/extensions/shout/workflows",
+    ] {
+        for entry in std::fs::read_dir(repo(dir)).unwrap().flatten() {
+            let path = entry.path();
+            assert_eq!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("toml"),
+                "{path:?}"
+            );
+            files.push((
+                path.display().to_string(),
+                std::fs::read_to_string(&path).unwrap(),
+            ));
+        }
+    }
+    let docs = std::fs::read_to_string(repo("docs/workflows.md")).unwrap();
+    let example = docs
+        .split("```toml\n")
+        .nth(1)
+        .and_then(|rest| rest.split("```").next())
+        .unwrap();
+    files.push(("docs/workflows.md".to_owned(), example.to_owned()));
+    assert!(files.len() >= 4, "{files:?}");
+    let b = Bindings::default();
+    for (name, text) in files {
+        let read = read(&text, &b).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert!(read.hints.is_empty(), "{name}: {:?}", read.hints);
+        let wf = read.workflow;
+        assert!(
+            wf["nodes"].as_array().is_some_and(|n| n.len() >= 2),
+            "{name}"
+        );
+        assert_eq!(update(&text, &wf, &b), text, "{name}");
+        let again = read_back(&write(&wf, &b));
+        assert_eq!(again, wf, "{name}");
+    }
+    let wf = read(example, &b).unwrap().workflow;
+    let each = &wf["nodes"][3];
+    assert_eq!(each["config"]["parallel"], true);
+    assert_eq!(each["config"]["concurrency"], 3);
+    assert_eq!(
+        wf["edges"][2],
+        serde_json::json!({ "id": "any-each", "source": "any", "target": "each", "conditionBranch": "true" })
+    );
+}
+
+fn read_back(text: &str) -> Value {
+    read(text, &Bindings::default()).unwrap().workflow
+}

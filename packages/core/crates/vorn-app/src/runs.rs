@@ -95,8 +95,7 @@ pub fn states(run: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
-/// The workflow node `id` among `nodes`; for one item of a loop run in
-/// parallel (`<step>#<n>`), the step it ran.
+/// The workflow node `id` among `nodes`; for a parallel loop's item (`<step>#<n>`), its step.
 pub fn node<'a>(nodes: &'a Value, id: &str) -> Option<&'a Value> {
     let list = nodes.as_array()?;
     let find = |id: &str| list.iter().find(|n| s(n, "id") == Some(id));
@@ -109,15 +108,16 @@ pub fn item_of(id: &str) -> Option<(&str, u32)> {
     Some((step, n.parse().ok()?))
 }
 
-/// `nodeLabel`: the node's label, else its id's first eight characters;
-/// a parallel loop's item says which.
+/// `nodeLabel`: the node's label, else its id's first eight characters; an item says which.
 pub fn node_label(node: Option<&Value>, id: &str) -> String {
     let label = node
         .and_then(|n| s(n, "label"))
         .filter(|l| !l.is_empty())
         .map_or_else(|| id.chars().take(8).collect(), str::to_owned);
     match (node, item_of(id)) {
-        (Some(n), Some((step, k))) if s(n, "id") == Some(step) => format!("{label} \u{b7} item {k}"),
+        (Some(n), Some((step, k))) if s(n, "id") == Some(step) => {
+            format!("{label} \u{b7} item {k}")
+        }
         _ => label,
     }
 }

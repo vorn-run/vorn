@@ -186,8 +186,7 @@ pub fn step_outputs(execution: &WorkflowExecution, workflow: &Workflow) -> StepO
     outputs
 }
 
-/// What a script step printed, when all of it is one JSON value: what
-/// `{{steps.<slug>.json.<path>}}` reads. Colours a terminal adds are dropped first.
+/// A script's printed output when all of it is one JSON value (colours dropped): `{{steps.<slug>.json.*}}`.
 pub fn printed_json(node: &Node, ns: &NodeExecutionState) -> Option<Value> {
     if node.kind.step() != Some("script") {
         return None;
@@ -1005,9 +1004,15 @@ mod tests {
         );
         let mut run = run_of(&["f", "t", "c", "a"]);
         let printed = [
-            ("f", "{\"items\": [{\"name\": \"a\"}, {\"name\": \"b\"}]}\r\n"),
+            (
+                "f",
+                "{\"items\": [{\"name\": \"a\"}, {\"name\": \"b\"}]}\r\n",
+            ),
             ("t", "not json {\"items\": []}"),
-            ("c", "\x1b[1;39m{\x1b[0m\n  \x1b[34;1m\"n\"\x1b[0m: 1\n}\x1b]0;title\x07"),
+            (
+                "c",
+                "\x1b[1;39m{\x1b[0m\n  \x1b[34;1m\"n\"\x1b[0m: 1\n}\x1b]0;title\x07",
+            ),
             ("a", "{\"x\": 1}"),
         ];
         for (id, out) in printed {
@@ -1021,8 +1026,15 @@ mod tests {
         assert_eq!(out["fetch"]["output"], printed[0].1);
         assert!(out["text"].get("json").is_none());
         assert_eq!(out["coloured"]["json"], json!({ "n": 1 }));
-        assert!(out["agent"].get("json").is_none(), "only a script's output is read as JSON");
-        let resolved = resolve("{{steps.fetch.json.items.0.name}} of {{steps.fetch.json.items.length}}", None, Some(&out));
+        assert!(
+            out["agent"].get("json").is_none(),
+            "only a script's output is read as JSON"
+        );
+        let resolved = resolve(
+            "{{steps.fetch.json.items.0.name}} of {{steps.fetch.json.items.length}}",
+            None,
+            Some(&out),
+        );
         assert_eq!(resolved, "a of 2");
     }
 

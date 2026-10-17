@@ -2964,8 +2964,20 @@ fn loop_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
                 .map_or_else(String::new, |v| wf::text_of(Some(v)));
             out.push(block(vec![
                 label("At most at once"),
-                input(s, bind(Some(id), "config.concurrency", Conv::Count, false), &limit, "4", false, Wash::Quiet, 13.0, 12.0),
-                help("How many items run at the same time. Up to 16; blank is 4.", 6.0),
+                input(
+                    s,
+                    bind(Some(id), "config.concurrency", Conv::Count, false),
+                    &limit,
+                    "4",
+                    false,
+                    Wash::Quiet,
+                    13.0,
+                    12.0,
+                ),
+                help(
+                    "How many items run at the same time. Up to 16; blank is 4.",
+                    6.0,
+                ),
             ]));
         }
     } else {

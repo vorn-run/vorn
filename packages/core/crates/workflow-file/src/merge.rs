@@ -1,13 +1,4 @@
-//! A workflow's changes written into the file it came from: whatever did
-//! not change keeps its text as the person left it, comments and layout
-//! included; what changed is written fresh in its place; what is new comes
-//! where the workflow has it.
-//!
-//! Each key of the old file is matched to the new one by its name, and each
-//! `[[step]]` (or `[[edge]]`, or any list of tables) by its `id`, else its
-//! place. A key is kept as it was when it says the same as before, judged
-//! by writing both from the workflow they read as; a table that changed
-//! keeps the keys that did not, and the comments above them.
+//! A workflow's changes written into its file: keys and `[[step]]`s (by `id`) that say the same keep their text and comments.
 
 use serde_json::{Map, Value};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
@@ -42,8 +33,7 @@ pub fn update(old: &str, definition: &Value, bindings: &Bindings<'_>) -> String 
     doc.to_string()
 }
 
-/// New table `n`, kept as old table `o` where it says what `c` (`o` as
-/// written fresh) says.
+/// New table `n`, kept as old table `o` where it says what `c` (`o` written fresh) says.
 fn merge(o: &Table, c: &Table, n: &Table) -> Table {
     let mut out = Table::new();
     out.set_implicit(n.is_implicit());
@@ -102,8 +92,7 @@ fn id_of(t: &Table) -> Option<&str> {
     t.get("id").and_then(Item::as_str)
 }
 
-/// The table of `list` with id `id`, when exactly one has it; else, for a
-/// table without one, the table at its place that has none either.
+/// The one table of `list` with `id`; without an id, the id-less table at the same place.
 fn find<'a>(list: &'a ArrayOfTables, at: usize, id: Option<&str>) -> Option<&'a Table> {
     match id {
         Some(id) => {
@@ -157,8 +146,7 @@ fn plain_value(v: &toml_edit::Value) -> Value {
     }
 }
 
-/// Every table placed in the order it is reached, so tables kept from the
-/// old file and written fresh come out in the new file's order.
+/// Every table placed in the order it is reached, so old and fresh tables print in the new order.
 fn renumber(table: &mut Table, next: &mut isize) {
     table.set_position(Some(*next));
     *next += 1;

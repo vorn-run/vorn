@@ -571,7 +571,11 @@ async fn a_loop_in_parallel_cannot_stop_on_a_condition() {
     let engine = common::engine(fake.clone());
     engine.run_scheduled("fan", None).await;
     let run = finished(&fake, 1).await.remove(0);
-    let each = run.node_states.iter().find(|s| s.node_id == "each").unwrap();
+    let each = run
+        .node_states
+        .iter()
+        .find(|s| s.node_id == "each")
+        .unwrap();
     assert_eq!(each.status.0, "error");
     assert!(each
         .error

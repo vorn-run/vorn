@@ -211,8 +211,7 @@ fn table_shaped(v: &Value) -> bool {
 }
 
 impl Writer<'_> {
-    /// Writes the trigger and steps into `out`; the `edgeOrder` list when
-    /// the edges are stored out of the order the steps give them.
+    /// Writes the trigger and steps; returns `edgeOrder` when edges are stored out of step order.
     fn graph(&self, out: &mut String, nodes: &[Value], edges: &[Value]) -> Option<String> {
         let ids: Vec<Option<&str>> = nodes
             .iter()
@@ -270,8 +269,7 @@ impl Writer<'_> {
         Some(format!("[{}]", list.join(", ")))
     }
 
-    /// One node: `[trigger]` for a first node that is a trigger with a
-    /// type, else `[[step]]`; its own fields, then its settings.
+    /// One node as `[trigger]` (a typed trigger first) or `[[step]]`: its fields, then its settings.
     fn node(&self, out: &mut String, node: &Value, first: bool, needs: Option<Vec<&str>>) {
         let empty = Map::new();
         let map = node.as_object().unwrap_or(&empty);
@@ -364,9 +362,7 @@ impl Writer<'_> {
         t.write(self, out, &["edge".to_owned()]);
     }
 
-    /// A value on one line, or across lines for text that has several.
-    /// `config` marks a step's settings, whose connections and paths are
-    /// written by name.
+    /// A value written inline; `config` marks a step's settings, whose connections and paths go by name.
     fn inline(&self, key: &str, value: &Value, config: bool) -> String {
         match value {
             Value::Null => json_tag("null"),
@@ -450,8 +446,7 @@ fn position(p: &Value) -> Option<(String, String)> {
     Some((x, y))
 }
 
-/// A number as TOML writes it, a float keeping its point; `None` for an
-/// integer past TOML's 64-bit signed range.
+/// A number as TOML writes it; `None` past TOML's 64-bit signed integers.
 fn number(n: &Number) -> Option<String> {
     if let Some(i) = n.as_i64() {
         return Some(i.to_string());
@@ -485,8 +480,7 @@ fn is_control(c: char) -> bool {
     (c < ' ' && c != '\t') || c == '\u{7f}'
 }
 
-/// A string: on one line, or across lines when it has several; literal
-/// (`'…'`) when that spares its backslashes or quotes their escapes.
+/// A string, across lines when it has several, literal when that spares escapes.
 pub(crate) fn string(s: &str) -> String {
     if !s.contains('\n') {
         let worth = s.contains('\\') || s.contains('"');

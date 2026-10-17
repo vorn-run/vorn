@@ -1,12 +1,4 @@
-//! A `forEach` loop run in parallel (`parallel = true`): every item gets a
-//! pass of the loop's body, at most `concurrency` passes at once. Each pass
-//! runs the body's steps under ids of their own, `<step>#<n>`, so the run
-//! records, and its view shows, each item's steps beside the others'.
-//!
-//! A failing item stops new items from starting; those already running
-//! finish. Results are kept per item, in the list's order, whatever order
-//! the items finished in; afterwards each body step holds what the last
-//! item left, as after a loop run one item at a time.
+//! A `forEach` loop with `parallel = true`: each item's pass runs the body as steps of its own, `<step>#<n>`, at most `concurrency` at once.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,8 +21,7 @@ pub const DEFAULT_CONCURRENCY: usize = 4;
 /// The most passes at once, whatever a loop asks for.
 pub const MAX_CONCURRENCY: usize = 16;
 
-/// How many passes a loop runs at once: its `concurrency`, from 1 to
-/// [`MAX_CONCURRENCY`], else [`DEFAULT_CONCURRENCY`].
+/// How many passes a loop runs at once: its `concurrency`, capped, else the default.
 pub fn concurrency(config: &Value) -> usize {
     match graph::js_number(config.get("concurrency")) {
         Some(n) if n.is_finite() && n >= 1.0 => (n.floor() as usize).min(MAX_CONCURRENCY),
@@ -58,8 +49,7 @@ enum Pass {
     },
 }
 
-/// The workflow as item `number`'s pass sees it: the body's steps under
-/// that item's ids, so the outputs it reads are its own.
+/// The workflow as item `number`'s pass sees it: the body's steps under that item's ids.
 fn item_workflow(workflow: &Workflow, members: &HashSet<&str>, number: u32) -> Workflow {
     let rename = |id: &mut String| {
         if members.contains(id.as_str()) {
@@ -127,9 +117,17 @@ impl<H: Host> Engine<H> {
                     let number = u32::try_from(index + 1).unwrap_or(u32::MAX);
                     let wf = item_workflow(workflow, members, number);
                     let pass = self
-                        .item_pass(node, &wf, run, context, active, body, fed, item, number, count)
+                        .item_pass(
+                            node, &wf, run, context, active, body, fed, item, number, count,
+                        )
                         .await;
-                    if matches!(&pass, Pass::Ran { failed: Some(_), .. }) {
+                    if matches!(
+                        &pass,
+                        Pass::Ran {
+                            failed: Some(_),
+                            ..
+                        }
+                    ) {
                         stop.store(true, Ordering::Relaxed);
                     }
                     (index, pass)
