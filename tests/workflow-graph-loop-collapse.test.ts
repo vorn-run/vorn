@@ -92,7 +92,11 @@ describe('loopBodyGraph', () => {
 
 describe('loopStructureError', () => {
   const check = (nodes: WorkflowNode[], edges: WorkflowEdge[]) =>
-    loopStructureError(nodes, edges, nodes.find((n) => n.type === 'loop')!)
+    loopStructureError(
+      nodes,
+      edges,
+      nodes.find((n) => n.type === 'loop')!
+    )
 
   it('accepts a branching body', () => {
     const nodes = [loop(['c', 'y', 'n']), node('c', 'condition'), node('y'), node('n')]

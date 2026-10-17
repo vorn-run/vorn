@@ -895,13 +895,7 @@ export interface WorkflowNodePosition {
  * future exhaustive switch to carry an untestable branch.
  */
 export type WorkflowInputType =
-  | 'text'
-  | 'textarea'
-  | 'number'
-  | 'select'
-  | 'boolean'
-  | 'project'
-  | 'branch'
+  'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'project' | 'branch'
 
 /**
  * One parameter the user fills in when starting a manual run. Declared on the
@@ -1075,12 +1069,7 @@ export interface ScriptConfig {
 }
 
 export type ConditionOperator =
-  | 'equals'
-  | 'notEquals'
-  | 'contains'
-  | 'notContains'
-  | 'isEmpty'
-  | 'isNotEmpty'
+  'equals' | 'notEquals' | 'contains' | 'notContains' | 'isEmpty' | 'isNotEmpty'
 
 export interface ConditionConfig {
   variable: string
@@ -1259,12 +1248,7 @@ export interface WorkflowEdge {
 
 // Execution tracking (runtime only)
 export type NodeExecutionStatus =
-  | 'pending'
-  | 'running'
-  | 'success'
-  | 'error'
-  | 'skipped'
-  | 'waiting'
+  'pending' | 'running' | 'success' | 'error' | 'skipped' | 'waiting'
 
 export interface NodeExecutionState {
   nodeId: string
@@ -2674,8 +2658,7 @@ export type ConnectorPackSource =
   | { kind: 'url'; url: string; sha256?: string }
 
 export type ConnectorPackResult =
-  | { ok: true; pack: InstalledConnectorPack }
-  | { ok: false; error: string }
+  { ok: true; pack: InstalledConnectorPack } | { ok: false; error: string }
 
 /** What a verified pack says about itself, before any of it is kept. */
 export interface ConnectorPackSummary {
@@ -2702,8 +2685,7 @@ export interface ConnectorPackSummary {
 }
 
 export type ConnectorPackPreview =
-  | { ok: true; preview: ConnectorPackSummary }
-  | { ok: false; error: string }
+  { ok: true; preview: ConnectorPackSummary } | { ok: false; error: string }
 
 /** `id` is the connector's once its manifest is read, and the source label until then. */
 export interface ConnectorInstallProgress {
@@ -2723,8 +2705,7 @@ export interface SdkProbeRequest {
 }
 
 export type SdkProbeResult =
-  | { ok: true; manifest: SdkConnectorManifest }
-  | { ok: false; error: string }
+  { ok: true; manifest: SdkConnectorManifest } | { ok: false; error: string }
 
 export interface PermissionSuggestion {
   type: 'addRules' | 'setMode' | string
@@ -3118,8 +3099,7 @@ export type DeviceClaimFailure =
   | { reason: 'boot-failed'; message: string }
 
 export type DeviceClaimResult =
-  | { ok: true; udid: string; name: string; booted: boolean }
-  | ({ ok: false } & DeviceClaimFailure)
+  { ok: true; udid: string; name: string; booted: boolean } | ({ ok: false } & DeviceClaimFailure)
 
 /** A point in **points**, the accessibility tree's units — never pixels. */
 export interface DevicePoint {
@@ -3194,10 +3174,7 @@ export interface DeviceChrome {
  * nothing outside `device-registry.ts` has to know idb's spelling.
  */
 export type DeviceOrientation =
-  | 'portrait'
-  | 'portrait-upside-down'
-  | 'landscape-left'
-  | 'landscape-right'
+  'portrait' | 'portrait-upside-down' | 'landscape-left' | 'landscape-right'
 
 /**
  * One element of a screen as the agent sees it.

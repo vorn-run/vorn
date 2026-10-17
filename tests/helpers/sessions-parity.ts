@@ -180,8 +180,7 @@ export function outputWhole(
 export function withoutRecordedHeads<T extends { environment?: unknown }>(offered: T[]): T[] {
   return offered.map((one) => {
     const environment = one.environment as
-      | { head?: { recorded?: unknown; actual?: unknown } }
-      | undefined
+      { head?: { recorded?: unknown; actual?: unknown } } | undefined
     if (!environment?.head) return one
     const { recorded: _recorded, ...head } = environment.head
     return { ...one, environment: { ...environment, head } }

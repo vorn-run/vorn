@@ -30,9 +30,10 @@ const live = (over: Partial<ConnectorDefinition> = {}) =>
 
 describe('a live check, before it trusts anything else', () => {
   it('asks the connector whether it can sign in at all', async () => {
-    const preflight = vi.fn(
-      (): PreflightResult => ({ ok: false, message: 'Run `acme login` first' })
-    )
+    const preflight = vi.fn((): PreflightResult => ({
+      ok: false,
+      message: 'Run `acme login` first'
+    }))
     const findings = await live({ preflight })
 
     expect(preflight).toHaveBeenCalled()

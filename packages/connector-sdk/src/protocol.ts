@@ -41,12 +41,7 @@ export const PROTOCOL_ERROR_KINDS = [
 export type ProtocolErrorKind = (typeof PROTOCOL_ERROR_KINDS)[number]
 
 export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue }
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
 export interface VornHelloParams {
   protocols: number[]
