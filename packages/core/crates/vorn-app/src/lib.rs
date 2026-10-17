@@ -28,6 +28,7 @@ pub mod file_icons;
 pub mod gates;
 pub mod git;
 pub mod graph;
+pub mod flex;
 pub mod grid;
 pub mod headless;
 pub mod highlight;

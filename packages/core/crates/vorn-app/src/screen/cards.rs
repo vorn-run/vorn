@@ -6,6 +6,7 @@
 use super::chrome::{self, divider, draggable};
 use super::panes;
 use super::{c, ico, mod_label, truncate, white, Screen};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::act::{Act, Acts};
@@ -1292,10 +1293,127 @@ fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
     out
 }
 
+/// The grid's box: the flexible tree is measured against it.
+pub fn grid_id() -> Id {
+    Id::new("grid")
+}
+
+/// The flexible grid's divider of the split at `path`.
+pub fn flex_divider_id(path: crate::flex::Path) -> Id {
+    Id::new("flex-split").child(path)
+}
+
+/// One cell's card, a session's or a popped-out file's.
+fn cell_card(s: &Screen<'_>, cell: &Cell<'_>, n: usize) -> El {
+    match cell {
+        Cell::Session(i) => card(s, *i, n, &s.store.sessions[*i]),
+        Cell::Card(c) => super::side::editor_card(s, c),
+    }
+}
+
+/// The flexible grid's seam between two panes: a 1px rule with a 3px grab
+/// either side, lit while hovered or dragged; a double press evens the panes.
+fn flex_divider(s: &Screen<'_>, path: crate::flex::Path, dir: crate::flex::Dir) -> El {
+    let id = flex_divider_id(path);
+    let hot = if s.ui.pressed(id) {
+        1.0
+    } else {
+        s.ui.hover(id)
+    };
+    let side_by_side = dir == crate::flex::Dir::Row;
+    // Cells draw a tint as a box rule, and a colour as a bar: stay a tint there.
+    let lit = if s.ui.is_cells() {
+        white(0.18)
+    } else {
+        Rgba::hexa(look::BLUE_500, 0.4)
+    };
+    s.acts.double(id, Act::EqualizePanes);
+    let line = div()
+        .id(id)
+        .shrink0()
+        .sense(Sense::DRAG | Sense::DOUBLE)
+        .bg(white(0.06).mix(lit, hot))
+        .role(Role::Splitter, "Resize panes")
+        .vertical(side_by_side);
+    if side_by_side {
+        line.w(1.0).h_full().hit_slop(3.0, 0.0)
+    } else {
+        line.h(1.0).w_full().hit_slop(0.0, 3.0)
+    }
+}
+
+/// The flexible grid's node at `path`: a pane, or two beside a divider.
+/// Hidden panes give their room to the rest.
+fn flex_node(
+    s: &Screen<'_>,
+    node: &crate::flex::Node,
+    path: crate::flex::Path,
+    shown: &HashMap<&str, (usize, &Cell<'_>)>,
+) -> Option<El> {
+    use crate::flex::{Dir, Node};
+    match node {
+        Node::Leaf(id) => shown
+            .get(id.as_str())
+            .map(|(n, cell)| cell_card(s, cell, *n).grow().min_w0().min_h(0.0)),
+        Node::Split { dir, ratio, a, b } => {
+            let ea = flex_node(s, a, path << 1, shown);
+            let eb = flex_node(s, b, path << 1 | 1, shown);
+            let (ea, eb) = match (ea, eb) {
+                (Some(ea), Some(eb)) => (ea, eb),
+                (one, other) => return one.or(other),
+            };
+            let el = if *dir == Dir::Row {
+                div().row()
+            } else {
+                div().col()
+            };
+            Some(
+                el.id(Id::new("flex-box").child(path))
+                    .grow()
+                    .min_w0()
+                    .min_h(0.0)
+                    .child(ea.flex(*ratio))
+                    .child(flex_divider(s, path, *dir))
+                    .child(eb.flex(1.0 - *ratio)),
+            )
+        }
+    }
+}
+
+/// The Flexible grid: the workspace's split tree, every shown card in it.
+fn flex_grid(s: &Screen<'_>, cells: &[Cell<'_>], tree: &crate::flex::Node) -> Option<El> {
+    let shown: HashMap<&str, (usize, &Cell<'_>)> = cells
+        .iter()
+        .enumerate()
+        .map(|(n, cell)| {
+            let id = match cell {
+                Cell::Session(i) => s.store.sessions[*i].info.id.as_str(),
+                Cell::Card(c) => c,
+            };
+            (id, (n, cell))
+        })
+        .collect();
+    let body = flex_node(s, tree, crate::flex::ROOT, &shown)?;
+    let body = div()
+        .col()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
+        .role(Role::Grid, "Sessions")
+        .child(body);
+    Some(s.acts.context(body, grid_id(), Act::Open(MenuKind::Grid)))
+}
+
 pub(super) fn grid(s: &Screen<'_>) -> El {
     let cells = cells(s);
     if cells.is_empty() {
         return no_match();
+    }
+    let tree = (s.st.columns == -1)
+        .then(|| s.st.grids.get(s.store.workspace())?.tree.as_ref())
+        .flatten();
+    if let Some(el) = tree.and_then(|t| flex_grid(s, &cells, t)) {
+        return el;
     }
     let selected = s.st.selected.as_deref().and_then(|id| {
         cells.iter().position(|cell| match cell {
@@ -1305,14 +1423,13 @@ pub(super) fn grid(s: &Screen<'_>) -> El {
     });
     let (l, first, rows) = visible(cells.len(), selected, s.grid_size(), s.st.columns);
     let mut body = div().col().grow().min_h(0.0).role(Role::Grid, "Sessions");
-    let grid_id = Id::new("grid");
+    let grid_id = grid_id();
     for r in first..first + rows {
         let mut row = div().row().grow().min_h(0.0);
         for col in 0..l.cols {
             let n = r * l.cols + col;
             row = row.child(match cells.get(n) {
-                Some(Cell::Session(i)) => card(s, *i, n, &s.store.sessions[*i]).flex(1.0),
-                Some(Cell::Card(c)) => super::side::editor_card(s, c).flex(1.0),
+                Some(cell) => cell_card(s, cell, n).flex(1.0),
                 None => div().grow(),
             });
         }

@@ -4,6 +4,7 @@
 //! paints after layout.
 
 mod cards;
+pub use cards::{flex_divider_id, grid_id};
 mod chrome;
 pub use chrome::{DOCK, VIEWS, VIEW_ORDER};
 mod composer;

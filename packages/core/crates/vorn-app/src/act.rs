@@ -32,6 +32,8 @@ pub enum Act {
     Sort(Sort),
     Layout(LayoutMode),
     Columns(i32),
+    /// Every flexible pane back to an equal share.
+    EqualizePanes,
     /// The launcher, over the cards.
     NewSession,
     /// A session of the default agent in the active project at once, or

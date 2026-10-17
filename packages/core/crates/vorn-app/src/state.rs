@@ -461,8 +461,15 @@ pub struct State {
     pub ws_form: Option<WorkspaceForm>,
     pub filter: Filter,
     pub sort: Sort,
-    /// 0 for the automatic layout, -1 flexible, else that many columns.
+    /// 0 for the automatic layout, -1 flexible, else that many columns:
+    /// the active workspace's, from `grids`.
     pub columns: i32,
+    /// Each workspace's columns and flexible tree (`gridLayout`).
+    pub grids: std::collections::BTreeMap<String, crate::flex::Grid>,
+    /// The pane a new session splits in the flexible grid: the last selected one.
+    pub flex_anchor: Option<String>,
+    /// The flexible divider being dragged, until it is let go.
+    pub flex_drag: Option<crate::flex::Path>,
     pub layout: LayoutMode,
     pub menu: Option<Menu>,
     pub dialog: Option<Dialog>,
