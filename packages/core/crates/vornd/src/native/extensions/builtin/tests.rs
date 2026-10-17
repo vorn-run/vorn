@@ -546,8 +546,17 @@ async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
     until(|| !s.router.rows("vorn.worktrees", "idle").is_empty()).await;
     let idle = drawn("idle").await.unwrap().unwrap();
     let text = idle.to_string();
-    assert!(text.contains("keep:/p/.vorn-worktrees/old") && text.contains("old"), "{text}");
-    assert_eq!(tell("idle", "keep:/p/.vorn-worktrees/old").await.unwrap().unwrap(), Value::Null);
+    assert!(
+        text.contains("keep:/p/.vorn-worktrees/old") && text.contains("old"),
+        "{text}"
+    );
+    assert_eq!(
+        tell("idle", "keep:/p/.vorn-worktrees/old")
+            .await
+            .unwrap()
+            .unwrap(),
+        Value::Null
+    );
     assert!(s.router.rows("vorn.worktrees", "idle").is_empty());
 
     s.builtins
@@ -560,7 +569,12 @@ async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
         .unwrap()
         .unwrap();
     let dialog = drawn("confirm").await.unwrap().unwrap().to_string();
-    for said in ["Remove fix?", "Branch fix", "Its 1 running sessions are closed first.", "uncommitted changes"] {
+    for said in [
+        "Remove fix?",
+        "Branch fix",
+        "Its 1 running sessions are closed first.",
+        "uncommitted changes",
+    ] {
         assert!(dialog.contains(said), "{said} in {dialog}");
     }
     let cancelled = tell("confirm", "cancel").await.unwrap().unwrap();
@@ -576,5 +590,8 @@ async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
         .unwrap()
         .unwrap();
     let removed = tell("confirm", "confirm").await.unwrap().unwrap();
-    assert_eq!((removed["close"].clone(), removed["toast"].clone()), (json!(true), json!("Worktree removed")));
+    assert_eq!(
+        (removed["close"].clone(), removed["toast"].clone()),
+        (json!(true), json!("Worktree removed"))
+    );
 }

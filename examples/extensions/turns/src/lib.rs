@@ -219,6 +219,10 @@ impl Turns {
 mod draw {
     use super::*;
 
+    pub(super) fn row_of_signin(id: &str) -> Node {
+        line([button(format!("signin:{id}"), "Sign in").primary()]).py(4.0)
+    }
+
     pub fn finished(rows: &[Value]) -> Node {
         col(rows.iter().map(|f| {
             line([
@@ -232,12 +236,12 @@ mod draw {
     }
 
     pub fn badges(sessions: &[Value]) -> Node {
-        per_session(
-            sessions
-                .iter()
-                .filter(|r| n(r, "turns") > 0)
-                .map(|r| (s(r, "id"), badge(format!("{} done", n(r, "turns")), Tone::Neutral))),
-        )
+        per_session(sessions.iter().filter(|r| n(r, "turns") > 0).map(|r| {
+            (
+                s(r, "id"),
+                badge(format!("{} done", n(r, "turns")), Tone::Neutral),
+            )
+        }))
     }
 
     pub fn footers(sessions: &[Value]) -> Node {
@@ -307,8 +311,9 @@ mod draw {
         let accounts = account.iter().map(|a| {
             let id = s(a, "id");
             let mut row = entry(id, s(a, "name"));
+            // Under the name rather than beside it, so a phone's narrow page keeps the row's menu in view.
             if !on(a, "signed_in") {
-                row = row.actions([button(format!("signin:{id}"), "Sign in").primary()]);
+                row = row.child(row_of_signin(id));
             }
             row.more([button(format!("forget:{id}"), "Forget account")
                 .danger()
@@ -317,13 +322,9 @@ mod draw {
         Ok(col([
             section(
                 "Counting",
-                prefs.iter().map(|p| {
-                    toggle(
-                        format!("pref:{}", s(p, "id")),
-                        s(p, "label"),
-                        on(p, "on"),
-                    )
-                }),
+                prefs
+                    .iter()
+                    .map(|p| toggle(format!("pref:{}", s(p, "id")), s(p, "label"), on(p, "on"))),
             ),
             section(
                 "Account",
@@ -425,7 +426,12 @@ impl Extension for Turns {
             "prefs" => draw::settings(host)?,
             "turns" => draw::window(&host.rows(SESSIONS)?),
             "clear" => draw::dialog(),
-            other => return Err(Error::new("unknown-action", format!("Turns draws no {other}"))),
+            other => {
+                return Err(Error::new(
+                    "unknown-action",
+                    format!("Turns draws no {other}"),
+                ))
+            }
         })
     }
 

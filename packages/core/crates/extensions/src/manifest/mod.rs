@@ -1658,7 +1658,10 @@ fn read_point(
         ));
     }
     if tree && place == Place::Views {
-        return Err(("tree", "draws no main view; a main view is a template".into()));
+        return Err((
+            "tree",
+            "draws no main view; a main view is a template".into(),
+        ));
     }
     if tree && view.is_some() {
         return Err(("tree", "draws in place of a view; give one of them".into()));

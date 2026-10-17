@@ -51,16 +51,20 @@ fn changes(rows: &[Value], batch: &[Event]) -> Vec<Op> {
 
 /// Each agent's footer, once its first tool call is reported.
 fn footers(rows: &[Value]) -> Node {
-    per_session(rows.iter().filter(|r| r["tools"].as_u64() > Some(0)).map(|r| {
-        let said = format!("{} tool calls · last {}", r["tools"], s(r, "tool"));
-        let footer = row([
-            icon("wrench"),
-            text(said).style(TextStyle::Secondary).grow(),
-            text(s(r, "model")).style(TextStyle::Secondary),
-        ])
-        .gap(8.0);
-        (s(r, "id"), footer)
-    }))
+    per_session(
+        rows.iter()
+            .filter(|r| r["tools"].as_u64() > Some(0))
+            .map(|r| {
+                let said = format!("{} tool calls · last {}", r["tools"], s(r, "tool"));
+                let footer = row([
+                    icon("wrench"),
+                    text(said).style(TextStyle::Secondary).grow(),
+                    text(s(r, "model")).style(TextStyle::Secondary),
+                ])
+                .gap(8.0);
+                (s(r, "id"), footer)
+            }),
+    )
 }
 
 impl Extension for Footer {
@@ -108,21 +112,37 @@ mod tests {
         f.on_events(
             &mut h,
             vec![
-                event("session.created", json!({ "sessionId": "a", "agent": "acme", "model": "mini" })),
-                event("session.created", json!({ "sessionId": "s", "agent": "shell" })),
+                event(
+                    "session.created",
+                    json!({ "sessionId": "a", "agent": "acme", "model": "mini" }),
+                ),
+                event(
+                    "session.created",
+                    json!({ "sessionId": "s", "agent": "shell" }),
+                ),
             ],
         );
         assert_eq!(h.rows(SESSIONS).unwrap().len(), 1, "a shell has no footer");
         let drawn = f.render(&mut h, "tools", Surface::default()).unwrap();
         assert!(tree::for_session(&drawn, "a").is_none(), "no tool call yet");
-        let hook = |tool: &str| event("agent.hook", json!({ "sessionId": "a", "event": "PreToolUse", "tool": tool }));
+        let hook = |tool: &str| {
+            event(
+                "agent.hook",
+                json!({ "sessionId": "a", "event": "PreToolUse", "tool": tool }),
+            )
+        };
         f.on_events(&mut h, vec![hook("read"), hook("edit")]);
         let drawn = f.render(&mut h, "tools", Surface::default()).unwrap();
         tree::check(&drawn).unwrap();
-        let text = vorn_extension_sdk::serde_json::to_string(tree::for_session(&drawn, "a").unwrap()).unwrap();
+        let text =
+            vorn_extension_sdk::serde_json::to_string(tree::for_session(&drawn, "a").unwrap())
+                .unwrap();
         assert!(text.contains("2 tool calls · last edit"), "{text}");
         assert!(text.contains("mini"), "{text}");
-        f.on_events(&mut h, vec![event("session.exited", json!({ "sessionId": "a" }))]);
+        f.on_events(
+            &mut h,
+            vec![event("session.exited", json!({ "sessionId": "a" }))],
+        );
         assert!(h.rows(SESSIONS).unwrap().is_empty());
     }
 }

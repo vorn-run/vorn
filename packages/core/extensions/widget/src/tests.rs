@@ -76,8 +76,7 @@ fn a_request_reads_as_its_description_or_its_input() {
 
 #[test]
 fn a_suggestion_reads_as_the_rule_it_keeps() {
-    let rule =
-        |r: &str| json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": r }] });
+    let rule = |r: &str| json!({ "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": r }] });
     assert_eq!(
         suggestion_label(&rule("src/**"), "Bash"),
         "Allow Bash in src/"
@@ -93,9 +92,7 @@ fn a_suggestion_reads_as_the_rule_it_keeps() {
 
 #[test]
 fn answers_wait_for_every_question() {
-    let o = |id: &str, picked: bool| {
-        json!({ "id": id, "request": "r:1", "label": id, "picked": picked })
-    };
+    let o = |id: &str, picked: bool| json!({ "id": id, "request": "r:1", "label": id, "picked": picked });
     let mut opts = vec![o("r:1:0:0", true), o("r:1:0:1", false), o("r:1:1:0", false)];
     assert_eq!(answers(&opts, "r:1"), None);
     opts[2]["picked"] = json!(true);
@@ -132,7 +129,10 @@ fn a_request_shows_its_rule_and_allow_keeps_it_then_forgets_the_request() {
     for shown in ["npm test", "Always allow `npm test`", "allow:r1", "deny:r1"] {
         assert!(window.contains(shown), "{shown} in {window}");
     }
-    assert_eq!(click(&mut w, &mut h, "widget", "suggest:r1:0"), Ok(Value::Null));
+    assert_eq!(
+        click(&mut w, &mut h, "widget", "suggest:r1:0"),
+        Ok(Value::Null)
+    );
     assert_eq!(
         h.asked("permissions.resolve"),
         [json!({ "requestId": "r1", "allow": true, "suggestion": 0 })]
@@ -184,8 +184,14 @@ fn its_buttons_fold_raise_and_focus_through_the_answer() {
     let mut h = host();
     let mut w = started(&mut h);
     let said = |w: &mut Widget, h: &mut FakeHost, id| click(w, h, "widget", id).unwrap();
-    assert_eq!(said(&mut w, &mut h, "collapse"), json!({ "window": "compact" }));
-    assert_eq!(said(&mut w, &mut h, "expand"), json!({ "window": "widget" }));
+    assert_eq!(
+        said(&mut w, &mut h, "collapse"),
+        json!({ "window": "compact" })
+    );
+    assert_eq!(
+        said(&mut w, &mut h, "expand"),
+        json!({ "window": "widget" })
+    );
     assert_eq!(said(&mut w, &mut h, "vorn"), json!({ "show": true }));
     assert_eq!(said(&mut w, &mut h, "show:t1"), json!({ "focus": "t1" }));
     let err = click(&mut w, &mut h, "widget", "nope").unwrap_err();

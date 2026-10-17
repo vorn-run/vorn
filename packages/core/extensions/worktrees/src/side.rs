@@ -53,7 +53,9 @@ pub(super) fn confirm(asked: Option<&Value>) -> Node {
         text(format!("Branch {}", s(a, "branch"))).style(TextStyle::Secondary),
     ];
     if sessions > 0 {
-        kids.push(text(format!("Its {sessions} running sessions are closed first.")));
+        kids.push(text(format!(
+            "Its {sessions} running sessions are closed first."
+        )));
     }
     if on(a, "dirty") {
         kids.push(text("It has uncommitted changes, which are lost."));

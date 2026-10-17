@@ -660,3 +660,103 @@ pub fn seed_runs(v: &TestVornd, runs: &[Value]) {
         store.save_workflow_run(&run).expect("run saved");
     }
 }
+
+/// A copy of example extension `name` (`examples/extensions/<name>`) in `home`,
+/// its component built as its manifest's `[build]` would and put where the manifest names it.
+pub fn example(home: &Path, name: &str) -> PathBuf {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("dir");
+        for e in std::fs::read_dir(from).expect("example").flatten() {
+            let at = to.join(e.file_name());
+            if e.file_name() == "target" {
+                continue;
+            }
+            if e.file_type().expect("type").is_dir() {
+                copy(&e.path(), &at);
+            } else {
+                std::fs::copy(e.path(), at).expect("copy");
+            }
+        }
+    }
+    let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../examples/extensions")
+        .join(name);
+    let dir = home.join(name);
+    copy(&from, &dir);
+    let package = format!("vorn-example-{name}");
+    let built = vorn_guest_build::component(&package).unwrap_or_else(|e| panic!("{e}"));
+    let at = dir
+        .join("target/wasm32-wasip2/release")
+        .join(format!("{}.wasm", package.replace('-', "_")));
+    std::fs::create_dir_all(at.parent().expect("its folder")).expect("dir");
+    std::fs::copy(built, at).expect("the component");
+    dir
+}
+
+/// Posts a hook event to the endpoint vornd registered in the test HOME, as
+/// an agent's hook does; answers what the hook was told. A permission request
+/// waits for its answer.
+pub fn post_hook(home: &Path, body: &Value) -> String {
+    let dir = home.join(".vorn");
+    let (port, token) = wait_for("the hook endpoint", || {
+        let port = std::fs::read_to_string(dir.join("port")).ok()?;
+        let token = std::fs::read_to_string(dir.join("token")).ok()?;
+        Some((port.trim().to_owned(), token.trim().to_owned()))
+    });
+    let body = body.to_string();
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).expect("hooks");
+    write!(
+        stream,
+        "POST /hooks HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("sent");
+    let mut answer = String::new();
+    let _ = stream.read_to_string(&mut answer);
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    answer
+}
+
+/// Whether tree point `key` has drawn, and its tree says `text`.
+pub fn tree_says(app: &App, key: &str, text: &str) -> bool {
+    app.st
+        .points
+        .trees
+        .get(key)
+        .and_then(|t| t.as_ref().ok())
+        .is_some_and(|t| serde_json::to_string(t).is_ok_and(|j| j.contains(text)))
+}
+
+/// This state on a terminal at 120x36 and 80x24, saved as HTML and text with
+/// `VORN_APP_SHOT`; each size shows every one of `shown`.
+#[track_caller]
+pub fn every_size(app: &mut App, name: &str, shown: &[&str]) {
+    use vorn_app::ui::backend::{Backend, Cells};
+    let (chrome, traffic) = (app.chrome, app.traffic);
+    (app.chrome, app.traffic) = (false, false);
+    for (cols, rows) in [(120u16, 36u16), (80, 24)] {
+        let mut ui = Ui::cells(&ui_config(1.0));
+        let size = vorn_app::ui::cells::units::px(cols, rows);
+        app.frame(&mut ui, size);
+        app.frame(&mut ui, size);
+        let mut target = Cells::offscreen(cols, rows);
+        target.present(&mut ui).expect("present");
+        let text = (0..rows)
+            .map(|r| target.buffer.row_text(r))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Some(base) = std::env::var_os("VORN_APP_SHOT") {
+            let path = format!("{}-cells-{name}-{cols}x{rows}", base.to_string_lossy());
+            let html = target.buffer.to_html(&format!("{name} {cols}x{rows}"));
+            std::fs::write(format!("{path}.html"), html).expect("html");
+            std::fs::write(format!("{path}.txt"), &text).expect("txt");
+        }
+        for t in shown {
+            assert!(
+                text.contains(t),
+                "{name} {cols}x{rows} shows {t:?}:\n{text}"
+            );
+        }
+    }
+    (app.chrome, app.traffic) = (chrome, traffic);
+}

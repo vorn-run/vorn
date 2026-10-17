@@ -269,7 +269,7 @@ fn answers(options: &[Value], request: &str) -> Option<Value> {
             answers.insert(index, o["label"].clone());
         }
     }
-    (!asked.is_empty() && asked.len() == answers.len()).then(|| Value::Object(answers))
+    (!asked.is_empty() && asked.len() == answers.len()).then_some(Value::Object(answers))
 }
 
 /// `submit`: Allow with the options picked as the answers to the agent's questions.

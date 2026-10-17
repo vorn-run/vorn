@@ -1320,7 +1320,12 @@ impl RawContributes {
                 m.insert("tree".into(), json!(true));
             }
             let value = Value::Object(m);
-            let draws = [p.web.is_some(), p.command.is_some(), p.view.is_some(), p.tree];
+            let draws = [
+                p.web.is_some(),
+                p.command.is_some(),
+                p.view.is_some(),
+                p.tree,
+            ];
             if kept("panes", value.clone()).is_none() || draws.iter().filter(|d| **d).count() != 1 {
                 return Err(at(
                     &field,
@@ -2187,15 +2192,26 @@ tree = true
             "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n",
         );
         let places = [
-            "sidebar", "badges", "card_footers", "decorations", "composer", "windows", "dialogs",
+            "sidebar",
+            "badges",
+            "card_footers",
+            "decorations",
+            "composer",
+            "windows",
+            "dialogs",
         ];
         for (i, place) in places.iter().enumerate() {
-            text.push_str(&format!("\n[[contributes.{place}]]\nid = \"p{i}\"\ntree = true\n"));
+            text.push_str(&format!(
+                "\n[[contributes.{place}]]\nid = \"p{i}\"\ntree = true\n"
+            ));
         }
         text.push_str("\n[[contributes.panes]]\nid = \"pane\"\ntitle = \"Pane\"\ntree = true\n");
         let m = parse(&text).unwrap();
         let c = m.contributes.as_ref().unwrap();
-        assert_eq!(c.points.values().flatten().filter(|p| p.tree).count(), places.len());
+        assert_eq!(
+            c.points.values().flatten().filter(|p| p.tree).count(),
+            places.len()
+        );
         assert_eq!(c.panes()[0].draws, super::super::PaneDraws::Tree);
         assert!(c.templated() && c.templated_only());
         assert_eq!(serde_json::to_value(c).unwrap()["panes"][0]["tree"], true);

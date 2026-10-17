@@ -401,7 +401,11 @@ impl App {
             super::tasks::open_url(&url);
         }
         if let Some(target) = a.signin {
-            let id = target.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let id = target
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
             if let Some(e) = self.open_signin(&id, &target, crate::signin::From::Page) {
                 self.st.toast(e, true);
             }
@@ -548,7 +552,11 @@ impl App {
     fn trees_shown(&self) -> Vec<String> {
         let pts = &self.st.points;
         let composing = self.st.composer_open || self.composing();
-        let page = self.st.settings.open.then(|| self.st.settings.ext_page.clone());
+        let page = self
+            .st
+            .settings
+            .open
+            .then(|| self.st.settings.ext_page.clone());
         let mut out: Vec<String> = pts
             .all
             .iter()

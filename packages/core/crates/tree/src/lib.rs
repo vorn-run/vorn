@@ -88,7 +88,9 @@ pub enum Kind {
     },
     Badge(Badge),
     /// A status dot in a tone; its `label` prop names the state it shows.
-    Dot { tone: Tone },
+    Dot {
+        tone: Tone,
+    },
     /// A switch beside its label: reports `toggle` with the state it switches to, `true` or `false`.
     Toggle {
         #[serde(default)]

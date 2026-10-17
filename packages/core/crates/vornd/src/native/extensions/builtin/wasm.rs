@@ -42,8 +42,7 @@ pub fn worktrees() -> Component {
 /// The Widget (`packages/core/extensions/widget`).
 pub fn widget() -> Component {
     use vorn_extensions::events::{
-        AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_CREATED, SESSION_EXITED,
-        SESSION_STATUS,
+        AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_CREATED, SESSION_EXITED, SESSION_STATUS,
     };
     Component {
         manifest: include_str!("../../../../../../extensions/widget/vorn-extension.toml"),

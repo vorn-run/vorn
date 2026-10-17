@@ -565,7 +565,10 @@ fn dots_in_every_tone_and_a_growing_line_between_them() {
     both("dot", t.clone(), Role::Status, "running", "●");
     let laid = pixels(&t, &Rec::default());
     assert!(named(&laid, Role::Status, "idle"));
-    assert!(named(&laid, Role::Button, "Show"), "the growing text leaves its room");
+    assert!(
+        named(&laid, Role::Button, "Show"),
+        "the growing text leaves its room"
+    );
     let text = cells(&t, &Rec::default());
     assert!(text.contains("Show"), "{text}");
 }
@@ -576,7 +579,13 @@ fn a_toggle_reports_the_state_it_switches_to() {
         toggle("shells", "Count shells too", true),
         toggle("tools", "Count tool calls", false),
     ]);
-    both("toggle", t.clone(), Role::Switch, "Count shells too", "Count shells too");
+    both(
+        "toggle",
+        t.clone(),
+        Role::Switch,
+        "Count shells too",
+        "Count shells too",
+    );
     let bind = Rec::default();
     let laid = pixels(&t, &bind);
     let on = laid
@@ -598,7 +607,10 @@ fn a_toggle_reports_the_state_it_switches_to() {
 
 #[test]
 fn a_per_session_tree_draws_one_sessions_child() {
-    let t = per_session([("t1", badge("2 done", Tone::Neutral)), ("t2", badge("5 done", Tone::Neutral))]);
+    let t = per_session([
+        ("t1", badge("2 done", Tone::Neutral)),
+        ("t2", badge("5 done", Tone::Neutral)),
+    ]);
     let one = vorn_tree::for_session(&t, "t2").expect("t2's");
     both("badge", one.clone(), Role::Label, "5 done", "5 done");
     let text = cells(one, &Rec::default());

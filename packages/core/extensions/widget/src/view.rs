@@ -48,7 +48,10 @@ pub(crate) fn compact(agents: &[Value]) -> Node {
     for status in ["running", "waiting", "error"] {
         let n = count(agents, status);
         if n > 0 {
-            kids.push(line([dot(tone(status)).label(status), quiet(n.to_string())]));
+            kids.push(line([
+                dot(tone(status)).label(status),
+                quiet(n.to_string()),
+            ]));
         }
     }
     if agents.is_empty() {
@@ -64,7 +67,10 @@ pub(crate) fn compact(agents: &[Value]) -> Node {
 fn request(p: &Value, asks: &Asks) -> Node {
     let id = s(p, "id");
     let question = on(p, "question");
-    let mut kids = vec![line([badge(s(p, "tool"), Tone::Neutral), quiet(s(p, "agent")).grow()])];
+    let mut kids = vec![line([
+        badge(s(p, "tool"), Tone::Neutral),
+        quiet(s(p, "agent")).grow(),
+    ])];
     if !question {
         kids.push(text(s(p, "description")).style(TextStyle::Mono));
         kids.push(line([
@@ -104,7 +110,9 @@ fn request(p: &Value, asks: &Asks) -> Node {
     if question {
         let submit = on(p, "ready").then(|| button(format!("submit:{id}"), "Submit").primary());
         kids.push(line(
-            submit.into_iter().chain([button(format!("deny:{id}"), "Skip")]),
+            submit
+                .into_iter()
+                .chain([button(format!("deny:{id}"), "Skip")]),
         ));
     }
     col(kids).gap(6.0)

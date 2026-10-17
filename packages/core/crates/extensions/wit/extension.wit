@@ -22,10 +22,11 @@
 // another api id. A `[connector]` section (auth, triggers, actions) means its
 // service speaks the connector protocol instead of these interfaces: the
 // JSON-RPC child protocol 1 (`vorn/hello`, `poll`, `action`, ...) that this
-// API version includes and versions with it. A package may add template
-// points, MCP tools or events beside its kind section; its service then also
+// API version includes and versions with it. A package may add the places
+// it draws, MCP tools or events beside its kind section; its service then also
 // runs as an extension, and the first message it is sent, `guest.init` or
-// `vorn/hello`, says which role a process plays. Templates are files in their
+// `vorn/hello`, says which role a process plays. What it draws is an element
+// tree it answers `ui.render` with (`vorn-tree`); templates are files in their
 // own format, `vorn:view@1`, not an API.
 //
 // A service is a program (`[service] command`) or a Wasm component
@@ -195,11 +196,11 @@ interface host {
 
   /// A core method, such as `sessions.list`, if the manifest declares the permission it needs.
   call: func(method: string, args: json) -> result<json, ext-error>;
-  /// Changes the rows of a collection the extension's templates draw.
+  /// Changes the rows of a collection; a change asks for its trees again.
   publish: func(collection: string, ops: list<row-op>);
   log: func(level: level, message: string);
   /// The rows it published to `collection`, in the order they came; they
-  /// outlive a restart of its service, so state a template draws lives there.
+  /// outlive a restart of its service, so state a tree draws lives there.
   rows: func(collection: string) -> result<list<json>, ext-error>;
   /// Starts a session the way the app and the MCP tools do, under the
   /// `sessions.launch` permission; answers the new session's id.
@@ -257,6 +258,11 @@ interface guest {
   use types.{json, ext-error, call-ctx, init-ctx, event};
 
   init: func(ctx: init-ctx) -> result<_, ext-error>;
+  /// `ui.render` with `{point, surface}` answers the tree a `tree = true`
+  /// contribution draws, `{tokens, tree}`; `ui.event` with `{point, event}`
+  /// answers what follows a click, a toggle, a choice or a field's Return:
+  /// `{toast?, error?, patch?, open?, window?, close?, focus?, show?, url?, signin?}`,
+  /// `signin` being the window's target, `{id, name, browser: {signInUrl, origins, check}}`.
   /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
   /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
   /// An agent adapter whose `[agent.headless]` says `stream = true` is called

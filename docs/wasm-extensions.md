@@ -161,17 +161,17 @@ show.
 A click, a toggle, a choice or a field's Return comes back as `ui.event`
 (`{point, event}` in). Its answer, every field optional, says what follows:
 
-| field    | does                                                                       |
-| -------- | -------------------------------------------------------------------------- |
-| `toast`  | a line that says what happened                                             |
-| `error`  | a line that says what failed                                               |
-| `patch`  | nodes changed in place, without a render                                   |
-| `open`   | opens one of its dialogs, by id                                            |
-| `window` | opens one of its windows by id, in place of the one open                   |
-| `close`  | `true` closes the dialog or window the tree is in                          |
-| `focus`  | a session to show in the main window, which comes forward                  |
-| `show`   | `true` brings the main window forward                                      |
-| `url`    | an `https:` page to open in the browser                                    |
+| field    | does                                                                        |
+| -------- | --------------------------------------------------------------------------- |
+| `toast`  | a line that says what happened                                              |
+| `error`  | a line that says what failed                                                |
+| `patch`  | nodes changed in place, without a render                                    |
+| `open`   | opens one of its dialogs, by id                                             |
+| `window` | opens one of its windows by id, in place of the one open                    |
+| `close`  | `true` closes the dialog or window the tree is in                           |
+| `focus`  | a session to show in the main window, which comes forward                   |
+| `show`   | `true` brings the main window forward                                       |
+| `url`    | an `https:` page to open in the browser                                     |
 | `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id` |
 
 `examples/extensions/turns` draws a tree in every place, and

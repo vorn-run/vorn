@@ -537,27 +537,33 @@ fn the_worktree_cleanup_extension_asks_then_offers_idle_worktrees() {
             .get("asked")
             .is_some_and(|r| !r.is_empty())
     };
+    let dialog = "vorn.worktrees/dialogs/confirm";
     shot.until(&mut app, "the removal dialog", |a, _| {
-        (a.st.points.dialog.as_deref() == Some("vorn.worktrees/dialogs/confirm") && asked(a))
-            .then_some(())
+        let open = a.st.points.dialog.as_deref() == Some(dialog);
+        (open && asked(a) && support::tree_says(a, dialog, "closed first")).then_some(())
     });
     shot.save(&mut app, "g-dialog");
+    support::every_size(
+        &mut app,
+        "g-dialog",
+        &["Remove feature-greet?", "closed first", "Cancel"],
+    );
     let cancel = shot
         .button(&mut app, "Cancel")
         .expect("the dialog's Cancel");
     shot.click(&mut app, cancel);
-    assert_eq!(app.st.points.dialog, None);
+    shot.until(&mut app, "the dialog closed", |a, _| {
+        a.st.points.dialog.is_none().then_some(())
+    });
 
     // Closing its last session lists the worktree as idle; Remove takes it away.
     app.rpc().call("terminal:kill", json!(sid)).expect("kill");
+    let idle = "vorn.worktrees/sidebar/idle";
     shot.until(&mut app, "the idle worktree", |a, _| {
-        a.st.points
-            .rows_of("vorn.worktrees")
-            .get("idle")
-            .and_then(|r| r.iter().find(|r| r.id == wt))
-            .map(|_| ())
+        support::tree_says(a, idle, &format!("remove:{wt}")).then_some(())
     });
     shot.save(&mut app, "g-idle");
+    support::every_size(&mut app, "g-idle", &["Idle worktrees", "Keep", "Remove"]);
     let remove = shot
         .button(&mut app, "Remove")
         .expect("the idle row's Remove");

@@ -259,14 +259,24 @@ fn click(c: &mut Cleanup, h: &mut FakeHost, point: &str, id: &str) -> Result<Val
 fn the_sidebar_offers_each_idle_worktree_with_keep_and_remove() {
     let mut h = host();
     let mut c = started(&mut h);
-    assert!(!drawn(&mut c, &mut h, IDLE).contains("children"), "nothing idle, nothing drawn");
+    assert!(
+        !drawn(&mut c, &mut h, IDLE).contains("children"),
+        "nothing idle, nothing drawn"
+    );
     c.on_events(&mut h, vec![idle("/p/.vorn-worktrees/old")]);
     let side = drawn(&mut c, &mut h, IDLE);
-    for shown in ["git-branch", "keep:/p/.vorn-worktrees/old", "remove:/p/.vorn-worktrees/old"] {
+    for shown in [
+        "git-branch",
+        "keep:/p/.vorn-worktrees/old",
+        "remove:/p/.vorn-worktrees/old",
+    ] {
         assert!(side.contains(shown), "{shown} in {side}");
     }
     assert!(!side.contains("changes"), "old has none");
-    assert_eq!(click(&mut c, &mut h, IDLE, "keep:/p/.vorn-worktrees/old"), Ok(Value::Null));
+    assert_eq!(
+        click(&mut c, &mut h, IDLE, "keep:/p/.vorn-worktrees/old"),
+        Ok(Value::Null)
+    );
     assert!(h.rows(IDLE).unwrap().is_empty());
     assert!(click(&mut c, &mut h, IDLE, "refresh").is_err());
 }
@@ -276,18 +286,35 @@ fn the_dialog_says_what_is_lost_and_closes_on_either_button() {
     let mut h = host();
     let mut c = started(&mut h);
     let ask = json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" });
-    assert_eq!(call(&mut c, &mut h, "ask", ask.clone()), Ok(json!({ "open": "confirm" })));
+    assert_eq!(
+        call(&mut c, &mut h, "ask", ask.clone()),
+        Ok(json!({ "open": "confirm" }))
+    );
     let dialog = drawn(&mut c, &mut h, "confirm");
-    for said in ["Remove fix?", "Branch fix", "Its 1 running sessions", "uncommitted changes"] {
+    for said in [
+        "Remove fix?",
+        "Branch fix",
+        "Its 1 running sessions",
+        "uncommitted changes",
+    ] {
         assert!(dialog.contains(said), "{said} in {dialog}");
     }
-    assert_eq!(click(&mut c, &mut h, "confirm", "cancel"), Ok(json!({ "close": true })));
+    assert_eq!(
+        click(&mut c, &mut h, "confirm", "cancel"),
+        Ok(json!({ "close": true }))
+    );
     assert!(h.rows(ASKED).unwrap().is_empty());
     assert!(!drawn(&mut c, &mut h, "confirm").contains("Remove"));
     call(&mut c, &mut h, "ask", ask).unwrap();
     let done = click(&mut c, &mut h, "confirm", "confirm").unwrap();
-    assert_eq!((done["close"].clone(), done["toast"].clone()), (json!(true), json!("Worktree removed")));
+    assert_eq!(
+        (done["close"].clone(), done["toast"].clone()),
+        (json!(true), json!("Worktree removed"))
+    );
     // Asked again with nothing asked, it still closes and says why.
     let gone = click(&mut c, &mut h, "confirm", "confirm").unwrap();
-    assert_eq!((gone["close"].clone(), gone["error"].clone()), (json!(true), json!("Nothing is asked")));
+    assert_eq!(
+        (gone["close"].clone(), gone["error"].clone()),
+        (json!(true), json!("Nothing is asked"))
+    );
 }

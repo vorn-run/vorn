@@ -1008,7 +1008,7 @@ impl Extensions {
             }
             PaneDraws::View(_) | PaneDraws::Tree => {
                 return Err(format!(
-                    "The pane \"{pane_id}\" draws a template, which the client draws"
+                    "The pane \"{pane_id}\" draws a template or a tree, which the client draws"
                 ));
             }
             PaneDraws::Web(_) => {

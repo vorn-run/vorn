@@ -126,8 +126,11 @@ impl Panel {
     fn trees(&mut self) {
         if let Some(answer) = self.rendering.as_ref().and_then(Pending::poll) {
             self.rendering = None;
-            let answer = answer.map_err(|e| e.to_string());
-            self.points.rendered(&self.key, answer.as_ref());
+            let key = self.key.clone();
+            match &answer {
+                Ok(v) => self.points.rendered(&key, Ok(v)),
+                Err(e) => self.points.rendered(&key, Err(e.to_string())),
+            }
         }
         let key = self.key.clone();
         let mut told = std::mem::take(&mut self.told);

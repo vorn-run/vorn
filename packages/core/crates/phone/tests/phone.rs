@@ -1,4 +1,4 @@
-//! The turns settings page at 390x844 in pixels, cells and a native tree; `VORN_PHONE_SHOT=<prefix>` saves them.
+//! The turns settings page, the example extension's element tree, at 390x844 in pixels, cells and a native tree; `VORN_PHONE_SHOT=<prefix>` saves them.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -12,53 +12,67 @@ use vornui::cells::units;
 use vornui::native::Native;
 use vornui::{App, Id, RenderMode, Rgba, Ui};
 
-const SETTINGS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../../examples/extensions/turns/views/settings.kdl"
-);
 const EXT: &str = "example.turns";
 const PHONE: (f32, f32) = (390.0, 844.0);
 const SCALE: f32 = 3.0;
 
+/// The example extension's settings page, its tree drawn by its own code against a fake Vorn.
+fn turns_page() -> serde_json::Value {
+    use vorn_extension_sdk::testing::FakeHost;
+    use vorn_extension_sdk::{dispatch, Ctx, Extension, Host, Init, Op};
+    let mut host = FakeHost::default();
+    let up = |rows: serde_json::Value| {
+        rows.as_array()
+            .expect("rows")
+            .iter()
+            .cloned()
+            .map(Op::Upsert)
+            .collect::<Vec<_>>()
+    };
+    host.publish(
+        "prefs",
+        up(
+            json!([{ "id": "tools", "label": "Count tool calls", "on": true },
+                  { "id": "idle", "label": "Count idle turns", "on": false }]),
+        ),
+    );
+    host.publish(
+        "plans",
+        up(json!([{ "id": "free", "name": "Free", "selected": true },
+                  { "id": "pro", "name": "Pro", "selected": false }])),
+    );
+    host.publish(
+        "account",
+        up(json!([{ "id": "a1", "name": "work@example.com", "signed_in": false }])),
+    );
+    let mut turns = vorn_example_turns::Turns::init(&Init::default(), &mut host).expect("init");
+    let args = json!({ "point": "prefs", "surface": {} });
+    dispatch(
+        &mut turns,
+        &mut host,
+        vorn_tree::RENDER,
+        args,
+        &Ctx::default(),
+    )
+    .expect("the page")
+}
+
 fn phone(size: (f32, f32)) -> (Phone, String) {
-    let text = std::fs::read_to_string(SETTINGS).expect("settings.kdl");
-    let template = vorn_view::file::parse("views/settings.kdl", &text, Default::default())
-        .expect("the example's settings check");
     let mut p = Point::from_value(&json!({
         "kind": "settings",
         "extension": EXT,
         "extensionName": "Turns",
         "id": "prefs",
         "title": "Turns",
+        "tree": true,
     }))
     .expect("point");
-    p.template = Ok(Some(template));
+    p.tree = true;
     let key = p.key();
     let mut model = Model::new(Arc::new(|| {}));
     model.points.all = vec![p];
     model.points.loaded = true;
-    let rows = |c: &str, v: serde_json::Value| (c.to_owned(), v);
-    for (coll, list) in [
-        rows(
-            "prefs",
-            json!([{ "id": "tools", "label": "Count tool calls", "on": true },
-                   { "id": "idle", "label": "Count idle turns", "on": false }]),
-        ),
-        rows(
-            "plans",
-            json!([{ "id": "free", "name": "Free", "selected": true },
-                   { "id": "pro", "name": "Pro", "selected": false }]),
-        ),
-        rows(
-            "account",
-            json!([{ "id": "a1", "name": "work@example.com", "signed_in": false }]),
-        ),
-        rows("finished", json!([])),
-    ] {
-        model
-            .points
-            .fill(EXT, &coll, Some(list.as_array().expect("rows")));
-    }
+    model.points.rendered(&key, Ok(&turns_page()));
     let mut phone = Phone::new(model);
     phone.size = size;
     phone.insets = Insets {
