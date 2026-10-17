@@ -319,6 +319,13 @@ impl Router {
         if pack.manifest.service.is_none() && pack.manifest.runs.is_empty() {
             return Err(format!("{} runs no program to hold", pack.name()));
         }
+        let component = pack.manifest.service.as_ref().is_some_and(|s| s.component.is_some());
+        if component && pack.manifest.runs.is_empty() {
+            return Err(format!(
+                "{} runs as a Wasm component, which Vorn sandboxes always",
+                pack.name()
+            ));
+        }
         sandbox::set(&self.store.root().join(id), on)?;
         self.lifecycle.stop_extension(id).await;
         Ok(())

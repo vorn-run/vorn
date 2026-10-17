@@ -2173,6 +2173,36 @@ tree = true
     }
 
     #[test]
+    fn a_service_is_a_program_or_a_wasm_component_in_the_package() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[service]
+component = "target/x.wasm"
+events = ["session.status"]
+"#;
+        let m = parse(text).unwrap();
+        let service = m.service.as_ref().unwrap();
+        assert_eq!(service.component.as_deref(), Some("target/x.wasm"));
+        assert!(service.command.is_empty() && m.speaks_api());
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert_eq!(
+            err("component = \"target/x.wasm\"", "component = \"x.wasm\"\ncommand = [\"node\"]"),
+            "vorn-extension.toml:7: service.component: runs in place of service.command; name one of them"
+        );
+        for outside in ["../x.wasm", "/x.wasm", "x.so"] {
+            assert_eq!(
+                err("target/x.wasm", outside),
+                "vorn-extension.toml:7: service.component: names a .wasm file inside the package",
+                "{outside}"
+            );
+        }
+    }
+
+    #[test]
     fn holds_legacy_parts_to_the_connector_protocol() {
         let text = r#"id = "x"
 name = "X"

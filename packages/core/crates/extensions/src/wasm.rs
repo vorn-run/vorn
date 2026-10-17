@@ -1056,7 +1056,7 @@ mod tests {
             name: Arc::from("x"),
             tail: Arc::default(),
         };
-        let mut w = stderr.async_stream();
+        let mut w = Box::into_pin(stderr.async_stream());
         let long = "y".repeat(MAX_LINE * 2);
         w.write_all(format!("thread panicked at src/lib.rs:3\n{long}\nlast").as_bytes())
             .await
@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!(tail[1].len(), MAX_LINE);
         assert_eq!(tail[2], "last");
         for i in 0..TAIL_LINES + 5 {
-            let mut w = stderr.async_stream();
+            let mut w = Box::into_pin(stderr.async_stream());
             w.write_all(format!("{i}\n").as_bytes()).await.unwrap();
         }
         assert_eq!(guard(&stderr.tail).len(), TAIL_LINES);

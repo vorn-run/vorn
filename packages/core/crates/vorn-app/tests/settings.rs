@@ -44,6 +44,42 @@ fn saved(app: &mut App, what: &str, f: impl Fn(&Value) -> bool) {
     });
 }
 
+/// What a cells frame of the app shows, row after row.
+fn cells_text(app: &mut App) -> String {
+    use vorn_app::ui::backend::{Backend, Cells};
+    let mut ui = vorn_app::ui::Ui::cells(&vorn_app::ui_config(1.0));
+    let size = vorn_app::ui::cells::units::px(160, 40);
+    app.frame(&mut ui, size);
+    app.frame(&mut ui, size);
+    let mut target = Cells::offscreen(160, 40);
+    target.present(&mut ui).expect("present");
+    (0..40)
+        .map(|r| target.buffer.row_text(r))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Worktree cleanup is a Wasm component; its page draws in a terminal's cells as on pixels.
+#[test]
+fn the_worktrees_page_a_wasm_component_draws_shows_on_cells() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = support::connect(&v);
+    seed_acme(&mut app, &v);
+    let page = "vorn.worktrees/settings/worktrees";
+    app.st.settings.open = true;
+    app.st.settings.ext_page = Some(page.to_owned());
+    let mut shown = String::new();
+    wait_for("the inventory in cells", || {
+        shown = cells_text(&mut app);
+        let tree = app.st.points.trees.get(page)?.as_ref().ok()?;
+        (entry_titled(tree, "feature-greet").is_some() && shown.contains("feature-greet"))
+            .then_some(())
+    });
+    assert!(shown.contains("ON DISK") && shown.contains("Removable"), "{shown}");
+}
+
 #[test]
 fn every_settings_panel_opens_and_saves_to_vornd() {
     let Some(v) = TestVornd::start() else {

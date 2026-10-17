@@ -364,13 +364,16 @@ pub fn arg<'a>(args: &'a Value, key: &str, action: &str) -> Result<&'a str, Erro
         .ok_or_else(|| Error::bad_args(format!("{action} takes {key}")))
 }
 
-/// Makes `$ty`, an [`Extension`], the guest of this component.
+/// Makes `$ty`, an [`Extension`], the guest of this component. Off Wasm it
+/// adds nothing, so the crate also builds, tests and lints natively.
 #[macro_export]
 macro_rules! export {
     ($ty:ty) => {
+        #[cfg(target_arch = "wasm32")]
         #[doc(hidden)]
         pub struct __VornGuest;
 
+        #[cfg(target_arch = "wasm32")]
         impl $crate::bindings::exports::vorn::extension::guest::Guest for __VornGuest {
             fn init(
                 ctx: $crate::bindings::vorn::extension::types::InitCtx,
@@ -394,6 +397,7 @@ macro_rules! export {
             }
         }
 
+        #[cfg(target_arch = "wasm32")]
         $crate::bindings::__export_extension!(__VornGuest with_types_in $crate::bindings);
     };
 }
