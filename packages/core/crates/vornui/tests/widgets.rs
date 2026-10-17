@@ -874,6 +874,21 @@ fn on_cells_a_fresh_field_takes_keys_and_shows_its_caret() {
 }
 
 #[test]
+fn on_cells_a_drawing_shows_its_whole_glyph_line() {
+    let s = Id::new("spark");
+    let mut ui = Ui::cells(&UiConfig::system(1.0, 13.0));
+    let size = vornui::cells::units::px(40, 4);
+    ui.begin(color::SURFACE_BASE);
+    let line = vornui::shape("<svg/>", 96.0, 20.0, color::GRAY_300)
+        .id(s)
+        .sense(vornui::Sense::MOVE)
+        .glyph("▁▂▃▄▅▆▇█▇▆▅▄");
+    ui.layout(div().w(size.0).h(size.1).row().child(line), size);
+    let r = ui.rect_of(s).expect("laid out");
+    assert_eq!((r.w, r.h), (12.0, 1.0), "one column per glyph");
+}
+
+#[test]
 fn a_terminal_shows_a_hand_over_controls_and_a_beam_over_fields() {
     let (b, f) = (Id::new("press-me"), Id::new("type-here"));
     let build = |ui: &Ui| {

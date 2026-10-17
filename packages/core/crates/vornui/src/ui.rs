@@ -1916,7 +1916,8 @@ fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
         }
     }
     if glyph.is_some() || icon {
-        let gw = glyph.map_or(1, |g| cells::width(g).max(1)) as f32;
+        // In pixels, as the conversion below expects, so a wide glyph keeps its columns.
+        let gw = glyph.map_or(1, |g| cells::width(g).max(1)) as f32 * units::COL;
         if icon || px(s.size.width.into_raw()).is_some_and(|v| v <= 24.0) {
             s.size.width = Dimension::length(gw);
             s.min_size.width = Dimension::length(gw);

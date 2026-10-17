@@ -1,0 +1,9 @@
+[package]
+name = "ext-ui-sdk"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Model C's guest side: vornui's element builder, emitting a tree instead of drawing"
+
+[dependencies]
+wit-bindgen = "0.62"

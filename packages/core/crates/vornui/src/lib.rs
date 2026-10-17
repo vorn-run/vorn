@@ -21,6 +21,7 @@ pub mod element;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod embed;
 pub mod gpu;
+#[cfg(not(target_os = "wasi"))]
 mod host;
 pub mod icons;
 pub mod input;
@@ -37,19 +38,21 @@ pub mod text;
 pub mod theme;
 mod ui;
 mod virt;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
 pub mod web;
 pub mod widgets;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window;
 /// The browser's host behind the desktop's names, so an app opens the same way in both.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
 pub mod window {
     pub use crate::host::{App, Dropped, UserEvent, Waker, WindowOptions};
     pub use crate::web::{run, run_with};
 }
 
-pub use {accesskit, web_time, wgpu, winit};
+#[cfg(not(target_os = "wasi"))]
+pub use winit;
+pub use {accesskit, web_time, wgpu};
 
 pub use edit::{Clipboard, MemoryClipboard, TextEdit};
 pub use element::{
@@ -71,4 +74,5 @@ pub use ui::{
     ROOT_NODE,
 };
 pub use virt::Windowed;
+#[cfg(not(target_os = "wasi"))]
 pub use window::{run, run_with, App, Dropped, UserEvent, Waker, WindowOptions};
