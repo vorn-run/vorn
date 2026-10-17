@@ -163,7 +163,7 @@ fn the_settings_page_fits_a_phone_in_cells() {
     b.present(&mut ui).expect("cells");
     let text: Vec<String> = (0..30).map(|r| b.buffer.row_text(r)).collect();
     let all = text.join("\n");
-    for want in ["Turns", "Counting", "Count tool calls", "Account", "Free"] {
+    for want in ["Turns", "COUNTING", "Count tool calls", "ACCOUNT", "Free"] {
         assert!(all.contains(want), "{want:?} in\n{all}");
     }
     for (id, kind, label) in &controls {

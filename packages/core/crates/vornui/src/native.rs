@@ -65,6 +65,15 @@ pub enum Sem {
     Key(&'static str),
     /// Text in a role: `title`, `body`, `secondary`, `mono`, `error`, `markdown`.
     Text(&'static str),
+    /// A row of buttons a platform puts in its own toolbar.
+    Toolbar,
+    /// One row of a list: a title over a detail; its icon, marks, trailing text and actions inside.
+    Entry {
+        title: String,
+        detail: String,
+    },
+    /// A line that stands out, in a tone (`bad`, `warn`, or another).
+    Notice(&'static str),
     /// A box the platform leaves to the drawn surface (a terminal).
     Drawn(String),
     /// Drawn surfaces only; a platform draws its own (a section's title, a toggle's label).
@@ -230,6 +239,20 @@ impl Ui {
                 Sem::Column => Node::of("column"),
                 Sem::Row => Node::of("row"),
                 Sem::List => Node::of("list"),
+                Sem::Toolbar => Node::of("toolbar"),
+                Sem::Entry { title, detail } => Node {
+                    label: title.clone(),
+                    value: detail.clone(),
+                    ..Node::of("entry")
+                },
+                Sem::Notice(tone) => {
+                    out.push(Node {
+                        label: text_of(el).unwrap_or(label),
+                        style: tone,
+                        ..Node::of("notice")
+                    });
+                    return;
+                }
                 Sem::Divider => Node::of("divider"),
                 Sem::Prose => Node::of("prose"),
                 Sem::Key(key) => {

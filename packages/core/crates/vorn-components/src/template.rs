@@ -270,6 +270,7 @@ impl Cx<'_> {
                 .sem(Sem::Column)
                 .children(self.kids(kids, row, slot)),
             Kind::Toolbar(kids) => div()
+                .sem(Sem::Toolbar)
                 .row()
                 .items_center()
                 .justify_end()
@@ -888,6 +889,10 @@ impl Cx<'_> {
             }
         }
         let two = detail.as_deref().is_some_and(|d| !d.is_empty());
+        let sem = Sem::Entry {
+            title: title.to_owned(),
+            detail: detail.clone().unwrap_or_default(),
+        };
         let line = div()
             .row()
             .items_center()
@@ -899,7 +904,8 @@ impl Cx<'_> {
                     .line_height(18.0)
                     .weight(size::MEDIUM)
                     .truncate()
-                    .silent(),
+                    .silent()
+                    .sem(Sem::Hidden),
             )
             .children(badges);
         let middle = div()
@@ -912,8 +918,10 @@ impl Cx<'_> {
                     .line_height(size::XS.1)
                     .truncate()
                     .silent()
+                    .sem(Sem::Hidden)
             }));
         let mut e = div()
+            .sem(sem)
             .id(id)
             .sense(Sense::HOVER)
             .row()
@@ -960,6 +968,7 @@ impl Cx<'_> {
             .border(1.0, Rgba::white(0.08))
             .bg(color::SURFACE_SUNKEN)
             .role(Role::Status, value)
+            .sem(Sem::Notice(t.map_or("", tone_name)))
             .child(crate::lucide(icon, 14.0, 2.0, ink).mt(1.0).shrink0())
             .child(
                 div().grow().min_w0().child(
@@ -1065,7 +1074,17 @@ rows "items" {
     state enum pass fail
 }
 column {
+    toolbar {
+        button Refresh call="refresh" icon="refresh-cw"
+    }
+    notice "Could not scan" tone=bad
     section "All" {
+        list "items" {
+            entry "{row.name}" detail="{row.state}" {
+                icon "folder"
+                text "1 GB" role=number
+            }
+        }
         row {
             icon "check" tone=good
             badge "3"
@@ -1155,6 +1174,19 @@ column {
         let options: Vec<_> = all.iter().filter(|n| n.kind == "option").collect();
         assert_eq!(options.len(), 2);
         assert_eq!(options[0].on, Some(true));
+        let entry = all.iter().find(|n| n.kind == "entry").unwrap();
+        assert_eq!((entry.label.as_str(), entry.value.as_str()), ("a", "pass"));
+        let kids: Vec<_> = entry.children.iter().map(|n| n.kind).collect();
+        assert_eq!(
+            kids,
+            ["icon", "text"],
+            "its title and detail are the entry's own"
+        );
+        let notice = all.iter().find(|n| n.kind == "notice").unwrap();
+        assert_eq!(
+            (notice.label.as_str(), notice.style),
+            ("Could not scan", "bad")
+        );
         let section = all.iter().find(|n| n.kind == "section").unwrap();
         assert_eq!(section.label, "All");
         assert!(

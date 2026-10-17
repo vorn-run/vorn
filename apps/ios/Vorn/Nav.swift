@@ -259,7 +259,7 @@ struct Rows: View {
     }
 
     static func isRow(_ n: Node) -> Bool {
-        ["section", "list", "link", "toggle", "choice", "field", "prose", "row", "empty", "option", "button"].contains(n.k)
+        ["section", "list", "link", "toggle", "choice", "field", "prose", "row", "empty", "option", "button", "entry", "notice", "toolbar"].contains(n.k)
     }
 }
 
@@ -425,8 +425,24 @@ struct Control: View {
             More(screen: screen, node: node)
         case "empty":
             Empty(screen: screen, node: node)
-        case "row", "column":
+        case "row", "column", "toolbar":
             HStack(spacing: 12) { inline(node.kids) }
+        case "entry":
+            HStack(spacing: 12) {
+                if let mark = node.kids.first(where: { $0.k == "icon" }) { VornIcon(mark, ink: .secondary) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(node.label ?? "").lineLimit(1)
+                    if let d = node.value, !d.isEmpty { Text(d).font(.footnote).foregroundStyle(.secondary).lineLimit(1) }
+                }
+                Spacer(minLength: 8)
+                inline(node.kids.filter { $0.k != "icon" })
+            }
+        case "notice":
+            Label { Text(node.label ?? "") } icon: {
+                VornIcon(name: node.style == "bad" ? "circle-alert" : node.style == "warn" ? "triangle-alert" : "info",
+                         ink: Palette.tone(node.style))
+            }
+            .font(.footnote)
         default:
             inline([node])
         }
@@ -493,6 +509,7 @@ enum Leaf {
         case "title": Text(s).font(.body.weight(.medium)).lineLimit(row ? 1 : nil)
         case "secondary": Text(s).font(.footnote).foregroundStyle(.secondary).lineLimit(row ? 1 : nil)
         case "mono": Text(s).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+        case "number": Text(s).font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
         case "error": Text(s).font(.footnote).foregroundStyle(.red)
         case "markdown": Markdown(source: s)
         default: Text(s).textSelection(.enabled)
