@@ -96,27 +96,27 @@ export!(Hello);
 
 `Extension` has five methods, each with a default but `init`:
 
-| method | called for |
-|---|---|
-| `init` | the start of its instance |
-| `handle` | an action: a client, a menu item's `call`, an MCP tool (`mcp.<name>`), a workflow node |
-| `on_events` | a batch of the events `[service] events` subscribes to |
-| `render` | the tree of a `tree = true` contribution: `ui.render` |
-| `event` | a click, a submit or a choice on that tree: `ui.event` |
+| method      | called for                                                                             |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `init`      | the start of its instance                                                              |
+| `handle`    | an action: a client, a menu item's `call`, an MCP tool (`mcp.<name>`), a workflow node |
+| `on_events` | a batch of the events `[service] events` subscribes to                                 |
+| `render`    | the tree of a `tree = true` contribution: `ui.render`                                  |
+| `event`     | a click, a submit or a choice on that tree: `ui.event`                                 |
 
 Every call back into Vorn goes through the `Host` it is handed:
 
-| `Host` | API | permission |
-|---|---|---|
-| `call(method, args)` | `host.call`: a core method such as `sessions.list` | the method's own |
-| `publish(collection, ops)` | `host.publish`: rows its templates and trees draw | none |
-| `rows(collection)` | `host.rows`: the rows it published | none |
-| `start_session(req)` | `host.start-session` | `sessions.launch` |
-| `fetch(req, connection)` | `net.fetch`: HTTPS to a declared host | `[declares] network` |
-| `prefix`, `query`, `exec`, `get`, `set` | `storage.*`: its own tables and values | `storage` |
-| `transaction(statements)` | `storage.transaction` | `storage` |
-| `put_file`, `file`, `files`, `delete_file` | `blobs.*`: its own files | `storage` |
-| `log(level, message)` | `host.log` | none |
+| `Host`                                     | API                                                | permission           |
+| ------------------------------------------ | -------------------------------------------------- | -------------------- |
+| `call(method, args)`                       | `host.call`: a core method such as `sessions.list` | the method's own     |
+| `publish(collection, ops)`                 | `host.publish`: rows its templates and trees draw  | none                 |
+| `rows(collection)`                         | `host.rows`: the rows it published                 | none                 |
+| `start_session(req)`                       | `host.start-session`                               | `sessions.launch`    |
+| `fetch(req, connection)`                   | `net.fetch`: HTTPS to a declared host              | `[declares] network` |
+| `prefix`, `query`, `exec`, `get`, `set`    | `storage.*`: its own tables and values             | `storage`            |
+| `transaction(statements)`                  | `storage.transaction`                              | `storage`            |
+| `put_file`, `file`, `files`, `delete_file` | `blobs.*`: its own files                           | `storage`            |
+| `log(level, message)`                      | `host.log`                                         | none                 |
 
 `vorn_extension_sdk::testing::FakeHost` is a `Host` in memory: core methods
 answered by closures, rows kept as Vorn keeps them, values and files in
@@ -183,12 +183,12 @@ many rows it changed. A failure names the statement, from 0: `statement 1:
 
 ### `blobs.*`: its own files
 
-| function | does |
-|---|---|
-| `put(name, data)` | writes the file, whole or not at all |
-| `get(name)` | the file, or none |
-| `list(prefix)` | `{name, size, modified}` of each file whose name starts with `prefix`, by name |
-| `delete(name)` | removes it; answers whether there was one |
+| function          | does                                                                           |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `put(name, data)` | writes the file, whole or not at all                                           |
+| `get(name)`       | the file, or none                                                              |
+| `list(prefix)`    | `{name, size, modified}` of each file whose name starts with `prefix`, by name |
+| `delete(name)`    | removes it; answers whether there was one                                      |
 
 A name is segments of letters, digits, `.`, `_` and `-`, joined by `/`, none
 starting with `.`, at most 200 bytes. A file holds up to 8 MiB, and an
@@ -211,9 +211,9 @@ A component runs on a thread of its own in vornd, with:
 
 ## Commands
 
-| command | does |
-|---|---|
-| `vorn ext new <id> [--wasm] [--path <folder>] [--sdk <folder>]` | writes a package; `--sdk` builds against a local SDK in place of this release's |
-| `vorn ext link [<folder>] [--watch]` | links a folder in place; a component is built first, and `--watch` rebuilds and reloads it on every save |
-| `vorn ext compile <file.wasm> --into <folder>` | compiles a component into a cache; what Vorn runs at install, link and first start |
-| `vorn ext install <git url>` | shows what it runs and asks, then builds and installs it |
+| command                                                         | does                                                                                                     |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `vorn ext new <id> [--wasm] [--path <folder>] [--sdk <folder>]` | writes a package; `--sdk` builds against a local SDK in place of this release's                          |
+| `vorn ext link [<folder>] [--watch]`                            | links a folder in place; a component is built first, and `--watch` rebuilds and reloads it on every save |
+| `vorn ext compile <file.wasm> --into <folder>`                  | compiles a component into a cache; what Vorn runs at install, link and first start                       |
+| `vorn ext install <git url>`                                    | shows what it runs and asks, then builds and installs it                                                 |
