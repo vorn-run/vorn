@@ -1,6 +1,6 @@
-//! What a local shell is launched with so it reports command blocks
-//! (`shell-integration`): the environment and arguments for bash, zsh, fish,
-//! PowerShell and cmd, and which shell a session runs when none is chosen.
+//! What a local shell is launched with so it reports command blocks: the
+//! environment and arguments for bash, zsh, fish, PowerShell and cmd, and
+//! which shell a session runs when none is chosen.
 //!
 //! bash, zsh and fish read init files ("shims") written into a directory of
 //! their own under the temporary directory ([`shim_root`]). Every shell
@@ -31,7 +31,7 @@ pub enum ShellFamily {
 }
 
 impl ShellFamily {
-    /// The family a shell's path names (`detectShellFamily`), or `None` for a
+    /// The family a shell's path names, or `None` for a
     /// shell that runs untouched.
     pub fn of(path: &str) -> Option<ShellFamily> {
         let name = path.replace('\\', "/");
@@ -138,9 +138,8 @@ impl fmt::Display for ShimError {
 
 impl std::error::Error for ShimError {}
 
-/// The setup for `shell` (`getShellIntegration` with the shell given): an
-/// empty one for a shell with no integration, which then runs exactly as it
-/// would have.
+/// The setup for `shell`: an empty one for a shell with no integration, which
+/// then runs exactly as it would have.
 pub fn shell_setup(shell: &str, cx: &ShellContext<'_>) -> Result<ShellSetup, ShimError> {
     let Some(family) = ShellFamily::of(shell) else {
         return Ok(ShellSetup::default());
@@ -318,8 +317,8 @@ fn exclusively_owned(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir())
 }
 
-/// Where the shims are written: `vorn-shell-integration` in the temporary
-/// directory Node's `os.tmpdir()` names, read from the environment through `var`.
+/// Where the shims are written: `vorn-shell-integration` in the platform's
+/// temporary directory, read from the environment through `var`.
 pub fn shim_root(platform: Platform, var: impl Fn(&str) -> Option<String>) -> String {
     let set = |name: &str| var(name).filter(|v| !v.is_empty());
     let tmp = match platform {
@@ -347,10 +346,10 @@ pub fn shim_root(platform: Platform, var: impl Fn(&str) -> Option<String>) -> St
     paths::join(&tmp, "vorn-shell-integration")
 }
 
-/// The shell a session runs (`getDefaultShell`): the configured one when
+/// The shell a session runs: the configured one when
 /// set; else on Windows PowerShell 7 where it is on PATH, then the Windows
 /// PowerShell every install has, and cmd only if neither is there; else
-/// `$SHELL`, else zsh. `var` reads the server's own environment.
+/// `$SHELL`, else zsh. `var` reads the host's own environment.
 pub fn default_shell(
     configured: Option<&str>,
     platform: Platform,
@@ -388,8 +387,8 @@ pub fn default_shell(
     set("COMSPEC").unwrap_or_else(|| "cmd.exe".to_owned())
 }
 
-/// The arguments a shell starts with when its integration sets none
-/// (`getShellArgs`): a login shell, except on Windows.
+/// The arguments a shell starts with when its integration sets none: a login
+/// shell, except on Windows.
 pub fn default_shell_args(platform: Platform) -> &'static [&'static str] {
     match platform {
         Platform::Posix => &["-l"],
@@ -615,8 +614,8 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_shims_the_server_wrote_byte_for_byte() {
-        // The digests of the files `packages/server/src/shell-integration` wrote, minimal prompt first.
+    fn writes_the_known_shims_byte_for_byte() {
+        // The digests of the expected shim files, minimal prompt first.
         let known = [
             (
                 ShellFamily::Zsh,
@@ -679,11 +678,11 @@ mod tests {
         })
     }
 
-    // The directory is joined as Node's `path.join` joins on the host, so
-    // each platform's rules are checked on that platform.
+    // The directory is joined by the host's path rules, so each platform's
+    // rules are checked on that platform.
     #[cfg(windows)]
     #[test]
-    fn finds_the_temporary_directory_as_node_does() {
+    fn finds_the_platforms_temporary_directory() {
         let windows = |vars| root_with(Platform::Windows, vars);
         assert_eq!(
             windows(&[("TEMP", "C:\\Users\\a\\Temp\\"), ("TMP", "D:\\x")]),
@@ -697,7 +696,7 @@ mod tests {
 
     #[cfg(not(windows))]
     #[test]
-    fn finds_the_temporary_directory_as_node_does() {
+    fn finds_the_platforms_temporary_directory() {
         let posix = |vars| root_with(Platform::Posix, vars);
         assert_eq!(posix(&[]), "/tmp/vorn-shell-integration");
         assert_eq!(

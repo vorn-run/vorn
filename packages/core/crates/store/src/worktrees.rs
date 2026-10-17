@@ -1,7 +1,7 @@
 //! What the worktree manager reads of the configuration, by a second process.
 //!
 //! The projects with their names, which hosts they are on, and the person's
-//! retention preferences, read from the server's file as
+//! retention preferences, read from the store's file as
 //! [`crate::ProjectHosts`] reads the projects: read-only, fresh on every call,
 //! creating nothing.
 
@@ -25,7 +25,7 @@ pub struct WorktreeSettings {
 
 impl WorktreeSettings {
     /// Reads them from the database at `path`. `None` when there is no such
-    /// file or the server has not created its tables yet; an error when a
+    /// file or its tables have not been created yet; an error when a
     /// row does not parse, so the caller cannot mistake it for no projects.
     pub fn read(path: &Path) -> Result<Option<WorktreeSettings>> {
         if !path.exists() {

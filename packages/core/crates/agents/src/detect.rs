@@ -1,10 +1,8 @@
-//! Which agents are installed (`agent-detector`): an agent is when its
-//! configured command, or its fallback command, is a program on PATH, as
-//! `which` (`where` on Windows) finds it.
+//! Which agents are installed: an agent is when its configured command is a
+//! program on PATH, as `which` (`where` on Windows) finds it.
 //!
-//! The server asks `which` once per command and keeps the answer until the
-//! configuration is saved. This looks on PATH itself, which costs a few
-//! `stat`s, and keeps nothing: an agent installed meanwhile is found.
+//! Looks on PATH itself on every call, which costs a few `stat`s and keeps
+//! nothing: an agent installed meanwhile is found.
 
 use std::path::{Path, PathBuf};
 
@@ -23,7 +21,7 @@ pub fn installed(
         .collect()
 }
 
-/// Where each agent's command, or else its fallback, is, in `agents`' order.
+/// Where each agent's command is, in `agents`' order.
 pub fn locate(
     agents: &Agents,
     mut command_of: impl FnMut(&Agent) -> AgentCommand,
@@ -33,13 +31,7 @@ pub fn locate(
         .iter()
         .map(|agent| {
             let config = command_of(agent);
-            let at = command_path(&config.command, path_env).or_else(|| {
-                config
-                    .fallback_command
-                    .as_deref()
-                    .and_then(|fallback| command_path(fallback, path_env))
-            });
-            (agent.clone(), at)
+            (agent.clone(), command_path(&config.command, path_env))
         })
         .collect()
 }
@@ -105,11 +97,11 @@ mod tests {
     }
 
     #[test]
-    fn finds_a_command_or_its_fallback_on_path() {
+    fn finds_a_command_on_path() {
         let dir = tempfile::tempdir().unwrap();
         tool(dir.path(), "one", 0o755);
         tool(dir.path(), "three", 0o644);
-        tool(dir.path(), "five-fallback", 0o755);
+        tool(dir.path(), "five-renamed", 0o755);
         std::fs::create_dir(dir.path().join("two")).unwrap();
         let path = format!("/nonexistent::{}", dir.path().display());
         let agents = agents();
@@ -118,8 +110,7 @@ mod tests {
             |agent| {
                 let mut config = agent.default_command();
                 if agent.id() == "five" {
-                    config.command = "five-missing".into();
-                    config.fallback_command = Some("five-fallback".into());
+                    config.command = "five-renamed".into();
                 }
                 config
             },

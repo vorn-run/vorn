@@ -1,5 +1,4 @@
-//! Artifacts (`artifacts/service.ts`, `bodies.ts` and `delivery.ts`):
-//! pages, docs and designs an agent publishes, their numbered versions kept
+//! Artifacts: pages, docs and designs an agent publishes, their numbered versions kept
 //! as files beside `vorn.db`, the pages that serve them, and the review
 //! comments a person sends back to the agent that published them.
 
@@ -20,7 +19,7 @@ pub const MAX_BYTES: u64 = 5 * 1024 * 1024;
 /// How long an artifact nobody has touched is kept.
 pub const RETENTION_DAYS: i64 = 90;
 
-/// A store call's answer with JavaScript's numbers, or what failed.
+/// A store call's answer, whole numbers as integers, or what failed.
 pub fn call(store: &mut Store, name: &str, args: Value) -> Result<Value, String> {
     store
         .call(name, args)
@@ -63,7 +62,7 @@ pub fn read_body(data_dir: &Path, id: &str, version: u32, kind: &str) -> Option<
     fs::read_to_string(version_file(data_dir, id, version, kind)).ok()
 }
 
-/// `encodeURIComponent`.
+/// Percent-encodes every byte but ASCII letters, digits and `-_.!~*'()`.
 pub fn encode_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
@@ -166,8 +165,8 @@ fn version_number(v: &Value) -> u32 {
     v.as_f64().unwrap_or(0.0) as u32
 }
 
-/// `publishArtifact`: a first version, or the next version of one this
-/// session can see. Answers `{ artifact, version, path, answered }`.
+/// A first version, or the next version of one this session can see. Answers
+/// `{ artifact, version, path, answered }`.
 pub fn publish(
     store: &mut Store,
     data_dir: &Path,
@@ -255,8 +254,8 @@ pub fn publish(
     }))
 }
 
-/// `publishGateArtifact`: a gate's review page as the next version of the
-/// gate's own artifact, so it can be commented on.
+/// A gate's review page as the next version of the gate's own artifact, so it
+/// can be commented on.
 pub fn publish_gate_page(
     store: &mut Store,
     data_dir: &Path,
@@ -286,7 +285,7 @@ pub fn publish_gate_page(
     Ok(json!({ "artifact": call(store, "getArtifact", json!([id]))?, "version": version }))
 }
 
-/// `gateDraftComments`: the drafts on a gate's review page, as the comments
+/// The drafts on a gate's review page, as the comments
 /// a request for changes carries.
 pub fn gate_draft_comments(store: &mut Store, run_id: &str, node_id: &str) -> Value {
     let Ok(artifact) = call(store, "findGateArtifact", json!([run_id, node_id])) else {
@@ -317,7 +316,7 @@ pub fn gate_draft_comments(store: &mut Store, run_id: &str, node_id: &str) -> Va
     )
 }
 
-/// `artifactPage`: a version's HTML, or `None` unless the token is the
+/// A version's HTML, or `None` unless the token is the
 /// artifact's and the version exists. A doc is rendered as a page.
 pub fn page(
     store: &mut Store,
@@ -344,7 +343,7 @@ pub fn page(
     })
 }
 
-/// `readArtifactSource`: a version as it was written.
+/// A version as it was written.
 pub fn read_source(store: &mut Store, data_dir: &Path, id: &str, version: Option<u32>) -> Value {
     let Ok(artifact) = call(store, "getArtifact", json!([id])) else {
         return Value::Null;
@@ -369,7 +368,7 @@ pub fn read_source(store: &mut Store, data_dir: &Path, id: &str, version: Option
     }
 }
 
-/// `saveUserVersion`: a person's own edit of a doc as its next version,
+/// A person's own edit of a doc as its next version,
 /// each changed paragraph a draft to send.
 pub fn save_user_version(
     store: &mut Store,
@@ -493,8 +492,8 @@ fn line(c: &Value) -> String {
     }
 }
 
-/// `formatArtifactFeedback`: the message a batch becomes, its comments
-/// grouped by the version they were written on.
+/// The message a batch becomes, its comments grouped by the version they were
+/// written on.
 pub fn feedback_message(
     artifact: &Value,
     comments: &[Value],

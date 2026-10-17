@@ -502,7 +502,7 @@ fn send_signal(child: &mut tokio::process::Child, pid: Option<u32>, sig: Signal)
     let _ = child.start_kill();
 }
 
-/// Why a start failed, worded as Node words it.
+/// Why a start failed, as `spawn <program> ENOENT` and the like.
 fn spawn_reason(program: &std::path::Path, err: &std::io::Error) -> String {
     let program = program.display();
     match err.kind() {

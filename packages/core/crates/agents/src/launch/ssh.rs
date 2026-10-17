@@ -1,9 +1,8 @@
-//! A session on a remote host, as the server's `createRemotePty` starts it:
-//! a local shell, into which the `ssh` line is typed ([`ssh_line`]); the
-//! password typed when ssh asks for it; and, once the remote shell has said
-//! it is up, the agent's launch line run in the project there
-//! ([`remote_command`]). [`Login`] reads the session's output and says when
-//! to do each.
+//! A session on a remote host: a local shell, into which the `ssh` line is
+//! typed ([`ssh_line`]); the password typed when ssh asks for it; and, once
+//! the remote shell has said it is up, the agent's launch line run in the
+//! project there ([`remote_command`]). [`Login`] reads the session's output
+//! and says when to do each.
 //!
 //! The ready marker is typed split by quotes ([`ssh_line`]) on a POSIX
 //! shell, so the local shell's echo of the line does not count as the
@@ -30,7 +29,7 @@ pub enum Auth<'a> {
 
 impl<'a> Auth<'a> {
     /// The auth method as stored (`agent` when none is), with the key file
-    /// it uses. An unknown method passes no flags, as the server's does.
+    /// it uses. An unknown method passes no flags.
     pub fn from_stored(
         method: Option<&str>,
         key_path: Option<&'a str>,
@@ -154,7 +153,7 @@ pub struct Login {
     password_sent: bool,
     connected: bool,
     failed: bool,
-    /// Everything read until the marker, as the server keeps it.
+    /// Everything read until the marker.
     seen: String,
 }
 
@@ -264,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn types_ssh_as_the_server_does_with_the_marker_split_by_quotes() {
+    fn types_ssh_with_the_marker_split_by_quotes() {
         let m = marker("0123456789abcdef");
         assert_eq!(m, "__VORN_READY_01234567__");
         assert_eq!(
@@ -272,7 +271,7 @@ mod tests {
             "ssh -t me@box.example 'echo __VORN_READY_'01234567__' && exec $SHELL -l'"
         );
         assert!(!ssh_line(&target(Auth::Agent), &m, Platform::Posix).contains(&m));
-        // Elsewhere the line is the server's, word for word.
+        // Elsewhere the marker is typed whole.
         assert_eq!(
             ssh_line(&target(Auth::Agent), &m, Platform::Windows),
             "ssh -t me@box.example 'echo __VORN_READY_01234567__ && exec $SHELL -l'"
@@ -336,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn knows_a_password_prompt_as_the_server_does() {
+    fn knows_a_password_prompt() {
         for yes in [
             "me@box's password: ",
             "Password:",

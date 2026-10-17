@@ -1,4 +1,4 @@
-//! The extensions of 0.8, which add to a session's card: one child per
+//! The card extensions, which add to a session's card: one child per
 //! extension and project in the connector protocol, each with a token of its
 //! own, kept by the shared [`Lifecycle`]: started when first needed, started
 //! again on the next use after a crash, and stopped when its project has no
@@ -28,13 +28,6 @@ pub const SUPPORTED_PROTOCOLS: [u64; 1] = [1];
 const UNSUPPORTED_PROTOCOL: i64 = -32001;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(15);
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// What a pack that names no protocol is told.
-pub fn outdated_message(name: &str) -> String {
-    format!(
-        "{name} was built for an older Vorn. Update it in Settings › Extensions, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later."
-    )
-}
 
 fn needs_newer_vorn(name: &str, protocol: Option<u64>) -> String {
     let spoken = protocol.map_or_else(
@@ -214,7 +207,7 @@ impl Hosts {
         }
         let name = pack.name().to_owned();
         match pack.manifest.protocol {
-            None => return Err(outdated_message(&name)),
+            None => return Err(format!("{name} names no connector protocol")),
             Some(p) if !SUPPORTED_PROTOCOLS.contains(&p) => {
                 return Err(needs_newer_vorn(&name, Some(p)))
             }

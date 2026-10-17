@@ -17,9 +17,9 @@ use crate::sql::{
 use crate::tasks::bind;
 use crate::{tokens, Result, Store};
 
-/// A `projects` row as `rowToProject` maps it: `preferredAgents` and
-/// `hostIds` are parsed (and throw on bad JSON, as `JSON.parse` does), and a
-/// row from before workspaces belongs to `personal`.
+/// A `projects` row as a project: `preferredAgents` and `hostIds` are parsed
+/// (bad JSON is an error), and a row from before workspaces belongs to
+/// `personal`.
 pub(crate) fn row_to_project(row: &Row<'_>) -> Result<ProjectConfig> {
     Ok(ProjectConfig {
         name: get_text(row, "name")?,
@@ -34,8 +34,7 @@ pub(crate) fn row_to_project(row: &Row<'_>) -> Result<ProjectConfig> {
     })
 }
 
-/// A `workflows` row as `rowToWorkflow` maps it. `enabled` is `=== 1`, so
-/// only the number one is on.
+/// A `workflows` row as a workflow. Only an `enabled` of exactly 1 is on.
 pub(crate) fn row_to_workflow(row: &Row<'_>) -> Result<WorkflowDefinition> {
     let enabled = match row.get_ref("enabled")? {
         ValueRef::Integer(i) => i == 1,
@@ -58,7 +57,7 @@ pub(crate) fn row_to_workflow(row: &Row<'_>) -> Result<WorkflowDefinition> {
     })
 }
 
-/// A `session_groups` row as `rowToSessionGroup` maps it.
+/// A `session_groups` row as a session group.
 pub(crate) fn row_to_session_group(row: &Row<'_>) -> Result<SessionGroupConfig> {
     Ok(SessionGroupConfig {
         id: get_text(row, "id")?,
@@ -70,7 +69,7 @@ pub(crate) fn row_to_session_group(row: &Row<'_>) -> Result<SessionGroupConfig> 
     })
 }
 
-/// A `workspaces` row as `rowToWorkspace` maps it.
+/// A `workspaces` row as a workspace.
 pub(crate) fn row_to_workspace(row: &Row<'_>) -> Result<WorkspaceConfig> {
     Ok(WorkspaceConfig {
         id: get_text(row, "id")?,
@@ -81,13 +80,13 @@ pub(crate) fn row_to_workspace(row: &Row<'_>) -> Result<WorkspaceConfig> {
     })
 }
 
-/// `workspaceId ?? 'personal'`.
+/// The workspace id, or `personal` when unset.
 fn personal_unless_set(workspace_id: Option<String>) -> String {
     workspace_id.unwrap_or_else(|| "personal".to_owned())
 }
 
-/// Collects the `UPDATE ... SET` clauses a partial update names, in the
-/// order the TypeScript tests its keys.
+/// Collects the `UPDATE ... SET` clauses a partial update names, in a fixed
+/// key order.
 #[derive(Default)]
 struct Sets {
     clauses: Vec<&'static str>,
@@ -175,9 +174,9 @@ impl Store {
         Ok(())
     }
 
-    /// `updates` is the partial project as JSON; a key present is one the
-    /// TypeScript sees as `!== undefined`. `hostIds` is stringified whatever
-    /// it is, so `null` stores the text `null`, as it does there.
+    /// `updates` is the partial project as JSON; only the keys present
+    /// change. `hostIds` is stored as JSON whatever it is, so `null` stores
+    /// the text `null`.
     pub fn db_update_project(&self, name: &str, updates: &Map<String, Value>) -> Result<()> {
         let mut sets = Sets::default();
         if let Some(v) = updates.get("path") {

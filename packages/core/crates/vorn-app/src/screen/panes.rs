@@ -1,7 +1,7 @@
-//! The panes beside a session's terminal (`PaneColumn`): the browser
-//! (`BrowserCard`) with its artifact bar, banner, design canvas, doc editor
-//! and comment rail; the device (`DeviceCard`) with its frame and controls;
-//! and the simulator picker (`DevicePicker`). Pages and the device's screen
+//! The panes beside a session's terminal: the browser
+//! with its artifact bar, banner, design canvas, doc editor
+//! and comment rail; the device with its frame and controls;
+//! and the simulator picker. Pages and the device's screen
 //! are native web views the app seats in the custom boxes left for them.
 
 use super::{c, ico, white, Screen};
@@ -113,7 +113,7 @@ fn text_btn(s: &Screen<'_>, act: PaneAct, label: El, name: &str, enabled: bool) 
     (b, id)
 }
 
-/// `PaneControls`: maximize or restore, and close.
+/// Maximize or restore, and close.
 fn controls(s: &Screen<'_>, sid: &str, kind: PaneKind, title: &str) -> El {
     let maxed = s.st.bench.maximized.get(sid) == Some(&kind);
     let (icon, tip, aria) = if maxed {
@@ -155,7 +155,7 @@ fn kinds(s: &Screen<'_>, sid: &str) -> Vec<PaneKind> {
     out
 }
 
-/// `ExtensionPaneIcon`: the pane's glyph, the extension's, else a puzzle piece.
+/// The pane's glyph, the extension's, else a puzzle piece.
 pub(super) fn extension_icon(icon: Option<&serde_json::Value>, size: f32, color: Rgba) -> El {
     let svg = icon.and_then(crate::library::parse_icon).and_then(|i| {
         crate::library::mark_svg(&crate::library::Look {
@@ -170,7 +170,7 @@ pub(super) fn extension_icon(icon: Option<&serde_json::Value>, size: f32, color:
     }
 }
 
-/// `ExtensionPaneCard`: its own bar naming the pane and its extension, over
+/// Its own bar naming the pane and its extension, over
 /// the page the pack ships or the program the host runs.
 fn extension_pane(s: &Screen<'_>, sid: &str) -> El {
     let Some(p) = s.st.ext.panes.get(sid) else {
@@ -250,7 +250,7 @@ fn extension_pane(s: &Screen<'_>, sid: &str) -> El {
         .child(body)
 }
 
-/// `PaneColumn`: the browser over the device, or the maximized one alone.
+/// The browser over the device, or the maximized one alone.
 pub(super) fn column(s: &Screen<'_>, session: &Session) -> Option<El> {
     let sid = session.info.id.as_str();
     let bench = &s.st.bench;
@@ -360,7 +360,7 @@ fn browser_pane(s: &Screen<'_>, session: &Session) -> El {
         .child(page_body(s, sid, live, agent))
 }
 
-/// `PaneTabStrip`: the tabs, a new one, and the pane's controls.
+/// The tabs, a new one, and the pane's controls.
 fn tab_strip(s: &Screen<'_>, sid: &str, p: &Pane, live: Option<&Live>, host: &str) -> El {
     let manifest = live.and_then(|l| l.manifest.as_ref());
     let mut tabs = div()
@@ -574,7 +574,7 @@ fn header(s: &Screen<'_>, sid: &str, live: Option<&Live>, url: &str, agent: &str
     row
 }
 
-/// `AddressBar`: back, forward, reload or stop, and the address.
+/// Back, forward, reload or stop, and the address.
 fn address_bar(s: &Screen<'_>, row: El, sid: &str, live: Option<&Live>, url: &str) -> El {
     let (back, forward) = live.map_or((false, false), |l| l.nav);
     let loading = live.is_some_and(|l| l.loading);
@@ -641,7 +641,7 @@ fn address_bar(s: &Screen<'_>, row: El, sid: &str, live: Option<&Live>, url: &st
     )
 }
 
-/// `ArtifactBar`: the version and its menu, who made it, and editing,
+/// The version and its menu, who made it, and editing,
 /// commenting and sending.
 fn artifact_bar(
     s: &Screen<'_>,
@@ -1012,7 +1012,7 @@ fn tweak_control(s: &Screen<'_>, sid: &str, key: &str, t: &Tweak, live: Option<&
     }
 }
 
-/// `ArtifactBanner`: a newer version is out, or this one answers comments.
+/// A newer version is out, or this one answers comments.
 fn banner(s: &Screen<'_>, sid: &str, live: Option<&Live>) -> Option<El> {
     let (a, Some(state)) = s.st.bench.artifact(sid)? else {
         return None;
@@ -1254,7 +1254,7 @@ fn quiet_btn(
     }
 }
 
-/// `DocEditor`: the markdown, and the edits it makes beside it.
+/// The markdown, and the edits it makes beside it.
 fn doc_editor(
     s: &Screen<'_>,
     sid: &str,
@@ -1380,7 +1380,7 @@ fn doc_editor(
         )
 }
 
-/// `DesignCanvas`: every artboard side by side, and the zoom.
+/// Every artboard side by side, and the zoom.
 fn canvas(s: &Screen<'_>, sid: &str, boards: &[artifact::Artboard]) -> El {
     let bench = &s.st.bench;
     let area = s.ui.rect_of(canvas_id(sid)).map(|r| (r.w, r.h));
@@ -1573,7 +1573,7 @@ fn link(s: &Screen<'_>, act: PaneAct, label: &str, hover: Rgba) -> El {
         )
 }
 
-/// `ArtifactRail`: the comments to send, the last ones sent, a note and
+/// The comments to send, the last ones sent, a note and
 /// the send button.
 fn rail(
     s: &Screen<'_>,
@@ -2084,7 +2084,7 @@ fn control_bar(s: &Screen<'_>, sid: &str, dev: &crate::panes::DevicePane, scale:
         .child(tooltip(s.ui, one, actual, "One pixel per point", None))
 }
 
-/// `DevicePicker`: the simulators this session may take.
+/// The simulators this session may take.
 pub(super) fn picker(s: &Screen<'_>) -> El {
     let Some(p) = &s.st.bench.picker else {
         return div();

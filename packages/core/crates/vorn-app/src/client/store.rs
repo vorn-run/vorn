@@ -1,6 +1,6 @@
 //! What the main screen shows, as vornd last told it: the config, projects,
 //! sessions, tasks and workflows, loaded once and then kept current by
-//! folding notifications in, the way the renderer's stores do.
+//! folding notifications in.
 //!
 //! vornd's configuration carries neither tasks nor workflows; the app keeps
 //! them beside its copy of it, under `tasks` and `workflows`, so the screens
@@ -49,7 +49,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// `getDisplayName`: the name given, else the project's.
+    /// The name given, else the project's.
     pub fn title(&self) -> String {
         match self.info.display_name.as_deref().map(str::trim) {
             Some(name) if !name.is_empty() => name.to_owned(),
@@ -284,13 +284,13 @@ impl Store {
         p.workspace_id.as_deref().unwrap_or(WORKSPACE) == self.workspace()
     }
 
-    /// `useWorkspaceProjects`: the active workspace's projects, in order.
+    /// The active workspace's projects, in order.
     pub fn workspace_projects(&self) -> impl Iterator<Item = &ProjectConfig> {
         self.projects.iter().filter(|p| self.in_workspace(p))
     }
 
     /// Whether a session's project is in the active workspace, which is
-    /// what `useSessionScope` lets any surface show. A session outside every
+    /// what any surface shows. A session outside every
     /// project (a shell in the home directory) belongs to no workspace, so
     /// it shows in all of them rather than nowhere.
     pub fn in_scope(&self, s: &Session) -> bool {
@@ -525,7 +525,7 @@ fn tasks_list(config: &mut Value) -> &mut Vec<Value> {
     }
 }
 
-/// `DEFAULT_WORKSPACE`.
+/// The workspace a config starts with.
 pub fn default_workspace() -> WorkspaceConfig {
     WorkspaceConfig {
         id: WORKSPACE.to_owned(),
@@ -536,7 +536,7 @@ pub fn default_workspace() -> WorkspaceConfig {
     }
 }
 
-/// The workspace every config has (`DEFAULT_WORKSPACE_ID`).
+/// The id of the workspace every config has.
 pub const WORKSPACE: &str = "personal";
 
 /// `defaults.activeWorkspace`, else `personal`.
@@ -548,7 +548,7 @@ fn active_workspace(config: &Value) -> &str {
         .unwrap_or(WORKSPACE)
 }
 
-/// `useWorkspaceSessionGroups`: the active workspace's groups by `order`.
+/// The active workspace's groups by `order`.
 fn groups(config: &Value) -> Vec<SessionGroupConfig> {
     let workspace = active_workspace(config);
     let mut out: Vec<SessionGroupConfig> =

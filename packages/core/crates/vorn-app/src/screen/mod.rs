@@ -1,4 +1,4 @@
-//! Today's main screen as elements: the top bar over either the composer
+//! The main screen as elements: the top bar over either the composer
 //! (no sessions yet) or the terminal cards. Each part is a function of what
 //! the app knows, rebuilt every frame; terminals are custom boxes the app
 //! paints after layout.
@@ -203,7 +203,7 @@ impl Screen<'_> {
     }
 
     /// The left padding of a bar at the window's top left: room for the
-    /// traffic lights on macOS (`TRAFFIC_LIGHT_PAD_PX`) while the sidebar,
+    /// traffic lights on macOS while the sidebar,
     /// which otherwise holds them, is closed.
     pub fn lead(&self) -> f32 {
         if self.traffic && !self.st.sidebar {
@@ -274,7 +274,7 @@ pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
     icon(look::icon(name, stroke).unwrap_or_default(), size, color)
 }
 
-/// `AgentIcon`: an agent's mark, or a shell's terminal.
+/// An agent's mark, or a shell's terminal.
 pub(crate) fn agent_icon(s: &Screen<'_>, agent: &str, size: f32) -> El {
     crate::components::agent_icon(s.agents, agent, size)
 }
@@ -288,7 +288,7 @@ pub(crate) fn alt_label() -> &'static str {
     }
 }
 
-/// The modifier the renderer's shortcuts use: ⌘ on a Mac, Ctrl elsewhere.
+/// The modifier the shortcuts use: ⌘ on a Mac, Ctrl elsewhere.
 pub(crate) fn mod_label() -> &'static str {
     if crate::ui::mods::mac() {
         "\u{2318}"

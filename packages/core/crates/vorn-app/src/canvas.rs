@@ -1,4 +1,4 @@
-//! The workflow canvas's geometry (`workflow-canvas-layout.ts`): where each
+//! The workflow canvas's geometry: where each
 //! card, loop frame and add button sits, the edges between their ports,
 //! which hand-drawn connections are allowed, and the viewport it opens on.
 //! The definition stays the source of truth; this only projects it.
@@ -25,7 +25,7 @@ const LOOP_FOOTER: f64 = 18.0 + 22.0 + 40.0;
 const EMPTY_BODY: f64 = 52.0;
 /// Where a loop's body starts, from the top of its frame.
 pub const LOOP_BODY_TOP: f64 = LOOP_HEADER + LOOP_BODY_PAD;
-/// `OPENING_TOP`.
+/// The margin above the workflow when the view fits it.
 const OPENING_TOP: f64 = 48.0;
 pub use vorn_components::graph::{
     edge_curve, zoom_by, Minimap, Viewport, MAX_ZOOM, MINI, MIN_ZOOM,
@@ -49,7 +49,7 @@ fn config_str<'a>(n: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|v| !v.is_empty())
 }
 
-/// `connectorArgsPreview`.
+/// A connector step's arguments on one line, or `None` without any.
 pub fn args_preview(args: Option<&Value>) -> Option<String> {
     let map = args?.as_object()?;
     (!map.is_empty()).then(|| {
@@ -66,7 +66,7 @@ pub fn args_preview(args: Option<&Value>) -> Option<String> {
     })
 }
 
-/// `stepPreview`: the configured body that sizes a card.
+/// The configured body that sizes a card.
 pub fn step_preview(n: &Value) -> Option<String> {
     match kind(n) {
         "script" => config_str(n, "scriptContent").map(str::to_owned),
@@ -88,7 +88,7 @@ pub struct LoopBody {
     pub height: f64,
 }
 
-/// `layoutLoopBody`.
+/// A loop's body laid out inside its card, and the card's size.
 pub fn layout_loop_body(lp: &Value, nodes: &[Value], edges: &[Value]) -> LoopBody {
     let (members, inner) = loop_body_graph(nodes, edges, lp);
     if members.is_empty() {
@@ -131,7 +131,7 @@ pub fn layout_loop_body(lp: &Value, nodes: &[Value], edges: &[Value]) -> LoopBod
     }
 }
 
-/// `estimateNodeHeight`: only feeds the layout, so drift just widens a gap.
+/// Only feeds the layout, so drift just widens a gap.
 pub fn estimate_height(n: &Value, nodes: &[Value], edges: &[Value]) -> f64 {
     match kind(n) {
         "loop" => {
@@ -154,7 +154,7 @@ pub fn estimate_height(n: &Value, nodes: &[Value], edges: &[Value]) -> f64 {
     }
 }
 
-/// `layoutPositions`: a vertical trunk, branches side by side, loops as one
+/// A vertical trunk, branches side by side, loops as one
 /// block; and which steps sit inside a fork's branch.
 pub fn layout_positions(
     nodes: &[Value],
@@ -259,13 +259,13 @@ impl Placer<'_> {
     }
 }
 
-/// `latticePosition`.
+/// A node's position snapped to the lattice.
 pub fn lattice(n: &Value) -> (f64, f64) {
     let (x, y) = graph::position(n);
     (snap(x), snap(y))
 }
 
-/// `alignedNodes`: positions healed onto the lattice for the next save.
+/// Positions healed onto the lattice for the next save.
 pub fn aligned(nodes: &[Value]) -> Vec<Value> {
     let aligned = nodes.iter().all(|n| lattice(n) == graph::position(n));
     if graph::positions_are_seed(nodes) || aligned {
@@ -282,7 +282,7 @@ pub fn aligned(nodes: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// A step card's height as drawn (`NodeShell`): the header, and the
+/// A step card's height as drawn: the header, and the
 /// footer line when it has one.
 pub fn drawn_height(n: &Value) -> f64 {
     if crate::workflows::footer(n).is_some() {
@@ -325,7 +325,7 @@ impl Element {
     }
 }
 
-/// `CanvasEdgeData`: where a step dropped on this edge goes.
+/// Where a step dropped on this edge goes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeData {
     pub after: String,
@@ -373,7 +373,7 @@ impl Elements {
     }
 }
 
-/// `toCanvasElements`: stored positions once someone arranged the
+/// Stored positions once someone arranged the
 /// workflow, the layout otherwise; then the edges, the + under each leaf
 /// and the spot where a missing trigger goes.
 pub fn elements(nodes: &[Value], edges: &[Value]) -> Elements {
@@ -588,7 +588,7 @@ pub fn elements(nodes: &[Value], edges: &[Value]) -> Elements {
     }
 }
 
-/// `canConnect`: a hand-drawn edge keeps the graph a DAG the engine runs.
+/// Whether a hand-drawn edge keeps the graph a DAG the engine runs.
 pub fn can_connect(
     nodes: &[Value],
     edges: &[Value],
@@ -663,7 +663,7 @@ fn place_at_top((bx, by, bw, _): (f64, f64, f64, f64), width: f64, zoom: f64) ->
     }
 }
 
-/// `openingViewport`: 100%, the steps centred, the first near the top.
+/// 100%, the steps centred, the first near the top.
 pub fn opening(els: &Elements, width: f64) -> Viewport {
     match bounds(els) {
         Some((x, y, w, _)) => place_at_top((x, y, w, 0.0), width, 1.0),
@@ -675,7 +675,7 @@ pub fn opening(els: &Elements, width: f64) -> Viewport {
     }
 }
 
-/// `topAlignedFit` over every element: the whole workflow on screen, never
+/// The viewport with the whole workflow on screen, top-aligned, never
 /// past 100%.
 pub fn fit(els: &Elements, width: f64, height: f64) -> Option<Viewport> {
     let all: Vec<&Element> = els.nodes.iter().collect();
@@ -698,8 +698,8 @@ pub fn fit(els: &Elements, width: f64, height: f64) -> Option<Viewport> {
     Some(place_at_top((min_x, min_y, bw, bh), width, zoom))
 }
 
-/// React Flow's `MiniMap`: every node and the visible area, fitted with a
-/// margin into 96×64, as the kit's graph draws it.
+/// The minimap: every node and the visible area, fitted with a margin into
+/// 96×64, as the kit's graph draws it.
 pub fn minimap(els: &Elements, v: Viewport, size: (f64, f64)) -> Minimap {
     let cards: Vec<(f64, f64, f64, f64)> = els.nodes.iter().map(|e| (e.x, e.y, e.w, e.h)).collect();
     vorn_components::graph::minimap(&cards, v, size)

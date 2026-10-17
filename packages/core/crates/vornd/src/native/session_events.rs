@@ -30,7 +30,7 @@ use super::Native;
 use crate::engine::{Engine, Event};
 use crate::registry::{EntryState, ProgramStatus, SessionRegistry, Stamp, WaitKind};
 
-/// How long an ended headless agent's record is kept, as the server kept it.
+/// How long an ended headless agent's record is kept.
 const HEADLESS_KEPT: Duration = Duration::from_secs(30);
 /// How often each terminal's HEAD is read again (`HEAD_REFRESH_MS`).
 const HEAD_EVERY: Duration = Duration::from_secs(30);

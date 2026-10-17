@@ -2,7 +2,8 @@
 //!
 //! `cases.json` holds, for each case, the arguments and either the arguments
 //! as the SDK parsed them or the message it refused them with, both taken
-//! from `@modelcontextprotocol/sdk` validating against the TypeScript tools.
+//! from `@modelcontextprotocol/sdk` validating against the tools in
+//! `packages/mcp`.
 
 use serde_json::Value;
 

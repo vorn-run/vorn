@@ -1,12 +1,12 @@
 //! The few JavaScript behaviours the command's output depends on.
 //!
-//! The TypeScript command prints what the server sent through
-//! `JSON.stringify(value, null, 2)`, interpolates values into templates with
-//! `String(x)`, and branches on truthiness. A script reading either command's
-//! output must not be able to tell them apart, so those three are reproduced
-//! here rather than approximated with serde's own printer: numbers print as
-//! JavaScript prints them (`1e+21`, not `1e21`; `1`, not `1.0`) and objects put
-//! their integer-like keys first, as a JavaScript object does.
+//! The command prints what the server sent as `JSON.stringify(value, null, 2)`
+//! would, interpolates values into templates as `String(x)` would, and branches
+//! on truthiness. Those three are reproduced here rather than approximated with
+//! serde's own printer, so the output matches what the web client shows:
+//! numbers print as JavaScript prints them (`1e+21`, not `1e21`; `1`, not
+//! `1.0`) and objects put their integer-like keys first, as a JavaScript object
+//! does.
 
 use serde_json::{Map, Value};
 

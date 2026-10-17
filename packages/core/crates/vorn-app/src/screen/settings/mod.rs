@@ -1,6 +1,6 @@
-//! `SettingsPage`: the category sidebar beside the open panel, over the
+//! The settings page: the category sidebar beside the open panel, over the
 //! whole window, and the rows, switches and segmented controls the panels
-//! share (`SettingRow`, `ToggleSwitch`, `SegmentedControl`).
+//! share.
 
 mod agents;
 mod pages;
@@ -291,7 +291,7 @@ fn page_with(s: &Screen<'_>, body: El) -> El {
         )
 }
 
-/// `SettingsPageHeader`: the title, its description, and actions.
+/// The title, its description, and actions.
 pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<El>) -> El {
     div()
         .row()
@@ -319,7 +319,7 @@ pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<
         .child_if(actions)
 }
 
-/// `SettingRow`: the label and description beside `control`, a note
+/// The label and description beside `control`, a note
 /// under the description, dimmed when `disabled`.
 pub(in crate::screen) fn row(
     label: &str,
@@ -367,7 +367,7 @@ pub(in crate::screen) fn row(
     el
 }
 
-/// `ToggleSwitch`: the one switch, [`widgets::toggle`](crate::ui::widgets::toggle).
+/// The one switch, [`widgets::toggle`](crate::ui::widgets::toggle).
 pub(in crate::screen) fn toggle(
     s: &Screen<'_>,
     place: &str,
@@ -389,7 +389,7 @@ pub(super) struct Seg<'a> {
     pub disabled: bool,
 }
 
-/// `SegmentedControl`: `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`.
+/// `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`.
 pub(super) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_>>, px: f32) -> El {
     let mut row = div()
         .row()

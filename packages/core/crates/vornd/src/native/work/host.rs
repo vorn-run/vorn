@@ -107,8 +107,8 @@ impl VorndHost {
         }
     }
 
-    /// Tells the server the configuration changed, as `dbSignalChange`
-    /// does: it reads it again and tells every client.
+    /// Tells the server the configuration changed: it reads it again and
+    /// tells every client.
     pub fn signal_change(&self) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -167,7 +167,7 @@ impl Host for VorndHost {
         let Some(Value::Array(all)) = listed.map(vorn_work::js_numbers) else {
             return Vec::new();
         };
-        // `dbListTasks` skips an empty name; the configuration's list matched it exactly.
+        // `dbListTasks` skips an empty name, so the project is matched exactly here.
         all.into_iter()
             .filter(|t| t.get("projectName").and_then(Value::as_str) == Some(project))
             .collect()

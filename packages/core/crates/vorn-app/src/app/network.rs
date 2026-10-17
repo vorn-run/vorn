@@ -285,7 +285,7 @@ impl App {
     }
 }
 
-/// Opens the token form empty with its field focused (`autoFocus`).
+/// Opens the token form empty with its field focused.
 fn net_name_form(ui: &mut Ui) {
     ui.set_edit_text(DEVICE_NAME, "");
     ui.set_focus(Some(DEVICE_NAME));

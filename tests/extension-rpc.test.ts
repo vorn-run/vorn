@@ -11,20 +11,12 @@ describe('extension RPC wiring', () => {
   const requests = {
     EXTENSION_LIST: 'extension:list',
     EXTENSION_ACTIVATION: 'extension:activation',
-    EXTENSION_FOOTER_ITEMS: 'extension:footerItems',
     EXTENSION_OPEN_PANE: 'extension:openPane',
-    EXTENSION_CLOSE_PANE: 'extension:closePane',
-    EXTENSION_RUN_HANDLER: 'extension:runHandler',
-    EXTENSION_MATCH_LINKS: 'extension:matchLinks'
-  } as const
-
-  const pushes = {
-    EXTENSION_SELECTION_REQUEST: 'extension:selectionRequest',
-    EXTENSION_SELECTION_RESULT: 'extension:selectionResult'
+    EXTENSION_CLOSE_PANE: 'extension:closePane'
   } as const
 
   it('names every channel once, in one place', () => {
-    for (const [key, channel] of Object.entries({ ...requests, ...pushes })) {
+    for (const [key, channel] of Object.entries(requests)) {
       expect(IPC[key as keyof typeof IPC]).toBe(channel)
     }
   })
@@ -36,15 +28,6 @@ describe('extension RPC wiring', () => {
     }
   })
 
-  it('declares the pushes each in the direction it travels', () => {
-    const protocol = read('packages/shared/src/protocol.ts')
-    const server = protocol.slice(protocol.indexOf('export interface ServerNotifications'))
-    const client = protocol.slice(protocol.indexOf('export interface ClientNotifications'))
-    expect(server).toContain(`'${pushes.EXTENSION_SELECTION_REQUEST}': {`)
-    expect(server).toContain(`'${requests.EXTENSION_FOOTER_ITEMS}': {`)
-    expect(client).toContain(`'${pushes.EXTENSION_SELECTION_RESULT}': {`)
-  })
-
   it('answers each request in vornd', () => {
     const host = read('packages/core/crates/vornd/src/native/extensions/mod.rs')
     const methods = host.slice(host.indexOf('pub const METHODS'), host.indexOf('];'))
@@ -52,6 +35,5 @@ describe('extension RPC wiring', () => {
       expect(methods).toContain(`"${channel}"`)
       expect(host).toContain(`"${channel}" =>`)
     }
-    expect(host).toContain(`SELECTION_RESULT: &str = "${pushes.EXTENSION_SELECTION_RESULT}"`)
   })
 })

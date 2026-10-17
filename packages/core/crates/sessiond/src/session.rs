@@ -1693,14 +1693,14 @@ fn detach(cmd: &mut Command) {
 }
 
 /// Whether `program` is cmd.exe, which reads its own command line rather
-/// than by the rules `Command` quotes for. Node's rule for the same choice.
+/// than by the rules `Command` quotes for.
 #[cfg(any(windows, test))]
 fn is_cmd(program: &str) -> bool {
     let name = program.rsplit(['\\', '/']).next().unwrap_or(program);
     name.eq_ignore_ascii_case("cmd") || name.eq_ignore_ascii_case("cmd.exe")
 }
 
-/// Hands cmd.exe its arguments as they are, joined by spaces, as Node does,
+/// Hands cmd.exe its arguments as they are, joined by spaces,
 /// so `/s /c "<command line>"` reaches it unescaped.
 #[cfg(windows)]
 fn verbatim(cmd: &mut Command, args: &[String]) {

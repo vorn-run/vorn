@@ -1,8 +1,6 @@
 //! A session's git, as the screen shows it: the changes count each card
-//! carries (`useGitDiffPolling`), the Changes panel and its commit dialog
-//! (`RightPanel`, `CommitDialog`), the branch switcher (`BranchPicker`), the
-//! editors it can open in (`OpenInButton`), and removing a worktree
-//! (`WorktreeCleanupDialog`, `WorktreeCleanupToastBridge`).
+//! carries, the Changes panel and its commit dialog, the branch switcher,
+//! the editors it can open in, and removing a worktree.
 
 use std::collections::HashMap;
 use web_time::{Duration, Instant};
@@ -44,7 +42,7 @@ pub enum CommitOp {
 /// What the git controls do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GitAct {
-    /// `GitChangesIndicator`: a session's changes in the panel.
+    /// A session's changes in the panel.
     Open(String),
     Close,
     Maximize,
@@ -98,7 +96,7 @@ pub fn files_label(n: u64) -> String {
     format!("{n} file{}", if n == 1 { "" } else { "s" })
 }
 
-/// One editor or app a project can be opened in (`DetectedIDE`).
+/// One editor or app a project can be opened in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ide {
     pub id: String,
@@ -114,7 +112,7 @@ impl Ide {
     }
 }
 
-/// The glyph today's app draws for an editor (`IDE_ICONS`).
+/// The glyph drawn for an editor.
 pub fn ide_icon(id: &str) -> Option<&'static str> {
     Some(match id {
         "vscode" | "vscode-insiders" => include_str!("../assets/ide/vscode.svg"),
@@ -131,7 +129,7 @@ pub fn ide_icon(id: &str) -> Option<&'static str> {
     })
 }
 
-/// The branch switcher's list (`BranchPicker`).
+/// The branch switcher's list.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Branches {
     /// The session it switches.
@@ -165,7 +163,7 @@ pub struct Git {
     pub polled: Option<Instant>,
     /// Sessions whose poll is on its way.
     pub polling: usize,
-    /// The session whose Changes panel is open (`diffSidebarTerminalId`).
+    /// The session whose Changes panel is open.
     pub panel: Option<String>,
     pub maximized: bool,
     pub width: Option<f32>,

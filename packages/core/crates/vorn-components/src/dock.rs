@@ -27,11 +27,11 @@ fn middot() -> El {
 
 /// A minimized session, as its pill shows it.
 pub struct Minimized<'a> {
-    /// `getDisplayName`: the session's name, or its project's.
+    /// The session's name, or its project's.
     pub name: &'a str,
     pub agent: &'a str,
     pub status: Status,
-    /// `getBranchLabel`: the branch, or the worktree's name.
+    /// The branch, or the worktree's name.
     pub branch: Option<&'a str>,
     pub worktree: bool,
 }

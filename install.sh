@@ -198,14 +198,6 @@ SHIM
 
     mkdir -p "$BIN_DIR" "$LIB_DIR"
 
-    # Earlier installs put the AppImage itself here. The new one is downloaded
-    # to LIB_DIR below, so the old file is removed rather than moved -- said
-    # plainly, because a message about moving would send you looking for it.
-    if [ -f "${BIN_DIR}/vorn" ] && [ ! -f "${LIB_DIR}/${APP_NAME}.AppImage" ]; then
-      echo "Removing the old AppImage at ${BIN_DIR}/vorn; the app now lives in ${LIB_DIR}."
-      rm -f "${BIN_DIR}/vorn"
-    fi
-
     echo "Downloading ${ARTIFACT}..."
     curl -fSL --progress-bar -o "${LIB_DIR}/${APP_NAME}.AppImage" "$URL"
     chmod +x "${LIB_DIR}/${APP_NAME}.AppImage"

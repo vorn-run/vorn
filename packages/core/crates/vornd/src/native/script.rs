@@ -20,7 +20,7 @@ use super::{agent, Answer, Native};
 /// The call that runs a script.
 pub const METHOD: &str = "script:execute";
 
-/// How a script type is run, as the server's `interpreterFor` runs it.
+/// How a script type is run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Interpreter {
     Bash,
@@ -370,7 +370,7 @@ pub async fn execute(native: &Arc<Native>, params: Value) -> Answer {
     let then: Then = Box::new(move |outcome| {
         let _ = started_tx.send(outcome);
     });
-    // A run that resumes as vornd starts waits for the session holder, as the server's did.
+    // A run that resumes as vornd starts waits for the session holder.
     native.await_holder().await;
     let s = Arc::clone(&scripts);
     let ran = tokio::task::spawn_blocking(move || s.start(&asked, Some(watch), then)).await;

@@ -1,14 +1,14 @@
 //! Git for Vorn's server, off its event loop.
 //!
-//! [`run`] takes the arguments the server would hand to `git` and returns what
-//! git would print. A few read-only commands are answered in-process by gix,
+//! [`run`] takes the arguments for one `git` command and returns what git
+//! would print. A few read-only commands are answered in-process by gix,
 //! but only where the answer is byte-for-byte what git prints and only when
 //! nothing about the repository or the environment could make git answer
 //! differently; everything else, and every failure, runs git itself. Either
-//! way the call blocks the thread it runs on, which is the point: the caller is
-//! a worker thread, never Node's.
+//! way the call blocks the thread it runs on, so callers run it on a worker
+//! thread.
 //!
-//! [`repo`] builds the server's repository calls (branches, worktrees, diffs,
+//! [`repo`] builds the server's repository operations (branches, worktrees, diffs,
 //! commits) on top of [`run`], for a host that answers them itself.
 
 use std::fmt;
@@ -19,7 +19,7 @@ mod exec;
 mod fast;
 pub mod repo;
 
-/// One git command, as the server would have run it with `execFileSync`.
+/// One git command: binary, arguments, directory, environment and limits.
 #[derive(Clone, Debug)]
 pub struct Request {
     /// The git executable, already resolved by the caller.
@@ -48,8 +48,8 @@ pub struct Reply {
 
 #[derive(Debug)]
 pub enum Error {
-    /// git exited non-zero. Worded as Node words it, so a message the server
-    /// shows (a failed checkout, a rejected push) reads the same on either path.
+    /// git exited non-zero; the message (a failed checkout, a rejected push)
+    /// reads the same whether the command ran locally or remotely.
     Failed {
         command: String,
         stderr: String,
@@ -67,7 +67,7 @@ pub enum Error {
         bin: String,
         limit: usize,
     },
-    /// A command on a remote host failed, in the words a failed `execFile` has.
+    /// A command on a remote host failed, with the message it reported.
     Remote {
         message: String,
     },
@@ -80,7 +80,7 @@ pub enum Error {
     },
 }
 
-/// Worded as `execFileSync` words its errors, which the server shows as they are.
+/// `Command failed: ...` or `spawnSync <bin> <CODE>`, shown to the user as they are.
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -106,8 +106,8 @@ impl fmt::Display for Error {
 
 fn errno_name(error: &std::io::Error) -> Option<&'static str> {
     use std::io::ErrorKind::*;
-    // A missing working directory is ERROR_DIRECTORY on Windows, which Node
-    // reports as ENOENT, as it does everywhere else.
+    // A missing working directory is ERROR_DIRECTORY on Windows; report it as
+    // ENOENT, as on every other platform.
     #[cfg(windows)]
     if error.raw_os_error() == Some(267) {
         return Some("ENOENT");
@@ -122,8 +122,8 @@ fn errno_name(error: &std::io::Error) -> Option<&'static str> {
 
 impl std::error::Error for Error {}
 
-/// A file system error worded as Node words one, `CODE: description,
-/// syscall 'path'`, which the server passes to the client as it is.
+/// A file system error as `CODE: description, syscall 'path'`, which the
+/// server passes to the client as it is.
 pub fn fs_message(syscall: &str, path: &str, error: &std::io::Error) -> String {
     match uv_error(error) {
         Some((code, text)) => format!("{code}: {text}, {syscall} '{path}'"),
@@ -180,7 +180,7 @@ pub fn run_git(req: &Request) -> Result<String, Error> {
     exec::run(req)
 }
 
-/// `bin args...`, as Node prints a failed command.
+/// `bin args...`, the command line a failure message names.
 fn command_line(req: &Request) -> String {
     std::iter::once(req.bin.as_str())
         .chain(req.args.iter().map(String::as_str))

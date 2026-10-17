@@ -6,10 +6,10 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Vorn's work model without a host: workflow graphs, templates and prompts, schedules as node-cron reads them, trigger receipts, artifacts, and the workflow, run and artifact reads"
+description = "Vorn's work model without a host: workflow graphs, templates and prompts, cron schedules, trigger receipts, artifacts, and the workflow, run and artifact reads"
 
 [dependencies]
-# Wall-clock time in a schedule's time zone, as node-cron reads it through Intl.
+# Wall-clock time in a schedule's time zone.
 jiff = "0.2"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

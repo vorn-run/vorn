@@ -27,14 +27,12 @@ import type {
   GitDiffResult,
   GitDiffRange,
   WorkflowDefinition,
-  RestoreEnvironment,
   WorkflowExecution,
   WorkflowExecutionContext,
   ScriptConfig,
   ScheduleLogEntry,
   ProjectConfig,
   RecentSession,
-  SSHKey,
   SSHKeyMeta,
   SessionEvent,
   SessionEventType,
@@ -75,7 +73,6 @@ import type {
   ConnectorPackSource,
   ExtensionActivationState,
   ExtensionFooterReading,
-  ExtensionLinkMatch,
   ExtensionOpenPane,
   InstalledConnectorPack,
   SdkProbeRequest,
@@ -162,9 +159,9 @@ export interface ServerIdentity {
   dataDir: string
   pid: number
   /**
-   * A dev build and a packaged build deliberately share `~/.vorn` while keeping
-   * separate Electron user data, so without this a `yarn dev` launch would adopt
-   * the packaged app's bundled server, or the reverse.
+   * A dev build and a packaged build deliberately share `~/.vorn`, so without
+   * this a dev launch would adopt the packaged app's bundled server, or the
+   * reverse.
    */
   buildChannel: 'dev' | 'packaged'
   /**
@@ -306,13 +303,6 @@ export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'server:reachableUrls': { params: void; result: ReachableUrls }
-  /**
-   * The PATH the server read from a login shell, for a process that has none
-   * of its own: an app started from Finder inherits four system directories,
-   * and everything a person installed is invisible to it. `resolved` is false
-   * while the shell has not answered yet, so the answer may still improve.
-   */
-  'env:path': { params: void; result: { path: string | null; resolved: boolean } }
   'webhook:info': { params: void; result: { baseUrl: string } }
   // Device tokens. Namespaced `token:` rather than `device:`, which belongs
   // entirely to the simulator registry — thirteen methods of it.
@@ -338,7 +328,6 @@ export interface RequestMethods {
 
   // Git
   'git:getBranch': { params: string; result: string | null }
-  'git:getWorktreeBranch': { params: string; result: string | null }
   'git:checkoutBranch': {
     params: { cwd: string; branch: string }
     result: { ok: boolean; error?: string }
@@ -373,30 +362,13 @@ export interface RequestMethods {
   // Extensions
   'extension:list': { params: void; result: InstalledConnectorPack[] }
   'extension:activation': { params: { sessionId: string }; result: ExtensionActivationState[] }
-  'extension:footerItems': { params: { sessionId: string }; result: ExtensionFooterReading[] }
   'extension:openPane': {
     params: { extensionId: string; paneId: string; sessionId: string }
     result: ExtensionOpenPane
   }
   'extension:closePane': { params: { nonce: string }; result: { closed: boolean } }
-  'extension:runHandler': {
-    params: { extensionId: string; handlerId: string; sessionId: string; url: string }
-    result: { openedPane?: ExtensionOpenPane }
-  }
-  'extension:matchLinks': {
-    params: { sessionId: string; text: string }
-    result: ExtensionLinkMatch[]
-  }
 
   // Workflow runs
-  'workflowRun:claim': {
-    params: { workflowId: string; params?: string; windowMs?: number }
-    result: { granted: boolean; runId: string }
-  }
-  'workflowRun:release': {
-    params: { workflowId: string; params?: string; runId: string }
-    result: void
-  }
   'workflowRun:listRunning': { params: void; result: WorkflowExecution[] }
   'workflowRun:listWaiting': { params: void; result: WorkflowExecution[] }
   'workflowRun:listAll': {
@@ -615,18 +587,6 @@ export interface RequestMethods {
     result: WorkflowExecution | null
   }
 
-  /**
-   * A session came back, so anything triggered by that can run.
-   *
-   * Reported by the client that restored it, because restoring is a client
-   * action; deciding which workflows care is the server's, so they run whether
-   * or not that client stays open.
-   */
-  'workflow:sessionRestored': {
-    params: { sessionId: string; restore: 'cold' | 'warm'; environment?: RestoreEnvironment }
-    result: void
-  }
-
   /** Start a failed run again from where it failed, keeping what succeeded. */
   'workflow:retryRun': { params: { runId: string }; result: WorkflowExecution | null }
   /** Start the same run over from the beginning, with the same context. */
@@ -821,7 +781,6 @@ export interface RequestMethods {
     params: ScriptConfig
     result: { success: boolean; output: string; error?: string; exitCode?: number }
   }
-  'workflowRun:save': { params: WorkflowExecution; result: void }
   'workflowRun:list': {
     params: { workflowId: string; limit?: number }
     result: WorkflowExecution[]
@@ -893,8 +852,6 @@ export interface RequestMethods {
   }
   'credential:listKeys': { params: void; result: SSHKeyMeta[] }
   'credential:deleteKey': { params: string; result: void }
-  /** A key's row: its private half reads `vorn-vault` once vornd keeps it. */
-  'credential:getEncryptedKey': { params: string; result: SSHKey | null }
 
   // File explorer
   'file:listDir': { params: { dirPath: string; remoteHostId?: string }; result: FileEntry[] }
@@ -1088,21 +1045,6 @@ export interface RequestMethods {
     params: { workflowId: string }
     result: { pages: number }
   }
-  /** A run settled the connector event it was delivered. Failures are retried
-   * with bounded exponential backoff. */
-  'connector:inboxComplete': {
-    params: {
-      id: number
-      leaseToken: string
-      disposition: 'processed' | 'retry' | 'defer'
-      error?: string
-    }
-    result: void
-  }
-  'connector:inboxRenew': {
-    params: { id: number; leaseToken: string }
-    result: boolean
-  }
   'connection:getSourceLink': {
     params: string
     result: TaskSourceLink | null
@@ -1130,10 +1072,9 @@ export interface RequestMethods {
   // ─── Agent-controllable browser pane ──────────────────────────
   //
   // These are the one family of methods the server does not itself implement.
-  // A `<webview>` guest is only reachable from the Electron main process, so
-  // the server forwards each call back over the same bridge main uses to reach
-  // it (`native::desktop` in vornd) and main answers from its CDP
-  // registry. Every one is session-scoped by the *caller's* identity —
+  // The browser pane lives in the desktop app, so the server forwards each call
+  // over the desktop bridge (`native::desktop` in vornd) and the app answers.
+  // Every one is session-scoped by the *caller's* identity —
   // `VORN_SESSION_ID`, resolved in the MCP layer — and none of them accepts a
   // session argument, so one session cannot address another's pane.
   'browser:readPage': {
@@ -1511,8 +1452,6 @@ export interface ServerNotifications {
   'extension:footerItems': { sessionId: string; readings: ExtensionFooterReading[] }
   /** What an extension shows on a session changed, because its worktree or its packs did. */
   'extension:activation': { sessionId: string; states: ExtensionActivationState[] }
-  /** Only the window drawing the terminal knows what is selected in it. */
-  'extension:selectionRequest': { requestId: number; sessionId: string }
 }
 
 /** Whether a pane showing a session is in use (`active`), on screen (`watching`), or hidden (`away`). */
@@ -1558,8 +1497,6 @@ export interface ClientNotifications {
    * `resync` promises to re-attach on `terminal:resync`.
    */
   'subscribe:set': { topics?: readonly string[]; terminalBytes?: boolean; resync?: boolean }
-  /** The answer to `extension:selectionRequest`, from the window that drew the terminal. */
-  'extension:selectionResult': { requestId: number; text: string }
 }
 
 // ─── Typed helpers ──────────────────────────────────────────────

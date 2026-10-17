@@ -189,7 +189,8 @@ jobs:
       # programs) side by side in target/ci. On Windows sessiond hosts its
       # sessions in the ConPTY the app ships, so the gate test installs it
       # beside sessiond too. The parity tests in vorn-git compare against the
-      # git each runner has.
+      # git each runner has. On Windows the app's tests also save their
+      # offscreen renders.
       - name: Rust tests
         working-directory: packages/core
         shell: bash
@@ -197,6 +198,8 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             node scripts/fetch-conpty.mjs
             export VORN_CONPTY_DIR="$(cygpath -w "$PWD")"
+            mkdir -p "$RUNNER_TEMP/shots"
+            export VORN_APP_SHOT="$RUNNER_TEMP/shots/windows"
           fi
           if [ -n "$CRATES" ]; then
             packages=$(printf -- '-p %s ' $CRATES)
@@ -207,6 +210,13 @@ jobs:
           cargo test --doc --profile ci --locked --no-fail-fast $packages
         env:
           CRATES: ${{ inputs.crates }}
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && runner.os == 'Windows' }}
+        with:
+          name: vorn-app-windows
+          path: ${{ runner.temp }}/shots/windows*
+          if-no-files-found: warn
 
       # The many-pane bench at a small N, so it keeps running; its numbers on a
       # shared runner are not a baseline.

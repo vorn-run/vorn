@@ -1,4 +1,4 @@
-//! The command palette (`CommandPalette`): every command the app offers,
+//! The command palette: every command the app offers,
 //! by category, matched against what is typed. The commands are rebuilt
 //! from the store each frame, so the list is never stale.
 
@@ -11,7 +11,7 @@ use crate::state::{basename, now_ms, time_ago, Filter, LayoutMode, Sort, State};
 use crate::tasks::TaskAct;
 use crate::workflows::WfAct;
 
-/// What the MCP server answers on, as the renderer copies it.
+/// What the MCP server answers on, for copying.
 pub const MCP_URL: &str = "http://localhost:56433/mcp";
 
 /// What a palette control does.
@@ -29,7 +29,7 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// Moves the active row by one, wrapping as the renderer does.
+    /// Moves the active row by one, wrapping around.
     pub fn step(&mut self, n: usize, forward: bool) {
         let n = n.max(1);
         self.active = if forward {
@@ -121,7 +121,7 @@ impl Entry {
     }
 }
 
-/// `scoreMatch`: an exact label, a prefix, a word's prefix, anywhere in
+/// An exact label, a prefix, a word's prefix, anywhere in
 /// the label, then the keywords; 0 is no match.
 pub fn score(query: &str, cmd: &Entry) -> u32 {
     let q = query.to_lowercase();
@@ -270,10 +270,9 @@ fn extensions(st: &State) -> Vec<Entry> {
     out
 }
 
-/// `useCommands`: every command, in the renderer's order.
-/// `m` and `alt` are the modifier labels; the status filters show the
-/// keys that really pick them (Alt), not the renderer's ⌘ digits, which
-/// jump to a card.
+/// Every command, in the palette's order. `m` and `alt` are the modifier
+/// labels; the status filters show the keys that really pick them (Alt), not
+/// the ⌘ digits, which jump to a card.
 pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
     for p in st.points.at(crate::points::kind::COMMANDS) {

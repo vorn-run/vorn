@@ -233,8 +233,8 @@ fn trimmed(s: &str) -> String {
     lines[..end].join("\n")
 }
 
-/// TP-T18 at the endpoint: an app one major ahead gets Error 426 and the
-/// connection ends; one a major behind attaches with the capabilities both
+/// TP-T18 at the endpoint: an app on another major gets Error 426 and the
+/// connection ends; one on this major attaches with the capabilities both
 /// have, and unknown fields and optional kinds are ignored on the way.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn t18_versions_at_the_endpoint() {
@@ -243,25 +243,25 @@ async fn t18_versions_at_the_endpoint() {
     let id = v.spawn(&["sh", "-c", "echo ready; sleep 30"]).await;
     v.live(&id).await;
 
-    let mut newer = v.app(hello(PROTO_MAJOR + 1));
-    assert!(!newer.until("426", |_| false).await, "the connection ended");
-    assert!(newer
-        .got
-        .iter()
-        .any(|g| matches!(g, Got::Message(ServerMsg::Error { code: 426, .. }))));
+    for major in [PROTO_MAJOR - 1, PROTO_MAJOR + 1] {
+        let mut other = v.app(hello(major));
+        assert!(!other.until("426", |_| false).await, "the connection ended");
+        assert!(other
+            .got
+            .iter()
+            .any(|g| matches!(g, Got::Message(ServerMsg::Error { code: 426, .. }))));
+    }
 
-    let mut older = v.app(hello(PROTO_MAJOR - 1));
-    older
-        .until("welcome", |a| a.client.welcome().is_some())
-        .await;
-    let w = older.client.welcome().unwrap();
-    assert_eq!((w.proto_major, w.caps), (PROTO_MAJOR - 1, caps::ALL));
+    let mut app = v.app(hello(PROTO_MAJOR));
+    app.until("welcome", |a| a.client.welcome().is_some()).await;
+    let w = app.client.welcome().unwrap();
+    assert_eq!((w.proto_major, w.caps), (PROTO_MAJOR, caps::ALL));
     // An optional kind this vornd does not know, then an Attach with a field
     // it does not know: both are fine.
     let mut raw = Vec::new();
     raw.extend_from_slice(&2u32.to_le_bytes());
     raw.extend_from_slice(&[kind::OPTIONAL | 0x1f, 0xa0]);
-    older.io.write_all(&raw).await.unwrap();
+    app.io.write_all(&raw).await.unwrap();
     let mut frame = Vec::new();
     ClientMsg::Attach(attach(&id, None)).encode(&mut frame);
     // Splice an unknown key (40: "x") into the Attach map before its end.
@@ -269,13 +269,12 @@ async fn t18_versions_at_the_endpoint() {
     frame.splice(end..end, [0x18, 40, 0x61, b'x']);
     let len = (frame.len() - 4) as u32;
     frame[..4].copy_from_slice(&len.to_le_bytes());
-    older.io.write_all(&frame).await.unwrap();
-    older
-        .until("ready", |a| {
-            a.attached().is_some_and(|s| a.text(s).contains("ready"))
-        })
-        .await;
-    assert!(!older
+    app.io.write_all(&frame).await.unwrap();
+    app.until("ready", |a| {
+        a.attached().is_some_and(|s| a.text(s).contains("ready"))
+    })
+    .await;
+    assert!(!app
         .got
         .iter()
         .any(|g| matches!(g, Got::Message(ServerMsg::Error { .. }))));

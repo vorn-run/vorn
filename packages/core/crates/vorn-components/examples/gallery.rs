@@ -3,8 +3,8 @@
 //!
 //! `cargo run -p vorn-components --example gallery` opens it in a window;
 //! `-- --render DIR` draws each case offscreen to `DIR/<case>.png` and
-//! writes `DIR/manifest.json`, which the fidelity harness replays against
-//! the renderer's components (same size, same pointer, same clock).
+//! writes `DIR/manifest.json`, each case's size, pointer, clock and the
+//! component it reproduces.
 
 use std::cell::Cell;
 use std::fmt::Write as _;
@@ -66,14 +66,14 @@ struct Case {
     layer: &'static str,
     component: &'static str,
     state: &'static str,
-    /// The renderer's component the case is compared with.
+    /// The component the case reproduces, by its design source's file name.
     source: &'static str,
     size: (f32, f32),
     /// Where the component's top-left sits in the case.
     at: (f32, f32),
     act: Act,
     target: Option<Id>,
-    /// The CSS selector of the same target in the renderer's DOM.
+    /// The CSS selector of the same target in the design source.
     selector: &'static str,
     /// Seconds into the shared animation clock.
     clock: f32,
@@ -497,7 +497,7 @@ fn card_cases(b: &mut Builder) {
     }
 }
 
-/// The gate the harness seeds: the dock's says less than the lone pill's.
+/// The gate the cases show: the dock's says less than the lone pill's.
 fn approval(message: &str) -> Approval<'_> {
     Approval {
         workflow: "Release notes",
@@ -763,7 +763,7 @@ fn render(dir: &str, only: Option<&str>) -> Result<(), String> {
         }
         reset(&mut ui);
         // Far enough apart that the case before has faded out; each case's
-        // animations count from its own start, as the harness's do.
+        // animations count from its own start.
         let start = epoch + Duration::from_secs(1000 * (i as u64 + 1));
         ui.set_anim_epoch(start);
         let start = start + Duration::from_secs_f32(case.clock);

@@ -1,5 +1,4 @@
-//! The inventory: every worktree of each project, sized and judged
-//! (`scanWorktreeInventory`).
+//! The inventory: every worktree of each project, sized and judged.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,8 +20,7 @@ const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 pub struct Project {
     pub name: String,
     pub path: String,
-    /// The hosts it is on, `["local"]` when none are named
-    /// (`getProjectHostIds`).
+    /// The hosts it is on, `["local"]` when none are named.
     pub host_ids: Vec<String>,
     /// The remote host it is on, reached over ssh; `None` on this machine.
     pub remote: Option<Remote>,
@@ -36,7 +34,7 @@ pub struct Remote {
 }
 
 impl Remote {
-    /// `cmd` in a shell there, its output trimmed (`runShell`).
+    /// `cmd` in a shell there, its output trimmed.
     pub(crate) fn shell(&self, cmd: &str, timeout: std::time::Duration) -> Result<String, String> {
         self.login
             .exec(cmd, None, timeout)
@@ -61,8 +59,8 @@ pub struct Retention {
 }
 
 impl Retention {
-    /// From `defaults.worktreeRetention`, as the server reads it: an empty
-    /// list of directories is the default list.
+    /// From `defaults.worktreeRetention`: an empty list of directories is the
+    /// default list.
     pub fn from_config(config: Option<&Value>) -> Retention {
         let strings = |key: &str| -> Vec<String> {
             config
@@ -94,7 +92,7 @@ impl Retention {
     }
 }
 
-/// One worktree, or a directory git has forgotten, keys in the server's order.
+/// One worktree, or a directory git has forgotten, keys in wire order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
@@ -136,7 +134,7 @@ pub struct ProjectInventory {
     pub project_path: String,
     pub project_name: String,
     pub default_branch: Option<String>,
-    /// Always null here: a remote host's projects are the server's to scan.
+    /// The remote host the project is on; `None` on this machine.
     pub remote_host_id: Option<String>,
     pub entries: Vec<Entry>,
     pub stale_branches: Vec<StaleBranch>,
@@ -202,7 +200,7 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
     let owned = git_on(ctx.git, remote);
     let git = &owned;
     let dir = Path::new(&project.path);
-    // A remote project is taken to be a repository, as the server takes it.
+    // A remote project is taken to be a repository.
     if remote.is_none() && !git.is_git_repo(dir) {
         out.error = Some("not a git repository".into());
         return out;
@@ -416,7 +414,7 @@ fn index_mtime(git: &Git, worktree: &Path, remote: Option<&Remote>) -> Option<St
     Some(iso_millis(modified.into()))
 }
 
-/// `Date.prototype.toISOString`: milliseconds, in UTC.
+/// An ISO 8601 time with milliseconds, in UTC.
 pub fn iso_millis(t: DateTime<Utc>) -> String {
     t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }

@@ -1,4 +1,4 @@
-//! `tools/artifacts.ts`: publishing deliverables into the session's pane, and
+//! Publishing deliverables into the session's pane, and
 //! reading what the person said about them.
 
 use serde_json::Value;

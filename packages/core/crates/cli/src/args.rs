@@ -1,9 +1,8 @@
 //! The two command-line grammars: the one for commands that talk to a running
 //! server, and the one for `vorn server`.
 //!
-//! Both are parsed the way `node:util`'s `parseArgs` parses them in strict
-//! mode, with the same messages, because the TypeScript command is built on it
-//! and a script that matched its errors keeps matching ours: `--lines=200` and
+//! Both are parsed with the rules and messages of `node:util`'s `parseArgs` in
+//! strict mode, so scripts can match the errors: `--lines=200` and
 //! `--lines 200` both work, `--` ends the options, `-h` may be grouped, and the
 //! first bad option in order is the one reported.
 
@@ -51,7 +50,7 @@ const HELP: OptionSpec = OptionSpec {
     multiple: false,
 };
 
-/// The options the client commands take (`client-args.ts`).
+/// The options the client commands take.
 pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     string("agent"),
     string("prompt"),
@@ -89,7 +88,7 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     HELP,
 ];
 
-/// The options `vorn server` takes (`server-args.ts`).
+/// The options `vorn server` takes.
 pub const SERVER_OPTIONS: &[OptionSpec] = &[
     string("host"),
     string("port"),

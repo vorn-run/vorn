@@ -1,6 +1,5 @@
-//! The terminal grid's automatic layout: `pickAutoLayout` from
-//! `src/renderer/lib/auto-grid-layout.ts`, case for case, so the same
-//! number of cards in the same window lands in the same rows and columns.
+//! The terminal grid's automatic layout: the same number of cards in the
+//! same window lands in the same rows and columns.
 
 /// Narrowest a card may be before a layout is rejected.
 pub const MIN_CARD_W: f32 = 320.0;
@@ -79,7 +78,7 @@ pub fn pick(n: usize, w: f32, h: f32) -> Layout {
 mod tests {
     use super::*;
 
-    // The cases of `tests/grid-view.test.tsx`'s `pickAutoLayout` block.
+    // One case per layout rule.
     #[test]
     fn matches_the_renderer() {
         let (w, h) = (1920.0, 1080.0);

@@ -301,7 +301,7 @@ fn carry_records(_: &HolderConfig, _: &Holder) -> Option<vornd::carry::CarryFile
 /// Where the app passes the desktop's launch token.
 const DESKTOP_TOKEN_VAR: &str = "VORND_DESKTOP_TOKEN";
 
-/// The name the app has always passed the server's credential under.
+/// The variable the app passes the server's credential in.
 const BOOTSTRAP_VAR: &str = "SECRET_VORN_BOOTSTRAP_TOKEN";
 
 /// The desktop's launch token, taken out of the environment, under either

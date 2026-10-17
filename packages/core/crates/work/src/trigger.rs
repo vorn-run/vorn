@@ -1,6 +1,6 @@
-//! A workflow's trigger, as the server's scheduler reads it: the `config` of
-//! the first node whose `type` is `"trigger"`, read field by field the way
-//! JavaScript reads an object it has not checked.
+//! A workflow's trigger, as the scheduler reads it: the `config` of the
+//! first node whose `type` is `"trigger"`, read field by field, with a
+//! missing field or one of another type left absent.
 
 use std::collections::BTreeMap;
 
@@ -39,14 +39,14 @@ pub enum Trigger<'a> {
     Once { run_at: Option<&'a Value> },
     /// A trigger the scheduler does not arm.
     Other,
-    /// Nodes JavaScript cannot search (not an array, or a `null` before the
-    /// trigger): the server's handler throws.
+    /// Nodes that cannot be searched: not an array, or a `null` before the
+    /// trigger.
     Unreadable,
 }
 
 impl<'a> Trigger<'a> {
-    /// `getTriggerConfig(workflow)`, from the workflow's `nodes`, its type
-    /// timed as `timings` says.
+    /// The trigger read from the workflow's `nodes`, its type timed as
+    /// `timings` says.
     pub fn of(workflow: &'a Value, timings: &Timings) -> Trigger<'a> {
         let Some(nodes) = workflow.get("nodes").and_then(Value::as_array) else {
             return Trigger::Unreadable;
@@ -82,8 +82,8 @@ impl<'a> Trigger<'a> {
     }
 }
 
-/// `trigger.timezone || system`, as a zone; `None` for a name Intl would
-/// refuse, which never fires.
+/// The trigger's `timezone`, or `system` when that is falsy, as a zone;
+/// `None` for an unknown name, which never fires.
 pub fn zone_of(timezone: Option<&Value>, system: &TimeZone) -> Option<TimeZone> {
     match timezone {
         None | Some(Value::Null | Value::Bool(false)) => Some(system.clone()),
@@ -94,10 +94,9 @@ pub fn zone_of(timezone: Option<&Value>, system: &TimeZone) -> Option<TimeZone> 
     }
 }
 
-/// What `new Date(text).getTime()` is, for the date-time strings JavaScript
-/// reads by the ISO format: `YYYY-MM-DD` (UTC), or with `THH:mm`, seconds
-/// and a fraction, and `Z` or `±HH:mm` (local time in `system` without
-/// one). `None` for anything else, which is left to the server to read.
+/// Unix milliseconds of an ISO date-time string: `YYYY-MM-DD` (UTC), or
+/// with `THH:mm`, seconds and a fraction, and `Z` or `±HH:mm` (local time in
+/// `system` without one). `None` for anything else.
 pub fn js_date(text: &str, system: &TimeZone) -> Option<i64> {
     let (date, time) = match text.split_once('T') {
         Some((d, t)) => (d, Some(t)),
@@ -248,7 +247,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn nodes_javascript_cannot_search_are_unreadable() {
+    fn nodes_that_cannot_be_searched_are_unreadable() {
         assert_eq!(Trigger::of(&json!({}), &timings()), Trigger::Unreadable);
         assert_eq!(
             Trigger::of(&json!({ "nodes": {} }), &timings()),
@@ -284,7 +283,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn reads_iso_dates_as_javascript_does() {
+    fn reads_iso_dates() {
         let tokyo = TimeZone::get("Asia/Tokyo").unwrap();
         let utc = |s: &str| s.parse::<jiff::Timestamp>().unwrap().as_millisecond();
         assert_eq!(

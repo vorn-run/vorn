@@ -56,9 +56,9 @@ pub struct Import {
     pub items: Vec<Imported>,
 }
 
-/// Puts `item` on the board (`upsertExternalItem`): the task it is linked
-/// to, else one an earlier link left behind, else a new one in `project`.
-/// Answers `{taskId, created}`.
+/// Puts `item` on the board: the task it is linked to, else one an earlier
+/// link left behind, else a new one in `project`. Answers
+/// `{taskId, created}`.
 pub fn upsert(
     store: &mut Store,
     source: &Source,

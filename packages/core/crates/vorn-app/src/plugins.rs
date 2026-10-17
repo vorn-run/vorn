@@ -387,7 +387,8 @@ pub fn installable(entry: &Value) -> bool {
     s(entry, "git").is_some_and(|u| !u.is_empty())
 }
 
-/// `packStateFor`.
+/// Where a pack stands, from the pack, its catalog entry and any install in
+/// progress.
 pub fn pack_state(
     pack: Option<&Value>,
     catalog: Option<&Value>,
@@ -430,7 +431,7 @@ pub fn pack_state(
     }
 }
 
-/// `describePackStatus`.
+/// The label, detail, tone and action for a pack's state.
 pub fn describe(state: &PackState) -> PackStatus {
     let view = |label: &str, detail: Option<String>, tone, action| PackStatus {
         label: label.to_owned(),
@@ -493,7 +494,7 @@ pub fn describe(state: &PackState) -> PackStatus {
     }
 }
 
-/// `isNewerVersion`: semver precedence, prereleases included.
+/// Semver precedence, prereleases included.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
     #[derive(PartialEq)]
     enum Part<'a> {
@@ -578,7 +579,7 @@ impl Listing {
         pack_state(self.pack.as_ref(), self.catalog.as_ref(), progress)
     }
 
-    /// `canAddConnection`.
+    /// Whether another connection can be added for this listing.
     pub fn can_add(&self, state: &PackState) -> bool {
         if self.kind == Kind::Extension {
             return false;
@@ -628,7 +629,8 @@ pub fn is_implicit(conn: &Value) -> bool {
         .is_some_and(|v| v == true || v == "true")
 }
 
-/// `buildConnectorListings`, sorted ready-first then by name.
+/// The connector listings from builtins, the catalog and packs, sorted
+/// ready-first then by name.
 pub fn build_listings(
     builtins: &[Value],
     catalog: &[Value],
@@ -803,7 +805,7 @@ const PERMISSIONS: [&str; 6] = [
     "card.rename",
 ];
 
-/// `permissionRows`: what an extension asks for, under its verb.
+/// What an extension asks for, under its verb.
 pub fn permission_rows(asked: &[String]) -> Vec<(&'static str, Vec<&'static str>)> {
     ["Reads", "Sends", "Renames"]
         .into_iter()
@@ -821,7 +823,7 @@ pub fn permission_rows(asked: &[String]) -> Vec<(&'static str, Vec<&'static str>
         .collect()
 }
 
-/// `notAsked`.
+/// The permissions an extension does not ask for.
 pub fn not_asked(asked: &[String]) -> Vec<&'static str> {
     PERMISSIONS
         .iter()
@@ -835,7 +837,7 @@ pub fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
-/// `describeContributions`: "2 panes, 1 footer".
+/// "2 panes, 1 footer".
 pub fn describe_contributions(contributes: Option<&Value>) -> String {
     let n = |key| contributes.map_or(0, |c| array(c, key));
     [
@@ -1172,7 +1174,7 @@ fn any_of(values: &[String]) -> String {
     }
 }
 
-/// `describeActivation`: where an extension shows, as clauses.
+/// Where an extension shows, as clauses.
 pub fn describe_activation(
     agents: &crate::agents::Agents,
     activates: Option<&Value>,
@@ -1257,7 +1259,7 @@ fn haystack(l: &Listing) -> String {
     parts.join(" ").to_lowercase()
 }
 
-/// `filterConnectorListings`: every term must match.
+/// Every term must match.
 pub fn matches_query(l: &Listing, query: &str) -> bool {
     let q = query.to_lowercase();
     let terms: Vec<&str> = q.split_whitespace().collect();
@@ -1271,7 +1273,7 @@ pub fn matches_query(l: &Listing, query: &str) -> bool {
 pub const CALLABLE: &str = "Can be called from a step";
 pub const CONNECTED: &str = "Connected";
 
-/// `filterByCategory`.
+/// Whether a listing is in `category`; any is, without one.
 pub fn matches_category(l: &Listing, category: Option<&str>) -> bool {
     match category {
         None => true,
@@ -1281,7 +1283,7 @@ pub fn matches_category(l: &Listing, category: Option<&str>) -> bool {
     }
 }
 
-/// `connectorCategories`: sorted categories, then the two facets present.
+/// Sorted categories, then the two facets present.
 pub fn categories(listings: &[Listing]) -> Vec<String> {
     let mut out: Vec<String> = listings.iter().map(|l| l.category.clone()).collect();
     out.sort();
@@ -1295,7 +1297,7 @@ pub fn categories(listings: &[Listing]) -> Vec<String> {
     out
 }
 
-/// `connectorKinds`.
+/// The kinds present among `listings`.
 pub fn kinds(listings: &[Listing]) -> Vec<Kind> {
     Kind::ALL
         .into_iter()
@@ -1303,7 +1305,7 @@ pub fn kinds(listings: &[Listing]) -> Vec<Kind> {
         .collect()
 }
 
-/// `connectorAuthRungs`.
+/// The auth rungs present among `listings`.
 pub fn rungs(listings: &[Listing]) -> Vec<Rung> {
     Rung::ALL
         .into_iter()
@@ -1311,8 +1313,8 @@ pub fn rungs(listings: &[Listing]) -> Vec<Rung> {
         .collect()
 }
 
-/// `groupListingsByCategory`: first-seen order.
-/// The directory by category, every extension under "Interface".
+/// First-seen order. The directory by category, every extension under
+/// "Interface".
 pub fn sections(listings: Vec<&Listing>) -> Vec<(String, Vec<&Listing>)> {
     let mut out: Vec<(String, Vec<&Listing>)> = Vec::new();
     for l in listings {
@@ -1328,7 +1330,7 @@ pub fn sections(listings: Vec<&Listing>) -> Vec<(String, Vec<&Listing>)> {
     out
 }
 
-/// `describeCatalogAge`.
+/// How old the connector catalog is, in words.
 pub fn catalog_age(fetched_at: Option<f64>, now: f64) -> String {
     let Some(at) = fetched_at else {
         return "Showing the connectors that shipped with Vorn".to_owned();
@@ -1342,7 +1344,7 @@ pub fn catalog_age(fetched_at: Option<f64>, now: f64) -> String {
     }
 }
 
-/// `ConnectorDetails`: what a connector triggers on, offers and asks for.
+/// What a connector triggers on, offers and asks for.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Details {
     pub triggers: Vec<(String, Option<String>)>,
@@ -1388,7 +1390,7 @@ fn env_settings(items: Option<&Value>) -> Vec<(String, bool, Option<String>)> {
         .collect()
 }
 
-/// `listingDetails`: the pack beats the catalog, which beats nothing.
+/// The pack beats the catalog, which beats nothing.
 pub fn details(l: &Listing, builtins: &[Value]) -> Details {
     if let Some(pack) = &l.pack {
         return Details {
@@ -1443,7 +1445,7 @@ pub fn details(l: &Listing, builtins: &[Value]) -> Details {
     }
 }
 
-/// `matchesListing`: the checked pack is exactly what the row described.
+/// The checked pack is exactly what the row described.
 pub fn matches_listing(preview: &Value, l: &Listing) -> bool {
     let version = s(preview, "version");
     s(preview, "id") == Some(l.id.as_str())
@@ -1465,7 +1467,7 @@ pub struct Group<'a> {
     pub connections: Vec<&'a Value>,
 }
 
-/// `groupConnections`, in server order.
+/// The connections grouped by listing, in vornd's order.
 pub fn group_connections<'a>(connections: &'a [Value], listings: &'a [Listing]) -> Vec<Group<'a>> {
     let mut out: Vec<Group<'a>> = Vec::new();
     for conn in connections.iter().filter(|c| !is_implicit(c)) {
@@ -1486,7 +1488,7 @@ pub fn group_connections<'a>(connections: &'a [Value], listings: &'a [Listing]) 
     out
 }
 
-/// `humanCron`: the two shapes a seeded poll uses, else the raw line.
+/// The two shapes a seeded poll uses, else the raw line.
 pub fn human_cron(cron: &str) -> String {
     if cron.trim() == "* * * * *" {
         return "every minute".to_owned();
@@ -1504,7 +1506,7 @@ pub fn human_cron(cron: &str) -> String {
     cron.to_owned()
 }
 
-/// `parseLaunchSpec`: a bare package name runs through npx, else the line splits.
+/// A bare package name runs through npx, else the line splits.
 pub fn parse_launch_spec(spec: &str) -> (String, Vec<String>) {
     let parts: Vec<String> = spec.split_whitespace().map(str::to_owned).collect();
     let local = |t: &str| {
@@ -1899,7 +1901,7 @@ pub struct SourceDialog {
     pub error: Option<String>,
 }
 
-/// A built-in connector's form (`AddConnectionForm`).
+/// A built-in connector's form.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BuiltinForm {
     pub connector: String,
@@ -1911,7 +1913,7 @@ pub struct BuiltinForm {
     pub repo: String,
 }
 
-/// A packaged connector's form (`SdkConnectorForm`).
+/// A packaged connector's form.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SdkForm {
     /// Set when the listing named its package, so there is nothing to type.
@@ -2034,7 +2036,7 @@ impl SdkForm {
     }
 }
 
-/// `seedStatusMapping`: `[{upstream, suggestedLocal}]` as a map.
+/// `[{upstream, suggestedLocal}]` as a map.
 pub fn status_mapping(suggestions: Option<&Value>) -> Value {
     let mut out = serde_json::Map::new();
     for e in suggestions.and_then(Value::as_array).into_iter().flatten() {
@@ -2112,7 +2114,7 @@ pub struct Adding {
 }
 
 impl BuiltinForm {
-    /// `canSave`.
+    /// Whether the form can be saved.
     pub fn can_save(&self, manifest: Option<&Value>) -> bool {
         if manifest.is_some_and(|m| m.get("detectRepo") == Some(&Value::Bool(true))) {
             return matches!(self.detected, Some(Some(_)))
@@ -2603,7 +2605,7 @@ mod tests {
         // Unreleased: nothing to connect to.
         let ado = by("ado");
         assert!(!ado.can_add(&ado.state(None)));
-        // Released, absent, with a package name: the legacy launch.
+        // Released, absent, with a package name: launched by that name.
         let kusto = by("kusto");
         assert!(kusto.can_add(&kusto.state(None)));
     }

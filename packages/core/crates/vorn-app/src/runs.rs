@@ -1,4 +1,4 @@
-//! Workflow runs as the run lists read them (`RunEntry`, `RunStepsList`):
+//! Workflow runs as the run lists read them:
 //! their status dots, durations and the steps worth showing.
 
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ pub fn label(status: &str) -> &'static str {
     }
 }
 
-/// `formatRunDuration`.
+/// How long a run took, or "running..." while it runs.
 pub fn duration(start: &str, end: Option<&str>) -> String {
     let Some(end) = end else {
         return "running...".to_owned();
@@ -53,7 +53,7 @@ pub fn duration(start: &str, end: Option<&str>) -> String {
     }
 }
 
-/// `formatRelativeTime`.
+/// How long ago `iso` was, from `now`.
 pub fn relative(iso: &str, now: f64) -> String {
     let Some(t) = crate::tasks::ms(iso) else {
         return "Unknown".to_owned();
@@ -77,7 +77,7 @@ pub fn s<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
 }
 
-/// `runDotStatus`: a run a gate rejected reads as stopped.
+/// A run a gate rejected reads as stopped.
 pub fn run_status(run: &Value) -> &str {
     let failed = states(run).find(|n| s(n, "status") == Some("error"));
     let rejected = failed.is_some_and(|n| n.get("rejectedAt").is_some_and(|r| !r.is_null()));
@@ -108,7 +108,7 @@ pub fn item_of(id: &str) -> Option<(&str, u32)> {
     Some((step, n.parse().ok()?))
 }
 
-/// `nodeLabel`: the node's label, else its id's first eight characters; an item says which.
+/// The node's label, else its id's first eight characters; an item says which.
 pub fn node_label(node: Option<&Value>, id: &str) -> String {
     let label = node
         .and_then(|n| s(n, "label"))
@@ -193,7 +193,7 @@ pub enum RunAct {
     OpenReview(String, String),
 }
 
-/// `toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })`.
+/// The time of day of `iso`, as "9:05 AM".
 pub fn clock_time(iso: &str) -> String {
     let t = crate::tasks::long_date(iso);
     // "Oct 12, 9:05 AM": the time is what follows the comma.
@@ -201,7 +201,7 @@ pub fn clock_time(iso: &str) -> String {
         .map_or(t.clone(), |(_, time)| time.to_owned())
 }
 
-/// `encodeURIComponent`.
+/// `s` percent-encoded as a URI component.
 pub fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -255,7 +255,7 @@ pub fn stoppable(run: &Value) -> bool {
         || states(run).any(|n| matches!(s(n, "status"), Some("running" | "waiting")))
 }
 
-/// `formatInputValue`: one line, clipped at 60 characters.
+/// One line, clipped at 60 characters.
 pub fn input_value(v: &Value) -> String {
     let text = match v {
         Value::Null => String::new(),
@@ -277,7 +277,7 @@ pub enum Line {
     Engine(String),
 }
 
-/// `inlineLogTail`: the last 8000 characters, with a note of what went.
+/// The last 8000 characters, with a note of what went.
 pub fn log_tail(logs: &str) -> String {
     const MAX: usize = 8000;
     let n = logs.chars().count();
@@ -292,7 +292,7 @@ pub fn log_tail(logs: &str) -> String {
     )
 }
 
-/// `toLocaleString` for a count: `12,345`.
+/// A count with thousands separators: `12,345`.
 fn grouped(n: usize) -> String {
     let d = n.to_string();
     let mut out = String::new();
@@ -318,7 +318,7 @@ fn first_output(note: &str) -> bool {
         })
 }
 
-/// `stepTimeline`: the engine's notes up to the agent's first output, the
+/// The engine's notes up to the agent's first output, the
 /// agent's log, then the notes on how the step ended.
 pub fn timeline(logs: Option<&str>, diagnostics: Option<&str>) -> Vec<Line> {
     let notes: Vec<&str> = diagnostics
@@ -347,7 +347,7 @@ pub fn timeline(logs: Option<&str>, diagnostics: Option<&str>) -> Vec<Line> {
 }
 
 /// What "Resume session" on step `nid` starts (`terminal:create`'s
-/// params), as RunEntry gathers it from the step, its node and the tasks.
+/// params), gathered from the step, its node and the tasks.
 pub fn resume_params(
     agents: &crate::agents::Agents,
     run: &Value,

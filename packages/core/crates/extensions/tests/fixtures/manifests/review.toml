@@ -1,0 +1,26 @@
+id = "review"
+name = "Review"
+version = "0.1.0"
+api = "vorn:extension@0.9"
+description = "Reads the session"
+
+[service]
+command = ["node", "index.js"]
+
+[declares]
+uses = ["terminal.read"]
+
+[connector]
+
+[activates]
+workspace_contains = ["package.json"]
+
+[[contributes.panes]]
+id = "report"
+title = "Report"
+web = "web/report/index.html"
+
+[[contributes.footers]]
+id = "checks"
+title = "Checks"
+every = 30.0

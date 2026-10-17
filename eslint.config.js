@@ -6,7 +6,6 @@ import prettier from 'eslint-config-prettier'
 export default tseslint.config(
   {
     ignores: [
-      'out/',
       'dist/',
       '**/dist/',
       'node_modules/',
@@ -15,11 +14,8 @@ export default tseslint.config(
       'scripts/',
       'packages/core/scripts/',
       'packages/core/crates/vorn-web/tests/',
-      'apps/macos/scripts/',
-      'apps/macos/Sources/VornUI/Resources/shiki.js',
       'packages/core/target/',
-      'website/scripts/',
-      'spikes/'
+      'website/scripts/'
     ]
   },
 

@@ -160,7 +160,6 @@ pub fn page_headers(media: &'static str, ancestors: &[String]) -> [(&'static str
 mod tests {
     use super::*;
     use crate::pack::{fixture::install, PackStore};
-    use serde_json::json;
     use std::fs;
 
     fn pack() -> (tempfile::TempDir, InstalledPack) {
@@ -169,9 +168,15 @@ mod tests {
             root.path(),
             "x",
             "1.0.0",
-            &json!({ "id": "x", "name": "X", "kind": "extension", "contributes": { "panes": [
-                { "id": "page", "web": "web/pane/index.html" }, { "id": "prog", "command": ["x"] }
-            ] } }),
+            r#"name = "X"
+[connector]
+[[contributes.panes]]
+id = "page"
+web = "web/pane/index.html"
+[[contributes.panes]]
+id = "prog"
+command = ["x"]
+"#,
         );
         let web = dir.join("web/pane");
         fs::create_dir_all(web.join("lib")).unwrap();
@@ -179,7 +184,7 @@ mod tests {
         fs::write(web.join("lib/app.JS"), "1").unwrap();
         fs::write(web.join("tool.wasm"), "").unwrap();
         fs::write(dir.join("web/secret.html"), "").unwrap();
-        let pack = PackStore::new(root.path()).describe("x").unwrap();
+        let pack = PackStore::new(root.path()).inspect("x").unwrap();
         (root, pack)
     }
 

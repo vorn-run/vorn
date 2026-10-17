@@ -1,6 +1,5 @@
 //! A session's disk history as a session engine keeps it: one log file in
-//! the server's history log format, version 2 (`history/log.ts`), written
-//! once per record.
+//! the history log format, version 2, written once per record.
 //!
 //! The header names the cursor the log starts at, and the writer knows the
 //! cursor after the last record it holds. A record below that is one the
@@ -370,7 +369,7 @@ fn read_tail(path: &Path) -> Option<Tail> {
 /// Reads a log: its generation, start cursor, every whole frame, and how
 /// many bytes those take. `None` for a file that is not a version 2 log.
 /// Reading stops at the first torn or damaged frame, or a kind it does not
-/// know, as the server's reader does.
+/// know.
 pub fn parse(bytes: &[u8]) -> Option<(u32, Cursor, Vec<Frame>, usize)> {
     let (generation, start) = read_header(bytes)?;
     let (frames, good) = frames(&bytes[HEADER_BYTES..]);

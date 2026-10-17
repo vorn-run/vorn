@@ -1,9 +1,8 @@
-//! The workflow triggers a task's change fires (`taskTriggersForChange`,
-//! per task): a task that was not there before is created, and one whose
-//! status changed moved. Each carries an effect id naming the change itself,
-//! so a trigger delivered twice runs once ([`vorn_work::receipts`]). vornd emits
-//! each as a public event when a task is written, and the work model fires
-//! it from there.
+//! The workflow triggers a task's change fires, per task: a task that was not
+//! there before is created, and one whose status changed moved. Each carries
+//! an effect id naming the change itself, so a trigger delivered twice runs
+//! once ([`vorn_work::receipts`]). vornd emits each as a public event when a
+//! task is written, and the work model fires it from there.
 
 use std::cmp::Ordering;
 
@@ -37,7 +36,7 @@ pub fn for_task(prior: Option<&Value>, task: &Value) -> Option<Value> {
         "kind": "taskStatusChanged",
         "task": task,
     });
-    // An absent status is `undefined`, which JSON leaves out.
+    // An absent status leaves `from` or `to` out.
     for (name, value) in [("from", prior.get("status")), ("to", task.get("status"))] {
         if let Some(value) = value {
             trigger[name] = value.clone();
@@ -91,12 +90,13 @@ pub fn fire_args(trigger: &Value) -> Option<Value> {
     }
 }
 
-/// A value in a template literal.
+/// `value` as text, `undefined` when it is absent.
 fn text(value: Option<&Value>) -> String {
     value.map_or_else(|| "undefined".to_owned(), js::to_string)
 }
 
-/// JavaScript's `a < b` for what a task's `updatedAt` holds.
+/// Whether `a` sorts before `b`, for what a task's `updatedAt` holds:
+/// strings by UTF-16 units, numbers by value.
 fn less(a: Option<&Value>, b: Option<&Value>) -> bool {
     match (a, b) {
         (Some(Value::String(a)), Some(Value::String(b))) => {

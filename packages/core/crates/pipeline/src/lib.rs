@@ -1,11 +1,10 @@
 //! A terminal's output, handled on a thread of its own.
 //!
 //! Every flush the server sends to its clients is also parsed into a screen
-//! model, kept in a scrollback buffer and framed into the history log. Those
-//! three used to run on the server's event loop, one after another, for every
-//! flush of every terminal -- and at 64 KB a flush the parse alone holds the
-//! loop for half a millisecond. Here they run on a thread the terminal owns,
-//! fed in order through a channel, so the loop pays for one hand-off.
+//! model, kept in a scrollback buffer and framed into the history log. At
+//! 64 KB a flush the parse alone takes half a millisecond, so the three run on
+//! a thread the terminal owns, fed in order through a channel, and the sender
+//! pays for one hand-off.
 //!
 //! Ordering is the whole contract. Everything is a message on one channel, so
 //! a read -- a snapshot, the scrollback, a checkpoint's cut -- is answered after

@@ -1,7 +1,7 @@
 //! The conversation an agent took, read from its own database, for agents
 //! that can be sent back to a conversation but cannot be told one when they
-//! start (`captureAgentSessionId`): the adapter's `[agent.resume.capture]`
-//! query, the newest conversation in the session's directory.
+//! start: the adapter's `[agent.resume.capture]` query, the newest
+//! conversation in the session's directory.
 
 use std::path::Path;
 

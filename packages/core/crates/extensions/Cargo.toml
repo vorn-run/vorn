@@ -13,7 +13,7 @@ description = "Extensions for Vorn: the one manifest and package store, the exte
 vorn-spawn = { path = "../spawn", features = ["tokio"] }
 data-encoding = "2"
 getrandom = "0.4"
-# `vorn ext pack` bundles a folder as a .tar.gz, as 0.8's packs were; both already in the tree.
+# `vorn ext pack` bundles a folder as a .tar.gz; both already in the tree.
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
 # Link handler patterns are JavaScript regular expressions, matched as a browser would.

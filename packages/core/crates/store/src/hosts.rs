@@ -1,8 +1,8 @@
 //! Which projects are on which machine, read by a second process.
 //!
 //! A path in a call names a project on this machine or one on a remote host,
-//! and only the server reaches remote hosts. A process standing beside the
-//! server (vornd) reads the same rows to tell the two apart, from the same
+//! and only the server (vornd) reaches remote hosts. Another process reads
+//! the same rows to tell the two apart, from the same
 //! file, without opening it for writing: no schema created, no migration, no
 //! seeding, all of which stay the server's. A file it cannot read, or rows it
 //! cannot make sense of, are an answer of "cannot tell", never "local".
@@ -88,8 +88,8 @@ impl ProjectHosts {
         }))
     }
 
-    /// Where the project at exactly `project_path` is, as the server's
-    /// `resolveRemoteHost` decides it.
+    /// Where the project at exactly `project_path` is; a path that is no
+    /// project is local.
     pub fn for_project(&self, project_path: &str) -> Placement {
         self.projects
             .iter()
@@ -98,8 +98,7 @@ impl ProjectHosts {
     }
 
     /// Where the project a path is in, or a worktree of it, is: the first
-    /// project the path is, sits under, or has a worktree under, as the
-    /// server's `resolveRemoteHostByPath` decides it.
+    /// project the path is, sits under, or has a worktree under.
     pub fn for_path(&self, any_path: &str) -> Placement {
         for project in &self.projects {
             let path = project.path.as_str();
@@ -131,7 +130,8 @@ impl ProjectHosts {
     }
 }
 
-/// Remote host `id` as the server keeps it, read beside it; `None` when there is no such file, table or host.
+/// Remote host `id`, read without opening the store for writing; `None` when
+/// there is no such file, table or host.
 pub fn remote_host(path: &Path, id: &str) -> Result<Option<RemoteHost>> {
     if !path.exists() {
         return Ok(None);
@@ -157,8 +157,7 @@ pub fn remote_host(path: &Path, id: &str) -> Result<Option<RemoteHost>> {
     }
 }
 
-/// `path` without its last `/segment`, or all of it when it ends in `/`:
-/// the server's `path.replace(/\/[^/]+$/, '')`.
+/// `path` without its last `/segment`, or all of it when it ends in `/`.
 fn parent_of(path: &str) -> &str {
     match path.rfind('/') {
         Some(at) if at + 1 < path.len() => &path[..at],

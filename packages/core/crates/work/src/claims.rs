@@ -1,4 +1,4 @@
-//! Which run may carry out a workflow trigger (`workflowRun:claim`).
+//! Which run may carry out a workflow trigger, claimed by the engine in-process.
 //!
 //! One claim is granted per workflow and trigger fingerprint inside its
 //! window; a second identical trigger is told the run already holding it.

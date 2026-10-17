@@ -1,10 +1,9 @@
 //! Lists of records, as a for-each loop walks them and a review gate draws
-//! them (`item-list.ts`).
+//! them.
 //!
 //! Both take whatever a step produced: a list, the JSON text of one, or an
 //! object wrapping exactly one (`{ "findings": [...] }`). Where JSON text
-//! does not parse, the line and column are serde_json's, which can name a
-//! different spot than V8's message for the same text.
+//! does not parse, the line and column are serde_json's.
 
 use serde_json::Value;
 
@@ -22,9 +21,8 @@ pub struct JsonErrorAt {
     pub column: usize,
 }
 
-/// Parses `text` as JSON, or says where it broke, as V8's message for the
-/// same text does: a token it did not expect and an early end name no
-/// position, so the end of the text is reported; the rest name where.
+/// Parses `text` as JSON, or says where it broke: for an unexpected token
+/// or an early end, the end of the text; for the rest, where.
 pub fn parse_json(text: &str) -> Result<Value, JsonErrorAt> {
     serde_json::from_str(text).map_err(|err| {
         let unplaced =
@@ -49,7 +47,7 @@ fn end_of(text: &str) -> JsonErrorAt {
     }
 }
 
-/// `toItemList`.
+/// The items `value` holds, or why it is not a list.
 pub fn to_item_list(value: &Value) -> Result<ItemList, String> {
     let parsed;
     let data = match value {
@@ -99,7 +97,7 @@ pub fn to_item_list(value: &Value) -> Result<ItemList, String> {
 
 const NOT_A_LIST: &str = "Not a list: expected a JSON array, or an object holding one.";
 
-/// `isRecordList`: every item a plain object, which is what a table draws.
+/// Every item a plain object, which is what a table draws.
 pub fn is_record_list(items: &[Value]) -> bool {
     !items.is_empty() && items.iter().all(Value::is_object)
 }
@@ -137,7 +135,7 @@ mod tests {
 
     #[test]
     fn says_where_json_broke() {
-        // V8 names no position for an unexpected token or an early end.
+        // An unexpected token or an early end is placed at the end of the text.
         assert_eq!(
             parse_json("{\n  \"a\": }").unwrap_err(),
             JsonErrorAt { line: 2, column: 9 }

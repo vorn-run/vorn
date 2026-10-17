@@ -1,5 +1,5 @@
-// Generated from today's file-icons.tsx and the Seti font (MIT, Jesse Weed): the
-// icon tables and each glyph's outline in a 1000-unit box. Regenerate rather than edit.
+// Generated from the Seti font (MIT, Jesse Weed): the file-icon tables and
+// each glyph's outline in a 1000-unit box. Regenerate rather than edit.
 
 /// Icon name, glyph and colour (`D`).
 pub(super) const DEFS: &[(&str, u32, u32)] = &[

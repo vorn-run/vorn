@@ -53,7 +53,7 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// Logs a session's lifecycle event (`logSessionEvent`): best effort, as the server's was.
+/// Logs a session's lifecycle event, best effort.
 pub fn log_event(native: &Native, session: &str, kind: &str, metadata: Option<Value>) {
     let Some(db) = native.database().map(std::path::Path::to_path_buf) else {
         return;

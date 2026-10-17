@@ -3,9 +3,9 @@
 //! vornd answers the calls that look the agents up (which are installed,
 //! which models one offers), and both depend on the configured commands and
 //! on the variables passed through to what an agent runs. It reads them from
-//! the server's file as [`crate::ProjectHosts`] reads the projects: read-only,
-//! fresh on every call, creating and migrating nothing, so a save the server
-//! has just made is what the next call sees. A session vornd starts reads the
+//! the store's file as [`crate::ProjectHosts`] reads the projects: read-only,
+//! fresh on every call, creating and migrating nothing, so a save just made
+//! is what the next call sees. A session vornd starts reads the
 //! shell it runs in from here too.
 
 use std::path::Path;
@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 use crate::config::load_agent_commands;
 use crate::Result;
 
-/// The agents' configuration as the server's `loadConfig` reads it.
+/// The agents' configuration, as `loadConfig` reads it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AgentSettings {
     /// `agentCommands`' stored rows, by agent type, each an
@@ -32,7 +32,7 @@ pub struct AgentSettings {
 
 impl AgentSettings {
     /// Reads them from the database at `path`. `None` when there is no such
-    /// file or the server has not created its tables yet; an error when a
+    /// file or its tables have not been created yet; an error when a
     /// row does not parse, so the caller cannot mistake it for no settings.
     pub fn read(path: &Path) -> Result<Option<AgentSettings>> {
         if !path.exists() {
@@ -105,9 +105,8 @@ mod tests {
         assert_eq!(AgentSettings::read(&db).unwrap(), None);
         conn.execute_batch(
             r#"CREATE TABLE agent_commands (agent_type TEXT PRIMARY KEY, command TEXT NOT NULL,
-                 args TEXT NOT NULL, headless_args TEXT, fallback_command TEXT, fallback_args TEXT,
-                 row_revision INTEGER);
-               INSERT INTO agent_commands VALUES ('gamma', 'gem', '["--x"]', NULL, 'gem2', NULL, 1);
+                 args TEXT NOT NULL, headless_args TEXT, row_revision INTEGER);
+               INSERT INTO agent_commands VALUES ('gamma', 'gem', '["--x"]', '["-p"]', 1);
                INSERT INTO defaults VALUES ('envPassthrough', '["ANTHROPIC_API_KEY", 3]');"#,
         )
         .unwrap();
@@ -126,7 +125,7 @@ mod tests {
         );
         assert_eq!(
             read.commands["gamma"],
-            serde_json::json!({ "command": "gem", "args": ["--x"], "fallbackCommand": "gem2" })
+            serde_json::json!({ "command": "gem", "args": ["--x"], "headlessArgs": ["-p"] })
         );
         conn.execute_batch("UPDATE agent_commands SET args = 'not json'")
             .unwrap();

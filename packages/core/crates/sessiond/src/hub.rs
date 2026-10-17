@@ -15,9 +15,8 @@
 //! finds no handler and is ignored.
 //!
 //! Program exits are watched here too: a pidfd on Linux (from 5.3), an
-//! `EVFILT_PROC` note on macOS. Timers stand in for the sleeps the threads
-//! did (the drain after exit, retries for a full log, polling for an exit
-//! another sessiond writes down).
+//! `EVFILT_PROC` note on macOS. Timers drive the drain after exit, retries
+//! for a full log, and polling for an exit another sessiond writes down.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};

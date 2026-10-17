@@ -1,6 +1,5 @@
 //! What winit does not reach on macOS: where the traffic lights sit when
-//! the app draws its own top bar under them (Electron's
-//! `trafficLightPosition`), drops of images that are not files and where a
+//! the app draws its own top bar under them, drops of images that are not files and where a
 //! drop landed, and whether the clipboard holds an image.
 
 use std::sync::Mutex;
@@ -30,7 +29,7 @@ fn content_view(window: &Window) -> Option<&NSView> {
 
 /// Puts the close, minimize and zoom buttons at `(x, y)` logical points
 /// from the window's top left, centred in a title area `2y` taller than
-/// them, as Electron does.
+/// them.
 pub(crate) fn place_traffic_lights(window: &Window, (x, y): (f32, f32)) {
     let Some(win) = content_view(window).and_then(NSView::window) else {
         return;

@@ -77,8 +77,7 @@ impl Daemon {
         let native = {
             let native = Native::new();
             native.prepare();
-            // The session reads answer from the engine's copy of the
-            // server's records, which the server feeds only when asked.
+            // The session reads answer from the engine's session registry.
             #[cfg(feature = "engine")]
             if let Some(engine) = holder.as_ref().and_then(|h| h.engine()) {
                 native.set_adapters(Arc::clone(engine.adapters()));
@@ -260,15 +259,9 @@ impl Daemon {
             Arc::clone(native.events()),
         );
         let installs = native.installs(&db_dir);
-        let daemon = Arc::downgrade(self);
         let around = Wired {
             native: Arc::downgrade(native),
             loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),
-            clients: Box::new(move || {
-                daemon
-                    .upgrade()
-                    .map_or(0, |d| d.open.load(Ordering::Relaxed))
-            }),
         };
         let declared = std::env::var("VORN_APP_ORIGINS").ok();
         let ancestors =
@@ -716,8 +709,7 @@ fn health(daemon: &Daemon) -> Response<Body> {
     res
 }
 
-/// Where the copy of the server's session records stands, when vornd keeps
-/// one.
+/// Where the session registry stands, when vornd keeps one.
 #[cfg(feature = "engine")]
 fn registry_report(daemon: &Daemon) -> Option<serde_json::Value> {
     let registry = daemon.holder.as_ref()?.engine()?.registry();

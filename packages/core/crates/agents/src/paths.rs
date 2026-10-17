@@ -1,6 +1,6 @@
-//! Paths compared the way the server compares them (`normalizePath`): an
-//! agent records the directory a session ran in in its own spelling, and a
-//! project is matched to it only after both are put in one form.
+//! Paths compared in one normalized form: an agent records the directory a
+//! session ran in in its own spelling, and a project is matched to it only
+//! after both are put in one form.
 
 /// Whether `p` is spelled as a Windows path: a drive letter or a UNC share.
 fn windows_style(p: &str) -> bool {
@@ -9,7 +9,7 @@ fn windows_style(p: &str) -> bool {
         || p.starts_with("\\\\")
 }
 
-/// `normalizePath`: `.` and `..` resolved, repeated and trailing separators
+/// `.` and `..` resolved, repeated and trailing separators
 /// dropped, symlinks resolved when the path exists, and lowercased when it
 /// is a Windows path or this is Windows.
 pub fn normalize(p: &str) -> String {
@@ -41,8 +41,8 @@ pub fn normalize_lexically(p: &str) -> String {
     result
 }
 
-/// One form for comparing a project path with one an agent recorded
-/// (`comparablePath`): normalized, forward slashes, lowercase.
+/// One form for comparing a project path with one an agent recorded:
+/// normalized, forward slashes, lowercase.
 pub fn comparable(p: &str) -> String {
     normalize(p).replace('\\', "/").to_lowercase()
 }
@@ -142,8 +142,7 @@ fn resolve_segments<'a>(
     kept.join(sep)
 }
 
-/// A canonical Windows path without the `\\?\` prefix `realpathSync` never
-/// shows.
+/// A canonical Windows path without its `\\?\` prefix.
 fn without_verbatim(p: &str) -> String {
     if let Some(unc) = p.strip_prefix("\\\\?\\UNC\\") {
         format!("\\\\{unc}")
@@ -159,7 +158,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_dots_and_separators_as_path_normalize_does() {
+    fn resolves_dots_and_separators() {
         assert_eq!(normalize("/no/such/./dir//x/../y/"), "/no/such/dir/y");
         assert_eq!(normalize("/../no-such"), "/no-such");
         assert_eq!(normalize("rel/../../up"), "../up");

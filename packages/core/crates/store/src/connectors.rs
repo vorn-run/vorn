@@ -37,8 +37,8 @@ fn collect<T>(
     Ok(out)
 }
 
-/// A `source_connections` row as `rowToSourceConnection` maps it: NULL
-/// columns leave their field out.
+/// A `source_connections` row as a connection: NULL columns leave their field
+/// out.
 fn row_to_source_connection(row: &Row<'_>) -> Result<SourceConnection> {
     Ok(SourceConnection {
         id: get_text(row, "id")?,
@@ -146,10 +146,9 @@ impl Store {
         Ok(())
     }
 
-    /// `updates` is the partial connection as JSON. `lastSyncAt`,
-    /// `lastSyncError` and `syncCursor` use an `in` test there, which also
-    /// counts an explicit `undefined`; `present` names the keys the caller's
-    /// object had, so those clear as they do in TypeScript.
+    /// `updates` is the partial connection as JSON. `present` names the keys
+    /// the caller's object had, so `lastSyncAt`, `lastSyncError` and
+    /// `syncCursor` clear when present without a value.
     pub fn db_update_source_connection(
         &self,
         id: &str,
@@ -442,7 +441,7 @@ impl Store {
 
     /// Puts a failed row back with backoff, or marks it dead once it has had
     /// [`MAX_INBOX_ATTEMPTS`]. Either way the connection's `last_sync_error`
-    /// names the workflow. Not one transaction, as in TypeScript.
+    /// names the workflow. Not one transaction.
     pub fn db_retry_connector_inbox(&self, args: &ConnectorInboxRetry) -> Result<bool> {
         let d = self.conn();
         let id = num(args.id);
@@ -484,11 +483,10 @@ impl Store {
             )?;
             return Ok(true);
         }
-        // `new Date(NaN).toISOString()` throws this in JavaScript.
+        // A `now` that is not a time refuses the call.
         let now = parse_iso_millis(&args.now)
             .ok_or_else(|| Error::Refused("Invalid time value".into()))?;
-        // The delay is whole milliseconds for whole attempts; `new Date`
-        // truncates any fraction the same way.
+        // The delay is whole milliseconds for whole attempts; any fraction is truncated.
         let available_at = iso_from_millis(now + retry_delay_ms(attempts) as i64);
         let changes = d.execute(
             "UPDATE connector_inbox
@@ -784,7 +782,7 @@ mod tests {
         assert_eq!(a.sync_interval_minutes, 15.0);
         assert_eq!(a.last_sync_at.as_deref(), Some("x"));
 
-        // `{ lastSyncAt: undefined }` clears it; a missing key leaves syncCursor.
+        // A present `lastSyncAt` without a value clears it; a missing key leaves syncCursor.
         store
             .db_update_source_connection("a", &Map::new(), &["lastSyncAt".into()])
             .unwrap();
@@ -963,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_with_a_bad_time_refuses_as_javascript_throws() {
+    fn retry_with_a_bad_time_is_refused() {
         let mut store = inbox_store();
         let item = claim(&mut store, T0).remove(0);
         let err = retry(&store, &item, "not a date").unwrap_err();

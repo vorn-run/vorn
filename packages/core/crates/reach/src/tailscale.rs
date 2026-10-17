@@ -48,8 +48,8 @@ pub fn status(printed: &str, app_port: Option<u16>) -> Value {
         .unwrap_or_else(failed)
 }
 
-/// `value[0]` as JavaScript reads it: an array's first element, a string's
-/// first UTF-16 unit, or nothing.
+/// The first item: an array's first element, a string's first UTF-16 unit,
+/// an object's `"0"` field, or nothing.
 fn first(value: Option<&Value>) -> Option<Value> {
     match value? {
         Value::Array(items) => items.first().cloned(),
@@ -62,12 +62,12 @@ fn first(value: Option<&Value>) -> Option<Value> {
     }
 }
 
-/// `x ?? fallback`.
+/// `value`, or `fallback` when it is missing or null.
 fn or(value: Option<Value>, fallback: Value) -> Value {
     value.filter(|v| !v.is_null()).unwrap_or(fallback)
 }
 
-/// A field as `obj?.key` reads it: nothing from a value that is not an object.
+/// A field of `obj`: nothing from a value that is not an object.
 fn field<'a>(obj: Option<&'a Value>, key: &str) -> Option<&'a Value> {
     match obj? {
         Value::Object(map) => map.get(key),
@@ -75,7 +75,8 @@ fn field<'a>(obj: Option<&'a Value>, key: &str) -> Option<&'a Value> {
     }
 }
 
-/// `(name ?? '').replace(/\.$/, '')`; `None` where JavaScript would throw.
+/// The name without one trailing dot, empty when missing or null; `None` for
+/// a value that is not a string.
 fn dns_name(value: Option<&Value>) -> Option<Value> {
     match value {
         None | Some(Value::Null) => Some(Value::String(String::new())),
@@ -85,7 +86,7 @@ fn dns_name(value: Option<&Value>) -> Option<Value> {
 }
 
 fn read(raw: &Value, app_port: Option<u16>) -> Option<Value> {
-    // `null.BackendState` throws; any other value reads as having no fields.
+    // A null status is unreadable; any other value reads as having no fields.
     if raw.is_null() {
         return None;
     }
@@ -98,7 +99,7 @@ fn read(raw: &Value, app_port: Option<u16>) -> Option<Value> {
     );
     let self_dns = dns_name(field(own, "DNSName"))?;
 
-    // `Object.values(status.Peer ?? {})`.
+    // The peers: an object's values, an array's items, a string's UTF-16 units.
     let listed: Vec<Value> = match field(Some(raw), "Peer") {
         None | Some(Value::Null | Value::Bool(_) | Value::Number(_)) => Vec::new(),
         Some(Value::Object(map)) => map.values().cloned().collect(),
@@ -110,7 +111,7 @@ fn read(raw: &Value, app_port: Option<u16>) -> Option<Value> {
     };
     let mut peers = Vec::new();
     for peer in &listed {
-        // `p.HostName` on null throws.
+        // A null peer makes the whole status unreadable.
         if peer.is_null() {
             return None;
         }
@@ -159,7 +160,7 @@ fn read(raw: &Value, app_port: Option<u16>) -> Option<Value> {
     Some(Value::Object(out))
 }
 
-/// JavaScript truthiness, for `!!value`.
+/// Whether `v` is truthy: not null, false, zero, NaN or empty text.
 fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
@@ -217,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_odd_shapes_as_javascript_does() {
+    fn reads_odd_shapes_leniently() {
         assert_eq!(
             status("[]", None),
             json!({ "installed": true, "running": false, "selfIP": "", "selfDNSName": "", "peers": [] })

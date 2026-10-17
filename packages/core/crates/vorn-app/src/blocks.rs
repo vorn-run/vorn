@@ -270,7 +270,7 @@ pub fn live(l: &Lines) -> (u16, u16) {
     (first.min(rows - count), count)
 }
 
-/// `formatDuration`.
+/// A duration as `0.3s`, `4.2s`, `42s` and up.
 pub fn format_duration(ms: u64) -> String {
     if ms < 1000 {
         let tenths = ((ms as f64 / 100.0).round() as u64).max(1);
@@ -287,7 +287,7 @@ pub fn format_duration(ms: u64) -> String {
     format!("{}m {}s", m as u64, (s - m * 60.0).round() as u64)
 }
 
-/// `shortenCwd`: the last two parts of a path.
+/// The last two parts of a path.
 pub fn shorten_cwd(cwd: &str) -> String {
     let parts: Vec<&str> = cwd.split('/').filter(|p| !p.is_empty()).collect();
     match parts.len() {

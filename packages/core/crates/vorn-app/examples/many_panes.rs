@@ -15,8 +15,7 @@
 //!
 //! - `mixed`: an agent's TUI, a build log and a full-screen redraw at 60 Hz,
 //!   in turn.
-//! - `agent`: every pane an agent's TUI at `--agent-rate`, the feed the
-//!   renderer suite of `yarn bench` gives each terminal.
+//! - `agent`: every pane an agent's TUI at `--agent-rate`.
 //! - `hidden`: as `agent`, with the probe's card expanded, so the other
 //!   panes stream into cards that are not on screen.
 //! - `resize`: as `agent`, while the window is dragged between its size and
@@ -67,12 +66,11 @@ fn flag<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
         .map(|w| w[1].as_str())
 }
 
-/// The terminal output the workloads write, ported from
-/// `bench/lib/transcripts.ts` with its seeds, so both benches feed the same
-/// bytes.
+/// The terminal output the workloads write, generated from fixed seeds so
+/// every run feeds the same bytes.
 #[cfg(unix)]
 mod transcript {
-    /// mulberry32, as the TypeScript generator.
+    /// mulberry32.
     struct Rng(u32);
 
     impl Rng {
@@ -91,11 +89,11 @@ mod transcript {
 
     const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     const FILES: [&str; 5] = [
-        "packages/server/src/pty-manager.ts",
-        "packages/server/src/vornd-sessions.ts",
-        "src/renderer/lib/terminal-registry.ts",
-        "packages/shared/src/protocol.ts",
-        "tests/pty-manager-recovery.test.ts",
+        "packages/core/crates/sessiond/src/pty.rs",
+        "packages/core/crates/vornd/src/terminal.rs",
+        "packages/core/crates/term-proto/src/screen.rs",
+        "packages/core/crates/term-proto/src/msg.rs",
+        "packages/core/crates/vornd/tests/grid.rs",
     ];
     const WORDS: [&str; 7] = ["the", "flush", "buffer", "screen", "model", "per", "chunk"];
 
@@ -198,7 +196,7 @@ mod feed {
 
     use super::{flag, transcript};
 
-    /// The server's flush beat, on which the renderer suite feeds too.
+    /// The beat output is fed on.
     const BEAT: Duration = Duration::from_millis(8);
     const FRAME: Duration = Duration::from_micros(16_667);
 

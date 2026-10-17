@@ -223,22 +223,6 @@ async fn connectors_run_as_a_built_in_and_keep_their_data_when_off() {
     let repo = repository();
     let url = format!("file://{}", repo.path().display());
 
-    // A 0.8 pack is refused, naming the command that installs from git.
-    let refused = c
-        .result(
-            "connector:inspectPack",
-            json!({ "kind": "file", "path": "/x.vorn.tgz" }),
-        )
-        .await;
-    assert_eq!(refused["ok"], false);
-    assert!(
-        refused["error"]
-            .as_str()
-            .unwrap()
-            .contains("vorn ext install <git url>"),
-        "{refused}"
-    );
-
     // From git, with what it reaches on the sheet; installed by the click on it.
     let inspected = c
         .result(

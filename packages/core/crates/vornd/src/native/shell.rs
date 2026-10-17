@@ -5,10 +5,9 @@
 //! shell session is launched with ([`Shells::setup`]), with the shim files
 //! it sources written first.
 //!
-//! Both are kept as the server keeps them: the programs for a minute, the
-//! shells for as long as vornd runs. Finding the shells runs each one's
-//! `--version`, which the server does on its event loop; here it holds only
-//! a blocking thread.
+//! Both are cached: the programs for a minute, the shells for as long as
+//! vornd runs. Finding the shells runs each one's `--version` on a blocking
+//! thread.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -110,8 +109,8 @@ fn names_on_path(path: &str) -> BTreeSet<String> {
             continue;
         };
         for entry in entries.flatten() {
-            // A link to a directory counts, as the server's directory
-            // entries do not follow links either.
+            // A link to a directory counts: directory entries do not follow
+            // links.
             if entry.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
@@ -234,7 +233,7 @@ impl Family {
     }
 }
 
-/// Node's `os.homedir()`: `HOME`, or on Windows `USERPROFILE`.
+/// The home directory: `HOME`, or on Windows `USERPROFILE`.
 pub(crate) fn home_dir() -> String {
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     std::env::var(var).unwrap_or_default()

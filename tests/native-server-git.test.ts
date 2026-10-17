@@ -206,7 +206,6 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     ['git:getBranch', reads.repo],
     ['git:getBranch', reads.worktree],
     ['git:getBranch', reads.plain],
-    ['git:getWorktreeBranch', reads.worktree],
     ['git:worktreeDirty', reads.repo],
     ['git:worktreeDirty', reads.worktree],
     ['git:diffStat', reads.repo],

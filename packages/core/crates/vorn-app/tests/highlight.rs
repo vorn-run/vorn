@@ -1,5 +1,5 @@
 //! Syntax colour against Shiki's: each fixture holds a file and the tokens
-//! today's app draws it with, and the lexer has to agree on most of the
+//! Shiki gives it, and the lexer has to agree on most of the
 //! characters a person sees. The rate is per language, printed with
 //! `--nocapture`; `HL_DIFF=<lang>` lists where they differ.
 

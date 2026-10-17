@@ -1,6 +1,6 @@
-//! The desktop bridge end to end: main claims its connection to vornd with
+//! The desktop bridge end to end: the app claims its connection to vornd with
 //! `bridge:identify`, and an agent's `browser:*` and `device:*` calls reach
-//! main through vornd and come back.
+//! the app through vornd and come back.
 
 mod common;
 

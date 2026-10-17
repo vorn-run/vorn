@@ -22,7 +22,7 @@ use super::config::Viewer;
 use super::{Answer, Native};
 use crate::registry::Registry;
 
-pub const METHODS: &[&str] = &["layout:list", "layout:get", "layout:open", "layout:save"];
+pub const METHODS: &[&str] = &["layout:list", "layout:open", "layout:save"];
 
 /// Where the person's layouts are kept; none before the database is set.
 fn dir(native: &Native) -> Option<PathBuf> {
@@ -144,20 +144,6 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
             blocking(move || list(&n))
                 .await
                 .unwrap_or_else(Answer::Error)
-        }
-        "layout:get" => {
-            let n = Arc::clone(native);
-            let got = blocking(move || {
-                pick(&n, &params).and_then(|f| read(&n, &f).map(|(text, _)| (f, text)))
-            })
-            .await
-            .and_then(|r| r);
-            match got {
-                Ok((f, text)) => {
-                    Answer::Result(json!({ "name": f.name, "source": f.source, "toml": text }))
-                }
-                Err(e) => Answer::Error(e),
-            }
         }
         "layout:open" => open(native, &params, viewer).await,
         "layout:save" => save(native, &params, viewer).await,

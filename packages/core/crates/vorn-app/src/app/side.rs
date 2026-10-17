@@ -1,6 +1,5 @@
-//! The pane column's controls (`PaneColumn`, `FilesCard`, `TerminalsCard`,
-//! `EditorCard`): opening and closing panes, their tabs, the file tree,
-//! the cards a file pops out into, and each open file's load, edit, find
+//! The pane column's controls: opening and closing panes, their tabs, the file
+//! tree, the cards a file pops out into, and each open file's load, edit, find
 //! and save, with vornd reading and writing the files.
 
 use std::collections::HashSet;
@@ -354,7 +353,7 @@ impl App {
         );
     }
 
-    /// `handleSave`: checked against the base unless `force`.
+    /// Checked against the base unless `force`.
     fn save(&mut self, key: &str, force: bool) {
         let Some(b) = self.st.editors.buffers.get_mut(key) else {
             return;
@@ -376,7 +375,7 @@ impl App {
         );
     }
 
-    /// `confirmDiscardAll`: runs `act` now when none of `keys` has edits,
+    /// Runs `act` now when none of `keys` has edits,
     /// else asks first. True when it may go ahead now.
     fn may_discard(&mut self, keys: &[String], act: Act) -> bool {
         if self.discarding || !keys.iter().any(|k| self.st.editors.dirty(k)) {
@@ -406,7 +405,7 @@ impl App {
         );
     }
 
-    /// Stops `ids` and lets go of their cards, as `closeTerminalsPanel` does.
+    /// Stops `ids` and lets go of their cards.
     fn kill_shells(&mut self, ids: Vec<String>) {
         for id in ids {
             self.call(Call::Ignore, "terminal:kill", json!(id));
@@ -647,7 +646,7 @@ impl App {
         }
     }
 
-    /// `handleOpen`: a click previews, a double click pins; a narrow pane
+    /// A click previews, a double click pins; a narrow pane
     /// hides the tree to show the file.
     fn open_file(&mut self, owner: &str, path: &str, pin: bool) {
         let preview_dirty = self
@@ -928,8 +927,8 @@ impl App {
                 }
             }
             PaneDivider::Changes => {
-                // The handle sits inside the panel; the width is the row's right
-                // edge less the pointer, as today's drag measures it.
+                // The handle sits inside the panel; the width is the row's
+                // right edge less the pointer.
                 let (Some(row), Some((x, _))) = (
                     ui.rect_of(crate::screen::git::changes_row_id()),
                     ui.pointer(),

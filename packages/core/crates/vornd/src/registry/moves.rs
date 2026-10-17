@@ -1,8 +1,7 @@
 //! A worktree's branch renamed, or the worktree moved, by vornd for a
 //! client's call (`git:renameWorktreeBranch`, `git:renameWorktree`): the
-//! sessions in it take the new branch or path and name, as the server's
-//! `updateSessionsForWorktree` sets them, and each is told whole, marked
-//! `moved`, for the server to tell its clients.
+//! sessions in it take the new branch or path and name, and each is told
+//! whole, marked `moved`.
 
 use serde_json::json;
 
@@ -11,8 +10,8 @@ use super::{Registry, RegistryError, Value};
 /// What changed about a worktree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorktreeMove {
-    /// Its branch, as the client named it: the server keeps the name
-    /// untrimmed in the record, though git was given it trimmed.
+    /// Its branch, as the client named it: the record keeps the name
+    /// untrimmed, though git was given it trimmed.
     Branch(String),
     /// It was moved to `path`, and is now called `name`.
     Path { path: String, name: String },
@@ -37,8 +36,8 @@ impl WorktreeMove {
 
 impl Registry {
     /// Sets what `moved` says on every terminal, then every headless agent,
-    /// whose worktree is `path`, in the order the server holds them. Each
-    /// is told, changed or not, as the server tells each.
+    /// whose worktree is `path`, in the order they are held. Each is told,
+    /// changed or not.
     pub fn move_worktree(
         &mut self,
         path: &str,

@@ -1,7 +1,7 @@
-//! `triggers::for_task` against what the TypeScript it replaced
-//! answered for the same seeded saves (`tests/fixtures/js-reference/task-triggers.json`):
-//! each recorded save, taken a task at a time as vornd now writes them,
-//! fires the same triggers in the same order.
+//! `triggers::for_task` against recorded expected triggers for seeded saves
+//! (`tests/fixtures/js-reference/task-triggers.json`): each recorded save,
+//! taken a task at a time as vornd writes them, fires the same triggers in
+//! the same order.
 
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ fn key(id: Option<&Value>) -> String {
 }
 
 #[test]
-fn every_recorded_save_fires_what_the_server_fired() {
+fn every_recorded_save_fires_the_recorded_triggers() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../tests/fixtures/js-reference/task-triggers.json");
     let text = std::fs::read_to_string(&path).expect("the recorded saves");

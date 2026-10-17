@@ -1,4 +1,4 @@
-//! What the engine runs itself (`executeNode`): approval gates, conditions
+//! What the engine runs itself: approval gates, conditions
 //! and loops, and every other step handed to the node type that runs it,
 //! in vornd or by a call to its extension.
 
@@ -27,7 +27,7 @@ fn text_of(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str).map(str::to_owned)
 }
 
-/// `value || undefined` for a string.
+/// `None` for an empty string.
 fn nonempty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }

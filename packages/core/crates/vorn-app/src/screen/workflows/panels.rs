@@ -84,7 +84,7 @@ pub fn mark(look: Option<&crate::library::Look>, size: f32, color: Rgba) -> El {
     }
 }
 
-/// `StepLibrary`: the steps or triggers, Recent, then each connector's
+/// The steps or triggers, Recent, then each connector's
 /// group, the highlighted line answering Enter.
 fn library(s: &Screen<'_>, at: &Anchor) -> El {
     let label = if at.trigger {
@@ -357,7 +357,7 @@ fn group_label(label: &str) -> El {
     )
 }
 
-/// `StepStrip`: the shape of the flow, drawn rather than counted.
+/// The shape of the flow, drawn rather than counted.
 fn step_strip(count: usize) -> El {
     let mut strip = div().col().w(22.0).mt(2.0).gap(3.0).shrink0().opacity(0.7);
     for _ in 0..count.min(4) {
@@ -366,7 +366,7 @@ fn step_strip(count: usize) -> El {
     strip
 }
 
-/// `RequirementRow`: what one unmet requirement says, and its fix.
+/// What one unmet requirement says, and its fix.
 fn requirement_row(s: &Screen<'_>, need: &crate::templates::Need) -> El {
     let l = crate::templates::Listings {
         connectors: &s.st.wf.lib.connectors,
@@ -421,7 +421,7 @@ fn s_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-/// `StartFromPanel`: blank first, then the templates and what each still
+/// Blank first, then the templates and what each still
 /// wants, then the workflows this machine's connections ship with.
 fn start_from(s: &Screen<'_>) -> El {
     let blank = pick_row(

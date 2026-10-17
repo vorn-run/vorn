@@ -1,4 +1,4 @@
-//! The description editor (`RichMarkdownEditor`): markdown in a framed
+//! The description editor: markdown in a framed
 //! field, the slash menu at the caret and the floating format toolbar over
 //! a selection.
 

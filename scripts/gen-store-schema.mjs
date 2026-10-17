@@ -72,7 +72,7 @@ const SOURCES = [
 
 /** Fields kept as any JSON value: stored as JSON text, or passed through whole. */
 const OPAQUE = {
-  AgentCommandConfig: ['args', 'headlessArgs', 'fallbackArgs'],
+  AgentCommandConfig: ['args', 'headlessArgs'],
   ArtifactComment: ['anchor'],
   ArtifactCommentChange: ['anchor'],
   ConnectorInboxItem: ['connectorItem'],

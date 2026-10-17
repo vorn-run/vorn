@@ -1,7 +1,7 @@
-//! The terminal cards (`GridView`, `AgentCard`): a header with the status
+//! The terminal cards: a header with the status
 //! icon, title and actions, the terminal beside its command spine, the
 //! intent bar or ended strip, and the status bar. Also the focused stage
-//! (`FocusedStage`) and the tabs layout (`TabView`), which show one card.
+//! and the tabs layout, which show one card.
 
 use super::chrome::{self, divider, draggable};
 use super::panes;
@@ -112,7 +112,7 @@ fn fade(color: Rgb, alpha: f32, dim: f32) -> Rgba {
     Rgba::hexa(color, alpha * dim)
 }
 
-/// AgentStatusIcon: the agent's own icon, or the running glyph while an
+/// The agent's own icon, or the running glyph while an
 /// agent works. A shell is always its terminal icon.
 pub(super) fn status_icon(s: &Screen<'_>, session: &Session, size: f32, dim: f32) -> El {
     use crate::components::{status_icon, Status};
@@ -134,7 +134,7 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
     )
 }
 
-/// CardActionCluster: more actions, minimize on a grid card, expand or
+/// More actions, minimize on a grid card, expand or
 /// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
     use crate::components::card::{card_actions_with, CardActions, CardButton, CardVariant};
@@ -279,7 +279,7 @@ fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> E
         .child(div().h(1.0).w_full().bg(white(0.04)))
 }
 
-/// FocusedNavHint: where this session sits among the others, and the
+/// Where this session sits among the others, and the
 /// arrows to its neighbours.
 fn nav_hint(s: &Screen<'_>, sid: &str) -> Option<El> {
     let ids = s.st.visible(s.store);
@@ -389,7 +389,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
     }
 }
 
-/// BranchChip: the worktree in ink-secondary, then the branch; a click
+/// The worktree in ink-secondary, then the branch; a click
 /// opens the branch switcher.
 pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> {
     let branch = s.info.branch.as_deref()?;
@@ -530,7 +530,7 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         .child(bar)
 }
 
-/// CommandSpine: an 8 px gutter with its hairline and a mark per command
+/// An 8 px gutter with its hairline and a mark per command
 /// block, from each prompt to the next. Only shells have one.
 fn spine(s: &Screen<'_>, session: &Session) -> El {
     let mut gutter = div()
@@ -606,13 +606,13 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
         .sense(Sense::WHEEL | Sense::MOVE | Sense::DOUBLE)
 }
 
-/// The shell's blocks when it shows them, as TerminalPane splits.
+/// The shell's blocks when it shows them.
 pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
     blocks::split(&s.store.config, session, s.st.shells.get(&session.info.id))
 }
 
-/// TerminalPane's split: the finished commands (BlockLog), the running
-/// one (RunningCommand), then the live rows, all held to the bottom.
+/// The terminal's split: the finished commands, the running one, then the
+/// live rows, all held to the bottom.
 pub(super) fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
     let sid = s.store.sessions[i].info.id.as_str();
     let cell_h = s.ui.text.cell_logical().1;
@@ -737,7 +737,7 @@ const MONO_SEMIBOLD: u16 = 700;
 /// How long Copy shows its check.
 const COPIED: Duration = Duration::from_millis(1200);
 
-/// RunningCommand: the command, a pulse and how long it has run.
+/// The command, a pulse and how long it has run.
 fn running_row(s: &Screen<'_>, r: &Running) -> El {
     let elapsed = s.ui.now().saturating_duration_since(r.since);
     s.ui.wake_at(r.since + Duration::from_secs(elapsed.as_secs() + 1));
@@ -881,7 +881,7 @@ fn scroll_to_bottom(s: &Screen<'_>, sid: &str) -> El {
     tooltip(s.ui, b, id, "Scroll to bottom", None)
 }
 
-/// EndedStrip: why the session ended, and how to pick it back up.
+/// Why the session ended, and how to pick it back up.
 fn ended_strip(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     let sid = session.info.id.as_str();
     let cause = session.ended_cause().unwrap_or_else(|| "exited".to_owned());
@@ -1184,7 +1184,7 @@ pub fn stands_aside(s: &Screen<'_>, session: &Session) -> bool {
     ran >= SETTLE
 }
 
-/// SessionComposer: the ended strip, or a shell's intent bar.
+/// The ended strip, or a shell's intent bar.
 pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
     if session.ended() {
         return Some(ended_strip(s, session, compact));
@@ -1321,7 +1321,7 @@ pub(super) fn grid(s: &Screen<'_>) -> El {
     s.acts.context(body, grid_id, Act::Open(MenuKind::Grid))
 }
 
-/// FocusedStage: one session filling the window under its header.
+/// One session filling the window under its header.
 pub(super) fn focused(s: &Screen<'_>) -> El {
     let Some((i, session)) = s.st.focused.as_deref().and_then(|id| {
         s.store
@@ -1460,7 +1460,7 @@ fn tab(s: &Screen<'_>, n: usize, session: &Session, active: bool) -> El {
         .sense(Sense::DOUBLE | Sense::HOVER)
 }
 
-/// TabView: the tab strip over the active session.
+/// The tab strip over the active session.
 pub(super) fn tabs(s: &Screen<'_>) -> El {
     let shown = s.st.visible(s.store);
     let active =

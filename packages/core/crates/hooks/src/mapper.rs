@@ -1,5 +1,4 @@
-//! Which terminal a hook event is about, and the status it means
-//! (`hookStatusMapper`).
+//! Which terminal a hook event is about, and the status it means.
 //!
 //! An event names its terminal exactly when Vorn started the agent (its
 //! terminal id), or by the conversation a terminal was started on; failing
@@ -65,7 +64,7 @@ pub fn status_of(name: &str) -> Option<Status> {
     })
 }
 
-/// A directory as terminals are matched by it (`normalizePath`): no trailing
+/// A directory as terminals are matched by it: no trailing
 /// separator, and the real path where there is one.
 pub fn normalize(dir: &str) -> PathBuf {
     let trimmed = dir.trim_end_matches(['/', '\\']);

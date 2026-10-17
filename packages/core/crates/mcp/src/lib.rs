@@ -1,12 +1,9 @@
-//! Vorn's MCP server, answering as the TypeScript one in `packages/mcp` does.
+//! Vorn's MCP server.
 //!
-//! An agent cannot tell which of the two it is talking to: the same tools are
-//! listed with the same schemas, a call is checked by the same rules and
-//! refused in the same words, and a result reads the same down to the key
-//! order of its JSON. What the TypeScript writes down as data (the tool list,
-//! the argument schemas, the node reference) is generated from it by
-//! `scripts/gen-mcp-tools.mjs` into `generated/`; what it writes as code is
-//! ported here.
+//! The tool list, the argument schemas and the node reference are generated
+//! from the tool definitions in `packages/mcp` by `scripts/gen-mcp-tools.mjs`
+//! into `generated/`; calls are checked against them and answered here, with
+//! results whose JSON keeps a stable key order.
 //!
 //! The crate does no I/O of its own. Tools reach the Vorn server through
 //! [`Rpc`], which the host implements over whatever socket it has, and
@@ -40,7 +37,7 @@ static WORKFLOW_NODES: LazyLock<Value> = LazyLock::new(|| {
         .expect("the workflow reference is JSON")
 });
 
-/// The `tools` of a `tools/list` answer, exactly as the TypeScript sends them.
+/// The `tools` of a `tools/list` answer, from `generated/tools.json`.
 pub fn tools_list() -> &'static Value {
     &TOOLS
 }

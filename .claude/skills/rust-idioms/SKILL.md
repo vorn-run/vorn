@@ -25,8 +25,8 @@ code and raise it in the PR.
   and serialization. Derive `Hash, Eq, PartialEq` together, never by hand
   unless the semantics differ.
 - **Conversions** through `From`/`TryFrom`, not ad hoc `to_x()` helpers. Use
-  `TryFrom` whenever the conversion can lose information (`usize` to `u32` at
-  the napi boundary is the usual one).
+  `TryFrom` whenever the conversion can lose information (`usize` to `u32` on
+  the wire is the usual one).
 - Derive `Debug` on every public type; derive `Clone`, `Default`, `Copy` only
   when they are cheap and meaningful.
 
@@ -40,8 +40,8 @@ code and raise it in the PR.
   library's public API.
 - `unwrap()`/`expect()` only for invariants the code itself establishes, with
   `expect("why this cannot fail")`. Never on input from a PTY, a file, the
-  network or JS.
-- Panics never cross FFI; see the `napi-boundary` skill.
+  network or a client.
+- Panics never cross FFI.
 
 ## Ownership and memory
 
@@ -140,7 +140,7 @@ pane are hot paths: 16 panes streaming at once is the normal case.
   as what. Doc examples compile; use them for small API examples.
 - After adding a dependency locally, `cargo tree -p <crate>` shows what it
   pulls in; check that before committing. `cargo tree -i <crate>` shows who
-  depends on a crate. `cargo expand` debugs a macro (napi-derive included).
+  depends on a crate. `cargo expand` debugs a macro.
 - Dependencies: prefer the standard library and crates already in
   `Cargo.lock`. Turn off default features and enable only what is used.
   Optional heavy deps sit behind a cargo feature (as `ghostty` does).

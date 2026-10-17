@@ -2,10 +2,10 @@
 //!
 //! Parsing is strict where JSON reading is lenient: a misspelt key is an
 //! error rather than a feature silently off, and every error names the file,
-//! the line and the field. The parts 0.8 packs already carried (a
-//! connector's triggers and actions, an extension's contributions) then go
-//! through the same checks [`super::read`] applies to `manifest.json`, so a
-//! value the app would drop is reported instead.
+//! the line and the field. A connector's triggers and actions and an
+//! extension's contributions then go through the same checks [`super::read`]
+//! applies to a connector's own manifest, so a value the app would drop is
+//! reported instead.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -16,14 +16,12 @@ use toml::de::{DeTable, DeValue};
 use toml::Spanned;
 
 use super::{
-    Credential, Declares, Manifest, ManifestError, McpTool, Permission, Run, Service, Storage, API,
-    CONNECTOR_PROTOCOL, KIND_SECTIONS, RETIRED_CONNECTOR_API,
+    Credential, Declares, Manifest, McpTool, Permission, Run, Service, Storage, API,
+    CONNECTOR_PROTOCOL,
 };
 
 /// The manifest's file name in a package's folder.
 pub const FILE: &str = "vorn-extension.toml";
-/// What a 0.8 pack ran: `node index.js` in its folder.
-pub const PACK_ENTRY: [&str; 2] = ["node", "index.js"];
 
 /// A manifest that does not parse or check, and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,25 +69,6 @@ fn parse_as(text: &str, builtin: bool) -> Result<Manifest, FileError> {
     };
     raw.check(&at, builtin)?;
     let manifest = raw.into_manifest(&at)?;
-    Ok(manifest)
-}
-
-/// The one line a manifest still on a retired api id gets.
-pub fn retired_api(api: &str) -> String {
-    let kinds: Vec<String> = KIND_SECTIONS.iter().map(|k| format!("[{k}]")).collect();
-    format!(
-        "`{api}` is retired; set api = \"{API}\" and keep auth, triggers and actions under a {} section",
-        kinds.join(" or ")
-    )
-}
-
-/// A 0.8 pack's `manifest.json`, read as its folder runs it: `node index.js`.
-pub fn from_pack_json(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
-    let mut manifest = super::read(payload)?;
-    manifest.service = Some(Service {
-        command: PACK_ENTRY.map(str::to_owned).to_vec(),
-        events: Vec::new(),
-    });
     Ok(manifest)
 }
 
@@ -744,9 +723,6 @@ impl Raw {
                 "version",
                 format!("`{}` is not a version like 1.2.0", self.version),
             ));
-        }
-        if self.api.starts_with(RETIRED_CONNECTOR_API) {
-            return Err(at("api", retired_api(&self.api)));
         }
         if self.api != API {
             return Err(at(
@@ -2137,7 +2113,7 @@ view = "views/pane.kdl"
         );
         assert_eq!(
             err("vorn:extension@0.9", "vorn:connector@1"),
-            "vorn-extension.toml:4: api: `vorn:connector@1` is retired; set api = \"vorn:extension@0.9\" and keep auth, triggers and actions under a [connector] section"
+            "vorn-extension.toml:4: api: this Vorn speaks vorn:extension@0.9; the package asks for vorn:connector@1"
         );
     }
 
@@ -2241,23 +2217,6 @@ call = "refresh"
             "{text}\n[[contributes.panes]]\nid = \"a\"\nview = \"views/a.kdl\"\n\n[[contributes.panes]]\nid = \"b\"\nweb = \"web/b.html\"\n"
         );
         assert_eq!(parse(&panes).unwrap_err().field, "contributes.panes");
-    }
-
-    #[test]
-    fn converts_a_pack_and_back() {
-        let pack = json!({
-            "id": "jira", "name": "Jira", "version": "1.2.0", "protocol": 1,
-            "auth": { "rung": "cli", "probe": { "command": "acli", "args": ["auth", "status"] } },
-            "triggers": [{ "type": "issue", "label": "Issues", "statusMapping": [{ "upstream": "Open", "suggestedLocal": "todo" }],
-                           "setup": { "env": [{ "name": "JIRA_URL", "required": true }] } }],
-            "actions": [{ "type": "comment", "inputs": [{ "key": "body", "type": "text", "required": true }] }]
-        });
-        let m = from_pack_json(pack.as_object().unwrap()).unwrap();
-        let text = to_toml(&m);
-        assert!(text.contains("api = \"vorn:extension@0.9\""), "{text}");
-        assert!(text.contains("[connector"), "{text}");
-        assert!(text.contains("\"index.js\""), "{text}");
-        assert_eq!(parse(&text).unwrap(), m);
     }
 
     #[test]

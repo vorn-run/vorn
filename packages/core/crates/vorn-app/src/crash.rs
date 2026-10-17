@@ -1,4 +1,4 @@
-//! The screen a panic leaves behind (`ErrorBoundary`): what went wrong, with
+//! The screen a panic leaves behind: what went wrong, with
 //! a way to start the app over and a way to copy the details.
 
 use std::panic::{self, AssertUnwindSafe};

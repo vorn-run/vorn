@@ -1,7 +1,6 @@
-//! The sessions sidebar's view options (`vorn:sidebarSettings`): how it
+//! The sessions sidebar's view options: how it
 //! arranges sessions, how it orders projects and worktrees, and which it
-//! shows. They outlive a launch in `desktop/sidebar.json`, under the keys
-//! the renderer stores them with.
+//! shows. They outlive a launch in `desktop/sidebar.json`.
 
 use std::path::{Path, PathBuf};
 
@@ -73,9 +72,8 @@ impl WorktreeFilter {
     }
 }
 
-/// The options together, as the renderer's `saveSidebarSettings` writes
-/// them. A value this build does not know reads as its default, so one
-/// stale key never resets the rest.
+/// The options together, as they are saved. A value this build does not know
+/// reads as its default, so one stale key never resets the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SidebarView {
@@ -95,7 +93,7 @@ fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(d: D) -> Re
 }
 
 impl SidebarView {
-    /// `hasNonDefault`: what lights the Filter & sort button. It measures
+    /// What lights the Filter & sort button. It measures
     /// the mode against `worktrees`, not the default arrangement, as today.
     pub fn non_default(&self) -> bool {
         self.view_mode != SidebarMode::Worktrees

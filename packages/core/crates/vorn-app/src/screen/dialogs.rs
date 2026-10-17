@@ -17,7 +17,7 @@ pub const PROJECT_ICON: &str = "Folder";
 pub const PROJECT_COLOR: &str = "#6b7280";
 
 /// The shortcuts panel's rows: its categories, each with description and
-/// keys, as `keyboard-shortcuts.ts` lists them.
+/// keys.
 pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
     let m = mod_label();
     let a = alt_label();

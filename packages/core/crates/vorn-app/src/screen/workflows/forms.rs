@@ -1,9 +1,5 @@
-//! `NodeConfigPanel` and every step's form (`TriggerConfigForm`,
-//! `LaunchAgentConfigForm`, `ScriptConfigForm`, `ConditionConfigForm`,
-//! `LoopConfigForm`, `ApprovalConfigForm`, `HttpRequestConfigForm`,
-//! `CallConnectorActionNodeForm`, `ConnectorPollTriggerForm`,
-//! `CreateTaskFromItemNodeForm`), `WorkflowInputsEditor`,
-//! `WorkflowPropertiesPanel`, and `VariableAutocomplete` under any field.
+//! The step config panel and every step's form, the workflow's inputs
+//! editor and properties panel, and the variable dropdown under any field.
 
 use serde_json::Value;
 
@@ -140,7 +136,7 @@ fn input(
         )
 }
 
-/// `VariableAutocomplete`: a template field with the `{{` button, the
+/// A template field with the `{{` button, the
 /// preview of what its tokens resolve to, and the dropdown.
 #[allow(clippy::too_many_arguments)]
 fn var_area(
@@ -1075,7 +1071,7 @@ fn arg_field(s: &Screen<'_>, node: &str, key: &str) -> Option<Value> {
         .find(|f| sv(f, "key") == Some(key))
 }
 
-/// `argFields`: the action's config fields, or what the catalog published
+/// The action's config fields, or what the catalog published
 /// for a step not bound to a connection yet.
 fn arg_fields(s: &Screen<'_>, node: &str) -> Vec<Value> {
     let Some(n) = s.st.wf.editor.as_ref().and_then(|d| d.node(node)) else {
@@ -1133,7 +1129,7 @@ fn arg_fields(s: &Screen<'_>, node: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// `ToggleSwitch`: 40×24, blue when on, the knob white.
+/// 40×24, blue when on, the knob white.
 fn toggle(s: &Screen<'_>, a: WfAct, on: bool, disabled: bool, label: &str) -> El {
     let id = s.acts.on("wf-toggle", act(a));
     let mut el = div()
@@ -1422,7 +1418,7 @@ fn model_picker(s: &Screen<'_>, id: &str, n: &Value) -> El {
         .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_500)))
 }
 
-/// The panel for `n` (`NodeConfigPanel`).
+/// The panel for `n`.
 pub fn node_panel(s: &Screen<'_>, d: &Draft, n: &Value) -> El {
     let id = sv(n, "id").unwrap_or("").to_owned();
     let kind = sv(n, "type").unwrap_or("");

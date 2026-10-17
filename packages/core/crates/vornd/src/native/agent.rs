@@ -1,4 +1,4 @@
-//! The `agent:*` calls and `sessions:getRecent`: what the server reads about
+//! The `agent:*` calls and `sessions:getRecent`: what vornd reads about
 //! the coding agents without starting one, answered by `vorn_agents` from
 //! the agents' adapters (`agent:list`).
 //!
@@ -38,7 +38,7 @@ pub(super) fn no_settings() -> Answer {
     Answer::Error("vornd could not read the settings".to_owned())
 }
 
-/// The error for a stored agent command of a shape the server's code would not read.
+/// The error for a stored agent command of an unreadable shape.
 pub(super) fn unreadable_command(agent: &Agent) -> Answer {
     Answer::Error(format!(
         "the {} command in the settings cannot be read",
@@ -59,7 +59,7 @@ pub(super) fn settings(native: &Native) -> Option<AgentSettings> {
 }
 
 /// The configured command for `agent`, or its default when none is stored.
-/// `None` for a stored one of a shape the server's code would not expect.
+/// `None` for a stored one of an unexpected shape.
 pub(super) fn command_of(settings: &AgentSettings, agent: &Agent) -> Option<AgentCommand> {
     let Some(stored) = settings.commands.get(agent.id()) else {
         return Some(agent.default_command());
@@ -75,17 +75,10 @@ pub(super) fn command_of(settings: &AgentSettings, agent: &Agent) -> Option<Agen
             Some(_) => None,
         }
     };
-    let fallback_command = match stored.get("fallbackCommand") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(_) => return None,
-    };
     Some(AgentCommand {
         command: stored.get("command")?.as_str()?.to_owned(),
         args: strings(stored.get("args"))??,
         headless_args: strings(stored.get("headlessArgs"))?,
-        fallback_command,
-        fallback_args: strings(stored.get("fallbackArgs"))?,
     })
 }
 
@@ -171,7 +164,7 @@ fn path_of(env: &env::Env) -> Option<&str> {
     get("PATH").or_else(|| get("Path"))
 }
 
-/// JavaScript truthiness, for the flags a request carries.
+/// Whether a flag a request carries is set: not null, false, 0 or empty.
 fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
@@ -189,7 +182,7 @@ fn list_models(native: &Native, params: &Value) -> Answer {
     let project_path = match request.get("projectPath") {
         Some(Value::String(s)) => s.clone(),
         v if !truthy(v) => String::new(),
-        // Not a string: the server's handler throws on it.
+        // Not a string: refused.
         _ => return bad_params("agent:listModels"),
     };
     let agents = native.agents();
@@ -203,8 +196,7 @@ fn list_models(native: &Native, params: &Value) -> Answer {
         remote: truthy(request.get("remoteHostId")),
         refresh: truthy(request.get("refresh")),
     };
-    // Answered without settings when there is nothing to ask; a relative
-    // project would be resolved against the server's directory, not vornd's.
+    // Answered without settings when there is nothing to ask.
     let askable = request.agent.as_ref().is_some_and(Agent::selects_models)
         && !request.remote
         && !request.project_path.is_empty()
@@ -283,8 +275,6 @@ fn unused() -> AgentCommand {
         command: String::new(),
         args: Vec::new(),
         headless_args: None,
-        fallback_command: None,
-        fallback_args: None,
     }
 }
 
@@ -298,7 +288,7 @@ fn recent_sessions(native: &Native, params: &Value) -> Answer {
     let project = match params {
         Value::String(s) if !s.is_empty() => Some(s.as_str()),
         v if !truthy(Some(v)) => None,
-        // Not a path: the server's handler throws on it.
+        // Not a path: refused.
         _ => return bad_params("sessions:getRecent"),
     };
     let Some(homes) = Homes::from_env() else {
@@ -388,14 +378,14 @@ mod tests {
     #[test]
     fn reads_a_stored_command_and_defaults_the_rest() {
         let s = settings_with(json!({
-            "gamma": { "command": "gam", "args": ["-x"], "fallbackCommand": "g2" },
+            "gamma": { "command": "gam", "args": ["-x"], "headlessArgs": ["-p"] },
             "beta": { "command": "beta", "args": "not a list" }
         }));
         let agents = crate::adapters::testing::adapters().agents();
         let gamma = command_of(&s, agents.get("gamma").unwrap()).unwrap();
         assert_eq!(gamma.command, "gam");
         assert_eq!(gamma.args, ["-x"]);
-        assert_eq!(gamma.fallback_command.as_deref(), Some("g2"));
+        assert_eq!(gamma.headless_args.as_deref(), Some(&["-p".to_owned()][..]));
         let acme = agents.get("acme").unwrap();
         assert_eq!(command_of(&s, acme), Some(acme.default_command()));
         assert_eq!(command_of(&s, agents.get("beta").unwrap()), None);

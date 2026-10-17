@@ -1074,7 +1074,7 @@ async fn resizes_reach_bytes_clients_in_record_order() {
 
 /// TP-T12, vornd's half: three clients attached, and a program asking DA1,
 /// DSR 6, DECRQM and OSC 11. vornd's actor answers each once, live; the
-/// clients answer none (their half is the renderer's query handlers).
+/// clients answer none.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn each_query_gets_exactly_one_reply() {
     let dir = tempfile::tempdir().unwrap();
@@ -1167,7 +1167,7 @@ async fn write_resize_and_reads_are_answered_by_vornd() {
         c.answer(rpc).await,
         json!({ "data": "", "seq": 0, "live": false })
     );
-    // Writing to it goes nowhere, as the server's write to a session it had no program for.
+    // Writing to it goes nowhere: the session has no program.
     let rpc = c.call("terminal:write", json!({ "id": "nodes", "data": "x" }));
     assert_eq!(c.answer(rpc).await, Value::Null);
     v.kill().await;

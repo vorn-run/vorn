@@ -6,17 +6,13 @@
 //! ([`display_name_from_prompt`]), and a session on a remote host
 //! ([`ssh`]).
 //!
-//! Each answers as the server's TypeScript of the same purpose does
-//! (`agent-launch`, `launch-tokens`, `model-arguments`, `resume-cwd`,
-//! `shell-integration`, `process-utils`), checked against both by the shared
-//! corpus in `tests/fixtures/launch-lines.json`. What the TypeScript reads
-//! from its process (the platform, the default shell, the environment) is
-//! passed in here, so a host can answer for the machine it runs on and a
-//! test for any.
+//! Each is checked against the recorded corpus in
+//! `tests/fixtures/launch-lines.json`. The platform, the default shell and
+//! the environment are passed in, so a host can answer for the machine it
+//! runs on and a test for any.
 //!
-//! Strings are measured in bytes where the TypeScript counts UTF-16 code
-//! units. Every place either one cuts a line is ASCII, so the answers agree;
-//! where a cut can fall inside a character, the docs say what happens.
+//! Strings are measured in bytes. Every place a line is cut is ASCII; where
+//! a cut can fall inside a character, the docs say what happens.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -49,7 +45,7 @@ impl Platform {
         Platform::Posix
     };
 
-    /// `process.platform` as the server names it.
+    /// A platform from its name: `win32` is Windows, anything else POSIX.
     pub fn from_node(platform: &str) -> Platform {
         if platform == "win32" {
             Platform::Windows
@@ -59,7 +55,7 @@ impl Platform {
     }
 }
 
-/// How a shell reads a quoted word (`shellEscape`'s flavours).
+/// How a shell reads a quoted word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Quoting {
     /// Single quotes, `'\''` for a quote inside.
@@ -126,7 +122,7 @@ impl Quoting {
     }
 }
 
-/// The machine the server runs on, as a launch sees it.
+/// The machine a launch runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Machine {
     /// Decides how PATH is searched.
@@ -138,7 +134,7 @@ pub struct Machine {
 
 /// What a session asks to be launched with: the part of
 /// `CreateTerminalPayload` a launch reads. An empty id or prompt counts as
-/// none, as JavaScript's truthiness reads it.
+/// none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchRequest {
     pub agent: Agent,
@@ -179,7 +175,7 @@ fn given(value: &Option<String>) -> Option<&str> {
     value.as_deref().filter(|v| !v.is_empty())
 }
 
-/// Why a launch cannot be built. Each reads as the server's message.
+/// Why a launch cannot be built, worded for the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchError {
     /// A model was asked of an agent that has no model choice; its id.
@@ -216,9 +212,9 @@ impl fmt::Display for LaunchError {
 
 impl std::error::Error for LaunchError {}
 
-/// Where `name` can be run from on `path_env` (`findOnPath`); on Windows
-/// `.exe` and `.cmd` count too. Whether a file can be run is this host's
-/// answer, as the server's `accessSync` is: on Unix any execute bit.
+/// Where `name` can be run from on `path_env`; on Windows `.exe` and `.cmd`
+/// count too. Whether a file can be run is this host's answer: on Unix any
+/// execute bit.
 pub fn find_on_path(name: &str, path_env: Option<&str>, platform: Platform) -> Option<String> {
     let path_env = path_env.filter(|p| !p.is_empty())?;
     let (sep, candidates) = match platform {
@@ -251,9 +247,7 @@ fn runnable(path: &Path) -> bool {
     path.exists()
 }
 
-/// The configured command as found (`resolveAgentCommand`): the primary
-/// where it is on PATH, else the fallback where that is, else the primary
-/// by name.
+/// The configured command as found: where it is on PATH, else by name.
 struct Resolved<'a> {
     command: &'a str,
     args: &'a [String],
@@ -273,15 +267,6 @@ fn resolve<'a>(
             args: &config.args,
             path,
         };
-    }
-    if let Some(fallback) = config.fallback_command.as_deref().filter(|f| !f.is_empty()) {
-        if let Some(path) = find_on_path(fallback, path_env, platform) {
-            return Resolved {
-                command: fallback,
-                args: config.fallback_args.as_deref().unwrap_or_default(),
-                path,
-            };
-        }
     }
     Resolved {
         command: &config.command,
@@ -305,10 +290,9 @@ fn with_model(
     }
 }
 
-/// The line typed into a terminal to start the agent interactively
-/// (`buildAgentLaunchLine`). `config` is the agent's configured command,
-/// the default when `None`; `env` is the launch environment, whose PATH
-/// finds the command.
+/// The line typed into a terminal to start the agent interactively. `config`
+/// is the agent's configured command, the default when `None`; `env` is the
+/// launch environment, whose PATH finds the command.
 pub fn launch_line(
     req: &LaunchRequest,
     config: Option<&AgentCommand>,
@@ -421,9 +405,9 @@ pub struct HeadlessSpawn {
     pub stdin: Option<String>,
 }
 
-/// How to spawn the agent headless, directly and with no shell line
-/// (`buildHeadlessSpawnArgs`). Arguments for this launch win over the
-/// configured headless ones, which win over the configured ones.
+/// How to spawn the agent headless, directly and with no shell line.
+/// Arguments for this launch win over the configured headless ones, which win
+/// over the configured ones.
 pub fn headless_spawn(
     req: &LaunchRequest,
     config: Option<&AgentCommand>,
@@ -488,11 +472,10 @@ pub fn headless_spawn(
     })
 }
 
-/// The name a prompt gives a session (`displayNameFromPrompt`): whitespace
-/// collapsed, cut to `max_len` UTF-16 code units at the last space with an
-/// ellipsis; `None` when there is nothing in it. A cut with no space before
-/// it that would split a surrogate pair leaves the pair out, where the
-/// TypeScript keeps a lone surrogate a Rust string cannot hold.
+/// The name a prompt gives a session: whitespace collapsed, cut to `max_len`
+/// UTF-16 code units at the last space with an ellipsis; `None` when there is
+/// nothing in it. A cut with no space before it that would split a surrogate
+/// pair leaves the pair out.
 pub fn display_name_from_prompt(prompt: &str, max_len: usize) -> Option<String> {
     let cleaned = prompt
         .split(js::is_space)
@@ -523,7 +506,7 @@ pub struct ResumeCwd {
 }
 
 /// The most specific of the shell's own directory, the worktree and the
-/// project that is still a directory (`resumeCwdFor`); `None` when none is,
+/// project that is still a directory; `None` when none is,
 /// so nothing is spawned into a directory that is not there.
 pub fn resume_cwd(
     shell_cwd: Option<&str>,

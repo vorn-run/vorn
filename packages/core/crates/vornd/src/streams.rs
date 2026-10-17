@@ -1,6 +1,6 @@
 //! Terminal streams to bytes clients, for the sessions vornd holds.
 //!
-//! A bytes client (the desktop renderer, the web client, the phone) parses
+//! A bytes client (the web client, the phone) parses
 //! a session itself with xterm.js. vornd sends it the session's records
 //! exactly, as they were applied to the session's terminal: data as
 //! version 2 Bytes frames that name their records, resizes in-band as
@@ -169,7 +169,7 @@ impl ClientConn {
         }
     }
 
-    /// A handle that queues the server's own frames behind native ones.
+    /// A handle that queues frames from elsewhere behind this stream's own.
     pub fn forwarder(&self) -> Forwarder {
         Forwarder {
             outbox: self.sender.clone(),
@@ -1310,7 +1310,7 @@ impl Inner {
 }
 
 /// The answer to an attach of a session that runs nowhere yet: nothing to
-/// show, as the server answers for a session of a previous run.
+/// show, as for a session of a previous run.
 fn cold_answer() -> Value {
     json!({ "data": "", "seq": 0, "live": false, "continued": false })
 }

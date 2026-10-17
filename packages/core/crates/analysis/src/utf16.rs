@@ -1,12 +1,8 @@
-//! UTF-16 to UTF-8, for text that arrives from JavaScript.
+//! UTF-16 to UTF-8, for text that arrives as UTF-16.
 //!
-//! V8 converts a two-byte string to UTF-8 at about a millisecond per megabyte,
-//! which was a third of what native analysis cost on an agent's output. Copying
-//! the UTF-16 out is a memcpy, and terminal output is mostly ASCII, which this
-//! moves eight units at a time.
+//! Terminal output is mostly ASCII, which this moves eight units at a time.
 
-/// Appends `src` to `dst` as UTF-8. A lone surrogate becomes U+FFFD, as V8's
-/// own conversion does.
+/// Appends `src` to `dst` as UTF-8. A lone surrogate becomes U+FFFD.
 pub fn push_utf16(dst: &mut String, src: &[u16]) {
     let mut out = std::mem::take(dst).into_bytes();
     out.reserve(src.len());

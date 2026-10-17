@@ -284,7 +284,7 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
                 };
                 let words: Vec<&str> = label.split(' ').collect();
                 for (j, w) in words.iter().enumerate() {
-                    // The renderer's three spaces collapse to one, as HTML does.
+                    // Runs of spaces collapse to one, as HTML does.
                     let gap = if j + 1 < words.len() || i < last {
                         " "
                     } else {
@@ -561,7 +561,7 @@ fn actions(s: &Screen<'_>, l: &Listing, state: &PackState) -> El {
     row
 }
 
-/// `VerifiedStrip`: the named checks and when they ran.
+/// The named checks and when they ran.
 fn verified(v: &Value) -> El {
     let mut row = div().row().wrap_children().items_center().gap(12.0).mt(6.0);
     for check in v
@@ -592,7 +592,7 @@ fn verified(v: &Value) -> El {
     )
 }
 
-/// `formatDay`: "Mar 4, 2025", or the stamp as given.
+/// "Mar 4, 2025", or the stamp as given.
 fn format_day(iso: &str) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -604,7 +604,7 @@ fn format_day(iso: &str) -> String {
     }
 }
 
-/// `originLabel`: an origin's host.
+/// An origin's host.
 pub(super) fn origin_label(origin: &str) -> &str {
     let host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
     host.split('/').next().unwrap_or(host)

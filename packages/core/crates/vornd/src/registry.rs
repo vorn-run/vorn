@@ -4,53 +4,47 @@
 //! carries them from one run to the next ([`Registry::own_records`]). What
 //! follows of a feeder sending changes ([`SessionRegistry::feed`]) is how the tests set it up.
 //!
-//! Every change the copy takes moves its revision ([`Rev`]) on by one and is
-//! told to subscribers as a `vornd:session` note carrying the generation
+//! Every change the registry takes moves its revision ([`Rev`]) on by one and
+//! is told to subscribers as a `vornd:session` note carrying the generation
 //! ([`Gen`]) and the revision. The generation is drawn at random when vornd
-//! starts, so a subscriber that sees a new one, or a revision it skipped,
-//! knows to ask for the whole registry again rather than patch a stale copy.
+//! starts, so a subscriber that sees a new one, or a revision it skipped, knows
+//! to ask for the whole registry again rather than patch a stale copy.
 //!
 //! A record's status and exit can carry the record cursor of the effect that
 //! set them ([`Stamp`]). A record that arrives with an older stamp than the
 //! one held keeps the held status or exit: a state told again after a
 //! reconnect never overwrites a newer one.
 //!
-//! With terminals native, the registry also decides each
-//! terminal's status itself ([`Registry::decide_statuses`]), from what the
-//! session's screen shows, from its output going quiet, from input the server
-//! writes to it and from what the agent's hooks report, as the server did. The
-//! server stops deciding and takes each status from the copy's notes instead,
-//! and an upsert it sends no longer moves what the registry decides: the
-//! status, where it comes from (`statusSource`) and the hook session linked
-//! to it (`hookSessionId`). Every status the registry sets carries a stamp: a
-//! screen status the effect's, anything else the session's head at the moment
-//! it arrives ([`Stamp::at_head`]), so a hook's word is never undone by an
-//! older screen status told again. Once the server says a terminal's program
-//! ended, its record is the server's again, whole, but for the fields only
-//! `vornd:patch` and vornd's own calls set (a name, a group, the agent's
-//! conversation), which stay the registry's whatever an upsert says.
+//! The registry decides each terminal's status itself
+//! ([`Registry::decide_statuses`]), from what the session's screen shows,
+//! from its output going quiet, from input written to it and from what the
+//! agent's hooks report. An upsert from a feeder does not move what the
+//! registry decides: the status, where it comes from (`statusSource`) and
+//! the hook session linked to it (`hookSessionId`). Every status the registry
+//! sets carries a stamp: a screen status the effect's, anything else the
+//! session's head at the moment it arrives ([`Stamp::at_head`]), so a hook's
+//! word is never undone by an older screen status told again. Once a feeder
+//! says a terminal's program ended, its record is the feeder's again, whole,
+//! but for the fields only `vornd:patch` and vornd's own calls set (a name, a
+//! group, the agent's conversation), which stay the registry's whatever an
+//! upsert says.
 //!
-//! vornd also creates, renames, regroups,
-//! reorders and closes terminals itself ([`crate::native::sessions`]). Those
-//! changes are told with `native: true`, so the server knows they are not the
-//! echo of its own: a terminal vornd created (`created`, then `started` once
-//! its program is up, or `failed`), one it closed, and the order it set. A
-//! terminal vornd closed is remembered until the server lets go of it too,
-//! so an upsert the server sent before it heard does not bring it back. The
-//! workspaces vornd holds while it prepares a session are told beside the
-//! server's own, as `nativeHolds`.
+//! vornd creates, renames, regroups, reorders and closes terminals itself
+//! ([`crate::native::sessions`]). Those changes are told with `native: true`:
+//! a terminal vornd created (`created`, then `started` once its program is
+//! up, or `failed`), one it closed, and the order it set. A terminal vornd
+//! closed is remembered until the feeder lets go of it too, so a stale upsert
+//! does not bring it back. The workspaces vornd holds while it prepares a
+//! session are told as `nativeHolds`.
 //!
-//! With the switch on the registry also owns the records between runs
-//! ([`Registry::own_records`]): what it holds is written down
-//! ([`crate::carry`]) and read back when vornd starts. A record read back is
-//! carried ([`Registry::carry`]): a terminal the session holder still holds
-//! is adopted as live when the holder says so ([`Registry::adopt`]), told as
-//! a terminal vornd made (`adopted`); any other becomes a session a previous
-//! run left (`restored`, the server's `RestoredSession`), listed by
+//! What the registry holds is written down ([`crate::carry`]) and read back
+//! when vornd starts. A record read back is carried ([`Registry::carry`]): a
+//! terminal the session holder still holds is adopted as live when the holder
+//! says so ([`Registry::adopt`]), told as a terminal vornd made (`adopted`);
+//! any other becomes a session a previous run left (`restored`), listed by
 //! `sessions:restored` and started again under its id by `sessions:resume`
-//! ([`Registry::resume`]). The server's snapshot then adds to the registry
-//! rather than replacing it, and its own list of restored sessions is not
-//! taken: vornd's is the one there is.
+//! ([`Registry::resume`]). A feeder's snapshot then adds to the registry
+//! rather than replacing it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -82,8 +76,8 @@ pub const IDLE_AFTER: Duration = Duration::from_secs(5);
 /// only the safety net for a hook that never came.
 pub const IDLE_AFTER_HOOKS: Duration = Duration::from_secs(30);
 
-/// The fields `vornd:patch` may set. Everything else in a record is the
-/// server's to send whole.
+/// The fields `vornd:patch` may set. Everything else in a record is sent
+/// whole.
 pub const PATCHABLE: [&str; 6] = [
     "displayName",
     "renamedByPerson",
@@ -171,7 +165,7 @@ fn stale(incoming: Option<Stamp>, held: Option<Stamp>) -> bool {
     matches!((incoming, held), (Some(a), Some(b)) if a < b)
 }
 
-/// The two kinds of session the server keeps a record of.
+/// The two kinds of session the registry keeps a record of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -190,8 +184,8 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
-    /// A status effect's code (`vorn_analysis::STATUS_*`), as the server's
-    /// `NATIVE_STATUS` reads it: `None` says nothing.
+    /// A status effect's code (`vorn_analysis::STATUS_*`): `None` says
+    /// nothing.
     pub fn from_code(code: u32) -> Option<AgentStatus> {
         match code {
             1 => Some(AgentStatus::Running),
@@ -221,10 +215,10 @@ pub enum HeadlessStatus {
 
 /// `TerminalSession` in packages/shared.
 ///
-/// `agentType` stays a string: the list of agents grows on the server's
-/// side, and a session of a kind this build has not heard of is still a
-/// session. A field this mirror does not name yet is carried in `other`, so
-/// it reaches readers unchanged rather than being dropped.
+/// `agentType` stays a string: the list of agents grows, and a session of a
+/// kind this build has not heard of is still a session. A field this mirror
+/// does not name yet is carried in `other`, so it reaches readers unchanged
+/// rather than being dropped.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSession {
@@ -275,7 +269,7 @@ pub struct TerminalSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_status: Option<ProgramStatus>,
     /// The registry revision of this record. Set only on what the registry
-    /// tells subscribers: the server's own records do not carry one.
+    /// tells subscribers: the feeder's own records do not carry one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<u64>,
     /// What set the status, and how the program ended, when the session's
@@ -436,7 +430,7 @@ trait Record: Clone + PartialEq + Serialize {
     /// Takes how it ended from `held`, which is newer.
     fn keep_exit(&mut self, held: &Self);
     /// Takes from `held` what the registry decides while it decides the
-    /// statuses, rather than what the server sent.
+    /// statuses, rather than what the feeder sent.
     fn keep_decided(&mut self, held: &Self);
     /// Takes from `held` the fields only a patch or vornd's own calls set
     /// while it decides, whether or not the program still runs.
@@ -487,7 +481,7 @@ impl Record for HeadlessSession {
         self.ended_at = held.ended_at;
     }
     // While the registry decides, how an agent ended is read from its
-    // session ([`Registry::headless_exit`]), not from the server's record.
+    // session ([`Registry::headless_exit`]), not from the feeder's record.
     fn keep_decided(&mut self, held: &Self) {
         self.keep_exit(held);
     }
@@ -508,7 +502,7 @@ struct Row<R> {
     /// The revision the record was put in at: a patch read from an earlier
     /// record under the same id (a resume reuses it) is not for this one.
     created: Rev,
-    /// The server said the session's program ended.
+    /// The feeder said the session's program ended.
     ended: bool,
 }
 
@@ -536,8 +530,8 @@ enum Upserted {
     Created,
 }
 
-/// One kind's records, in the order the server first registered them, which
-/// is the order its maps iterate in. A server holds dozens of sessions, not
+/// One kind's records, in the order the feeder first registered them, which
+/// is the order its maps iterate in. A feeder holds dozens of sessions, not
 /// thousands, so a vector searched in place is the simplest thing that keeps
 /// that order.
 #[derive(Clone, Debug)]
@@ -586,7 +580,7 @@ impl<R: Record> Table<R> {
             });
             return Upserted::Created;
         };
-        // The server's records stop moving what the registry decides, until
+        // The feeder's records stop moving what the registry decides, until
         // it says the program ended: from then on the record is its own.
         if decided {
             record.keep_patched(&row.record);
@@ -627,7 +621,7 @@ impl<R: Record> Table<R> {
         self.rows.len() != before
     }
 
-    /// Replaced whole, as a snapshot from the server says, with the ids
+    /// Replaced whole, as a snapshot from the feeder says, with the ids
     /// whose programs ended. Stamps held for a session the snapshot still
     /// has are kept, so a stale state told after the snapshot is still
     /// recognised, and so, when `decided`, is what the registry decides of
@@ -674,7 +668,7 @@ impl<R: Record> Table<R> {
     }
 }
 
-/// One change the server makes to its registry, as `vornd:record` carries
+/// One change the feeder makes to its registry, as `vornd:record` carries
 /// it in `{op, ...}`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Change {
@@ -685,20 +679,20 @@ pub enum Change {
         record: Box<Session>,
         status_at: Option<Stamp>,
         exit_at: Option<Stamp>,
-        /// The session's program ended: the server's record is its own
+        /// The session's program ended: the feeder's record is its own
         /// again, status included.
         ended: bool,
     },
-    /// The server let go of a record.
+    /// The feeder let go of a record.
     Remove { kind: Kind, id: String },
-    /// The order the server lists its terminals in.
+    /// The order the feeder lists its terminals in.
     Order(Vec<String>),
     /// The workspaces held while a session is prepared, by path, with how
     /// many preparations hold each.
     Holds(BTreeMap<String, u32>),
-    /// Everything, as the server holds it when it connects.
+    /// Everything, as the feeder holds it when it connects.
     Snapshot(Snapshot),
-    /// The sessions of earlier runs the server still offers to resume. Not
+    /// The sessions of earlier runs the feeder still offers to resume. Not
     /// taken while vornd owns the records: its own list is the one there is.
     Restored(Vec<Restored>),
 }
@@ -710,7 +704,7 @@ pub enum Session {
     Headless(HeadlessSession),
 }
 
-/// The whole registry, as the server sends it and as subscribers are given
+/// The whole registry, as the feeder sends it and as subscribers are given
 /// it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -740,7 +734,7 @@ pub enum RegistryError {
     NoTerminal { call: &'static str, id: String },
     /// A patch read from a record the id no longer names.
     Replaced { id: String },
-    /// A call a client made, refused in the words the server refuses it.
+    /// A call a client made, refused, and why.
     Refused(String),
 }
 
@@ -842,13 +836,12 @@ impl TryFrom<&Value> for Change {
     }
 }
 
-/// A `vornd:hookStatus` call: the status the server's hook mapper read from
-/// an agent's hook, and whether the session's status comes from its hooks
-/// from now on.
+/// A `vornd:hookStatus` call: the status read from an agent's hook, and whether
+/// the session's status comes from its hooks from now on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HookStatus {
     pub id: String,
-    /// Set first, then the promotion, as the server did them.
+    /// Set first, then the promotion.
     pub status: Option<AgentStatus>,
     pub promote: bool,
 }
@@ -928,9 +921,8 @@ impl TryFrom<&Value> for Patch {
 struct Statuses {
     /// The last status each session's screen showed, with the effect that
     /// showed it, kept while the engine holds the session whatever its
-    /// record says: a record put in later (the server taking on a session it
-    /// held before it restarted) starts from it, as the server's did from
-    /// the states vornd told it again.
+    /// record says: a record put in later (a session carried over a
+    /// restart) starts from it.
     screens: HashMap<String, (AgentStatus, Stamp)>,
     /// When each terminal that went quiet turns idle.
     idle_at: HashMap<String, Instant>,
@@ -946,7 +938,7 @@ struct Statuses {
     asking: HashSet<String>,
 }
 
-/// The registry: every record the server holds, as it last told them.
+/// The registry: every record the feeder holds, as it last told them.
 #[derive(Clone, Debug)]
 pub struct Registry {
     gen: Gen,
@@ -958,7 +950,7 @@ pub struct Registry {
     /// The workspaces vornd holds itself while it prepares a session, by
     /// path, with how many preparations hold each.
     own_holds: BTreeMap<String, u32>,
-    /// Terminals vornd closed that the server has not let go of yet: an
+    /// Terminals vornd closed that the feeder has not let go of yet: an
     /// upsert it sent before it heard is not a new terminal.
     closed: HashSet<String>,
     /// Set while the registry decides the terminals' statuses.
@@ -973,11 +965,11 @@ pub struct Registry {
     carried_order: Vec<String>,
     /// Whether vornd owns the records between runs ([`Registry::own_records`]).
     owned: bool,
-    /// When this machine came up, as the server told it: a session that ended
+    /// When this machine came up: a session that ended
     /// before then was interrupted by the machine going down.
     boot_time: i64,
-    /// Whether records were carried in this run, from vornd's file or the
-    /// server's handover: the server's are taken only when none were.
+    /// Whether records were carried in this run, from vornd's file or a
+    /// handover: the feeder's are taken only when none were.
     carried: bool,
 }
 
@@ -1012,7 +1004,7 @@ impl Registry {
     }
 
     /// Decides the terminals' statuses from now on, rather than taking the
-    /// server's. It cannot be undone: the server is told once, when it
+    /// feeder's. It cannot be undone: the feeder is told once, when it
     /// connects, and follows.
     pub fn decide_statuses(&mut self) {
         self.statuses.get_or_insert_with(Statuses::default);
@@ -1037,11 +1029,11 @@ impl Registry {
             } => {
                 let at = Stamps { status_at, exit_at };
                 match *record {
-                    // Closed here, and the server has not heard yet.
+                    // Closed here, and the feeder has not heard yet.
                     Session::Terminal(r) if self.closed.contains(&r.id) => return None,
                     Session::Terminal(r) => {
                         let id = r.id.clone();
-                        // The server holds it: it is no longer only offered.
+                        // The feeder holds it: it is no longer only offered.
                         self.restored.retain(|o| o.session.id != id);
                         match self.terminals.upsert(r, at, ended, decided, next) {
                             Upserted::Unchanged => return None,
@@ -1067,7 +1059,7 @@ impl Registry {
                 }
             }
             Change::Remove { kind, id } => {
-                // The server letting go of a terminal vornd closed: it heard.
+                // The feeder letting go of a terminal vornd closed: it heard.
                 if kind == Kind::Terminal && self.closed.remove(&id) {
                     return None;
                 }
@@ -1110,7 +1102,7 @@ impl Registry {
                 return Some(self.merge_snapshot(s, next, decided))
             }
             Change::Snapshot(mut s) => {
-                // A terminal vornd closed stays closed; one the server no
+                // A terminal vornd closed stays closed; one the feeder no
                 // longer has, it has let go of.
                 let still: HashSet<String> = s
                     .terminals
@@ -1146,8 +1138,8 @@ impl Registry {
         Some(self.note(fields))
     }
 
-    /// The server's snapshot while vornd owns the records: what the server
-    /// holds is put in or changed, and nothing it lacks goes, since a server
+    /// The feeder's snapshot while vornd owns the records: what the feeder
+    /// holds is put in or changed, and nothing it lacks goes, since a feeder
     /// that has just connected has not heard of the terminals vornd carried
     /// yet. Its order comes first, then the terminals it does not name as
     /// they were. Its restored sessions are not taken.
@@ -1270,7 +1262,7 @@ impl Registry {
         self.decided(id)
     }
 
-    /// The terminal a call from the server names, still running. One whose
+    /// The terminal a call from the feeder names, still running. One whose
     /// program ended keeps the status it ended with.
     fn running(
         &self,
@@ -1335,7 +1327,7 @@ impl Registry {
         note
     }
 
-    /// The server wrote to terminal `id`: one idle or waiting is running
+    /// The feeder wrote to terminal `id`: one idle or waiting is running
     /// again, unless its hooks report its status (they say when it runs).
     pub fn input(&mut self, id: &str, head: Option<Stamp>) -> Result<Option<Value>, RegistryError> {
         let Some(row) = self.running("vornd:input", id)? else {
@@ -1606,7 +1598,7 @@ impl Registry {
         snapshot
     }
 
-    /// A `holds` note's fields: the server's holds, and vornd's own beside
+    /// A `holds` note's fields: the feeder's holds, and vornd's own beside
     /// them while it has any.
     fn holds_fields(&self) -> Value {
         let mut fields = json!({ "op": "holds", "holds": self.holds });
@@ -1621,7 +1613,7 @@ impl Registry {
     /// registered (`PtyManager.getActiveSessions`).
     pub fn terminals(&self) -> Vec<&TerminalSession> {
         let mut listed: Vec<&TerminalSession> = Vec::with_capacity(self.terminals.rows.len());
-        // An id the order names twice is listed twice, as the server lists it.
+        // An id the order names twice is listed twice, as the feeder lists it.
         for id in &self.order {
             if let Some(row) = self.terminals.get(id) {
                 listed.push(&row.record);
@@ -1640,11 +1632,11 @@ impl Registry {
         self.headless.records()
     }
 
-    /// The sessions still at work in the worktree at `path`, terminals
-    /// first: a terminal that is not idle, an agent still running
-    /// (`worktree:activeSessions`). The path is compared as given, as the
-    /// server compares it, except that on Windows `/` and `\` are one
-    /// separator: git lists `C:/a/b` for the worktree vorn made as `C:\a\b`.
+    /// The sessions still at work in the worktree at `path`, terminals first: a
+    /// terminal that is not idle, an agent still running
+    /// (`worktree:activeSessions`). The path is compared as given, except that
+    /// on Windows `/` and `\` are one separator: git lists `C:/a/b` for the
+    /// worktree vorn made as `C:\a\b`.
     pub fn active_in_worktree(&self, path: &str) -> Vec<&str> {
         let at = |w: &Option<String>| {
             w.as_deref()
@@ -1784,7 +1776,7 @@ impl Registry {
     }
 
     /// Headless agent `id`'s program could not be started, and why: it
-    /// ended with exit code 1, as the server ends one whose spawn failed.
+    /// ended with exit code 1.
     pub fn headless_failed(&mut self, id: &str, why: &str) -> Option<Value> {
         let row = self.headless.get_mut(id)?;
         end_headless(row, 1, None);
@@ -1826,7 +1818,7 @@ impl Registry {
         self.native_upsert(id, json!({ "started": { "pid": pid, "epoch": epoch } }))
     }
 
-    /// Terminal `id`'s program could not be started, and why: the server
+    /// Terminal `id`'s program could not be started, and why: the feeder
     /// ends it as it ends one whose spawn failed.
     pub fn failed(&mut self, id: &str, why: &str) -> Option<Value> {
         self.terminals.get(id)?;
@@ -1834,7 +1826,7 @@ impl Registry {
     }
 
     /// Closes terminal `id`: its record and its place in the order go, and
-    /// an upsert the server sent before it hears is not taken. Answers the
+    /// an upsert the feeder sent before it hears is not taken. Answers the
     /// record as it was, whether its program still ran, and the notes.
     pub fn close(
         &mut self,
@@ -1923,7 +1915,7 @@ impl Registry {
         self.native_upsert(id, json!({}))
     }
 
-    /// Lets go of a headless agent's record, as the server did a while after it ended.
+    /// Lets go of a headless agent's record, a while after it ended.
     pub fn forget_headless(&mut self, id: &str) -> Option<Value> {
         if !self.headless.remove(id) {
             return None;
@@ -1933,8 +1925,7 @@ impl Registry {
 
     /// Sets the order the terminals are listed in (`reorderSessions`): every
     /// id once, each a terminal the registry holds. Told even when it is the
-    /// order there was, as the server tells clients, and marked
-    /// `reordered`, so the server takes it as a client's order rather than
+    /// order there was, and marked `reordered`: a client's order rather than
     /// one that follows a create or a close.
     pub fn reorder(&mut self, ids: Vec<String>) -> Result<Value, RegistryError> {
         const CALL: &str = "terminal:reorder";
@@ -1947,8 +1938,8 @@ impl Registry {
         Ok(self.native_note(order))
     }
 
-    /// Whether `ids` is an order the server would take (`reorderSessions`):
-    /// every id once, each a terminal held. Refused in the server's words.
+    /// Whether `ids` is an order to take: every id once, each a terminal
+    /// held.
     pub fn check_order(&self, ids: &[String]) -> Result<(), RegistryError> {
         let distinct: HashSet<&str> = ids.iter().map(String::as_str).collect();
         if distinct.len() != ids.len() {
@@ -1962,8 +1953,7 @@ impl Registry {
         Ok(())
     }
 
-    /// Whether terminal `id` is one the server would rename or regroup
-    /// (`renameSession`, `setSessionGroup`). Refused in the server's words.
+    /// Whether terminal `id` is one to rename or regroup.
     pub fn check_terminal(&self, id: &str) -> Result<(), RegistryError> {
         if self.terminals.get(id).is_none() {
             return Err(RegistryError::Refused(format!("Session not found: {id}")));
@@ -1972,8 +1962,7 @@ impl Registry {
     }
 
     /// Sets fields of [`PATCHABLE`] on terminal `id` for a call a client
-    /// made (`renameSession`, `setSessionGroup`), refused as the server
-    /// refuses it when there is no such terminal. Answers the note when the
+    /// made, refused when there is no such terminal. Answers the note when the
     /// record changed.
     pub fn set_fields(
         &mut self,
@@ -2022,8 +2011,8 @@ impl Registry {
 /// what is carried from the last run, which of it the session holder still
 /// has, the sessions offered to resume, and resuming one.
 impl Registry {
-    /// Owns the records from now on: what is read back is carried, the
-    /// server's snapshot adds to the registry rather than replacing it, and
+    /// Owns the records from now on: what is read back is carried, a
+    /// feeder's snapshot adds to the registry rather than replacing it, and
     /// its list of restored sessions is not taken. It cannot be undone.
     pub fn own_records(&mut self) {
         self.owned = true;
@@ -2033,7 +2022,7 @@ impl Registry {
         self.owned
     }
 
-    /// When this machine came up, as the server works it out.
+    /// When this machine came up.
     pub fn set_boot_time(&mut self, at: i64) {
         self.boot_time = at;
     }
@@ -2251,7 +2240,7 @@ impl Registry {
     }
 
     /// Lets go of the ended terminal `id` whose conversation runs elsewhere
-    /// (`releaseForResume`): the record goes, told `released` so the server
+    /// (`releaseForResume`): the record goes, told `released` so the feeder
     /// lets go of it as quietly.
     pub fn release_for_resume(&mut self, id: &str) -> Vec<Value> {
         if !self.terminals.remove(id) {
@@ -2356,19 +2345,19 @@ struct Fed {
     registry: Registry,
     /// The app connection whose snapshot the registry holds. Until one has
     /// sent its snapshot, or once it has gone, the copy cannot be trusted
-    /// to be the server's and nothing is answered from it.
+    /// to be the feeder's and nothing is answered from it.
     feeder: Option<u64>,
     /// Whether the holder has yet to say what it holds, after
     /// [`SessionRegistry::expect_holder`]: until then a session it still runs
     /// would read as one of the last run's.
     holder_pending: bool,
-    /// Whether the server has yet to send its first snapshot, after
+    /// Whether the feeder has yet to send its first snapshot, after
     /// [`SessionRegistry::expect_holder`].
     feed_pending: bool,
 }
 
 impl Fed {
-    /// Whether the copy can be answered from: the server fed it, or vornd
+    /// Whether the copy can be answered from: the feeder fed it, or vornd
     /// owns the records itself and needs no one to.
     fn trusted(&self) -> bool {
         self.feeder.is_some() || self.registry.owns()
@@ -2437,7 +2426,7 @@ impl SessionRegistry {
     }
 
     /// Has [`SessionRegistry::settle`] wait for the holder's first list of
-    /// what it holds, and for the server's records: set by a vornd that
+    /// what it holds, and for the feeder's records: set by a vornd that
     /// starts a holder, before the holder connects.
     pub fn expect_holder(&self) {
         let mut fed = self.lock();
@@ -2446,7 +2435,7 @@ impl SessionRegistry {
     }
 
     /// Waits, at most `limit`, until the copy says what runs and what is
-    /// offered: the server has fed it and the holder has listed what it still
+    /// offered: the feeder has fed it and the holder has listed what it still
     /// runs. Without it, a client asking as vornd starts would be offered to
     /// resume the sessions the holder is about to hand back live. Answers
     /// whether it settled; past the limit it stops waiting, for every call.
@@ -2564,7 +2553,7 @@ impl SessionRegistry {
         self.tell(note);
     }
 
-    /// [`Registry::input`], for a `vornd:input {id}` from the server.
+    /// [`Registry::input`], for a `vornd:input {id}` from the feeder.
     pub fn input(&self, id: &str, head: Option<Stamp>) -> Result<(), RegistryError> {
         let mut fed = self.lock();
         let note = fed.registry.input(id, head)?;
@@ -2646,7 +2635,7 @@ impl SessionRegistry {
     /// Makes a change of vornd's own ([`Registry::create`] and the rest)
     /// and tells subscribers its notes, while the registry holds the
     /// server's records and decides the statuses; `None` otherwise, when the
-    /// call is the server's to make.
+    /// call is the feeder's to make.
     pub fn change<T>(&self, f: impl FnOnce(&mut Registry) -> (T, Vec<Value>)) -> Option<T> {
         let mut fed = self.lock();
         if !fed.trusted() || !fed.registry.decides() {
@@ -2657,8 +2646,8 @@ impl SessionRegistry {
         Some(answer)
     }
 
-    /// Reads the registry, while it holds the server's records; `None`
-    /// before the server has sent them, or after it went.
+    /// Reads the registry, while it holds the feeder's records; `None`
+    /// before the feeder has sent them, or after it went.
     pub fn read<T>(&self, f: impl FnOnce(&Registry) -> T) -> Option<T> {
         let fed = self.lock();
         fed.trusted().then(|| f(&fed.registry))
@@ -2678,9 +2667,9 @@ impl SessionRegistry {
         self.lock().registry.carry(c, now)
     }
 
-    /// The server's records of its last run, taken as what is carried when
+    /// The feeder's records of its last run, taken as what is carried when
     /// vornd owns the records and has carried none of its own: its file is
-    /// written once it owns them, so the server's are taken once, ever, and
+    /// written once it owns them, so the feeder's are taken once, ever, and
     /// a session declined or adopted since is not offered again. Answers
     /// how many are offered.
     pub fn carry_once(&self, terminals: Vec<TerminalSession>, now: i64) -> usize {
@@ -2743,7 +2732,7 @@ impl SessionRegistry {
     }
 
     /// The sessions still offered ([`Registry::restored`]): vornd's own
-    /// list while it owns the records, else the server's copy once fed.
+    /// list while it owns the records, else the feeder's copy once fed.
     pub fn restored(&self) -> Option<Vec<Value>> {
         let fed = self.lock();
         fed.trusted().then(|| fed.registry.restored())
@@ -3116,7 +3105,7 @@ mod tests {
         assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
         assert_eq!(shared.agent_type("sh").as_deref(), Some("shell"));
         assert_eq!(shared.agent_type("gone"), None);
-        // The server leaving does not forget what each session runs.
+        // The feeder leaving does not forget what each session runs.
         shared.left(1);
         assert_eq!(shared.agent_type("a").as_deref(), Some("acme"));
     }
@@ -3498,7 +3487,7 @@ mod tests {
             &Patch::try_from(&json!({ "id": "a", "fields": { "hookSessionId": "conv" } })).unwrap(),
         )
         .unwrap();
-        // The server sends its record, which says running and has no link.
+        // The feeder sends its record, which says running and has no link.
         let mut resized = agent("a");
         resized["cols"] = json!(120);
         let note = r.apply(upsert(resized)).unwrap();
@@ -3510,7 +3499,7 @@ mod tests {
         resized["cols"] = json!(120);
         assert!(r.apply(upsert(resized)).is_none());
 
-        // It ended: the server's record is its own again.
+        // It ended: the feeder's record is its own again.
         let mut ended = agent("a");
         ended["status"] = json!("idle");
         let note = r
@@ -3627,11 +3616,11 @@ mod tests {
         assert_eq!(note["failed"], "no shell");
         assert!(r.started("gone", 1, 1).is_none());
 
-        // The server's echo of what it was told changes nothing.
+        // The feeder's echo of what it was told changes nothing.
         let mut echo = agent("n");
         echo["pid"] = json!(42);
         assert!(r.apply(upsert(echo)).is_none());
-        // Not deciding: the server creates its own.
+        // Not deciding: the feeder creates its own.
         assert!(Registry::new(Gen(1)).create(record("x")).is_err());
     }
 
@@ -3649,7 +3638,7 @@ mod tests {
             r.close("a"),
             Err(RegistryError::NoTerminal { .. })
         ));
-        // An upsert the server sent before it heard is not taken.
+        // An upsert the feeder sent before it heard is not taken.
         assert!(r.apply(upsert(agent("a"))).is_none());
         // Nor kept by a snapshot sent meanwhile.
         r.apply(change(json!({
@@ -3657,7 +3646,7 @@ mod tests {
         })))
         .unwrap();
         assert!(r.terminal("a").is_none());
-        // The server lets go of it: it heard, and the id is free again.
+        // The feeder lets go of it: it heard, and the id is free again.
         assert!(r
             .apply(change(
                 json!({ "op": "remove", "kind": "terminal", "id": "a" })
@@ -3722,7 +3711,7 @@ mod tests {
             r.set_fields("x", Map::new()).unwrap_err().to_string(),
             "Session not found: x"
         );
-        // An upsert the server sent with the old name, and a snapshot, and
+        // An upsert the feeder sent with the old name, and a snapshot, and
         // one after the program ended: the name stays.
         let mut stale = agent("a");
         stale["displayName"] = json!("old");
@@ -3801,7 +3790,8 @@ mod tests {
         assert!(r.headless_exit("h", 3, at(2, 5, 0)).is_none());
         assert!(r.headless_exit("h", 0, at(2, 4, 0)).is_none());
 
-        // The server's record, still running, moves what it owns and not the exit.
+        // The feeder's record, still running, moves what it owns and not the
+        // exit.
         let mut later = headless("h");
         later["pid"] = json!(9);
         let note = r.apply(headless_upsert(later, json!({}))).unwrap();
@@ -3838,7 +3828,7 @@ mod tests {
             .unwrap();
         assert_eq!(note["record"]["status"], "running");
 
-        // Without deciding, the exit is the server's to tell.
+        // Without deciding, the exit is the feeder's to tell.
         let mut r = Registry::new(Gen(1));
         r.apply(change(
             json!({ "op": "snapshot", "terminals": [], "headless": [headless("h")] }),
@@ -3884,7 +3874,7 @@ mod tests {
         assert_eq!(note["record"]["status"], "exited");
         assert_eq!(note["record"]["exitCode"], 1);
         assert!(note["record"].get("exitAt").is_none());
-        // The server's record, mirrored with the failure: only that it
+        // The feeder's record, mirrored with the failure: only that it
         // heard the program ended is new, and told once.
         let mut told = headless("f");
         told["status"] = json!("exited");
@@ -4071,7 +4061,8 @@ mod tests {
             pid: 1,
             epoch: 1,
         });
-        // A server that has just connected, with a shell and offered sessions of its own.
+        // A feeder that has just connected, with a shell and offered sessions
+        // of its own.
         let note = r
             .apply(change(json!({
                 "op": "snapshot", "terminals": [terminal("sh")], "headless": [], "order": ["sh"],
@@ -4085,10 +4076,10 @@ mod tests {
             .apply(change(json!({ "op": "restored", "restored": [] })))
             .is_none());
         assert_eq!(r.restored().len(), 1);
-        // The server holds b now: it is no longer only offered.
+        // The feeder holds b now: it is no longer only offered.
         r.apply(upsert(terminal("b"))).unwrap();
         assert!(r.restored().is_empty());
-        // One that does not own the records takes the server's offers.
+        // One that does not own the records takes the feeder's offers.
         let mut other = deciding();
         let note = other
             .apply(change(json!({ "op": "restored", "restored": [{ "session": terminal("srv"), "endedAt": 7, "rebooted": true }] })))
@@ -4149,7 +4140,7 @@ mod tests {
         );
         assert_eq!(notes[1]["order"], json!(["a", "b"]));
         assert!(r.release_for_resume("sh").is_empty());
-        // Not deciding: a resume is the server's.
+        // Not deciding: a resume is the feeder's.
         assert!(Registry::new(Gen(1)).resume(record("x")).is_err());
     }
 

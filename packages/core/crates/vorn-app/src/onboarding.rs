@@ -1,7 +1,7 @@
-//! The welcome guide (`OnboardingModal`): seven steps that introduce the
+//! The welcome guide: seven steps that introduce the
 //! app, shown once on a first run and again from the palette or the
-//! shortcuts panel. The steps, their copy and the setup commands are
-//! `onboarding-data.ts` and `mcp-data.ts` as values.
+//! shortcuts panel, with the steps, their copy and the setup commands as
+//! values.
 
 use web_time::Instant;
 

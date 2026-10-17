@@ -266,7 +266,8 @@ async fn run(
             let read = extensions.around.read_output(&session.id, lines).await?;
             Some(Value::String(bridge::output_text(&read)))
         }
-        Call::Selection => Some(Value::String(extensions.selection(&session.id).await)),
+        // No window reports its selection to vornd.
+        Call::Selection => Some(Value::String(String::new())),
         Call::Send { text } => {
             extensions.around.write(&session.id, &text).await?;
             None

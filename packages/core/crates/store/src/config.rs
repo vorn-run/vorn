@@ -1,8 +1,5 @@
-//! The whole-config snapshot: `loadConfig` and `saveConfig`.
-//!
-//! Tasks and workflows are not part of it: they are read and written
-//! through their own calls, and a snapshot that carries them is read
-//! without them.
+//! The whole-config snapshot: `loadConfig` and `saveConfig`. Tasks and
+//! workflows have their own calls.
 //!
 //! A save rewrites the collections it carries from the snapshot, but a row
 //! the snapshot leaves out is deleted only if the saving client could have
@@ -27,14 +24,13 @@ use crate::sql::{
 };
 use crate::{Result, Store};
 
-/// `Number.MAX_SAFE_INTEGER`: the base revision of a caller that does not
-/// track revisions (the CLI, a test, the server saving its own port), so its
-/// snapshot prunes everything it omits.
+/// 2^53 - 1, the largest exact integer in an f64: the base revision of a
+/// caller that does not track revisions (the CLI, a test, the server saving
+/// its own port), so its snapshot prunes everything it omits.
 const NO_BASE_REVISION: f64 = 9_007_199_254_740_991.0;
 
 /// The parts of an `AppConfig` a save reads. A collection that is absent or
-/// `null` is `?? []` there and `None` here; `defaults` and `projects` are
-/// required, as `Object.entries` and `.map` would throw without them.
+/// `null` is `None`; `defaults` and `projects` are required.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedConfig {
@@ -42,7 +38,7 @@ struct SavedConfig {
     defaults: Map<String, Value>,
     projects: Vec<ProjectConfig>,
     /// Values stay JSON: an entry whose value is falsy is kept from pruning
-    /// but not written, as `if (cmd)` skips it.
+    /// but not written.
     agent_commands: Option<Map<String, Value>>,
     remote_hosts: Option<Vec<RemoteHost>>,
     workspaces: Option<Vec<WorkspaceConfig>>,
@@ -50,7 +46,7 @@ struct SavedConfig {
 }
 
 impl Store {
-    /// The `AppConfig` object, keys in the order `loadConfig` writes them.
+    /// The `AppConfig` object, keys in a fixed order.
     /// Tasks and workflows are not in it: they have their own calls.
     pub fn load_config(&self) -> Result<Value> {
         let conn = self.conn();
@@ -90,12 +86,8 @@ impl Store {
         Ok(Value::Object(config))
     }
 
-    /// `defaults` as `loadDefaults` builds it: an explicit list of keys, so a
-    /// row for a key not listed here does not load. `??` keys fall back when
-    /// the row is missing or holds `null`; the conditional keys appear when
-    /// the row exists, even holding `null`.
     /// The `defaults` rows as stored, without the app's fallbacks: what a
-    /// store opened beside the server can read of them.
+    /// store opened by [`Store::open_beside`] can read of them.
     pub fn stored_defaults(&self) -> Result<Map<String, Value>> {
         let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;
         let mut rows = stmt.query([])?;
@@ -106,6 +98,10 @@ impl Store {
         Ok(stored)
     }
 
+    /// `defaults` from an explicit list of keys, so a row for a key not listed
+    /// here does not load. Keys with a fallback use it when the row is missing
+    /// or holds `null`; the conditional keys appear when the row exists, even
+    /// holding `null`.
     fn load_defaults(&self) -> Result<Map<String, Value>> {
         let stored = {
             let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;
@@ -203,11 +199,11 @@ impl Store {
         Ok(out)
     }
 
-    /// Writes a whole `AppConfig` snapshot in one transaction, as `saveConfig`
-    /// does. `deleted_defaults` names the `defaults` keys the caller set to
-    /// `undefined`, which JSON cannot carry: those rows are deleted, while a
-    /// key simply absent from `defaults` is left as it is. A key is never in
-    /// both, so deleting after the upserts loses nothing.
+    /// Writes a whole `AppConfig` snapshot in one transaction.
+    /// `deleted_defaults` names the `defaults` keys the caller cleared: those
+    /// rows are deleted, while a key simply absent from `defaults` is left as
+    /// it is. A key is never in both, so deleting after the upserts loses
+    /// nothing.
     pub fn save_config(&mut self, config: &Value, deleted_defaults: &[String]) -> Result<()> {
         let config = SavedConfig::deserialize(config)?;
         let default_workspace = self.options()?.default_workspace.clone();
@@ -266,22 +262,18 @@ impl Store {
             }
             let cmd = AgentCommandConfig::deserialize(cmd)?;
             tx.execute(
-                "INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+                "INSERT INTO agent_commands (agent_type, command, args, headless_args, row_revision)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(agent_type) DO UPDATE SET
          row_revision = excluded.row_revision,
          command = excluded.command,
          args = excluded.args,
-         headless_args = excluded.headless_args,
-         fallback_command = excluded.fallback_command,
-         fallback_args = excluded.fallback_args",
+         headless_args = excluded.headless_args",
                 params![
                     agent_type,
                     cmd.command,
                     json_text(&cmd.args)?,
                     json_if_truthy(cmd.headless_args.as_ref())?,
-                    cmd.fallback_command,
-                    json_if_truthy(cmd.fallback_args.as_ref())?,
                     rev,
                 ],
             )?;
@@ -399,8 +391,7 @@ fn prune_missing(
     };
     let delete = format!("DELETE FROM {table} WHERE {key_column} = ?");
     for (key, revision) in existing {
-        // Only a text key can match: the snapshot's keys are strings, as the
-        // `Set` of strings is in the TypeScript.
+        // Only a text key can match: the snapshot's keys are strings.
         if matches!(&key, SqlValue::Text(k) if wanted.contains(k.as_str())) {
             continue;
         }
@@ -441,7 +432,7 @@ pub const VIEWER_SETTING_KEYS: &[&str] = &[
     "hasSeenOnboarding",
 ];
 
-/// The `defaults` row a viewer's own settings are kept in. `loadDefaults`
+/// The `defaults` row a viewer's own settings are kept in. `load_defaults`
 /// reads only the keys it lists, so these rows never reach a config.
 fn viewer_row(viewer: &str) -> String {
     format!("viewer:{viewer}")
@@ -485,7 +476,7 @@ impl Store {
         Ok(())
     }
 
-    /// `loadConfig`, with `viewer`'s own settings laid over the shared ones.
+    /// [`Store::load_config`], with `viewer`'s own settings laid over the shared ones.
     pub fn load_config_for(&self, viewer: &str) -> Result<Value> {
         let mut config = self.load_config()?;
         let own = self.viewer_settings(viewer)?;
@@ -496,8 +487,7 @@ impl Store {
     }
 }
 
-/// The viewer settings in `source`, `null` and `undefined` left out as
-/// `pickViewerSettings` leaves them.
+/// The viewer settings in `source`, `null` and missing ones left out.
 fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
     VIEWER_SETTING_KEYS
         .iter()
@@ -510,7 +500,7 @@ fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// `readConfigRevision`: `Number(value)`, and 0 when that is not finite
+/// The stored config revision as a number, and 0 when that is not finite
 /// (no row, or text that is not a number).
 fn read_config_revision(conn: &Connection) -> Result<f64> {
     let mut stmt = conn.prepare("SELECT value FROM schema_meta WHERE key = ?")?;
@@ -522,10 +512,9 @@ fn read_config_revision(conn: &Connection) -> Result<f64> {
     Ok(if parsed.is_finite() { parsed } else { 0.0 })
 }
 
-/// JavaScript's `Number(text)`: trimmed, empty is 0, `0x`/`0o`/`0b` prefixes
-/// read in their base, anything else that is not a decimal is NaN. Rust's
-/// parser also takes `inf` and `nan`, which JavaScript reads as NaN; both are
-/// non-finite, which is all a caller here looks at.
+/// `text` as a number: trimmed, empty is 0, `0x`/`0o`/`0b` prefixes read in
+/// their base, anything else that is not a decimal is NaN. `inf` and `nan`
+/// parse too; both are non-finite, which is all a caller here looks at.
 fn js_number(text: &str) -> f64 {
     let text = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
     if text.is_empty() {
@@ -553,8 +542,8 @@ fn js_number(text: &str) -> f64 {
     text.parse().unwrap_or(f64::NAN)
 }
 
-/// A number as `JSON.stringify` writes it: integral values without a
-/// fraction, so a revision reads back as `3`, not `3.0`.
+/// A number as JSON, integral values without a fraction, so a revision reads
+/// back as `3`, not `3.0`.
 fn js_number_value(n: f64) -> Value {
     if n.fract() == 0.0 && n.abs() <= NO_BASE_REVISION {
         // In range and integral: the cast is exact.
@@ -564,8 +553,8 @@ fn js_number_value(n: f64) -> Value {
     }
 }
 
-/// An object's keys in the order JavaScript enumerates them: array-index
-/// keys first, ascending, then the rest in insertion order.
+/// An object's keys reordered: array-index keys first, ascending, then the
+/// rest in insertion order.
 fn js_key_order(map: Map<String, Value>) -> Map<String, Value> {
     let index = |key: &str| -> Option<u32> {
         key.parse::<u32>()
@@ -581,7 +570,7 @@ fn js_key_order(map: Map<String, Value>) -> Map<String, Value> {
     indexed.into_iter().chain(rest).collect()
 }
 
-/// `loadAgentCommands`: by agent type, `args` parsed, the optional fields
+/// The agent commands by agent type, `args` parsed, the optional fields
 /// present only when their column is not NULL.
 pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value>> {
     let mut stmt = conn.prepare("SELECT * FROM agent_commands")?;
@@ -594,17 +583,13 @@ pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value
             headless_args: get_opt_text(row, "headless_args")?
                 .map(|t| parse_json(&t))
                 .transpose()?,
-            fallback_command: get_opt_text(row, "fallback_command")?,
-            fallback_args: get_opt_text(row, "fallback_args")?
-                .map(|t| parse_json(&t))
-                .transpose()?,
         };
         result.insert(get_text(row, "agent_type")?, serde_json::to_value(cmd)?);
     }
     Ok(js_key_order(result))
 }
 
-/// A `remote_hosts` row as `loadRemoteHosts` maps it.
+/// A `remote_hosts` row as a remote host.
 pub(crate) fn row_to_remote_host(row: &Row<'_>) -> Result<RemoteHost> {
     Ok(RemoteHost {
         id: get_text(row, "id")?,
@@ -633,16 +618,8 @@ mod tests {
             "version": 1,
             "defaults": { "shell": "/bin/bash", "fontSize": 14, "theme": "light" },
             "projects": [{ "name": "p", "path": "/p", "preferredAgents": ["acme"], "hostIds": ["h"] }],
-            "agentCommands": { "acme": { "command": "acme", "args": ["--x"], "fallbackCommand": "c2" } },
-            "workflows": [{
-                "id": "w", "name": "W", "icon": "Zap", "iconColor": "#fff",
-                "nodes": [], "edges": [], "enabled": false, "staggerDelayMs": 250
-            }],
+            "agentCommands": { "acme": { "command": "acme", "args": ["--x"], "headlessArgs": ["-p"] } },
             "remoteHosts": [{ "id": "h", "label": "H", "hostname": "h.local", "user": "me", "port": 22 }],
-            "tasks": [{
-                "id": "t", "projectName": "p", "title": "T", "description": "d",
-                "status": "todo", "order": 1, "createdAt": "c", "updatedAt": "u", "useWorktree": true
-            }],
             "workspaces": [
                 { "id": "personal", "name": "Personal", "icon": "User", "iconColor": "#6b7280", "order": 0 },
                 { "id": "w2", "name": "Work", "order": 1 }
@@ -759,46 +736,6 @@ mod tests {
         // A client that has seen p2's revision and leaves it out deleted it.
         store.save_config(&snapshot(Some(2)), &[]).unwrap();
         assert_eq!(project_names(&store), ["p"]);
-    }
-
-    /// A database from before tasks and workflows left the document: its rows
-    /// are neither loaded into it nor touched by a save, whatever it carries.
-    #[test]
-    fn a_save_leaves_tasks_and_workflows_alone() {
-        let mut store = test_support::store();
-        store.save_config(&snapshot(None), &[]).unwrap();
-        store
-            .call(
-                "dbInsertTask",
-                json!([{ "id": "kept", "projectName": "p", "title": "K", "description": "",
-                    "status": "todo", "order": 0, "createdAt": "c", "updatedAt": "u" }]),
-            )
-            .unwrap();
-        store
-            .call(
-                "dbInsertWorkflow",
-                json!([{ "id": "wf", "name": "Wf", "icon": "Zap", "iconColor": "#fff",
-                    "nodes": [], "edges": [], "enabled": true }]),
-            )
-            .unwrap();
-        let loaded = store.load_config().unwrap();
-        assert!(loaded.get("tasks").is_none() && loaded.get("workflows").is_none());
-
-        // An old client's snapshot: no tasks, then other tasks, then none at all.
-        for tasks in [json!([]), snapshot(None)["tasks"].clone(), Value::Null] {
-            let mut old = snapshot(None);
-            old["tasks"] = tasks;
-            old["workflows"] = json!([]);
-            store.save_config(&old, &[]).unwrap();
-            let ids: Vec<String> = store
-                .db_list_tasks(None, None)
-                .unwrap()
-                .into_iter()
-                .map(|t| t.id)
-                .collect();
-            assert_eq!(ids, ["kept"]);
-            assert_eq!(store.db_list_workflows().unwrap().len(), 1);
-        }
     }
 
     #[test]

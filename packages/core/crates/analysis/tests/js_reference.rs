@@ -1,10 +1,9 @@
-//! The analysis against the JavaScript analysis it replaced, recorded as
+//! The analysis against recorded expected outputs, kept in
 //! `tests/fixtures/js-reference/analysis.json` at the repository root.
 //!
-//! Each case feeds its reads in order through one analyzer, as the server fed
-//! each flush, and compares the status after every read, the completed lines
-//! and the line in progress. The one accepted difference is named
-//! [`REDRAWN_LINES`].
+//! Each case feeds its reads in order through one analyzer, one flush each,
+//! and compares the status after every read, the completed lines and the line
+//! in progress. The one accepted difference is named [`REDRAWN_LINES`].
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -14,9 +13,8 @@ use vorn_analysis::{Analyzer, STATUS_ERROR, STATUS_RUNNING, STATUS_WAITING};
 
 /// The analysis applies a carriage return and an erase in line to the line
 /// being built, as a terminal does, so a line a program redrew in place holds
-/// what was left on it. The JavaScript stripped those sequences and kept every
-/// redraw run together on one line. Such a line is compared by its position,
-/// not its text.
+/// what was left on it, where the recording kept every redraw run together on
+/// one line. Such a line is compared by its position, not its text.
 const REDRAWN_LINES: &str = "lines-redrawn-in-place-keep-what-is-left";
 
 /// One recorded case.
@@ -73,7 +71,7 @@ fn load_cases() -> Vec<Case> {
         .collect()
 }
 
-/// The status name the server used for a code, or `None` for "no change",
+/// The status name the recording uses for a code, or `None` for "no change",
 /// which keeps the previous status.
 fn status_name(code: u32) -> Option<&'static str> {
     match code {
@@ -171,7 +169,7 @@ fn check(case: &Case) -> Result<(), String> {
 }
 
 #[test]
-fn analysis_matches_js_reference() {
+fn analysis_matches_the_recorded_outputs() {
     let cases = load_cases();
     assert!(!cases.is_empty(), "the fixture has no cases");
     let failures: Vec<String> = cases

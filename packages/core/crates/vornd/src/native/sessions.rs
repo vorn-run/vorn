@@ -2,36 +2,32 @@
 //! `terminal:create`, `kill`, `rename`, `setGroup` and `reorder`, and
 //! `shell:create`.
 //!
-//! Each answers as the server's handler did, from the session registry
-//! vornd keeps ([`crate::registry`]), which then holds the record vornd made
-//! or changed. Clients are told from the registry's notes
-//! ([`super::session_events`]).
+//! Each answers from the session registry vornd keeps ([`crate::registry`]),
+//! which then holds the record vornd made or changed. Clients are told from the
+//! registry's notes ([`super::session_events`]).
 //!
-//! A create prepares the session's workspace as the server's
-//! `prepareSession` does: the worktree it names, or one it makes, or the
-//! branch it checks out, under the repository's turn ([`super::Turns`]),
-//! holding each directory involved until the record is in, so the server's
-//! worktree calls see it as in use meanwhile. An agent that can be told
-//! which conversation to start is given an id; one that names a
-//! conversation already running is answered with the session running it,
-//! and creates naming one conversation while one prepares share its answer
-//! ([`crate::claims`]).
+//! A create prepares the session's workspace: the worktree it names, or one it
+//! makes, or the branch it checks out, under the repository's turn
+//! ([`super::Turns`]), holding each directory involved until the record is in,
+//! so the worktree calls see it as in use meanwhile. An agent that can be told
+//! which conversation to start is given an id; one that names a conversation
+//! already running is answered with the session running it, and creates naming
+//! one conversation while one prepares share its answer ([`crate::claims`]).
 //!
-//! While vornd owns the records between runs ([`crate::registry::SessionRegistry::owns`])
-//! it also answers `sessions:restored`, `sessions:resume` and
-//! `sessions:clear`, and a `terminal:kill` of a session of an earlier run,
-//! as the server's handlers do: a resume takes the offered session once,
-//! hands back the terminal already writing its conversation if one is, or
-//! starts a shell where the session was, or the agent on the conversation
-//! it had, under the same id ([`resume`]). The launch line is typed once
-//! the shell has drawn its prompt ([`type_at`]).
+//! While vornd owns the records between runs
+//! ([`crate::registry::SessionRegistry::owns`]) it also answers
+//! `sessions:restored`, `sessions:resume` and `sessions:clear`, and a
+//! `terminal:kill` of a session of an earlier run: a resume takes the offered
+//! session once, hands back the terminal already writing its conversation if
+//! one is, or starts a shell where the session was, or the agent on the
+//! conversation it had, under the same id ([`resume`]). The launch line is
+//! typed once the shell has drawn its prompt ([`type_at`]).
 //!
-//! A call whose params are not the shape the server's handler read is
-//! refused ([`super::bad_params`]), a terminal no record names in the
-//! server's words, and a start before the records are read
-//! ([`super::not_ready`]) or while the session holder is not connected
-//! ([`NO_HOLDER`]). A start asked for as vornd starts waits for the holder
-//! first ([`super::Native::await_holder`]).
+//! A call whose params are not the expected shape is refused
+//! ([`super::bad_params`]), as is a terminal no record names, and a start
+//! before the records are read ([`super::not_ready`]) or while the session
+//! holder is not connected ([`NO_HOLDER`]). A start asked for as vornd starts
+//! waits for the holder first ([`super::Native::await_holder`]).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -67,8 +63,8 @@ pub const INITIAL_ROWS: u16 = 24;
 /// The terminal type programs are told they run in, off Windows.
 pub(super) const PTY_TERM: &str = "xterm-256color";
 
-/// How long a create naming a conversation that a start of the server's
-/// holds waits for it before it says the conversation is busy, and how
+/// How long a create naming a conversation that another start holds waits
+/// for it before it says the conversation is busy, and how
 /// often it looks meanwhile.
 const HOLDER_WAIT: Duration = Duration::from_secs(60);
 const HOLDER_POLL: Duration = Duration::from_millis(50);
@@ -76,8 +72,7 @@ const HOLDER_POLL: Duration = Duration::from_millis(50);
 /// The longest an agent's display name taken from its prompt runs.
 const PROMPT_NAME_LEN: usize = 60;
 
-/// The params of `terminal:create` the server's handler reads; any other
-/// is a call for the server.
+/// The params `terminal:create` reads; any other is refused.
 const CREATE_KEYS: [&str; 17] = [
     "agentType",
     "model",
@@ -299,8 +294,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     }
 }
 
-/// What a call that changes a terminal held asks for, as the server's
-/// handler reads it.
+/// What a call that changes a terminal held asks for.
 #[derive(Debug)]
 enum Asked {
     Kill(String),
@@ -309,8 +303,7 @@ enum Asked {
     Order(Vec<String>),
 }
 
-/// Reads `params` for `method`; `None` for a shape the server's handler
-/// would not expect, which is then its to answer.
+/// Reads `params` for `method`; `None` for a shape it does not expect.
 fn asked(method: &str, params: &Value) -> Option<Asked> {
     match method {
         "terminal:kill" => params.as_str().map(|id| Asked::Kill(id.to_owned())),
@@ -327,7 +320,7 @@ fn asked(method: &str, params: &Value) -> Option<Asked> {
             let id = params.get("id").and_then(Value::as_str)?;
             let group = match params.get("groupId") {
                 Some(Value::Null) => Value::Null,
-                // An empty id takes it out of its group, as the server reads it.
+                // An empty id takes it out of its group.
                 Some(Value::String(g)) if g.is_empty() => Value::Null,
                 Some(Value::String(g)) => json!(g),
                 _ => return None,
@@ -491,7 +484,7 @@ fn resumed_shell(previous: &TerminalSession, cwd: &str, count: usize) -> Termina
 }
 
 /// How many shells a resumed one is numbered after: those there are, less
-/// the one it replaces, which the server lets go of first.
+/// the one it replaces, which is let go of first.
 fn shells_before(native: &Native, id: &str) -> Option<usize> {
     native.registry.get()?.read(|r| {
         let replaced = r
@@ -832,9 +825,8 @@ pub struct CreateRequest {
 }
 
 impl CreateRequest {
-    /// Reads `params` as the server's handler does. `None` for a call that
-    /// is the server's: an agent none of `agents` is,
-    /// a param it does not read or one of a shape it would not expect.
+    /// Reads `params`. `None` for an agent none of `agents` is, a param it
+    /// does not read or one of a shape it would not expect.
     pub fn read(params: &Value, agents: &Agents) -> Option<CreateRequest> {
         let p = params.as_object()?;
         if p.keys().any(|k| !CREATE_KEYS.contains(&k.as_str())) {
@@ -854,7 +846,7 @@ impl CreateRequest {
                 Some(_) => None,
             }
         };
-        // Read for its shape only: the server's handlers ignore it.
+        // Read for its shape only, then ignored.
         flag("headless")?;
         match p.get("promptDelayMs") {
             None | Some(Value::Null | Value::Number(_)) => {}
@@ -908,7 +900,7 @@ impl CreateRequest {
     }
 }
 
-/// JavaScript's truthiness for an optional string.
+/// An optional string that is set and not empty.
 pub(super) fn given(s: Option<&str>) -> Option<&str> {
     s.filter(|s| !s.is_empty())
 }
@@ -919,12 +911,12 @@ pub(super) fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// A record as the server's handler answers it.
+/// A record as the answer carries it.
 fn record_json(record: &TerminalSession) -> Value {
     serde_json::to_value(record).unwrap_or(Value::Null)
 }
 
-/// Whether the registry holds the server's records and decides, and the
+/// Whether the registry holds the session records and decides, and the
 /// session holder is connected.
 pub(super) fn fed_and_held(native: &Native) -> bool {
     let fed = native
@@ -967,7 +959,7 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
     if let Some(answer) = unread(native) {
         return answer;
     }
-    // A host the settings do not name starts the session here, as the server started it.
+    // A host the settings do not name starts the session here.
     if let Some(h) = req.remote() {
         match remote_host(native, h) {
             Ok(Some(_)) => {}
@@ -1005,7 +997,7 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
 fn create_named(native: &Native, claims: &Claims, req: &CreateRequest, named: &str) -> Answer {
     let id = new_id();
     if let Some(holder) = claims.claim(named, &id, Instant::now()) {
-        // A start of the server's (a resume) got there first: wait for it,
+        // Another start (a resume) got there first: wait for it,
         // then show what it started.
         let deadline = Instant::now() + HOLDER_WAIT;
         while claims.holder(named, Instant::now()).as_deref() == Some(holder.as_str())
@@ -1236,7 +1228,7 @@ fn skeleton(id: &str, agent: &str, project_name: &str, project_path: &str) -> Te
     }
 }
 
-/// Remote host `id` as the server keeps it, or `None` when vornd cannot read it.
+/// Remote host `id` from the store, or `None` when vornd cannot read it.
 fn remote_host(native: &Native, id: &str) -> Result<Option<vorn_protocol::RemoteHost>, Answer> {
     let db = native.db.get().ok_or_else(super::no_database)?;
     vorn_store::remote_host(db, id).map_err(|err| {
@@ -1372,7 +1364,7 @@ pub(super) struct Workspace {
 }
 
 /// Works out the workspace for `req`, making a worktree or checking out a
-/// branch as the server does, holding each directory made in `holds`.
+/// branch, holding each directory made in `holds`.
 pub(super) fn workspace(
     native: &Native,
     req: &CreateRequest,
@@ -1416,7 +1408,7 @@ pub(super) fn workspace(
         if git.is_git_repo(dir) {
             if git.branch(dir).as_deref() != Some(branch) {
                 // What git says is not the call's: the session starts on
-                // whatever is checked out, as the server's does.
+                // whatever is checked out.
                 let _ = native.turns.take(dir, || git.checkout(dir, branch));
             }
             out.branch = Some(branch.to_owned());
@@ -1578,7 +1570,7 @@ pub(super) fn set(env: &mut Vec<(String, String)>, key: &str, value: String) {
 }
 
 /// Puts `record` in the registry and starts its program in `cwd`. The
-/// answer is the record, as the server answers before its program is up.
+/// answer is the record, sent before its program is up.
 fn register(
     native: &Native,
     record: TerminalSession,
@@ -1788,8 +1780,7 @@ fn seen(native: &Native, id: &str) -> Answer {
     }
 }
 
-/// `terminal:reorder`: told even when the order is the one there was, as
-/// the server tells it.
+/// `terminal:reorder`: told even when the order is the one there was.
 fn reorder(native: &Native, ids: Vec<String>) -> Answer {
     let Some(registry) = native.registry.get() else {
         return not_ready();
@@ -1800,7 +1791,7 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
     });
     match done {
         Some(Ok(())) => Answer::Void,
-        // A duplicate or an unknown id, in the server's words.
+        // A duplicate or an unknown id.
         Some(Err(e)) => Answer::Error(e.to_string()),
         None => not_ready(),
     }
@@ -1997,7 +1988,7 @@ pub(super) mod tests {
         }
     }
 
-    /// vornd holding the server's records: two agents in one worktree, one
+    /// vornd holding the session records: two agents in one worktree, one
     /// of them idle, and a shell.
     pub(in crate::native) fn fed() -> Fed {
         let native = Native::new();
@@ -2172,7 +2163,7 @@ pub(super) mod tests {
             ),
             (Some("mine"), Some(true), Some("g"))
         );
-        // An empty group takes it out of its group, as the server reads it.
+        // An empty group takes it out of its group.
         let ungroup = json!({ "id": "a", "groupId": "" });
         assert_eq!(
             call(&fed.native, "terminal:setGroup", &ungroup),

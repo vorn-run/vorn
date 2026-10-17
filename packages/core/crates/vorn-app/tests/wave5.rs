@@ -32,7 +32,7 @@ fn the_palette_filters_moves_and_runs_a_command() {
     assert_eq!(shot.ui.focus(), Some(PALETTE_INPUT));
     shot.save(&mut app, "palette");
 
-    // Mod+K again closes it, as the renderer's toggle does.
+    // Mod+K again closes it.
     shot.send(&mut app, key("KeyK", MOD(), None));
     assert!(!palette_open(&app));
     shot.send(&mut app, key("KeyK", MOD(), None));

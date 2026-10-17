@@ -1,6 +1,6 @@
-//! Whether a project is a mobile app worth offering a device for
-//! (`detectMobileProject`), from its declared dependencies and config, never
-//! its build output: a managed Expo app often has no `ios/` at all.
+//! Whether a project is a mobile app worth offering a device for, from its
+//! declared dependencies and config, never its build output: a managed Expo
+//! app often has no `ios/` at all.
 
 use std::fs;
 use std::path::Path;

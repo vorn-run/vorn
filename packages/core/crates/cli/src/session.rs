@@ -1,4 +1,4 @@
-//! `vorn session start|list|logs|send|kill`: agent sessions in the running
+//! `vorn session start|list|read|wait|send|kill`: agent sessions in the running
 //! server, terminal and headless alike.
 
 use std::sync::LazyLock;
@@ -42,7 +42,6 @@ Reading
   --format but text read the terminal instead: its screen and scrollback, with
   soft-wrapped rows joined. --trim drops trailing spaces and trailing blank
   lines. vt keeps colours as SGR escapes; html draws them as spans in a <pre>.
-  `logs` is the same command.
 
 Waiting
   `wait` blocks until the session's program exits, then exits with its code.
@@ -433,17 +432,17 @@ async fn list_sessions(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> 
     Ok(ExitCode::Ok)
 }
 
-async fn logs(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
+async fn read(ctx: &mut Context<'_>, given: Option<&str>) -> ExitCode {
     let Some(given) = given.filter(|g| !g.is_empty()) else {
         return ctx.usage("session read needs a session", session_usage());
     };
-    match read_logs(ctx, given).await {
+    match read_session(ctx, given).await {
         Ok(code) => code,
         Err(err) => ctx.error("could not read the session", err),
     }
 }
 
-async fn read_logs(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, CommandError> {
+async fn read_session(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, CommandError> {
     let target = resolve_session(ctx, given).await?;
     if target.headless {
         return Ok(no_terminal(ctx, &target.id, "read"));
@@ -782,7 +781,7 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
         ctx.io.write_err(session_usage());
         return ExitCode::Usage;
     };
-    if !["start", "list", "logs", "read", "wait", "send", "kill"].contains(&verb) {
+    if !["start", "list", "read", "wait", "send", "kill"].contains(&verb) {
         return ctx.usage(
             &format!("unknown session command \"{verb}\""),
             session_usage(),
@@ -796,7 +795,7 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
     match verb {
         "start" => start(ctx).await,
         "list" => list(ctx).await,
-        "logs" | "read" => logs(ctx, first).await,
+        "read" => read(ctx, first).await,
         "wait" => wait(ctx, first).await,
         "send" => {
             let joined = rest.get(1..).unwrap_or_default().join(" ");

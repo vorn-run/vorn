@@ -1,4 +1,4 @@
-//! `tools/browser.ts`: the agent's half of its session's browser pane.
+//! The agent's half of its session's browser pane.
 //!
 //! Every tool acts on the caller's own session and none takes a session
 //! argument, so a page the model just read cannot talk it into reaching

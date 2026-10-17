@@ -9,7 +9,7 @@ use vorn_protocol::{AiAgentType, TaskConfig, TaskStatus};
 use crate::sql::{get_f64, get_opt_f64, get_opt_text, get_text, num};
 use crate::{Result, Store};
 
-/// A `tasks` row as `rowToTask` maps it: absent columns and NULLs leave the
+/// A `tasks` row as a task: absent columns and NULLs leave the
 /// field out, and `use_worktree` is there only when it is set.
 pub(crate) fn row_to_task(row: &Row<'_>) -> Result<TaskConfig> {
     let use_worktree = get_opt_f64(row, "use_worktree")?.is_some_and(|n| n != 0.0);
@@ -121,11 +121,9 @@ impl Store {
         Ok(())
     }
 
-    /// `updates` is the partial task as JSON. A field set to `undefined` in
-    /// JavaScript does not reach here, which is the same as leaving it out for
-    /// every field but `completedAt` and `archivedAt`, whose `in` test also
-    /// counts an explicit `undefined`; `present` names the keys the caller's
-    /// object had, so those two clear as they do there.
+    /// `updates` is the partial task as JSON. A missing field is left as it
+    /// is, except `completedAt` and `archivedAt`: `present` names the keys the
+    /// caller's object had, so those two clear when present without a value.
     pub fn db_update_task(
         &self,
         id: &str,
@@ -238,10 +236,8 @@ impl Store {
     }
 }
 
-/// A JSON value bound as libsql binds the JavaScript value: strings as text,
-/// numbers as numbers, booleans as 1 or 0, null as NULL. Objects and arrays
-/// never reached a column unserialized in the TypeScript store; they bind as
-/// their JSON text here.
+/// A JSON value as a column value: strings as text, numbers as numbers,
+/// booleans as 1 or 0, null as NULL, objects and arrays as their JSON text.
 pub(crate) fn bind(value: &Value) -> SqlValue {
     match value {
         Value::Null => SqlValue::Null,
@@ -298,7 +294,7 @@ mod tests {
         assert_eq!(a.completed_at.as_deref(), Some("x"));
         assert_eq!(a.use_worktree, Some(true));
 
-        // `{ completedAt: undefined }` clears it, as the `in` test does.
+        // A present `completedAt` without a value clears it.
         store
             .db_update_task("a", &serde_json::Map::new(), &["completedAt".into()])
             .unwrap();

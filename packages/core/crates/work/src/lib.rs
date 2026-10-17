@@ -3,9 +3,7 @@
 //! received once however often it is delivered, and the reads of workflows,
 //! their runs, the schedule log and artifacts, from `vorn.db`.
 //!
-//! The TypeScript that ran workflows before is the reference: every answer
-//! here is what it gave for the same input. Nothing here waits on anything;
-//! running a workflow is `vorn-workflow`'s.
+//! Nothing here waits on anything; running a workflow is `vorn-workflow`'s.
 
 pub mod artifacts;
 pub mod claims;
@@ -27,9 +25,8 @@ pub mod trigger;
 
 use serde_json::Value;
 
-/// `value` with every whole number JavaScript would print without a
-/// fraction made an integer, as the server's JSON carries it. The store
-/// reads numeric columns as `f64`.
+/// `value` with every whole number below 2^53 made an integer, so JSON
+/// carries `3` rather than `3.0`. The store reads numeric columns as `f64`.
 pub fn js_numbers(value: Value) -> Value {
     const SAFE: f64 = 9_007_199_254_740_992.0;
     match value {
@@ -48,7 +45,7 @@ pub fn js_numbers(value: Value) -> Value {
     }
 }
 
-/// JavaScript truthiness of a field.
+/// Whether a field is truthy: present, not null, false, zero or empty text.
 pub fn is_truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,

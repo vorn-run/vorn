@@ -1,6 +1,6 @@
-//! The MCP tools' way to vornd: one WebSocket to vornd's own `/ws`, its requests multiplexed by id.
-//! It is opened on first use and again after it drops, and a call in flight
-//! when it drops fails the way the TypeScript client's does.
+//! The MCP tools' way to vornd: one WebSocket to vornd's own `/ws`, its
+//! requests multiplexed by id. It is opened on first use and again after it
+//! drops, and a call in flight when it drops fails with a message saying so.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -190,7 +190,7 @@ fn settle(waiters: &Waiters, notes: &tokio::sync::broadcast::Sender<Value>, text
     let _ = waiter.send(answer);
 }
 
-/// `closedBeforeAnswering` from the TypeScript client.
+/// Why a call failed when the connection closed before its answer.
 fn closed_before_answering(code: u16) -> String {
     if code == CLOSE_UNAUTHENTICATED || code == CLOSE_CREDENTIAL_REJECTED {
         return format!(

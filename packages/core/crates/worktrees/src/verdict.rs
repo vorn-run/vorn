@@ -1,4 +1,4 @@
-//! The safest action for one worktree (`computeVerdict`).
+//! The safest action for one worktree.
 
 use serde::Serialize;
 

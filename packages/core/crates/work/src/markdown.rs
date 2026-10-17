@@ -1,6 +1,5 @@
-//! A doc artifact's Markdown as the page it is read on (`markdown.ts` and
-//! `doc-page.ts`). Text is escaped before inline marks, so Markdown cannot
-//! smuggle raw HTML through.
+//! A doc artifact's Markdown as the page it is read on. Text is escaped
+//! before inline marks, so Markdown cannot smuggle raw HTML through.
 
 use std::sync::LazyLock;
 
@@ -10,7 +9,7 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a markdown pattern is valid")
 }
 
-/// A JavaScript `.`, which stops at every line terminator, not only `\n`.
+/// Any character but a line terminator: `\r`, `\n`, U+2028 or U+2029.
 const DOT: &str = r"[^\r\n\u{2028}\u{2029}]";
 
 static HEADING: LazyLock<Regex> = LazyLock::new(|| re(&format!(r"^(#{{1,3}}) ({DOT}+)$")));
@@ -27,7 +26,7 @@ static LINK: LazyLock<Regex> = LazyLock::new(|| re(r"\[([^\]]+)\]\(([^)]+)\)"));
 static SAFE_SCHEME: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)^(https?|mailto):"));
 static ANY_SCHEME: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)^[a-z][a-z0-9+.\-]*:"));
 
-/// `escapeHtml`.
+/// `text` with `&`, `<`, `>`, `"` and `'` escaped for HTML.
 pub fn escape_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -60,7 +59,7 @@ fn inline(text: &str) -> String {
     .into_owned()
 }
 
-/// `markdownToHtml`.
+/// `md` as HTML.
 pub fn to_html(md: &str) -> String {
     if md.trim().is_empty() {
         return String::new();
@@ -173,7 +172,7 @@ ul[data-type=taskList] p{margin:0}
 li p{margin:0}
 "#;
 
-/// `renderDocPage`: a doc read as a page, in a plain reading column.
+/// A doc read as a page, in a plain reading column.
 pub fn doc_page(title: &str, markdown: &str) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>{STYLE}</style></head><body><main>{}</main></body></html>",

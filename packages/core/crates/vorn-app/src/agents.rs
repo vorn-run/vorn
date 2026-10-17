@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-/// How an agent gets Vorn's skills and MCP server (`AgentMcpSetup`).
+/// How an agent gets Vorn's skills and MCP server.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct McpSetup {
     /// In order: some agents want a marketplace added first.

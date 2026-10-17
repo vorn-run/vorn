@@ -1,6 +1,6 @@
-//! The Extensions page (`ConnectorSettings`): what is installed and what can
-//! be, an extension's page, the add forms and the install sheet. Everything here reads the
-//! model in `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
+//! The Extensions page: what is installed and what can be, an extension's page,
+//! the add forms and the install sheet. Everything here reads the model in
+//! `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
 
 mod browse;
 mod detail;
@@ -26,7 +26,7 @@ use crate::ui::theme::color as k;
 use crate::ui::widgets::{pills, Pill};
 use crate::ui::{div, icon, text, Action, El, Rgba, Role};
 
-/// `rounded-sm` in the renderer's Tailwind.
+/// The small corner radius.
 const R: f32 = 4.0;
 
 pub(super) fn page(s: &Screen<'_>) -> El {
@@ -213,7 +213,7 @@ pub(super) fn tone_line(t: Tone, line: &str, size: f32) -> El {
         )
 }
 
-/// `ActivityLine`: what a row is doing, or why its last try failed.
+/// What a row is doing, or why its last try failed.
 pub(super) fn activity_line(s: &Screen<'_>, id: &str) -> Option<El> {
     Some(match s.st.plugins.activity.get(id)? {
         Activity::Busy(verb) => tone_line(Tone::Live, verb.phrase(), 11.0),
@@ -361,7 +361,7 @@ fn strs<'a>(v: &'a Value, key: &str) -> Vec<&'a str> {
         .collect()
 }
 
-/// `PackInstallConfirm`: what a checked pack brings, before it is kept.
+/// What a checked pack brings, before it is kept.
 pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
     let pv = &pending.preview;
     let name = sv(pv, "name").unwrap_or("");

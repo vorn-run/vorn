@@ -6,9 +6,8 @@
 //! gate and a loop. Every other step is run by a node type an extension
 //! declares, and every trigger is fired by a trigger type one declares, both
 //! kept in the [`Registry`]. What decides rather than does lives in
-//! `vorn-work`; this crate waits, times and runs. The TypeScript engine that
-//! ran workflows before is the reference, replayed with Vorn's own node
-//! types by the Workflows built-in's tests.
+//! `vorn-work`; this crate waits, times and runs. The Workflows built-in's
+//! tests replay recorded engine cases against it.
 
 mod engine;
 mod host;

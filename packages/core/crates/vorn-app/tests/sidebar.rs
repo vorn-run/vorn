@@ -1,6 +1,6 @@
 //! The sidebar's view options, the workspace switcher, the new-session
 //! menu and each agent's icon, driven against a test vornd and drawn as
-//! `VORN_APP_SHOT=<prefix>` frames to compare with today's screens.
+//! `VORN_APP_SHOT=<prefix>` frames.
 
 #![cfg(unix)]
 

@@ -1,7 +1,7 @@
-//! Whole screens on the seed today's renderer is captured with (a git
-//! project `demo`, three tasks, a group and a workflow), each state drawn
-//! as `VORN_APP_SHOT=<prefix>` frames for a side-by-side comparison, and the
-//! session groups driven through their menus against vornd.
+//! Whole screens on a seed (a git project `demo`, three tasks, a group and a
+//! workflow), each state drawn as `VORN_APP_SHOT=<prefix>` frames for a
+//! side-by-side comparison, and the session groups driven through their menus
+//! against vornd.
 
 #![cfg(unix)]
 
@@ -50,7 +50,7 @@ fn escape(shot: &mut Shot, app: &mut App) {
     shot.frame(app);
 }
 
-/// The pointer where today's captures park it, over the empty sidebar.
+/// Parks the pointer over the empty sidebar.
 fn park(shot: &mut Shot, app: &mut App) {
     shot.ui.pointer_move(130.0, 600.0);
     shot.frame(app);

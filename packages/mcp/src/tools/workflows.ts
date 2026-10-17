@@ -373,26 +373,12 @@ export function resolveWorkflowInputs(
   return { values, errors }
 }
 
-/**
- * The workflow tools grew two names for one argument: the read tools take
- * `workflow_id`, while update/delete took `id`. Nothing signals which a given
- * tool wants, so reaching for the wrong one costs a failed call and a re-read
- * of the schema.
- *
- * `workflow_id` is canonical now — it is what the majority already used.
- * `id` keeps working, because breaking every existing caller to win
- * consistency would be a poor trade.
- */
+/** The non-empty `workflow_id` the update, delete and run tools are given. */
 export function resolveWorkflowId(args: {
   workflow_id?: string
-  id?: string
 }): { id: string } | { error: string } {
-  const id = args.workflow_id ?? args.id
-  if (!id) return { error: 'provide workflow_id' }
-  if (args.workflow_id && args.id && args.workflow_id !== args.id) {
-    return { error: 'workflow_id and id disagree — pass only workflow_id' }
-  }
-  return { id }
+  if (!args.workflow_id) return { error: 'provide workflow_id' }
+  return { id: args.workflow_id }
 }
 
 /** The approval node a gate belongs to, so its question and its name come from one lookup. */
@@ -648,7 +634,6 @@ export function registerWorkflowTools(server: McpServer): void {
       'older workflow stays editable; fix what the warning names when you can.',
     {
       workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
-      id: V.id.optional().describe('Deprecated alias for workflow_id'),
       name: V.title.optional().describe('New name'),
       // The shape only: configs are checked in the handler, where an untouched
       // stored config can be told apart from a new mistake.
@@ -738,8 +723,7 @@ export function registerWorkflowTools(server: McpServer): void {
     'delete_workflow',
     'Delete a workflow',
     {
-      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
-      id: V.id.optional().describe('Deprecated alias for workflow_id')
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)')
     },
     async (args) => {
       const resolved = resolveWorkflowId(args)
@@ -1112,8 +1096,7 @@ export function registerWorkflowTools(server: McpServer): void {
     'export_workflow',
     'Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Connections are dropped too and recorded as requirements the importing machine rebinds by connector and name.',
     {
-      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
-      id: V.id.optional().describe('Deprecated alias for workflow_id')
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)')
     },
     async (args) => {
       const resolved = resolveWorkflowId(args)

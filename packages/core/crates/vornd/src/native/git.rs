@@ -1,10 +1,8 @@
 //! The `git:*` calls vornd answers, for repositories on this machine and in
-//! projects on remote hosts, where git runs over ssh as the server's
-//! `gitExec` runs it ([`super::remote`]).
+//! projects on remote hosts, where git runs over ssh ([`super::remote`]).
 //!
-//! Each reads its params as the server's handler does and answers what it
-//! answers; the git itself is `vorn_git::repo`. Params of a shape the
-//! server's handler cannot read are refused ([`super::bad_params`]).
+//! The git itself is `vorn_git::repo`. Params of an unexpected shape are
+//! refused ([`super::bad_params`]).
 
 use std::path::Path;
 
@@ -17,12 +15,12 @@ use super::{absolute_str, bad_params, Answer, Native};
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     let answered = match method {
-        // Any path, a relative one included, as the server's `git rev-parse` in it reads it.
+        // Any path, a relative one included, as `git rev-parse` in it reads it.
         "git:isGitRepo" => params.as_str().map(|p| json!(Place::Local.git(native).is_git_repo(Path::new(p)))),
         "git:listBranches" => project(native, params).map(|(p, place)| {
             let git = place.git(native);
             let dir = Path::new(p);
-            // A remote repository is taken to be one, as the server takes it.
+            // A remote repository is taken to be one.
             let repo = place.login().is_some() || git.is_git_repo(dir);
             json!({
                 "local": if repo { git.list_branches(dir) } else { Vec::new() },
@@ -41,7 +39,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
                     .collect(),
             )
         }),
-        "git:getBranch" | "git:getWorktreeBranch" => {
+        "git:getBranch" => {
             any_path(native, params).map(|(p, place)| json!(place.git(native).branch(Path::new(p))))
         }
         "git:worktreeDirty" => {
@@ -80,8 +78,8 @@ fn path_field<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
     absolute_str(params.get(key)?)
 }
 
-/// An optional boolean field: absent is `false`, as the server's defaults
-/// read it; anything but a boolean is not a call this answers.
+/// An optional boolean field: absent is `false`; anything but a boolean is
+/// not a call this answers.
 fn flag(params: &Value, key: &str) -> Option<bool> {
     match params.get(key) {
         None | Some(Value::Null) => Some(false),
@@ -102,7 +100,7 @@ fn done_json(done: Done) -> Value {
 }
 
 /// `git:diffFull`: a cwd string for the working tree, or `{cwd, from, to}`
-/// for a range. A range missing an end reads it as the server formats it.
+/// for a range. A range missing an end names it `undefined`.
 fn diff_full(native: &Native, params: &Value) -> Option<Value> {
     let (cwd, target) = match params {
         Value::String(_) => (absolute_str(params)?, DiffTarget::WorkingTree),
@@ -145,7 +143,7 @@ fn full_diff_json(d: &FullDiff) -> Value {
 }
 
 /// `git:createWorktree {projectPath, branch, worktreeName?}`: git's refusal
-/// is the call's error, as the server lets it through.
+/// is the call's error.
 fn create_worktree(native: &Native, method: &str, params: &Value) -> Answer {
     let Some(project) = path_field(params, "projectPath") else {
         return bad_params(method);

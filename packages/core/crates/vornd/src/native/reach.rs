@@ -22,7 +22,7 @@ use super::env::SafeEnv;
 use super::{Answer, Native};
 use crate::applink::AppLink;
 
-/// How long `tailscale status` may take, as the server allows it.
+/// How long `tailscale status` may take.
 const TAILSCALE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The broadcasts the server makes when a phone asks to pair and collects.
@@ -238,8 +238,7 @@ impl Native {
             },
             "pairing:pending" => Answer::Result(Value::Array(self.pairing().pending(now_ms()))),
             "pairing:approve" | "pairing:deny" => {
-                // The server's handler destructures its params: anything
-                // but an object throws there, and is its to answer.
+                // Anything but an object is refused.
                 let Some(id) = params.as_object().map(|o| o.get("requestId")) else {
                     return super::bad_params(method);
                 };

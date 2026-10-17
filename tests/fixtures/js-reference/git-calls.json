@@ -68,10 +68,6 @@
     "jsonrpc": "2.0",
     "result": null
   },
-  "git:getWorktreeBranch \"<root>/.vorn-worktrees/repo/existing\"": {
-    "jsonrpc": "2.0",
-    "result": "wt-branch"
-  },
   "git:worktreeDirty \"<root>/repo\"": {
     "jsonrpc": "2.0",
     "result": true

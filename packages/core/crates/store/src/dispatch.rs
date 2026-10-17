@@ -1,9 +1,8 @@
-//! [`Store::call`]: a call by its TypeScript name, with its arguments as a
-//! JSON array in signature order.
+//! [`Store::call`]: a call by its camelCase name (`dbListTasks`), with its
+//! arguments as a JSON array in signature order.
 //!
-//! The server sends every argument, `undefined` as `null`, so each call reads
-//! a tuple of exactly its parameters. What comes back is what the TypeScript
-//! function returns, `undefined` and `null` both as `null`.
+//! A caller sends every argument, a missing one as `null`, so each call reads
+//! a tuple of exactly its parameters. A missing result comes back as `null`.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -38,12 +37,12 @@ fn out<T: Serialize>(value: T) -> Result<Value> {
     Ok(serde_json::to_value(value)?)
 }
 
-/// A JS number argument used as a row id or count.
+/// A JSON number argument used as a row id or count.
 fn int(n: f64) -> i64 {
     n as i64
 }
 
-/// A number result, written as JavaScript writes it: `3`, not `3.0`.
+/// A number result, integral when it can be: `3`, not `3.0`.
 fn number(n: f64) -> Value {
     if n.fract() == 0.0 && n.is_finite() && n.abs() <= 9_007_199_254_740_992.0 {
         Value::from(n as i64)
@@ -507,7 +506,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn answers_by_the_typescript_name() {
+    fn answers_by_the_call_name() {
         let mut store = test_support::store();
         let task = json!({
             "id": "t1", "projectName": "p", "title": "T", "description": "",

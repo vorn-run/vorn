@@ -4,14 +4,13 @@
 //! much it holds, how much of that is rebuildable build output, when it was
 //! last worked in, and a [`Verdict`] on the safest thing to do with it. The
 //! actions remove worktrees, sweep their build output, and delete directories
-//! git has forgotten. Each answers what the server's `worktree-inventory`
-//! answers, in its words, so a client cannot tell which one ran.
+//! git has forgotten, and reports every path it touched in plain words.
 //!
 //! Nothing here knows which sessions are running: the host says, through the
 //! `active` callback of a scan and a [`Guard`] for the actions, which every
 //! action asks again right before it deletes anything, since a session can
-//! start while the person looks at the list. Remote hosts are not reached:
-//! their projects stay the server's.
+//! start while the person looks at the list. A remote host's projects are
+//! reached over ssh.
 
 mod guard;
 pub mod mobile;

@@ -5,10 +5,9 @@
 //! The engine ([`vorn_workflow`]) walks runs through [`host::VorndHost`];
 //! the scheduler and the connector inbox ([`schedule`]) start them; the
 //! pages a browser opens (an artifact, a gate's review page, a webhook) are
-//! answered over HTTP ([`routes`]). Reads come from `vorn.db` as the server
-//! answered them ([`vorn_work::reads`]). Every client hears about runs and
-//! artifacts through the server's broadcast, since the server holds every
-//! client; what it no longer does is run any of this.
+//! answered over HTTP ([`routes`]). Reads come from `vorn.db`
+//! ([`vorn_work::reads`]). Every client hears about runs and artifacts
+//! through the server's broadcast.
 
 pub mod db;
 pub mod files;
@@ -72,20 +71,16 @@ pub const METHODS: &[&str] = &[
     "workflow:runManual",
     "workflow:stopRun",
     "workflow:resolveGate",
-    "workflow:sessionRestored",
     "workflow:executionComplete",
     "workflow:describe",
     "workflow:nodeTypes",
     "workflow:saveToFile",
     "workflow:files",
-    "workflowRun:save",
     "workflowRun:list",
     "workflowRun:listByTask",
     "workflowRun:listWaiting",
     "workflowRun:listRunning",
     "workflowRun:listAll",
-    "workflowRun:claim",
-    "workflowRun:release",
     "scheduler:getLog",
     "scheduler:getNextRun",
     "webhook:info",
@@ -137,7 +132,7 @@ fn text(params: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The JSON a store call answers, or the error a handler would throw.
+/// The JSON a store call answers, or its error.
 fn stored(value: Option<Result<Value, String>>) -> Answer {
     match value {
         Some(Ok(v)) => Answer::Result(v),
@@ -261,8 +256,8 @@ impl Work {
         }
     }
 
-    /// `resumeRunsAfterStart`, and the sweeps of pages and artifacts no
-    /// longer kept.
+    /// Resumes the runs a restart left going, and sweeps the pages and
+    /// artifacts no longer kept.
     async fn resume(&self) {
         let data_dir = self.host().data_dir.clone();
         let found = self
@@ -308,30 +303,6 @@ impl Work {
         }
     }
 
-    /// Answers `method` with `params`: the work model's calls, and the
-    /// connector inbox's, whose leases are its.
-    pub async fn answer(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
-        use vorn_workflow::Host;
-        let id = params.get("id").and_then(Value::as_f64).map(|id| id as i64);
-        let lease = text(params, "leaseToken");
-        match (method, id, lease) {
-            ("connector:inboxComplete", Some(id), Some(lease)) => {
-                let disposition = text(params, "disposition").unwrap_or_else(|| "retry".into());
-                self.host()
-                    .complete_inbox(id, &lease, &disposition, text(params, "error"))
-                    .await;
-                Answer::Void
-            }
-            ("connector:inboxRenew", Some(id), Some(lease)) => {
-                Answer::Result(Value::Bool(self.host().renew_inbox(id, &lease).await))
-            }
-            ("connector:inboxComplete" | "connector:inboxRenew", _, _) => {
-                Answer::Error(format!("{method} needs an id and a leaseToken"))
-            }
-            _ => self.call(method, params).await,
-        }
-    }
-
     /// Whether Artifacts is on.
     fn artifacts_on(&self) -> bool {
         self.native
@@ -350,7 +321,7 @@ impl Work {
         }
     }
 
-    /// What the server's process knew that the database does not.
+    /// What this process knows that the database does not.
     fn read_host(&self) -> (PathBuf, Option<u16>) {
         (
             self.host().data_dir.clone(),
@@ -358,7 +329,7 @@ impl Work {
         )
     }
 
-    /// A read the database answers as the server's handler did.
+    /// A read the database answers.
     async fn read(&self, method: &str, params: &Value) -> Answer {
         let (data_dir, port) = self.read_host();
         let (method, params) = (method.to_owned(), params.clone());
@@ -606,28 +577,6 @@ impl Work {
             }
             "workflow:files" => Answer::Result(self.files.listed()),
             "workflow:nodeTypes" => Answer::Result(types::listed(self.engine.registry())),
-            "workflow:sessionRestored" => {
-                let id = text(params, "sessionId").unwrap_or_default();
-                let session = self
-                    .native
-                    .upgrade()
-                    .and_then(|n| n.session_records())
-                    .and_then(|(terminals, _)| {
-                        terminals.into_iter().find(|t| t["id"] == id.as_str())
-                    });
-                if let Some(session) = session {
-                    let restore = text(params, "restore").unwrap_or_else(|| "cold".into());
-                    let environment = param(params, "environment").cloned();
-                    vorn_workflows::triggers::session_restored(
-                        &self.engine,
-                        &session,
-                        &restore,
-                        environment,
-                    )
-                    .await;
-                }
-                Answer::Void
-            }
             "workflow:executionComplete" => {
                 use vorn_workflow::Host;
                 let status = text(params, "status").unwrap_or_default();
@@ -649,35 +598,6 @@ impl Work {
                         source,
                     })
                     .await;
-                Answer::Void
-            }
-            "workflowRun:save" => {
-                let Ok(run) =
-                    serde_json::from_value::<vorn_protocol::WorkflowExecution>(params.clone())
-                else {
-                    return Answer::Error("workflowRun:save needs a run".into());
-                };
-                use vorn_workflow::Host;
-                self.host().save_run(run).await;
-                Answer::Void
-            }
-            "workflowRun:claim" => {
-                let claim = self.engine.claim(
-                    &text(params, "workflowId").unwrap_or_default(),
-                    text(params, "params").as_deref(),
-                    params
-                        .get("windowMs")
-                        .and_then(Value::as_f64)
-                        .map(|ms| ms as i64),
-                );
-                Answer::Result(json!({ "granted": claim.granted, "runId": claim.run_id }))
-            }
-            "workflowRun:release" => {
-                self.engine.release(
-                    &text(params, "workflowId").unwrap_or_default(),
-                    text(params, "params").as_deref(),
-                    &text(params, "runId").unwrap_or_default(),
-                );
                 Answer::Void
             }
             _ => Answer::Error(format!("Method not found: {method}")),
@@ -780,7 +700,7 @@ impl Work {
         );
     }
 
-    /// `callingSession`: the terminal an agent publishes from.
+    /// The terminal an agent publishes from.
     fn calling_session(&self, id: &str) -> Result<Publisher, String> {
         self.native
             .upgrade()
@@ -809,7 +729,7 @@ impl Work {
             .filter(Value::is_object)
     }
 
-    /// `visibleTo`: the artifact, when the session may see it.
+    /// The artifact, when the session may see it.
     async fn visible(&self, session: &str, artifact: &str) -> Result<Value, String> {
         let me = self.calling_session(session)?;
         match self.artifact_row(artifact).await {
@@ -1346,8 +1266,7 @@ impl Work {
     }
 }
 
-/// `startedRun`: the run as it stood when it started, or `null` when it
-/// did not start.
+/// The run as it stood when it started, or `null` when it did not start.
 fn started(result: Result<vorn_workflow::Started, String>) -> Answer {
     match result {
         Ok(started) => Answer::Result(without_definition(&started.run)),

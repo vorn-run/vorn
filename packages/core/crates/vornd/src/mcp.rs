@@ -120,8 +120,7 @@ pub async fn answer(mcp: &Mcp, req: Request<Incoming>) -> Response<Body> {
 }
 
 /// Who is calling, from the relay's headers. Without a directory the
-/// agent's is not known, and vornd's own stands in, as the TypeScript
-/// server would use its own.
+/// agent's is not known, and vornd's own stands in.
 fn caller(cwd: Option<&str>, session: Option<&str>) -> Caller {
     let cwd = cwd
         .map(percent_decode)

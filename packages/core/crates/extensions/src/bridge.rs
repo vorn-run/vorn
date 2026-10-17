@@ -114,7 +114,7 @@ pub fn session_named<'a>(bound: Option<&'a str>, body: &'a Map<String, Value>) -
 }
 
 /// The checks on the session, then the call read from its body. A body that
-/// does not say what the method needs fails with 500, as a thrown error did.
+/// does not say what the method needs fails with 500.
 pub fn request(
     caller: &Caller,
     method: &str,
@@ -268,22 +268,23 @@ mod tests {
         }
     }
 
-    fn pack(permissions: Value) -> (tempfile::TempDir, InstalledPack) {
+    fn pack(uses: &str) -> (tempfile::TempDir, InstalledPack) {
         let root = tempfile::tempdir().unwrap();
         install(
             root.path(),
             "x",
             "1.0.0",
-            &json!({ "id": "x", "name": "X", "kind": "extension", "permissions": permissions,
-                    "contributes": { "footers": [{ "id": "f", "every": 5 }] } }),
+            &format!(
+                "name = \"X\"\n[connector]\n[declares]\nuses = {uses}\n[[contributes.footers]]\nid = \"f\"\nevery = 5.0\n"
+            ),
         );
-        let pack = PackStore::new(root.path()).describe("x").unwrap();
+        let pack = PackStore::new(root.path()).inspect("x").unwrap();
         (root, pack)
     }
 
     #[test]
     fn admits_in_the_order_a_caller_learns_the_rules() {
-        let (_root, p) = pack(json!(["git.read"]));
+        let (_root, p) = pack(r#"["git.read"]"#);
         let refused =
             |c: Option<&Caller>, pk: Option<&InstalledPack>, m: &str| admit(c, pk, m).unwrap_err();
         assert_eq!(refused(None, Some(&p), "diff").status, 401);
@@ -309,7 +310,7 @@ mod tests {
             root.path(),
             "x",
             "1.0.0",
-            &json!({ "id": "x", "name": "X", "actions": [{ "type": "a" }] }),
+            "name = \"X\"\n[[connector.actions]]\ntype = \"a\"\n",
         );
         let p = PackStore::new(root.path()).describe("x").unwrap();
         assert_eq!(

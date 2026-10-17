@@ -272,7 +272,7 @@ fn the_composer_starts_the_default_agent_in_the_chosen_project() {
     let mut shot = Shot::new();
     shot.frame(&mut app);
 
-    // Enter without a project does nothing, as in the renderer.
+    // Enter without a project does nothing.
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     app.pump();
     assert!(!app.st.composer.launching);

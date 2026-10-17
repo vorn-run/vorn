@@ -75,7 +75,8 @@ pub fn fit((bx, by, bw, bh): (f64, f64, f64, f64), size: (f64, f64), pad: f64) -
     }
 }
 
-/// The control offset of a bezier at React Flow's default curvature.
+/// A bezier's control offset at curvature 0.25: half the distance ahead, a
+/// root-scaled reach behind.
 fn control_offset(distance: f64) -> f64 {
     if distance >= 0.0 {
         0.5 * distance

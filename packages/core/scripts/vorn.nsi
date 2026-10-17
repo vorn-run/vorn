@@ -1,7 +1,7 @@
 ; Vorn's Windows installer, built by package-native.mjs:
 ;   makensis /DVERSION= /DNUMERIC_VERSION= /DSOURCE= /DOUTFILE= /DICON= /DGUID= vorn.nsi
-; It installs for the current user where the Electron app's installer did and
-; takes over its registry entries, so an existing install updates in place.
+; It installs for the current user, under the same folder and registry
+; entries every release, so an existing install updates in place.
 ; The updater runs it with /S --updated --force-run: silent, no folder
 ; choice, and Vorn started when done. A first install puts the folder with
 ; vorn.exe on the user's PATH; the uninstaller takes it off.
@@ -114,23 +114,6 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-; What the Electron app installed that this one does not.
-Function RemoveElectron
-  ${If} ${FileExists} "$INSTDIR\resources\app.asar"
-    Delete /REBOOTOK "$INSTDIR\*.dll"
-    Delete /REBOOTOK "$INSTDIR\*.pak"
-    Delete /REBOOTOK "$INSTDIR\*.bin"
-    Delete /REBOOTOK "$INSTDIR\*.dat"
-    Delete /REBOOTOK "$INSTDIR\*.json"
-    Delete /REBOOTOK "$INSTDIR\LICENSE*"
-    RMDir /r /REBOOTOK "$INSTDIR\locales"
-    Delete /REBOOTOK "$INSTDIR\resources\app.asar"
-    RMDir /r /REBOOTOK "$INSTDIR\resources\app.asar.unpacked"
-    Delete "$INSTDIR\resources\app-update.yml"
-    Delete "$INSTDIR\resources\elevate.exe"
-  ${EndIf}
-FunctionEnd
-
 ; Adds (+) or removes (-) the vorn command's folder in the user's PATH, for
 ; terminals opened after. A PATH too long to read whole is left alone: the
 ; app adds the folder itself on launch.
@@ -168,7 +151,6 @@ Section "Vorn"
   !insertmacro MoveAside "resources\vornd\vorn-sessiond.exe"
   !insertmacro MoveAside "resources\vornd\conpty.dll"
   !insertmacro MoveAside "resources\vornd\x64\OpenConsole.exe"
-  Call RemoveElectron
   ; The web client's file names change with every build.
   RMDir /r "$INSTDIR\resources\web"
 

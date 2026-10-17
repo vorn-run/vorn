@@ -63,14 +63,13 @@ pub enum Act {
     /// Asks before closing a session.
     AskClose(String),
     CloseSession(String),
-    /// Stows a card in the session dock, or brings it back
-    /// (`toggleMinimized`).
+    /// Stows a card in the session dock, or brings it back.
     ToggleMinimized(String),
     /// Folds the session dock into its chip, or opens it out.
     ToggleDock,
     /// Opens or closes the dock's popover.
     DockPopover,
-    /// Opens a run on the workflows landing (`showRun`), by key.
+    /// Opens a run on the workflows landing, by key.
     ShowRun(String),
     Resume(String),
     Paste(String),
@@ -128,7 +127,7 @@ pub enum Act {
     /// Lets every session of a group go.
     UngroupAll(String),
     AskDeleteGroup(String),
-    /// `setActiveWorkspace`.
+    /// Switches to another workspace.
     SwitchWorkspace(String),
     /// Opens the switcher's form: a new workspace, or this one's.
     EditWorkspace(Option<String>),
@@ -193,7 +192,7 @@ pub enum Act {
     Ext(crate::extensions::ExtAct),
     /// Extensions' contributions: templates' controls, commands, menus, windows.
     Point(crate::points::PointAct),
-    /// `addSessionGroup`: a group named "New group" at the end of the list.
+    /// A group named "New group" at the end of the list.
     AddGroup,
     /// Closes the sign-in sheet before anyone signed in.
     SignInClose,

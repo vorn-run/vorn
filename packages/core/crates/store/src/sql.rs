@@ -1,5 +1,4 @@
-//! What every module needs to read rows and bind values the way the
-//! TypeScript store it replaced did through libsql.
+//! Reading rows and binding values, shared by every module.
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::Row;
@@ -7,7 +6,7 @@ use serde_json::Value;
 
 use crate::{Error, Result};
 
-/// A JS number as SQLite stores it: an integer when it is one, else a real.
+/// A number as SQLite stores it: an integer when it is one, else a real.
 pub fn num(n: f64) -> SqlValue {
     if n.fract() == 0.0 && n.is_finite() && n.abs() <= 9_007_199_254_740_992.0 {
         SqlValue::Integer(n as i64)
@@ -16,7 +15,7 @@ pub fn num(n: f64) -> SqlValue {
     }
 }
 
-/// An optional JS number, `null` when absent.
+/// An optional number, `null` when absent.
 pub fn opt_num(n: Option<f64>) -> SqlValue {
     n.map_or(SqlValue::Null, num)
 }
@@ -26,12 +25,12 @@ pub fn opt_text(s: Option<&str>) -> SqlValue {
     s.map_or(SqlValue::Null, |s| SqlValue::Text(s.to_owned()))
 }
 
-/// What JS `JSON.stringify(value)` writes.
+/// `value` as compact JSON text.
 pub fn json_text(value: &Value) -> Result<String> {
     Ok(serde_json::to_string(value)?)
 }
 
-/// `value ? JSON.stringify(value) : null`.
+/// `value` as JSON text when it is truthy, else `null`.
 pub fn json_if_truthy(value: Option<&Value>) -> Result<SqlValue> {
     match value {
         Some(v) if truthy(v) => Ok(SqlValue::Text(json_text(v)?)),
@@ -39,7 +38,7 @@ pub fn json_if_truthy(value: Option<&Value>) -> Result<SqlValue> {
     }
 }
 
-/// JavaScript truthiness of a JSON value.
+/// Whether a JSON value is truthy: not null, false, 0, NaN or the empty string.
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -50,13 +49,13 @@ pub fn truthy(value: &Value) -> bool {
     }
 }
 
-/// What `JSON.parse` of a column gives back. Throws as JSON.parse would.
+/// A column's JSON text parsed; bad JSON is an error.
 pub fn parse_json(text: &str) -> Result<Value> {
     serde_json::from_str(text).map_err(Error::Json)
 }
 
-/// A column read as a JSON number, string or null, the way libsql hands a
-/// column to JavaScript: integers and reals as numbers, text as strings.
+/// A column read as a JSON value: integers and reals as numbers, text as
+/// strings, a blob as an array of bytes.
 pub fn column_value(row: &Row<'_>, name: &str) -> Result<Value> {
     Ok(match row.get_ref(name)? {
         ValueRef::Null => Value::Null,
@@ -67,8 +66,8 @@ pub fn column_value(row: &Row<'_>, name: &str) -> Result<Value> {
     })
 }
 
-/// A number column (`order`, `pid`), as JavaScript reads it. A non-number
-/// reads as NaN would, which no caller relies on; it is 0 here.
+/// A number column (`order`, `pid`). Text is parsed; anything else that is
+/// not a number reads as 0.
 pub fn get_f64(row: &Row<'_>, name: &str) -> Result<f64> {
     Ok(match row.get_ref(name)? {
         ValueRef::Integer(i) => i as f64,
@@ -108,8 +107,8 @@ pub fn get_opt_text(row: &Row<'_>, name: &str) -> Result<Option<String>> {
     get_text(row, name).map(Some)
 }
 
-/// How JavaScript prints a number with `String(n)`, for the cases a store
-/// meets: integers without a fraction, anything else as Rust prints it.
+/// A number as text: integers without a fraction, anything else as Rust
+/// prints it.
 pub fn format_js_number(f: f64) -> String {
     if f.fract() == 0.0 && f.abs() < 1e21 {
         format!("{f:.0}")
@@ -118,12 +117,12 @@ pub fn format_js_number(f: f64) -> String {
     }
 }
 
-/// `new Date().toISOString()`.
+/// Now, as an ISO string in UTC with milliseconds.
 pub fn now_iso() -> String {
     iso_from_millis(now_millis())
 }
 
-/// `Date.now()`.
+/// Milliseconds since the Unix epoch.
 pub fn now_millis() -> i64 {
     let since = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -131,7 +130,8 @@ pub fn now_millis() -> i64 {
     i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
 }
 
-/// `new Date(ms).toISOString()`: `2026-10-05T17:16:44.123Z`.
+/// `ms` as an ISO string in UTC: `2026-10-05T17:16:44.123Z`, with a signed
+/// six-digit year outside 0..=9999.
 pub fn iso_from_millis(ms: i64) -> String {
     let days = ms.div_euclid(86_400_000);
     let rem = ms.rem_euclid(86_400_000);
@@ -150,8 +150,8 @@ pub fn iso_from_millis(ms: i64) -> String {
     }
 }
 
-/// `Date.parse` of an ISO string as `toISOString` writes it (and the date-only
-/// and offset forms around it). `None` where JavaScript gives NaN.
+/// Milliseconds since the epoch for an ISO string as [`iso_from_millis`]
+/// writes it, or its date-only and offset forms; `None` for anything else.
 pub fn parse_iso_millis(text: &str) -> Option<i64> {
     let text = text.trim();
     let (date, time) = match text.split_once('T') {
@@ -177,8 +177,8 @@ pub fn parse_iso_millis(text: &str) -> Option<i64> {
             let minutes = oh.parse::<i64>().ok()? * 60 + om.parse::<i64>().ok()?;
             (clock, sign * minutes * 60_000)
         } else {
-            // No zone on a date-time is local time in JavaScript; every
-            // timestamp the store is given carries one.
+            // A date-time without a zone reads as UTC; every timestamp the
+            // store is given carries one.
             (time, 0)
         };
         let mut fields = clock.splitn(3, ':');
@@ -226,7 +226,7 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-/// `crypto.randomUUID()`.
+/// A random v4 UUID, hyphenated.
 pub fn random_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn iso_strings_round_trip_as_javascript_writes_them() {
+    fn iso_strings_round_trip() {
         for ms in [
             0,
             1_728_148_604_123,
@@ -255,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_forms_date_parse_accepts_from_the_server() {
+    fn parses_date_only_offset_and_fractional_forms() {
         assert_eq!(parse_iso_millis("1970-01-01"), Some(0));
         assert_eq!(parse_iso_millis("1970-01-01T01:00:00+01:00"), Some(0));
         assert_eq!(parse_iso_millis("1970-01-01T00:00:01.5Z"), Some(1500));
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn truthiness_is_javascripts() {
+    fn only_empty_and_zero_values_are_falsy() {
         for (value, expected) in [
             (serde_json::json!(null), false),
             (serde_json::json!(""), false),

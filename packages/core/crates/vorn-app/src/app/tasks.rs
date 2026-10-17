@@ -1,6 +1,5 @@
-//! What the Tasks view's controls and keys do, and the answers to the
-//! calls they make, as `TaskBoardView`, `TaskDetailPanel`, `AddTaskDialog`
-//! and `CommitDialog` do them.
+//! What the Tasks view's controls, dialogs and keys do, and the answers to
+//! the calls they make.
 
 use web_time::{Duration, Instant};
 
@@ -339,7 +338,7 @@ impl App {
             .filter(|c| !c.is_empty())
     }
 
-    /// `fetchDiff`: the selected task's uncommitted changes.
+    /// The selected task's uncommitted changes.
     fn fetch_diff(&mut self) {
         let Some(cwd) = self.diff_cwd() else { return };
         self.st.tasks.diff.cwd = cwd.clone();
@@ -576,7 +575,7 @@ impl App {
         Some(params)
     }
 
-    /// `getOpenSessionHandler`: the live session focused, else the agent's
+    /// The live session focused, else the agent's
     /// session resumed.
     fn open_session(&mut self, ui: &mut Ui, id: &str) {
         let Some(t) = self.task(id) else { return };
@@ -602,7 +601,7 @@ impl App {
         );
     }
 
-    /// `handleSendFeedback`: into the agent's session when it can resume,
+    /// Into the agent's session when it can resume,
     /// else onto the clipboard.
     fn send_feedback(&mut self, ui: &mut Ui) {
         let comments = std::mem::take(&mut self.st.tasks.diff.comments);
@@ -884,7 +883,7 @@ impl App {
         }
     }
 
-    /// `handleKanbanDrop`.
+    /// Moves a task dropped on column `to`.
     fn drop_task(&mut self, id: &str, to: &str) {
         let Some(from) = self.task(id).map(|t| t.status.to_string()) else {
             return;

@@ -1,4 +1,4 @@
-//! The Tasks view (`TaskBoardView`): the list and the board of the
+//! The Tasks view: the list and the board of the
 //! project's tasks, the detail panel beside them, the toolbar's popover and
 //! the pickers the forms open.
 
@@ -99,7 +99,7 @@ pub(super) fn live(s: &Screen<'_>, t: &TaskConfig) -> bool {
     })
 }
 
-/// `getOpenSessionHandler`: a live session to focus or an agent session to
+/// A live session to focus or an agent session to
 /// resume.
 pub(super) fn can_open(s: &Screen<'_>, t: &TaskConfig) -> bool {
     live(s, t) || can_resume(s, t)
@@ -206,7 +206,7 @@ pub(super) fn confirm_delete(s: &Screen<'_>, anchor: El, task: &str) -> El {
     anchor.overlay(panel, Place::Below, 4.0)
 }
 
-/// A list row (`TaskCard`): agent, id, status, title, date and the hover
+/// A list row: agent, id, status, title, date and the hover
 /// actions.
 fn list_row(s: &Screen<'_>, t: &TaskConfig) -> El {
     let id = card_id(&t.id);
@@ -372,7 +372,7 @@ fn list_row(s: &Screen<'_>, t: &TaskConfig) -> El {
     row
 }
 
-/// `SourceBadge`: the external id the task came from.
+/// The external id the task came from.
 fn source_badge(ext: &str) -> El {
     div()
         .row()
@@ -629,7 +629,7 @@ fn off() -> El {
         )
 }
 
-/// The toolbar popover's entries (`TaskToolbar`).
+/// The toolbar popover's entries.
 pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
     let t = &s.st.tasks;
     let mut items = vec![Item::header("Status")];

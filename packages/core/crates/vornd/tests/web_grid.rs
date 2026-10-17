@@ -152,6 +152,12 @@ impl Browser {
         })
     }
 
+    fn not_found(&self) -> bool {
+        self.got
+            .iter()
+            .any(|g| matches!(g, Got::Message(ServerMsg::Error { code, .. }) if *code == 404))
+    }
+
     fn text(&self, sid: u32) -> String {
         self.client
             .pane(sid)
@@ -220,14 +226,29 @@ async fn a_browser_follows_types_into_and_resizes_a_session_over_grid() {
     assert_eq!(text(&mut ws).await["result"]["ok"], true);
     let mut b = Browser::new(ws);
     b.until("welcome", |b| b.client.welcome().is_some()).await;
-    b.client.attach(Attach {
-        session: id.clone(),
-        mode: AttachMode::Grid,
-        view: view(80, 24),
-        visible: true,
-        resume: None,
-        history_tail: 0,
-    });
+    // `shell:create` answers before the session is live, so a first attach
+    // may find no session yet.
+    let t = Instant::now();
+    loop {
+        b.client.attach(Attach {
+            session: id.clone(),
+            mode: AttachMode::Grid,
+            view: view(80, 24),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        });
+        b.until("an answer to the attach", |b| {
+            b.attached().is_some() || b.not_found()
+        })
+        .await;
+        if b.attached().is_some() {
+            break;
+        }
+        assert!(t.elapsed() < PATIENCE, "{}", v.log());
+        b.got.clear();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     b.until("a snapshot", |b| {
         b.attached().is_some_and(|s| {
             b.got

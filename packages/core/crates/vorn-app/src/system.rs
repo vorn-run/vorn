@@ -1,5 +1,4 @@
-//! What the desktop's main process does for settings, done here: starting
-//! at sign-in (`login-item.ts`), the way this platform does it. The `vorn`
+//! Starting at sign-in, the way this platform does it. The `vorn`
 //! command on PATH is `cli_link`'s.
 
 use std::path::{Path, PathBuf};
@@ -17,7 +16,7 @@ fn home() -> PathBuf {
         .map_or_else(PathBuf::new, PathBuf::from)
 }
 
-/// `loginItemFor`: what the OS record should say, or none to leave it
+/// What the OS record should say, or none to leave it
 /// alone (a dev build, or no config yet).
 pub fn login_item_for(config: &Value, packaged: bool) -> Option<bool> {
     if !packaged || !config.is_object() {
@@ -75,7 +74,7 @@ pub fn set_autostart_file(file: &Path, exe: &Path, on: bool, mac: bool) -> std::
     }
 }
 
-/// `applyLoginItem`: makes the OS record match the config.
+/// Makes the OS record match the config.
 pub fn apply_login_item(config: &Value) -> Result<(), String> {
     if cfg!(target_arch = "wasm32") {
         return Ok(());
@@ -88,12 +87,8 @@ pub fn apply_login_item(config: &Value) -> Result<(), String> {
         Some(image) => PathBuf::from(image),
         None => std::env::current_exe().map_err(|e| e.to_string())?,
     };
-    clear_legacy_login();
     set_login(&exe, on)
 }
-
-#[cfg(target_arch = "wasm32")]
-fn clear_legacy_login() {}
 
 #[cfg(target_arch = "wasm32")]
 fn kill(_pid: i64) -> Result<(), String> {
@@ -104,44 +99,6 @@ fn kill(_pid: i64) -> Result<(), String> {
 fn set_login(_exe: &Path, _on: bool) -> Result<(), String> {
     Ok(())
 }
-
-/// Removes the login item releases up to 0.8.0-beta.8 registered, which this
-/// app's own record replaces and could not otherwise turn off.
-#[cfg(target_os = "macos")]
-fn clear_legacy_login() {
-    use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject, Bool};
-    #[link(name = "ServiceManagement", kind = "framework")]
-    extern "C" {}
-    // SMAppService arrived in macOS 13; before it there is nothing to clear.
-    let Some(class) = AnyClass::get("SMAppService") else {
-        return;
-    };
-    // SAFETY: documented SMAppService selectors with their declared types;
-    // the service is a shared object that is not retained past this scope.
-    unsafe {
-        let service: *mut AnyObject = msg_send![class, mainAppService];
-        if service.is_null() {
-            return;
-        }
-        // 1 enabled, 2 waiting for approval.
-        let status: isize = msg_send![service, status];
-        if status == 1 || status == 2 {
-            let mut error: *mut AnyObject = std::ptr::null_mut();
-            let _: Bool = msg_send![service, unregisterAndReturnError: &mut error];
-        }
-    }
-}
-
-#[cfg(windows)]
-fn clear_legacy_login() {
-    for name in ["com.vorn.app", "electron.app.Vorn"] {
-        let _ = win::set_run_value(name, None);
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn clear_legacy_login() {}
 
 /// `~/x` with the home directory spelled out.
 pub fn expand_home(path: &str) -> PathBuf {
@@ -173,7 +130,7 @@ pub fn http_get_json(port: u16, path: &str) -> Option<Value> {
 }
 
 /// The pid an older holder announced under `home`, if it still names
-/// `instance` (`readAnnouncement`).
+/// `instance`.
 pub fn announced_pid(home: &Path, instance: &str) -> Option<i64> {
     if instance.is_empty()
         || instance.len() > 32
@@ -195,7 +152,7 @@ pub fn announced_pid(home: &Path, instance: &str) -> Option<i64> {
     (field("instance")?.as_str() == instance).then_some(pid)
 }
 
-/// `endOlderHolder`: stops an older session holder vornd reports.
+/// Stops an older session holder vornd reports.
 pub fn end_older_holder(
     home: &Path,
     reported: &crate::settings::Holders,

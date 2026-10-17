@@ -11,7 +11,9 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, replace_workflows, seed_workflows, Shot, TestVornd};
+use support::{
+    add_project, connect, key, replace_workflows, seed_runs, seed_workflows, Shot, TestVornd,
+};
 use vorn_app::act::Act;
 use vorn_app::app::forms::field_of;
 use vorn_app::app::MOD;
@@ -627,7 +629,7 @@ fn a_gate_is_edited_sent_back_reviewed_and_approved() {
     );
 }
 
-/// Forks, a loop and a request: the canvas from today's layout.
+/// Forks, a loop and a request on one canvas.
 fn shapes(web: &std::path::Path) -> Value {
     let sc = |cmd: &str| json!({ "scriptType": "bash", "scriptContent": cmd, "projectName": "web", "projectPath": web });
     let n = |id: &str, kind: &str, label: &str, config: Value| json!({ "id": id, "type": kind, "label": label, "slug": id, "position": { "x": 0, "y": 0 }, "config": config });
@@ -906,20 +908,21 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     shot.save(&mut app, "icons-task-picker");
     shot.send(&mut app, key("Escape", 0, None));
     shot.send(&mut app, key("Escape", 0, None));
-    for run in [
-        icon_run("run-bug", "wf-bug", json!({})),
-        icon_run("run-sched", "wf-plain", json!({})),
-        icon_run(
-            "run-pr",
-            "connector:c1:issue.opened",
-            json!({ "connectorItem": {
+    seed_runs(
+        &v,
+        &[
+            icon_run("run-bug", "wf-bug", json!({})),
+            icon_run("run-sched", "wf-plain", json!({})),
+            icon_run(
+                "run-pr",
+                "connector:c1:issue.opened",
+                json!({ "connectorItem": {
                 "connectionId": "c1", "connectorId": "github", "externalId": "42",
                 "externalUrl": "https://example.test/o/r/pull/42", "title": "Fix the build"
             } }),
-        ),
-    ] {
-        app.rpc().call("workflowRun:save", run).expect("run saved");
-    }
+            ),
+        ],
+    );
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     shot.click(

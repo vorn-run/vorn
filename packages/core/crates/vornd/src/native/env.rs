@@ -1,4 +1,4 @@
-//! The environment vornd runs git, `which`, IDEs and agents with, as the server does.
+//! The environment vornd runs git, `which`, IDEs and agents with.
 //!
 //! The "safe" environment: the login shell's once it has answered
 //! (`$SHELL -ilc`, read between sentinels), on Windows the registry's PATH
@@ -78,9 +78,9 @@ impl SafeEnv {
         safe_env(self.source())
     }
 
-    /// The server's `getLaunchEnv`, for what an agent runs: [`SafeEnv::get`]
+    /// The environment an agent runs with: [`SafeEnv::get`]
     /// but for the names the person passed through (`envPassthrough`), and
-    /// with `VORN_DATA_DIR` naming the server's data directory.
+    /// with `VORN_DATA_DIR` naming vornd's data directory.
     pub fn launch(self: &Arc<Self>, passthrough: &[String], data_dir: Option<&Path>) -> Env {
         let dir = data_dir.map(|d| d.to_string_lossy().into_owned());
         launch_env(self.source(), passthrough, dir.as_deref())
@@ -109,11 +109,6 @@ impl SafeEnv {
     /// Whether the login shell has answered.
     pub fn resolved(&self) -> bool {
         self.shell().answer.is_some()
-    }
-
-    /// Whether the login shell is being asked now.
-    pub fn asking(&self) -> bool {
-        self.shell().asking
     }
 
     /// Starts asking the login shell, once.
@@ -174,8 +169,7 @@ impl SafeEnv {
         });
     }
 
-    /// Where `name` is on the safe environment's PATH, as the server's
-    /// `resolveExecutable` finds it.
+    /// Where `name` is on the safe environment's PATH.
     pub fn find(self: &Arc<Self>, name: &str) -> Option<PathBuf> {
         let env = self.get();
         let path = env
@@ -468,7 +462,7 @@ fn parse_env_records<'a>(records: impl Iterator<Item = &'a str>) -> Env {
     env
 }
 
-/// The server's `filterEnv` with nothing passed through.
+/// The safe environment of `source`, with nothing passed through.
 pub fn filter(source: impl Iterator<Item = (String, String)>) -> Env {
     safe_env(source)
 }

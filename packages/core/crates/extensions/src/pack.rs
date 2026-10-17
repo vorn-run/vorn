@@ -2,9 +2,7 @@
 //! whose files sit in `<root>/<id>/<version>/`, or the folder a linked one
 //! runs from in place.
 //!
-//! A package carries `vorn-extension.toml`. A pack built for 0.8 carried
-//! `manifest.json` and `index.js` instead; it no longer loads, and reading
-//! one says how to install it again. Only reading lives here;
+//! A package carries `vorn-extension.toml`. Only reading lives here;
 //! [`crate::install`] writes.
 
 use std::fs;
@@ -17,15 +15,6 @@ use serde_json::Value;
 use crate::manifest::{self, file, Kind, Manifest};
 
 pub const CURRENT_FILE: &str = "current.json";
-/// The manifest of a 0.8 pack, which is read only to say it no longer loads.
-pub const MANIFEST_FILE: &str = "manifest.json";
-
-/// What a person reads about a 0.8 pack, named by `name`: the command that installs it again.
-pub fn legacy_message(name: &str) -> String {
-    format!(
-        "{name} is a 0.8 pack (manifest.json), which this Vorn no longer loads. Install it again from its git repository: vorn ext install <git url>, or from Settings › Extensions."
-    )
-}
 
 /// A package as the app lists it: its manifest, where it is and when it came.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,7 +35,7 @@ pub struct InstalledPack {
     pub bytes: u64,
 }
 
-/// The wire keeps 0.8's shape: the manifest's fields beside the install's.
+/// On the wire, the manifest's fields sit beside the install's.
 impl Serialize for InstalledPack {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let m = &self.manifest;
@@ -210,28 +199,15 @@ struct Current {
     installed_at: Value,
 }
 
-/// Reads the manifest a folder carries, `vorn-extension.toml`; a 0.8
-/// pack's `manifest.json` is refused with [`legacy_message`].
+/// Reads the manifest a folder carries, `vorn-extension.toml`.
 pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
     let toml = dir.join(file::FILE);
-    if toml.is_file() {
-        let text = fs::read_to_string(&toml)
-            .map_err(|e| format!("cannot read {}: {e}", toml.display()))?;
-        return file::parse(&text).map_err(|e| e.to_string());
+    if !toml.is_file() {
+        return Err(format!("{} has no {}", dir.display(), file::FILE));
     }
-    let json = dir.join(MANIFEST_FILE);
-    if let Ok(text) = fs::read_to_string(&json) {
-        let named = serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|v| {
-                ["name", "id"]
-                    .iter()
-                    .find_map(|k| v.get(k).and_then(Value::as_str).map(str::to_owned))
-            })
-            .unwrap_or_else(|| dir.display().to_string());
-        return Err(legacy_message(&named));
-    }
-    Err(format!("{} has no {}", dir.display(), file::FILE))
+    let text =
+        fs::read_to_string(&toml).map_err(|e| format!("cannot read {}: {e}", toml.display()))?;
+    file::parse(&text).map_err(|e| e.to_string())
 }
 
 impl PackStore {
@@ -402,37 +378,23 @@ pub fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     Ok(total)
 }
 
-/// Packs written straight to disk, for tests here and in the crates built on this one.
+/// Packages written straight to disk, for tests here.
 #[cfg(test)]
 pub mod fixture {
     use super::*;
     use serde_json::json;
 
-    /// Writes an installed package `id` at `version`, its manifest given in
-    /// 0.8's JSON and written as `vorn-extension.toml`; one that does not
-    /// convert is written as the 0.8 pack it was, which does not load.
-    pub fn install(root: &Path, id: &str, version: &str, manifest: &Value) -> PathBuf {
+    /// Writes an installed package `id` at `version`: `vorn-extension.toml`
+    /// holds its id, version and api, then `body` (its name and sections).
+    pub fn install(root: &Path, id: &str, version: &str, body: &str) -> PathBuf {
         let dir = root.join(id).join(version);
         // Windows resolves `id/../x` without creating `id`, where current.json goes.
         fs::create_dir_all(root.join(id)).unwrap();
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("index.js"), "process.stdin.resume()\n").unwrap();
-        // The installer named a 0.8 pack's directory; a manifest names its own now.
-        let converted = manifest
-            .as_object()
-            .map(|m| {
-                let mut m = m.clone();
-                m.insert("id".into(), json!(id));
-                m.entry("protocol").or_insert(json!(1));
-                m
-            })
-            .and_then(|m| file::from_pack_json(&m).ok())
-            .map(|m| file::to_toml(&m))
-            .filter(|t| file::parse(t).is_ok());
-        match converted {
-            Some(toml) => fs::write(dir.join(file::FILE), toml).unwrap(),
-            None => fs::write(dir.join(MANIFEST_FILE), manifest.to_string()).unwrap(),
-        }
+        let api = manifest::API;
+        let toml = format!("id = \"{id}\"\nversion = \"1.0.0\"\napi = \"{api}\"\n{body}");
+        fs::write(dir.join(file::FILE), toml).unwrap();
         fs::write(
             root.join(id).join(CURRENT_FILE),
             json!({ "version": version, "previousVersion": "../x", "installedAt": 5 }).to_string(),
@@ -448,9 +410,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn extension(name: &str) -> Value {
-        json!({ "id": name, "name": name, "kind": "extension", "protocol": 1,
-                "contributes": { "footers": [{ "id": "f", "every": 5 }] } })
+    fn extension(name: &str) -> String {
+        format!(
+            "name = \"{name}\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n[[contributes.footers]]\nid = \"f\"\nevery = 5.0\n"
+        )
     }
 
     #[test]
@@ -502,9 +465,10 @@ mod tests {
             root.path(),
             "c",
             "1.0.0",
-            &json!({ "id": "c", "name": "Conn", "actions": [{ "type": "go" }] }),
+            "name = \"Conn\"\n[[connector.actions]]\ntype = \"go\"\n",
         );
-        install(root.path(), "d", "1.0.0", &json!({ "id": "d" }));
+        // No name, so it does not read.
+        install(root.path(), "d", "1.0.0", "");
         install(root.path(), "e", "../up", &extension("E"));
         fs::create_dir_all(root.path().join(".staging")).unwrap();
         let store = PackStore::new(root.path());
@@ -520,15 +484,13 @@ mod tests {
     }
 
     #[test]
-    fn needs_its_manifest_and_refuses_a_0_8_pack_by_name() {
+    fn needs_its_manifest() {
         let root = tempfile::tempdir().unwrap();
         let dir = install(root.path(), "ext", "1.0.0", &extension("Ext"));
         fs::remove_file(dir.join(file::FILE)).unwrap();
-        assert!(PackStore::new(root.path()).describe("ext").is_none());
-        fs::write(dir.join(MANIFEST_FILE), extension("Ext").to_string()).unwrap();
+        fs::write(dir.join("manifest.json"), r#"{"id":"ext","name":"Ext"}"#).unwrap();
         let err = PackStore::new(root.path()).inspect("ext").unwrap_err();
-        assert_eq!(err, legacy_message("Ext"));
-        assert!(err.contains("vorn ext install"), "{err}");
+        assert!(err.ends_with("has no vorn-extension.toml"), "{err}");
     }
 
     #[test]

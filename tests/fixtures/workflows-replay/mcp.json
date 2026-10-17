@@ -703,12 +703,6 @@
             "minLength": 1,
             "maxLength": 100
           },
-          "id": {
-            "description": "Deprecated alias for workflow_id",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
           "name": {
             "description": "New name",
             "type": "string",
@@ -848,12 +842,6 @@
         "properties": {
           "workflow_id": {
             "description": "Workflow ID (from list_workflows)",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "id": {
-            "description": "Deprecated alias for workflow_id",
             "type": "string",
             "minLength": 1,
             "maxLength": 100
@@ -1040,12 +1028,6 @@
         "properties": {
           "workflow_id": {
             "description": "Workflow ID (from list_workflows)",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "id": {
-            "description": "Deprecated alias for workflow_id",
             "type": "string",
             "minLength": 1,
             "maxLength": 100

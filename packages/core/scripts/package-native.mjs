@@ -8,10 +8,10 @@
 //   Linux    Vorn-<v>.AppImage and vorn_<v>_amd64.deb
 //   server   vorn-server-<v>-<os>-<arch>.tar.gz (--package server), for machines without a desktop
 //
-// The app keeps the identity the Electron app had (com.vorn.app, "Vorn", the
-// same executable and install folder), so an existing install updates in
-// place: Vorn.app/Contents/MacOS/Vorn, %LOCALAPPDATA%\Programs\vorn\Vorn.exe
-// and /opt/Vorn/vorn, each with resources/vornd and resources/web/dist.
+// The app's identity (com.vorn.app, "Vorn", its executable and install folder)
+// stays the same from release to release, so an install updates in place:
+// Vorn.app/Contents/MacOS/Vorn, %LOCALAPPDATA%\Programs\vorn\Vorn.exe and
+// /opt/Vorn/vorn, each with resources/vornd and resources/web/dist.
 //
 //   --bin-dir <dir>     where vorn-app is (default: target/release)
 //   --daemon-dir <dir>  where vornd, vorn-sessiond, vorn and, on Windows, the
@@ -51,7 +51,7 @@ const repo = path.resolve(core, '..', '..')
 export const APP_NAME = 'Vorn'
 export const BUNDLE_ID = 'com.vorn.app'
 export const URL_SCHEME = 'vorn'
-/** electron-builder's key for com.vorn.app, kept so the installer takes over its install. */
+/** The Windows installer's key for com.vorn.app; installs are found by it, so it never changes. */
 export const WINDOWS_GUID = '51b24bfb-ca41-5f10-85db-83383073071d'
 
 /** This platform's release assets, by kind. */
@@ -154,8 +154,8 @@ Description: Run and supervise coding agents
 `
 }
 
-// The Electron package made /usr/bin/vorn in its scripts, and its postrm
-// removes it on upgrade, after this package unpacks: the link is made here.
+// /usr/bin/vorn is a link to the bundled command line, made after the package
+// unpacks and removed with it.
 const DEB_POSTINST = `#!/bin/sh
 set -e
 ln -sf /opt/Vorn/resources/vornd/vorn /usr/bin/vorn

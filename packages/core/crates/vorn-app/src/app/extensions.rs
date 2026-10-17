@@ -1,6 +1,5 @@
-//! Extension panes against vornd (`openExtensionPane`, `closeExtensionPane`,
-//! `hydrateExtensions`): the packs, each session's activation, and the pane
-//! a card has open.
+//! Extension panes against vornd: the packs, each session's activation, and the
+//! pane a card has open.
 
 use serde_json::{json, Value};
 

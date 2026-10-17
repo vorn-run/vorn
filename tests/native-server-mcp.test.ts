@@ -231,7 +231,7 @@ function scripted(cwd: string): Array<[string, Record<string, unknown>]> {
       }
     ],
     ['update_workflow', { workflow_id: WORKFLOW, name: 'Nightly 2', enabled: false }],
-    ['delete_workflow', { id: WORKFLOW }],
+    ['delete_workflow', { workflow_id: WORKFLOW }],
     ['export_workflow', { workflow_id: WORKFLOW }],
     ['import_workflow', { workflow: '{not json', project_name: 'app' }],
     ['describe_workflow_nodes', { types: ['loop', 'script'] }],

@@ -1,4 +1,4 @@
-//! A gate's review page (`gate-views.ts`): the HTML a gate shows, kept
+//! A gate's review page: the HTML a gate shows, kept
 //! beside its run in the data directory for this round, opened only with
 //! the round's token, and served under a policy that lets it reach nothing.
 

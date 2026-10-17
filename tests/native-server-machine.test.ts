@@ -1,7 +1,7 @@
 /**
  * What vornd says of itself and this machine, through a real server and the
- * vornd it keeps: the core that answers, the PATH programs get, and why a
- * remote host cannot be logged in to. None of these calls reaches the server.
+ * vornd it keeps: the core that answers and why a remote host cannot be
+ * logged in to. None of these calls reaches the server.
  *
  * Runs where vornd and its session holder have been built.
  */
@@ -39,12 +39,6 @@ describe.runIf(runnable)('this machine, from vornd', () => {
       error: null,
       missing: []
     })
-  })
-
-  it('answers the PATH programs get', async () => {
-    const answer = await client.result<{ path: string | null; resolved: boolean }>('env:path')
-    expect(answer.path).toEqual(expect.stringContaining('/'))
-    expect(typeof answer.resolved).toBe('boolean')
   })
 
   it('says why a host cannot be logged in to', async () => {

@@ -1,7 +1,7 @@
-//! The step library every + opens (`StepLibrary`): the built-in steps or
+//! The step library every + opens: the built-in steps or
 //! triggers, saved HTTP profiles, what was picked lately, then one folding
 //! group per connection and per catalog connector; and the connector marks
-//! (`ConnectorIcon`) its rows and the canvas draw.
+//! its rows and the canvas draw.
 
 use std::collections::{HashMap, HashSet};
 
@@ -148,7 +148,7 @@ pub(crate) fn parse_icon(v: &Value) -> Option<(String, Vec<String>)> {
     Some((vb, paths))
 }
 
-/// `connectorLookFor`.
+/// How `connection`'s connector is drawn.
 pub fn look_for(src: &Sources<'_>, connection: &str) -> Option<Look> {
     let c = src
         .connections
@@ -204,7 +204,7 @@ fn xml_attr(s: &str) -> String {
         .replace('<', "&lt;")
 }
 
-/// What the anchor allows (`LibraryScope`).
+/// What the anchor allows.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Scope {
     pub body_only: bool,
@@ -245,7 +245,7 @@ fn row(key: String, label: String, pick: Pick, icon: Option<&'static str>) -> En
     }
 }
 
-/// `packStateFor`'s word for a catalog connector not connected here.
+/// The pack state's word for a catalog connector not connected here.
 fn catalog_detail(entry: &Value, packs: &[Value]) -> &'static str {
     let installed = packs.iter().any(|p| s(p, "id") == s(entry, "id"));
     let released = crate::plugins::installable(entry);
@@ -638,7 +638,7 @@ pub fn entries(
     out
 }
 
-/// `recordRecentAction`: newest first, five kept.
+/// Newest first, five kept.
 pub fn remember(recent: &mut Vec<Recent>, picked: Recent) {
     recent.retain(|r| r.connector != picked.connector || r.action != picked.action);
     recent.insert(0, picked);

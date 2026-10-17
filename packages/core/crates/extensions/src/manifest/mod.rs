@@ -2,13 +2,13 @@
 //! triggers and actions, an extension's contributions, the program it runs
 //! and what it declares it will reach.
 //!
-//! A package writes it as `vorn-extension.toml` ([`file`]); packs built for
-//! 0.8 carry `manifest.json`, read here by [`read`] into the same type, and
-//! [`file::to_toml`] converts one to the other. The JSON comes from a package
-//! anyone can publish, so every field the app reads is checked rather than
-//! trusted downstream: a bad contribution, icon or sign-in costs only itself,
-//! never the pack. These are the SDK's own rules, applied again, so they
-//! follow its wording and its limits.
+//! A package writes it as `vorn-extension.toml` ([`file`]), which reads into
+//! JSON and then through [`read`], as does the manifest a connector answers
+//! `connector/manifest` with. Both come from a package anyone can publish, so
+//! every field the app reads is checked rather than trusted downstream: a bad
+//! contribution, icon or sign-in costs only itself, never the package. These
+//! are the SDK's own rules, applied again, so they follow its wording and its
+//! limits.
 
 pub mod file;
 pub mod workflows;
@@ -23,14 +23,9 @@ use crate::js;
 
 /// The extension API this build speaks over stdio, generated from the WIT.
 pub const API: &str = crate::api::API;
-/// The api id connector packages said before there was one API, refused by name.
-pub const RETIRED_CONNECTOR_API: &str = "vorn:connector@";
-/// The kind sections a manifest may carry beside its contributions, each
-/// naming the child protocol its service speaks within [`API`]. A package
-/// with none speaks the extension API itself. An `[agent]` section is data
-/// and names no protocol.
-pub const KIND_SECTIONS: &[&str] = &["connector"];
-/// The connector child protocol [`API`] includes, spoken by a `[connector]` service.
+/// The connector child protocol [`API`] includes, spoken by a `[connector]`
+/// service. A package without that section speaks the extension API itself;
+/// an `[agent]` section is data and names no protocol.
 pub const CONNECTOR_PROTOCOL: u64 = 1;
 
 /// What a package says it is, does, runs and reaches.
@@ -40,7 +35,7 @@ pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
-    /// Derived from what it adds, never declared: clients of 0.8 draw by it.
+    /// Derived from what it adds, never declared: clients draw by it.
     pub kind: Kind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -60,7 +55,7 @@ pub struct Manifest {
     pub permissions: Option<Vec<Permission>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activates: Option<Activation>,
-    /// `vorn:extension@0.9`; `None` for a pack too old to say.
+    /// `vorn:extension@0.9`; `None` for a connector's own manifest that names no protocol.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<String>,
     /// The Vorn releases it runs on, as `>=0.9`.
@@ -504,7 +499,7 @@ impl Place {
         Place::Attention,
     ];
 
-    /// Its key in `manifest.json`.
+    /// Its key in the JSON the manifest reads through.
     pub fn key(self) -> &'static str {
         match self {
             Place::Sidebar => "sidebar",
@@ -684,7 +679,7 @@ pub struct Activation {
     pub platform: Vec<String>,
 }
 
-/// What a package may ask the bridge for. The first six are 0.8's and keep their names.
+/// What a package may ask the bridge for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Permission {
     #[serde(rename = "git.read")]
@@ -1288,7 +1283,7 @@ pub fn within_origins(origins: &[String], url: &str) -> bool {
 
 /// The lowercase host of an `https:` URL on its default port, or `None`.
 ///
-/// No URL crate is in the build, and this is all `withinOrigins` reads: a
+/// No URL crate is in the build, and this is all [`within_origins`] reads: a
 /// URL with an explicit port other than 443 or with no host is refused.
 fn https_host(url: &str) -> Option<String> {
     let rest = url

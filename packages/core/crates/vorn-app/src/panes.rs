@@ -1,7 +1,7 @@
-//! The panes beside a session's terminal (`PaneColumn`): its browser and
+//! The panes beside a session's terminal: its browser and
 //! its device, what each shows between frames, and what their controls do.
 //! The browser's tabs persist ([`crate::browser::Panes`]); the rest lives as
-//! long as the app, as the renderer's component state does.
+//! long as the app.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use web_time::Instant;
@@ -29,7 +29,7 @@ pub fn web_index(id: u64) -> Option<usize> {
 pub enum PaneKind {
     Browser,
     Device,
-    /// The pane an extension opened (`ExtensionPaneCard`).
+    /// The pane an extension opened.
     Extension,
 }
 
@@ -94,7 +94,7 @@ pub struct DocDraft {
     pub edited: String,
 }
 
-/// The browser pane's state that is not its tabs (`BrowserCard`'s own).
+/// The browser pane's state that is not its tabs.
 #[derive(Debug, Clone, Default)]
 pub struct Live {
     /// The address bar while it is being typed in.
@@ -138,8 +138,7 @@ pub struct Live {
 /// A rectangle in page pixels: x, y, width, height.
 pub type PageRect = (f32, f32, f32, f32);
 
-/// How long a selection holds still before the comment popover opens, as
-/// the renderer's two matching 400 ms polls.
+/// How long a selection holds still before the comment popover opens.
 pub const SELECTION_SETTLE: web_time::Duration = web_time::Duration::from_millis(400);
 
 /// How many console messages and requests a page keeps for the agent.
@@ -154,7 +153,7 @@ pub struct Claim {
     pub booted_here: bool,
 }
 
-/// A session's device pane (`DeviceCard`'s own state).
+/// A session's device pane.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DevicePane {
     pub error: Option<String>,
@@ -308,8 +307,8 @@ impl Workbench {
         Some((art, self.artifacts.get(&art.id)))
     }
 
-    /// The artifact's unsent comments and the last batch sent
-    /// (`useQuoteComments`), as the rail and the page's marks show them.
+    /// The artifact's unsent comments and the last batch sent, as the rail
+    /// and the page's marks show them.
     pub fn comments(&self, session: &str) -> (Vec<&Comment>, Vec<&Comment>) {
         match self.artifact(session) {
             Some((_, Some(state))) => (

@@ -1,4 +1,4 @@
-//! `tools/projects.ts`: projects, kept in the config blob.
+//! Projects, kept in the config blob.
 
 use serde_json::Value;
 

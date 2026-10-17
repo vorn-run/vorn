@@ -1,5 +1,4 @@
-//! The add box (`AddConnectionForm`, `SdkConnectorForm`, `HttpProfileForm`,
-//! `DynamicField`): the questions a connector asks before it is connected.
+//! The add box: the questions a connector asks before it is connected.
 
 use serde_json::Value;
 
@@ -253,7 +252,7 @@ fn buttons(s: &Screen<'_>, label: &str, enabled: bool, busy: bool, done: PlugAct
         )))
 }
 
-/// `DynamicField`: one field a built-in's manifest declared.
+/// One field a built-in's manifest declared.
 fn dynamic(s: &Screen<'_>, f: &BuiltinForm, spec: &Value) -> Option<El> {
     let key = sv(spec, "key")?;
     let name = sv(spec, "label").unwrap_or(key);
@@ -414,7 +413,7 @@ fn small(t: impl Into<String>, color: crate::ui::Rgba) -> El {
     text(t, 11.0, color).line_height(16.0).wrapping()
 }
 
-/// `SdkConnectorForm`: look a package up, then ask what it needs.
+/// Look a package up, then ask what it needs.
 fn sdk(s: &Screen<'_>, a: &Adding, f: &SdkForm) -> El {
     let mut col = div().col().gap(12.0);
     if f.listing.is_none() {
@@ -754,7 +753,7 @@ fn browser(m: &Value) -> Option<El> {
     )
 }
 
-/// `HttpProfileForm`: name, base URL, auth header and secret, then a test.
+/// Name, base URL, auth header and secret, then a test.
 fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
     let fieldset = |l: &str, fld: Field, v: &str, ph: &str, mono: bool, secret: bool| {
         let id = field_id(&fld);

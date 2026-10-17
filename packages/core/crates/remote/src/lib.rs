@@ -1,5 +1,4 @@
-//! Commands run on a remote host over `ssh`, as the server's `buildSshArgs`
-//! and `sshExec` run them: in batch mode, accepting a new host key, sharing
+//! Commands run on a remote host over `ssh`: in batch mode, accepting a new host key, sharing
 //! one connection per host for a minute where ssh can, with the person's key
 //! file and options.
 
@@ -173,7 +172,7 @@ pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-/// How a host is logged in to for one command (`sshExec`): ssh's arguments
+/// How a host is logged in to for one command: ssh's arguments
 /// through `user@host`, and the environment ssh runs with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Login {
@@ -182,7 +181,7 @@ pub struct Login {
 }
 
 impl Login {
-    /// The login `buildSshArgs` makes for `host`.
+    /// The login for `host`, with a ten-second connect timeout.
     pub fn new(host: &Host, env: Vec<(String, String)>) -> Login {
         Login {
             args: args(host, 10, multiplex_dir().as_deref()),
@@ -190,8 +189,8 @@ impl Login {
         }
     }
 
-    /// Runs `command` in a shell on the host: its output, or why it failed in
-    /// the words a failed `execFile` has (`Command failed: ...`).
+    /// Runs `command` in a shell on the host: its output, or why it failed
+    /// (`Command failed: ...`).
     pub fn exec(
         &self,
         command: &str,
@@ -229,7 +228,7 @@ pub struct Tested {
 
 const OK_MARKER: &str = "__VORN_OK__";
 
-/// Logs in to `host` and runs `echo __VORN_OK__`, as `testSshConnection` does.
+/// Logs in to `host` and runs `echo __VORN_OK__`.
 pub fn test(host: &Host, env: &[(String, String)]) -> Tested {
     let started = Instant::now();
     let mut argv = args(host, 5, multiplex_dir().as_deref());
@@ -295,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_the_arguments_the_server_does() {
+    fn builds_the_ssh_arguments() {
         assert_eq!(
             args(&host(), 5, Some("/t")).join(" "),
             "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
@@ -311,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn says_why_a_login_failed_in_the_server_s_words() {
+    fn says_why_a_login_failed() {
         let out = |code, stdout: &str, stderr: &str| {
             Ok(Output {
                 code,

@@ -330,7 +330,7 @@ pub struct Shot {
 }
 
 /// The window a shot draws: `VORN_APP_SHOT_SIZE` (`1400x900`) and
-/// `VORN_APP_SHOT_SCALE`, to compare with captures of today's app.
+/// `VORN_APP_SHOT_SCALE`.
 fn shot_window() -> ((f32, f32), f32) {
     let size = std::env::var("VORN_APP_SHOT_SIZE")
         .ok()
@@ -646,5 +646,17 @@ pub fn seed_workflows(rpc: &vorn_app::client::Rpc, workflows: &[Value]) {
     for w in workflows {
         rpc.call("workflow:create", json!({ "workflow": w }))
             .expect("workflow:create");
+    }
+}
+
+/// Writes `runs` straight into vornd's database, as the engine would have saved them.
+pub fn seed_runs(v: &TestVornd, runs: &[Value]) {
+    let mut store = vorn_store::Store::open_beside(&v.home.join("vorn.db"))
+        .expect("vorn.db opens")
+        .expect("vornd made vorn.db");
+    for run in runs {
+        let run: vorn_protocol::WorkflowExecution =
+            serde_json::from_value(run.clone()).expect("a workflow run");
+        store.save_workflow_run(&run).expect("run saved");
     }
 }

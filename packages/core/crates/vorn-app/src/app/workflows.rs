@@ -1,6 +1,5 @@
-//! What the workflow landing, sidebar and editor do, and the answers to the
-//! calls they make, as `WorkflowsLandingView`, `WorkflowsSection`,
-//! `WorkflowEditor`, `SourcePromptDialog` and `MissedScheduleDialog` do them.
+//! What the workflow landing, sidebar, editor and their dialogs do, and the
+//! answers to the calls they make.
 
 use serde_json::{json, Map, Value};
 use vorn_mcp::workflow::portability as port;
@@ -15,10 +14,10 @@ use crate::templates;
 use crate::ui::{mods, Event as UiEvent, Input, Ui};
 use crate::workflows::{self as wf, Draft, Missed, Panel, Prompt, WfAct};
 
-/// `MAX_WORKFLOW_FILE_BYTES`.
+/// The largest workflow file an import reads.
 const MAX_FILE: u64 = 500_000;
 
-/// `WORKFLOW_FILE_SUFFIX`.
+/// The suffix an exported workflow file ends in.
 const SUFFIX: &str = ".vorn-workflow.json";
 
 /// A workflow call whose answer changes the screen.
@@ -214,7 +213,7 @@ impl App {
         }
         self.st.wf.launching = None;
         let key = runs::key(run);
-        // The run the editor just launched opens in the history, as `followRunId` does.
+        // The run the editor just launched opens in the history.
         if let Some(at) = self.st.wf.follow_armed.take() {
             if now_ms() - at < 10_000.0 {
                 self.st.runs.open.insert(key.clone(), true);
@@ -272,7 +271,7 @@ impl App {
         self.st.dialog = Some(Dialog::Missed);
     }
 
-    /// `startManualRun`: the prompt when the run needs one, else the run.
+    /// The prompt when the run needs one, else the run.
     pub(super) fn start_run(
         &mut self,
         ui: &mut Ui,
@@ -315,7 +314,7 @@ impl App {
         if let Some(i) = inputs {
             context.insert("inputs".into(), i);
         }
-        // `startManualRun` says nothing on success; the run shows up live.
+        // A manual run says nothing on success; the run shows up live.
         let toast = Call::Quiet;
         if context.is_empty() && target.is_none() {
             self.call(toast, "workflow:runManual", json!({ "workflowId": id }));
@@ -458,7 +457,7 @@ impl App {
             .collect()
     }
 
-    /// `reorderWorkflows`: within the active workspace, the others kept in
+    /// Within the active workspace, the others kept in
     /// their slots.
     fn reorder_workflows(&mut self, from: usize, to: usize) {
         if from == to {
@@ -500,7 +499,7 @@ impl App {
         self.save_config(config, call);
     }
 
-    /// `persistWorkflow`: the draft saved, under the workspace, its last run
+    /// The draft saved, under the workspace, its last run
     /// kept.
     fn persist(&mut self, text: Option<String>) -> Option<String> {
         let ws = self.workspace();
@@ -653,7 +652,7 @@ impl App {
     }
 
     /// The first project, which a new agent step runs in.
-    /// `handlePickTemplate`.
+    /// Starts a workflow from template `i`.
     fn pick_template(&mut self, ui: &mut Ui, i: usize) {
         let Some(template) = self.st.wf.lib.templates.get(i).cloned() else {
             return;
@@ -1037,7 +1036,7 @@ impl App {
                     );
                 }
             }
-            // The fix opens in the panel that asked, as today's editor does.
+            // The fix opens in the panel that asked.
             WfAct::Fix(fix) => self.plug_fix(fix),
             WfAct::DismissNeeds => self.st.wf.imported = None,
             WfAct::ClosePanel => {
@@ -1121,7 +1120,7 @@ impl App {
             .map(str::to_owned)
     }
 
-    /// `handleExport`.
+    /// Writes workflow `id` to `path` as a portable file.
     pub(super) fn export(&mut self, id: &str, path: &str) {
         let Some(w) = self.workflow(id) else { return };
         let project = self
@@ -1169,7 +1168,7 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// `handleImport`.
+    /// Imports the workflow file at `path`.
     pub(super) fn import(&mut self, path: &str) {
         let active = self.st.project.clone();
         let Some(project) = active
@@ -1449,7 +1448,7 @@ fn read_file(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|_| "That is not a workflow file".into())
 }
 
-/// `definitionFromFile`: the definition a file carries and what it still
+/// The definition a file carries and what it still
 /// needs here, or why it carries none.
 fn definition_from_file(
     text: &str,
@@ -1500,7 +1499,7 @@ fn definition_from_file(
     Ok((def, port::unresolved_requirements(&portable, connections)))
 }
 
-/// `graphComplaint`.
+/// What is wrong with an imported graph, if anything.
 fn graph_complaint(p: &Value) -> Result<(), String> {
     let mut ids = std::collections::HashSet::new();
     for n in p["nodes"].as_array().into_iter().flatten() {

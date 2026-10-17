@@ -101,7 +101,7 @@ fn keys_that_were_declared_but_never_listed_survive() {
 }
 
 #[test]
-fn worktree_retention_survives_since_the_server_reads_it() {
+fn worktree_retention_survives_a_save() {
     round_trips("worktreeRetention", json!({ "mode": "days", "days": 7 }));
 }
 
@@ -142,7 +142,7 @@ fn a_setting_can_still_be_cleared_on_purpose() {
         config_with(json!({ "widgetEnabled": true })),
         &[],
     );
-    // `{ widgetEnabled: undefined }`: JSON drops the key, the wrapper names it.
+    // `widgetEnabled` cleared: absent from the JSON, named in `deleted`.
     save_config(&mut store, config_with(json!({})), &["widgetEnabled"]);
     assert!(lacks(&defaults_of(&mut store), "widgetEnabled"));
 }

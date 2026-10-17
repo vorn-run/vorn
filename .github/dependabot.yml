@@ -24,12 +24,6 @@ updates:
       cargo-minor-patch:
         update-types: ['minor', 'patch']
 
-  # The SwiftUI Mac app.
-  - package-ecosystem: 'swift'
-    directory: '/apps/macos'
-    schedule:
-      interval: 'weekly'
-
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:

@@ -1,9 +1,8 @@
-//! The approve and deny keys held system-wide (`globalShortcut` in the
-//! desktop's main process): Mod+Shift+A and Mod+Shift+D answer the oldest
-//! permission request even while another app is in front. macOS registers
-//! them with Carbon, Windows with `RegisterHotKey`, X11 with a key grab on
-//! the root window; where none of these exists (Wayland) the keys work only
-//! while the window has focus.
+//! The approve and deny keys held system-wide: Mod+Shift+A and Mod+Shift+D
+//! answer the oldest permission request even while another app is in front.
+//! macOS registers them with Carbon, Windows with `RegisterHotKey`, X11 with a
+//! key grab on the root window; where none of these exists (Wayland) the keys
+//! work only while the window has focus.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, OnceLock, PoisonError};

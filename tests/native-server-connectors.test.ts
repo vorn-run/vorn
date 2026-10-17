@@ -367,15 +367,8 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
       ok: false,
       error: 'A command is required'
     })
-    const refused = await client.result('connector:inspectPack', {
-      kind: 'url',
-      url: 'https://example.com/p.vorn.tgz'
-    })
-    expect(refused).toEqual({
-      ok: false,
-      error:
-        'Vorn no longer installs .vorn.tgz packs. Install the connector from its git repository: vorn ext install <git url>, or from Settings › Extensions.'
-    })
+    const refused = await client.result('connector:inspectPack', { kind: 'url', url: 'x' })
+    expect(refused).toEqual({ ok: false, error: 'That is not a connector to install' })
   })
 
   it('refuses a window call it never granted', async () => {

@@ -14,7 +14,7 @@ pub struct Need {
     pub bound: Option<Value>,
 }
 
-/// `RequirementAction`: the one step a requirement row offers.
+/// The one step a requirement row offers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Fix {
     None,
@@ -35,7 +35,7 @@ impl Fix {
     }
 }
 
-/// `ConnectorSuggestion`: a workflow a connected connector already knows how to build.
+/// A workflow a connected connector already knows how to build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Suggestion {
     pub key: String,
@@ -53,7 +53,7 @@ pub struct Listings<'a> {
     pub packs: &'a [Value],
 }
 
-/// `describeRequirement`.
+/// A requirement in words.
 pub fn describe(r: &Value) -> String {
     let name = s(r, "name").filter(|n| !n.is_empty());
     if s(r, "kind") == Some("httpProfile") {
@@ -77,7 +77,7 @@ pub fn describe(r: &Value) -> String {
     )
 }
 
-/// `connectorSuggestions`.
+/// The workflows each connection's connector seeds, as suggestions.
 pub fn suggestions(connections: &[Value], connectors: &[Value]) -> Vec<Suggestion> {
     connections
         .iter()
@@ -106,7 +106,7 @@ pub fn suggestions(connections: &[Value], connectors: &[Value]) -> Vec<Suggestio
         .collect()
 }
 
-/// `requirementsOfDefinition`: what the canvas is still missing.
+/// What the canvas is still missing.
 pub fn of_definition(nodes: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     for node in nodes {
@@ -146,7 +146,7 @@ pub fn of_definition(nodes: &[Value]) -> Vec<Value> {
     out
 }
 
-/// `mergeRequirements`: one list of gaps from the canvas and an import.
+/// One list of gaps from the canvas and an import.
 pub fn merge(derived: Vec<Value>, imported: &[Value]) -> Vec<Value> {
     let mut rest: Vec<Value> = imported.to_vec();
     let mut out: Vec<Value> = derived
@@ -174,7 +174,7 @@ pub fn merge(derived: Vec<Value>, imported: &[Value]) -> Vec<Value> {
     out
 }
 
-/// `requirementsWithBindings`.
+/// Each requirement with the connection bound to it, if any.
 pub fn with_bindings(reqs: &[Value], connections: &[Value]) -> Vec<Need> {
     reqs.iter()
         .map(|r| Need {
@@ -188,7 +188,7 @@ pub fn with_bindings(reqs: &[Value], connections: &[Value]) -> Vec<Need> {
         .collect()
 }
 
-/// `templateRequirements`.
+/// What a template requires, with its bindings.
 pub fn of_template(template: &Value, connections: &[Value]) -> Vec<Need> {
     let reqs = template
         .pointer("/portable/requires")
@@ -198,7 +198,7 @@ pub fn of_template(template: &Value, connections: &[Value]) -> Vec<Need> {
     with_bindings(&reqs, connections)
 }
 
-/// `requirementAction`, over the listings `buildConnectorListings` would make.
+/// What would fill a requirement, over the connector listings.
 pub fn fix(need: &Need, l: Listings<'_>) -> Fix {
     let r = &need.req;
     if need.bound.is_some() || port::binds_only_by_hand(r) {
@@ -254,7 +254,7 @@ pub fn fix(need: &Need, l: Listings<'_>) -> Fix {
     }
 }
 
-/// `templateSeed`: the definition a template starts the canvas with, and
+/// The definition a template starts the canvas with, and
 /// what it left unbound.
 pub fn seed(template: &Value, project: (&str, &str), connections: &[Value]) -> (Value, Vec<Value>) {
     let portable = template.get("portable").cloned().unwrap_or(Value::Null);

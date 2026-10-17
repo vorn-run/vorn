@@ -2,8 +2,8 @@
 //! against.
 //!
 //! The SQL is here rather than on [`Store`](crate::Store) alone because a
-//! process beside the server (vornd) reads and writes the same rows from the
-//! same file: [`DeviceTokens`] opens an existing database for that, and
+//! process other than the server (vornd) reads and writes the same rows from
+//! the same file: [`DeviceTokens`] opens an existing database for that, and
 //! creates no schema, runs no migration and seeds nothing, all of which stay
 //! the server's.
 

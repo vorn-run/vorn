@@ -1,5 +1,5 @@
-//! The shipped adapters through `vorn_agents::launch` against the corpus 0.8
-//! recorded (`tests/fixtures/launch-lines.json`); cases needing executables
+//! The shipped adapters through `vorn_agents::launch` against the recorded
+//! corpus (`tests/fixtures/launch-lines.json`); cases needing executables
 //! in `{bin}` run on Unix.
 
 mod support;
@@ -43,8 +43,8 @@ fn fill(value: &Value, vars: &HashMap<&str, String>) -> Value {
     }
 }
 
-/// The corpus was recorded on unix, where `path.join(shims, family)` joins
-/// with `/`; on this host it joins with the host's separator.
+/// The corpus was recorded on unix, where the shims path joins with `/`; on
+/// this host it joins with the host's separator.
 fn joined_on_host(value: Value, root: &str) -> Value {
     match value {
         Value::String(s) => Value::String(s.replace(
@@ -66,8 +66,6 @@ fn command(v: &Value) -> AgentCommand {
         command: string(&v["command"]).unwrap(),
         args: strings(&v["args"]).unwrap(),
         headless_args: strings(&v["headlessArgs"]),
-        fallback_command: string(&v["fallbackCommand"]),
-        fallback_args: strings(&v["fallbackArgs"]),
     }
 }
 

@@ -41,7 +41,7 @@ pub struct KeyFile {
 }
 
 impl KeyFile {
-    /// A key to be written under the temporary directory, named as the server names its own.
+    /// A key to be written under the temporary directory as `vorn-key-<uuid>`.
     pub fn new(content: Secret) -> KeyFile {
         let path = std::env::temp_dir().join(format!("vorn-key-{}", uuid::Uuid::new_v4()));
         KeyFile { path, content }

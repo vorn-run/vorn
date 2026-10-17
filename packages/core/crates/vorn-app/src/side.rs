@@ -1,7 +1,7 @@
-//! The panes a session owns beside its terminal (`PaneColumn`), and the
+//! The panes a session owns beside its terminal, and the
 //! files popped out of them into cards of their own: which are open, how
 //! a card's space is split between them, and which shells each session's
-//! terminals panel holds. Kept per device, as today's app keeps them.
+//! terminals panel holds. Kept per device.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ pub const DEFAULT_TREE: f32 = 0.38;
 /// Below this width the tree and the file take turns (`SIDE_BY_SIDE_MIN_PX`).
 pub const SIDE_BY_SIDE_MIN: f32 = 480.0;
 
-/// `clampSplitRatio`: a ratio inside the visible range, an even split for
+/// A ratio inside the visible range, an even split for
 /// anything that is not a number.
 pub fn clamp_split(r: f32) -> f32 {
     if r.is_finite() {
@@ -27,7 +27,7 @@ pub fn clamp_split(r: f32) -> f32 {
     }
 }
 
-/// `splitPaneWeights`: each of `count` panes' share of the column, from a
+/// Each of `count` panes' share of the column, from a
 /// stored list that may be the wrong length, renormalised to sum to 1.
 pub fn pane_weights(stored: &[f32], count: usize) -> Vec<f32> {
     if count == 0 {
@@ -48,7 +48,7 @@ pub fn pane_weights(stored: &[f32], count: usize) -> Vec<f32> {
     }
 }
 
-/// `resizePaneWeights`: the divider below pane `index` moved to `ratio` of
+/// The divider below pane `index` moved to `ratio` of
 /// the whole column; only the two panes it touches change, and neither
 /// collapses.
 pub fn resize_weights(weights: &[f32], index: usize, ratio: f32) -> Vec<f32> {
@@ -75,11 +75,11 @@ pub fn resize_weights(weights: &[f32], index: usize, ratio: f32) -> Vec<f32> {
 /// What the panes, their tabs, the file tree and the cards do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SideAct {
-    /// `toggleFilesPane`.
+    /// Opens or closes the files pane.
     ToggleFiles(String),
-    /// `toggleTerminalsPanel`: opened with a first shell, closed with them all.
+    /// Opened with a first shell, closed with them all.
     ToggleTerminals(String),
-    /// `addTerminalToPanel`.
+    /// Adds a shell to the terminals panel.
     AddTerminal(String),
     /// Maximizes a pane over its owner's card, or restores it.
     Maximize(String),
@@ -135,17 +135,17 @@ impl SideKind {
     }
 }
 
-/// `paneIdFor`: the id maximize is matched on.
+/// The id maximize is matched on.
 pub fn pane_id(kind: SideKind, owner: &str) -> String {
     format!("{}:{owner}", kind.key())
 }
 
-/// `fileTabKey`: an open file tab's buffer and draft key.
+/// An open file tab's buffer and draft key.
 pub fn tab_key(owner: &str, path: &str) -> String {
     format!("files:{owner}:{path}")
 }
 
-/// A session's Files pane (`FilesPaneState`).
+/// A session's Files pane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FilesPane {
@@ -168,7 +168,7 @@ impl Default for FilesPane {
     }
 }
 
-/// The shells a session holds beside its agent (`TerminalsPaneState`).
+/// The shells a session holds beside its agent.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Panel {
@@ -177,13 +177,13 @@ pub struct Panel {
 }
 
 impl Panel {
-    /// `activePanelIndex`: the tab in front, clamped to what is there.
+    /// The tab in front, clamped to what is there.
     pub fn active(&self) -> usize {
         self.active_tab.min(self.terminals.len().saturating_sub(1))
     }
 }
 
-/// A file popped out of a session into a card of its own (`EditorPaneState`).
+/// A file popped out of a session into a card of its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
@@ -191,7 +191,7 @@ pub struct Card {
     pub file_path: String,
 }
 
-/// How a session card divides its interior (`CardSplit`).
+/// How a session card divides its interior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Split {
     pub terminal: f32,
@@ -211,7 +211,7 @@ pub struct Saved {
     pub next_card: u32,
 }
 
-/// One entry of a directory (`FileEntry`).
+/// One entry of a directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
@@ -232,7 +232,7 @@ impl Entry {
     }
 }
 
-/// A Files pane's tree (`FileTreePane`): what has been listed, what is
+/// A Files pane's tree: what has been listed, what is
 /// open, and the filter.
 #[derive(Debug, Clone, Default)]
 pub struct Tree {
@@ -267,7 +267,7 @@ pub enum TreeRow {
 }
 
 impl Tree {
-    /// `computeFilterSets`: entries that match or hold a match, and the
+    /// Entries that match or hold a match, and the
     /// directories opened to show them; only what has been listed counts.
     pub fn filter_sets(&self) -> (HashSet<String>, HashSet<String>) {
         let (mut matched, mut expand) = (HashSet::new(), HashSet::new());
@@ -376,7 +376,7 @@ pub struct Side {
     pub drag_tree: Option<f32>,
     /// The trees, by owning session.
     pub trees: HashMap<String, Tree>,
-    /// A panel shell holding the keyboard (`focusTarget`).
+    /// A panel shell holding the keyboard.
     pub focus: Option<String>,
     /// Where the view is kept between launches; none keeps it in memory.
     pub file: Option<PathBuf>,
@@ -415,7 +415,7 @@ impl Side {
             .map_or(DEFAULT_TREE, clamp_split)
     }
 
-    /// `usePaneColumnEntries`: what `owner`'s column draws, in order.
+    /// What `owner`'s column draws, in order.
     pub fn entries(&self, owner: &str) -> Vec<SideKind> {
         let mut out = Vec::new();
         if self.saved.files.contains_key(owner) {
@@ -480,7 +480,7 @@ impl Side {
         s.panes = w;
     }
 
-    /// Every shell some panel holds (`claimedTerminalIds`): drawn there and
+    /// Every shell some panel holds: drawn there and
     /// nowhere else.
     pub fn claimed(&self) -> HashSet<&str> {
         self.saved
@@ -499,12 +499,12 @@ impl Side {
             .map(|(k, _)| k.as_str())
     }
 
-    /// `openFilesPane`.
+    /// Opens the files pane.
     pub fn open_files(&mut self, owner: &str) {
         self.saved.files.entry(owner.to_owned()).or_default();
     }
 
-    /// `closeFilesPane`: the tab keys whose buffers go with it.
+    /// The tab keys whose buffers go with it.
     pub fn close_files(&mut self, owner: &str) -> Vec<String> {
         let tabs = self
             .saved
@@ -517,7 +517,7 @@ impl Side {
         tabs.iter().map(|t| tab_key(owner, t)).collect()
     }
 
-    /// `openFileTab`: a single click previews, replacing the last preview
+    /// A single click previews, replacing the last preview
     /// unless that one has edits; `pin` keeps the tab.
     pub fn open_tab(&mut self, owner: &str, path: &str, pin: bool, preview_dirty: bool) {
         let pane = self.saved.files.entry(owner.to_owned()).or_default();
@@ -543,7 +543,7 @@ impl Side {
         pane.active = Some(path.to_owned());
     }
 
-    /// `pinFileTab`.
+    /// Pins a preview tab.
     pub fn pin_tab(&mut self, owner: &str, path: &str) {
         if let Some(p) = self.saved.files.get_mut(owner) {
             if p.preview.as_deref() == Some(path) {
@@ -552,7 +552,7 @@ impl Side {
         }
     }
 
-    /// `setActiveFileTab`.
+    /// Brings a file tab to the front.
     pub fn set_active_tab(&mut self, owner: &str, path: &str) {
         if let Some(p) = self.saved.files.get_mut(owner) {
             if p.tabs.iter().any(|t| t == path) {
@@ -561,7 +561,7 @@ impl Side {
         }
     }
 
-    /// `closeFileTab`: the next tab along takes the front.
+    /// The next tab along takes the front.
     pub fn close_tab(&mut self, owner: &str, path: &str) {
         let Some(p) = self.saved.files.get_mut(owner) else {
             return;
@@ -582,7 +582,7 @@ impl Side {
         }
     }
 
-    /// `closeSavedFileTabs`: only tabs with edits stay.
+    /// Only tabs with edits stay.
     pub fn close_saved_tabs(&mut self, owner: &str, dirty: impl Fn(&str) -> bool) {
         let Some(p) = self.saved.files.get_mut(owner) else {
             return;
@@ -596,7 +596,7 @@ impl Side {
         }
     }
 
-    /// `toggleFileTree`.
+    /// Shows or hides the file tree.
     pub fn toggle_tree(&mut self, owner: &str) {
         if let Some(p) = self.saved.files.get_mut(owner) {
             p.tree_visible = !p.tree_visible;
@@ -609,7 +609,7 @@ impl Side {
         }
     }
 
-    /// `openTerminalsPane`: shown in front, never listed twice.
+    /// Shown in front, never listed twice.
     pub fn open_panel(&mut self, owner: &str, terminal: &str) {
         let p = self.saved.panels.entry(owner.to_owned()).or_default();
         if !p.terminals.iter().any(|t| t == terminal) {
@@ -618,7 +618,7 @@ impl Side {
         p.active_tab = p.terminals.iter().position(|t| t == terminal).unwrap_or(0);
     }
 
-    /// `closeTerminalsPane`: the shells it held, to stop.
+    /// The shells it held, to stop.
     pub fn close_panel(&mut self, owner: &str) -> Vec<String> {
         let held = self
             .saved
@@ -630,7 +630,7 @@ impl Side {
         held
     }
 
-    /// `setActivePanelTerminal`.
+    /// Brings shell `index` to the front.
     pub fn set_active_panel(&mut self, owner: &str, index: usize) {
         if let Some(p) = self.saved.panels.get_mut(owner) {
             if index < p.terminals.len() {
@@ -639,7 +639,7 @@ impl Side {
         }
     }
 
-    /// `releaseFromPanels`: the claim on `terminal` dropped; a panel left
+    /// The claim on `terminal` dropped; a panel left
     /// empty closes.
     pub fn release(&mut self, terminal: &str) -> bool {
         let mut emptied = Vec::new();
@@ -663,7 +663,7 @@ impl Side {
         released
     }
 
-    /// `promoteFile`: one card per file per session; an existing one is
+    /// One card per file per session; an existing one is
     /// returned rather than a second made.
     pub fn promote(&mut self, owner: &str, path: &str) -> String {
         if let Some((id, _)) = self

@@ -1,4 +1,4 @@
-//! The empty grid's composer (`PromptLauncher` inline): the logo, the
+//! The empty grid's composer: the logo, the
 //! prompt box with its pickers and send button, and the line under it.
 
 use super::{agent_icon, c, ico, mod_label, truncate, white, Screen};

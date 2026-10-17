@@ -2,9 +2,8 @@
 //! context a run starts with, and the status each node's state is in.
 //!
 //! Definitions are stored as JSON a person or an agent wrote, so every field
-//! is read the way JavaScript reads an object it has not checked: what is
-//! missing or of another type is absent, never an error. A node's `config`
-//! stays JSON and is read where its kind is known.
+//! is read leniently: what is missing or of another type is absent, never an
+//! error. A node's `config` stays JSON and is read where its kind is known.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -74,7 +73,7 @@ impl Node {
         self.config.get(key).and_then(Value::as_str)
     }
 
-    /// `stopsRunOnError`: a failure ends the run unless the node opted out.
+    /// A failure ends the run unless the node opted out.
     pub fn stops_run_on_error(&self) -> bool {
         !self.continue_on_error
     }
@@ -118,8 +117,8 @@ pub struct Workflow {
 }
 
 impl Workflow {
-    /// `None` without an id; nodes and edges JavaScript could not read are
-    /// left out.
+    /// `None` without an id; nodes and edges that cannot be read are left
+    /// out.
     pub fn from_json(raw: &Value) -> Option<Workflow> {
         let id = raw.get("id")?.as_str()?.to_owned();
         let list = |key: &str| raw.get(key).and_then(Value::as_array).cloned();
@@ -354,7 +353,7 @@ pub fn state(node_id: &str, status: Status) -> NodeExecutionState {
 pub trait RunExt {
     fn node_state(&self, node_id: &str) -> Option<&NodeExecutionState>;
     fn node_state_mut(&mut self, node_id: &str) -> Option<&mut NodeExecutionState>;
-    /// `updateNodeState`: changes the node's state when the run has one.
+    /// Changes the node's state when the run has one.
     fn update(&mut self, node_id: &str, change: impl FnOnce(&mut NodeExecutionState)) {
         if let Some(state) = self.node_state_mut(node_id) {
             change(state);
@@ -384,7 +383,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn reads_a_definition_as_javascript_would() {
+    fn reads_a_definition_leniently() {
         let wf = Workflow::from_json(&json!({
             "id": "w", "name": "W", "enabled": 1, "staggerDelayMs": 250,
             "nodes": [

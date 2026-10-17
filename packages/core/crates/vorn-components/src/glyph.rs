@@ -1,5 +1,5 @@
 //! RunningGlyph and the pulsing status dot: the two pieces of motion a
-//! session's status makes, timed as the renderer's CSS times them.
+//! session's status makes.
 
 use vornui::accesskit::Role;
 use vornui::theme::motion::FRAME;
@@ -19,8 +19,8 @@ const GRID: [Tier; 16] = {
     [H, O, O, H, O, I, I, O, O, I, I, O, H, O, O, H]
 };
 
-/// The renderer's `seeded`: a fixed pseudo-random fraction per seed, so
-/// every glyph twinkles in the same pattern.
+/// A fixed pseudo-random fraction per seed, so every glyph twinkles in the
+/// same pattern.
 fn seeded(seed: f64) -> f64 {
     let s = (seed * 12.9898 + 78.233).sin() * 43758.5453;
     s - s.floor()
@@ -128,7 +128,7 @@ pub fn pulse(ui: &Ui) -> f32 {
     envelope(ui.anim_time(), 0.0, 2.0, (1.0, 0.5), PULSE) as f32
 }
 
-/// `borderPulse` 2.5 s ease-in-out: 0 at rest, 1 at its peak, which a
+/// The border pulse, 2.5 s ease-in-out: 0 at rest, 1 at its peak, which a
 /// caller maps onto its border and glow. A terminal holds it at rest.
 pub fn border_pulse(ui: &Ui) -> f32 {
     if ui.is_cells() {

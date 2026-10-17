@@ -143,10 +143,9 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
 }
 
 /// Tells every client what changed after a write elsewhere (a workflow, a
-/// project, or tasks written without saying which), as the server's
-/// `notifyChanged` did: the configuration (`config:changed`) and the
-/// workflows (`workflow:changed`) whole, and that the task list is to be
-/// read again (`task:rows`), a page at a time.
+/// project, or tasks written without saying which): the configuration
+/// (`config:changed`) and the workflows (`workflow:changed`) whole, and that
+/// the task list is to be read again (`task:rows`), a page at a time.
 pub(crate) async fn announce(native: &Arc<Native>) {
     let n = Arc::clone(native);
     let _order = native.config_order.lock().await;

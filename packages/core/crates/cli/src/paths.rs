@@ -1,6 +1,5 @@
-//! Paths as the TypeScript command handles them: `path.resolve`,
-//! `path.basename`, and the server's `normalizePath` for telling whether two
-//! paths name one project.
+//! Paths: `path.resolve`, `path.basename`, and the normalisation that tells
+//! whether two paths name one project.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;

@@ -186,7 +186,7 @@ impl Builtin for Entry {
     }
 
     fn events(&self) -> &'static [&'static str] {
-        // It follows its events itself, from vornd's start, as the board always did.
+        // It follows its events itself, from vornd's start.
         &[]
     }
 

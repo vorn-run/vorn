@@ -1,4 +1,4 @@
-//! `TaskDetailPanel`: the selected task's properties, description, images,
+//! The selected task's properties, description, images,
 //! session buttons, workflow runs and changes, or the create form.
 
 use vorn_protocol::TaskConfig;

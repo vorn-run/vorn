@@ -1,5 +1,5 @@
 //! `{{…}}` templates, resolved against a run's context and the outputs of
-//! the steps before (`template-vars.ts`).
+//! the steps before.
 //!
 //! A token names a namespace and a dotted path: `steps`, `task`, `trigger`,
 //! `connectorItem`, `inputs`, `context` and `loop`. A token whose namespace
@@ -21,7 +21,7 @@ pub type StepOutputs = Map<String, Value>;
 /// The longest text a template expands to; longer text keeps its end.
 pub const MAX_OUTPUT_LENGTH: usize = 50_000;
 
-/// `\w` is ASCII in JavaScript.
+/// A token: `{{ name.path }}`, in ASCII word characters.
 static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\{\s*([a-zA-Z_][A-Za-z0-9_.\-]*)\s*\}\}").expect("the token pattern is valid")
 });
@@ -35,12 +35,12 @@ static WHOLE: LazyLock<Regex> = LazyLock::new(|| {
 enum Found {
     /// No namespace this run has: the token stays as written.
     Unresolved,
-    /// A value; `undefined` and `null` both as [`Value::Null`].
+    /// A value; missing and `null` both as [`Value::Null`].
     Value(Value),
 }
 
-/// `walkPath`: into objects by key and arrays by index (or `length`);
-/// anything else, or a missing step, is undefined.
+/// Walks into objects by key and arrays by index (or `length`); anything
+/// else, or a missing step, is null.
 fn walk(root: &Value, path: &[&str]) -> Value {
     let mut current = root;
     let mut length;
@@ -64,7 +64,7 @@ fn walk(root: &Value, path: &[&str]) -> Value {
     current.clone()
 }
 
-/// An array index as JavaScript reads a property name: digits, no leading zero.
+/// An array index in a path: digits, no leading zero.
 fn index_of(segment: &str) -> Option<usize> {
     let canonical = segment == "0" || !segment.starts_with('0');
     (canonical && !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit()))
@@ -72,7 +72,7 @@ fn index_of(segment: &str) -> Option<usize> {
         .flatten()
 }
 
-/// `stringifyResolved`: scalars as text, objects and lists as JSON, both cut
+/// Scalars as text, objects and lists as JSON, both cut
 /// to their last [`MAX_OUTPUT_LENGTH`] units.
 fn text_of(value: &Value) -> String {
     match value {
@@ -168,8 +168,8 @@ fn lookup(path: &str, context: Option<&Context>, outputs: Option<&StepOutputs>) 
     Found::Unresolved
 }
 
-/// `resolveTemplateVars`: every token replaced by its text, or left as
-/// written when its namespace is not this run's.
+/// Every token replaced by its text, or left as written when its namespace is
+/// not this run's.
 pub fn resolve(template: &str, context: Option<&Context>, outputs: Option<&StepOutputs>) -> String {
     if template.is_empty() || (context.is_none() && outputs.is_none()) {
         return template.to_owned();
@@ -184,9 +184,9 @@ pub fn resolve(template: &str, context: Option<&Context>, outputs: Option<&StepO
         .into_owned()
 }
 
-/// `resolveTemplateValue`: a template that is exactly one token yields the
-/// value it names, a list staying a list and never cut; anything else is
-/// text, as [`resolve`] gives it.
+/// A template that is exactly one token yields the value it names, a list
+/// staying a list and never cut; anything else is text, as [`resolve`] gives
+/// it.
 pub fn resolve_value(
     template: &str,
     context: Option<&Context>,
@@ -229,12 +229,12 @@ impl Field {
     }
 }
 
-/// `resolveContextField`: the task first, then the session that launched
-/// the workflow. `None` when neither says.
+/// The task first, then the session that launched the workflow. `None` when
+/// neither says.
 pub fn context_field(field: &str, ctx: &Context) -> Option<Field> {
     let task = ctx.task.as_ref();
     let source = ctx.source.as_ref();
-    // `??` passes over `undefined` and `null` only.
+    // Only a missing or `null` value passes on to the next.
     let pick = |vals: &[Option<&Value>]| -> Option<Field> {
         vals.iter().find_map(|v| match v {
             None | Some(Value::Null) => None,

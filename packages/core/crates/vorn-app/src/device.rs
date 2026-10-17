@@ -1,7 +1,7 @@
-//! iOS simulators for the device pane: what `simctl` lists, the picker's
-//! order (`device-picker-list.ts`), when a card offers the device button
-//! (`device-affordance.ts`), and claiming one for a session. Simulators
-//! exist only on macOS; elsewhere the list is empty and a claim says why.
+//! iOS simulators for the device pane: what `simctl` lists, the picker's order,
+//! when a card offers the device button, and claiming one for a session.
+//! Simulators exist only on macOS; elsewhere the list is empty and a claim says
+//! why.
 
 use std::collections::HashMap;
 
@@ -29,12 +29,12 @@ pub struct Listed {
     pub subtitle: Option<String>,
 }
 
-/// `isSelectable`: free, or already this session's.
+/// Free, or already this session's.
 pub fn is_selectable(d: &Device, session: &str) -> bool {
     d.claimed_by.as_deref().is_none_or(|c| c == session)
 }
 
-/// `orderDevices`: selectable first, then booted, then by name and runtime;
+/// Selectable first, then booted, then by name and runtime;
 /// a subtitle only where the name alone is ambiguous.
 pub fn order_devices(devices: &[Device], session: &str) -> Vec<Listed> {
     let mut by_name: HashMap<&str, usize> = HashMap::new();
@@ -76,7 +76,7 @@ fn locale_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b))
 }
 
-/// `shouldShowDeviceButton`: an open pane always keeps its button; a shell
+/// An open pane always keeps its button; a shell
 /// never offers one; otherwise only a mobile project does.
 pub fn should_show_button(mobile: Option<bool>, has_pane: bool, shell: bool) -> bool {
     if has_pane {
@@ -85,7 +85,7 @@ pub fn should_show_button(mobile: Option<bool>, has_pane: bool, shell: bool) -> 
     !shell && mobile == Some(true)
 }
 
-/// `formatRuntime`: `com.apple.CoreSimulator.SimRuntime.iOS-26-2` reads
+/// `com.apple.CoreSimulator.SimRuntime.iOS-26-2` reads
 /// `iOS 26.2`.
 pub fn format_runtime(id: &str) -> String {
     let bare = id
@@ -98,7 +98,7 @@ pub fn format_runtime(id: &str) -> String {
 }
 
 /// The iOS simulators in `simctl list devices available -j`'s output;
-/// watchOS and tvOS ones are left out, as the renderer leaves them.
+/// watchOS and tvOS ones are left out.
 pub fn parse_simctl(json: &Value, claims: &HashMap<String, String>) -> Vec<Device> {
     let Some(Value::Object(runtimes)) = json.get("devices") else {
         return Vec::new();
@@ -275,12 +275,12 @@ pub fn screenshot(udid: &str) -> Result<Vec<u8>, String> {
     bytes
 }
 
-/// The device frame's zoom bounds and step (`device-bezel.ts`).
+/// The device frame's zoom bounds and step.
 pub const ZOOM_MIN: f64 = 0.25;
 pub const ZOOM_MAX: f64 = 4.0;
 const ZOOM_STEP: f64 = 1.25;
 
-/// `steppedZoom`: one step in or out, rounded as `toFixed(3)` and clamped.
+/// One step in or out, rounded as `toFixed(3)` and clamped.
 pub fn stepped_zoom(current: f64, inward: bool) -> f64 {
     let next = if inward {
         current * ZOOM_STEP
@@ -328,14 +328,14 @@ fn is_phone(points: (f64, f64)) -> bool {
     short <= 0.0 || long / short >= PHONE_ASPECT
 }
 
-/// `bezelThickness`: the drawn frame's width, from the pane so it keeps its
+/// The drawn frame's width, from the pane so it keeps its
 /// weight while the device zooms.
 pub fn bezel_thickness(area: (f64, f64), points: (f64, f64)) -> f64 {
     let k = if is_phone(points) { 0.035 } else { 0.028 };
     (area.0.min(area.1) * k).round().clamp(6.0, 16.0)
 }
 
-/// `fitScale`: the scale at which the screen and its frame fit `area`; 1
+/// The scale at which the screen and its frame fit `area`; 1
 /// before either is known.
 pub fn fit_scale(points: (f64, f64), area: (f64, f64)) -> f64 {
     let inset = 2.0 * bezel_thickness(area, points) + 2.0 * GUTTER;
@@ -352,7 +352,7 @@ pub fn outer_radius(drawn: (f64, f64), points: (f64, f64)) -> f64 {
     (drawn.0.min(drawn.1) * k).round()
 }
 
-/// `screenshotName`: the device's name made safe for a file, and when, as
+/// The device's name made safe for a file, and when, as
 /// `iso` (`toISOString`) gives it.
 pub fn screenshot_name(name: &str, iso: &str) -> String {
     let stamp = iso

@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn hashes_as_the_server_does() {
+    fn hashes_as_sha256_hex() {
         // sha256("secret") in hex.
         assert_eq!(
             hash_hex("secret"),

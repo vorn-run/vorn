@@ -5,7 +5,7 @@
 use crate::ui::{Rect, Rgba, Ui, BOLD, ITALIC};
 use crate::view::{flags, Cursor, PaneView};
 
-/// How a pane shows its cursor, as today's terminals do: the session being
+/// How a pane shows its cursor: the session being
 /// typed into draws its own shape, the current one with keys elsewhere an
 /// outline, and the rest none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

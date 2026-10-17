@@ -164,7 +164,7 @@ fn run_workflow_comes_from_the_editors_menu_rows() {
         .iter()
         .map(|r| r.text("title"))
         .collect();
-    // The seeded Default Task Workflow is offered first, as it always was.
+    // The seeded Default Task Workflow is offered first.
     assert_eq!(titles, ["Default Task Workflow", "Nightly"]);
     shot.click(&mut app, item_id(SUB, 1));
     let runs = shot.until(&mut app, "the run it started", |app, _| {

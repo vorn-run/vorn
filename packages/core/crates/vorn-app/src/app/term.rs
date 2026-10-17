@@ -24,7 +24,7 @@ pub enum Clip {
     SelectAll,
 }
 
-/// The renderer's clipboard keys: Cmd-C, Cmd-V and Cmd-A on a Mac;
+/// The clipboard keys: Cmd-C, Cmd-V and Cmd-A on a Mac;
 /// elsewhere Ctrl-Shift-C and Ctrl-Shift-V, and Ctrl-C only over a
 /// selection, else it interrupts. Ctrl-V is the program's everywhere (agent
 /// CLIs paste an image on it). Shift-Insert pastes everywhere.

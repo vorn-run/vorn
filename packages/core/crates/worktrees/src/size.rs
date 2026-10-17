@@ -354,7 +354,7 @@ mod tests {
         let at = |p: &str| tmp.path().join(p);
         let found: Vec<PathBuf> = found.into_iter().map(PathBuf::from).collect();
         let walked: Vec<PathBuf> = walked.into_iter().map(PathBuf::from).collect();
-        // `find` enters `.git`; the walk does not, as the server's does not.
+        // `find` enters `.git`; the walk does not.
         assert!(found.contains(&at("node_modules")) && found.contains(&at("pkg/dist")));
         assert!(!found.contains(&at("node_modules/a/node_modules")));
         assert_eq!(walked, vec![at("node_modules"), at("pkg/dist")]);
@@ -388,7 +388,7 @@ mod tests {
         let sizes = Sizes::default();
         let gone = std::env::temp_dir().join("vorn-worktrees-no-such-dir");
         let size = sizes.measure(&gone.to_string_lossy(), &names(), false, &[], None);
-        // Without `du`, the walk reads a missing tree as empty, as the server's does.
+        // Without `du`, the walk reads a missing tree as empty.
         let walked = Size {
             measured: true,
             ..Size::default()

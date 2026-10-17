@@ -185,7 +185,7 @@ pub fn handle(
 }
 
 /// Answers a call that was sent as a request; a notification gets nothing.
-/// A session nothing holds, as the server answered it: no screen, no output,
+/// A session nothing holds: no screen, no output,
 /// not live, and nothing to write to or size.
 fn unheld(engine: &Engine, reply: &Forwarder, rpc: Option<Value>, method: &str, session: &str) {
     let answered = match method {

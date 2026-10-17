@@ -1,6 +1,5 @@
-//! The workflow helpers against what the TypeScript ones answered for the
-//! same seeded inputs (`tests/fixtures/js-reference/workflow-functions.json`,
-//! recorded from the last release that had them): templates, typed agent
+//! The workflow helpers against recorded expected outputs for seeded inputs
+//! (`tests/fixtures/js-reference/workflow-functions.json`): templates, typed agent
 //! output, prompts, item lists, gate rewrites, conditions, fingerprints,
 //! script configs, log bounds and doc pages.
 
@@ -35,7 +34,7 @@ fn short(v: Value) -> Value {
 }
 
 #[test]
-fn templates_resolve_as_they_did() {
+fn templates_resolve_as_recorded() {
     let f = fixture();
     let contexts: Vec<Option<Context>> = f["contexts"]
         .as_array()
@@ -67,7 +66,7 @@ fn templates_resolve_as_they_did() {
 }
 
 #[test]
-fn typed_output_is_extracted_as_it_was() {
+fn typed_output_is_extracted_as_recorded() {
     let f = fixture();
     for case in f["structured"].as_array().unwrap() {
         let got =
@@ -85,7 +84,7 @@ fn typed_output_is_extracted_as_it_was() {
 }
 
 #[test]
-fn prompts_read_as_they_did() {
+fn prompts_read_as_recorded() {
     let f = fixture();
     for case in f["prompts"].as_array().unwrap() {
         let siblings = case["siblings"].as_array().unwrap();
@@ -108,7 +107,7 @@ fn prompts_read_as_they_did() {
 }
 
 #[test]
-fn graph_helpers_answer_as_they_did() {
+fn graph_helpers_answer_as_recorded() {
     let f = fixture();
     let g = &f["graph"];
     for case in g["itemLists"].as_array().unwrap() {
@@ -180,7 +179,7 @@ fn graph_helpers_answer_as_they_did() {
 }
 
 #[test]
-fn doc_markdown_renders_as_it_did() {
+fn doc_markdown_renders_as_recorded() {
     let f = fixture();
     for case in f["markdown"].as_array().unwrap() {
         assert_eq!(
