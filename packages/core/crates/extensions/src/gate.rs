@@ -147,7 +147,8 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("task.changed", Permission::TasksWrite),
     ("task.take", Permission::TasksWrite),
     ("task.handBack", Permission::TasksWrite),
-    ("connection.upsertFromItem", Permission::TasksWrite),
+    ("connection.itemImport", Permission::TasksWrite),
+    ("connection.synced", Permission::TasksWrite),
     ("workflow.fire", Permission::WorkflowsWrite),
     ("task.sourceLink", Permission::TasksRead),
     ("project.list", Permission::TasksRead),
@@ -166,7 +167,8 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// The core methods open only to the extensions Vorn ships: they write the
 /// board, the workflows, their inbox and the sign-in windows of every
 /// connection, which no one installed extension owns. `task.take` and
-/// `task.handBack` are Tasks' and `connection.upsertFromItem` Connectors',
+/// `task.handBack` are Tasks', and `connection.itemImport` and
+/// `connection.synced` Connectors',
 /// called by the other built-ins; `task.changed` is Tasks' own, which tells
 /// clients the rows a write changed and emits the events it fires.
 pub const BUILTIN_ONLY: &[&str] = &[
@@ -174,7 +176,8 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "task.changed",
     "task.take",
     "task.handBack",
-    "connection.upsertFromItem",
+    "connection.itemImport",
+    "connection.synced",
     "task.sourceLink",
     "workflow.get",
     "workflow.list",

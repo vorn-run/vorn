@@ -165,6 +165,23 @@ impl Tasks {
         Ok(Value::Array(answers))
     }
 
+    /// A connector item on the board, as `createTaskFromItem` puts it: read
+    /// as a task by Connectors, imported here, and its connection stamped
+    /// synced. Answers `{taskId, created}`.
+    fn upsert_item(&mut self, host: &mut dyn Host, item: Value) -> Result<Value, String> {
+        let args = host
+            .call("connection.itemImport", item)
+            .map_err(|e| e.message)?;
+        let answered = self.import(host, args.clone()).map_err(|e| e.message)?;
+        host.call("connection.synced", args)
+            .map_err(|e| e.message)?;
+        Ok(answered
+            .as_array()
+            .and_then(|a| a.last())
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
+
     /// `task.take`: task `id` in progress for a workflow step's session and
     /// agent; `task.handBack`: back in the queue, unassigned. Each fires the
     /// workflows watching for the move, as any write does.
@@ -333,8 +350,8 @@ impl Extension for Tasks {
                 let task = arg(&args, "taskId", "task.sourceLink")?.to_owned();
                 sources::link(&mut HostDb::new(host), &task).map_err(failed)
             }
-            "workflow.node.createTaskFromItem" => Ok(nodes::create_task_from_item(&args, |m, a| {
-                host.call(m, a).map_err(|e| e.message)
+            "workflow.node.createTaskFromItem" => Ok(nodes::create_task_from_item(&args, |item| {
+                self.upsert_item(host, item)
             })),
             "badges" => {
                 self.badges(host);

@@ -1,14 +1,16 @@
 //! The workflow step Tasks declares (`[[contributes.nodes]]`), run when a
 //! workflow reaches one: `createTaskFromItem` puts the connector item a run
-//! was started with on the board, through the Connectors built-in's
-//! `connection.upsertFromItem`, which knows the item's connection.
+//! was started with on the board. The Connectors built-in, which knows the
+//! item's connection, says how the item reads as a task
+//! (`connection.itemImport`); Tasks imports it itself, so its step never
+//! waits on a call back into it.
 
 use serde_json::{json, Map, Value};
 
 use crate::js;
 
-/// What `createTaskFromItem` asks `connection.upsertFromItem`, or the step's
-/// answer when the run carries no connector item.
+/// The item `createTaskFromItem` puts on the board, its connection and how it
+/// starts, or the step's answer when the run carries no connector item.
 pub fn upsert_params(request: &Value) -> Result<Value, Value> {
     let Some(item) = request
         .pointer("/context/connectorItem")
@@ -41,7 +43,7 @@ pub fn upsert_params(request: &Value) -> Result<Value, Value> {
     Ok(Value::Object(params))
 }
 
-/// The step's answer to what `connection.upsertFromItem` answered for `params`.
+/// The step's answer to what putting `params`' item on the board answered: `{taskId, created}`.
 pub fn answered(params: &Value, result: Result<Value, String>) -> Value {
     let item = params.get("item").unwrap_or(&Value::Null);
     match result {
@@ -80,11 +82,11 @@ pub fn answered(params: &Value, result: Result<Value, String>) -> Value {
 /// brought up to date, in the step's project or its connection's.
 pub fn create_task_from_item(
     request: &Value,
-    mut call: impl FnMut(&str, Value) -> Result<Value, String>,
+    upsert: impl FnOnce(Value) -> Result<Value, String>,
 ) -> Value {
     match upsert_params(request) {
         Ok(params) => {
-            let result = call("connection.upsertFromItem", params.clone());
+            let result = upsert(params.clone());
             answered(&params, result)
         }
         Err(skipped) => skipped,
@@ -97,23 +99,23 @@ mod tests {
 
     #[test]
     fn imports_the_runs_item_or_skips_a_run_without_one() {
-        let skipped = create_task_from_item(&json!({ "context": {} }), |_, _| unreachable!());
+        let skipped = create_task_from_item(&json!({ "context": {} }), |_| unreachable!());
         assert_eq!(skipped["status"], "skipped");
         let request = json!({
             "context": { "connectorItem": { "connectionId": "c", "externalId": 7, "title": "x".repeat(70) } },
             "raw": { "project": "app", "initialStatus": "todo" },
         });
         let mut asked = Vec::new();
-        let answer = create_task_from_item(&request, |m, a| {
-            asked.push((m.to_owned(), a));
+        let answer = create_task_from_item(&request, |a| {
+            asked.push(a);
             Ok(json!({ "taskId": "t1", "created": true }))
         });
-        assert_eq!(asked[0].0, "connection.upsertFromItem");
-        assert_eq!(asked[0].1["project"], "app");
+        assert_eq!(asked[0]["project"], "app");
+        assert_eq!(asked[0]["connectionId"], "c");
         assert_eq!(answer["status"], "success");
         assert_eq!(answer["output"], format!("Imported #7 \"{}...\"", "x".repeat(57)));
         assert!(answer["logs"].as_str().unwrap().ends_with("(no url)\nTaskId: t1"));
-        let failed = create_task_from_item(&request, |_, _| Err("gone".into()));
+        let failed = create_task_from_item(&request, |_| Err("gone".into()));
         assert_eq!(failed, json!({ "status": "error", "error": "gone" }));
     }
 }

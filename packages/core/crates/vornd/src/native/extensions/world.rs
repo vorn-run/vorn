@@ -448,15 +448,11 @@ impl World for Wired {
                     task_changed(&native, &args).await;
                     Ok(Value::Null)
                 }
-                "connection.upsertFromItem" => {
+                "connection.itemImport" | "connection.synced" => {
                     let connectors = native.connectors().cloned().ok_or_else(|| {
                         ExtError::new("unsupported", "this vornd keeps no connections")
                     })?;
-                    match connectors.answer("connection:upsertFromItem", args).await {
-                        NativeAnswer::Result(v) => Ok(v),
-                        NativeAnswer::Void | NativeAnswer::Unanswered => Ok(Value::Null),
-                        NativeAnswer::Error(e) => Err(ExtError::new("failed", e)),
-                    }
+                    connectors.items(m, &args).await
                 }
                 "workflow.fire" => {
                     let work = native.work().cloned().ok_or_else(|| {

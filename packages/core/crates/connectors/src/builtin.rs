@@ -1408,6 +1408,22 @@ impl Connectors {
     // ---- items ----
 
     async fn upsert_from_item(&self, params: &Value) -> Result<Option<Value>, String> {
+        let args = self.item_import(params).await?;
+        let answered = self.api("task.importItems", args.clone()).await?;
+        let result = answered
+            .as_array()
+            .and_then(|a| a.last())
+            .cloned()
+            .unwrap_or(Value::Null);
+        self.synced(&args).await?;
+        Ok(Some(result))
+    }
+
+    /// `connection.itemImport`: what `task.importItems` takes to put one item
+    /// of a connection on the board, in the step's project or the
+    /// connection's, read without writing anything. Tasks imports it itself,
+    /// so its own step never waits on a call back into it.
+    pub async fn item_import(&self, params: &Value) -> Result<Value, String> {
         let id = params
             .get("connectionId")
             .and_then(Value::as_str)
@@ -1443,16 +1459,18 @@ impl Connectors {
             .map(vorn_extensions::js::to_string)
             .unwrap_or_default();
         let status = params.get("initialStatus").cloned().unwrap_or(Value::Null);
-        let mut answered = self
-            .import_items(&conn, &project, vec![(item_fields, status)])
-            .await?;
-        let result = answered.pop().unwrap_or(Value::Null);
+        Ok(import_args(&conn, &project, vec![(item_fields, status)]))
+    }
+
+    /// `connection.synced`: the connection whose items `args` imported was synced now.
+    pub async fn synced(&self, args: &Value) -> Result<(), String> {
+        let id = text(args, "connectionId").to_owned();
         let mut updates = Map::new();
-        updates.insert("lastSyncAt".into(), json!(now));
+        updates.insert("lastSyncAt".into(), json!(now_iso()));
         self.store(move |st| conns::update(st, &id, updates, &[]))
             .await?;
         self.changed();
-        Ok(Some(result))
+        Ok(())
     }
 
     /// `connection:backfill`: everything a connection's trigger returns, from the start, on the board.
@@ -1529,24 +1547,9 @@ impl Connectors {
         project: &str,
         items: Vec<(Item, Value)>,
     ) -> Result<Vec<Value>, String> {
-        let items: Vec<Value> = items
-            .into_iter()
-            .map(|(i, status)| {
-                json!({
-                    "externalId": i.external_id, "title": i.title, "description": i.description,
-                    "externalUrl": i.external_url, "statusRaw": i.status_raw,
-                    "updatedAt": i.updated_at, "status": status,
-                })
-            })
-            .collect();
-        let args = json!({
-            "connectionId": text(conn, "id"),
-            "connectorId": conn.get("connectorId").cloned().unwrap_or(Value::Null),
-            "sourceConnectorId": conns::connector_id_of(conn),
-            "project": project,
-            "items": items,
-        });
-        let answered = self.api("task.importItems", args).await?;
+        let answered = self
+            .api("task.importItems", import_args(conn, project, items))
+            .await?;
         Ok(answered.as_array().cloned().unwrap_or_default())
     }
 
@@ -2289,6 +2292,27 @@ struct Spawn {
     name: String,
     /// A browser connector's sign-in, when it acts through a window.
     browser: Option<Value>,
+}
+
+/// What `task.importItems` takes to put `items` of connection `conn` on the board in `project`.
+fn import_args(conn: &Value, project: &str, items: Vec<(Item, Value)>) -> Value {
+    let items: Vec<Value> = items
+        .into_iter()
+        .map(|(i, status)| {
+            json!({
+                "externalId": i.external_id, "title": i.title, "description": i.description,
+                "externalUrl": i.external_url, "statusRaw": i.status_raw,
+                "updatedAt": i.updated_at, "status": status,
+            })
+        })
+        .collect();
+    json!({
+        "connectionId": text(conn, "id"),
+        "connectorId": conn.get("connectorId").cloned().unwrap_or(Value::Null),
+        "sourceConnectorId": conns::connector_id_of(conn),
+        "project": project,
+        "items": items,
+    })
 }
 
 #[cfg(test)]
