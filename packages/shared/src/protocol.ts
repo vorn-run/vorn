@@ -587,7 +587,6 @@ export interface RequestMethods {
     result: WorkflowExecution | null
   }
 
-
   /** Start a failed run again from where it failed, keeping what succeeded. */
   'workflow:retryRun': { params: { runId: string }; result: WorkflowExecution | null }
   /** Start the same run over from the beginning, with the same context. */
