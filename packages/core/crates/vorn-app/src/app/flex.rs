@@ -125,7 +125,7 @@ impl App {
             .tree
             .take()
             .and_then(|t| t.retain(&|id| members.iter().any(|(m, _)| m == id)));
-        if let Some(t) = tree.take().filter(|_| beside) {
+        if let Some(t) = tree.take_if(|_| beside) {
             let held = t.leaves().len();
             let rest: Vec<Node> = members
                 .iter()

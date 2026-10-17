@@ -162,10 +162,12 @@ fn the_flexible_grid_splits_resizes_and_is_kept() {
 
     // A new card splits the selected one; closing it gives its room back.
     shot.click(&mut app, App::control("card-box", &Act::Select(a.clone())));
+    let (held, split) = (tree(&app), ratio(&app));
     let d = new_shell(&mut shot, &mut app);
     shot.until(&mut app, "the new card in the tree", |app, _| {
         tree(app).filter(|t| t.contains(&d)).map(|_| ())
     });
+    assert_eq!(ratio(&app), split, "a new card keeps the dragged split");
     shot.save(&mut app, "flexible-four");
     shot.hover(&mut app, term_id(&d));
     shot.click(&mut app, App::control("card", &Act::AskClose(d.clone())));
@@ -176,6 +178,7 @@ fn the_flexible_grid_splits_resizes_and_is_kept() {
     shot.until(&mut app, "its pane gone", |app, _| {
         tree(app).filter(|t| !t.contains(&d)).map(|_| ())
     });
+    assert_eq!(tree(&app), held, "closing it gives its room back");
 
     // The keyboard moves the divider and evens the panes.
     shot.click(&mut app, App::control("card-box", &Act::Select(a.clone())));
