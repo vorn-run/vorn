@@ -34,8 +34,8 @@ vorn-adapters = { path = "../adapters" }
 # model, and WASI preview 2 with nothing granted. The compiler is a separate
 # feature that only the vorn command turns on, so vornd runs only components
 # Vorn already compiled into its cache.
-wasmtime = { version = "=49.0.2", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
-wasmtime-wasi = { version = "=49.0.2", optional = true, default-features = false, features = ["p2"] }
+wasmtime = { version = "=49.0.3", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
+wasmtime-wasi = { version = "=49.0.3", optional = true, default-features = false, features = ["p2"] }
 # Names a compiled component by the bytes it was compiled from; already in the tree.
 sha2 = { version = "0.10", optional = true, default-features = false }
 
