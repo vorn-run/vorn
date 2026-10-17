@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn saving_keeps_intent_only() {
-        let dir = std::env::temp_dir().join(format!("vorn-panes-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vorn-browser-panes-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("panes.json");
         let mut p = Panes::default();
