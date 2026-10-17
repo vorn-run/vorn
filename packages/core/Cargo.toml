@@ -47,6 +47,7 @@ members = [
   "extensions/worktrees",
   "extensions/widget",
   "extensions/tasks",
+  "extensions/workflow-editor",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",

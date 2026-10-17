@@ -231,8 +231,10 @@ impl Host for VorndHost {
 
     fn publish(&self, run: &WorkflowExecution) {
         self.broadcast("workflow:runUpdated", without_definition(run));
-        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
-            editor.run_changed(run);
+        if let Some(native) = self.native.upgrade() {
+            if let Some(told) = native.waiting().changed(run) {
+                native.events().emit(super::waiting::WORKFLOW_GATES, || told);
+            }
         }
     }
 

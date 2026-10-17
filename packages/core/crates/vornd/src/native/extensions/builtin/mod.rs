@@ -8,7 +8,6 @@
 pub mod agents;
 pub mod artifacts;
 pub mod connectors;
-pub mod editor;
 pub mod tasks;
 pub mod wasm;
 pub mod workflows;
@@ -38,7 +37,7 @@ pub const SHIPPED: &[&str] = &[
     vorn_connectors::builtin::ID,
     tasks::ID,
     vorn_workflows::ID,
-    editor::ID,
+    wasm::EDITOR,
 ];
 
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
@@ -366,14 +365,6 @@ impl Builtins {
         }
         Some(e.builtin.handle(&e.api, action, args).await)
     }
-}
-
-/// A string argument, or the error that says it is missing.
-pub(crate) fn arg<'a>(args: &'a Value, key: &str, action: &str) -> Result<&'a str, ExtError> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| ExtError::new("bad-request", format!("{action} takes {key}")))
 }
 
 pub(crate) fn unknown(name: &str, action: &str) -> ExtError {

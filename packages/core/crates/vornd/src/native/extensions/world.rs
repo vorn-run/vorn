@@ -491,6 +491,38 @@ impl World for Wired {
                 "workflow.list" => {
                     on_store(&native, m, |s| s.call("dbListWorkflows", json!([]))).await
                 }
+                "workflow.gates" => {
+                    let waiting = ask(&native, "workflowRun:listWaiting", Value::Null).await?;
+                    let workflows = ask(&native, "workflow:list", Value::Null).await?;
+                    let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+                    Ok(Value::Array(crate::native::work::waiting::all_rows(
+                        &list(&waiting),
+                        &list(&workflows),
+                    )))
+                }
+                "workflow.run" => {
+                    let id = text(&args, "workflowId")
+                        .ok_or_else(|| needs(m, "the workflowId to run"))?;
+                    let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
+                    ask(
+                        &native,
+                        "workflow:runManual",
+                        json!({ "workflowId": id, "inputs": inputs }),
+                    )
+                    .await
+                }
+                "workflow.resolveGate" => {
+                    let run = text(&args, "runId").ok_or_else(|| needs(m, "the runId"))?;
+                    let node = text(&args, "nodeId").ok_or_else(|| needs(m, "the nodeId"))?;
+                    let decision = text(&args, "decision")
+                        .ok_or_else(|| needs(m, "the decision: approve or reject"))?;
+                    ask(
+                        &native,
+                        "workflow:resolveGate",
+                        json!({ "runId": run, "nodeId": node, "decision": decision }),
+                    )
+                    .await
+                }
                 "workflow.seed" => {
                     let workflows = args
                         .get("workflows")

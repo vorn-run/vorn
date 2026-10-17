@@ -8,6 +8,16 @@ description = "The Workflows view: its runs and the editor, where each step is a
 [declares]
 uses = ["workflows.read", "workflows.write"]
 
+[service]
+component = "workflow-editor.wasm"
+events = ["workflow.changed", "workflow.gates"]
+
+[[contributes.views]]
+id = "workflows"
+title = "Workflows"
+icon = "workflow"
+tree = true
+
 [[contributes.menus]]
 id = "run"
 title = "Run workflow"

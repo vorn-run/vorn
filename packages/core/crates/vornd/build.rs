@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 /// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 3] = [
+const SHIPPED: [(&str, &str, &str); 4] = [
     (
         "vorn-ext-worktrees",
         "extensions/worktrees",
@@ -13,6 +13,11 @@ const SHIPPED: [(&str, &str, &str); 3] = [
     ),
     ("vorn-ext-widget", "extensions/widget", "widget.wasm"),
     ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
+    (
+        "vorn-ext-workflow-editor",
+        "extensions/workflow-editor",
+        "workflow-editor.wasm",
+    ),
 ];
 
 fn main() {

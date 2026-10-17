@@ -194,7 +194,7 @@ impl Screen<'_> {
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows if workflows::is_off(self) => workflows::off(),
-            MainView::Workflows => workflows::landing(self),
+            MainView::Workflows => workflows::view(self),
         };
         let mut col = div().col().grow().min_h(0.0);
         if st.view == MainView::Sessions {

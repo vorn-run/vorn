@@ -7193,6 +7193,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-workflow-editor"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-worktrees"
 version = "0.0.0"
 dependencies = [

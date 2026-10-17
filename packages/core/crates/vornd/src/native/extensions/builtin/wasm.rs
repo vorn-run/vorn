@@ -24,7 +24,12 @@ pub struct Component {
     /// The component, built for wasm32-wasip2.
     pub wasm: &'static [u8],
     pub on_by_default: bool,
+    /// What it is called as it is switched on, to publish what it shows; none starts it at its first use.
+    pub start: Option<&'static str>,
 }
+
+/// The Workflow editor's id.
+pub const EDITOR: &str = "vorn.workflow-editor";
 
 /// Worktree cleanup (`packages/core/extensions/worktrees`).
 pub fn worktrees() -> Component {
@@ -33,6 +38,7 @@ pub fn worktrees() -> Component {
         events: &[vorn_extensions::events::WORKTREE_IDLE],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/worktrees.wasm")),
         on_by_default: true,
+        start: None,
     }
 }
 
@@ -52,6 +58,20 @@ pub fn widget() -> Component {
         ],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/widget.wasm")),
         on_by_default: false,
+        start: None,
+    }
+}
+
+/// The Workflow editor (`packages/core/extensions/workflow-editor`): its
+/// menus and gates are published as it is switched on.
+pub fn workflow_editor() -> Component {
+    use vorn_extensions::events::{WORKFLOW_CHANGED, WORKFLOW_GATES};
+    Component {
+        manifest: include_str!("../../../../../../extensions/workflow-editor/vorn-extension.toml"),
+        events: &[WORKFLOW_CHANGED, WORKFLOW_GATES],
+        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/workflow-editor.wasm")),
+        on_by_default: true,
+        start: Some("refresh"),
     }
 }
 
@@ -77,10 +97,24 @@ impl Builtin for Component {
         self.on_by_default
     }
 
-    /// Nothing until it is used: every vornd start would otherwise compile it,
-    /// and the first call or event compiles it into the cache in its place.
-    fn start<'a>(&'a self, _api: &'a Api) -> BoxFuture<'a, ()> {
-        async {}.boxed()
+    /// Nothing until it is used, unless it publishes what it shows from the
+    /// start: the first call or event compiles it into the cache.
+    fn start<'a>(&'a self, api: &'a Api) -> BoxFuture<'a, ()> {
+        async move {
+            let Some(action) = self.start else { return };
+            let ctx = CallCtx {
+                caller: "client".to_owned(),
+                project: None,
+            };
+            if let Err(e) = api
+                .router
+                .call_bundled(&self.bundled(api), action, Value::Null, ctx)
+                .await
+            {
+                tracing::warn!(extension = %api.manifest.id, error = %e.message, "could not start");
+            }
+        }
+        .boxed()
     }
 
     fn handle<'a>(

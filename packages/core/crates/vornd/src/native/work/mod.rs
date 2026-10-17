@@ -15,6 +15,7 @@ pub mod host;
 pub mod routes;
 pub mod schedule;
 pub mod types;
+pub mod waiting;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
@@ -384,8 +385,15 @@ impl Work {
     fn workflows_changed(&self) {
         self.host().signal_change();
         self.rearm.notify_one();
-        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
-            tokio::spawn(async move { editor.workflows_changed().await });
+        self.tell_changed();
+    }
+
+    /// Tells whoever follows the workflows (the Workflow editor) that they changed.
+    fn tell_changed(&self) {
+        if let Some(native) = self.native.upgrade() {
+            native
+                .events()
+                .emit(waiting::WORKFLOW_CHANGED, || serde_json::json!({}));
         }
     }
 
@@ -1231,9 +1239,7 @@ impl Work {
     /// The workflows changed elsewhere: the scheduler reads them again.
     pub fn workflows_changed_elsewhere(&self) {
         self.rearm.notify_one();
-        if let Some(editor) = self.native.upgrade().and_then(|n| n.editor().cloned()) {
-            tokio::spawn(async move { editor.workflows_changed().await });
-        }
+        self.tell_changed();
     }
 
     /// How many schedules are armed, which keeps an idle server up.

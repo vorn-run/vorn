@@ -298,6 +298,60 @@ fn dot_status(run: &Value) -> &str {
     }
 }
 
+/// The Workflows view: the Workflow editor's tree, its `graph` the view the
+/// app draws; the view itself until the tree has come.
+pub fn view(s: &Screen<'_>) -> El {
+    use vorn_components::tree::{self, Ev, TreeBind};
+
+    struct Graph<'s, 'a> {
+        tree: crate::screen::points::TreeBinder<'s>,
+        s: &'s Screen<'a>,
+    }
+
+    impl TreeBind for Graph<'_, '_> {
+        fn on(&self, ev: Ev) -> crate::ui::Id {
+            self.tree.on(ev)
+        }
+        fn confirming(&self, id: crate::ui::Id) -> Option<(crate::ui::Id, crate::ui::Id)> {
+            self.tree.confirming(id)
+        }
+        fn menu_open(&self, id: crate::ui::Id) -> bool {
+            self.tree.menu_open(id)
+        }
+        fn checked(&self, list: &str, row: &str) -> bool {
+            self.tree.checked(list, row)
+        }
+        fn graph(&self) -> Option<El> {
+            Some(landing(self.s))
+        }
+    }
+
+    let point = s.st.points.find(
+        crate::workflows::EDITOR,
+        crate::points::kind::VIEWS,
+        "workflows",
+    );
+    let Some(p) = point else {
+        return landing(s);
+    };
+    let key = p.key();
+    match s.st.points.trees.get(&key) {
+        Some(Ok(t)) => {
+            let bind = Graph {
+                tree: crate::screen::points::TreeBinder {
+                    acts: s.acts,
+                    points: &s.st.points,
+                    key: &key,
+                },
+                s,
+            };
+            tree::view(s.ui, t, &bind)
+        }
+        Some(Err(errors)) => tree::invalid(&p.place(), errors),
+        None => landing(s),
+    }
+}
+
 /// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
 pub fn is_off(s: &Screen<'_>) -> bool {
     s.st.points.builtins.iter().any(|b| {
