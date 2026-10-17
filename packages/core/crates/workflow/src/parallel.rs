@@ -86,13 +86,17 @@ impl<H: Host> Engine<H> {
         let fed: HashSet<&str> = body.edges.iter().map(|e| e.source.as_str()).collect();
         {
             let mut r = lock(run);
+            // A loop run again (a gate sent work back) starts its items afresh.
+            r.node_states.retain(|s| {
+                !s.node_id
+                    .rsplit_once('#')
+                    .is_some_and(|(step, n)| members.contains(step) && n.parse::<u32>().is_ok())
+            });
             for number in 1..=count {
                 for m in &body.members {
                     let id = item_node_id(&m.id, number);
-                    if r.node_state(&id).is_none() {
-                        r.node_states
-                            .push(graph::blank_pass_state(&id, Some(number)));
-                    }
+                    r.node_states
+                        .push(graph::blank_pass_state(&id, Some(number)));
                 }
             }
             r.update(&node.id, |s| {

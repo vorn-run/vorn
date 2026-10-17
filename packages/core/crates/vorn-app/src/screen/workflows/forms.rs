@@ -2990,8 +2990,12 @@ fn loop_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             help("This is what ends the loop, not a safety net: an agent asked whether its own work is good enough tends to say yes. Capped at 10.", 6.0),
         ]));
     }
-    // Items run side by side all run, so there is no pass to stop after.
-    if mode == "forEach" && parallel {
+    let until_set = n
+        .pointer("/config/until/variable")
+        .and_then(Value::as_str)
+        .is_some_and(|v| !v.trim().is_empty());
+    // Items run side by side all run; a condition left from before stays shown so it can be cleared.
+    if mode == "forEach" && parallel && !until_set {
         return section(out);
     }
     let ops = [

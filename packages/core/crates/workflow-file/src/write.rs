@@ -223,7 +223,7 @@ impl Writer<'_> {
         for (i, e) in edges.iter().enumerate() {
             let token = EdgeOf::of(e).and_then(|edge| {
                 let token = edge.token()?;
-                ids.contains(&Some(edge.target))
+                (ids.contains(&Some(edge.target)) && ids.contains(&Some(edge.source)))
                     .then_some((edge.target, token))
             });
             match token {

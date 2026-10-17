@@ -439,3 +439,17 @@ fn any_config_reads_back_as_written() {
         assert_eq!(update(&text, &def, &none()), text, "seed {seed}");
     }
 }
+
+#[test]
+fn an_edge_from_a_step_that_is_gone_reads_back() {
+    let def = json!({ "name": "W", "nodes": [
+        { "id": "t", "type": "trigger", "config": { "triggerType": "manual" } },
+        { "id": "b", "type": "script", "config": {} }
+    ], "edges": [{ "id": "x-b", "source": "x", "target": "b" }] });
+    let text = write(&def, &none());
+    assert!(
+        text.contains("[[edge]]\nid = \"x-b\"\nfrom = \"x\""),
+        "{text}"
+    );
+    assert_eq!(back(&def, &none()), def);
+}
