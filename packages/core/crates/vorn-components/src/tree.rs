@@ -4,6 +4,7 @@ use vorn_tree::{
     ButtonStyle, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token, Tone,
 };
 use vornui::accesskit::Role;
+use vornui::native::Sem;
 use vornui::theme::{color, radius, text as size};
 use vornui::widgets::{self, Tone as ConfirmTone};
 use vornui::{div, text, Action, El, Id, Place, Rgba, Sense, Ui};
@@ -135,6 +136,15 @@ struct Listing<'a> {
 }
 
 impl Cx<'_> {
+    /// `el` tagged for a native backend; other surfaces skip building the tag.
+    fn sem(&self, el: El, s: impl FnOnce() -> Sem) -> El {
+        if self.ui.is_native() {
+            el.sem(s())
+        } else {
+            el
+        }
+    }
+
     fn node(&self, n: &Node) -> El {
         let el = match &n.kind {
             Kind::Box => return self.boxed(&n.props, n.children.iter().map(|k| self.node(k))),
@@ -146,6 +156,7 @@ impl Cx<'_> {
             } => {
                 let mut e = styled(t, *style, tn.map(tone));
                 e = if *wrap { e.wrapping() } else { e.truncate() };
+                let e = self.sem(e, || Sem::Text(text_role(*style, *tn)));
                 match style {
                     TextStyle::Number => {
                         div().row().justify_end().w(NUMBER_WIDTH).shrink0().child(e)
@@ -156,7 +167,12 @@ impl Cx<'_> {
                 }
             }
             Kind::Icon { name, tone: tn } => {
-                self.icon(name, 14.0, tn.map_or(color::GRAY_400, tone))
+                let e = self.icon(name, 14.0, tn.map_or(color::GRAY_400, tone));
+                self.sem(e, || Sem::Icon {
+                    name: name.clone(),
+                    tone: tn.map_or("", sem_tone),
+                    svg: None,
+                })
             }
             Kind::Shape {
                 svg,
@@ -167,11 +183,16 @@ impl Cx<'_> {
             } => {
                 let ink = ink.map_or(color::GRAY_300, paint);
                 let name = n.props.label.as_deref().unwrap_or(glyph.as_str());
-                vornui::shape(svg.as_str(), *w, *h, ink)
+                let e = vornui::shape(svg.as_str(), *w, *h, ink)
                     .glyph(glyph.as_str())
                     .glyph_tint(ink)
                     .shrink0()
-                    .role(Role::Image, name)
+                    .role(Role::Image, name);
+                self.sem(e, || Sem::Icon {
+                    name: name.to_owned(),
+                    tone: "",
+                    svg: Some(svg.clone()),
+                })
             }
             Kind::Button {
                 label,
@@ -199,15 +220,17 @@ impl Cx<'_> {
                 let input = widgets::text_input(self.ui, id, name, placeholder)
                     .grow()
                     .min_w0();
-                if *secret {
-                    input.secure()
-                } else {
-                    input
-                }
+                let input = if *secret { input.secure() } else { input };
+                self.sem(input, || Sem::Field(name.to_owned()))
             }
             Kind::Choice { options } => self.choice(n, options),
-            Kind::Badge(b) => badge(&b.text, b.tone),
-            Kind::Notice { text: t, tone: tn } => notice(t, *tn),
+            Kind::Badge(b) => self.sem(badge(&b.text, b.tone), || Sem::Badge {
+                value: b.text.clone(),
+                tone: sem_tone(b.tone),
+            }),
+            Kind::Notice { text: t, tone: tn } => {
+                self.sem(notice(t, *tn), || Sem::Notice(tn.map_or("", sem_tone)))
+            }
             Kind::Stat {
                 value,
                 label,
@@ -217,6 +240,7 @@ impl Cx<'_> {
             } => self.stat(value, label.as_deref(), icon.as_deref(), *tn, *end),
             Kind::Meter(m) => self.meter(m, false).unwrap_or_else(div),
             Kind::Section { title } => div()
+                .sem(Sem::Section(title.clone()))
                 .col()
                 .gap(12.0)
                 .min_w0()
@@ -226,10 +250,12 @@ impl Cx<'_> {
                         .weight(size::MEDIUM)
                         .tracking(0.05)
                         .truncate()
-                        .role(Role::Heading, title.as_str()),
+                        .role(Role::Heading, title.as_str())
+                        .sem(Sem::Hidden),
                 )
                 .children(n.children.iter().map(|k| self.node(k))),
             Kind::Toolbar => div()
+                .sem(Sem::Toolbar)
                 .row()
                 .items_center()
                 .justify_end()
@@ -267,7 +293,11 @@ impl Cx<'_> {
                 .min_w0()
                 .children(n.children.iter().map(|c| self.column(c))),
             Kind::Column { .. } => self.column(n),
-            Kind::Divider => div().w_full().h(0.0).border_top(1.0, Rgba::white(0.08)),
+            Kind::Divider => div()
+                .w_full()
+                .h(0.0)
+                .border_top(1.0, Rgba::white(0.08))
+                .sem(Sem::Divider),
         };
         sized(el, &n.props)
     }
@@ -300,14 +330,16 @@ impl Cx<'_> {
         if let Some(l) = &p.label {
             b = b.role(Role::Group, l.as_str());
         }
+        b = self.sem(b, || if p.row { Sem::Row } else { Sem::Column });
         sized(b.gap(p.gap.unwrap_or(0.0)).children(kids), p)
     }
 
     fn icon(&self, name: &str, px: f32, ink: Rgba) -> El {
-        match self.bind.icon(name, px) {
+        let e = match self.bind.icon(name, px) {
             Some(drawn) => drawn.shrink0(),
             None => crate::lucide(name, px, 2.0, ink).shrink0(),
-        }
+        };
+        self.sem(e, || Sem::icon(name))
     }
 
     /// A button and its id; with `confirm`, it asks inline before it counts.
@@ -332,7 +364,7 @@ impl Cx<'_> {
             ButtonStyle::Primary => Rgba::white(0.10).mix(Rgba::white(0.15), hot),
             _ => Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot),
         };
-        let mut b = div()
+        let b = div()
             .id(id)
             .on(Action::Click)
             .row()
@@ -345,6 +377,11 @@ impl Cx<'_> {
             .bg(fill)
             .ring(radius::SM)
             .role(Role::Button, name);
+        let mut b = self.sem(b, || Sem::Button {
+            style: sem_style(style),
+            confirm: confirm.map(str::to_owned),
+            icon: icon.map(str::to_owned),
+        });
         if let Some(i) = icon {
             b = b.child(self.icon(i, 12.0, ink));
         }
@@ -376,6 +413,7 @@ impl Cx<'_> {
             .gap(4.0)
             .min_w0()
             .role(Role::RadioGroup, name);
+        let line = self.sem(line, || Sem::Choice);
         line.children(options.iter().map(|o| {
             let event = Event {
                 id: node.to_owned(),
@@ -424,6 +462,18 @@ impl Cx<'_> {
         end: bool,
     ) -> El {
         let label = label.filter(|l| !l.is_empty());
+        if self.ui.is_native() {
+            return div()
+                .sem(Sem::Entry {
+                    title: label.unwrap_or(value).to_owned(),
+                    detail: String::new(),
+                })
+                .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500)))
+                .child_if(label.map(|_| {
+                    let e = text(value, size::XS.0, color::GRAY_100);
+                    e.sem(Sem::Text(text_role(TextStyle::Number, t)))
+                }));
+        }
         let said = label.map_or_else(|| value.to_owned(), |l| format!("{l}: {value}"));
         let label = label.map(|l| {
             div()
@@ -507,6 +557,18 @@ impl Cx<'_> {
                 }
             })
             .collect();
+        let aside = m.aside.as_deref().filter(|a| !a.is_empty());
+        if self.ui.is_native() {
+            // A platform shows the shares as a line; an entry's short bar repeats its figure.
+            let line = said
+                .iter()
+                .map(String::as_str)
+                .chain(aside)
+                .collect::<Vec<_>>();
+            return (!short).then(|| {
+                text(line.join(" · "), size::XS.0, color::GRAY_500).sem(Sem::Text("secondary"))
+            });
+        }
         let cells = self.ui.is_cells();
         let bar = if cells {
             let width = if short {
@@ -547,7 +609,6 @@ impl Cx<'_> {
         let labelled: Vec<_> = (parts.iter().enumerate())
             .filter(|(_, (_, _, l))| !l.is_empty())
             .collect();
-        let aside = m.aside.as_deref().filter(|a| !a.is_empty());
         if labelled.is_empty() && aside.is_none() {
             return Some(bar);
         }
@@ -618,7 +679,7 @@ impl Cx<'_> {
             checked,
         };
         let head = select.then(|| self.list_head(&l, &can, bulk));
-        let body = if lazy {
+        let body = if lazy && !self.ui.is_native() {
             self.lazy(n, &l)
         } else {
             let mut col = div().col().gap(24.0).min_w0();
@@ -639,13 +700,14 @@ impl Cx<'_> {
             col
         };
         let name = n.props.label.as_deref().unwrap_or(id);
-        div()
+        let list = div()
             .col()
             .gap(8.0)
             .min_w0()
             .role(Role::List, name)
             .child_if(head)
-            .child(body)
+            .child(body);
+        self.sem(list, || Sem::List)
     }
 
     /// A list's head: a box that checks every row, the count checked and the bulk buttons.
@@ -684,6 +746,7 @@ impl Cx<'_> {
                         .silent(),
                 ),
             );
+        head = self.sem(head, || Sem::Row);
         if some {
             head = head.children(bulk.iter().filter_map(|b| {
                 let Kind::Button {
@@ -752,12 +815,13 @@ impl Cx<'_> {
             .ring(radius::SM)
             .role(Role::CheckBox, name)
             .toggled(on)
+            .sem(Sem::Select)
             .child(mark)
     }
 
     /// Entries in one box, a hairline between each.
     fn items(&self, entries: Vec<&Node>, l: &Listing<'_>) -> El {
-        div()
+        let items = div()
             .col()
             .min_w0()
             .rounded(radius::SM)
@@ -774,7 +838,8 @@ impl Cx<'_> {
                 } else {
                     e.border_top(1.0, Rgba::white(0.06))
                 }
-            }))
+            }));
+        self.sem(items, || Sem::List)
     }
 
     /// A group: its heading and its entries.
@@ -784,11 +849,18 @@ impl Cx<'_> {
             _ => "",
         };
         let kids: Vec<&Node> = n.children.iter().collect();
-        div()
-            .col()
-            .gap(8.0)
-            .min_w0()
-            .role(Role::Group, heading)
+        let group = div().col().gap(8.0).min_w0().role(Role::Group, heading);
+        let group = self.sem(group, || Sem::Section(heading.to_owned()));
+        if self.ui.is_native() {
+            // A platform's section lists the group's entries itself, under its heading.
+            return group
+                .child(self.group_head(n))
+                .children(kids.into_iter().map(|k| match &k.kind {
+                    Kind::Entry(e) => self.entry(k, e, Some(l)),
+                    _ => self.node(k),
+                }));
+        }
+        group
             .child(self.group_head(n))
             .child_if((!kids.is_empty()).then(|| self.items(kids, l)))
     }
@@ -812,6 +884,14 @@ impl Cx<'_> {
             .weight(size::MEDIUM)
             .truncate()
             .role(Role::Heading, heading.as_str());
+        if self.ui.is_native() {
+            let quiet = |s: &str| text(s, size::XS.0, color::GRAY_500).sem(Sem::Text("secondary"));
+            return div()
+                .child_if(icon.as_deref().map(|i| self.icon(i, 14.0, color::GRAY_400)))
+                .child_if(note.map(quiet))
+                .child_if(aside.as_deref().filter(|a| !a.is_empty()).map(quiet))
+                .children(actions.iter().map(|b| self.node(b)));
+        }
         let mut head = div().row().items_center().gap(8.0).min_w0();
         match icon {
             Some(i) => {
@@ -903,12 +983,105 @@ impl Cx<'_> {
             })
     }
 
+    /// Button node `b` as an entry's action: its id, its box and its style.
+    fn action(&self, b: &Node) -> Option<(Id, El, ButtonStyle)> {
+        let Kind::Button {
+            label,
+            icon,
+            style,
+            confirm,
+        } = &b.kind
+        else {
+            return None;
+        };
+        let bid = b.id.as_deref().unwrap_or_default();
+        let name = b.props.label.as_deref().unwrap_or(label);
+        let ev = send(bid, EventKind::Click, confirm.is_some());
+        let (id, el) = self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref());
+        Some((id, el, *style))
+    }
+
+    /// One entry as a platform's list row: its check, marks, figure, primary actions and the rest in its menu.
+    fn native_entry(&self, n: &Node, e: &Entry, l: Option<&Listing<'_>>, id: Id) -> El {
+        let node = key(n);
+        let detail: Vec<&str> = [e.code.as_deref(), e.detail.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .collect();
+        let check = l.filter(|l| l.select && e.selectable).map(|l| {
+            let on = l.checked.iter().any(|c| c == node);
+            let ev = Ev::Check {
+                list: l.id.to_owned(),
+                rows: vec![node.to_owned()],
+                on: !on,
+                all: false,
+            };
+            self.check(ev, on, &format!("Select {}", e.title))
+        });
+        let primary = |b: &&Node| {
+            matches!(
+                b.kind,
+                Kind::Button {
+                    style: ButtonStyle::Primary,
+                    ..
+                }
+            )
+        };
+        let menu: Vec<&Node> = (e.actions.iter().filter(|b| !primary(b)))
+            .chain(&e.more)
+            .collect();
+        let quiet = |s: &str| text(s, size::XS.0, color::GRAY_500).sem(Sem::Text("secondary"));
+        div()
+            .id(id)
+            .sem(Sem::Entry {
+                title: e.title.clone(),
+                detail: detail.join(" · "),
+            })
+            .child_if(check)
+            .child_if(
+                e.icon
+                    .as_deref()
+                    .map(|i| self.icon(i, 14.0, color::GRAY_400)),
+            )
+            .child_if(e.status.map(|t| {
+                div().sem(Sem::Status {
+                    value: tone_name(t).to_owned(),
+                    tone: sem_tone(t),
+                })
+            }))
+            .child_if(e.badge.as_ref().map(|b| {
+                badge(&b.text, b.tone).sem(Sem::Badge {
+                    value: b.text.clone(),
+                    tone: sem_tone(b.tone),
+                })
+            }))
+            .children(e.chips.iter().map(|c| quiet(c)))
+            .children(n.children.iter().map(|k| self.node(k)))
+            .child_if(
+                e.aside
+                    .as_deref()
+                    .map(|a| text(a, size::XS.0, color::GRAY_300).sem(Sem::Text("number"))),
+            )
+            .children(
+                e.actions
+                    .iter()
+                    .filter(primary)
+                    .filter_map(|b| self.action(b))
+                    .map(|(_, el, _)| el),
+            )
+            .child_if(self.more(node, &menu))
+    }
+
     /// One entry; its actions show on hover, and on cells join its more menu.
     fn entry(&self, n: &Node, e: &Entry, l: Option<&Listing<'_>>) -> El {
         let node = key(n);
         let id = self.bind.on(Ev::Hover {
             node: node.to_owned(),
         });
+        if self.ui.is_native() {
+            return self.native_entry(n, e, l, id);
+        }
         let hot = self.ui.hover(id);
         let cells = self.ui.is_cells();
         let check = l.filter(|l| l.select).map(|l| {
@@ -1026,21 +1199,10 @@ impl Cx<'_> {
         let mut acts = Vec::new();
         let mut menu: Vec<&Node> = e.more.iter().collect();
         for b in &e.actions {
-            let Kind::Button {
-                label,
-                icon,
-                style,
-                confirm,
-            } = &b.kind
-            else {
+            let Some((bid, el, style)) = self.action(b) else {
                 continue;
             };
-            let bid = b.id.as_deref().unwrap_or_default();
-            let name = b.props.label.as_deref().unwrap_or(label);
-            let ev = send(bid, EventKind::Click, confirm.is_some());
-            let (bid, el) =
-                self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref());
-            let pinned = *style == ButtonStyle::Primary
+            let pinned = style == ButtonStyle::Primary
                 || self.ui.key_focused(bid)
                 || self.bind.confirming(bid).is_some();
             if pinned {
@@ -1118,7 +1280,15 @@ impl Cx<'_> {
             if let (Some(q), Some(ids)) = (confirm, self.bind.confirming(id)) {
                 asking = Some((q.as_str(), shown, *style, ids));
             }
-            entries.push(self.menu_item(id, shown, *style, icon.as_deref()));
+            let item = self.menu_item(id, shown, *style, icon.as_deref());
+            entries.push(self.sem(item, || Sem::Button {
+                style: sem_style(*style),
+                confirm: confirm.clone(),
+                icon: icon.clone(),
+            }));
+        }
+        if self.ui.is_native() {
+            return Some(div().id(menu).sem(Sem::More).children(entries));
         }
         let hot = self.ui.hover(menu);
         let open = self.bind.menu_open(menu);
@@ -1272,6 +1442,38 @@ fn ask_tone(style: ButtonStyle) -> ConfirmTone {
         ConfirmTone::Danger
     } else {
         ConfirmTone::Neutral
+    }
+}
+
+/// Tone `t` as a native backend names it.
+fn sem_tone(t: Tone) -> &'static str {
+    match t {
+        Tone::Neutral => "muted",
+        Tone::Good => "good",
+        Tone::Warn => "warn",
+        Tone::Bad => "bad",
+        Tone::Info => "busy",
+        Tone::Accent => "lit",
+    }
+}
+
+fn sem_style(s: ButtonStyle) -> &'static str {
+    match s {
+        ButtonStyle::Plain => "plain",
+        ButtonStyle::Primary => "primary",
+        ButtonStyle::Danger => "danger",
+    }
+}
+
+/// The text role a native backend draws `style` in; bad text reads as an error.
+fn text_role(style: TextStyle, t: Option<Tone>) -> &'static str {
+    match (style, t) {
+        (_, Some(Tone::Bad)) => "error",
+        (TextStyle::Title | TextStyle::Heading, _) => "title",
+        (TextStyle::Body, _) => "body",
+        (TextStyle::Secondary, _) => "secondary",
+        (TextStyle::Mono, _) => "mono",
+        (TextStyle::Number, _) => "number",
     }
 }
 

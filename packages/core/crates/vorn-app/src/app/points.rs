@@ -252,14 +252,9 @@ impl App {
 
     /// Tells tree point `key`'s extension what happened; a bulk button's checks go with it.
     fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
-        let Some(p) = self.st.points.get(key) else {
+        let Some(params) = self.st.points.tell(key, event) else {
             return;
         };
-        let params = points::tree_event_params(p, event);
-        if !event.selected.is_empty() {
-            let pts = &mut self.st.points;
-            pts.checked.retain(|(k, _), _| k != key);
-        }
         self.call(
             Call::Point(PointCall::Told(key.to_owned())),
             "extension:call",
@@ -316,17 +311,7 @@ impl App {
                 self.st.points.rendered(&key, answer);
             }
             PointCall::Told(key) => {
-                let patched = answer.as_ref().ok().and_then(|v| v.get("patch")).map(|p| {
-                    let pts = &mut self.st.points;
-                    let patches = serde_json::from_value::<Vec<vorn_tree::Patch>>(p.clone());
-                    match (pts.trees.get_mut(&key), patches) {
-                        (Some(Ok(tree)), Ok(patches)) => vorn_tree::patch(tree, &patches).is_ok(),
-                        _ => false,
-                    }
-                });
-                if patched != Some(true) {
-                    self.st.points.stale_trees.insert(key);
-                }
+                self.st.points.told(&key, answer.as_ref().ok());
                 self.point_answered(PointCall::Called, answer);
             }
             PointCall::Called => match answer {
@@ -498,17 +483,13 @@ impl App {
         else {
             return;
         };
-        let Some(p) = self.st.points.get(&key).filter(|p| p.tree) else {
-            return;
-        };
-        let pts = &self.st.points;
-        let want = !pts.trees.contains_key(&key) || pts.stale_trees.contains(&key);
         let asking = |c: &Call| matches!(c, Call::Point(PointCall::Render(k)) if *k == key);
-        if !want || self.calls.iter().any(|(c, _)| asking(c)) {
+        if self.calls.iter().any(|(c, _)| asking(c)) {
             return;
         }
-        let params = points::tree_render_params(p, cells);
-        self.st.points.stale_trees.remove(&key);
+        let Some(params) = self.st.points.render(&key, cells) else {
+            return;
+        };
         self.call(
             Call::Point(PointCall::Render(key)),
             "extension:call",

@@ -191,3 +191,111 @@ fn a_native_toggle_presses_what_the_drawn_one_does() {
         "the drawn page binds the id the native tree gave"
     );
 }
+
+/// A phone on tree point `prefs`, its tree rendered: a field, and a list with a check per row.
+fn tree_phone() -> (Phone, String) {
+    use vorn_tree::sdk::*;
+    let mut p = Point::from_value(&json!({
+        "kind": "settings",
+        "extension": EXT,
+        "extensionName": "Turns",
+        "id": "prefs",
+        "title": "Turns",
+    }))
+    .expect("point");
+    p.tree = true;
+    let key = p.key();
+    let mut model = Model::new(Arc::new(|| {}));
+    model.points.all = vec![p];
+    model.points.loaded = true;
+    let tree = col([
+        field("name", "acme").placeholder("Name"),
+        list(
+            "rows",
+            [entry("a", "fix-login")
+                .detail("today")
+                .more([button("a:rm", "Remove")
+                    .danger()
+                    .confirm("Remove fix-login?")])],
+        )
+        .select([button("rm-many", "Remove").danger()]),
+    ]);
+    let answer = serde_json::to_value(vorn_tree::Rendered::new(tree)).expect("json");
+    model.points.rendered(&key, Ok(&answer));
+    let mut phone = Phone::new(model);
+    phone.size = PHONE;
+    phone.settings = Some(Some(key.clone()));
+    (phone, key)
+}
+
+/// Settings page `key` as a native host reads it.
+fn native_page(phone: &Phone, key: &str) -> vornui::native::Node {
+    let mut ui = Ui::native(&config(SCALE));
+    let el = screens::native(phone, &ui, &format!("settings:{key}"));
+    ui.begin(Rgba::TRANSPARENT);
+    ui.layout(el, PHONE);
+    ui.native_tree().expect("tree").clone()
+}
+
+#[test]
+fn a_tree_page_reads_natively_and_a_tap_checks_its_row() {
+    let (mut phone, key) = tree_phone();
+    let tree = native_page(&phone, &key);
+    let nodes = tree.walk();
+    let field = nodes.iter().find(|n| n.kind == "field").expect("a field");
+    assert_eq!(field.label, "Name");
+    let field = field.id.expect("a field has an id");
+    assert!(
+        phone.model.acts.text_of(field).is_some(),
+        "Return tells the extension"
+    );
+    let entry = nodes.iter().find(|n| n.kind == "entry").expect("an entry");
+    assert_eq!(
+        (entry.label.as_str(), entry.value.as_str()),
+        ("fix-login", "today")
+    );
+    let pick = entry
+        .children
+        .iter()
+        .find(|n| n.kind == "select")
+        .expect("a row's check");
+    assert_eq!(pick.on, Some(false));
+    let pick = pick.id.expect("a check has an id");
+    let rm = nodes
+        .iter()
+        .find(|n| n.label == "Remove" && n.confirm.is_some());
+    assert_eq!(rm.expect("the row's menu").style, "danger");
+    phone.model.click(pick);
+    assert!(phone.model.points.is_checked(&key, "rows", "a"));
+
+    let tree = native_page(&phone, &key);
+    let nodes = tree.walk();
+    let all = nodes
+        .iter()
+        .find(|n| n.kind == "select" && n.label == "Select all");
+    assert_eq!(all.expect("the list's head").on, Some(true));
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.kind == "button" && n.label == "Remove" && n.confirm.is_none()),
+        "a bulk button shows once a row is checked"
+    );
+
+    let mut drawn = Ui::headless(RenderMode::Cpu, &config(SCALE));
+    frame(&mut phone, &mut drawn, PHONE);
+    assert!(
+        phone.model.acts.clicked(pick).is_some(),
+        "the drawn page binds the check the native tree gave"
+    );
+}
+
+#[test]
+fn a_tree_page_waits_for_its_tree() {
+    let (mut phone, key) = tree_phone();
+    phone.model.points.trees.clear();
+    let tree = native_page(&phone, &key);
+    assert!(tree
+        .walk()
+        .iter()
+        .any(|n| n.kind == "empty" && n.label == "Loading"));
+}

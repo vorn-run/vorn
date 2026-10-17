@@ -511,6 +511,7 @@ fn seeds(p: &mut Phone, ui: &mut Ui, route: &str, arg: &str) {
                 seed(p, ui, workflows::input_id(arg, &key), &value);
             }
         }
+        "settings" if !arg.is_empty() => p.model.want_tree(arg),
         _ => {}
     }
 }
@@ -547,7 +548,14 @@ pub fn screen(p: &mut Phone, ui: &mut Ui, screen: &str) -> El {
         "review" => workflows::review(&cx, arg),
         "gate-changes" => workflows::changes(&cx, arg),
         "gate-edit" => workflows::edit(&cx, arg),
-        _ => return screens::native(cx.p, cx.ui, screen),
+        _ => {
+            let el = screens::native(cx.p, cx.ui, screen);
+            // A tree's fields start with what it says they hold, once per opening.
+            for (id, text) in p.model.acts.texts() {
+                seed(p, ui, id, &text);
+            }
+            return el;
+        }
     };
     div().col().child(body)
 }

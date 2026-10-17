@@ -259,7 +259,7 @@ struct Rows: View {
     }
 
     static func isRow(_ n: Node) -> Bool {
-        ["section", "list", "link", "toggle", "choice", "field", "prose", "row", "empty", "option", "button", "entry", "notice", "toolbar"].contains(n.k)
+        ["section", "list", "link", "toggle", "choice", "field", "prose", "row", "empty", "option", "button", "entry", "notice", "toolbar", "select"].contains(n.k)
     }
 }
 
@@ -373,6 +373,16 @@ struct Control: View {
                 .contentShape(Rectangle())
             }
             .accessibilityAddTraits(node.on == true ? .isSelected : [])
+        case "select":
+            Button { act() } label: {
+                HStack(spacing: 12) {
+                    Text(node.label ?? "").foregroundStyle(Palette.ink)
+                    Spacer()
+                    if node.on == true { VornIcon(name: "check", ink: Palette.bronze) }
+                }
+                .contentShape(Rectangle())
+            }
+            .accessibilityAddTraits(node.on == true ? .isSelected : [])
         case "choice":
             Picker(node.label ?? "", selection: Binding(
                 get: { node.kids.first { $0.on == true }?.id_ ?? "" },
@@ -428,14 +438,20 @@ struct Control: View {
         case "row", "column", "toolbar":
             HStack(spacing: 12) { inline(node.kids) }
         case "entry":
-            HStack(spacing: 12) {
-                if let mark = node.kids.first(where: { $0.k == "icon" }) { VornIcon(mark, ink: .secondary) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.label ?? "").lineLimit(1)
-                    if let d = node.value, !d.isEmpty { Text(d).font(.footnote).foregroundStyle(.secondary).lineLimit(1) }
+            if let pick = node.kids.first(where: { $0.k == "select" }) {
+                // A row a tap checks: the whole row toggles its box.
+                Button { if let id = pick.id_ { nav.act(screen, ["id": id]) } } label: {
+                    HStack(spacing: 12) {
+                        VornIcon(name: "check", ink: Palette.bronze).opacity(pick.on == true ? 1 : 0)
+                        entry(node.kids.filter { $0.k != "select" })
+                    }
+                    .contentShape(Rectangle())
                 }
-                Spacer(minLength: 8)
-                inline(node.kids.filter { $0.k != "icon" })
+                .foregroundStyle(Palette.ink)
+                .accessibilityLabel(node.label ?? "")
+                .accessibilityAddTraits(pick.on == true ? .isSelected : [])
+            } else {
+                entry(node.kids)
             }
         case "notice":
             Label { Text(node.label ?? "") } icon: {
@@ -445,6 +461,19 @@ struct Control: View {
             .font(.footnote)
         default:
             inline([node])
+        }
+    }
+
+    /// An entry's content: `label` over `value`, its icon leading and the rest trailing.
+    private func entry(_ kids: [Node]) -> some View {
+        HStack(spacing: 12) {
+            if let mark = kids.first(where: { $0.k == "icon" }) { VornIcon(mark, ink: .secondary) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.label ?? "").lineLimit(1)
+                if let d = node.value, !d.isEmpty { Text(d).font(.footnote).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            inline(kids.filter { $0.k != "icon" })
         }
     }
 

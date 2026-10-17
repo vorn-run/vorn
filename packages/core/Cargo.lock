@@ -6855,6 +6855,7 @@ dependencies = [
  "vorn-app",
  "vorn-components",
  "vorn-protocol",
+ "vorn-tree",
  "vorn-view",
  "vornui",
  "web-time",

@@ -15,6 +15,7 @@ vornui = { path = "../vornui" }
 vorn-components = { path = "../vorn-components" }
 vorn-app = { path = "../vorn-app", default-features = false }
 vorn-protocol = { path = "../protocol" }
+vorn-tree = { path = "../tree" }
 serde_json = "1"
 web-time = "1"
 

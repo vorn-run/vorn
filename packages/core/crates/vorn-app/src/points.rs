@@ -385,6 +385,40 @@ impl Points {
         self.trees.insert(key.to_owned(), tree);
     }
 
+    /// What telling tree point `key`'s extension `event` asks of vornd; a bulk button's checks go with it.
+    pub fn tell(&mut self, key: &str, event: &vorn_tree::Event) -> Option<Value> {
+        let params = tree_event_params(self.get(key)?, event);
+        if !event.selected.is_empty() {
+            self.checked.retain(|(k, _), _| k != key);
+        }
+        Some(params)
+    }
+
+    /// The answer to telling tree point `key`: its patch applied, or the tree marked to render again.
+    pub fn told(&mut self, key: &str, answer: Option<&Value>) {
+        let patched = answer.and_then(|v| v.get("patch")).is_some_and(|p| {
+            let patches = serde_json::from_value::<Vec<vorn_tree::Patch>>(p.clone());
+            match (self.trees.get_mut(key), patches) {
+                (Some(Ok(tree)), Ok(patches)) => vorn_tree::patch(tree, &patches).is_ok(),
+                _ => false,
+            }
+        });
+        if !patched {
+            self.stale_trees.insert(key.to_owned());
+        }
+    }
+
+    /// What asking for tree point `key`'s tree asks of vornd, when it has none or its rows changed.
+    pub fn render(&mut self, key: &str, cells: bool) -> Option<Value> {
+        let p = self.get(key).filter(|p| p.tree)?;
+        if self.trees.contains_key(key) && !self.stale_trees.contains(key) {
+            return None;
+        }
+        let params = tree_render_params(p, cells);
+        self.stale_trees.remove(key);
+        Some(params)
+    }
+
     /// Marks the tree points of `extension` to render again.
     pub fn trees_changed(&mut self, extension: &str) {
         let keys: Vec<String> = self

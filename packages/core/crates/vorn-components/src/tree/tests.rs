@@ -441,3 +441,115 @@ fn board_columns_and_cards() {
         "{text}"
     );
 }
+
+/// `tree` read as a platform's semantic nodes, through the native backend.
+fn native(tree: &Node, bind: &Rec) -> vornui::native::Node {
+    let mut ui = Ui::native(&UiConfig::system(1.0, 13.0));
+    ui.begin(color::SURFACE_BASE);
+    ui.layout(view(&ui, tree, bind), (390.0, 844.0));
+    let mut out = vornui::native::Native::default();
+    out.present(&mut ui).expect("present");
+    assert!(out.json.starts_with('{'), "{}", out.json);
+    ui.native_tree().expect("a native tree").clone()
+}
+
+/// The first node of `kind` labelled `label`, depth first.
+fn find<'a>(
+    n: &'a vornui::native::Node,
+    kind: &str,
+    label: &str,
+) -> Option<&'a vornui::native::Node> {
+    if n.kind == kind && n.label == label {
+        return Some(n);
+    }
+    n.children.iter().find_map(|c| find(c, kind, label))
+}
+
+#[track_caller]
+fn has<'a>(n: &'a vornui::native::Node, kind: &str, label: &str) -> &'a vornui::native::Node {
+    find(n, kind, label).unwrap_or_else(|| panic!("a {kind} {label:?} in {n:#?}"))
+}
+
+#[test]
+fn native_reads_controls_and_structure() {
+    let t = col([
+        toolbar([button("scan", "Rescan").icon("refresh-cw")]),
+        section(
+            "Danger zone",
+            [text("Below").style(vorn_tree::TextStyle::Secondary)],
+        ),
+        field("name", "acme").placeholder("Name"),
+        field("token", "s3cret").placeholder("Token").secret(),
+        choice("kind", [("http", "HTTP"), ("mcp", "MCP")], "mcp"),
+        notice("The scan failed", Tone::Bad),
+        card([row([stat("73 MB", "On disk").icon("hard-drive")])]),
+        meter(10.0, [segment(6.0, "Build output", Tone::Accent)]).node(),
+    ]);
+    vorn_tree::check(&t).expect("checks");
+    let n = native(&t, &Rec::default());
+    let bar = n.children.iter().find(|c| c.kind == "toolbar");
+    let scan = has(bar.expect("a toolbar"), "button", "Rescan");
+    assert_eq!(scan.value, "refresh-cw");
+    let danger = has(&n, "section", "Danger zone");
+    assert_eq!(has(danger, "text", "Below").style, "secondary");
+    assert!(!has(&n, "field", "Name").secret);
+    let token = has(&n, "field", "Token");
+    assert!(token.secret && token.value.is_empty(), "a secret stays put");
+    let kind = n
+        .children
+        .iter()
+        .find(|c| c.kind == "choice")
+        .expect("a choice");
+    assert_eq!(has(kind, "option", "MCP").on, Some(true));
+    assert_eq!(has(&n, "notice", "The scan failed").style, "bad");
+    let disk = has(&n, "entry", "On disk");
+    assert_eq!(has(disk, "text", "73 MB").style, "number");
+    assert!(find(&n, "text", "Build output 60%").is_some(), "{n:#?}");
+}
+
+#[test]
+fn native_lists_rows_checks_and_menus() {
+    let l = list("rows", entries()).select([button("rm-many", "Remove").danger()]);
+    let picked = Rec {
+        checked: vec![("rows", "a")],
+        ..Rec::default()
+    };
+    let n = native(&l, &picked);
+    let all = has(&n, "select", "Select all");
+    assert_eq!(all.on, Some(true), "the one row that can be checked is");
+    let row = has(&n, "entry", "fix-login");
+    assert_eq!(row.value, "fix-login · today · uncommitted changes");
+    let kinds: Vec<&str> = row.children.iter().map(|c| c.kind).collect();
+    assert_eq!(kinds, ["select", "icon", "badge", "text", "more"]);
+    assert_eq!(has(row, "select", "Select fix-login").on, Some(true));
+    let more = &row.children[4];
+    let open = has(more, "button", "Open");
+    assert_eq!(open.value, "folder-open", "a hover action joins the menu");
+    let rm = has(more, "button", "Remove");
+    assert_eq!(
+        (rm.style, rm.confirm.as_deref()),
+        ("danger", Some("Remove fix-login?"))
+    );
+    let bulk = has(&n, "button", "Remove");
+    assert_eq!(
+        bulk.style, "danger",
+        "a bulk button shows once a row is checked"
+    );
+    assert!(find(has(&n, "entry", "main"), "select", "Select main").is_none());
+
+    let groups = list(
+        "c",
+        [group("HTTP", [entry("x", "Example API")])
+            .icon("globe")
+            .actions([button("add", "Add another").icon("plus")])],
+    );
+    let n = native(&groups, &Rec::default());
+    let http = has(&n, "section", "HTTP");
+    assert_eq!(http.children[0].kind, "icon", "a section wears its icon");
+    has(http, "button", "Add another");
+    has(http, "entry", "Example API");
+
+    let many = (0..500).map(|i| entry(format!("r{i}"), format!("Row {i}")));
+    let n = native(&list("big", many).lazy(), &Rec::default());
+    has(&n, "entry", "Row 499");
+}

@@ -239,6 +239,25 @@ pub fn draw(
     }
 }
 
+/// Tree point `p`'s tree whole, toolbar first, or its error box; nothing until it renders or for a template.
+pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El> {
+    if !p.tree {
+        return None;
+    }
+    let key = p.key();
+    match points.trees.get(&key)? {
+        Ok(t) => {
+            let bind = TreeBinder {
+                acts,
+                points,
+                key: &key,
+            };
+            Some(tree::view(ui, t, &bind))
+        }
+        Err(errors) => Some(template::invalid(&p.place(), errors)),
+    }
+}
+
 /// Point `p`'s template or tree as a page: its toolbar apart, for the page's header, and its body.
 fn draw_page(s: &Screen<'_>, p: &Point) -> (Option<El>, Option<El>) {
     if p.tree {
