@@ -207,7 +207,7 @@ async fn run_build(folder: &Path, build: &[String]) -> Result<(), String> {
     let (program, args) = build
         .split_first()
         .ok_or_else(|| "build.command is empty".to_owned())?;
-    let output = tokio::process::Command::new(program)
+    let output = vorn_spawn::tokio_command(program)
         .args(args)
         .current_dir(folder)
         .stdin(std::process::Stdio::null())

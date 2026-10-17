@@ -253,7 +253,7 @@ async fn compile_with(vorn: &Path, name: &str, bytes: &[u8], cache: &Path) -> Re
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| format!("{}: {e}", snapshot.display()))?;
-    let mut command = tokio::process::Command::new(vorn);
+    let mut command = vorn_spawn::tokio_command(vorn);
     command
         .args(["ext", "compile"])
         .arg(&snapshot)

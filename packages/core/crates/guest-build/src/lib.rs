@@ -60,6 +60,7 @@ fn host_only(name: &str) -> bool {
 pub fn component(package: &str) -> Result<PathBuf, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let target_dir = target_dir();
+    // spawn-visible: cargo, run by a build script or a test, never by Vorn as it runs.
     let mut command = Command::new(cargo);
     for (name, _) in std::env::vars_os() {
         if name.to_str().is_some_and(host_only) {
