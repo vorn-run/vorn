@@ -43,6 +43,8 @@ pub struct RouterSettings {
     pub start_timeout: Duration,
     /// Where each extension's own files are kept (`blobs.*`); none keeps none.
     pub blobs: Option<PathBuf>,
+    /// Extensions Vorn ships whose files are kept in a folder of their own, outside the quota.
+    pub placed_blobs: Vec<(String, PathBuf)>,
     /// What compiles a Wasm component into the cache when it is not there.
     pub compiler: Compiler,
 }
@@ -55,6 +57,7 @@ impl RouterSettings {
             call_timeout: Duration::from_secs(60),
             start_timeout: Duration::from_secs(15),
             blobs: None,
+            placed_blobs: Vec::new(),
             compiler: Compiler::None,
         }
     }
@@ -210,7 +213,12 @@ impl Router {
         settings: RouterSettings,
         bus: Arc<Bus>,
     ) -> Arc<Router> {
-        let blobs = settings.blobs.clone().map(BlobStore::new);
+        let blobs = settings.blobs.clone().map(|root| {
+            settings
+                .placed_blobs
+                .iter()
+                .fold(BlobStore::new(root), |s, (id, folder)| s.place(id, folder))
+        });
         Arc::new_cyclic(|me| Router {
             store,
             lifecycle,
@@ -511,6 +519,12 @@ impl Router {
             Some(store) => store.forget(id),
             None => Ok(()),
         }
+    }
+
+    /// Where extension `id`'s file `name` is on disk, for the core to hand on
+    /// (a task's image to an agent); `None` when this Vorn keeps no files.
+    pub fn blob_path(&self, id: &str, name: &str) -> Option<Result<PathBuf, ExtError>> {
+        self.blobs.as_ref().map(|s| s.path(id, name))
     }
 
     /// Runs `call` on extension `id`'s own files, off the runtime.

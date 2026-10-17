@@ -17,8 +17,9 @@ use std::time::UNIX_EPOCH;
 use crate::api::types::Blob;
 use crate::api::ExtError;
 
-/// The most one file holds: under the 16 MiB a stdio line carries once base64 has grown it.
-pub const MAX_BLOB: u64 = 8 << 20;
+/// The most one file holds, as a task's image may: under the 16 MiB a stdio
+/// line carries once base64 has grown it.
+pub const MAX_BLOB: u64 = 10 << 20;
 /// The most one extension keeps over all its files.
 pub const QUOTA: u64 = 256 << 20;
 /// The longest name, in bytes.
@@ -49,6 +50,8 @@ pub enum BlobAnswer {
 pub struct BlobStore {
     root: PathBuf,
     quota: u64,
+    /// Extensions whose files are kept elsewhere, outside the quota.
+    placed: Vec<(String, PathBuf)>,
     /// Held across a put's measure and write, so writes at once cannot pass the quota together.
     writing: Arc<Mutex<()>>,
 }
@@ -133,12 +136,33 @@ impl BlobStore {
         BlobStore {
             root: root.into(),
             quota,
+            placed: Vec::new(),
             writing: Arc::default(),
         }
     }
 
+    /// Keeps extension `id`'s files in `folder`, with no quota: for an
+    /// extension Vorn ships whose files were there before the store, as
+    /// Tasks' images are, so a path handed out before still reads.
+    pub fn place(mut self, id: &str, folder: impl Into<PathBuf>) -> BlobStore {
+        self.placed.push((id.to_owned(), folder.into()));
+        self
+    }
+
+    /// Where extension `id`'s file `name` is on disk, once the name checks.
+    pub fn path(&self, id: &str, name: &str) -> Result<PathBuf, ExtError> {
+        named(&self.dir(id), name)
+    }
+
+    fn quota_of(&self, id: &str) -> Option<u64> {
+        (!self.placed.iter().any(|(p, _)| p == id)).then_some(self.quota)
+    }
+
     /// Extension `id`'s folder; its name escapes the id as the store's tables do.
     fn dir(&self, id: &str) -> PathBuf {
+        if let Some((_, folder)) = self.placed.iter().find(|(p, _)| p == id) {
+            return folder.clone();
+        }
         let mut name = String::with_capacity(id.len() + 4);
         for c in id.chars() {
             match c {
@@ -159,7 +183,9 @@ impl BlobStore {
     pub fn run(&self, id: &str, call: BlobCall) -> Result<BlobAnswer, ExtError> {
         let dir = self.dir(id);
         match call {
-            BlobCall::Put { name, data } => self.put(&dir, &name, &data).map(|()| BlobAnswer::Put),
+            BlobCall::Put { name, data } => self
+                .put(&dir, &name, &data, self.quota_of(id))
+                .map(|()| BlobAnswer::Put),
             BlobCall::Get { name } => {
                 let path = named(&dir, &name)?;
                 match fs::read(&path) {
@@ -203,7 +229,7 @@ impl BlobStore {
         }
     }
 
-    fn put(&self, dir: &Path, name: &str, data: &[u8]) -> Result<(), ExtError> {
+    fn put(&self, dir: &Path, name: &str, data: &[u8], quota: Option<u64>) -> Result<(), ExtError> {
         let path = named(dir, name)?;
         let size = u64::try_from(data.len()).unwrap_or(u64::MAX);
         if size > MAX_BLOB {
@@ -212,18 +238,19 @@ impl BlobStore {
             )));
         }
         let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
-        let kept: u64 = walk(dir)
-            .map_err(|e| failed("measuring its files", &e))?
-            .iter()
-            .filter(|(n, ..)| n != name)
-            .map(|(.., size, _)| size)
-            .sum();
-        if kept.saturating_add(size) > self.quota {
-            return Err(denied(format!(
-                "writing {name} would keep {} bytes; an extension keeps {} at most",
-                kept.saturating_add(size),
-                self.quota
-            )));
+        if let Some(quota) = quota {
+            let kept: u64 = walk(dir)
+                .map_err(|e| failed("measuring its files", &e))?
+                .iter()
+                .filter(|(n, ..)| n != name)
+                .map(|(.., size, _)| size)
+                .sum();
+            if kept.saturating_add(size) > quota {
+                return Err(denied(format!(
+                    "writing {name} would keep {} bytes; an extension keeps {quota} at most",
+                    kept.saturating_add(size),
+                )));
+            }
         }
         let parent = path.parent().unwrap_or(dir);
         fs::create_dir_all(parent).map_err(|e| failed(&format!("writing {name}"), &e))?;
@@ -238,8 +265,11 @@ impl BlobStore {
         Ok(())
     }
 
-    /// Removes every file extension `id` keeps.
+    /// Removes every file extension `id` keeps; files placed elsewhere stay.
     pub fn forget(&self, id: &str) -> std::io::Result<()> {
+        if self.quota_of(id).is_none() {
+            return Ok(());
+        }
         match fs::remove_dir_all(self.dir(id)) {
             Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -287,6 +317,21 @@ mod tests {
                 data: data.to_vec(),
             },
         )
+    }
+
+    #[test]
+    fn a_placed_folder_keeps_its_files_where_they_were_with_no_quota() {
+        let dir = tempfile::tempdir().unwrap();
+        let images = dir.path().join("task-images");
+        let s = BlobStore::with_quota(dir.path().join("blobs"), 4).place("vorn.tasks", &images);
+        assert!(matches!(put(&s, "vorn.tasks", "t1/a.png", b"123456"), Ok(BlobAnswer::Put)));
+        assert_eq!(fs::read(images.join("t1/a.png")).unwrap(), b"123456");
+        assert_eq!(s.path("vorn.tasks", "t1/a.png").unwrap(), images.join("t1/a.png"));
+        assert!(s.path("vorn.tasks", "../x").is_err());
+        // Another extension is still held to the quota.
+        assert!(put(&s, "a.b", "big", b"123456").is_err());
+        s.forget("vorn.tasks").unwrap();
+        assert!(images.join("t1/a.png").exists(), "a placed folder is never removed");
     }
 
     fn get(s: &BlobStore, id: &str, name: &str) -> Option<Vec<u8>> {

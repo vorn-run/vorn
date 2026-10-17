@@ -36,7 +36,7 @@ use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::router::Router;
-use vorn_extensions::{token, views};
+use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
 

@@ -51,21 +51,12 @@ key = "title"
 [[contributes.sidebar]]
 id = "queue"
 title = "Queue"
-view = "views/queue.kdl"
+tree = true
 
 [[contributes.commands]]
 id = "refresh"
 title = "Refresh Tickets"
 call = "refresh"
-"#;
-
-const QUEUE: &str = r#"schema "vorn:view@1"
-rows "queue" {
-    title string
-}
-list "queue" {
-    text "{row.title}"
-}
 "#;
 
 fn has(program: &str) -> bool {
@@ -84,8 +75,6 @@ fn repository() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("vorn-extension.toml"), MANIFEST).unwrap();
     std::fs::write(dir.path().join("index.js"), FIXTURE).unwrap();
-    std::fs::create_dir(dir.path().join("views")).unwrap();
-    std::fs::write(dir.path().join("views/queue.kdl"), QUEUE).unwrap();
     std::fs::write(dir.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
     let git = |args: &[&str]| {
         let ok = Command::new("git")

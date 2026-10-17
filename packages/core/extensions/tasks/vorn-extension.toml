@@ -6,18 +6,22 @@ publisher = "Vorn"
 description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, and the MCP task tools. Off, the tasks are kept as they are."
 
 [declares]
-uses = ["tasks.read", "tasks.write", "sessions.read", "workflows.write"]
+uses = ["tasks.read", "tasks.write", "sessions.read", "workflows.write", "storage", "files.read"]
+
+[service]
+component = "tasks.wasm"
+events = ["agent.conversation"]
 
 [[contributes.views]]
 id = "board"
 title = "Tasks"
 icon = "list-todo"
-view = "views/board.kdl"
+tree = true
 
 [[contributes.badges]]
 id = "task"
 title = "Task in progress"
-view = "views/badge.kdl"
+tree = true
 
 [[contributes.nodes]]
 id = "createTaskFromItem"

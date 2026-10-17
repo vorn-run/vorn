@@ -1,0 +1,28 @@
+[package]
+name = "vorn-ext-tasks"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Tasks, an extension Vorn ships as a Wasm component: the board's writes, its images and triggers, connector imports, the MCP task tools, the card badge and the board's tree"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# The task tools are worded by the MCP server's own toolkit, as agents have always read them.
+vorn-mcp = { path = "../../crates/mcp" }
+vorn-extension-sdk = { path = "../../crates/extension-sdk" }
+# A task's id, as the board has always made them.
+uuid = { version = "1", features = ["v4"] }
+# Runs the toolkit's tools, whose host calls answer at once inside a component.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# Its writes checked against Vorn's own tables and the guard extension statements run under.
+vorn-store = { path = "../../crates/store" }
+tempfile = "3"

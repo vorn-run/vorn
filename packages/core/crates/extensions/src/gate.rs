@@ -144,6 +144,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("task.get", Permission::TasksRead),
     ("agents.list", Permission::SessionsRead),
     ("task.importItems", Permission::TasksWrite),
+    ("task.changed", Permission::TasksWrite),
     ("task.take", Permission::TasksWrite),
     ("task.handBack", Permission::TasksWrite),
     ("connection.upsertFromItem", Permission::TasksWrite),
@@ -166,9 +167,11 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// board, the workflows, their inbox and the sign-in windows of every
 /// connection, which no one installed extension owns. `task.take` and
 /// `task.handBack` are Tasks' and `connection.upsertFromItem` Connectors',
-/// called by the other built-ins.
+/// called by the other built-ins; `task.changed` is Tasks' own, which tells
+/// clients the rows a write changed and emits the events it fires.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
+    "task.changed",
     "task.take",
     "task.handBack",
     "connection.upsertFromItem",

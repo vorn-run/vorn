@@ -25,4 +25,4 @@ vorn-protocol = { path = "../protocol" }
 serde_json = { version = "1", features = ["preserve_order"] }
 # The node types Tasks and Connectors declare run in the reference cases beside the built-in's own.
 vorn-connectors = { path = "../connectors" }
-vorn-tasks = { path = "../tasks" }
+vorn-ext-tasks = { path = "../../extensions/tasks" }

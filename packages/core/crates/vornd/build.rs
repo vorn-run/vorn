@@ -5,13 +5,14 @@
 use std::path::PathBuf;
 
 /// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 2] = [
+const SHIPPED: [(&str, &str, &str); 3] = [
     (
         "vorn-ext-worktrees",
         "extensions/worktrees",
         "worktrees.wasm",
     ),
     ("vorn-ext-widget", "extensions/widget", "widget.wasm"),
+    ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
 ];
 
 fn main() {
@@ -20,9 +21,11 @@ fn main() {
     let sdk = workspace.join("crates/extension-sdk");
     let wit = workspace.join("crates/extensions/wit");
     let tree = workspace.join("crates/tree");
+    // Tasks words its MCP tools with the server's toolkit.
+    let mcp = workspace.join("crates/mcp");
     for (package, folder, name) in SHIPPED {
         let folder = workspace.join(folder);
-        vorn_guest_build::rerun_if_changed(&[&folder, &sdk, &wit, &tree]);
+        vorn_guest_build::rerun_if_changed(&[&folder, &sdk, &wit, &tree, &mcp]);
         let built = vorn_guest_build::component(package).unwrap_or_else(|e| panic!("{e}"));
         std::fs::copy(&built, out.join(name))
             .unwrap_or_else(|e| panic!("{}: {e}", built.display()));

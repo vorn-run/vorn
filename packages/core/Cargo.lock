@@ -7172,6 +7172,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-tasks"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "vorn-extension-sdk",
+ "vorn-mcp",
+ "vorn-store",
+]
+
+[[package]]
 name = "vorn-ext-widget"
 version = "0.0.0"
 dependencies = [
@@ -7456,23 +7470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vorn-tasks"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
- "vorn-extensions",
- "vorn-mcp",
- "vorn-store",
- "vorn-work",
-]
-
-[[package]]
 name = "vorn-term-mirror"
 version = "0.7.5"
 dependencies = [
@@ -7581,9 +7578,9 @@ dependencies = [
  "tracing",
  "uuid",
  "vorn-connectors",
+ "vorn-ext-tasks",
  "vorn-extensions",
  "vorn-protocol",
- "vorn-tasks",
  "vorn-work",
  "vorn-workflow",
 ]
@@ -7630,6 +7627,7 @@ dependencies = [
  "vorn-agents",
  "vorn-connectors",
  "vorn-engine",
+ "vorn-ext-tasks",
  "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
@@ -7649,7 +7647,6 @@ dependencies = [
  "vorn-size",
  "vorn-spawn",
  "vorn-store",
- "vorn-tasks",
  "vorn-term-proto",
  "vorn-tree",
  "vorn-vault",

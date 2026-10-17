@@ -239,7 +239,7 @@ interface storage {
 }
 
 /// The extension's own files, kept by Vorn under the `storage` permission:
-/// up to 8 MiB a file and 256 MiB in all. They go when the extension is removed.
+/// up to 10 MiB a file and 256 MiB in all. They go when the extension is removed.
 interface blobs {
   use types.{bytes, blob, ext-error};
 

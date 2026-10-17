@@ -161,7 +161,7 @@ pub enum Route {
 /// Each module's methods and where they go, in the order they are matched.
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
-    (vorn_tasks::METHODS, Route::Tasks),
+    (extensions::builtin::tasks::METHODS, Route::Tasks),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),

@@ -30,14 +30,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(root, 'packages/core/crates/mcp/generated')
 
 /** The built-ins that add tools: the crate each lives in, whose manifest names them. */
-const BUILTINS = ['packages/core/crates/connectors', 'packages/core/crates/tasks']
+const BUILTINS = ['packages/core/crates/connectors', 'packages/core/extensions/tasks']
 
-/** The built-in crate that declares each node type; the rest are the engine's own. */
+/** The built-in crate that declares each node type, from `crates/`; the rest are the engine's own. */
 const NODE_OWNERS = {
   launchAgent: 'workflows',
   script: 'workflows',
   httpRequest: 'workflows',
-  createTaskFromItem: 'tasks',
+  createTaskFromItem: '../extensions/tasks',
   callConnectorAction: 'connectors'
 }
 
@@ -293,7 +293,7 @@ async function generate() {
   let own = tools
   for (const crate of BUILTINS) {
     const names = contributedBy(crate)
-    files[path.join('..', '..', path.basename(crate), 'generated', 'tools.json')] = own.filter(
+    files[path.relative(OUT, path.join(root, crate, 'generated', 'tools.json'))] = own.filter(
       (t) => names.has(t.name)
     )
     own = own.filter((t) => !names.has(t.name))

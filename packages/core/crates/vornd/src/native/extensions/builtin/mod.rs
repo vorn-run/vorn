@@ -36,7 +36,7 @@ use super::guard;
 /// methods open only to them ([`vorn_extensions::gate::BUILTIN_ONLY`]).
 pub const SHIPPED: &[&str] = &[
     vorn_connectors::builtin::ID,
-    vorn_tasks::ID,
+    tasks::ID,
     vorn_workflows::ID,
     editor::ID,
 ];

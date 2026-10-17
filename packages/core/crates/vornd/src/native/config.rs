@@ -162,8 +162,9 @@ pub(crate) async fn announce(native: &Arc<Native>) {
             native.broadcast("config:changed", config);
             native.broadcast("task:rows", super::task_list::Change::Reload.note());
             native.broadcast("workflow:changed", workflows);
-            if let Some(tasks) = native.tasks().filter(|t| t.is_on()) {
-                tasks.inner().badges().await;
+            // Its own call, so a write Tasks makes never waits on Tasks.
+            if let Some(tasks) = native.tasks().filter(|t| t.is_on()).cloned() {
+                tokio::spawn(async move { tasks.badges().await });
             }
             native.config_changed();
         }

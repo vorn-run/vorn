@@ -12,7 +12,7 @@ use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
-use vorn_store::extension::ExtensionTables;
+use vorn_store::extension::{ExtensionTables, Grant};
 
 use crate::native::config::Viewer;
 use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
@@ -23,6 +23,50 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
     pub native: Weak<Native>,
+}
+
+/// The core's tables extension `id` is lent: Tasks keeps the board's own.
+fn lent(id: &str) -> &'static [Grant] {
+    if id == super::builtin::tasks::ID {
+        vorn_store::extension::TASKS
+    } else {
+        &[]
+    }
+}
+
+/// `files.read` with `encoding: base64`: the file's bytes, `{base64}`.
+async fn read_bytes(path: String) -> Result<Value, ExtError> {
+    tokio::task::spawn_blocking(move || std::fs::read(path))
+        .await
+        .map_err(|e| ExtError::new("failed", e.to_string()))?
+        .map(|bytes| json!({ "base64": vorn_extensions::api::base64::encode(&bytes) }))
+        .map_err(|e| ExtError::new("failed", e.to_string()))
+}
+
+/// `task.changed`: the events a task's write fires, emitted as the core's,
+/// then the rows it changed or removed, told to every client.
+async fn task_changed(native: &Arc<Native>, args: &Value) {
+    use vorn_extensions::events::{TASK_CREATED, TASK_STATUS_CHANGED};
+    for e in args.get("events").and_then(Value::as_array).into_iter().flatten() {
+        let name = match e.get("kind").and_then(Value::as_str) {
+            Some("taskCreated") => TASK_CREATED,
+            _ => TASK_STATUS_CHANGED,
+        };
+        native.events().emit(name, || e.clone());
+    }
+    let strings = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect()
+    };
+    let change = match (args.get("rows"), args.get("removed")) {
+        (Some(Value::Array(rows)), _) => crate::native::task_list::Change::Rows(rows.clone()),
+        (_, Some(removed)) => crate::native::task_list::Change::Removed(strings(removed)),
+        _ => return,
+    };
+    crate::native::task_list::told(native, change).await;
 }
 
 fn stopping() -> ExtError {
@@ -362,6 +406,9 @@ impl World for Wired {
                 "files.read" => {
                     let path =
                         text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
+                    if text(&args, "encoding").as_deref() == Some("base64") {
+                        return read_bytes(path).await;
+                    }
                     let mut params = json!({ "filePath": path });
                     if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
                         params["maxBytes"] = max.clone();
@@ -396,6 +443,10 @@ impl World for Wired {
                         .cloned()
                         .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
                     tasks.api(m, args).await
+                }
+                "task.changed" => {
+                    task_changed(&native, &args).await;
+                    Ok(Value::Null)
                 }
                 "connection.upsertFromItem" => {
                     let connectors = native.connectors().cloned().ok_or_else(|| {
@@ -588,7 +639,7 @@ impl World for Wired {
                 .map(std::path::Path::to_path_buf)
                 .ok_or_else(|| ExtError::new("unsupported", "vornd has no database"))?;
             let done = tokio::task::spawn_blocking(move || {
-                let tables = ExtensionTables::open(&db, &id)?;
+                let tables = ExtensionTables::open_with(&db, &id, lent(&id))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
                 if let Some(dir) = migrations.filter(|d| d.is_dir()) {
                     let ran = tables.migrate(&dir)?;

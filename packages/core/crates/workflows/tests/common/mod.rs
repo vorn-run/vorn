@@ -315,7 +315,15 @@ impl Host for Fake {
             }
         };
         let answered = match provider {
-            "vorn.tasks" => vorn_tasks::nodes::run(node_type, &request, call).await,
+            "vorn.tasks" if node_type == "createTaskFromItem" => {
+                Some(match vorn_ext_tasks::nodes::upsert_params(&request) {
+                    Ok(params) => {
+                        let result = call("connection.upsertFromItem", params.clone()).await;
+                        vorn_ext_tasks::nodes::answered(&params, result)
+                    }
+                    Err(skipped) => skipped,
+                })
+            }
             "vorn.connectors" => vorn_connectors::nodes::run(node_type, &request, call).await,
             _ => None,
         };
@@ -425,7 +433,7 @@ pub fn engine(fake: Fake) -> Engine<Fake> {
     let engine = Engine::new(fake);
     vorn_workflows::declare::declare_builtin(engine.registry());
     for (manifest, docs) in [
-        (vorn_tasks::MANIFEST, vorn_tasks::NODE_DOCS),
+        (vorn_ext_tasks::MANIFEST, vorn_ext_tasks::NODE_DOCS),
         (
             vorn_connectors::builtin::MANIFEST,
             vorn_connectors::builtin::NODE_DOCS,

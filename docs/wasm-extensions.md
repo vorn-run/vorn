@@ -223,7 +223,7 @@ many rows it changed. A failure names the statement, from 0: `statement 1:
 | `delete(name)`    | removes it; answers whether there was one                                      |
 
 A name is segments of letters, digits, `.`, `_` and `-`, joined by `/`, none
-starting with `.`, at most 200 bytes. A file holds up to 8 MiB, and an
+starting with `.`, at most 200 bytes. A file holds up to 10 MiB, and an
 extension keeps up to 256 MiB in all. Its files go when it is removed. Over
 stdio, `data` and what `get` answers are base64 strings.
 
