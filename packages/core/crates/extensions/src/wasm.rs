@@ -188,6 +188,16 @@ fn write_whole(path: &Path, bytes: &[u8]) -> io::Result<()> {
         })
 }
 
+/// A name no other compile in this process uses at the same time.
+fn unique() -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 /// Compiles the component `wasm` into `cache`, where it is loaded from;
 /// answers the compiled file. What `vorn ext compile` runs.
 #[cfg(feature = "wasm-compile")]
@@ -225,7 +235,7 @@ fn prune(cache: &Path) {
         .filter(|e| e.path().extension().is_some_and(|x| x == "cwasm"))
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
-    compiled.sort_by(|a, b| b.0.cmp(&a.0));
+    compiled.sort_by_key(|c| std::cmp::Reverse(c.0));
     for (_, old) in compiled.into_iter().skip(KEPT) {
         let _ = std::fs::remove_file(old);
     }
@@ -234,7 +244,8 @@ fn prune(cache: &Path) {
 /// Runs `vorn ext compile` on a copy of `bytes` in `cache`, so what it
 /// compiles is what was hashed even while a rebuild rewrites the package's file.
 async fn compile_with(vorn: &Path, name: &str, bytes: &[u8], cache: &Path) -> Result<(), String> {
-    let snapshot = cache.join(format!("{}.wasm", hex(&digest(bytes))));
+    // Its own name, so two compiles of the same bytes never remove each other's copy.
+    let snapshot = cache.join(format!("{}.{}.wasm", hex(&digest(bytes)), unique()));
     let (dir, copy, owned) = (cache.to_path_buf(), snapshot.clone(), bytes.to_vec());
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&dir).and_then(|()| write_whole(&copy, &owned))

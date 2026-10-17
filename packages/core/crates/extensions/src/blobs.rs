@@ -11,6 +11,7 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::UNIX_EPOCH;
 
 use crate::api::types::Blob;
@@ -48,6 +49,8 @@ pub enum BlobAnswer {
 pub struct BlobStore {
     root: PathBuf,
     quota: u64,
+    /// Held across a put's measure and write, so writes at once cannot pass the quota together.
+    writing: Arc<Mutex<()>>,
 }
 
 fn denied(message: String) -> ExtError {
@@ -122,10 +125,7 @@ fn walk(dir: &Path) -> std::io::Result<Vec<(String, PathBuf, u64, u64)>> {
 impl BlobStore {
     /// The files of every extension, under `root`.
     pub fn new(root: impl Into<PathBuf>) -> BlobStore {
-        BlobStore {
-            root: root.into(),
-            quota: QUOTA,
-        }
+        BlobStore::with_quota(root, QUOTA)
     }
 
     /// As [`BlobStore::new`], each extension held to `quota` bytes.
@@ -133,6 +133,7 @@ impl BlobStore {
         BlobStore {
             root: root.into(),
             quota,
+            writing: Arc::default(),
         }
     }
 
@@ -210,6 +211,7 @@ impl BlobStore {
                 "{name} is {size} bytes; a file holds {MAX_BLOB} at most"
             )));
         }
+        let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         let kept: u64 = walk(dir)
             .map_err(|e| failed("measuring its files", &e))?
             .iter()
