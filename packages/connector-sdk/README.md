@@ -377,7 +377,7 @@ test('does not redeliver the same backlog forever', async () => {
 
 ## Install it in Vorn
 
-In **Settings → Connectors**, add a connection **From a package** and type the
+In **Settings › Connections**, add a connection **From a package** and type the
 package name, or install the folder `pack` builds from its git repository:
 `vorn ext install <git url>`, or **Install from a repository** for one on disk.
 

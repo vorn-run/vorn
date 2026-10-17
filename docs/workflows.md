@@ -181,7 +181,7 @@ category = "Utilities"
 config = "nodes/shout.json"   # JSON Schema of the step's config; the editor draws its form from it
 
 [[contributes.nodes.outputs]]
-name = "output"
+field = "output"
 description = "The shouted text"
 ```
 

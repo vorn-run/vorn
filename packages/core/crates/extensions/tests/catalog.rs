@@ -118,7 +118,7 @@ async fn every_connector_installs_from_git_and_passes_its_recorded_checks() {
 
         // Its recorded checks, run as `vorn ext pack` runs them.
         let packed =
-            install::pack(&pack.path, &env(), None).unwrap_or_else(|e| panic!("{id}: {e}"));
+            install::pack(&pack.path, &env(), None, &[]).unwrap_or_else(|e| panic!("{id}: {e}"));
         assert!(packed.checks.is_some(), "{id} records no checks");
 
         // It starts, greets and says what it is.

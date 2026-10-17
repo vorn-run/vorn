@@ -277,11 +277,26 @@ async fn list(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> {
     Ok(ExitCode::Ok)
 }
 
-fn pack(ctx: &mut Context<'_>, folder: Option<&str>) -> ExitCode {
+/// The agents a running server has on; none when no server is running, which `pack` does not start.
+async fn server_agents(ctx: &Context<'_>) -> Vec<String> {
+    if !ctx.rpc.is_running() {
+        return Vec::new();
+    }
+    match ctx.call("agent:list", None).await {
+        Ok(Value::Array(agents)) => agents
+            .iter()
+            .filter_map(|a| a.get("id").and_then(Value::as_str).map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+async fn pack(ctx: &mut Context<'_>, folder: Option<&str>) -> ExitCode {
     let folder = absolute(folder.unwrap_or("."));
+    let installed = server_agents(ctx).await;
     let env: Vec<(String, String)> = std::env::vars().collect();
     let out = ctx.args.out.as_deref().map(absolute);
-    match vorn_extensions::install::pack(&folder, &env, out.as_deref()) {
+    match vorn_extensions::install::pack(&folder, &env, out.as_deref(), &installed) {
         Ok(packed) => {
             if ctx.args.json {
                 ctx.io.write(&format!("{}\n", json!(packed)));
@@ -321,7 +336,7 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
         return ExitCode::Usage;
     };
     if verb == "pack" {
-        return pack(ctx, first);
+        return pack(ctx, first).await;
     }
     if !["install", "link", "remove", "list", "sandbox"].contains(&verb) {
         return ctx.usage(&format!("unknown ext command \"{verb}\""), EXT_USAGE);

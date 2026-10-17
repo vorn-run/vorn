@@ -754,9 +754,28 @@ pub struct Packed {
     pub checks: Option<String>,
 }
 
+/// Records the agents a manifest's `agent` rules may name outside a server:
+/// every shipped adapter's, and the ids in `installed`.
+pub fn know_agents(installed: &[String]) {
+    for shipped in vorn_adapters::shipped() {
+        // A shipped adapter that does not read is a build fault the adapters' own tests catch.
+        let _ = vorn_agents::from_manifest_text(shipped.manifest);
+    }
+    for id in installed {
+        vorn_agents::know(id);
+    }
+}
+
 /// Validates `folder`'s manifest, runs its recorded checks, and lists what a
 /// bundle of it holds, writing the bundle to `out` as a `.tar.gz` when given.
-pub fn pack(folder: &Path, env: &[(String, String)], out: Option<&Path>) -> Result<Packed, String> {
+/// Agent ids in `installed` count as known beside the shipped adapters'.
+pub fn pack(
+    folder: &Path,
+    env: &[(String, String)],
+    out: Option<&Path>,
+    installed: &[String],
+) -> Result<Packed, String> {
+    know_agents(installed);
     let manifest = read_dir_manifest(folder)?;
     crate::views::refuse(&manifest, folder)?;
     let checks = match &manifest.checks {
@@ -1075,7 +1094,7 @@ migrations = "migrations"
         installs.link(folder.path()).unwrap();
         let out = tempfile::tempdir().unwrap();
         let bundle = out.path().join("marker.tar.gz");
-        let packed = super::pack(folder.path(), &env(), Some(&bundle)).unwrap();
+        let packed = super::pack(folder.path(), &env(), Some(&bundle), &[]).unwrap();
         assert_eq!(packed.files, ["hello.sh", "vorn-extension.toml"]);
         let mut names: Vec<String> = tar::Archive::new(flate2::read::GzDecoder::new(
             fs::File::open(&bundle).unwrap(),
@@ -1098,6 +1117,23 @@ migrations = "migrations"
             folder.path().join("hello.sh").exists(),
             "a linked folder stays"
         );
+    }
+
+    #[test]
+    fn packs_a_manifest_naming_a_shipped_or_installed_agent() {
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = |agent: &str| {
+            format!(
+                "id = \"test.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\npublisher = \"test\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n\n[activates]\nagent = [\"{agent}\"]\n"
+            )
+        };
+        let write =
+            |agent: &str| fs::write(folder.path().join(file::FILE), manifest(agent)).unwrap();
+        write("claude");
+        super::pack(folder.path(), &env(), None, &[]).unwrap();
+        write("acme-pack-test");
+        assert!(super::pack(folder.path(), &env(), None, &[]).is_err());
+        super::pack(folder.path(), &env(), None, &["acme-pack-test".to_owned()]).unwrap();
     }
 
     #[test]

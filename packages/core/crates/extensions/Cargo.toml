@@ -27,14 +27,14 @@ tracing = "0.1"
 vorn-view = { path = "../view", features = ["kdl"] }
 # An [agent] section is checked against the adapter format it reads as.
 vorn-agents = { path = "../agents" }
+# `pack` reads a manifest's agent rules against the adapters Vorn ships.
+vorn-adapters = { path = "../adapters" }
 
 [target.'cfg(unix)'.dependencies]
 # SIGTERM for a child that does not leave when its stdin closes.
 libc = "0.2"
 
 [dev-dependencies]
-# The SDK fixtures name an agent Vorn ships.
-vorn-adapters = { path = "../adapters" }
 criterion = { version = "0.5", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros", "test-util"] }

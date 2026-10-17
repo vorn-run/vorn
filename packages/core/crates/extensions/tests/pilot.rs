@@ -218,7 +218,7 @@ async fn a_connector_installs_from_git_and_polls_acts_crashes_and_times_out() {
         .unwrap();
 
     // Passes its recorded checks.
-    let packed = install::pack(&pack.path, &env(), None).unwrap();
+    let packed = install::pack(&pack.path, &env(), None, &[]).unwrap();
     assert_eq!(
         packed.checks.as_deref(),
         Some("manifest ok\npoll ok\n2 checks passed")
