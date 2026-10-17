@@ -418,6 +418,7 @@ fn collect<T>(conn: &Connection, sql: &str, map: impl Fn(&Row<'_>) -> Result<T>)
 pub const VIEWER_SETTING_KEYS: &[&str] = &[
     "mainViewMode",
     "layoutMode",
+    "gridLayout",
     "taskViewMode",
     "minimizedPlacement",
     "activeWorkspace",

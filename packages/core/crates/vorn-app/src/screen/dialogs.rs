@@ -36,6 +36,20 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
             ],
         ),
         (
+            "Flexible grid",
+            vec![
+                (
+                    "Move to the pane beside",
+                    format!("{m}{a}\u{2190}\u{2191}\u{2192}\u{2193}"),
+                ),
+                (
+                    "Move the divider",
+                    format!("{m}{a}\u{21e7}\u{2190}\u{2191}\u{2192}\u{2193}"),
+                ),
+                ("Equal pane sizes", format!("{m}{a}=")),
+            ],
+        ),
+        (
             "Sessions",
             vec![
                 ("New session", format!("{m}N")),
@@ -554,7 +568,10 @@ mod tests {
     fn the_shortcuts_panel_lists_every_category() {
         let groups = shortcut_groups();
         let names: Vec<&str> = groups.iter().map(|g| g.0).collect();
-        assert_eq!(names, ["Navigation", "Sessions", "View", "Filters"]);
-        assert_eq!(groups[3].1.len(), 5);
+        assert_eq!(
+            names,
+            ["Navigation", "Flexible grid", "Sessions", "View", "Filters"]
+        );
+        assert_eq!(groups[4].1.len(), 5);
     }
 }

@@ -453,6 +453,11 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
         ] {
             items.push(Item::option(label, s.st.columns == n, Act::Columns(n)));
         }
+        if s.st.columns == -1 {
+            let mut equal = Item::new("columns-3", "Equal Pane Sizes", Act::EqualizePanes);
+            equal.shortcut = Some(format!("{}{}=", super::mod_label(), super::alt_label()));
+            items.push(equal);
+        }
     }
     // The browser is where the web client already runs.
     if !cfg!(target_arch = "wasm32") {

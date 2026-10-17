@@ -17,8 +17,8 @@ pub const LAYOUT_USAGE: &str = "Usage
 
 A layout is a TOML file in the data directory's layouts/ folder, or one an
 extension offers. `open` starts its sessions and prints their ids, one per line
-(with --json, the whole answer). `save` writes the project's open sessions, in
-order. `check` reads a file and reports every mistake as file:line: message.
+(with --json, the whole answer). `save` writes the project's open sessions in
+the view the grid shows them, with the flexible grid's splits. `check` reads a file and reports every mistake as file:line: message.
 
 Names are matched like session targets: the whole name, then ignoring case, then
 the start of one. A name offered by several extensions is ambiguous (exit 3).
@@ -27,12 +27,15 @@ repository.
 
 Layout file
   name = \"dev\"                    project = \"vorn\"
+  view = \"flexible\" | \"grid\" | \"tabs\"  columns = 1..4 (with grid)
   split = \"horizontal\"            ratio = 0.6
   [[children]]                    agent = \"claude\" | command = [\"tail\", \"-f\", \"x\"] | shell = true
                                   cwd = \"sub/dir\"  label = \"name\"
   [[children]]                    pane = \"browser\"  url = \"http://localhost:3000\"
-Sessions start in tree order, which is the order the app lays cards out in.
-Split direction and ratio are kept in the file but do not size cards.
+Sessions start in tree order. `flexible` lays the cards out as the tree, each
+split's direction and ratio as written; `grid` puts them in rows of `columns`
+(automatic without it); `tabs` shows one at a time. Without `view`, a tree with
+splits opens flexible.
 ";
 
 fn names(rows: &[Value]) -> Vec<(String, String)> {

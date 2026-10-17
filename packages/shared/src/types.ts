@@ -1512,6 +1512,8 @@ export interface AppConfig {
     startAtLogin?: boolean
     taskViewMode?: TaskViewMode
     layoutMode?: 'grid' | 'tabs'
+    /** Each workspace's grid: its columns, or the Flexible split tree. Kept per viewer. */
+    gridLayout?: Record<string, { view?: 'grid' | 'flexible'; columns?: number; tree?: unknown }>
     minimizedPlacement?: MinimizedPlacement
     mainViewMode?: MainViewMode
     activeWorkspace?: string

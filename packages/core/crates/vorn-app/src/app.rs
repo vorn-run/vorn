@@ -34,6 +34,7 @@ use vorn_protocol::TerminalSession;
 mod browser;
 pub mod canvas;
 mod extensions;
+mod flex;
 pub mod forms;
 mod gates;
 mod git;
@@ -92,6 +93,12 @@ pub enum Shortcut {
     /// Mod+Shift+Up and Mod+Shift+Down: the selected terminal scrolled to
     /// the command before or after, by the shell's prompt marks.
     Prompt(bool),
+    /// Mod+Alt+arrow: the flexible grid's pane beside the selected one.
+    PaneFocus(crate::flex::Side),
+    /// Mod+Alt+Shift+arrow: the divider nearest the selected pane moved.
+    PaneResize(crate::flex::Side),
+    /// Mod+Alt+=: every flexible pane back to an equal share.
+    PaneEqualize,
 }
 
 /// The global shortcuts. Escape is not one: it closes what is open, else a
@@ -110,6 +117,27 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             "ArrowDown" => Some(Shortcut::Prompt(false)),
             _ => None,
         };
+    }
+    if only(MOD() | mods::ALT) && code == "Equal" {
+        return Some(Shortcut::PaneEqualize);
+    }
+    for (with, make) in [
+        (
+            MOD() | mods::ALT,
+            Shortcut::PaneFocus as fn(crate::flex::Side) -> Shortcut,
+        ),
+        (MOD() | mods::ALT | mods::SHIFT, Shortcut::PaneResize),
+    ] {
+        if only(with) {
+            use crate::flex::Side;
+            return match code {
+                "ArrowLeft" => Some(make(Side::Left)),
+                "ArrowRight" => Some(make(Side::Right)),
+                "ArrowUp" => Some(make(Side::Up)),
+                "ArrowDown" => Some(make(Side::Down)),
+                _ => None,
+            };
+        }
     }
     if only(0) {
         return match code {
@@ -533,6 +561,9 @@ impl App {
             cli_launch: None,
             cli_prompt: None,
         };
+        app.st.grids =
+            crate::flex::grids_from_json(app.store.config.pointer("/defaults/gridLayout"));
+        app.load_columns();
         app.see_projects();
         // Asked, not waited on: vornd holds it back while its session holder catches up.
         app.call(Call::Sessions, "terminal:listActive", Value::Null);
@@ -678,6 +709,7 @@ impl App {
         self.st.group = None;
         self.st.worktree = None;
         self.st.focused = None;
+        self.load_columns();
     }
 
     /// Changes the sidebar's view options and writes them down.
@@ -828,6 +860,9 @@ impl App {
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
                     self.ext_notified(&method, &params);
+                    if method == "layout:opened" {
+                        self.layout_opened(&params);
+                    }
                     let before = self.store.workspace().to_owned();
                     if self.store.apply(&method, params) == crate::client::Change::TasksStale {
                         self.reload_tasks();
@@ -1321,6 +1356,9 @@ impl App {
             Shortcut::Palette => self.toggle_palette(ui),
             Shortcut::Permission(allow) => self.answer_oldest(ui, allow),
             Shortcut::Prompt(up) => self.jump_to_command(ui, up),
+            Shortcut::PaneFocus(_) | Shortcut::PaneResize(_) | Shortcut::PaneEqualize => {
+                self.flex_key(ui, s);
+            }
         }
     }
 
@@ -1905,7 +1943,8 @@ impl App {
             Act::CloseMenu => self.close_menu(ui),
             Act::Filter(f) => self.st.filter = f,
             Act::Sort(s) => self.st.sort = s,
-            Act::Columns(n) => self.st.columns = n,
+            Act::Columns(n) => self.set_columns(ui, n),
+            Act::EqualizePanes => self.flex_equalize(),
             Act::Layout(mode) => {
                 self.st.layout = mode;
                 let mut config = self.store.config.clone();
@@ -2617,10 +2656,14 @@ impl App {
             UiEvent::Submit(id) => self.submit(ui, id),
             UiEvent::Changed(id) if self.pane_changed(ui, id) => {}
             UiEvent::Resized { id, ratio } => {
-                self.pane_resized(ui, id, ratio, false);
+                if !self.flex_resized(ui, id, ratio, false) {
+                    self.pane_resized(ui, id, ratio, false);
+                }
             }
             UiEvent::ResizeEnd { id, ratio } => {
-                self.pane_resized(ui, id, ratio, true);
+                if !self.flex_resized(ui, id, ratio, true) {
+                    self.pane_resized(ui, id, ratio, true);
+                }
             }
             UiEvent::Changed(id) if id == COMPOSER_INPUT => {
                 ui.edit_text(id).clone_into(&mut self.st.composer.text);
@@ -3122,6 +3165,7 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.flex_tick(ui);
         self.grid_replies(ui);
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
@@ -3505,6 +3549,19 @@ mod tests {
             Some(Shortcut::Prompt(true))
         );
         assert_eq!(shortcut("ArrowDown", MOD()), None);
+        use crate::flex::Side;
+        assert_eq!(
+            shortcut("ArrowLeft", MOD() | mods::ALT),
+            Some(Shortcut::PaneFocus(Side::Left))
+        );
+        assert_eq!(
+            shortcut("ArrowDown", MOD() | mods::ALT | mods::SHIFT),
+            Some(Shortcut::PaneResize(Side::Down))
+        );
+        assert_eq!(
+            shortcut("Equal", MOD() | mods::ALT),
+            Some(Shortcut::PaneEqualize)
+        );
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
         assert_eq!(shortcut("Slash", MOD()), Some(Shortcut::Shortcuts));
         assert_eq!(shortcut("KeyK", MOD()), Some(Shortcut::Palette));

@@ -24,6 +24,7 @@ pub const TOPICS: &[&str] = &[
     "session:reordered",
     "terminal:exit",
     "config:changed",
+    "layout:opened",
     "task:rows",
     "workflow:changed",
     "workflow:runUpdated",

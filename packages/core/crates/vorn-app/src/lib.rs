@@ -25,6 +25,7 @@ pub mod device;
 pub mod editor;
 pub mod extensions;
 pub mod file_icons;
+pub mod flex;
 pub mod gates;
 pub mod git;
 pub mod graph;

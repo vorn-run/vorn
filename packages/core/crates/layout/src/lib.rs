@@ -1,11 +1,13 @@
 //! Saved layouts: sessions and panes arranged as a tree, kept as a TOML file.
 //!
-//! A layout file is the tree's root with `name` and `project` beside it. A
-//! node is a split (`split`, `ratio`, `[[children]]`) or one thing to open:
+//! A layout file is the tree's root with `name`, `project`, `view` and
+//! `columns` beside it. A node is a split (`split`, `ratio`,
+//! `[[children]]`) or one thing to open:
 //!
 //! ```toml
 //! name = "dev"
 //! project = "vorn"
+//! view = "flexible"
 //! split = "horizontal"
 //! ratio = 0.6
 //!
@@ -23,6 +25,11 @@
 //! pane = "browser"
 //! url = "http://localhost:3000"
 //! ```
+//!
+//! `view` is how the grid shows the sessions: `flexible` lays them out as
+//! the tree, splits and ratios as written; `grid` puts them in rows of
+//! `columns` (automatic when absent); `tabs` one at a time. Without it, a
+//! split opens flexible and a single session leaves the view as it is.
 //!
 //! [`parse`] reads it and says which line is wrong; [`Layout::to_toml`] writes
 //! one back so that `parse` reads the same layout.
@@ -43,13 +50,46 @@ pub enum Direction {
 }
 
 impl Direction {
-    fn word(self) -> &'static str {
+    pub fn word(self) -> &'static str {
         match self {
             Direction::Horizontal => "horizontal",
             Direction::Vertical => "vertical",
         }
     }
 }
+
+/// How the grid shows a layout's sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// The tree itself: its splits and ratios.
+    Flexible,
+    /// Rows of cards, `columns` wide.
+    Grid,
+    /// One session at a time under a tab strip.
+    Tabs,
+}
+
+impl View {
+    pub fn word(self) -> &'static str {
+        match self {
+            View::Flexible => "flexible",
+            View::Grid => "grid",
+            View::Tabs => "tabs",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<View> {
+        match word {
+            "flexible" => Some(View::Flexible),
+            "grid" => Some(View::Grid),
+            "tabs" => Some(View::Tabs),
+            _ => None,
+        }
+    }
+}
+
+/// The most columns a grid view takes.
+pub const MAX_COLUMNS: u32 = 4;
 
 /// What a session runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +144,10 @@ pub struct Layout {
     pub name: Option<String>,
     /// A project's name or path; the one asked for at open time wins.
     pub project: Option<String>,
+    /// As written; [`Layout::view`] is what it opens in.
+    pub view: Option<View>,
+    /// A grid view's columns, 1 to [`MAX_COLUMNS`]; automatic when absent.
+    pub columns: Option<u32>,
     pub root: Node,
 }
 
@@ -133,6 +177,20 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 impl Layout {
+    /// The view the layout opens in: `view`, else a grid when `columns` is
+    /// given, else flexible for a split. None leaves the view as it is.
+    pub fn view(&self) -> Option<View> {
+        self.view.or_else(|| {
+            if self.columns.is_some() {
+                Some(View::Grid)
+            } else if matches!(self.root, Node::Split { .. }) {
+                Some(View::Flexible)
+            } else {
+                None
+            }
+        })
+    }
+
     /// The leaves in tree order, which is the order sessions are started in.
     pub fn leaves(&self) -> Vec<&Leaf> {
         fn walk<'a>(node: &'a Node, out: &mut Vec<&'a Leaf>) {
@@ -154,6 +212,12 @@ impl Layout {
         }
         if let Some(project) = &self.project {
             out.push_str(&format!("project = {}\n", quote(project)));
+        }
+        if let Some(view) = self.view {
+            out.push_str(&format!("view = \"{}\"\n", view.word()));
+        }
+        if let Some(columns) = self.columns {
+            out.push_str(&format!("columns = {columns}\n"));
         }
         write_node(&self.root, "", &mut out);
         out
@@ -219,6 +283,9 @@ fn line_of(text: &str, offset: usize) -> usize {
         + 1
 }
 
+/// The keys a layout file holds beside its root node.
+const TOP_KEYS: [&str; 4] = ["name", "project", "view", "columns"];
+
 struct Reader<'t> {
     text: &'t str,
     agents: &'t [&'t str],
@@ -245,7 +312,7 @@ impl Reader<'_> {
         }
     }
 
-    /// A node, from the table that holds it. `top` holds `name` and `project` as well.
+    /// A node, from the table that holds it. `top` holds the layout's own keys as well.
     fn node(&mut self, t: Pairs<'_>, top: bool, start: usize) -> Option<Node> {
         const KINDS: [&str; 5] = ["split", "agent", "command", "shell", "pane"];
         let has = |k: &str| t.iter().any(|(key, _)| key.get_ref() == k);
@@ -257,7 +324,7 @@ impl Reader<'_> {
         };
         for (key, _) in t.iter() {
             let k = key.get_ref().as_ref();
-            let top_key = top && matches!(k, "name" | "project");
+            let top_key = top && TOP_KEYS.contains(&k);
             if !allowed.contains(&k) && !top_key {
                 self.bad(key.span().start, format!("unknown key `{k}` here"));
             }
@@ -440,11 +507,43 @@ pub fn parse(text: &str, agents: &[&str]) -> Result<Layout, Vec<Problem>> {
         }
     }
     let project = named("project", &mut r);
+    let at = |key: &str| t.iter().find(|(k, _)| k.get_ref() == key).map(|(_, v)| v);
+    let view = at("view").and_then(|v| {
+        let word = r.string(v, "view")?;
+        View::parse(&word).or_else(|| {
+            r.bad(
+                v.span().start,
+                "`view` is \"flexible\", \"grid\" or \"tabs\"".into(),
+            );
+            None
+        })
+    });
+    let columns = at("columns").and_then(|v| {
+        let n = match v.get_ref() {
+            DeValue::Integer(i) => i.as_str().parse::<u32>().ok(),
+            _ => None,
+        }
+        .filter(|n| (1..=MAX_COLUMNS).contains(n));
+        if n.is_none() {
+            r.bad(
+                v.span().start,
+                format!("`columns` is a whole number from 1 to {MAX_COLUMNS}"),
+            );
+        } else if view.is_some_and(|v| v != View::Grid) {
+            r.bad(
+                v.span().start,
+                "`columns` goes with `view = \"grid\"`".into(),
+            );
+        }
+        n
+    });
     let root = r.node(t, true, 0);
     match (root, r.problems.is_empty()) {
         (Some(root), true) => Ok(Layout {
             name,
             project,
+            view,
+            columns,
             root,
         }),
         _ => {
@@ -515,6 +614,8 @@ url = "http://localhost:3000"
         let odd = Layout {
             name: Some("odd".into()),
             project: None,
+            view: Some(View::Tabs),
+            columns: None,
             root: Node::Leaf(Leaf::Session(Session {
                 launch: Launch::Command(vec!["echo".into(), "a \"b\"\nc".into()]),
                 cwd: Some("C:\\x".into()),
@@ -564,6 +665,39 @@ url = "http://localhost:3000"
         assert!(lines("name = \"a/b\"\nshell = true\n")[0]
             .1
             .contains("letters"));
+    }
+
+    #[test]
+    fn reads_and_writes_the_view() {
+        let l = parse(DEV, AGENTS).unwrap();
+        assert_eq!(l.view, None);
+        assert_eq!(l.view(), Some(View::Flexible));
+        let grid = parse("view = \"grid\"\ncolumns = 3\nshell = true\n", AGENTS).unwrap();
+        assert_eq!((grid.view(), grid.columns), (Some(View::Grid), Some(3)));
+        assert_eq!(parse(&grid.to_toml(), AGENTS).unwrap(), grid);
+        let cols = parse("columns = 2\nshell = true\n", AGENTS).unwrap();
+        assert_eq!(cols.view(), Some(View::Grid));
+        let one = parse("shell = true\n", AGENTS).unwrap();
+        assert_eq!(one.view(), None);
+        let flex = DEV.replace(
+            "project = \"vorn\"\n",
+            "project = \"vorn\"\nview = \"flexible\"\n",
+        );
+        let l = parse(&flex, AGENTS).unwrap();
+        assert_eq!(l.view, Some(View::Flexible));
+        assert_eq!(parse(&l.to_toml(), AGENTS).unwrap(), l);
+    }
+
+    #[test]
+    fn says_what_a_view_may_be() {
+        assert!(lines("view = \"cards\"\nshell = true\n")[0]
+            .1
+            .contains("\"flexible\", \"grid\" or \"tabs\""));
+        assert!(lines("columns = 9\nshell = true\n")[0].1.contains("1 to 4"));
+        assert_eq!(
+            lines("view = \"tabs\"\ncolumns = 2\nshell = true\n")[0],
+            (2, "`columns` goes with `view = \"grid\"`".to_owned())
+        );
     }
 
     #[test]

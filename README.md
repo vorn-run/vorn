@@ -164,12 +164,17 @@ A layout is a TOML file in `~/.vorn/layouts/` (the server's data directory), or 
 extension offers with `[[contributes.layouts]]` and `file = "layouts/dev.toml"`. It is a tree:
 a split (`split = "horizontal"|"vertical"`, `ratio`, `[[children]]`) or one thing to open: a
 session (`agent = "claude"`, `command = ["tail", "-f", "app.log"]` or `shell = true`, with
-`cwd` and `label`) or `pane = "browser"` with a `url`.
+`cwd` and `label`) or `pane = "browser"` with a `url`. Beside `name` and `project`, `view` is
+how the grid shows them: `"flexible"` (cards laid out as the tree, each split's direction and
+ratio as written), `"grid"` (rows of `columns`, 1 to 4, automatic without it) or `"tabs"`.
+Without `view`, a tree with splits opens flexible.
 
 ```toml
 name = "dev"
 project = "vorn"
+view = "flexible"
 split = "horizontal"
+ratio = 0.6
 
 [[children]]
 agent = "claude"
@@ -180,14 +185,15 @@ command = ["tail", "-f", "app.log"]
 cwd = "logs"
 ```
 
-`vorn layout list` shows them, `vorn layout open <name> [--project X]` starts the sessions
-through the same calls the app makes and prints their ids (3 when the name is ambiguous),
-`vorn layout save <name>` writes the project's open sessions, and `vorn layout check <file>`
-reports every mistake as `file:line: message`. The app lists layouts under Open Layout › in the
-command palette. Sessions start in tree order, which is the order the grid and tabs show them in.
-Split direction and ratio are kept in the file but the server does not size cards, so they do not
-change what opens; a `command` runs in a shell, which stays open when it ends; a `pane` opens
-beside the session before it and needs the app to be open.
+`vorn layout list` shows them, `vorn layout open <name> [--project X]` starts the sessions through
+the same calls the app makes and prints their ids (3 when the name is ambiguous), `vorn layout save
+<name>` writes the project's open sessions in the view the grid shows them (the flexible grid's
+splits and ratios included), and `vorn layout check <file>` reports every mistake as `file:line:
+message`. The app lists layouts under Open Layout › in the command palette. Sessions start in tree
+order. In the app, Columns › Flexible in the view menu splits the grid into panes: drag a divider
+to resize (double-click evens them), ⌘⌥ arrows move between panes and ⌘⌥⇧ arrows move the divider.
+A `command` runs in a shell, which stays open when it ends; a `pane` opens beside the session
+before it and needs the app to be open.
 
 Workflows run in the server, so a run started here keeps going with nothing open — and a
 scheduled one happens whether or not the app is running.
