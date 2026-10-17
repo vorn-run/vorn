@@ -46,8 +46,8 @@ const BASELINE_DDL: &str = r#"
       token_hash TEXT NOT NULL,
       created_at TEXT NOT NULL,
       last_seen_at TEXT,
-      last_address TEXT,
-      revoked_at TEXT
+      revoked_at TEXT,
+      last_address TEXT
     );
 
     CREATE INDEX idx_device_tokens_user ON device_tokens(user_id);
