@@ -13,8 +13,7 @@ import type {
  * an opaque string, so the shape is versioned and never inspected by the host.
  */
 type DedupeCursor =
-  | { v: 1; s: 'timestamp'; t: string; ids: string[] }
-  | { v: 1; s: 'lastItem'; id: string }
+  { v: 1; s: 'timestamp'; t: string; ids: string[] } | { v: 1; s: 'lastItem'; id: string }
 
 type CursorFor<S extends DedupeStrategy> = Extract<DedupeCursor, { s: S }>
 

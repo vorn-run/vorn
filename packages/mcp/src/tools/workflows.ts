@@ -1037,8 +1037,7 @@ export function registerWorkflowTools(server: McpServer): void {
       }
 
       const trigger = workflow.nodes.find((n) => n.type === 'trigger')?.config as
-        | TriggerConfig
-        | undefined
+        TriggerConfig | undefined
       const defs = trigger?.triggerType === 'manual' ? (trigger.inputs ?? []) : []
       const supplied = args.inputs ?? {}
 
