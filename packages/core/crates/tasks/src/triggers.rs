@@ -90,7 +90,7 @@ pub fn fire_args(trigger: &Value) -> Option<Value> {
     }
 }
 
-/// A value in a template literal.
+/// `value` as text, `undefined` when it is absent.
 fn text(value: Option<&Value>) -> String {
     value.map_or_else(|| "undefined".to_owned(), js::to_string)
 }

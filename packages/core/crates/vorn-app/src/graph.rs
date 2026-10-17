@@ -8,20 +8,20 @@ use serde_json::{json, Value};
 
 use crate::runs::s;
 
-/// `CARD_WIDTH`.
+/// A step card's width.
 pub const CARD_WIDTH: f64 = 280.0;
-/// `LOOP_WIDTH`: a loop draws its body inside itself.
+/// A loop's width: a loop draws its body inside itself.
 pub const LOOP_WIDTH: f64 = 312.0;
-/// `GRID`: the canvas snaps drags to this.
+/// The lattice the canvas snaps drags to.
 pub const GRID: f64 = 8.0;
-/// `PLACEMENT_PITCH`: one step down the trunk.
+/// One step down the trunk.
 pub const PITCH: f64 = 144.0;
 /// The `beforeNodeId` that names a loop's body.
 pub const LOOP_BODY: &str = "__LOOP_BODY__";
 /// The `beforeNodeId` that names the spot above a fork.
 pub const FORK: &str = "__FORK__";
 
-/// A new id, as `crypto.randomUUID()` makes them.
+/// A new random UUID.
 pub fn new_id() -> String {
     crate::tasks::uuid()
 }
@@ -109,7 +109,7 @@ fn body_ids(loop_node: &Value) -> Vec<String> {
         .collect()
 }
 
-/// `loopBodyOwners`: which loop owns each body step; the first claim wins.
+/// Which loop owns each body step; the first claim wins.
 pub fn loop_body_owners(nodes: &[Value]) -> HashMap<String, String> {
     let exists: HashSet<&str> = nodes.iter().map(id).collect();
     let mut owners = HashMap::new();
@@ -123,7 +123,7 @@ pub fn loop_body_owners(nodes: &[Value]) -> HashMap<String, String> {
     owners
 }
 
-/// `collapseLoopBodies`: the run graph with each loop standing for its body.
+/// The run graph with each loop standing for its body.
 pub fn collapse_loop_bodies(nodes: &[Value], edges: &[Value]) -> Vec<Value> {
     let owners = loop_body_owners(nodes);
     let mut seen = HashSet::new();
@@ -156,8 +156,8 @@ pub fn collapse_loop_bodies(nodes: &[Value], edges: &[Value]) -> Vec<Value> {
     out
 }
 
-/// `loopBodyGraph`: a loop's members, the edges between them, chained in
-/// `bodyNodeIds` order when it has none.
+/// A loop's members and the edges between them, chained in `bodyNodeIds`
+/// order when it has none.
 pub fn loop_body_graph<'a>(
     nodes: &'a [Value],
     edges: &[Value],
@@ -189,7 +189,7 @@ pub fn loop_body_graph<'a>(
     (members, inner)
 }
 
-/// One row of `computeFlowLayout`.
+/// One row of the flow layout.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FlowRow {
     Node(String),
@@ -859,7 +859,7 @@ pub fn nodes_after<'a>(nodes: &'a [Value], edges: &[Value], nid: &str) -> Vec<&'
     out
 }
 
-/// `REPLACEABLE_NODE_TYPES`.
+/// Whether a step of node type `kind` can be swapped for another type.
 pub fn replaceable(kind: &str) -> bool {
     matches!(
         kind,
@@ -895,7 +895,7 @@ pub fn contributed_node(kind: &str, taken: &HashSet<String>) -> Value {
     unique(node(kind, kind, json!({})), taken)
 }
 
-/// `createLaunchAgentNode`, in `project`, running `agent`.
+/// A new agent step in `project`, running `agent`.
 pub fn agent_node(project: Option<(&str, &str)>, agent: &str, taken: &HashSet<String>) -> Value {
     let (name, path) = project.unwrap_or(("", ""));
     unique(

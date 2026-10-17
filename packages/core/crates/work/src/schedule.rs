@@ -1,11 +1,12 @@
 //! The workflow schedules the server arms, and the occurrences they fire.
 //!
 //! The server arms every enabled workflow whose trigger type is timed by a
-//! cron (as `recurring` and `connectorPoll` are) with a cron node-cron
-//! accepts, and every one timed once (`once`) whose `runAt` is still ahead. An occurrence is one workflow in one Unix minute:
-//! the server writes one tick lock per workflow per minute, however many
-//! seconds of that minute the cron names, so the minute is the unit both
-//! sides count and the key a receiver deduplicates on.
+//! cron (as `recurring` and `connectorPoll` are) with a cron [`Cron`]
+//! accepts, and every one timed once (`once`) whose `runAt` is still ahead.
+//! An occurrence is one workflow in one Unix minute: the server writes one
+//! tick lock per workflow per minute, however many seconds of that minute
+//! the cron names, so the minute is the unit occurrences are counted in and
+//! the key a receiver deduplicates on.
 
 use jiff::tz::TimeZone;
 use serde_json::Value;
@@ -14,8 +15,7 @@ use crate::cron::Cron;
 use crate::is_truthy;
 use crate::trigger::{js_date, zone_of, Timings, Trigger};
 
-/// How long a server takes to notice a minute it fires in; a planned
-/// occurrence not seen by then is a difference.
+/// How long a server takes to notice a minute it fires in.
 pub const FIRE_GRACE_MS: i64 = 10_000;
 
 /// One workflow's armed trigger.

@@ -14,10 +14,10 @@ use crate::templates;
 use crate::ui::{mods, Event as UiEvent, Input, Ui};
 use crate::workflows::{self as wf, Draft, Missed, Panel, Prompt, WfAct};
 
-/// `MAX_WORKFLOW_FILE_BYTES`.
+/// The largest workflow file an import reads.
 const MAX_FILE: u64 = 500_000;
 
-/// `WORKFLOW_FILE_SUFFIX`.
+/// The suffix an exported workflow file ends in.
 const SUFFIX: &str = ".vorn-workflow.json";
 
 /// A workflow call whose answer changes the screen.
@@ -1120,7 +1120,7 @@ impl App {
             .map(str::to_owned)
     }
 
-    /// `handleExport`.
+    /// Writes workflow `id` to `path` as a portable file.
     pub(super) fn export(&mut self, id: &str, path: &str) {
         let Some(w) = self.workflow(id) else { return };
         let project = self

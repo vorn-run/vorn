@@ -132,7 +132,7 @@ fn text(params: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The JSON a store call answers, or the error a handler would throw.
+/// The JSON a store call answers, or its error.
 fn stored(value: Option<Result<Value, String>>) -> Answer {
     match value {
         Some(Ok(v)) => Answer::Result(v),
@@ -256,8 +256,8 @@ impl Work {
         }
     }
 
-    /// `resumeRunsAfterStart`, and the sweeps of pages and artifacts no
-    /// longer kept.
+    /// Resumes the runs a restart left going, and sweeps the pages and
+    /// artifacts no longer kept.
     async fn resume(&self) {
         let data_dir = self.host().data_dir.clone();
         let found = self
@@ -321,7 +321,7 @@ impl Work {
         }
     }
 
-    /// What the server's process knew that the database does not.
+    /// What this process knows that the database does not.
     fn read_host(&self) -> (PathBuf, Option<u16>) {
         (
             self.host().data_dir.clone(),
@@ -700,7 +700,7 @@ impl Work {
         );
     }
 
-    /// `callingSession`: the terminal an agent publishes from.
+    /// The terminal an agent publishes from.
     fn calling_session(&self, id: &str) -> Result<Publisher, String> {
         self.native
             .upgrade()
@@ -729,7 +729,7 @@ impl Work {
             .filter(Value::is_object)
     }
 
-    /// `visibleTo`: the artifact, when the session may see it.
+    /// The artifact, when the session may see it.
     async fn visible(&self, session: &str, artifact: &str) -> Result<Value, String> {
         let me = self.calling_session(session)?;
         match self.artifact_row(artifact).await {
@@ -1266,8 +1266,7 @@ impl Work {
     }
 }
 
-/// `startedRun`: the run as it stood when it started, or `null` when it
-/// did not start.
+/// The run as it stood when it started, or `null` when it did not start.
 fn started(result: Result<vorn_workflow::Started, String>) -> Answer {
     match result {
         Ok(started) => Answer::Result(without_definition(&started.run)),

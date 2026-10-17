@@ -857,8 +857,8 @@ impl Native {
         }
     }
 
-    /// `dbSignalChange`: tells the server, and any other process watching
-    /// the data directory, that the configuration changed.
+    /// Tells the server, and any other process watching the data directory,
+    /// that the configuration changed.
     fn signal_change(&self) {
         let Some(dir) = self.db.get().and_then(|db| db.parent()) else {
             return;
@@ -1286,8 +1286,7 @@ mod tests {
             Answer::Result(json!(null)).frame(&id),
             Some(json!({ "jsonrpc": "2.0", "id": 7, "result": null }))
         );
-        // A call that returns nothing has no result at all, as
-        // `JSON.stringify` drops an undefined one.
+        // A call that returns nothing has no result at all.
         assert_eq!(
             Answer::Void.frame(&id),
             Some(json!({ "jsonrpc": "2.0", "id": 7 }))

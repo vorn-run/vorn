@@ -25,7 +25,7 @@ const LOOP_FOOTER: f64 = 18.0 + 22.0 + 40.0;
 const EMPTY_BODY: f64 = 52.0;
 /// Where a loop's body starts, from the top of its frame.
 pub const LOOP_BODY_TOP: f64 = LOOP_HEADER + LOOP_BODY_PAD;
-/// `OPENING_TOP`.
+/// The margin above the workflow when the view fits it.
 const OPENING_TOP: f64 = 48.0;
 pub use vorn_components::graph::{
     edge_curve, zoom_by, Minimap, Viewport, MAX_ZOOM, MINI, MIN_ZOOM,
@@ -588,7 +588,7 @@ pub fn elements(nodes: &[Value], edges: &[Value]) -> Elements {
     }
 }
 
-/// `canConnect`: a hand-drawn edge keeps the graph a DAG the engine runs.
+/// Whether a hand-drawn edge keeps the graph a DAG the engine runs.
 pub fn can_connect(
     nodes: &[Value],
     edges: &[Value],
@@ -698,8 +698,8 @@ pub fn fit(els: &Elements, width: f64, height: f64) -> Option<Viewport> {
     Some(place_at_top((min_x, min_y, bw, bh), width, zoom))
 }
 
-/// React Flow's `MiniMap`: every node and the visible area, fitted with a
-/// margin into 96×64, as the kit's graph draws it.
+/// The minimap: every node and the visible area, fitted with a margin into
+/// 96×64, as the kit's graph draws it.
 pub fn minimap(els: &Elements, v: Viewport, size: (f64, f64)) -> Minimap {
     let cards: Vec<(f64, f64, f64, f64)> = els.nodes.iter().map(|e| (e.x, e.y, e.w, e.h)).collect();
     vorn_components::graph::minimap(&cards, v, size)

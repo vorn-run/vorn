@@ -45,8 +45,8 @@ pub enum Trigger<'a> {
 }
 
 impl<'a> Trigger<'a> {
-    /// `getTriggerConfig(workflow)`, from the workflow's `nodes`, its type
-    /// timed as `timings` says.
+    /// The trigger read from the workflow's `nodes`, its type timed as
+    /// `timings` says.
     pub fn of(workflow: &'a Value, timings: &Timings) -> Trigger<'a> {
         let Some(nodes) = workflow.get("nodes").and_then(Value::as_array) else {
             return Trigger::Unreadable;
@@ -247,7 +247,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn nodes_javascript_cannot_search_are_unreadable() {
+    fn nodes_that_cannot_be_searched_are_unreadable() {
         assert_eq!(Trigger::of(&json!({}), &timings()), Trigger::Unreadable);
         assert_eq!(
             Trigger::of(&json!({ "nodes": {} }), &timings()),

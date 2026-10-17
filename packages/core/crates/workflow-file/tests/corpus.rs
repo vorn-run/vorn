@@ -1,7 +1,7 @@
 //! Every workflow Vorn has a record of, written as a file and read back
-//! unchanged: the workflows a new database is seeded with (as recorded before they became files), the ones the
-//! replayed runs and the TypeScript reference cases use, and the shapes of
-//! real workflows people run (loops, gates, connector steps, long prompts).
+//! unchanged: the workflows a new database is seeded with, the ones the
+//! replayed runs and the recorded engine cases use, and the shapes of real
+//! workflows people run (loops, gates, connector steps, long prompts).
 
 use std::path::PathBuf;
 

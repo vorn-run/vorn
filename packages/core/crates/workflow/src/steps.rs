@@ -1,4 +1,4 @@
-//! What the engine runs itself (`executeNode`): approval gates, conditions
+//! What the engine runs itself: approval gates, conditions
 //! and loops, and every other step handed to the node type that runs it,
 //! in vornd or by a call to its extension.
 

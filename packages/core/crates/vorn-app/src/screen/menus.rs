@@ -164,7 +164,7 @@ fn row_menus(s: &Screen<'_>, menu: &str, source: Option<&str>) -> Vec<Item> {
         .collect()
 }
 
-/// `buildScopedSubmenu`: each of the workspace's projects, under its title
+/// Each of the workspace's projects, under its title
 /// its main checkout and worktrees with their session counts, or the
 /// project alone when it has none.
 fn scoped(s: &Screen<'_>, shell: bool) -> Vec<Item> {

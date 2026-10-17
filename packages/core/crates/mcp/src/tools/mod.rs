@@ -33,12 +33,12 @@ pub struct Cx<'a, R> {
 }
 
 impl<R: Rpc> Cx<'_, R> {
-    /// `rpcCall(method, params)`.
+    /// Calls `method` on vornd with the default timeout.
     pub async fn call(&self, method: &str, params: Option<Value>) -> Result<Value, RpcError> {
         self.rpc.call(method, params, DEFAULT_TIMEOUT).await
     }
 
-    /// `rpcCall(method, params, timeout)`.
+    /// Calls `method` on vornd, waiting up to `timeout`.
     pub async fn call_for(
         &self,
         method: &str,
@@ -48,7 +48,7 @@ impl<R: Rpc> Cx<'_, R> {
         self.rpc.call(method, params, timeout).await
     }
 
-    /// `rpcNotify(method, params)`.
+    /// Sends `method` to vornd without waiting for an answer.
     pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), RpcError> {
         self.rpc.notify(method, params).await
     }
@@ -65,7 +65,7 @@ impl Args {
         }
     }
 
-    /// `args.key`, `None` when it was not given.
+    /// Argument `key`, `None` when it was not given.
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key)
     }
@@ -74,12 +74,12 @@ impl Args {
         self.0.get(key).and_then(Value::as_str)
     }
 
-    /// `if (args.key)`.
+    /// Whether argument `key` is truthy.
     pub fn truthy(&self, key: &str) -> bool {
         json::truthy(self.0.get(key))
     }
 
-    /// A string argument when it is set and not empty: `args.key && ...`.
+    /// A string argument when it is set and not empty.
     pub fn nonempty(&self, key: &str) -> Option<&str> {
         self.str(key).filter(|s| !s.is_empty())
     }
@@ -89,8 +89,7 @@ impl Args {
     }
 }
 
-/// An object of the entries that are set, in order: the way a JavaScript
-/// object literal with `undefined` values reads once it is JSON.
+/// An object of the entries that are set, in order; unset ones are left out.
 pub fn object<'k>(entries: impl IntoIterator<Item = (&'k str, Option<Value>)>) -> Value {
     Value::Object(
         entries
@@ -110,12 +109,12 @@ pub fn failed(text: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": text.into() }], "isError": true })
 }
 
-/// `{ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] }`.
+/// A result of one text block holding `value` as indented JSON.
 pub fn pretty(value: &Value) -> Value {
     text(json::pretty(value))
 }
 
-/// `Error: ${err instanceof Error ? err.message : err}`.
+/// A failed result that reads `Error: ` and then `err`.
 pub fn error_of(err: impl Into<String>) -> Value {
     failed(format!("Error: {}", err.into()))
 }
@@ -143,7 +142,7 @@ pub async fn agents_off<R: Rpc>(cx: &Cx<'_, R>, agents: &[&str]) -> Option<Value
     )))
 }
 
-/// `value ?? []` as an array to walk: anything that is not one walks as empty.
+/// `value` as an array to walk: anything that is not one walks as empty.
 pub fn items(value: Option<&Value>) -> &[Value] {
     value.and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
@@ -226,8 +225,8 @@ pub(crate) async fn call<R: Rpc>(cx: &Cx<'_, R>, name: &str, args: Args) -> Opti
     })
 }
 
-/// `connectionConnectorId(conn)`: the packaged connector's id when a
-/// connection runs one, else the connection's own.
+/// The packaged connector's id when a connection runs one, else the
+/// connection's own.
 pub(crate) use browser::destructure;
 
 pub(crate) fn connection_connector_id(conn: &Value) -> Result<Option<Value>, String> {

@@ -450,7 +450,7 @@ impl Tasks {
             let Some(session) = task.get("assignedSessionId").and_then(Value::as_str) else {
                 continue;
             };
-            // The first task a session took is the one its card shows, as the chip showed it.
+            // The first task a session took is the one its card shows.
             now.entry(session.to_owned()).or_insert_with(|| {
                 json!({
                     "id": session,

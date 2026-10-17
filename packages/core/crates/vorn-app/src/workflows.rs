@@ -346,9 +346,9 @@ pub struct Undo {
 }
 
 impl Undo {
-    /// `STACK_LIMIT`.
+    /// The most edits kept to undo.
     const LIMIT: usize = 100;
-    /// `MERGE_WINDOW_MS`.
+    /// Edits closer than this many milliseconds undo as one.
     const MERGE: f64 = 500.0;
 
     /// Records the graph as it was before an edit at `now`.
@@ -484,7 +484,7 @@ pub fn bucket(run: &Value) -> Bucket {
     }
 }
 
-/// `failedStep`.
+/// The first step of `run` that failed.
 fn failed_step(run: &Value) -> Option<&Value> {
     runs::states(run).find(|n| s(n, "status") == Some("error"))
 }
@@ -532,7 +532,7 @@ pub fn status_line(run: &Value, nodes: &Value) -> String {
     }
 }
 
-/// `isSignInWait`.
+/// Whether a step state waits for a sign-in.
 pub fn is_sign_in(state: &Value) -> bool {
     s(state, "status") == Some("waiting") && s(state, "waitingFor") == Some("signIn")
 }
@@ -555,11 +555,11 @@ pub struct Described {
     pub source: String,
     /// The connector a connector run draws when its workflow has no icon.
     pub connector: Option<String>,
-    /// `SOURCE_ICONS[source]`, for a run whose workflow has no icon.
+    /// The icon of the run's source, for a run whose workflow has no icon.
     pub fallback: &'static str,
 }
 
-/// `SOURCE_ICONS`.
+/// The icon a run's source draws.
 fn source_icon(source: &str) -> &'static str {
     match source {
         "schedule" => "clock",
@@ -763,7 +763,7 @@ pub fn required(nodes: &[Value]) -> (bool, bool) {
     (branch, worktree)
 }
 
-/// `areInputsValid`: each required input answered; a toggle always is.
+/// Whether each required input is answered; a toggle always is.
 pub fn inputs_valid(defs: &[Value], value: impl Fn(&str) -> String) -> bool {
     defs.iter().all(|d| {
         d.get("required").and_then(Value::as_bool) != Some(true)
@@ -774,7 +774,7 @@ pub fn inputs_valid(defs: &[Value], value: impl Fn(&str) -> String) -> bool {
     })
 }
 
-/// `defaultInputValue`, as the text a field starts with.
+/// An input's default, as the text a field starts with.
 pub fn input_default(def: &Value) -> String {
     match s(def, "type") {
         Some("boolean") => (s(def, "defaultValue") == Some("true")).to_string(),
@@ -815,7 +815,7 @@ pub fn slugify(label: &str) -> String {
     }
 }
 
-/// `ensureUniqueSlug`.
+/// `base`, or `base_N` with the first free `N` from 2 when it is taken.
 pub fn unique_slug(base: &str, taken: &HashSet<String>) -> String {
     if !taken.contains(base) {
         return base.to_owned();
@@ -847,7 +847,7 @@ pub const STEPS: [(&str, &str, &str); 6] = [
     ("loop", "Loop", "repeat"),
 ];
 
-/// `TRIGGER_ICONS`.
+/// The icon a trigger kind draws.
 pub fn trigger_icon(kind: &str) -> &'static str {
     match kind {
         "once" => "calendar",
@@ -1611,7 +1611,7 @@ pub fn text_of(v: Option<&Value>) -> String {
     }
 }
 
-/// `OPERATOR_LABELS`.
+/// The symbol a condition operator shows as.
 fn operator_symbol(op: &str) -> &str {
     match op {
         "equals" => "=",

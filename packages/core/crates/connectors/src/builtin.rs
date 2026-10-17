@@ -144,7 +144,7 @@ fn failure(error: impl Into<String>) -> Value {
     json!({ "success": false, "error": error.into() })
 }
 
-/// The row as JavaScript would print it: whole numbers without `.0`.
+/// The row with whole numbers written without `.0`.
 fn from_store(mut value: Value) -> Value {
     fn walk(v: &mut Value) {
         match v {
@@ -687,7 +687,7 @@ impl Connectors {
         }
     }
 
-    /// `runMcpDiscovery`: lists an MCP connection's tools onto its row.
+    /// Lists an MCP connection's tools onto its row.
     async fn refresh(&self, id: &str) -> Value {
         let conn = match self.connection(id).await {
             Ok(Some(conn)) if text(&conn, "connectorId") == MCP => conn,
@@ -730,7 +730,7 @@ impl Connectors {
     // ---- launching ----
 
     /// How `sdk_id` signs in: its checkout's manifest, probed once, else its
-    /// installed pack's (`resolveConnectorAuth`).
+    /// installed pack's.
     async fn connector_auth(&self, sdk_id: &str) -> Option<auth::Source> {
         if sdk_id.is_empty() {
             return None;
@@ -799,7 +799,7 @@ impl Connectors {
         })
     }
 
-    /// Everything a connection's child starts with (`buildSpawnConfig`).
+    /// Everything a connection's child starts with.
     async fn spawn_spec(&self, conn: &Value) -> Result<Spawn, String> {
         let filters = conns::filters_of(conn);
         let sdk_id = conns::sdk_id_of(conn);

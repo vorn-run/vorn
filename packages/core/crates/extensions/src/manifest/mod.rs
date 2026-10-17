@@ -1283,7 +1283,7 @@ pub fn within_origins(origins: &[String], url: &str) -> bool {
 
 /// The lowercase host of an `https:` URL on its default port, or `None`.
 ///
-/// No URL crate is in the build, and this is all `withinOrigins` reads: a
+/// No URL crate is in the build, and this is all [`within_origins`] reads: a
 /// URL with an explicit port other than 443 or with no host is refused.
 fn https_host(url: &str) -> Option<String> {
     let rest = url

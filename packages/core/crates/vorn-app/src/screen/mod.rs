@@ -203,7 +203,7 @@ impl Screen<'_> {
     }
 
     /// The left padding of a bar at the window's top left: room for the
-    /// traffic lights on macOS (`TRAFFIC_LIGHT_PAD_PX`) while the sidebar,
+    /// traffic lights on macOS while the sidebar,
     /// which otherwise holds them, is closed.
     pub fn lead(&self) -> f32 {
         if self.traffic && !self.st.sidebar {

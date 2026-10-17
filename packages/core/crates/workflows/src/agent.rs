@@ -655,8 +655,8 @@ fn agent_spoke<H: Host>(
 }
 
 impl Agent {
-    /// `resolveEffectiveAgent`: a concrete agent as it is; `fromTask` reads
-    /// the trigger's task, then the step's, then the default, then `first_on`.
+    /// The agent a step runs: a concrete one as it is; `fromTask` reads the
+    /// trigger's task, then the step's, then the default, then `first_on`.
     fn effective_agent(
         &self,
         config: &Value,

@@ -11,7 +11,7 @@ use crate::workflow::graph::{self, is_sign_in_wait, name_of};
 use crate::workflow::portability as portable;
 use crate::zod;
 
-/// `resolveWorkflowId`: the non-empty `workflow_id`.
+/// The non-empty `workflow_id`.
 fn resolve_workflow_id(args: &Args) -> Result<String, String> {
     args.nonempty("workflow_id")
         .map(str::to_owned)
@@ -26,7 +26,7 @@ fn graph_refusal(errors: &[String]) -> Value {
     failed(format!("Error: {}", errors.join("; ")))
 }
 
-/// `describeConfigIssues(node)`: each config problem as "field: why".
+/// Each config problem on `node` as "field: why".
 fn describe_config_issues(node: &Value) -> Vec<String> {
     let kind = node.get("type").and_then(Value::as_str).unwrap_or_default();
     zod::node_config_issues(zod::registry(), kind, node.get("config"))
@@ -39,8 +39,8 @@ fn describe_config_issues(node: &Value) -> Vec<String> {
         .collect()
 }
 
-/// `checkNodeConfigs`: config problems on the nodes an update sends, split by
-/// whether the caller made them. A config left exactly as stored is a warning.
+/// Config problems on the nodes an update sends, split by whether the caller
+/// made them. A config left exactly as stored is a warning.
 fn check_node_configs(nodes: &[Value], stored: &[Value]) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -92,7 +92,7 @@ fn uuid() -> Value {
     Value::from(uuid::Uuid::new_v4().to_string())
 }
 
-/// `buildGraphFromFlat`: a trigger, then the agents one after another.
+/// A trigger, then the agents one after another.
 fn build_graph_from_flat(trigger: &Value, actions: &[Value]) -> (Vec<Value>, Vec<Value>) {
     let trigger_id = uuid();
     let mut nodes = vec![json!({
@@ -237,7 +237,7 @@ pub async fn delete_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     )))
 }
 
-/// `run.nodeStates.<method>(...)`, which a run without them throws on.
+/// A run's node states, or an error naming `method` when it has none.
 fn node_states<'a>(run: &'a Value, method: &str) -> Result<&'a [Value], String> {
     let states = json::prop(Some(run), "nodeStates")?;
     match states {
@@ -256,7 +256,7 @@ fn is_waiting(state: &Value) -> bool {
     state.get("status").and_then(Value::as_str) == Some("waiting")
 }
 
-/// `approvalNode(workflow, nodeId)`.
+/// The approval node `node_id` in `workflow`.
 fn approval_node<'a>(workflow: Option<&'a Value>, node_id: Option<&Value>) -> Option<&'a Value> {
     items(json::field(workflow, "nodes")).iter().find(|n| {
         json::strict_equals(n.get("id"), node_id)
@@ -264,14 +264,14 @@ fn approval_node<'a>(workflow: Option<&'a Value>, node_id: Option<&Value>) -> Op
     })
 }
 
-/// `askedBy(node)`: what an approval node asks, if anything.
+/// What an approval node asks, if anything.
 fn asked_by(node: Option<&Value>) -> Option<String> {
     let message = json::field(json::field(node, "config"), "message")?.as_str()?;
     let trimmed = json::trim(message);
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-/// `annotateWaitingGates`: each waiting node says what it asks.
+/// The runs, each waiting node saying what it asks.
 fn annotate_waiting_gates(runs: &[Value], workflows: &[Value]) -> Result<Vec<Value>, String> {
     runs.iter()
         .map(|run| {
@@ -360,7 +360,7 @@ pub async fn list_workflow_runs<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome 
     Ok(pretty(&with_gates(cx, Value::Array(parked)).await?))
 }
 
-/// `runById`: recent history first, then every parked run.
+/// A run by id: recent history first, then every parked run.
 async fn run_by_id<R: Rpc>(cx: &Cx<'_, R>, run_id: &str) -> Result<Option<Value>, String> {
     let recent = data::all_workflow_runs(cx, 500).await?;
     let found = items(Some(&recent))
@@ -420,7 +420,7 @@ pub async fn stop_workflow_run<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     )))
 }
 
-/// `resolveGateTarget`: which gate a decision answers.
+/// Which gate a decision answers.
 fn resolve_gate_target(
     run: &Value,
     node_id: Option<&str>,
@@ -595,8 +595,8 @@ pub async fn get_workflow_schedule<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outco
     Ok(run.await.unwrap_or_else(error_of))
 }
 
-/// `resolveWorkflowInputs`: supplied values matched against the declared ones,
-/// as the run dialog does for a person.
+/// Supplied values matched against the declared ones, as the run dialog does
+/// for a person.
 fn resolve_workflow_inputs(
     defs: &[Value],
     supplied: &Map<String, Value>,
@@ -775,8 +775,8 @@ pub async fn execute_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     )))
 }
 
-/// `listPortableConnections`: connections for naming and rebinding
-/// requirements, or none when they cannot be read.
+/// Connections for naming and rebinding requirements, or none when they
+/// cannot be read.
 async fn portable_connections<R: Rpc>(cx: &Cx<'_, R>) -> Vec<Value> {
     match cx.call("connection:list", Some(json!({}))).await {
         Ok(list) => items(Some(&list)).to_vec(),
@@ -794,7 +794,7 @@ pub async fn export_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     };
     let projects = data::list(cx, "projects").await?;
     // Every node's project name is read before the first is picked, so a node
-    // without a config throws wherever it sits.
+    // without a config fails wherever it sits.
     let mut names = Vec::new();
     for node in items(json::prop(Some(&workflow), "nodes")?) {
         let config = json::prop(Some(node), "config")?;
@@ -843,8 +843,7 @@ pub async fn export_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     Ok(text(out))
 }
 
-/// What `String(err)` prints for a `JSON.parse` failure, approximately: V8
-/// words each failure its own way, which serde_json does not reproduce.
+/// A parse failure as a `SyntaxError` line.
 fn json_parse_error(err: &serde_json::Error) -> String {
     format!("SyntaxError: {err}")
 }
@@ -1011,7 +1010,7 @@ pub async fn describe_workflow_nodes<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Out
     for t in types {
         let key = json::display(Some(t));
         let doc = json::field(all, &key).cloned();
-        // `Object.fromEntries` keeps an `undefined` value, which JSON then drops.
+        // A type with no doc is left out.
         match doc {
             Some(doc) => {
                 chosen.insert(key, doc);

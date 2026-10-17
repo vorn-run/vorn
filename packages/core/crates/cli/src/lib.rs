@@ -4,7 +4,7 @@
 //! its device tokens, read and written in the database directly, and `serve`,
 //! which runs vornd as the server. The rest talks to a server that is already
 //! running, starting one first if there is none, and every one of those verbs
-//! is an RPC the app has always had. `vorn mcp` relays an agent's MCP over
+//! is an RPC to it. `vorn mcp` relays an agent's MCP over
 //! stdio to vornd.
 //!
 //! Its output is pinned by `tests/native-cli.test.ts`.
@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_usage_and_dispatch_errors_as_the_typescript_does() {
+    fn reports_usage_and_dispatch_errors() {
         let (code, io) = run_sync(&[]);
         assert_eq!((code, io.out.as_str()), (2, ""));
         assert_eq!(io.err, USAGE);

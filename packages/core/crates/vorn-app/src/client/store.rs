@@ -290,7 +290,7 @@ impl Store {
     }
 
     /// Whether a session's project is in the active workspace, which is
-    /// what `useSessionScope` lets any surface show. A session outside every
+    /// what any surface shows. A session outside every
     /// project (a shell in the home directory) belongs to no workspace, so
     /// it shows in all of them rather than nowhere.
     pub fn in_scope(&self, s: &Session) -> bool {
@@ -525,7 +525,7 @@ fn tasks_list(config: &mut Value) -> &mut Vec<Value> {
     }
 }
 
-/// `DEFAULT_WORKSPACE`.
+/// The workspace a config starts with.
 pub fn default_workspace() -> WorkspaceConfig {
     WorkspaceConfig {
         id: WORKSPACE.to_owned(),
@@ -536,7 +536,7 @@ pub fn default_workspace() -> WorkspaceConfig {
     }
 }
 
-/// The workspace every config has (`DEFAULT_WORKSPACE_ID`).
+/// The id of the workspace every config has.
 pub const WORKSPACE: &str = "personal";
 
 /// `defaults.activeWorkspace`, else `personal`.

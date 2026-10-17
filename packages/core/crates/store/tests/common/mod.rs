@@ -97,7 +97,7 @@ pub fn db_file(dir: &Path) -> PathBuf {
     dir.join("vorn.db")
 }
 
-/// The store on `vorn.db` in `dir`, as `initDatabase(dir)` opened it.
+/// The store on `vorn.db` in `dir`, opened and migrated.
 pub fn open(dir: &Path) -> Store {
     let (store, opened) = Store::open(&db_file(dir), options()).expect("the store opens");
     assert_eq!(opened, Opened::Ok);
@@ -163,7 +163,7 @@ pub fn update_task(store: &mut Store, id: &str, updates: Value, present: &[&str]
     call(store, "dbUpdateTask", json!([id, updates, present]));
 }
 
-/// `dbUpdateSourceConnection(id, updates)`, with the same extra argument.
+/// `dbUpdateSourceConnection`, with `present` as for [`update_task`].
 pub fn update_connection(store: &mut Store, id: &str, updates: Value, present: &[&str]) {
     call(
         store,
@@ -187,7 +187,7 @@ pub fn ids(rows: &Value, key: &str) -> Vec<String> {
 }
 
 /// Makes `workflows` the only ones the store has, through the workflow
-/// calls: the configuration no longer carries them.
+/// calls.
 pub fn put_workflows(store: &mut Store, workflows: Vec<Value>) {
     for w in call(store, "dbListWorkflows", json!([]))
         .as_array()

@@ -665,7 +665,7 @@ fn loop_frame(
     wrap
 }
 
-/// React Flow's `Controls`: zoom in, zoom out, fit, tidy up, on the kit's strip.
+/// The canvas controls: zoom in, zoom out, fit, tidy up, on the kit's strip.
 fn controls(s: &Screen<'_>, h: f32) -> El {
     let control = |a: WfAct, icon: &'static str, label: &'static str| {
         let id = s.acts.on("wf-controls", act(a));
