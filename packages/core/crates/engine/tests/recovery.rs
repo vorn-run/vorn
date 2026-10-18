@@ -515,6 +515,10 @@ fn exact_only_when_earned() {
     s.input(Input::Checkpoint(good.clone()), Instant::now(), &mut out);
     assert_eq!(s.fidelity(), Fidelity::Exact);
     assert!(out.contains(&Out::Ready(Fidelity::Exact)));
+    assert!(
+        !out.iter().any(|o| matches!(o, Out::Nudge { .. })),
+        "{out:?}"
+    );
     compare(&reference(config(0), SIZE, &entries), &state(s)).unwrap();
 
     // Replay from rseq 0, spawn size known: exact.
@@ -537,6 +541,12 @@ fn exact_only_when_earned() {
     };
     assert_eq!(s.brief().reason, Some("spawn size unknown"));
     assert!(out.contains(&Out::Ready(Fidelity::Approximate)));
+    // The restored screen may not be the program's: it is asked to redraw
+    // once live (a program redrawing with relative moves would keep the
+    // stale cells otherwise), after the replay and not during it.
+    let ready = out.iter().position(|o| matches!(o, Out::Ready(_))).unwrap();
+    let nudge = out.iter().position(|o| matches!(o, Out::Nudge { .. }));
+    assert!(nudge.is_some_and(|n| n > ready), "{out:?}");
 
     // Across a gap: approximate, and a nudge to redraw once live, not
     // while replaying.
