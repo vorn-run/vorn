@@ -1307,11 +1307,15 @@ impl Run {
                 ..
             } => {
                 if !self.size_known {
-                    // The output before this was parsed at a size that may
-                    // not have been the spawn size.
                     self.size_known = true;
-                    self.term.fidelity = Fidelity::Approximate;
-                    reason.get_or_insert("spawn size unknown");
+                    // During replay, the output before this was parsed at a
+                    // size that may not have been the spawn size. Live, the
+                    // replay saw no resize, so the size never changed and
+                    // this one continues it.
+                    if !self.live {
+                        self.term.fidelity = Fidelity::Approximate;
+                        reason.get_or_insert("spawn size unknown");
+                    }
                 }
                 if self
                     .term
