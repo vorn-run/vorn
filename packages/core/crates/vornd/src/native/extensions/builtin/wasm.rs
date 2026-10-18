@@ -75,6 +75,29 @@ pub fn workflow_editor() -> Component {
     }
 }
 
+/// Shell blocks (`packages/core/extensions/blocks`): a shell's commands and its composer's history and completions.
+pub fn blocks() -> Component {
+    use vorn_extensions::events::{SESSION_EXITED, SESSION_MARK};
+    Component {
+        manifest: include_str!("../../../../../../extensions/blocks/vorn-extension.toml"),
+        events: &[SESSION_MARK, SESSION_EXITED],
+        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/blocks.wasm")),
+        on_by_default: true,
+        start: None,
+    }
+}
+
+/// Files (`packages/core/extensions/files`): the Files pane and the cards files pop out into.
+pub fn files() -> Component {
+    Component {
+        manifest: include_str!("../../../../../../extensions/files/vorn-extension.toml"),
+        events: &[],
+        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/files.wasm")),
+        on_by_default: true,
+        start: None,
+    }
+}
+
 impl Component {
     fn bundled(&self, api: &Api) -> Bundled {
         Bundled {

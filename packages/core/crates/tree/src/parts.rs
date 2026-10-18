@@ -130,9 +130,9 @@ pub const MIN_SPLIT: f32 = 0.15;
 pub const MAX_SPLIT: f32 = 0.85;
 
 /// A file's text and how it may be edited. The client holds the edit: it
-/// takes `text` when `rev` changes, colours and finds in what it holds, and
-/// reports `change` with the text when it starts or stops differing from
-/// `text` and once typing settles, `submit` with the text to save it, and
+/// takes `draft`, else `text`, when `rev` changes, colours and finds in what
+/// it holds, and reports `change` with the text when it starts or stops
+/// differing from `text` (what is on disk) and once typing settles, `submit` with the text to save it, and
 /// `click` with `discard`, `force` (save over a file that moved), `disk`
 /// (take what is on disk) or `keep` (keep editing over a moved file).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -141,9 +141,13 @@ pub struct Code {
     /// The strip shows `path` under this folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// What is on disk.
     #[serde(default)]
     pub text: String,
-    /// Changes whenever `text` must replace what the client holds.
+    /// An edit kept from before, to start from instead of `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<String>,
+    /// Changes whenever the client must take `draft` or `text` in place of what it holds.
     #[serde(default)]
     pub rev: u64,
     #[serde(default)]
@@ -219,7 +223,7 @@ impl Log {
 }
 
 /// Past these a part is a mistake, not a page.
-pub const MAX_CODE: usize = 1 << 20;
+pub const MAX_CODE: usize = 2 << 20;
 pub const MAX_LINES: usize = 100_000;
 pub const MAX_TABS: usize = 500;
 pub const MAX_COMMANDS: usize = 1000;

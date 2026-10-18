@@ -117,6 +117,8 @@ pub fn precompile(router: &Arc<Router>) {
         ),
         (wasm::widget().manifest, wasm::widget().wasm),
         (wasm::worktrees().manifest, wasm::worktrees().wasm),
+        (wasm::blocks().manifest, wasm::blocks().wasm),
+        (wasm::files().manifest, wasm::files().wasm),
     ]
     .into_iter()
     .collect();
@@ -186,6 +188,8 @@ impl std::fmt::Debug for Builtins {
 /// those vornd starts before the extension host (Connectors) after them.
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
+        Arc::new(wasm::files()),
+        Arc::new(wasm::blocks()),
         Arc::new(wasm::worktrees()),
         Arc::new(wasm::widget()),
         Arc::new(workflows::Workflows),

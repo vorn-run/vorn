@@ -303,6 +303,7 @@ pub fn split(
         Kind::Split {
             ratio,
             label: label.into(),
+            narrow: None,
         },
         children,
     )
@@ -337,6 +338,14 @@ pub fn group_by<T, K: PartialEq>(
 
 /// Setters; each applies to the kinds that have it and leaves the rest alone.
 impl Node {
+    /// A split that draws only its first child narrower than `w`.
+    pub fn narrow(mut self, w: f32) -> Node {
+        if let Kind::Split { narrow, .. } = &mut self.kind {
+            *narrow = Some(w);
+        }
+        self
+    }
+
     /// A field that reports `change` as it is typed.
     pub fn live(mut self) -> Node {
         if let Kind::Field { live, .. } = &mut self.kind {

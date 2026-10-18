@@ -188,6 +188,9 @@ pub enum Kind {
         /// The divider's accessible name.
         #[serde(default)]
         label: String,
+        /// Narrower than this many logical pixels, only the first child draws.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        narrow: Option<f32>,
     },
     /// A file's text being edited; its children are buttons at the end of its strip.
     Code(Box<Code>),
@@ -530,6 +533,9 @@ pub struct Answer {
     /// A question to ask first; its OK tells the extension the event it holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask: Option<Ask>,
+    /// The tree stands as drawn: nothing is asked for again.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub same: bool,
 }
 
 impl Answer {
@@ -911,7 +917,7 @@ impl Checker {
             }
             Kind::Tabs(t) => self.tabs(n, at, t),
             Kind::Outline(o) => self.outline(n, at, o),
-            Kind::Split { ratio, label } => {
+            Kind::Split { ratio, label, .. } => {
                 self.text(at, "label", label);
                 if !ratio.is_finite() || !(0.0..=1.0).contains(ratio) {
                     self.err(&format!("{at}.ratio"), "goes from 0 to 1");
@@ -926,10 +932,11 @@ impl Checker {
             Kind::Code(code) => {
                 self.named(n, at, "code");
                 self.text(at, "path", &code.path);
-                if code.text.len() > parts::MAX_CODE {
+                let size = code.text.len() + code.draft.as_ref().map_or(0, String::len);
+                if size > parts::MAX_CODE {
                     self.err(
                         &format!("{at}.text"),
-                        format_args!("{} bytes; code is {} at most", code.text.len(), parts::MAX_CODE),
+                        format_args!("{size} bytes; code is {} at most", parts::MAX_CODE),
                     );
                 }
                 if let Some(e) = &code.error {
