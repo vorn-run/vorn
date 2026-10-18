@@ -328,6 +328,10 @@ mod bench {
             .call("config:load", Value::Null)
             .map_err(|e| e.to_string())?;
         b.app.store.apply("config:changed", config);
+        // The board is read from the core's list, a page at a time, as the app loads it.
+        let loaded =
+            vorn_app::client::store::Store::load(b.app.rpc()).map_err(|e| e.to_string())?;
+        b.app.store.tasks = loaded.tasks;
         if b.app.store.tasks.len() != tier {
             return Err(format!(
                 "seeded {tier} tasks, the app has {}",
@@ -346,7 +350,7 @@ mod bench {
         if n == 60 {
             idle.extend(b.script(&[Step::None; 25]));
         }
-        let scroll_id = Id::new("task-column-scroll").child("todo");
+        let scroll_id = vorn_app::screen::tasks::column_scroll_id("todo");
         let (cx, cy) = center(b.rect(scroll_id, "the To do column")?);
         let notch = if cells { 3.0 } else { 120.0 };
         let mut wheel = vec![Step::Move(cx, cy)];

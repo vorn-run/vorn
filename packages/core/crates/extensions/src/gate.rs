@@ -184,6 +184,9 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "task.sourceLink",
     "workflow.get",
     "workflow.list",
+    "workflow.gates",
+    "workflow.run",
+    "workflow.resolveGate",
     "workflow.seed",
     "workflow.unseed",
     "inbox.cursor",
@@ -453,6 +456,19 @@ header = "Authorization: Bearer {token}"
         )
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn running_a_workflow_and_answering_a_gate_are_the_shipped_editors_alone() {
+        for m in [
+            "workflow.run",
+            "workflow.resolveGate",
+            "workflow.gates",
+            "task.changed",
+        ] {
+            assert!(BUILTIN_ONLY.contains(&m), "{m}");
+            assert!(CORE_METHODS.iter().any(|(c, _)| *c == m), "{m}");
+        }
     }
 
     #[test]

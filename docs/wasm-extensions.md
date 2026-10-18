@@ -240,10 +240,10 @@ stdio, `data` and what `get` answers are base64 strings.
 
 - `files.read` with `encoding: "base64"` answers `{base64}`, a file's bytes,
   under `files.read`.
-- `workflow.run` (`{workflowId, inputs}`) runs a workflow by hand and
-  `workflow.resolveGate` (`{runId, nodeId, decision}`) answers a gate, under
-  `workflows.write`; `workflow.gates` lists the gates waiting for a person,
-  under `workflows.read`.
+- `workflow.run` (`{workflowId, inputs}`) runs a workflow by hand,
+  `workflow.resolveGate` (`{runId, nodeId, decision}`) answers a gate and
+  `workflow.gates` lists the gates waiting for a person. Like `workflow.list`,
+  they are open only to the extensions Vorn ships: a gate waits for a person.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed).
