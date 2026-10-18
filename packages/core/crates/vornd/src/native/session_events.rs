@@ -113,7 +113,12 @@ fn effected(
         Effect::Cwd(cwd) if terminal => registry.terminal_cwd(id, &cwd),
         Effect::Command(mark) if terminal => {
             let note = command_note(id, &mark);
-            native.events().emit(SESSION_MARK, || mark_event(&note));
+            native.events().emit(SESSION_MARK, || {
+                let cwd = registry
+                    .read(|r| r.terminal(id).and_then(|(t, _)| t.shell_cwd.clone()))
+                    .flatten();
+                mark_event(&note, cwd)
+            });
             native.broadcast_to("terminal:command", note, Some(id));
         }
         Effect::Notify { title, body } => {
@@ -210,11 +215,14 @@ fn place_of(t: &crate::registry::TerminalSession) -> (String, String) {
 }
 
 /// `session.mark` from what clients hear of the mark: the same fields, the session named as events name it.
-fn mark_event(note: &Value) -> Value {
+fn mark_event(note: &Value, cwd: Option<String>) -> Value {
     let mut event = note.clone();
     if let Some(map) = event.as_object_mut() {
         if let Some(id) = map.shift_remove("id") {
             map.insert("sessionId".into(), id);
+        }
+        if let Some(cwd) = cwd {
+            map.insert("cwd".into(), Value::String(cwd));
         }
     }
     event

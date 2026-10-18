@@ -250,3 +250,120 @@ fn an_answer_reads_what_it_says_and_nothing_else() {
         Answer::default()
     );
 }
+
+#[test]
+fn the_parts_a_pane_draws_travel_and_check() {
+    let tree = col([
+        tabs(
+            "tabs",
+            Tabs {
+                tabs: vec![Tab {
+                    id: "/a.rs".into(),
+                    label: "a.rs".into(),
+                    file: true,
+                    active: true,
+                    preview: true,
+                    ..Tab::default()
+                }],
+                lead: vec![Tool {
+                    id: "tree".into(),
+                    label: "Hide file tree".into(),
+                    icon: "list-tree".into(),
+                    on: true,
+                }],
+                ..Tabs::default()
+            },
+        ),
+        split(
+            "split",
+            0.38,
+            "Resize file tree",
+            [
+                outline(
+                    "tree",
+                    Outline {
+                        rows: vec![
+                            Line {
+                                id: "/src".into(),
+                                label: "src".into(),
+                                depth: 0,
+                                kind: LineKind::Folder {
+                                    open: true,
+                                    busy: false,
+                                },
+                            },
+                            Line {
+                                id: String::new(),
+                                label: "empty".into(),
+                                depth: 1,
+                                kind: LineKind::Note,
+                            },
+                        ],
+                        filter: Some(Filter::default()),
+                        files: true,
+                        ..Outline::default()
+                    },
+                ),
+                code(
+                    "code",
+                    Code {
+                        path: "/a.rs".into(),
+                        text: "fn main() {}\n".into(),
+                        rev: 1,
+                        state: CodeState::Edit,
+                        ..Code::default()
+                    },
+                    [button("back", "Put back")],
+                ),
+            ],
+        ),
+        log(Log {
+            commands: vec![Command {
+                command: Some("ls".into()),
+                started: true,
+                ..Command::default()
+            }],
+        }),
+        field("q", "").live(),
+    ]);
+    let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
+    assert_eq!(v["tree"]["children"][1]["children"][0]["rows"][0]["line"], "folder");
+    assert_eq!(read(&v).unwrap().tree, tree);
+    let Kind::Log(l) = &tree.children[2].kind else {
+        panic!("a log")
+    };
+    assert_eq!(l.running().and_then(|c| c.command.as_deref()), Some("ls"));
+}
+
+#[test]
+fn a_part_that_cannot_be_drawn_says_why() {
+    let bad = col([
+        split("s", 2.0, "", [divider(), divider(), divider()]),
+        code("c", Code::default(), [text("not a button")]),
+        tabs(
+            "t",
+            Tabs {
+                tabs: vec![Tab::default(), Tab::default()],
+                ..Tabs::default()
+            },
+        ),
+    ]);
+    let errs = check(&bad).unwrap_err().join("\n");
+    assert!(errs.contains("$.children[0].ratio: goes from 0 to 1"), "{errs}");
+    assert!(errs.contains("a split holds one child or two"), "{errs}");
+    assert!(errs.contains("a code's strip holds buttons only"), "{errs}");
+    assert!(errs.contains("a tab needs an id"), "{errs}");
+}
+
+#[test]
+fn an_event_carries_its_scope_and_an_answer_can_ask_first() {
+    let e: Event = serde_json::from_value(
+        json!({"id": "tabs", "kind": "close", "value": "/a", "scope": "s1", "width": 400}),
+    )
+    .unwrap();
+    assert_eq!((e.kind, e.scope.as_deref(), e.width), (EventKind::Close, Some("s1"), Some(400)));
+    let a = Answer::read(&json!({"ask": {"title": "Discard unsaved changes?", "event": e}}));
+    assert_eq!(a.ask.map(|q| q.event.value), Some("/a".to_owned()));
+    let s: Surface = serde_json::from_value(json!({"cells": true, "scope": "s1"})).unwrap();
+    assert_eq!(s.scope.as_deref(), Some("s1"));
+}

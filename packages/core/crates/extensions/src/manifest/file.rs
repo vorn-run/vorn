@@ -397,6 +397,10 @@ struct RawContributes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     views: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shell: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cards: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attention: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<RawNode>,
@@ -474,7 +478,7 @@ struct RawWorkflow {
 
 impl RawContributes {
     /// The template points, by place.
-    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 13] {
+    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 15] {
         use super::Place as P;
         [
             (P::Sidebar, &self.sidebar),
@@ -489,6 +493,8 @@ impl RawContributes {
             (P::Menus, &self.menus),
             (P::Dialogs, &self.dialogs),
             (P::Views, &self.views),
+            (P::Shell, &self.shell),
+            (P::Cards, &self.cards),
             (P::Attention, &self.attention),
         ]
     }
@@ -508,6 +514,8 @@ impl RawContributes {
             P::Menus => &mut self.menus,
             P::Dialogs => &mut self.dialogs,
             P::Views => &mut self.views,
+            P::Shell => &mut self.shell,
+            P::Cards => &mut self.cards,
             P::Attention => &mut self.attention,
             P::Panes => return None,
         })

@@ -1,0 +1,18 @@
+id = "vorn.blocks"
+name = "Shell blocks"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "A shell's finished commands as blocks with their status and time, the command running now, and the composer's history and completions. Off, a shell is a plain terminal."
+
+[declares]
+uses = ["files.read", "git.read", "storage"]
+
+[service]
+component = "blocks.wasm"
+events = ["session.mark", "session.exited"]
+
+[[contributes.shell]]
+id = "commands"
+title = "Commands"
+tree = true
