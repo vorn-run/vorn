@@ -293,8 +293,8 @@ async function generate() {
   let own = tools
   for (const crate of BUILTINS) {
     const names = contributedBy(crate)
-    files[path.relative(OUT, path.join(root, crate, 'generated', 'tools.json'))] = own.filter(
-      (t) => names.has(t.name)
+    files[path.relative(OUT, path.join(root, crate, 'generated', 'tools.json'))] = own.filter((t) =>
+      names.has(t.name)
     )
     own = own.filter((t) => !names.has(t.name))
   }

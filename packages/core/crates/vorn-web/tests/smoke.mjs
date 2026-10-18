@@ -311,9 +311,7 @@ async function board(page, server) {
   await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2)
   await page.waitForTimeout(300)
   await press(page, '[role="button"][aria-label="More"]', "the card's menu")
-  await until('the menu', () =>
-    page.locator('[role="menuitem"][aria-label="Edit"]').count()
-  )
+  await until('the menu', () => page.locator('[role="menuitem"][aria-label="Edit"]').count())
 }
 
 /** The bottom strip of the card named `name`, as pixels: where its footer draws. */
