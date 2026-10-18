@@ -1442,6 +1442,9 @@ impl Around for Wired {
     fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
         let native = self.native.upgrade();
         let connectors = native.as_ref().and_then(|n| n.connectors().cloned());
+        if let Some(n) = &native {
+            n.ext_tables().forget(id);
+        }
         let db = native.and_then(|n| n.database().map(Path::to_path_buf));
         let id = id.to_owned();
         Box::pin(async move {

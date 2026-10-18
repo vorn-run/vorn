@@ -25,6 +25,42 @@ pub struct Wired {
     pub native: Weak<Native>,
 }
 
+/// Each extension's tables on a connection of its own, opened at its first
+/// storage call and kept: opening one per call cost each of Tasks' writes
+/// about a millisecond. Calls on one extension's tables take turns.
+#[derive(Default)]
+pub struct Tables {
+    open: std::sync::Mutex<std::collections::HashMap<String, Kept>>,
+}
+
+/// One extension's tables, opened on the blocking thread of their first call.
+pub type Kept = Arc<std::sync::Mutex<Option<ExtensionTables>>>;
+
+impl std::fmt::Debug for Tables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tables").finish_non_exhaustive()
+    }
+}
+
+impl Tables {
+    /// Where extension `id`'s tables are kept, not yet open before its first call.
+    pub fn of(&self, id: &str) -> Kept {
+        let mut open = self
+            .open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(open.entry(id.to_owned()).or_default())
+    }
+
+    /// Closes extension `id`'s tables, as it is removed.
+    pub fn forget(&self, id: &str) {
+        self.open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(id);
+    }
+}
+
 /// The core's tables extension `id` is lent: Tasks keeps the board's own.
 fn lent(id: &str) -> &'static [Grant] {
     if id == super::builtin::tasks::ID {
@@ -671,8 +707,17 @@ impl World for Wired {
                 .database()
                 .map(std::path::Path::to_path_buf)
                 .ok_or_else(|| ExtError::new("unsupported", "vornd has no database"))?;
+            let kept = native.ext_tables().of(&id);
             let done = tokio::task::spawn_blocking(move || {
-                let tables = ExtensionTables::open_with(&db, &id, lent(&id))?;
+                let mut held = kept
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if held.is_none() {
+                    *held = Some(ExtensionTables::open_with(&db, &id, lent(&id))?);
+                }
+                let tables = held
+                    .as_ref()
+                    .ok_or_else(|| vorn_store::Error::Refused("its tables did not open".into()))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
                 if let Some(dir) = migrations.filter(|d| d.is_dir()) {
                     let ran = tables.migrate(&dir)?;

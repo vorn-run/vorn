@@ -301,6 +301,8 @@ pub struct Native {
     tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
     /// The approval gates told waiting, by run.
     waiting: work::waiting::Waiting,
+    /// Each extension's own tables, on a connection kept open between its storage calls.
+    ext_tables: extensions::world::Tables,
     /// Installing and removing packages, one store for every kind.
     installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
     /// The sign-in windows programs call through ([`signin`]).
@@ -367,6 +369,7 @@ impl Native {
             connectors: OnceLock::new(),
             tasks: OnceLock::new(),
             waiting: work::waiting::Waiting::default(),
+            ext_tables: extensions::world::Tables::default(),
             installs: OnceLock::new(),
             windows: Arc::default(),
             polls: Arc::default(),
@@ -517,6 +520,11 @@ impl Native {
 
     pub fn tasks(&self) -> Option<&Arc<extensions::builtin::tasks::TasksBuiltin>> {
         self.tasks.get()
+    }
+
+    /// Each extension's tables, kept open between its storage calls.
+    pub(crate) fn ext_tables(&self) -> &extensions::world::Tables {
+        &self.ext_tables
     }
 
     /// The approval gates told waiting, which `workflow.gates` follows.
