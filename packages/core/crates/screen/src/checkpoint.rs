@@ -736,6 +736,31 @@ mod tests {
         assert_ne!(b.state_digest(), c.state_digest(), "inside a sequence");
     }
 
+    /// A terminal restored from a checkpoint reflows on a resize exactly as
+    /// the one that was never cut does: soft wraps, the cursor and the
+    /// scrolled-off rows all survive the restore.
+    #[test]
+    fn a_restored_terminal_resizes_like_one_never_cut() {
+        let mut fx = Vec::new();
+        let mut script = String::new();
+        for i in 0..30 {
+            script.push_str(&format!("{i:02} {}\r\n", "word ".repeat(9 + i % 7)));
+        }
+        // An incremental redraw: relative moves, erase to end of line.
+        script.push_str("\x1b[3A\x1b[2K\rredrawn row\x1b[2B\x1b[1G> prompt text that is quite long indeed and wraps");
+        let mut a = Emulator::with_scrollback(40, 12, 1 << 20).unwrap();
+        a.feed(script.as_bytes(), &mut fx);
+        let mut b = Emulator::with_scrollback(40, 12, 1 << 20).unwrap();
+        b.feed(script.as_bytes(), &mut fx);
+        b.checkpoint().unwrap();
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        for (cols, rows) in [(30, 12), (55, 9), (20, 14), (40, 12)] {
+            a.resize(cols, rows, &mut fx).unwrap();
+            b.resize(cols, rows, &mut fx).unwrap();
+            assert_eq!(a.fingerprint(), b.fingerprint(), "after {cols}x{rows}");
+        }
+    }
+
     #[test]
     fn malformed_checkpoints_are_refused() {
         let mut em = Emulator::new(20, 4).unwrap();
