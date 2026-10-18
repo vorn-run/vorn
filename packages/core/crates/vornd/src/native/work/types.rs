@@ -62,7 +62,10 @@ fn providers(native: &Native) -> Vec<Provider> {
     let mut out = Vec::new();
     for (text, node_docs) in [
         (vorn_workflows::MANIFEST, vorn_workflows::NODE_DOCS),
-        (vorn_tasks::MANIFEST, vorn_tasks::NODE_DOCS),
+        (
+            crate::native::extensions::builtin::tasks::MANIFEST,
+            crate::native::extensions::builtin::tasks::NODE_DOCS,
+        ),
         (
             vorn_connectors::builtin::MANIFEST,
             vorn_connectors::builtin::NODE_DOCS,
@@ -134,7 +137,7 @@ pub async fn run_node(
     node_type: &str,
     request: Value,
 ) -> Result<Value, String> {
-    if provider == vorn_tasks::ID {
+    if provider == crate::native::extensions::builtin::tasks::ID {
         let tasks = native.tasks().cloned().ok_or("this vornd keeps no tasks")?;
         return tasks.run_node(node_type, &request).await;
     }

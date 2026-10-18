@@ -640,6 +640,11 @@ impl App {
     }
 
     pub(super) fn run_task(&mut self, ui: &mut Ui, act: TaskAct) {
+        // A board card's menu, or the question one of its entries asks, closes on its act.
+        self.st.points.asking = None;
+        if self.st.points.more.take().is_some() {
+            ui.close_menu();
+        }
         match act {
             TaskAct::Open(id) | TaskAct::Edit(id) => self.open_task(ui, id),
             TaskAct::CloseDetail => {

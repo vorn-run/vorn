@@ -200,7 +200,7 @@ fn unsupported(what: &str) -> Error {
 pub trait Host {
     /// A core method, such as `sessions.list`, under the permission it needs.
     fn call(&mut self, method: &str, args: Value) -> Result<Value, Error>;
-    /// Changes the rows of a collection its templates or tree draw.
+    /// Changes the rows of a collection its trees, menus or attention draw.
     fn publish(&mut self, collection: &str, ops: Vec<Op>);
     fn log(&mut self, _level: Level, _message: &str) {}
     /// The rows it published to `collection`, in the order they came.
@@ -266,7 +266,7 @@ pub trait Extension: Sized + 'static {
     /// Starts it; an error means it does not run.
     fn init(init: &Init, host: &mut dyn Host) -> Result<Self, Error>;
 
-    /// A call to one of its actions: a template's button, a client, an MCP
+    /// A call to one of its actions: a menu item, a client, an MCP
     /// tool (`mcp.<name>`), a workflow node.
     fn handle(
         &mut self,

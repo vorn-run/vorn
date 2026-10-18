@@ -36,7 +36,7 @@ use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
 use vorn_extensions::router::Router;
-use vorn_extensions::{token, views};
+use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
 
@@ -65,7 +65,7 @@ pub const METHODS: &[&str] = &[
 ];
 
 /// Told to every client when what extensions contribute changed: a package
-/// came or went, a built-in was switched, or a linked package's template was saved.
+/// came or went, a built-in was switched, or a linked package's manifest was saved.
 pub const CONTRIBUTIONS_CHANGED: &str = "extension:contributionsChanged";
 
 /// The longest tool name MCP clients take.
@@ -110,8 +110,8 @@ const ACTIVATION: &str = "extension:activation";
 
 /// How often the installed packs are looked at for a change.
 const PACK_CHECK: Duration = Duration::from_secs(2);
-/// How often a linked package's templates are looked at: a saved one redraws within 100 ms.
-const VIEW_CHECK: Duration = Duration::from_millis(40);
+/// How often a linked package's manifest is looked at: a saved one redraws within 100 ms.
+const LINKED_CHECK: Duration = Duration::from_millis(40);
 /// How long a pane's program has to start.
 const TERMINAL_START: Duration = Duration::from_secs(30);
 
@@ -234,7 +234,7 @@ pub struct Extensions {
     /// The newest sync asked for each session; reading git can finish them out of order.
     syncs: Mutex<HashMap<String, u64>>,
     next_sync: AtomicU64,
-    /// A package was linked or installed: the template watcher lists the linked ones again.
+    /// A package was linked or installed: the manifest watcher lists the linked ones again.
     relist: AtomicBool,
     me: Weak<Extensions>,
 }
@@ -361,7 +361,7 @@ impl Extensions {
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
-        tokio::spawn(watch_views(Arc::downgrade(self)));
+        tokio::spawn(watch_linked(Arc::downgrade(self)));
     }
 
     /// The extensions Vorn ships with.
@@ -404,8 +404,8 @@ impl Extensions {
         adapters.set_installed(installed);
     }
 
-    /// Every contribution drawn from a template, of the installed packages
-    /// and the built-ins that are on, each with its template or its errors.
+    /// Every contribution a client draws or lists, of the installed packages
+    /// and the built-ins that are on.
     fn contributions(&self) -> Vec<Value> {
         let store = self.router.store();
         let mut out = Vec::new();
@@ -416,8 +416,7 @@ impl Extensions {
             if !pack.is_extension() {
                 continue;
             }
-            let load = |path: &str, place| views::load(&pack.path, path, place);
-            for mut c in views::listed(&pack.manifest, &load) {
+            for mut c in points::listed(&pack.manifest) {
                 c["extensionName"] = json!(pack.manifest.name);
                 c["builtin"] = json!(false);
                 out.push(c);
@@ -1006,9 +1005,9 @@ impl Extensions {
                 let terminal = self.start_program(ext, &key, argv, session).await?;
                 grant.terminal_id = Some(terminal);
             }
-            PaneDraws::View(_) | PaneDraws::Tree => {
+            PaneDraws::Tree => {
                 return Err(format!(
-                    "The pane \"{pane_id}\" draws a template or a tree, which the client draws"
+                    "The pane \"{pane_id}\" draws a tree, which the client draws"
                 ));
             }
             PaneDraws::Web(_) => {
@@ -1192,39 +1191,32 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
     }
 }
 
-/// When each linked package's manifest and templates were last written.
-fn view_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<SystemTime>, u64)> {
+/// When each linked package's manifest was last written.
+fn manifest_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<SystemTime>, u64)> {
     let mut out = HashMap::new();
-    let mut note = |p: PathBuf| {
+    for (_, dir) in linked {
+        let p = dir.join(vorn_extensions::manifest::file::FILE);
         if let Ok(meta) = std::fs::metadata(&p) {
             out.insert(p, (meta.modified().ok(), meta.len()));
-        }
-    };
-    for (_, dir) in linked {
-        note(dir.join(vorn_extensions::manifest::file::FILE));
-        if let Ok(entries) = std::fs::read_dir(dir.join("views")) {
-            for entry in entries.flatten() {
-                note(entry.path());
-            }
         }
     }
     out
 }
 
-/// Tells clients when a linked package's manifest or a template of it is
-/// saved, so a template being written redraws as it is saved.
-async fn watch_views(me: Weak<Extensions>) {
+/// Tells clients when a linked package's manifest is saved, so what it
+/// contributes shows as it is written.
+async fn watch_linked(me: Weak<Extensions>) {
     let mut linked: Vec<(String, PathBuf)> = Vec::new();
     let mut stamps = HashMap::new();
     let mut since_list = PACK_CHECK;
-    let mut tick = tokio::time::interval(VIEW_CHECK);
+    let mut tick = tokio::time::interval(LINKED_CHECK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
         let Some(extensions) = me.upgrade() else {
             return;
         };
-        since_list += VIEW_CHECK;
+        since_list += LINKED_CHECK;
         if since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed) {
             since_list = Duration::ZERO;
             let store = extensions.router.store().clone();
@@ -1240,7 +1232,7 @@ async fn watch_views(me: Weak<Extensions>) {
             stamps.clear();
             continue;
         }
-        let now = view_stamps(&linked);
+        let now = manifest_stamps(&linked);
         let moved: Vec<&String> = linked
             .iter()
             .filter(|(_, dir)| {
@@ -1254,7 +1246,7 @@ async fn watch_views(me: Weak<Extensions>) {
             .map(|(id, _)| id)
             .collect();
         for id in moved {
-            debug!("[extensions] {id}'s templates changed");
+            debug!("[extensions] {id}'s manifest changed");
             extensions.contributions_changed(id);
         }
         stamps = now;
@@ -1419,7 +1411,8 @@ impl Around for Wired {
             .into_iter()
             .collect();
         started.extend(native.tasks().map(builtin::tasks::entry));
-        started.extend(native.editor().map(builtin::editor::entry));
+        // Where the Workflow editor always was in Settings: after Tasks.
+        started.push(Arc::new(builtin::wasm::workflow_editor()));
         started.extend(builtin::agents::entries(native.adapters()));
         started
     }
@@ -1449,6 +1442,9 @@ impl Around for Wired {
     fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
         let native = self.native.upgrade();
         let connectors = native.as_ref().and_then(|n| n.connectors().cloned());
+        if let Some(n) = &native {
+            n.ext_tables().forget(id);
+        }
         let db = native.and_then(|n| n.database().map(Path::to_path_buf));
         let id = id.to_owned();
         Box::pin(async move {

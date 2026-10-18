@@ -144,14 +144,19 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("task.get", Permission::TasksRead),
     ("agents.list", Permission::SessionsRead),
     ("task.importItems", Permission::TasksWrite),
+    ("task.changed", Permission::TasksWrite),
     ("task.take", Permission::TasksWrite),
     ("task.handBack", Permission::TasksWrite),
-    ("connection.upsertFromItem", Permission::TasksWrite),
+    ("connection.itemImport", Permission::TasksWrite),
+    ("connection.synced", Permission::TasksWrite),
     ("workflow.fire", Permission::WorkflowsWrite),
     ("task.sourceLink", Permission::TasksRead),
     ("project.list", Permission::TasksRead),
     ("workflow.get", Permission::WorkflowsRead),
     ("workflow.list", Permission::WorkflowsRead),
+    ("workflow.gates", Permission::WorkflowsRead),
+    ("workflow.run", Permission::WorkflowsWrite),
+    ("workflow.resolveGate", Permission::WorkflowsWrite),
     ("workflow.seed", Permission::WorkflowsWrite),
     ("workflow.unseed", Permission::WorkflowsWrite),
     ("inbox.cursor", Permission::InboxWrite),
@@ -165,16 +170,23 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// The core methods open only to the extensions Vorn ships: they write the
 /// board, the workflows, their inbox and the sign-in windows of every
 /// connection, which no one installed extension owns. `task.take` and
-/// `task.handBack` are Tasks' and `connection.upsertFromItem` Connectors',
-/// called by the other built-ins.
+/// `task.handBack` are Tasks', and `connection.itemImport` and
+/// `connection.synced` Connectors',
+/// called by the other built-ins; `task.changed` is Tasks' own, which tells
+/// clients the rows a write changed and emits the events it fires.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
+    "task.changed",
     "task.take",
     "task.handBack",
-    "connection.upsertFromItem",
+    "connection.itemImport",
+    "connection.synced",
     "task.sourceLink",
     "workflow.get",
     "workflow.list",
+    "workflow.gates",
+    "workflow.run",
+    "workflow.resolveGate",
     "workflow.seed",
     "workflow.unseed",
     "inbox.cursor",
@@ -444,6 +456,19 @@ header = "Authorization: Bearer {token}"
         )
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn running_a_workflow_and_answering_a_gate_are_the_shipped_editors_alone() {
+        for m in [
+            "workflow.run",
+            "workflow.resolveGate",
+            "workflow.gates",
+            "task.changed",
+        ] {
+            assert!(BUILTIN_ONLY.contains(&m), "{m}");
+            assert!(CORE_METHODS.iter().any(|(c, _)| *c == m), "{m}");
+        }
     }
 
     #[test]

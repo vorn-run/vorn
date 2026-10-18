@@ -1,11 +1,18 @@
-//! The task board's calls (`task:*`): read, create, update, move, reorder,
-//! archive and delete. Listing is the core's. A task in a project that does
+//! The task board's calls (`task:*`): create, update, move, reorder,
+//! archive and delete. Reading and listing are the core's. A task in a project that does
 //! not exist is refused; finishing one stamps `completedAt` and reopening one
 //! clears it and `archivedAt`; a reorder permutes the places the named tasks
 //! already hold rather than numbering them.
 
+use std::collections::BTreeMap;
+
 use serde_json::{json, Map, Value};
-use vorn_store::{Result, Store};
+
+use crate::db::Db;
+use crate::triggers;
+use crate::Change;
+
+type Result<T> = std::result::Result<T, String>;
 
 /// Whether a status is one a task ends in (`isTerminalTaskStatus`).
 pub fn is_terminal(status: Option<&str>) -> bool {
@@ -34,16 +41,16 @@ fn ok(ok: bool) -> Value {
     json!({ "ok": ok })
 }
 
-fn task(store: &mut Store, id: &Value) -> Result<Option<Value>> {
+fn task(store: &mut dyn Db, id: &Value) -> Result<Option<Value>> {
     let found = store.call("dbGetTask", json!([id]))?;
     Ok((!found.is_null()).then_some(found))
 }
 
-fn project_exists(store: &mut Store, name: &Value) -> Result<bool> {
+fn project_exists(store: &mut dyn Db, name: &Value) -> Result<bool> {
     Ok(!store.call("dbGetProject", json!([name]))?.is_null())
 }
 
-fn max_order(store: &mut Store, project: &Value) -> Result<f64> {
+fn max_order(store: &mut dyn Db, project: &Value) -> Result<f64> {
     Ok(store
         .call("dbGetMaxTaskOrder", json!([project]))?
         .as_f64()
@@ -51,15 +58,11 @@ fn max_order(store: &mut Store, project: &Value) -> Result<f64> {
 }
 
 fn num(n: f64) -> Value {
-    if n.fract() == 0.0 && n.abs() < 9e15 {
-        json!(n as i64)
-    } else {
-        json!(n)
-    }
+    crate::js::num(n)
 }
 
 /// `task:setStatus`; whether anything changed is the second value.
-pub fn set_status(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+pub fn set_status(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     let Some(task) = task(store, &id)? else {
         return Ok((ok(false), false));
@@ -85,7 +88,7 @@ pub fn set_status(store: &mut Store, params: &Value, now: &str) -> Result<(Value
 /// `task:create`: the task as stored, in a project that exists. A client
 /// may name the task's id (its images are kept under it already); one that
 /// is taken is refused, and without one the task gets `id`.
-pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Result<(Value, bool)> {
+pub fn create(store: &mut dyn Db, params: &Value, id: String, now: &str) -> Result<(Value, bool)> {
     let project = params.get("projectName").cloned().unwrap_or(Value::Null);
     if !project_exists(store, &project)? {
         return Ok((ok(false), false));
@@ -124,7 +127,7 @@ pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Resul
     task.insert("createdAt".into(), json!(now));
     task.insert("updatedAt".into(), json!(now));
     for key in ["branch", "useWorktree", "assignedAgent"] {
-        if let Some(v) = params.get(key).filter(|v| vorn_work::js::truthy(v)) {
+        if let Some(v) = params.get(key).filter(|v| crate::js::truthy(v)) {
             task.insert(key.into(), v.clone());
         }
     }
@@ -137,7 +140,7 @@ pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Resul
 }
 
 /// `task:update`: only the six fields it names, never a date a caller sends.
-pub fn update(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+pub fn update(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     let Some(task) = task(store, &id)? else {
         return Ok((ok(false), false));
@@ -225,7 +228,7 @@ const CLEARABLE: [&str; 7] = [
 /// `task:patch {id, set}`: sets exactly the fields `set` names, `null`
 /// clearing one, and nothing else. A move to another project needs that
 /// project; a status change stamps the dates the caller did not set.
-pub fn patch(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+pub fn patch(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     let Some(before) = task(store, &id)? else {
         return Ok((ok(false), false));
@@ -274,7 +277,7 @@ pub fn patch(store: &mut Store, params: &Value, now: &str) -> Result<(Value, boo
 }
 
 /// `task:delete`.
-pub fn delete(store: &mut Store, params: &Value) -> Result<(Value, bool)> {
+pub fn delete(store: &mut dyn Db, params: &Value) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     if task(store, &id)?.is_none() {
         return Ok((ok(false), false));
@@ -286,7 +289,7 @@ pub fn delete(store: &mut Store, params: &Value) -> Result<(Value, bool)> {
 /// `task:reorder`: the named tasks take the places they already hold, in
 /// the order asked; an id sent twice counts once, and one naming nothing
 /// takes no place.
-pub fn reorder(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+pub fn reorder(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, bool)> {
     let mut seen: Vec<Value> = Vec::new();
     for id in params
         .get("ids")
@@ -326,12 +329,12 @@ pub fn reorder(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
 }
 
 /// `task:archive`: only work that is over may be filed away.
-pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
+pub fn archive(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     let Some(task) = task(store, &id)? else {
         return Ok((ok(false), false));
     };
-    let archived = params.get("archived").is_some_and(vorn_work::js::truthy);
+    let archived = params.get("archived").is_some_and(crate::js::truthy);
     if archived && !is_terminal(task.get("status").and_then(Value::as_str)) {
         return Ok((ok(false), false));
     }
@@ -347,185 +350,171 @@ pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
     Ok((ok(true), true))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Whether `method` writes one task, whose change may fire a trigger.
+fn written(method: &str) -> bool {
+    matches!(
+        method,
+        "task:create" | "task:setStatus" | "task:update" | "task:patch"
+    )
+}
 
-    /// A task as the core reads it.
-    fn get(s: &mut Store, params: &Value) -> Result<Value> {
-        s.call("dbGetTask", json!([params.get("id")]))
+/// What a write did: its answer, the change clients are told, and the trigger it fires.
+#[derive(Debug, Default)]
+pub struct Done {
+    pub value: Option<Value>,
+    pub change: Option<Change>,
+    pub trigger: Option<Value>,
+}
+
+fn row(store: &mut dyn Db, id: &Value) -> Result<Option<Value>> {
+    let found = store.call("dbGetTask", json!([id]))?;
+    Ok((!found.is_null()).then_some(found))
+}
+
+/// Runs `method` on the board's tables; a task it creates without an id of its own gets `new_id()`.
+pub fn write(
+    store: &mut dyn Db,
+    method: &str,
+    params: &Value,
+    now: &str,
+    new_id: impl FnOnce() -> String,
+) -> Result<Done> {
+    // A task being created was not there before, whatever id it is given.
+    let before = if written(method) && method != "task:create" {
+        row(store, params.get("id").unwrap_or(&Value::Null))?
+    } else {
+        None
+    };
+    let (value, changed) = match method {
+        "task:setStatus" => set_status(store, params, now)?,
+        "task:create" => create(store, params, new_id(), now)?,
+        "task:update" => update(store, params, now)?,
+        "task:patch" => patch(store, params, now)?,
+        "task:delete" => delete(store, params)?,
+        "task:reorder" => reorder(store, params, now)?,
+        "task:archive" => archive(store, params, now)?,
+        _ => return Ok(Done::default()),
+    };
+    let mut done = Done {
+        value: Some(value),
+        ..Done::default()
+    };
+    if !changed {
+        return Ok(done);
     }
-    use vorn_store::StoreOptions;
-
-    fn store() -> Store {
-        let options = StoreOptions {
-            default_shell: "/bin/sh".into(),
-            default_agent_commands: Map::new(),
-            default_workspace: serde_json::from_value(json!({ "id": "personal", "name": "Personal", "icon": "User", "iconColor": "#000", "order": 0 })).unwrap(),
-            owner_name: "o".into(),
-            seed_workflows: Vec::new(),
+    let ids: Vec<Value> = match method {
+        "task:reorder" => params
+            .get("ids")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        "task:create" => done
+            .value
+            .as_ref()
+            .and_then(|v| v.pointer("/task/id"))
+            .cloned()
+            .into_iter()
+            .collect(),
+        _ => params.get("id").cloned().into_iter().collect(),
+    };
+    if method == "task:delete" {
+        done.change = Some(Change::Removed(
+            ids.iter().map(crate::js::to_string).collect(),
+        ));
+        return Ok(done);
+    }
+    let mut rows: Vec<Value> = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let Some(after) = row(store, id)? else {
+            continue;
         };
-        let mut s = Store::open_in_memory(options).unwrap();
-        s.call(
-            "dbInsertProject",
-            json!([{ "name": "app", "path": "/app", "preferredAgents": [] }]),
-        )
-        .unwrap();
-        s
-    }
-
-    #[test]
-    fn a_patch_sets_only_what_it_names_and_stamps_a_finish() {
-        let mut s = store();
-        let made = json!({ "id": "mine", "projectName": "app", "title": "T", "branch": "b" });
-        let (created, _) =
-            create(&mut s, &made, "unused".into(), "2026-01-01T00:00:00.000Z").unwrap();
-        assert_eq!(created["task"]["id"], "mine");
-        // The id is the client's, so a second task under it is refused.
-        assert_eq!(
-            create(&mut s, &made, "x".into(), "n").unwrap().0,
-            json!({ "ok": false })
-        );
-
-        let set = json!({ "id": "mine", "set": {
-            "status": "in_progress", "assignedSessionId": "s1", "assignedAgent": "acme", "bogus": 1
-        } });
-        let (patched, changed) = patch(&mut s, &set, "2026-01-02T00:00:00.000Z").unwrap();
-        assert!(changed);
-        let t = &patched["task"];
-        assert_eq!(
-            (t["status"].as_str(), t["assignedSessionId"].as_str()),
-            (Some("in_progress"), Some("s1"))
-        );
-        assert_eq!(t["branch"], "b", "a field it does not name stays");
-        assert_eq!(t["title"], "T");
-
-        let done = json!({ "id": "mine", "set": { "status": "done", "assignedSessionId": null } });
-        let (patched, _) = patch(&mut s, &done, "2026-01-03T00:00:00.000Z").unwrap();
-        let t = &patched["task"];
-        assert_eq!(t["completedAt"], "2026-01-03T00:00:00.000Z");
-        assert!(t.get("assignedSessionId").is_none_or(Value::is_null));
-        assert_eq!(t["assignedAgent"], "acme");
-
-        let elsewhere = json!({ "id": "mine", "set": { "projectName": "nowhere" } });
-        assert_eq!(
-            patch(&mut s, &elsewhere, "n").unwrap(),
-            (json!({ "ok": false }), false)
-        );
-        assert!(
-            !patch(&mut s, &json!({ "id": "none", "set": {} }), "n")
-                .unwrap()
-                .1
-        );
-    }
-
-    #[test]
-    fn creates_moves_and_archives_a_task_with_its_dates() {
-        let mut s = store();
-        let (answer, _) = create(
-            &mut s,
-            &json!({ "projectName": "nope", "title": "T" }),
-            "x".into(),
-            "t0",
-        )
-        .unwrap();
-        assert_eq!(answer, json!({ "ok": false }));
-        let (answer, changed) = create(
-            &mut s,
-            &json!({ "projectName": "app", "title": "T", "branch": "" }),
-            "a".into(),
-            "t0",
-        )
-        .unwrap();
-        assert!(changed);
-        assert_eq!(answer["task"]["order"], 0);
-        assert!(answer["task"].get("branch").is_none());
-
-        // Not over yet, so it cannot be filed away.
-        assert_eq!(
-            archive(&mut s, &json!({ "id": "a", "archived": true }), "t1")
-                .unwrap()
-                .0,
-            ok(false)
-        );
-        set_status(&mut s, &json!({ "id": "a", "status": "done" }), "t2").unwrap();
-        let done = get(&mut s, &json!({ "id": "a" })).unwrap();
-        assert_eq!(done["completedAt"], "t2");
-        assert_eq!(
-            archive(&mut s, &json!({ "id": "a", "archived": true }), "t3")
-                .unwrap()
-                .0,
-            ok(true)
-        );
-        assert_eq!(
-            get(&mut s, &json!({ "id": "a" })).unwrap()["archivedAt"],
-            "t3"
-        );
-        // Reopened, both dates go.
-        let (answer, _) = update(&mut s, &json!({ "id": "a", "status": "todo" }), "t4").unwrap();
-        assert!(answer["task"].get("completedAt").is_none(), "{answer}");
-        assert!(answer["task"].get("archivedAt").is_none());
-        assert_eq!(answer["task"]["title"], "T");
-    }
-
-    #[test]
-    fn reorders_by_permuting_the_places_held() {
-        let mut s = store();
-        for id in ["a", "b", "c"] {
-            create(
-                &mut s,
-                &json!({ "projectName": "app", "title": id }),
-                id.into(),
-                "t",
-            )
-            .unwrap();
+        if rows.iter().any(|r| r.get("id") == after.get("id")) {
+            continue;
         }
-        let (answer, moved) =
-            reorder(&mut s, &json!({ "ids": ["c", "a", "c", "ghost"] }), "t1").unwrap();
-        assert_eq!(answer, ok(true));
-        assert!(moved);
-        let orders: Vec<(String, i64)> = s
-            .call("dbListTasks", json!([]))
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| {
-                (
-                    t["id"].as_str().unwrap().to_owned(),
-                    t["order"].as_f64().unwrap() as i64,
-                )
-            })
-            .collect();
-        assert_eq!(orders, [("c".into(), 0), ("b".into(), 1), ("a".into(), 2)]);
-        assert!(
-            !reorder(&mut s, &json!({ "ids": ["c", "a"] }), "t2")
-                .unwrap()
-                .1
-        );
-        assert_eq!(
-            reorder(&mut s, &json!({ "ids": ["ghost"] }), "t")
-                .unwrap()
-                .0,
-            ok(false)
-        );
+        if written(method) {
+            done.trigger = triggers::for_task(before.as_ref(), &after);
+        }
+        rows.push(after);
     }
+    done.change = Some(Change::Rows(rows));
+    Ok(done)
+}
 
-    #[test]
-    fn deletes_a_task_once() {
-        let mut s = store();
-        create(
-            &mut s,
-            &json!({ "projectName": "app", "title": "T", "description": "long" }),
-            "a".into(),
-            "t",
-        )
-        .unwrap();
-        assert_eq!(
-            get(&mut s, &json!({ "id": "a" })).unwrap()["description"],
-            "long"
-        );
-        assert_eq!(delete(&mut s, &json!({ "id": "a" })).unwrap().0, ok(true));
-        assert_eq!(delete(&mut s, &json!({ "id": "a" })).unwrap().0, ok(false));
+/// `task.take`: task `id` in progress for a workflow step's session and
+/// agent; `task.handBack`: back in the queue, unassigned. The task before
+/// and after, or `None` when there is no such task.
+pub fn take_or_hand_back(
+    store: &mut dyn Db,
+    method: &str,
+    id: &str,
+    args: &Value,
+    now: &str,
+) -> Result<Option<(Value, Value)>> {
+    let mut updates = Map::new();
+    if method == "task.take" {
+        let text = |k: &str| args.get(k).cloned().unwrap_or(Value::Null);
+        updates.insert("status".into(), json!("in_progress"));
+        updates.insert("assignedSessionId".into(), text("sessionId"));
+        updates.insert("assignedAgent".into(), text("agent"));
+        updates.insert("updatedAt".into(), json!(now));
+        updates.insert("archivedAt".into(), Value::Null);
+    } else {
+        updates.insert("status".into(), json!("todo"));
+        updates.insert("updatedAt".into(), json!(now));
+        updates.insert("completedAt".into(), Value::Null);
+        updates.insert("archivedAt".into(), Value::Null);
+        updates.insert("assignedSessionId".into(), Value::Null);
+        updates.insert("assignedAgent".into(), Value::Null);
     }
+    let Some(before) = row(store, &json!(id))? else {
+        return Ok(None);
+    };
+    let cleared: Vec<String> = updates
+        .iter()
+        .filter(|(_, v)| v.is_null())
+        .map(|(k, _)| k.clone())
+        .collect();
+    store.call("dbUpdateTask", json!([id, updates, cleared]))?;
+    Ok(row(store, &json!(id))?.map(|after| (before, after)))
+}
+
+/// Keeps conversation `conversation` on the in-progress task terminal
+/// `terminal` was assigned, when that task has none yet; the task after.
+pub fn keep_conversation(
+    store: &mut dyn Db,
+    terminal: &str,
+    conversation: &str,
+    now: &str,
+) -> Result<Option<Value>> {
+    let tasks = store.call("dbListTasks", json!([null, "in_progress"]))?;
+    let task = tasks.as_array().into_iter().flatten().find(|task| {
+        task.get("assignedSessionId").and_then(Value::as_str) == Some(terminal)
+            && task.get("agentSessionId").is_none_or(Value::is_null)
+    });
+    let Some(id) = task.and_then(|t| t.get("id")).cloned() else {
+        return Ok(None);
+    };
+    store.call(
+        "dbUpdateTask",
+        json!([id, { "agentSessionId": conversation, "updatedAt": now }, ["agentSessionId", "updatedAt"]]),
+    )?;
+    row(store, &id)
+}
+
+/// The card badges the tasks in progress make: one per session, the first task it took.
+pub fn badge_rows(working: &Value) -> BTreeMap<String, Value> {
+    let mut now: BTreeMap<String, Value> = BTreeMap::new();
+    for task in working.as_array().into_iter().flatten() {
+        let Some(session) = task.get("assignedSessionId").and_then(Value::as_str) else {
+            continue;
+        };
+        now.entry(session.to_owned()).or_insert_with(|| {
+            json!({
+                "id": session,
+                "task": task.get("id").cloned().unwrap_or(Value::Null),
+                "title": task.get("title").cloned().unwrap_or(Value::Null),
+            })
+        });
+    }
+    now
 }

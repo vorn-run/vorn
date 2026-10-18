@@ -65,7 +65,19 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
     let mut shot = Shot::new();
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
+    board_drawn(&mut shot, &mut app);
     (app, shot)
+}
+
+/// Waits for the board's tree, which Tasks answers once its component has started.
+fn board_drawn(shot: &mut Shot, app: &mut App) {
+    shot.until(app, "the board's tree", |app, _| {
+        match app.st.points.trees.get("vorn.tasks/views/board") {
+            Some(Ok(_)) => Some(()),
+            Some(Err(e)) => panic!("the board's tree cannot be drawn: {e:?}"),
+            None => None,
+        }
+    });
 }
 
 /// A task made through the add dialog, by its id.
@@ -237,6 +249,7 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
     });
     shot.send(&mut app, key("Escape", 0, None));
     shot.save(&mut app, "tasks-board");
+    support::every_size(&mut app, "tasks-board", &["Todo"]);
 
     shot.hover(&mut app, card_id(&id));
     let more = shot.button(&mut app, "More").expect("the card's menu");
@@ -255,6 +268,7 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
         );
     }
     shot.save(&mut app, "task-card-menu");
+    support::every_size(&mut app, "task-card-menu", &["Cancel task"]);
     shot.send(&mut app, key("Escape", 0, None));
     assert!(app.st.points.more.is_none());
 
@@ -384,6 +398,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     repo(&dir);
     let mut shot = Shot::new();
     shot.send(&mut app, key("KeyT", MOD(), None));
+    board_drawn(&mut shot, &mut app);
     let id = create(&mut shot, &mut app, "Add two");
     shot.click(&mut app, card_id(&id));
     shot.click(
@@ -742,6 +757,9 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
         shown = cells_text(&mut app);
         (row && point && shown.contains("Badge me")).then_some(())
     });
+    let mut shot = Shot::new();
+    shot.save(&mut app, "task-badge");
+    support::every_size(&mut app, "task-badge", &["Badge me"]);
 
     // Switched off, the board says so, the tasks stay, and writes are refused.
     app.rpc()

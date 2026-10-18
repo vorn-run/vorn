@@ -161,7 +161,7 @@ pub enum Route {
 /// Each module's methods and where they go, in the order they are matched.
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
-    (vorn_tasks::METHODS, Route::Tasks),
+    (extensions::builtin::tasks::METHODS, Route::Tasks),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -299,8 +299,10 @@ pub struct Native {
     connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
     /// The Tasks built-in, once vornd has a database.
     tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
-    /// The Workflow editor built-in, which follows the workflows and their gates.
-    editor: OnceLock<Arc<extensions::builtin::editor::Editor>>,
+    /// The approval gates told waiting, by run.
+    waiting: work::waiting::Waiting,
+    /// Each extension's own tables, on a connection kept open between its storage calls.
+    ext_tables: extensions::world::Tables,
     /// Installing and removing packages, one store for every kind.
     installs: OnceLock<Arc<vorn_extensions::install::Installs>>,
     /// The sign-in windows programs call through ([`signin`]).
@@ -366,7 +368,8 @@ impl Native {
             work: OnceLock::new(),
             connectors: OnceLock::new(),
             tasks: OnceLock::new(),
-            editor: OnceLock::new(),
+            waiting: work::waiting::Waiting::default(),
+            ext_tables: extensions::world::Tables::default(),
             installs: OnceLock::new(),
             windows: Arc::default(),
             polls: Arc::default(),
@@ -519,12 +522,14 @@ impl Native {
         self.tasks.get()
     }
 
-    pub fn set_editor(&self, editor: Arc<extensions::builtin::editor::Editor>) {
-        let _ = self.editor.set(editor);
+    /// Each extension's tables, kept open between its storage calls.
+    pub(crate) fn ext_tables(&self) -> &extensions::world::Tables {
+        &self.ext_tables
     }
 
-    pub fn editor(&self) -> Option<&Arc<extensions::builtin::editor::Editor>> {
-        self.editor.get()
+    /// The approval gates told waiting, which `workflow.gates` follows.
+    pub fn waiting(&self) -> &work::waiting::Waiting {
+        &self.waiting
     }
 
     /// The one installer of packages, kept in `<data_dir>/connectors`; the first call makes it.

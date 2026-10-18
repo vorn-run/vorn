@@ -35,13 +35,13 @@ pub mod manifest;
 pub mod netproxy;
 pub mod pack;
 pub mod page;
+pub mod points;
 pub mod polls;
 pub mod router;
 pub mod sandbox;
 pub mod signin;
 pub mod token;
 pub mod usage;
-pub mod views;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

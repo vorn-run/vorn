@@ -150,15 +150,37 @@ pub enum Kind {
     },
     /// One list row: `actions` show on hover, `more` behind its menu, `children` under its detail.
     Entry(Box<Entry>),
-    /// Columns of cards.
-    Board,
-    /// A board's column; each child is a card.
+    /// Columns of cards: each column's children, or, with `cards`, cards the client reads and draws itself.
+    Board {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cards: Option<Cards>,
+        /// What an empty column says.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        empty: Option<String>,
+    },
+    /// A board's column; each child is a card. On a board with `cards`, its id is the value its cards hold.
     Column {
         title: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tone: Option<Tone>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
     },
+    /// The workflow editor's canvas, which the client draws whole.
+    Graph,
     Divider,
+}
+
+/// Where a board's cards come from when the client reads them itself.
+///
+/// A board of thousands cannot travel as a tree, so the tree names the
+/// source and its columns, and the client windows the cards, drags them
+/// between columns and opens them, as it always drew the board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Cards {
+    /// The core's task list, read a page at a time; a column's id is the status it holds.
+    Tasks,
 }
 
 /// A list's row.
@@ -243,6 +265,8 @@ pub enum Tone {
     Busy,
     /// Quiet, as an idle one.
     Muted,
+    /// Waiting its turn, as a task to do.
+    Idle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -667,7 +691,7 @@ impl Checker {
                 | Kind::List { .. }
                 | Kind::Group { .. }
                 | Kind::Entry(_)
-                | Kind::Board
+                | Kind::Board { .. }
                 | Kind::Column { .. }
         );
         if !holds && !n.children.is_empty() {
@@ -751,10 +775,20 @@ impl Checker {
                 self.buttons(at, "actions", &e.actions, depth);
                 self.buttons(at, "more", &e.more, depth);
             }
-            Kind::Board => {
+            Kind::Board { cards, empty } => {
+                if let Some(e) = empty {
+                    self.text(at, "empty", e);
+                }
                 for (i, c) in n.children.iter().enumerate() {
+                    let p = format!("{at}.children[{i}]");
                     if !matches!(c.kind, Kind::Column { .. }) {
-                        self.err(&format!("{at}.children[{i}]"), "a board holds columns");
+                        self.err(&p, "a board holds columns");
+                    } else if cards.is_some() {
+                        // The client places each card by the value its column's id names.
+                        self.named(c, &p, "column of a board that reads its cards");
+                        if !c.children.is_empty() {
+                            self.err(&p, "holds no cards; the board reads them");
+                        }
                     }
                 }
             }

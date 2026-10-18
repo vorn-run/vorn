@@ -21,7 +21,6 @@ pub struct AgentAdapter {
     adapters: Arc<Adapters>,
     /// Its manifest's `id`.
     extension: String,
-    views: Vec<(&'static str, &'static str)>,
 }
 
 impl AgentAdapter {
@@ -35,7 +34,6 @@ impl AgentAdapter {
             shipped,
             adapters,
             extension,
-            views: shipped.views(),
         }
     }
 }
@@ -51,10 +49,6 @@ pub fn entries(adapters: &Arc<Adapters>) -> Vec<Arc<dyn Builtin>> {
 impl Builtin for AgentAdapter {
     fn manifest(&self) -> &'static str {
         self.shipped.manifest
-    }
-
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &self.views
     }
 
     fn events(&self) -> &'static [&'static str] {

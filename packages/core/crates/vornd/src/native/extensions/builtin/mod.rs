@@ -1,5 +1,5 @@
 //! The extensions Vorn ships with, written against the API a package speaks
-//! (a manifest, templates, core calls held to the declared permissions,
+//! (a manifest, trees, core calls held to the declared permissions,
 //! published rows and subscribed events) and compiled in rather than started
 //! as a program: as Rust in vornd, or as a Wasm component vornd carries
 //! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
@@ -8,7 +8,6 @@
 pub mod agents;
 pub mod artifacts;
 pub mod connectors;
-pub mod editor;
 pub mod tasks;
 pub mod wasm;
 pub mod workflows;
@@ -27,8 +26,8 @@ use vorn_extensions::api::ExtError;
 use vorn_extensions::events::{Owner, Queue, QUEUE};
 use vorn_extensions::gate::{self, Caller};
 use vorn_extensions::manifest::{file, Manifest};
+use vorn_extensions::points;
 use vorn_extensions::router::Router;
-use vorn_extensions::views;
 
 use super::guard;
 
@@ -36,9 +35,9 @@ use super::guard;
 /// methods open only to them ([`vorn_extensions::gate::BUILTIN_ONLY`]).
 pub const SHIPPED: &[&str] = &[
     vorn_connectors::builtin::ID,
-    vorn_tasks::ID,
+    tasks::ID,
     vorn_workflows::ID,
-    editor::ID,
+    wasm::EDITOR,
 ];
 
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
@@ -69,8 +68,6 @@ impl Api {
 pub trait Builtin: Send + Sync + 'static {
     /// Its `vorn-extension.toml`.
     fn manifest(&self) -> &'static str;
-    /// Its templates, as `("views/x.kdl", text)`.
-    fn views(&self) -> &[(&'static str, &'static str)];
     /// The public events it subscribes to.
     fn events(&self) -> &'static [&'static str];
     /// Whether it is on before the person switches it.
@@ -101,6 +98,46 @@ pub trait Builtin: Send + Sync + 'static {
     fn mcp_call<'a>(&'a self, _name: &'a str, _arguments: Value) -> BoxFuture<'a, Option<Value>> {
         Box::pin(async { None })
     }
+}
+
+/// Compiles every component Vorn ships into the cache, one after another
+/// and Tasks first, so the first task written or board opened after an
+/// install or upgrade waits for nothing. A call that comes first compiles as
+/// it always did. A test's vornd (`VORN_EXIT_WITH`) skips it: its start stays
+/// cheap, and each component compiles at its first use.
+pub fn precompile(router: &Arc<Router>) {
+    if std::env::var_os(vorn_spawn::watch::EXIT_WITH).is_some() {
+        return;
+    }
+    let shipped: Vec<(&'static str, &'static [u8])> = [
+        (tasks::MANIFEST, tasks::WASM),
+        (
+            wasm::workflow_editor().manifest,
+            wasm::workflow_editor().wasm,
+        ),
+        (wasm::widget().manifest, wasm::widget().wasm),
+        (wasm::worktrees().manifest, wasm::worktrees().wasm),
+    ]
+    .into_iter()
+    .collect();
+    let router = Arc::clone(router);
+    tokio::spawn(async move {
+        for (manifest, wasm) in shipped {
+            let Ok(manifest) = file::parse_builtin(manifest) else {
+                continue;
+            };
+            let bundled = vorn_extensions::component::Bundled {
+                manifest: Arc::new(manifest),
+                wasm,
+            };
+            if let Err(err) = router.prepare_bundled(&bundled).await {
+                warn!(
+                    "[extensions] could not compile {} ahead: {err}",
+                    bundled.manifest.name
+                );
+            }
+        }
+    });
 }
 
 /// Whether built-in `id` is switched on in `file`, `default` when the person never switched it.
@@ -319,15 +356,11 @@ impl Builtins {
         )
     }
 
-    /// What the built-ins that are on contribute, as [`views::listed`] gives it.
+    /// What the built-ins that are on contribute, as [`points::listed`] gives it.
     pub fn contributions(&self) -> Vec<Value> {
         let mut out = Vec::new();
         for e in self.entries.iter().filter(|e| self.is_on(e.id())) {
-            let template = |path: &str, place| {
-                let text = e.builtin.views().iter().find(|(p, _)| *p == path);
-                views::read(path, text.map_or("", |(_, t)| t), place)
-            };
-            for mut c in views::listed(&e.manifest, &template) {
+            for mut c in points::listed(&e.manifest) {
                 c["extensionName"] = json!(e.manifest.name);
                 c["builtin"] = json!(true);
                 out.push(c);
@@ -372,14 +405,6 @@ impl Builtins {
         }
         Some(e.builtin.handle(&e.api, action, args).await)
     }
-}
-
-/// A string argument, or the error that says it is missing.
-pub(crate) fn arg<'a>(args: &'a Value, key: &str, action: &str) -> Result<&'a str, ExtError> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| ExtError::new("bad-request", format!("{action} takes {key}")))
 }
 
 pub(crate) fn unknown(name: &str, action: &str) -> ExtError {

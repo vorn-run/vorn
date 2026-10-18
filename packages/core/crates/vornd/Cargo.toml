@@ -50,7 +50,6 @@ vorn-layout = { path = "../layout" }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }
 vorn-connectors = { path = "../connectors" }
-vorn-tasks = { path = "../tasks" }
 url = "2"
 vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
@@ -84,6 +83,8 @@ windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] 
 vorn-guest-build = { path = "../guest-build" }
 
 [dev-dependencies]
+# Tasks' triggers, built natively to fire them the way its component does.
+vorn-ext-tasks = { path = "../../extensions/tasks" }
 # The built-ins' tests compile their components in process.
 vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.

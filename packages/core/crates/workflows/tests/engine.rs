@@ -107,7 +107,7 @@ async fn a_task_starts_the_workflows_watching_for_it_and_no_others() {
         let engine = engine.clone();
         async move {
             // Tasks fires its triggers through `workflow.fire`, with these arguments.
-            let Some(args) = vorn_tasks::triggers::fire_args(&trigger) else {
+            let Some(args) = vorn_ext_tasks::triggers::fire_args(&trigger) else {
                 return;
             };
             let context = vorn_work::model::Context::from_json(&args["context"]).unwrap();

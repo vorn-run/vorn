@@ -9,6 +9,11 @@
 //! them, in tables only the host reaches. The schema itself may be read: it
 //! holds no rows, SQLite reads it to change a table, and it cannot be written
 //! directly.
+//!
+//! An extension Vorn ships may be granted tables of the core's by name
+//! ([`Grant`]): Tasks keeps the tables the board had before extensions had a
+//! prefix. A grant reads, or reads and writes, its rows; it never changes the
+//! table itself.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -52,6 +57,41 @@ pub fn table_prefix(id: &str) -> String {
     out
 }
 
+/// A table of the core's an extension may use, and whether it may write it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Grant {
+    pub table: &'static str,
+    pub write: bool,
+}
+
+/// What Vorn's own Tasks is lent: the board's tasks and their links to
+/// imported items, the projects a task must belong to, and the connections a
+/// link's foreign key reads.
+pub const TASKS: &[Grant] = &[
+    Grant {
+        table: "tasks",
+        write: true,
+    },
+    Grant {
+        table: "task_source_links",
+        write: true,
+    },
+    Grant {
+        table: "projects",
+        write: false,
+    },
+    Grant {
+        table: "source_connections",
+        write: false,
+    },
+];
+
+fn granted(grants: &[Grant], table: &str, write: bool) -> bool {
+    grants
+        .iter()
+        .any(|g| g.table.eq_ignore_ascii_case(table) && (g.write || !write))
+}
+
 /// Whether `table` is one an extension with `prefix` made itself.
 fn owns(prefix: &str, table: &str) -> bool {
     let table = table.to_ascii_lowercase();
@@ -75,22 +115,31 @@ fn in_main(ctx: &AuthContext<'_>) -> bool {
 }
 
 /// What the authorizer decides for `ctx`, and why when it refuses.
-fn decide(prefix: &str, ctx: &AuthContext<'_>) -> std::result::Result<(), String> {
+fn decide(
+    prefix: &str,
+    grants: &[Grant],
+    ctx: &AuthContext<'_>,
+) -> std::result::Result<(), String> {
     let schema = |t: &str| {
         t.eq_ignore_ascii_case("sqlite_master") || t.eq_ignore_ascii_case("sqlite_schema")
     };
     let mine = |t: &str| owns(prefix, t) && in_main(ctx);
+    let lent = |t: &str, write: bool| granted(grants, t, write) && in_main(ctx);
     // A change to its own table writes the schema, which SQLite allows no statement to write directly.
     let internal = |t: &str| schema(t);
     match ctx.action {
         AuthAction::Select | AuthAction::Recursive | AuthAction::Function { .. } => Ok(()),
         // The schema holds no rows, and Vorn's own is public; SQLite reads it to change a table.
-        AuthAction::Read { table_name, .. } if mine(table_name) || schema(table_name) => Ok(()),
+        AuthAction::Read { table_name, .. }
+            if mine(table_name) || schema(table_name) || lent(table_name, false) =>
+        {
+            Ok(())
+        }
         AuthAction::Read { table_name, .. } => Err(format!("read the table {table_name}")),
         AuthAction::Insert { table_name }
         | AuthAction::Delete { table_name }
         | AuthAction::Update { table_name, .. }
-            if mine(table_name) || internal(table_name) =>
+            if mine(table_name) || internal(table_name) || lent(table_name, true) =>
         {
             Ok(())
         }
@@ -138,6 +187,7 @@ pub struct ExtensionTables {
     conn: Connection,
     id: String,
     prefix: String,
+    grants: &'static [Grant],
     /// What the authorizer refused last, to name it in the error.
     refused: Arc<Mutex<Option<String>>>,
 }
@@ -176,6 +226,11 @@ fn from_sql(v: ValueRef<'_>) -> Value {
 impl ExtensionTables {
     /// Opens `db` for extension `id`, its statements held to its own tables.
     pub fn open(db: &Path, id: &str) -> Result<ExtensionTables> {
+        ExtensionTables::open_with(db, id, &[])
+    }
+
+    /// As [`ExtensionTables::open`], with the core's tables `grants` lends it.
+    pub fn open_with(db: &Path, id: &str, grants: &'static [Grant]) -> Result<ExtensionTables> {
         let conn = Connection::open_with_flags(
             db,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -191,6 +246,7 @@ impl ExtensionTables {
             conn,
             id: id.to_owned(),
             prefix,
+            grants,
             refused: Arc::default(),
         };
         tables.guard(true)?;
@@ -209,9 +265,10 @@ impl ExtensionTables {
                 .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
             return Ok(());
         }
-        let (prefix, refused) = (self.prefix.clone(), Arc::clone(&self.refused));
+        let (prefix, grants, refused) =
+            (self.prefix.clone(), self.grants, Arc::clone(&self.refused));
         self.conn.authorizer(Some(move |ctx: AuthContext<'_>| {
-            match decide(&prefix, &ctx) {
+            match decide(&prefix, grants, &ctx) {
                 Ok(()) => Authorization::Allow,
                 Err(why) => {
                     *refused.lock().unwrap_or_else(PoisonError::into_inner) = Some(why);
@@ -476,6 +533,52 @@ mod tests {
         assert!(!owns(&a, &format!("{}rows", table_prefix("a.x"))));
         assert!(!owns(&a, "x_a__kv"));
         assert!(!owns(&a, "tasks"));
+    }
+
+    #[test]
+    fn a_grant_lends_a_core_table_to_read_or_write_and_never_to_change() {
+        static READ: [Grant; 1] = [Grant {
+            table: "tasks",
+            write: false,
+        }];
+        static WRITE: [Grant; 1] = [Grant {
+            table: "tasks",
+            write: true,
+        }];
+        let (_dir, path) = db();
+        let reader = ExtensionTables::open_with(&path, "vorn.x", &READ).unwrap();
+        assert_eq!(
+            reader.query("SELECT title FROM tasks", &[]).unwrap(),
+            [json!({ "title": "secret" })]
+        );
+        assert!(reader
+            .exec("DELETE FROM tasks", &[])
+            .unwrap_err()
+            .to_string()
+            .contains("may not write the table tasks"));
+        let writer = ExtensionTables::open_with(&path, "vorn.x", &WRITE).unwrap();
+        let ran = writer
+            .transaction(&[
+                (
+                    "UPDATE tasks SET title = ? WHERE id = ?".into(),
+                    vec![json!("T"), json!("t1")],
+                ),
+                (
+                    "INSERT INTO tasks VALUES (?, ?)".into(),
+                    vec![json!("t2"), json!("U")],
+                ),
+            ])
+            .unwrap();
+        assert_eq!(ran, [json!(1), json!(1)]);
+        assert!(writer
+            .exec("DROP TABLE tasks", &[])
+            .unwrap_err()
+            .to_string()
+            .contains("may not change the schema of tasks"));
+        assert!(ExtensionTables::open(&path, "vorn.x")
+            .unwrap()
+            .query("SELECT * FROM tasks", &[])
+            .is_err());
     }
 
     #[test]

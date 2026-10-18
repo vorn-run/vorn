@@ -1,112 +1,13 @@
-//! Where extensions' templates draw: each place asks for its points and
-//! lays them out with the kit's one template renderer.
+//! Where extensions' trees draw: each place asks for its points and lays
+//! them out with the kit's one tree renderer.
 
-use vorn_components::template::{self, Bind, Press};
 use vorn_components::tree::{self, Ev, TreeBind};
-use vorn_view::Row;
 
 use super::Screen;
 use crate::act::{Act, Acts};
-use crate::points::{kind, Holder, Point, PointAct, Points};
+use crate::points::{kind, Point, PointAct, Points};
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Id, Rgba, Role, Ui};
-
-/// A template control's id: point `key`, drawn for `scope`, at node `slot`, for `row`.
-pub fn control_id(key: &str, scope: Option<&str>, slot: u64, row: Option<&str>) -> Id {
-    Id::new(key).child(scope).child(slot).child(row)
-}
-
-/// Binds a template's controls in one point to the app's acts.
-pub(crate) struct Binder<'a> {
-    acts: &'a Acts,
-    point: &'a Point,
-    /// The session or row the template is drawn for, to tell copies apart.
-    scope: Option<&'a str>,
-    holder: Option<Holder>,
-    asking: Option<u64>,
-    more: Option<u64>,
-}
-
-impl<'a> Binder<'a> {
-    /// Point `p`'s controls, drawn once, outside any session.
-    pub(crate) fn whole(acts: &'a Acts, points: &'a Points, point: &'a Point) -> Binder<'a> {
-        Binder {
-            acts,
-            point,
-            scope: None,
-            holder: None,
-            asking: points.asking,
-            more: points.more,
-        }
-    }
-
-    fn base(&self, slot: u64, row: Option<&str>) -> Id {
-        control_id(&self.point.key(), self.scope, slot, row)
-    }
-
-    fn act(&self, press: Press) -> Act {
-        Act::Point(PointAct::Press {
-            extension: self.point.extension.clone(),
-            press,
-            holder: self.holder.clone(),
-        })
-    }
-}
-
-impl Bind for Binder<'_> {
-    fn press(&self, slot: u64, press: Press) -> Id {
-        let id = self.base(slot, press.row.as_deref());
-        if press.confirm.is_none() {
-            self.acts.bind(id, self.act(press));
-        } else if self.asking == Some(id.0) {
-            self.acts.bind(id, Act::Point(PointAct::Ask(None)));
-            self.acts
-                .bind(id.child("no"), Act::Point(PointAct::Ask(None)));
-            self.acts.bind(id.child("ok"), self.act(press));
-        } else {
-            self.acts.bind(id, Act::Point(PointAct::Ask(Some(id.0))));
-        }
-        id
-    }
-
-    fn field(&self, slot: u64, row: Option<&str>, call: &str, value: &str) -> Id {
-        let id = self.base(slot, row);
-        self.acts.text(
-            id,
-            Act::Point(PointAct::Field {
-                extension: self.point.extension.clone(),
-                call: call.to_owned(),
-                row: row.map(str::to_owned),
-            }),
-            value,
-        );
-        id
-    }
-
-    fn confirming(&self, id: Id) -> Option<(Id, Id)> {
-        (self.asking == Some(id.0)).then(|| (id.child("ok"), id.child("no")))
-    }
-
-    fn menu(&self, slot: u64, row: Option<&str>) -> Id {
-        let id = self.base(slot, row).child("more");
-        let open = self.more == Some(id.0);
-        self.acts
-            .bind(id, Act::Point(PointAct::More((!open).then_some(id.0))));
-        id
-    }
-
-    fn menu_open(&self, id: Id) -> bool {
-        self.more == Some(id.0)
-    }
-
-    fn hover(&self, slot: u64, row: Option<&str>) -> Id {
-        self.base(slot, row).child("entry")
-    }
-
-    fn icon(&self, name: &str, size: f32) -> Option<El> {
-        connector_icon(name, size)
-    }
-}
 
 /// `connector:<id>`: a connector's mark, a plug for one without.
 fn connector_icon(name: &str, size: f32) -> Option<El> {
@@ -121,10 +22,10 @@ fn connector_icon(name: &str, size: f32) -> Option<El> {
 }
 
 /// Binds a tree page's controls to the app's acts.
-struct TreeBinder<'a> {
-    acts: &'a Acts,
-    points: &'a Points,
-    key: &'a str,
+pub(crate) struct TreeBinder<'a> {
+    pub(crate) acts: &'a Acts,
+    pub(crate) points: &'a Points,
+    pub(crate) key: &'a str,
 }
 
 impl TreeBinder<'_> {
@@ -211,39 +112,8 @@ impl TreeBind for TreeBinder<'_> {
     }
 }
 
-/// Point `p`'s template, with `row` in scope for a per-session place; its
-/// error box when it does not check, nothing when it has no template.
-pub fn draw(
-    ui: &Ui,
-    acts: &Acts,
-    points: &Points,
-    p: &Point,
-    row: Option<&Row>,
-    holder: Option<Holder>,
-) -> Option<El> {
-    if p.tree {
-        return draw_tree(ui, acts, points, p);
-    }
-    match &p.template {
-        Ok(Some(t)) => {
-            let bind = Binder {
-                acts,
-                point: p,
-                scope: row.map(|r| r.id.as_str()),
-                holder,
-                asking: points.asking,
-                more: points.more,
-            };
-            let src = points.rows_of(&p.extension);
-            Some(template::view(ui, t, row, src, &bind))
-        }
-        Ok(None) => None,
-        Err(errors) => Some(template::invalid(&p.place(), errors)),
-    }
-}
-
-/// Tree point `p`'s tree whole, or its error box; nothing until it renders, when it is an
-/// empty box, or for a template.
+/// Tree point `p`'s tree whole, or its error box; nothing until it renders,
+/// when it is an empty box, or for a point that draws no tree.
 pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El> {
     if !p.tree {
         return None;
@@ -259,7 +129,7 @@ pub fn draw_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point) -> Option<El>
             };
             Some(tree::view(ui, t, &bind))
         }
-        Err(errors) => Some(template::invalid(&p.place(), errors)),
+        Err(errors) => Some(tree::invalid(&p.place(), errors)),
     }
 }
 
@@ -278,62 +148,47 @@ fn session_tree(ui: &Ui, acts: &Acts, points: &Points, p: &Point, session: &str)
     Some(tree::view(ui, part, &bind))
 }
 
-/// Point `p`'s template or tree as a page: its toolbar apart, for the page's header, and its body.
+/// Point `p`'s tree as a page: its toolbar apart, for the page's header, and its body.
 fn draw_page(s: &Screen<'_>, p: &Point) -> (Option<El>, Option<El>) {
-    if p.tree {
-        let key = p.key();
-        return match s.st.points.trees.get(&key) {
-            Some(Ok(t)) => {
-                let bind = TreeBinder {
-                    acts: s.acts,
-                    points: &s.st.points,
-                    key: &key,
-                };
-                tree::page(s.ui, t, &bind)
-            }
-            Some(Err(errors)) => (None, Some(template::invalid(&p.place(), errors))),
-            None => (None, None),
-        };
+    if !p.tree {
+        return (None, None);
     }
-    match &p.template {
-        Ok(Some(t)) => {
-            let bind = Binder::whole(s.acts, &s.st.points, p);
-            template::page(s.ui, t, None, s.st.points.rows_of(&p.extension), &bind)
+    let key = p.key();
+    match s.st.points.trees.get(&key) {
+        Some(Ok(t)) => {
+            let bind = TreeBinder {
+                acts: s.acts,
+                points: &s.st.points,
+                key: &key,
+            };
+            tree::page(s.ui, t, &bind)
         }
-        _ => (None, drawn(s, p, None, None)),
+        Some(Err(errors)) => (None, Some(tree::invalid(&p.place(), errors))),
+        None => (None, None),
     }
 }
 
-fn drawn(s: &Screen<'_>, p: &Point, row: Option<&Row>, holder: Option<Holder>) -> Option<El> {
-    draw(s.ui, s.acts, &s.st.points, p, row, holder)
+fn drawn(s: &Screen<'_>, p: &Point) -> Option<El> {
+    draw_tree(s.ui, s.acts, &s.st.points, p)
 }
 
 /// Every point at a whole-screen place, each drawn.
 fn every(s: &Screen<'_>, at: &str) -> Vec<El> {
-    s.st.points
-        .at(at)
-        .filter_map(|p| drawn(s, p, None, None))
-        .collect()
+    s.st.points.at(at).filter_map(|p| drawn(s, p)).collect()
 }
 
-/// The points at a per-session place, each with that session's row; a
-/// template with errors shows its box only once, outside any session.
+/// The points at a per-session place, each its tree's child for that session;
+/// a tree that cannot be drawn shows its box only once, on the selected card.
 fn for_session(s: &Screen<'_>, at: &str, session: &str) -> Vec<El> {
     s.st.points
         .at(at)
-        .filter_map(|p| {
-            if p.tree {
-                return match s.st.points.trees.get(&p.key())? {
-                    Ok(_) => session_tree(s.ui, s.acts, &s.st.points, p, session),
-                    // A tree that cannot be drawn says so once, on the selected card.
-                    Err(e) if s.st.selected.as_deref() == Some(session) => {
-                        Some(template::invalid(&p.place(), e))
-                    }
-                    Err(_) => None,
-                };
+        .filter(|p| p.tree)
+        .filter_map(|p| match s.st.points.trees.get(&p.key())? {
+            Ok(_) => session_tree(s.ui, s.acts, &s.st.points, p, session),
+            Err(e) if s.st.selected.as_deref() == Some(session) => {
+                Some(tree::invalid(&p.place(), e))
             }
-            let row = s.st.points.session_row(p, session)?;
-            drawn(s, p, Some(row), None)
+            Err(_) => None,
         })
         .collect()
 }
@@ -343,12 +198,9 @@ pub(super) fn sidebar(s: &Screen<'_>) -> Option<El> {
     let mut col = div().col().gap(8.0).pt(8.0);
     let mut any = false;
     for p in s.st.points.at(kind::SIDEBAR) {
-        let Some(body) = drawn(s, p, None, None) else {
+        let Some(body) = drawn(s, p) else {
             continue;
         };
-        if !p.tree && !has_rows(s, p) && p.template.is_ok() {
-            continue;
-        }
         any = true;
         col = col.child(
             div()
@@ -360,14 +212,6 @@ pub(super) fn sidebar(s: &Screen<'_>) -> Option<El> {
         );
     }
     any.then_some(col)
-}
-
-/// A section holds rows when any collection its template draws has one.
-fn has_rows(s: &Screen<'_>, p: &Point) -> bool {
-    let rows = s.st.points.rows_of(&p.extension);
-    p.collections()
-        .iter()
-        .any(|c| rows.get(c).is_some_and(|r| !r.is_empty()))
 }
 
 fn heading(title: &str) -> El {
@@ -494,11 +338,7 @@ pub(super) fn settings_page(s: &Screen<'_>, key: &str) -> El {
 /// An extension pane's body.
 pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
     match s.st.points.get(key) {
-        Some(p) => div()
-            .col()
-            .p(12.0)
-            .gap(8.0)
-            .child_if(drawn(s, p, None, None)),
+        Some(p) => div().col().p(12.0).gap(8.0).child_if(drawn(s, p)),
         None => text("This pane's extension is off", 12.0, k::GRAY_500).line_height(16.0),
     }
 }
@@ -507,7 +347,7 @@ pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
 pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
     let key = s.st.points.dialog.as_deref()?;
     let p = s.st.points.get(key)?;
-    let body = drawn(s, p, None, Some(Holder::Dialog))?;
+    let body = drawn(s, p)?;
     let panel = div()
         .col()
         .w(400.0_f32.min(s.size.0 - 32.0))
@@ -558,7 +398,7 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
         let Some(p) = s.st.points.get(key) else {
             continue;
         };
-        let Some(body) = drawn(s, p, None, Some(Holder::Window(key.clone()))) else {
+        let Some(body) = drawn(s, p) else {
             continue;
         };
         any = true;

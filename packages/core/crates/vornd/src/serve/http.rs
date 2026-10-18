@@ -13,6 +13,7 @@ use hyper::{Response, StatusCode};
 use serde_json::{json, Value};
 
 use crate::endpoint::{full, Body};
+use crate::native::extensions::builtin::tasks::{ID as TASKS, IMAGES};
 
 /// The prefix the web client is served under.
 pub const APP_PREFIX: &str = "/app";
@@ -115,11 +116,20 @@ fn task_image(rest: &str, data_dir: &Path) -> Response<Body> {
     let (Some(task), Some(name)) = (percent_decode(task), percent_decode(name)) else {
         return invalid();
     };
-    let images = vorn_tasks::images::TaskImages::new(data_dir);
-    let Ok(file) = images.path(&task, &name) else {
+    // A task id, then a file name of its own: never a path out of the folder.
+    let id = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    if !id(&task) || name.contains('/') {
+        return invalid();
+    }
+    let images = vorn_extensions::blobs::BlobStore::new(data_dir.join("extension-files"))
+        .place(TASKS, data_dir.join(IMAGES));
+    let Ok(file) = images.path(TASKS, &format!("{task}/{name}")) else {
         return invalid();
     };
-    let file = PathBuf::from(file);
     let Ok(bytes) = std::fs::read(&file) else {
         return json_reply(
             StatusCode::NOT_FOUND,
@@ -293,16 +303,9 @@ mod tests {
     #[tokio::test]
     async fn serves_a_tasks_images_as_inert_content() {
         let data = tempfile::tempdir().unwrap();
-        let images = vorn_tasks::images::TaskImages::new(data.path());
-        let src = data.path().join("shot.png");
-        std::fs::write(&src, b"png").unwrap();
-        let name = images.save("t1", src.to_str().unwrap()).unwrap();
-        let name = Path::new(&name)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
+        let name = "shot.png";
+        std::fs::create_dir_all(data.path().join("task-images/t1")).unwrap();
+        std::fs::write(data.path().join("task-images/t1").join(name), b"png").unwrap();
         let res = answer(
             &format!("/api/task-images/t1/{name}"),
             false,

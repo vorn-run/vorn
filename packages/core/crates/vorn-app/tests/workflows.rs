@@ -65,6 +65,19 @@ fn workflows_view(v: &TestVornd) -> (App, Shot) {
     let mut shot = Shot::new();
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
+    // The view is the Workflow editor's tree around the canvas, once its component answers.
+    shot.until(&mut app, "the editor's tree", |app, _| {
+        match app
+            .st
+            .points
+            .trees
+            .get("vorn.workflow-editor/views/workflows")
+        {
+            Some(Ok(_)) => Some(()),
+            Some(Err(e)) => panic!("the editor's tree cannot be drawn: {e:?}"),
+            None => None,
+        }
+    });
     (app, shot)
 }
 

@@ -23,10 +23,6 @@ impl Builtin for Workflows {
         vorn_workflows::MANIFEST
     }
 
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &[]
-    }
-
     fn events(&self) -> &'static [&'static str] {
         &[]
     }

@@ -2678,16 +2678,6 @@ impl App {
     }
 
     fn submit(&mut self, ui: &mut Ui, id: Id) {
-        if let Some(Act::Point(crate::points::PointAct::Field {
-            extension,
-            call,
-            row,
-        })) = self.acts.text_of(id)
-        {
-            let text = ui.edit_text(id).to_owned();
-            self.point_field(&extension, &call, row.as_deref(), &text);
-            return;
-        }
         if id == COMPOSER_INPUT {
             self.launch();
             return;

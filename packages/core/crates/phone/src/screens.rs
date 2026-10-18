@@ -644,21 +644,17 @@ pub fn settings_list(p: &Phone) -> El {
 
 pub fn settings_page(p: &Phone, ui: &Ui, pt: &Point) -> El {
     let (acts, points) = (&p.model.acts, &p.model.points);
-    if pt.tree {
-        let loading = || {
-            if ui.is_native() {
-                div().sem(Sem::Empty {
-                    title: "Loading".into(),
-                    body: String::new(),
-                })
-            } else {
-                empty("Loading", "")
-            }
-        };
-        return vorn_app::screen::points::draw_tree(ui, acts, points, pt).unwrap_or_else(loading);
-    }
-    vorn_app::screen::points::draw(ui, acts, points, pt, None, None)
-        .unwrap_or_else(|| empty("Nothing to set", "This page has no template."))
+    let loading = || {
+        if ui.is_native() {
+            div().sem(Sem::Empty {
+                title: "Loading".into(),
+                body: String::new(),
+            })
+        } else {
+            empty("Loading", "")
+        }
+    };
+    vorn_app::screen::points::draw_tree(ui, acts, points, pt).unwrap_or_else(loading)
 }
 
 /// What a native host shows for `screen`, e.g. `sessions`, `settings:<key>` or `session:<id>`.

@@ -118,6 +118,20 @@ impl ConnectorsBuiltin {
         }
     }
 
+    /// `connection.itemImport` and `connection.synced`, which Tasks' step
+    /// calls to put a connection's item on the board itself; refused while off.
+    pub async fn items(&self, method: &str, args: &Value) -> Result<Value, ExtError> {
+        if !self.is_on() {
+            return Err(ExtError::new("off", OFF));
+        }
+        let done = if method == "connection.synced" {
+            self.inner.synced(args).await.map(|()| Value::Null)
+        } else {
+            self.inner.item_import(args).await
+        };
+        done.map_err(|e| ExtError::new("failed", e))
+    }
+
     /// A workflow step of a node type Connectors declares; refused while off.
     pub async fn run_node(&self, node_type: &str, request: &Value) -> Result<Value, String> {
         if !self.is_on() {
@@ -158,10 +172,6 @@ struct Entry(Arc<ConnectorsBuiltin>);
 impl Builtin for Entry {
     fn manifest(&self) -> &'static str {
         builtin::MANIFEST
-    }
-
-    fn views(&self) -> &[(&'static str, &'static str)] {
-        &[]
     }
 
     fn events(&self) -> &'static [&'static str] {

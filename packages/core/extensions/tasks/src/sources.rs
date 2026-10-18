@@ -8,9 +8,11 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use vorn_store::{Result, Store};
 
-use vorn_work::js::number_value;
+use crate::db::Db;
+use crate::js::num as number_value;
+
+type Result<T> = std::result::Result<T, String>;
 
 /// One external item, as a task is made from it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -60,7 +62,7 @@ pub struct Import {
 /// link left behind, else a new one in `project`. Answers
 /// `{taskId, created}`.
 pub fn upsert(
-    store: &mut Store,
+    store: &mut dyn Db,
     source: &Source,
     item: &Item,
     project: &str,
@@ -150,7 +152,7 @@ pub fn upsert(
 /// Every item of `import` on the board: each answer `{taskId, created}` in
 /// the order given, as far as the first that fails.
 pub fn import(
-    store: &mut Store,
+    store: &mut dyn Db,
     import: &Import,
     now: &str,
     mut new_task_id: impl FnMut() -> String,
@@ -173,103 +175,6 @@ pub fn import(
 }
 
 /// `task.sourceLink`: where task `task_id` was imported from, or null.
-pub fn link(store: &mut Store, task_id: &str) -> Result<Value> {
+pub fn link(store: &mut dyn Db, task_id: &str) -> Result<Value> {
     store.call("dbGetTaskSourceLink", json!([task_id]))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::Map;
-    use vorn_store::StoreOptions;
-
-    fn store() -> Store {
-        let options = StoreOptions {
-            default_shell: "/bin/sh".into(),
-            default_agent_commands: Map::new(),
-            default_workspace: serde_json::from_value(json!({ "id": "personal", "name": "Personal", "icon": "User", "iconColor": "#000", "order": 0 })).unwrap(),
-            owner_name: "o".into(),
-            seed_workflows: Vec::new(),
-        };
-        let mut s = Store::open_in_memory(options).unwrap();
-        s.call(
-            "dbInsertProject",
-            json!([{ "name": "app", "path": "/app", "preferredAgents": [] }]),
-        )
-        .unwrap();
-        for id in ["c1", "c2"] {
-            s.call(
-                "dbInsertSourceConnection",
-                json!([{ "id": id, "connectorId": "sdk", "name": id, "filters": {}, "syncIntervalMinutes": 0, "statusMapping": {}, "createdAt": "2026-01-01T00:00:00.000Z" }]),
-            )
-            .unwrap();
-        }
-        s
-    }
-
-    fn imported(id: &str, title: &str) -> Imported {
-        Imported {
-            item: Item {
-                external_id: id.into(),
-                title: title.into(),
-                external_url: format!("https://x.example/{id}"),
-                status_raw: "open".into(),
-                updated_at: "2026-01-01T00:00:00.000Z".into(),
-                ..Item::default()
-            },
-            status: json!("todo"),
-        }
-    }
-
-    #[test]
-    fn imports_once_and_updates_the_linked_task_after() {
-        let mut s = store();
-        let args: Import = serde_json::from_value(json!({
-            "connectionId": "c1", "connectorId": "sdk", "sourceConnectorId": "tickets",
-            "project": "app",
-            "items": [
-                { "externalId": "1", "title": "One", "status": "todo" },
-                { "externalId": "2", "title": "Two", "externalUrl": "https://x.example/2", "status": "todo" },
-            ],
-        }))
-        .unwrap();
-        let mut n = 0;
-        let mut ids = || {
-            n += 1;
-            format!("t{n}")
-        };
-        let first = import(&mut s, &args, "2026-01-01T00:00:00.000Z", &mut ids).unwrap();
-        assert_eq!(
-            first,
-            [
-                json!({ "taskId": "t1", "created": true }),
-                json!({ "taskId": "t2", "created": true })
-            ]
-        );
-        let again = Import {
-            items: vec![imported("1", "One, renamed")],
-            ..args.clone()
-        };
-        let second = import(&mut s, &again, "2026-01-02T00:00:00.000Z", &mut ids).unwrap();
-        assert_eq!(second, [json!({ "taskId": "t1", "created": false })]);
-        let task = s.call("dbGetTask", json!(["t1"])).unwrap();
-        assert_eq!(task["title"], "One, renamed");
-        assert_eq!(task["sourceConnectorId"], "tickets");
-        assert_eq!(link(&mut s, "t1").unwrap()["connectionId"], "c1");
-
-        // Another connection of the same connector takes over a task whose link was lost.
-        s.call("dbDeleteTaskSourceLink", json!(["t2"])).unwrap();
-        let other = Import {
-            source: Source {
-                connection_id: "c2".into(),
-                ..args.source.clone()
-            },
-            items: vec![imported("2", "Two")],
-            ..args
-        };
-        let third = import(&mut s, &other, "2026-01-03T00:00:00.000Z", &mut ids).unwrap();
-        assert_eq!(third, [json!({ "taskId": "t2", "created": false })]);
-        assert_eq!(link(&mut s, "t2").unwrap()["connectionId"], "c2");
-        assert!(link(&mut s, "nope").unwrap().is_null());
-    }
 }

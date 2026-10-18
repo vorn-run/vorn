@@ -37,7 +37,7 @@ impl App {
                     .st
                     .points
                     .find(&extension, crate::points::kind::PANES, &pane)
-                    .filter(|p| p.tree || !matches!(p.template, Ok(None)))
+                    .filter(|p| p.tree)
                 {
                     let open = crate::extensions::OpenPane {
                         nonce: format!("{}{}", crate::extensions::VIEW_NONCE, p.key()),

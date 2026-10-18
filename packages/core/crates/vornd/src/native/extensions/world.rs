@@ -12,7 +12,7 @@ use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
-use vorn_store::extension::ExtensionTables;
+use vorn_store::extension::{ExtensionTables, Grant};
 
 use crate::native::config::Viewer;
 use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
@@ -23,6 +23,91 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
     pub native: Weak<Native>,
+}
+
+/// Each extension's tables on a connection of its own, opened at its first
+/// storage call and kept: opening one per call cost each of Tasks' writes
+/// about a millisecond. Calls on one extension's tables take turns.
+#[derive(Default)]
+pub struct Tables {
+    open: std::sync::Mutex<std::collections::HashMap<String, Kept>>,
+}
+
+/// One extension's tables, opened on the blocking thread of their first call.
+pub type Kept = Arc<std::sync::Mutex<Option<ExtensionTables>>>;
+
+impl std::fmt::Debug for Tables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tables").finish_non_exhaustive()
+    }
+}
+
+impl Tables {
+    /// Where extension `id`'s tables are kept, not yet open before its first call.
+    pub fn of(&self, id: &str) -> Kept {
+        let mut open = self
+            .open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(open.entry(id.to_owned()).or_default())
+    }
+
+    /// Closes extension `id`'s tables, as it is removed.
+    pub fn forget(&self, id: &str) {
+        self.open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(id);
+    }
+}
+
+/// The core's tables extension `id` is lent: Tasks keeps the board's own.
+fn lent(id: &str) -> &'static [Grant] {
+    if id == super::builtin::tasks::ID {
+        vorn_store::extension::TASKS
+    } else {
+        &[]
+    }
+}
+
+/// `files.read` with `encoding: base64`: the file's bytes, `{base64}`.
+async fn read_bytes(path: String) -> Result<Value, ExtError> {
+    tokio::task::spawn_blocking(move || std::fs::read(path))
+        .await
+        .map_err(|e| ExtError::new("failed", e.to_string()))?
+        .map(|bytes| json!({ "base64": vorn_extensions::api::base64::encode(&bytes) }))
+        .map_err(|e| ExtError::new("failed", e.to_string()))
+}
+
+/// `task.changed`: the events a task's write fires, emitted as the core's,
+/// then the rows it changed or removed, told to every client.
+async fn task_changed(native: &Arc<Native>, args: &Value) {
+    use vorn_extensions::events::{TASK_CREATED, TASK_STATUS_CHANGED};
+    for e in args
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let name = match e.get("kind").and_then(Value::as_str) {
+            Some("taskCreated") => TASK_CREATED,
+            _ => TASK_STATUS_CHANGED,
+        };
+        native.events().emit(name, || e.clone());
+    }
+    let strings = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_owned))
+            .collect()
+    };
+    let change = match (args.get("rows"), args.get("removed")) {
+        (Some(Value::Array(rows)), _) => crate::native::task_list::Change::Rows(rows.clone()),
+        (_, Some(removed)) => crate::native::task_list::Change::Removed(strings(removed)),
+        _ => return,
+    };
+    crate::native::task_list::told(native, change).await;
 }
 
 fn stopping() -> ExtError {
@@ -362,6 +447,9 @@ impl World for Wired {
                 "files.read" => {
                     let path =
                         text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
+                    if text(&args, "encoding").as_deref() == Some("base64") {
+                        return read_bytes(path).await;
+                    }
                     let mut params = json!({ "filePath": path });
                     if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
                         params["maxBytes"] = max.clone();
@@ -397,15 +485,15 @@ impl World for Wired {
                         .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
                     tasks.api(m, args).await
                 }
-                "connection.upsertFromItem" => {
+                "task.changed" => {
+                    task_changed(&native, &args).await;
+                    Ok(Value::Null)
+                }
+                "connection.itemImport" | "connection.synced" => {
                     let connectors = native.connectors().cloned().ok_or_else(|| {
                         ExtError::new("unsupported", "this vornd keeps no connections")
                     })?;
-                    match connectors.answer("connection:upsertFromItem", args).await {
-                        NativeAnswer::Result(v) => Ok(v),
-                        NativeAnswer::Void | NativeAnswer::Unanswered => Ok(Value::Null),
-                        NativeAnswer::Error(e) => Err(ExtError::new("failed", e)),
-                    }
+                    connectors.items(m, &args).await
                 }
                 "workflow.fire" => {
                     let work = native.work().cloned().ok_or_else(|| {
@@ -443,6 +531,38 @@ impl World for Wired {
                 }
                 "workflow.list" => {
                     on_store(&native, m, |s| s.call("dbListWorkflows", json!([]))).await
+                }
+                "workflow.gates" => {
+                    let waiting = ask(&native, "workflowRun:listWaiting", Value::Null).await?;
+                    let workflows = ask(&native, "workflow:list", Value::Null).await?;
+                    let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+                    Ok(Value::Array(crate::native::work::waiting::all_rows(
+                        &list(&waiting),
+                        &list(&workflows),
+                    )))
+                }
+                "workflow.run" => {
+                    let id = text(&args, "workflowId")
+                        .ok_or_else(|| needs(m, "the workflowId to run"))?;
+                    let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
+                    ask(
+                        &native,
+                        "workflow:runManual",
+                        json!({ "workflowId": id, "inputs": inputs }),
+                    )
+                    .await
+                }
+                "workflow.resolveGate" => {
+                    let run = text(&args, "runId").ok_or_else(|| needs(m, "the runId"))?;
+                    let node = text(&args, "nodeId").ok_or_else(|| needs(m, "the nodeId"))?;
+                    let decision = text(&args, "decision")
+                        .ok_or_else(|| needs(m, "the decision: approve or reject"))?;
+                    ask(
+                        &native,
+                        "workflow:resolveGate",
+                        json!({ "runId": run, "nodeId": node, "decision": decision }),
+                    )
+                    .await
                 }
                 "workflow.seed" => {
                     let workflows = args
@@ -587,8 +707,17 @@ impl World for Wired {
                 .database()
                 .map(std::path::Path::to_path_buf)
                 .ok_or_else(|| ExtError::new("unsupported", "vornd has no database"))?;
+            let kept = native.ext_tables().of(&id);
             let done = tokio::task::spawn_blocking(move || {
-                let tables = ExtensionTables::open(&db, &id)?;
+                let mut held = kept
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if held.is_none() {
+                    *held = Some(ExtensionTables::open_with(&db, &id, lent(&id))?);
+                }
+                let tables = held
+                    .as_ref()
+                    .ok_or_else(|| vorn_store::Error::Refused("its tables did not open".into()))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
                 if let Some(dir) = migrations.filter(|d| d.is_dir()) {
                     let ran = tables.migrate(&dir)?;

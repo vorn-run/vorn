@@ -1,7 +1,7 @@
 //! Building trees: one function per component and chained setters for the optional parts.
 
 use crate::{
-    Badge, ButtonStyle, Choose, Entry, Kind, Meter, Node, Paint, Segment, TextStyle, Tone,
+    Badge, ButtonStyle, Cards, Choose, Entry, Kind, Meter, Node, Paint, Segment, TextStyle, Tone,
 };
 
 fn node(kind: Kind) -> Node {
@@ -235,7 +235,24 @@ pub fn entry(id: impl Into<String>, title: impl Into<String>) -> Node {
 }
 
 pub fn board(columns: impl IntoIterator<Item = Node>) -> Node {
-    holding(Kind::Board, columns)
+    holding(
+        Kind::Board {
+            cards: None,
+            empty: None,
+        },
+        columns,
+    )
+}
+
+/// A board of the cards `cards` names, which the client reads and draws; each of `columns` is a [`lane`].
+pub fn board_of(cards: Cards, columns: impl IntoIterator<Item = Node>) -> Node {
+    holding(
+        Kind::Board {
+            cards: Some(cards),
+            empty: None,
+        },
+        columns,
+    )
 }
 
 pub fn column(title: impl Into<String>, cards: impl IntoIterator<Item = Node>) -> Node {
@@ -243,9 +260,20 @@ pub fn column(title: impl Into<String>, cards: impl IntoIterator<Item = Node>) -
         Kind::Column {
             title: title.into(),
             tone: None,
+            icon: None,
         },
         cards,
     )
+}
+
+/// A column of a board that reads its cards: the cards whose value is `value` show in it.
+pub fn lane(value: impl Into<String>, title: impl Into<String>) -> Node {
+    column(title, []).id(value)
+}
+
+/// The workflow editor's canvas, drawn by the client.
+pub fn graph() -> Node {
+    node(Kind::Graph)
 }
 
 pub fn divider() -> Node {
@@ -373,9 +401,10 @@ impl Node {
     /// A button's or a stat's or a group's or an entry's icon.
     pub fn icon(mut self, name: impl Into<String>) -> Node {
         match &mut self.kind {
-            Kind::Button { icon, .. } | Kind::Stat { icon, .. } | Kind::Group { icon, .. } => {
-                *icon = Some(name.into())
-            }
+            Kind::Button { icon, .. }
+            | Kind::Stat { icon, .. }
+            | Kind::Group { icon, .. }
+            | Kind::Column { icon, .. } => *icon = Some(name.into()),
             Kind::Entry(e) => e.icon = Some(name.into()),
             _ => {}
         }
@@ -435,8 +464,9 @@ impl Node {
         self
     }
 
+    /// What an empty list or board column says.
     pub fn empty(mut self, line: impl Into<String>) -> Node {
-        if let Kind::List { empty, .. } = &mut self.kind {
+        if let Kind::List { empty, .. } | Kind::Board { empty, .. } = &mut self.kind {
             *empty = Some(line.into());
         }
         self

@@ -1,6 +1,6 @@
 //! What an extension adds to workflows: node types (steps a workflow can
 //! use, which the extension runs), trigger types (what starts one, which
-//! the extension fires or the core times), and workflows it ships as KDL
+//! the extension fires or the core times), and workflows it ships as TOML
 //! files. Read from the manifest's `nodes`, `triggers` and `workflows`,
 //! as `[[contributes.nodes]]`, `[[contributes.triggers]]` and
 //! `[[contributes.workflows]]` write them.
@@ -258,6 +258,6 @@ mod tests {
         assert!(!is_workflow_path("workflows/.toml"));
         assert!(!is_workflow_path("review.toml"));
         assert!(is_schema_path("nodes/deploy.json"));
-        assert!(!is_schema_path("nodes/deploy.kdl"));
+        assert!(!is_schema_path("nodes/deploy.toml"));
     }
 }

@@ -34,7 +34,6 @@ vornui = { path = "../vornui" }
 # The composed components the screens are built from.
 vorn-components = { path = "../vorn-components" }
 # Extension templates and their rows, checked as vornd sends them.
-vorn-view = { path = "../view" }
 # Extension pages drawn from element trees.
 vorn-tree = { path = "../tree" }
 vorn-protocol = { path = "../protocol" }

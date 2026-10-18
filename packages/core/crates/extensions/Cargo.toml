@@ -24,7 +24,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std", "display"] }
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time", "macros", "net"] }
 tracing = "0.1"
-vorn-view = { path = "../view", features = ["kdl"] }
 # An [agent] section is checked against the adapter format it reads as.
 vorn-agents = { path = "../agents" }
 # `pack` reads a manifest's agent rules against the adapters Vorn ships.

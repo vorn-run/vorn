@@ -1002,12 +1002,9 @@ pub fn form_of(t: &TaskConfig) -> TaskForm {
     }
 }
 
-/// What a press on the Tasks board's template does in the app: its cards'
-/// menus and its columns' add buttons, each the act the board ran before it
-/// was a template. `None` for a call the built-in answers itself.
-pub fn board_press(press: &crate::points::Press) -> Option<TaskAct> {
-    let row = press.row.clone()?;
-    Some(match press.call.as_deref()? {
+/// What an entry of a board card's menu does in the app, for task `row`.
+pub fn board_act(action: &str, row: String) -> Option<TaskAct> {
+    Some(match action {
         "open" => TaskAct::Open(row),
         "add" => TaskAct::New(row),
         "focus" | "resume" => TaskAct::OpenSession(row),

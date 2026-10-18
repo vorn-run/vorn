@@ -41,6 +41,11 @@ pub const AGENT_PERMISSION: &str = "agent.permission";
 pub const AGENT_PERMISSION_CLOSED: &str = "agent.permissionClosed";
 /// The last session in a worktree ended: `{projectPath, worktreePath, sessionId}`.
 pub const WORKTREE_IDLE: &str = "worktree.idle";
+/// The workflows changed: one was made, edited, switched or removed: `{}`.
+pub const WORKFLOW_CHANGED: &str = "workflow.changed";
+/// A run's approval gates waiting for a person changed: `{runId, gates}`, each gate
+/// `{id, title, subtitle, message, workflow, run, node, at}`.
+pub const WORKFLOW_GATES: &str = "workflow.gates";
 /// A worktree's HEAD moved or vornd committed in it: `{worktreePath, projectPath?, head?}`; only the latest per worktree in a batch.
 pub const GIT_CHANGED: &str = "git.changed";
 
@@ -59,10 +64,19 @@ pub const CORE_EVENTS: &[&str] = &[
     GIT_CHANGED,
     TASK_CREATED,
     TASK_STATUS_CHANGED,
+    WORKFLOW_CHANGED,
+    WORKFLOW_GATES,
 ];
 
 /// The namespaces the core's events live in; another extension's events live in its own.
-pub const CORE_NAMESPACES: &[&str] = &["session.", "agent.", "git.", "task.", "worktree."];
+pub const CORE_NAMESPACES: &[&str] = &[
+    "session.",
+    "agent.",
+    "git.",
+    "task.",
+    "worktree.",
+    "workflow.",
+];
 
 /// Whether `name` is in a core namespace without being a core event: a typo a manifest should hear about.
 pub fn unknown_core_event(name: &str) -> bool {
