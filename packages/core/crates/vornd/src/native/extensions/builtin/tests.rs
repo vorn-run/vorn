@@ -132,9 +132,8 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
         ]
     );
     for c in &listed {
-        assert_eq!(c["errors"], json!([]), "{c}");
         assert_eq!(c["builtin"], true);
-        assert_eq!(c["view"], Value::Null, "no template is left: {c}");
+        assert!(c.get("view").is_none() && c.get("errors").is_none(), "{c}");
         let draws = !matches!(c["kind"].as_str(), Some("menus" | "commands"));
         assert_eq!(c["tree"] == true, draws, "{c}");
     }
