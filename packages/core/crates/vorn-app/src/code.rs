@@ -111,6 +111,8 @@ pub fn rel_path<'a>(cwd: &str, path: &'a str) -> &'a str {
 pub struct View {
     /// The `rev` last taken into the edit.
     pub rev: Option<u64>,
+    /// The edit: what every window drawing this code shows.
+    pub text: String,
     pub find: Option<Find>,
     /// When the text last changed, for the colour and draft debounces.
     pub typed: Option<Instant>,

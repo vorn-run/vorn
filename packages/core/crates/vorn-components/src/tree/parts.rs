@@ -183,6 +183,7 @@ impl Cx<'_> {
         }
         let mut strip = div()
             .id(strip_id)
+            .sense(Sense::HOVER)
             .row()
             .items_center()
             .gap(4.0)
@@ -197,9 +198,8 @@ impl Cx<'_> {
         if !t.tabs.is_empty() && overflows(&names, width) {
             strip = strip.child(self.overflow(node, t));
         }
-        strip
-            .children(t.tools.iter().map(|x| self.tool(x)))
-            .child_if(self.bind.chrome(node))
+        let tools = t.tools.iter().map(|x| self.tool(x)).collect();
+        strip.child(self.bind.chrome(node, tools))
     }
 
     /// The chevron that lists every tab, and the list while it is open.

@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use super::{App, Call};
 use crate::client::RpcError;
-use crate::points::{self, kind, PointAct, Request};
+use crate::points::{self, kind, unscope, PointAct, Request};
 use crate::runs::s;
 use crate::ui::{Id, Ui, WindowRequest};
 
@@ -301,12 +301,17 @@ impl App {
         if let Some(id) = a.open {
             self.open_dialog(Some(&ext), &id);
         }
-        if let Some(id) = a.focus {
-            if self.store.session(&id).is_some() {
-                self.st.view = crate::screen::MainView::Sessions;
-                self.st.selected = Some(id);
+        match a.focus {
+            // A tree drawn in the main window (a pane, a card) picks a card there, maybe one not listed yet.
+            Some(id) if unscope(key).1.is_some() => self.st.selected = Some(id),
+            Some(id) => {
+                if self.store.session(&id).is_some() {
+                    self.st.view = crate::screen::MainView::Sessions;
+                    self.st.selected = Some(id);
+                }
+                self.come_forward = true;
             }
-            self.come_forward = true;
+            None => {}
         }
         self.come_forward |= a.show;
         if let Some(url) = a.url.filter(|u| u.starts_with("https://")) {

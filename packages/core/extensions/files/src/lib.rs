@@ -84,6 +84,14 @@ fn answer_ask(event: &Event) -> Value {
         .scoped(event.scope.clone()) } })
 }
 
+/// What follows something shown anew: the card or session `id` comes to the front; none or empty draws again.
+fn focus(id: Option<String>) -> Value {
+    match id.filter(|i| !i.is_empty()) {
+        Some(id) => json!({ "focus": id }),
+        None => Value::Null,
+    }
+}
+
 trait Scoped {
     fn scoped(self, scope: Option<String>) -> Self;
 }
@@ -242,14 +250,15 @@ impl Files {
     }
 
     /// A file into a card of its own; `from_tab` takes it out of the pane, asking first over edits.
-    fn pop(&mut self, host: &mut dyn Host, owner: &str, path: &str, from_tab: bool, force: bool) -> Result<bool, Error> {
+    /// Answers the card's id, or none when it asked first.
+    fn pop(&mut self, host: &mut dyn Host, owner: &str, path: &str, from_tab: bool, force: bool) -> Result<Option<String>, Error> {
         let key = tab_key(owner, path);
         if from_tab && !force && self.dirty(host, &key) {
             self.pending = Some(Pending::PopActive(owner.to_owned()));
-            return Ok(false);
+            return Ok(None);
         }
         let mut cards = self.cards(host)?;
-        cards.promote(owner, path);
+        let id = cards.promote(owner, path);
         self.save_cards(host, &cards)?;
         if from_tab {
             let mut p = self.pane(host, owner)?.unwrap_or_default();
@@ -257,21 +266,22 @@ impl Files {
             self.save_pane(host, owner, &p)?;
             self.forget(host, &[key])?;
         }
-        Ok(true)
+        Ok(Some(id))
     }
 
-    fn card_out(&mut self, host: &mut dyn Host, id: &str, back: bool, force: bool) -> Result<bool, Error> {
+    /// A card closed, or put `back` in its session's pane; answers the session to show, or none when it asked first.
+    fn card_out(&mut self, host: &mut dyn Host, id: &str, back: bool, force: bool) -> Result<Option<String>, Error> {
         if !force && self.dirty(host, id) {
             self.pending = Some(if back {
                 Pending::ReturnCard(id.to_owned())
             } else {
                 Pending::CloseCard(id.to_owned())
             });
-            return Ok(false);
+            return Ok(None);
         }
         let mut cards = self.cards(host)?;
         let Some(c) = cards.remove(id) else {
-            return Ok(true);
+            return Ok(Some(String::new()));
         };
         self.save_cards(host, &cards)?;
         self.forget(host, &[id.to_owned()])?;
@@ -279,29 +289,31 @@ impl Files {
             let mut p = self.pane(host, &c.session)?.unwrap_or_default();
             p.open(&c.path, true, false);
             self.save_pane(host, &c.session, &p)?;
+            return Ok(Some(c.session));
         }
-        Ok(true)
+        Ok(Some(String::new()))
     }
 
     /// What the question's OK was asked for, done without asking again.
-    fn confirmed(&mut self, host: &mut dyn Host) -> Result<(), Error> {
+    fn confirmed(&mut self, host: &mut dyn Host) -> Result<Value, Error> {
+        let shown = Value::Null;
         match self.pending.take() {
-            Some(Pending::Toggle(o)) => self.toggle(host, &o, true).map(drop),
-            Some(Pending::CloseTab(o, p)) => self.close_tab(host, &o, &p, true).map(drop),
+            Some(Pending::Toggle(o)) => self.toggle(host, &o, true).map(|_| shown),
+            Some(Pending::CloseTab(o, p)) => self.close_tab(host, &o, &p, true).map(|_| shown),
             Some(Pending::PopActive(o)) => {
                 let active = self.pane(host, &o)?.and_then(|p| p.active);
                 match active {
-                    Some(path) => self.pop(host, &o, &path, true, true).map(drop),
-                    None => Ok(()),
+                    Some(path) => self.pop(host, &o, &path, true, true).map(focus),
+                    None => Ok(shown),
                 }
             }
-            Some(Pending::ReturnCard(id)) => self.card_out(host, &id, true, true).map(drop),
-            Some(Pending::CloseCard(id)) => self.card_out(host, &id, false, true).map(drop),
+            Some(Pending::ReturnCard(id)) => self.card_out(host, &id, true, true).map(focus),
+            Some(Pending::CloseCard(id)) => self.card_out(host, &id, false, true).map(focus),
             Some(Pending::Discard(key)) => match self.buffers.get_mut(&key) {
-                Some(b) => b.discard(host, &key, now_ms()),
-                None => Ok(()),
+                Some(b) => b.discard(host, &key, now_ms()).map(|_| shown),
+                None => Ok(shown),
             },
-            None => Ok(()),
+            None => Ok(shown),
         }
     }
 
@@ -351,7 +363,7 @@ impl Files {
         let ask = |done: bool| if done { Value::Null } else { answer_ask(e) };
         let v = e.value.as_str();
         match (e.id.as_str(), e.kind) {
-            (CONFIRMED, _) => self.confirmed(host).map(|_| Value::Null),
+            (CONFIRMED, _) => self.confirmed(host),
             ("pane", EventKind::Close) => self.toggle(host, owner, false).map(ask),
             ("tabs", EventKind::Select) => {
                 let mut p = self.pane(host, owner)?.unwrap_or_default();
@@ -373,13 +385,16 @@ impl Files {
                 self.save_pane(host, owner, &p).map(|_| Value::Null)
             }
             ("pop", EventKind::Click) if !v.is_empty() => {
-                self.pop(host, owner, v, false, false).map(|_| Value::Null)
+                self.pop(host, owner, v, false, false).map(focus)
             }
             ("pop", EventKind::Click) => {
                 let Some(path) = self.pane(host, owner)?.and_then(|p| p.active) else {
                     return Ok(Value::Null);
                 };
-                self.pop(host, owner, &path, true, false).map(ask)
+                Ok(match self.pop(host, owner, &path, true, false)? {
+                    Some(id) => focus(Some(id)),
+                    None => answer_ask(e),
+                })
             }
             ("close-saved", EventKind::Click) => {
                 let mut p = self.pane(host, owner)?.unwrap_or_default();
@@ -451,11 +466,15 @@ impl Files {
     }
 
     fn card_event(&mut self, host: &mut dyn Host, id: &str, e: &Event) -> Result<Value, Error> {
-        let ask = |done: bool| if done { Value::Null } else { answer_ask(e) };
         match (e.id.as_str(), e.kind) {
-            (CONFIRMED, _) => self.confirmed(host).map(|_| Value::Null),
-            ("return", EventKind::Click) => self.card_out(host, id, true, false).map(ask),
-            ("close", EventKind::Click) => self.card_out(host, id, false, false).map(ask),
+            (CONFIRMED, _) => self.confirmed(host),
+            ("return", EventKind::Click) | ("close", EventKind::Click) => {
+                let back = e.id == "return";
+                Ok(match self.card_out(host, id, back, false)? {
+                    Some(shown) => focus(Some(shown)),
+                    None => answer_ask(e),
+                })
+            }
             ("code", _) => {
                 let Some(card) = self.cards(host)?.get(id).cloned() else {
                     return Ok(json!({ "same": true }));

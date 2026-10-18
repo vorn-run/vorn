@@ -178,14 +178,16 @@ impl App {
                 let id = editor_id(&inst);
                 if v.rev != Some(c.rev) {
                     v.rev = Some(c.rev);
-                    let text = c.draft.as_deref().unwrap_or(&c.text);
-                    ui.set_edit_text(id, text);
-                    v.told = Some((text.to_owned(), c.draft.is_some()));
+                    v.text = c.draft.clone().unwrap_or_else(|| c.text.clone());
+                    v.told = Some((v.text.clone(), c.draft.is_some()));
                     v.typed = None;
+                }
+                if !ui.focused(id) && ui.edit_text(id) != v.text {
+                    ui.set_edit_text(id, &v.text);
                 }
                 let editing = c.state == CodeState::Edit;
                 let text = if editing {
-                    ui.edit_text(id)
+                    v.text.as_str()
                 } else {
                     c.text.as_str()
                 };
@@ -377,11 +379,15 @@ impl App {
     }
 
     /// Whether code `inst` holds an edit not on disk.
-    pub(crate) fn code_dirty(&self, ui: &Ui, inst: &str) -> bool {
+    pub(crate) fn code_dirty(&self, inst: &str) -> bool {
         self.code_node(inst).is_some_and(|c| {
             c.state == CodeState::Edit
-                && self.st.codes.views.get(inst).is_some_and(|v| v.rev == Some(c.rev))
-                && ui.edit_text(editor_id(inst)) != c.text
+                && self
+                    .st
+                    .codes
+                    .views
+                    .get(inst)
+                    .is_some_and(|v| v.rev == Some(c.rev) && v.text != c.text)
         })
     }
 
@@ -407,7 +413,7 @@ impl App {
                 }
             }
             CodeAct::FindStep(inst, d) => {
-                let n = self.matches(ui, &inst).len();
+                let n = self.matches(&inst).len();
                 if let Some(f) = self
                     .st
                     .codes
@@ -426,7 +432,7 @@ impl App {
                 }
                 ui.set_focus(None);
             }
-            CodeAct::Save(inst) => self.save_code(ui, &inst),
+            CodeAct::Save(inst) => self.save_code(&inst),
             CodeAct::Tell(inst, what) => {
                 self.tell_code(&inst, EventKind::Click, what.to_owned());
             }
@@ -434,24 +440,30 @@ impl App {
     }
 
     /// Writes code `inst`'s edit, through its extension.
-    fn save_code(&mut self, ui: &Ui, inst: &str) {
-        if !self.code_dirty(ui, inst) {
+    fn save_code(&mut self, inst: &str) {
+        if !self.code_dirty(inst) {
             return;
         }
-        let text = ui.edit_text(editor_id(inst)).to_owned();
-        if let Some(v) = self.st.codes.views.get_mut(inst) {
-            v.told = Some((text.clone(), false));
-        }
+        let Some(v) = self.st.codes.views.get_mut(inst) else {
+            return;
+        };
+        let text = v.text.clone();
+        v.told = Some((text.clone(), false));
         self.tell_code(inst, EventKind::Submit, text);
     }
 
     /// The find hits in what code `inst` shows.
-    pub(crate) fn matches(&self, ui: &Ui, inst: &str) -> Vec<code::Match> {
+    pub(crate) fn matches(&self, inst: &str) -> Vec<code::Match> {
         let Some(f) = self.st.codes.views.get(inst).and_then(|v| v.find.as_ref()) else {
             return Vec::new();
         };
         let text = match self.code_node(inst) {
-            Some(c) if c.state == CodeState::Edit => ui.edit_text(editor_id(inst)),
+            Some(c) if c.state == CodeState::Edit => self
+                .st
+                .codes
+                .views
+                .get(inst)
+                .map_or("", |v| v.text.as_str()),
             Some(c) => c.text.as_str(),
             None => return Vec::new(),
         };
@@ -460,7 +472,7 @@ impl App {
 
     /// Scrolls the current find match to the middle of the editor.
     fn reveal_match(&mut self, ui: &mut Ui, inst: &str) {
-        let m = self.matches(ui, inst);
+        let m = self.matches(inst);
         let Some(f) = self.st.codes.views.get(inst).and_then(|v| v.find.as_ref()) else {
             return;
         };
@@ -523,6 +535,7 @@ impl App {
             }
             self.reveal_match(ui, &inst);
         } else {
+            v.text = text;
             v.typed = Some(Instant::now());
             self.follow_caret(ui, &inst);
         }
@@ -550,7 +563,7 @@ impl App {
             return false;
         };
         if code == "KeyS" && with_mod {
-            self.save_code(ui, &inst);
+            self.save_code(&inst);
             return true;
         }
         if find && code == "Enter" {

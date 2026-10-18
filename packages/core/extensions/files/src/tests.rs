@@ -172,8 +172,9 @@ fn a_file_pops_out_into_a_card_and_back() {
     let mut f = Files::init(&Init::default(), &mut h).unwrap();
     dispatch(&mut f, &mut h, "toggle", json!({ "session": "s" }), &Ctx::default()).unwrap();
     render(&mut f, &mut h, PANE, "s", 900.0);
-    tell(&mut f, &mut h, PANE, "s", "pop", EventKind::Click, "/p/README.md");
+    let a = tell(&mut f, &mut h, PANE, "s", "pop", EventKind::Click, "/p/README.md");
     let cards = h.rows(CARDS).unwrap();
+    assert_eq!(a.focus.as_ref(), cards[0]["id"].as_str().map(str::to_owned).as_ref());
     assert_eq!(cards.len(), 1);
     assert_eq!((cards[0]["session"].clone(), cards[0]["title"].clone()), (json!("s"), json!("README.md")));
     let id = cards[0]["id"].as_str().unwrap().to_owned();
@@ -191,7 +192,8 @@ fn a_file_pops_out_into_a_card_and_back() {
         })
         .collect();
     assert_eq!(labels, ["Put back in its session card", "Close"]);
-    tell(&mut f, &mut h, CARD, &id, "return", EventKind::Click, "");
+    let a = tell(&mut f, &mut h, CARD, &id, "return", EventKind::Click, "");
+    assert_eq!(a.focus.as_deref(), Some("s"));
     assert!(h.rows(CARDS).unwrap().is_empty());
     let t = tabs_of(&render(&mut f, &mut h, PANE, "s", 900.0));
     assert_eq!(t.tabs[0].label, "README.md");

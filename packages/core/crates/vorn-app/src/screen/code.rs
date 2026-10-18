@@ -76,7 +76,7 @@ pub(crate) fn panel(s: &Screen<'_>, inst: &str, node: &Code, extra: Option<El>) 
     let rel = code::rel_path(node.root.as_deref().unwrap_or(""), &node.path);
     let taken = view.rev == Some(node.rev);
     let editing = node.state == CodeState::Edit && taken;
-    let dirty = editing && s.ui.edit_text(editor_id(inst)) != node.text;
+    let dirty = editing && view.text != node.text;
     let can_find = matches!(node.state, CodeState::Edit | CodeState::Read);
     let mut strip = div()
         .row()
@@ -137,7 +137,7 @@ pub(crate) fn panel(s: &Screen<'_>, inst: &str, node: &Code, extra: Option<El>) 
     let mut col = col.child(strip.child_if(extra));
     if let (Some(f), true) = (&view.find, can_find) {
         let source = if editing {
-            s.ui.edit_text(editor_id(inst))
+            view.text.as_str()
         } else {
             node.text.as_str()
         };
@@ -182,7 +182,7 @@ pub(crate) fn panel(s: &Screen<'_>, inst: &str, node: &Code, extra: Option<El>) 
                     .silent(),
             )
         }
-        CodeState::Edit if taken => editor_view(s, inst, node, &view),
+        CodeState::Edit if taken => editor_view(inst, node, &view),
         _ => read_view(inst, &node.text),
     };
     col = col.child(body);
@@ -367,8 +367,8 @@ fn overlay(
 }
 
 /// The gutter beside the coloured, editable text, with the find marks.
-fn editor_view(s: &Screen<'_>, inst: &str, node: &Code, view: &View) -> El {
-    let text_ = s.ui.edit_text(editor_id(inst));
+fn editor_view(inst: &str, node: &Code, view: &View) -> El {
+    let text_ = view.text.as_str();
     let lines = text_.split('\n').count();
     let mut spans: Vec<(std::ops::Range<usize>, Rgba)> = view
         .coloured

@@ -172,8 +172,8 @@ pub fn split_of(points: &Points, id: Id) -> Option<(String, String)> {
 pub(crate) struct ScopedBinder<'a, 'b> {
     pub(crate) s: &'a Screen<'b>,
     pub(crate) key: &'a str,
-    /// The pane's own controls, for the end of its tab strip.
-    pub(crate) chrome: std::cell::RefCell<Option<El>>,
+    /// The pane's own controls after a tab strip's tools.
+    pub(crate) chrome: Option<&'a dyn Fn(Vec<El>) -> El>,
     /// What a card's code strip shows before its buttons.
     pub(crate) label: std::cell::RefCell<Option<El>>,
 }
@@ -220,8 +220,11 @@ impl TreeBind for ScopedBinder<'_, '_> {
         }
     }
 
-    fn chrome(&self, _node: &str) -> Option<El> {
-        self.chrome.borrow_mut().take()
+    fn chrome(&self, node: &str, tools: Vec<El>) -> El {
+        match self.chrome {
+            Some(f) => f(tools),
+            None => self.plain().chrome(node, tools),
+        }
     }
 
     fn code(&self, node: &str, code: &vorn_tree::Code, buttons: &[vorn_tree::Node]) -> Option<El> {
@@ -263,7 +266,7 @@ impl TreeBind for ScopedBinder<'_, '_> {
 pub(crate) fn draw_scoped(
     s: &Screen<'_>,
     key: &str,
-    chrome: Option<El>,
+    chrome: Option<&dyn Fn(Vec<El>) -> El>,
     label: Option<El>,
 ) -> Option<El> {
     let p = s.st.points.get(key)?;
@@ -272,7 +275,7 @@ pub(crate) fn draw_scoped(
             let bind = ScopedBinder {
                 s,
                 key,
-                chrome: std::cell::RefCell::new(chrome),
+                chrome,
                 label: std::cell::RefCell::new(label),
             };
             Some(tree::view(s.ui, t, &bind))

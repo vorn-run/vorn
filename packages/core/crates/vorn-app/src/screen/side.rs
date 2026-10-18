@@ -109,21 +109,16 @@ fn icon_button_on(s: &Screen<'_>, id: Id, name: &str, label: &str, on: bool) -> 
     tooltip(s.ui, b, id, label, None)
 }
 
-/// Pop out, maximize or restore, close.
-fn controls(s: &Screen<'_>, kind: SideKind, owner: &str, pop: Option<Act>) -> El {
+/// Maximize or restore, and close.
+fn controls(s: &Screen<'_>, kind: SideKind, owner: &str) -> El {
+    controls_after(s, kind, owner, Vec::new())
+}
+
+/// The pane's maximize and close after `tools`, an extension's own.
+fn controls_after(s: &Screen<'_>, kind: SideKind, owner: &str, tools: Vec<El>) -> El {
     let id = pane_id(kind, owner);
     let max = s.st.side.saved.maximized.as_deref() == Some(id.as_str());
-    let mut row = div().row().items_center().gap(2.0).shrink0();
-    if let Some(p) = pop {
-        row = row.child(icon_button(
-            s,
-            "pane-pop",
-            p,
-            "square-arrow-out-up-right",
-            "Open as its own card",
-            false,
-        ));
-    }
+    let row = div().row().items_center().gap(2.0).shrink0().children(tools);
     let (glyph, label) = if max {
         ("minimize-2", "Restore")
     } else {
@@ -384,7 +379,8 @@ pub(crate) fn cards_of<'a>(st: &'a State, owner: &str) -> Vec<&'a str> {
 fn files_card(s: &Screen<'_>, owner: &str) -> El {
     let body = files_key(s, owner)
         .and_then(|key| {
-            super::points::draw_scoped(s, &key, Some(controls(s, SideKind::Files, owner, None)), None)
+            let chrome = |tools: Vec<El>| controls_after(s, SideKind::Files, owner, tools);
+            super::points::draw_scoped(s, &key, Some(&chrome), None)
         })
         .unwrap_or_else(div);
     div()
@@ -440,7 +436,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
                 "New terminal in this session",
             )),
             overflow: None,
-            trailing: controls(s, SideKind::Terminals, owner, None),
+            trailing: controls(s, SideKind::Terminals, owner),
         },
     );
     let shell = panel.terminals.get(active).and_then(|id| {
