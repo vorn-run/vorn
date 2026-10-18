@@ -46,12 +46,19 @@ impl App {
         Some(scoped(&p.key(), id))
     }
 
-    /// The trees Shell blocks draws now: one per live shell.
+    /// The trees Shell blocks draws now: one per live shell that has shown a prompt mark.
+    /// A shell that never reports its commands has none to show, so its extension is not woken.
     pub(super) fn shell_trees(&self) -> Vec<String> {
         self.store
             .sessions
             .iter()
             .filter(|s| s.is_shell() && !s.ended())
+            .filter(|s| {
+                self.st
+                    .shells
+                    .get(&s.info.id)
+                    .is_some_and(|sh| !sh.lines.prompts.is_empty() || !sh.commands.is_empty())
+            })
             .filter_map(|s| self.shell_key(&s.info.id))
             .collect()
     }
