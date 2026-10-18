@@ -299,7 +299,8 @@ fn dot_status(run: &Value) -> &str {
 }
 
 /// The Workflows view: the Workflow editor's tree, its `graph` the view the
-/// app draws; the view itself until the tree has come.
+/// app draws; the view itself until the tree has come, or when it cannot be
+/// drawn, as the canvas is the app's whatever the extension answers.
 pub fn view(s: &Screen<'_>) -> El {
     use vorn_components::tree::{self, Ev, TreeBind};
 
@@ -347,8 +348,7 @@ pub fn view(s: &Screen<'_>) -> El {
             };
             tree::view(s.ui, t, &bind)
         }
-        Some(Err(errors)) => tree::invalid(&p.place(), errors),
-        None => landing(s),
+        Some(Err(_)) | None => landing(s),
     }
 }
 

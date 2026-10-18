@@ -65,7 +65,19 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
     let mut shot = Shot::new();
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
+    board_drawn(&mut shot, &mut app);
     (app, shot)
+}
+
+/// Waits for the board's tree, which Tasks answers once its component has started.
+fn board_drawn(shot: &mut Shot, app: &mut App) {
+    shot.until(app, "the board's tree", |app, _| {
+        match app.st.points.trees.get("vorn.tasks/views/board") {
+            Some(Ok(_)) => Some(()),
+            Some(Err(e)) => panic!("the board's tree cannot be drawn: {e:?}"),
+            None => None,
+        }
+    });
 }
 
 /// A task made through the add dialog, by its id.
@@ -386,6 +398,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     repo(&dir);
     let mut shot = Shot::new();
     shot.send(&mut app, key("KeyT", MOD(), None));
+    board_drawn(&mut shot, &mut app);
     let id = create(&mut shot, &mut app, "Add two");
     shot.click(&mut app, card_id(&id));
     shot.click(
