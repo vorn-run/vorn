@@ -1371,6 +1371,7 @@ impl Driver<'_> {
             let Record::Resize { cols, rows, .. } = e.rec else {
                 continue;
             };
+            self.engine.registry.resized(id, cols, rows);
             let decided = self.engine.sizes.applied(id, size_of((cols, rows)));
             let owner = decided.and_then(|d| d.owner);
             let reason = decided.map(|d| d.reason);
