@@ -1,19 +1,17 @@
-//! The panes beside a session's terminal (their column, dividers, cards
-//! and tab strips), its Files pane with its tree and Terminals panel, an
-//! open file, and a file popped out into a card of its own.
+//! The panes beside a session's terminal (their column, dividers and tab
+//! strips), its Files pane drawn from the Files extension's tree, its
+//! Terminals panel, and the cards an extension's rows make, as a file popped
+//! out of its session.
 
 use super::cards;
 use super::{c, ico, truncate, white, Screen};
 use crate::act::Act;
 use crate::client::Session;
-use crate::editor::{self, Buffer, EditAct, ReadOnly, LINE_HEIGHT};
 use crate::git::GitAct;
 use crate::look;
-use crate::side::{pane_id, tab_key, SideAct, SideKind, TreeRow};
+use crate::side::{pane_id, SideAct, SideKind};
 use crate::state::State;
-use crate::ui::{
-    code, custom, div, field, icon, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle,
-};
+use crate::ui::{custom, div, text, tooltip, Action, El, Id, Rgba, Role, Sense};
 
 /// The pane grey (`PANE_SURFACE`).
 fn pane_bg() -> Rgba {
@@ -24,28 +22,9 @@ fn pane(a: SideAct) -> Act {
     Act::Side(a)
 }
 
-fn edit(a: EditAct) -> Act {
-    Act::Edit(a)
-}
-
-pub fn editor_id(key: &str) -> Id {
-    Id::new("editor").child(key)
-}
-
-pub fn find_id(key: &str) -> Id {
-    Id::new("editor-find").child(key)
-}
-
-pub fn scroller_id(key: &str) -> Id {
-    Id::new("editor-scroll").child(key)
-}
-
+/// The box a session's Files pane draws its tree in.
 pub fn files_body_id(owner: &str) -> Id {
     Id::new("files-body").child(owner)
-}
-
-pub fn filter_id(owner: &str) -> Id {
-    Id::new("files-filter").child(owner)
 }
 
 fn card_divider_id(owner: &str) -> Id {
@@ -56,10 +35,6 @@ fn column_divider_id(owner: &str, i: usize) -> Id {
     Id::new("pane-divider").child((owner, i))
 }
 
-fn tree_divider_id(owner: &str) -> Id {
-    Id::new("tree-divider").child(owner)
-}
-
 /// What a dragged divider resizes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneDivider {
@@ -67,8 +42,6 @@ pub enum PaneDivider {
     Card(String),
     /// Between pane `i` and the next in `owner`'s column.
     Column(String, usize),
-    /// A Files pane's tree against its file.
-    Tree,
     /// The Changes panel's width.
     Changes,
 }
@@ -78,18 +51,9 @@ pub fn divider_of(st: &State, id: Id) -> Option<PaneDivider> {
     if id == super::git::changes_resize_id() {
         return Some(PaneDivider::Changes);
     }
-    for owner in st
-        .side
-        .saved
-        .files
-        .keys()
-        .chain(st.side.saved.panels.keys())
-    {
+    for owner in st.side.files.iter().chain(st.side.saved.panels.keys()) {
         if id == card_divider_id(owner) {
             return Some(PaneDivider::Card(owner.clone()));
-        }
-        if id == tree_divider_id(owner) {
-            return Some(PaneDivider::Tree);
         }
         for i in 0..2 {
             if id == column_divider_id(owner, i) {
@@ -121,18 +85,18 @@ fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
     }
 }
 
-/// A file's Seti glyph in its colour.
-pub(crate) fn file_icon(name: &str, size: f32) -> El {
-    let (ch, color) = crate::file_icons::resolve(name);
-    match crate::file_icons::svg(ch) {
-        Some(svg) => icon(svg, size, c(color)),
-        None => div().size(size, size),
-    }
-}
-
 /// `ICON_BUTTON`: `p-1 rounded hover:bg-white/10 text-ink`.
 fn icon_button(s: &Screen<'_>, place: &str, act: Act, name: &str, label: &str, on: bool) -> El {
     let id = s.acts.on(place, act);
+    icon_button_on(s, id, name, label, on)
+}
+
+/// An `ICON_BUTTON` whose control is already bound as `id`.
+pub(crate) fn icon_button_at(s: &Screen<'_>, id: Id, name: &str, label: &str) -> El {
+    icon_button_on(s, id, name, label, false)
+}
+
+fn icon_button_on(s: &Screen<'_>, id: Id, name: &str, label: &str, on: bool) -> El {
     let b = div()
         .id(id)
         .on(Action::Click)
@@ -378,814 +342,61 @@ fn Acts_id(place: &str, act: &Act) -> Id {
     crate::act::Acts::id(place, act)
 }
 
-/// The base name of a path.
-fn base(path: &str) -> &str {
-    crate::state::basename(path)
+/// The Files pane's tree for `owner`, when Files is on.
+fn files_key(s: &Screen<'_>, owner: &str) -> Option<String> {
+    let p = s
+        .st
+        .points
+        .find(crate::app::FILES, crate::points::kind::PANES, "files")?;
+    Some(crate::points::scoped(&p.key(), owner))
 }
 
-fn parent(path: &str) -> String {
-    let t = path.trim_end_matches(['/', '\\']);
-    let dir = t.rsplit_once(['/', '\\']).map_or("", |(d, _)| d);
-    base(dir).to_owned()
+/// The row of `card` among the cards points list: the point's key and the row.
+fn card_row<'a>(s: &'a Screen<'_>, card: &str) -> Option<(String, &'a crate::points::Row)> {
+    s.st.points.at(crate::points::kind::CARDS).find_map(|p| {
+        let row = s.st.points.listed_rows(p, "").into_iter().find(|r| r.id == card)?;
+        Some((p.key(), row))
+    })
 }
 
-/// Whether `tabs` would overflow a strip `w` wide, as the strip measures.
-fn overflows(names: &[&str], w: f32) -> bool {
-    let need: f32 = names
-        .iter()
-        .map(|n| (n.chars().count().min(22) as f32 * 6.2 + 44.0).min(170.0) + 2.0)
-        .sum();
-    need > (w - 120.0).max(0.0)
+/// Card `card`'s tree key, and the session it sits beside.
+fn card_of(s: &Screen<'_>, card: &str) -> Option<(String, String)> {
+    let (key, row) = card_row(s, card)?;
+    Some((crate::points::scoped(&key, card), row.str("session")?.to_owned()))
 }
 
-/// The tree and the open files as tabs.
-fn files_card(s: &Screen<'_>, owner: &str, session: &Session) -> El {
-    let Some(fp) = s.st.side.saved.files.get(owner) else {
-        return div();
-    };
-    let names: Vec<&str> = fp.tabs.iter().map(|p| base(p)).collect();
-    let tabs: Vec<Tab> = fp
-        .tabs
-        .iter()
-        .map(|p| {
-            let n = base(p);
-            let shared = names.iter().filter(|x| **x == n).count() > 1;
-            Tab {
-                name: n.to_owned(),
-                parent: shared.then(|| parent(p)),
-                icon: Some(file_icon(n, 12.0)),
-                italic: fp.preview.as_deref() == Some(p.as_str()),
-                dirty: s.st.editors.dirty(&tab_key(owner, p)),
-                active: fp.active.as_deref() == Some(p.as_str()),
-                select: pane(SideAct::Tab(owner.to_owned(), p.clone())),
-                close: pane(SideAct::CloseTab(owner.to_owned(), p.clone())),
-                double: Some(pane(SideAct::PinTab(owner.to_owned(), p.clone()))),
-                extract: None,
-            }
+/// What card `card` is called.
+fn card_title(s: &Screen<'_>, card: &str) -> String {
+    card_row(s, card).map(|(_, r)| r.text("title")).unwrap_or_default()
+}
+
+/// The cards each session's points list, by the session they sit beside, in their order.
+pub(crate) fn cards_of<'a>(st: &'a State, owner: &str) -> Vec<&'a str> {
+    st.points
+        .at(crate::points::kind::CARDS)
+        .flat_map(|p| st.points.listed_rows(p, ""))
+        .filter(|r| r.str("session") == Some(owner))
+        .map(|r| r.id.as_str())
+        .collect()
+}
+
+/// The Files extension's pane for `owner`: its tree, ending its strip with the pane's own controls.
+fn files_card(s: &Screen<'_>, owner: &str) -> El {
+    let body = files_key(s, owner)
+        .and_then(|key| {
+            super::points::draw_scoped(s, &key, Some(controls(s, SideKind::Files, owner, None)), None)
         })
-        .collect();
-    let has_tabs = !fp.tabs.is_empty();
-    let narrow = s.st.side.narrow.contains(owner);
-    let tree_shown = !has_tabs || fp.tree_visible;
-    let file_shown = has_tabs && !(narrow && fp.tree_visible);
-    let toggle_label = if tree_shown {
-        "Hide file tree"
-    } else {
-        "Show file tree"
-    };
-    let toggle = icon_button(
-        s,
-        "files-tree",
-        pane(SideAct::ToggleTree(owner.to_owned())),
-        "list-tree",
-        toggle_label,
-        tree_shown,
-    );
-    let width = s.ui.rect_of(files_body_id(owner)).map_or(400.0, |r| r.w);
-    let overflow =
-        (has_tabs && overflows(&names, width)).then(|| pane(SideAct::TabsMenu(owner.to_owned())));
-    let pop = fp
-        .active
-        .is_some()
-        .then(|| pane(SideAct::PopOutActive(owner.to_owned())));
-    let strip = tab_strip(
-        s,
-        "files",
-        tabs,
-        Strip {
-            leading: Some(toggle),
-            empty: Some("Files"),
-            add: None,
-            overflow,
-            trailing: controls(s, SideKind::Files, owner, pop),
-        },
-    );
-    let ratio = s.st.side.tree_ratio();
-    let mut body = div()
+        .unwrap_or_else(div);
+    div()
         .id(files_body_id(owner))
         .sense(Sense::HOVER)
-        .row()
-        .grow()
-        .min_h(0.0)
-        .pt(2.0);
-    if tree_shown {
-        let col = tree(s, owner);
-        body = body.child(if file_shown {
-            col.flex(ratio)
-        } else {
-            col.flex(1.0)
-        });
-    }
-    if tree_shown && file_shown {
-        body = body.child(divider(s, tree_divider_id(owner), true, "Resize file tree"));
-    }
-    if file_shown {
-        if let Some(path) = &fp.active {
-            let key = tab_key(owner, path);
-            let cwd = crate::git::session_cwd(&session.info);
-            let panel = file_panel(s, &key, &cwd, None);
-            body = body.child(if tree_shown {
-                panel.flex(1.0 - ratio)
-            } else {
-                panel.flex(1.0)
-            });
-        }
-    }
-    div()
         .col()
         .grow()
         .min_h(0.0)
         .min_w0()
         .bg(pane_bg())
         .role(Role::Group, "Files")
-        .child(strip)
         .child(body)
-}
-
-/// `FileTreePane` and its filter.
-fn tree(s: &Screen<'_>, owner: &str) -> El {
-    let col = div().col().min_w0().min_h(0.0);
-    let Some(t) = s.st.side.trees.get(owner) else {
-        return col;
-    };
-    if t.loading {
-        return col
-            .center()
-            .child(ico("loader-circle", 20.0, 2.0, c(look::GRAY_500)));
-    }
-    if t.root.as_ref().is_none_or(Vec::is_empty) {
-        return col.center().child(
-            text("Empty directory", 14.0, c(look::GRAY_500))
-                .line_height(20.0)
-                .silent(),
-        );
-    }
-    let fid = filter_id(owner);
-    let focus = s.ui.focused(fid);
-    let mut search = div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .grow()
-        .min_w0()
-        .px(8.0)
-        .py(4.0)
-        .rounded(4.0)
-        .frames(fid)
-        .bg(white(if focus { 0.13 } else { 0.09 }))
-        .child(ico("search", 13.0, 2.0, c(look::GRAY_600)))
-        .child(
-            div().grow().min_w0().child(
-                field(
-                    fid,
-                    "Filter files",
-                    "Filter files\u{2026}",
-                    TextStyle::ui(13.0),
-                    c(look::GRAY_200),
-                )
-                .w_full(),
-            ),
-        );
-    if !t.filter.is_empty() {
-        let id = s.acts.on(
-            "files-filter-clear",
-            pane(SideAct::ClearFilter(owner.to_owned())),
-        );
-        search = search.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .p(2.0)
-                .role(Role::Button, "Clear filter")
-                .child(ico(
-                    "x",
-                    11.0,
-                    2.0,
-                    c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(id)),
-                )),
-        );
-    }
-    let selected =
-        s.st.side
-            .saved
-            .files
-            .get(owner)
-            .and_then(|f| f.active.as_deref());
-    let mut list = div()
-        .id(Id::new("files-tree").child(owner))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .py(2.0)
-        .scroll_y();
-    for row in t.rows() {
-        list = list.child(tree_row(s, owner, &row, selected));
-    }
-    if t.no_match() {
-        list = list.child(
-            div().px(12.0).py(8.0).child(
-                text("No matching files loaded", 11.0, c(look::GRAY_600))
-                    .italic()
-                    .line_height(16.0)
-                    .silent(),
-            ),
-        );
-    }
-    col.child(div().row().px(6.0).py(6.0).shrink0().child(search))
-        .child(list)
-}
-
-const ROW_H: f32 = 22.0;
-const INDENT: f32 = 16.0;
-const BASE_LEFT: f32 = 8.0;
-
-/// The indent guides of a row at `depth`.
-fn guides(depth: usize) -> Vec<El> {
-    (0..depth)
-        .map(|i| {
-            div()
-                .absolute(BASE_LEFT + 7.0 + i as f32 * INDENT, 0.0)
-                .w(1.0)
-                .h(ROW_H)
-                .bg(white(0.06))
-        })
-        .collect()
-}
-
-fn tree_row(s: &Screen<'_>, owner: &str, row: &TreeRow, selected: Option<&str>) -> El {
-    match row {
-        TreeRow::Empty { depth } => {
-            let mut r = div()
-                .row()
-                .items_center()
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT + 16.0)
-                .child(
-                    text("empty", 11.0, c(look::GRAY_600))
-                        .italic()
-                        .line_height(14.0)
-                        .silent(),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-        TreeRow::Dir {
-            entry,
-            depth,
-            open,
-            loading,
-        } => {
-            let id = s.acts.on(
-                "tree-dir",
-                pane(SideAct::Dir(owner.to_owned(), entry.path.clone())),
-            );
-            let glyph = if *loading {
-                ico("loader-circle", 14.0, 2.0, c(look::GRAY_600))
-            } else {
-                ico(
-                    if *open {
-                        "chevron-down"
-                    } else {
-                        "chevron-right"
-                    },
-                    14.0,
-                    2.0,
-                    c(look::GRAY_500),
-                )
-            };
-            let mut r = div()
-                .id(id)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(5.0)
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT)
-                .pr(8.0)
-                .bg(white(0.05 * s.ui.hover(id)))
-                .role(Role::TreeItem, &entry.name)
-                .expanded(*open)
-                .child(glyph)
-                .child(
-                    text(&entry.name, 13.5, c(look::GRAY_300))
-                        .line_height(16.0)
-                        .truncate()
-                        .silent(),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-        TreeRow::File { entry, depth } => {
-            let act = pane(SideAct::File(owner.to_owned(), entry.path.clone()));
-            let id = s.acts.on("tree-file", act);
-            s.acts.double(
-                id,
-                pane(SideAct::PinFile(owner.to_owned(), entry.path.clone())),
-            );
-            let on = selected == Some(entry.path.as_str());
-            let pop = s.acts.on(
-                "tree-pop",
-                pane(SideAct::PopOut(owner.to_owned(), entry.path.clone())),
-            );
-            let hot = s.ui.hovered(id) || s.ui.hovered(pop);
-            let fg = if on {
-                c(look::GRAY_200)
-            } else if hot {
-                c(look::GRAY_300)
-            } else {
-                c(look::GRAY_400)
-            };
-            let mut r = div()
-                .id(id)
-                .on(Action::Click)
-                .sense(Sense::DOUBLE)
-                .row()
-                .items_center()
-                .gap(5.0)
-                .h(ROW_H)
-                .pl(BASE_LEFT + *depth as f32 * INDENT + 16.0)
-                .pr(4.0)
-                .bg(if on {
-                    white(0.10)
-                } else {
-                    white(0.05 * s.ui.hover(id))
-                })
-                .role(Role::TreeItem, &entry.name)
-                .selected(on)
-                .child(file_icon(&entry.name, 16.0))
-                .child(
-                    div().grow().min_w0().child(
-                        text(&entry.name, 13.5, fg)
-                            .line_height(16.0)
-                            .truncate()
-                            .silent(),
-                    ),
-                )
-                .child(
-                    div()
-                        .id(pop)
-                        .on(Action::Click)
-                        .p(2.0)
-                        .rounded(4.0)
-                        .opacity(if hot { 1.0 } else { 0.0 })
-                        .bg(white(0.08 * s.ui.hover(pop)))
-                        .role(Role::Button, format!("Open {} as its own card", entry.name))
-                        .child(ico(
-                            "square-arrow-out-up-right",
-                            11.0,
-                            2.0,
-                            c(look::INK).alpha(0.2).mix(c(look::WHITE), s.ui.hover(pop)),
-                        )),
-                );
-            for g in guides(*depth) {
-                r = r.child(g);
-            }
-            r
-        }
-    }
-}
-
-/// `ToolbarBtn`.
-fn toolbar_btn(s: &Screen<'_>, act: Act, glyph: &str, label: &str, on: bool, off: bool) -> El {
-    let id = s.acts.on("editor-tool", act);
-    let mut b = div()
-        .id(id)
-        .p(4.0)
-        .rounded(4.0)
-        .shrink0()
-        .bg(white(0.10 * if on { 1.0 } else { s.ui.hover(id) }))
-        .role(Role::Button, label)
-        .disabled(off)
-        .opacity(if off { 0.4 } else { 1.0 })
-        .child(ico(glyph, 14.0, 2.0, c(look::INK)));
-    if !off {
-        b = b.on(Action::Click);
-    }
-    tooltip(s.ui, b, id, label, None)
-}
-
-/// The path cut from the left, as `dir="rtl"` truncates it.
-fn tail(path: &str, max: usize) -> String {
-    let n = path.chars().count();
-    if n <= max {
-        return path.to_owned();
-    }
-    let rest: String = path.chars().skip(n - max + 1).collect();
-    format!("\u{2026}{rest}")
-}
-
-/// The path strip, the find bar, the notices and the body.
-pub(super) fn file_panel(s: &Screen<'_>, key: &str, cwd: &str, extra: Option<El>) -> El {
-    let col = div().col().min_w0().min_h(0.0).bg(pane_bg());
-    let Some(b) = s.st.editors.buffers.get(key) else {
-        return col;
-    };
-    let name = base(&b.path);
-    let rel = editor::rel_path(cwd, &b.path);
-    let dirty = b.dirty();
-    let can_find = b.content.is_some() && !b.loading;
-    let mut strip = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .pl(8.0)
-        .pr(4.0)
-        .py(2.0)
-        .shrink0()
-        .bg(pane_bg())
-        .child(file_icon(name, 12.0))
-        .child(
-            div().row().justify_end().grow().min_w0().ml(4.0).child(
-                text(tail(rel, 48), 11.0, c(look::GRAY_400))
-                    .mono()
-                    .line_height(16.0)
-                    .truncate()
-                    .role(Role::Label, &b.path),
-            ),
-        );
-    if dirty {
-        strip = strip.child(
-            div()
-                .mx(4.0)
-                .size(6.0, 6.0)
-                .rounded(3.0)
-                .bg(c(look::AMBER_400))
-                .role(Role::Image, "Unsaved changes"),
-        );
-    }
-    strip = strip.child(toolbar_btn(
-        s,
-        edit(EditAct::ToggleFind(key.to_owned())),
-        "search",
-        "Find in file",
-        b.find.is_some(),
-        !can_find,
-    ));
-    if dirty {
-        strip = strip
-            .child(toolbar_btn(
-                s,
-                edit(EditAct::Save(key.to_owned())),
-                "save",
-                if b.saving { "Saving\u{2026}" } else { "Save" },
-                false,
-                b.saving,
-            ))
-            .child(toolbar_btn(
-                s,
-                edit(EditAct::Discard(key.to_owned())),
-                "undo-2",
-                "Discard changes",
-                false,
-                false,
-            ));
-    }
-    let mut col = col.child(strip.child_if(extra));
-    if let (Some(f), true) = (&b.find, can_find) {
-        col = col.child(find_bar(s, key, b, f));
-    }
-    if b.conflict {
-        col = col.child(conflict(s, key));
-    }
-    if b.read_only == Some(ReadOnly::Truncated) {
-        col = col.child(
-            div()
-                .px(12.0)
-                .py(4.0)
-                .border_top(1.0, white(0.06))
-                .shrink0()
-                .child(
-                    text(
-                        "Too large to edit here. Showing the first part, read-only.",
-                        11.0,
-                        c(look::INK).alpha(look::INK_FAINT),
-                    )
-                    .line_height(16.0)
-                    .silent(),
-                ),
-        );
-    }
-    let body = if b.loading {
-        div()
-            .col()
-            .center()
-            .grow()
-            .child(ico("loader-circle", 16.0, 2.0, c(look::GRAY_500)))
-    } else if matches!(b.read_only, Some(ReadOnly::Binary | ReadOnly::Unreadable)) {
-        let msg = if b.read_only == Some(ReadOnly::Binary) {
-            "Binary file \u{2014} preview unavailable"
-        } else {
-            "This file could not be read"
-        };
-        div().col().center().grow().child(
-            text(msg, 13.0, c(look::GRAY_600))
-                .line_height(18.0)
-                .silent(),
-        )
-    } else if b.ready {
-        editor_view(key, b)
-    } else if b.content.is_some() {
-        read_view(key, b)
-    } else {
-        div().grow()
-    };
-    col = col.child(body);
-    if let Some(e) = &b.error {
-        col = col.child(
-            div()
-                .px(12.0)
-                .py(4.0)
-                .bg(c(look::DANGER).alpha(0.1))
-                .border_top(1.0, white(0.06))
-                .shrink0()
-                .child(text(e, 11.0, c(look::DANGER)).line_height(16.0).wrapping()),
-        );
-    }
-    col
-}
-
-fn find_bar(s: &Screen<'_>, key: &str, b: &Buffer, f: &editor::Find) -> El {
-    let n = b.matches().len();
-    let count = if n == 0 {
-        "0/0".to_owned()
-    } else {
-        format!("{}/{n}", f.index % n + 1)
-    };
-    let arrow = |place: &str, d: i32, glyph: &str, label: &str| {
-        let id = s.acts.on(place, edit(EditAct::FindStep(key.to_owned(), d)));
-        let off = n == 0;
-        let mut el = div()
-            .id(id)
-            .px(4.0)
-            .role(Role::Button, label)
-            .disabled(off)
-            .opacity(if off { 0.4 } else { 1.0 })
-            .child(
-                text(
-                    glyph,
-                    11.0,
-                    c(look::GRAY_500).mix(c(look::WHITE), s.ui.hover(id)),
-                )
-                .line_height(16.0)
-                .silent(),
-            );
-        if !off {
-            el = el.on(Action::Click);
-        }
-        tooltip(s.ui, el, id, label, None)
-    };
-    let close = s
-        .acts
-        .on("find-close", edit(EditAct::CloseFind(key.to_owned())));
-    div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .px(12.0)
-        .py(4.0)
-        .shrink0()
-        .bg(pane_bg())
-        .child(ico("search", 12.0, 2.0, c(look::GRAY_500)))
-        .child(
-            div().grow().min_w0().frames(find_id(key)).child(
-                field(
-                    find_id(key),
-                    "Find in file",
-                    "Find in file",
-                    TextStyle::mono(13.0),
-                    c(look::GRAY_200),
-                )
-                .w_full(),
-            ),
-        )
-        .child(
-            text(count, 11.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-        )
-        .child(arrow("find-prev", -1, "\u{2191}", "Previous (Shift+Enter)"))
-        .child(arrow("find-next", 1, "\u{2193}", "Next (Enter)"))
-        .child(tooltip(
-            s.ui,
-            div()
-                .id(close)
-                .on(Action::Click)
-                .p(2.0)
-                .role(Role::Button, "Close (Esc)")
-                .child(ico(
-                    "x",
-                    12.0,
-                    2.0,
-                    c(look::GRAY_500).mix(c(look::WHITE), s.ui.hover(close)),
-                )),
-            close,
-            "Close (Esc)",
-            None,
-        ))
-}
-
-/// The moved-file banner's three ways out.
-fn conflict(s: &Screen<'_>, key: &str) -> El {
-    let link = |place: &str, label: &str, act: Act| {
-        let id = s.acts.on(place, act);
-        div()
-            .id(id)
-            .on(Action::Click)
-            .role(Role::Button, label)
-            .child(
-                text(
-                    label,
-                    11.0,
-                    c(look::GRAY_300).mix(c(look::GRAY_100), s.ui.hover(id)),
-                )
-                .line_height(16.0)
-                .silent(),
-            )
-            .child(div().h(1.0).w_full().bg(c(look::GRAY_300).alpha(0.6)))
-    };
-    div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .px(12.0)
-        .py(6.0)
-        .bg(c(look::BRONZO).alpha(0.1))
-        .border_top(1.0, white(0.06))
-        .shrink0()
-        .child(
-            div().grow().min_w0().child(
-                text(
-                    "This file changed on disk while your edit was open.",
-                    11.0,
-                    c(look::BRONZO),
-                )
-                .line_height(16.0)
-                .wrapping(),
-            ),
-        )
-        .child(link(
-            "conflict-save",
-            "Save mine anyway",
-            edit(EditAct::SaveAnyway(key.to_owned())),
-        ))
-        .child(link(
-            "conflict-disk",
-            "Discard mine",
-            edit(EditAct::TakeDisk(key.to_owned())),
-        ))
-        .child(link(
-            "conflict-keep",
-            "Keep editing",
-            edit(EditAct::KeepEditing(key.to_owned())),
-        ))
-}
-
-/// Right-aligned line numbers in a mono column, one per line.
-fn gutter(lines: usize, from_top: f32) -> El {
-    let w = lines.max(1).to_string().len();
-    let numbers: Vec<String> = (1..=lines.max(1)).map(|n| format!("{n:>w$}")).collect();
-    div()
-        .pl(8.0)
-        .pr(12.0)
-        .pt(from_top)
-        .shrink0()
-        .bg(pane_bg())
-        .child(
-            text(numbers.join("\n"), 12.0, c(look::GRAY_600))
-                .mono()
-                .line_height(LINE_HEIGHT)
-                .silent(),
-        )
-}
-
-/// A span list with `range` laid over it in `color`, still sorted and
-/// apart (the active find match's text).
-fn overlay(
-    spans: &[(std::ops::Range<usize>, Rgba)],
-    range: std::ops::Range<usize>,
-    color: Rgba,
-) -> Vec<(std::ops::Range<usize>, Rgba)> {
-    let mut out = Vec::with_capacity(spans.len() + 2);
-    for (r, col) in spans {
-        if r.end <= range.start || r.start >= range.end {
-            out.push((r.clone(), *col));
-            continue;
-        }
-        if r.start < range.start {
-            out.push((r.start..range.start, *col));
-        }
-        if r.end > range.end {
-            out.push((range.end..r.end, *col));
-        }
-    }
-    out.push((range, color));
-    out.sort_by_key(|(r, _)| r.start);
-    out
-}
-
-/// The gutter beside the coloured, editable text, with the
-/// find marks.
-fn editor_view(key: &str, b: &Buffer) -> El {
-    let text_ = b.text();
-    let lines = text_.split('\n').count();
-    let mut spans: Vec<(std::ops::Range<usize>, Rgba)> = b
-        .coloured
-        .as_ref()
-        .filter(|(t, _)| t == text_)
-        .map(|(_, sp)| {
-            sp.iter()
-                .map(|(r, (rgb, a))| (r.clone(), Rgba::hexa(*rgb, f32::from(*a) / 255.0)))
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut marks = Vec::new();
-    if let Some(f) = &b.find {
-        let m = b.matches();
-        let active = (!m.is_empty()).then(|| f.index % m.len());
-        for (i, hit) in m.iter().enumerate() {
-            let on = Some(i) == active;
-            marks.push((
-                hit.range.0..hit.range.1,
-                c(look::AMBER_300).alpha(if on { 0.7 } else { 0.25 }),
-            ));
-            spans = overlay(
-                &spans,
-                hit.range.0..hit.range.1,
-                if on { c(0x000000) } else { c(look::GRAY_100) },
-            );
-        }
-    }
-    let style = TextStyle {
-        line_height: LINE_HEIGHT,
-        ..TextStyle::mono(13.0)
-    };
-    let field = code(
-        editor_id(key),
-        &format!("Edit {}", base(&b.path)),
-        style,
-        c(look::GRAY_300),
-    )
-    .edit_colors(spans, marks)
-    .w_full()
-    .h(lines as f32 * LINE_HEIGHT);
-    div()
-        .id(scroller_id(key))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .scroll_y()
-        .child(
-            div()
-                .row()
-                .child(gutter(lines, 4.0))
-                .child(div().grow().min_w0().pt(4.0).pb(4.0).pr(12.0).child(field)),
-        )
-}
-
-/// A file shown but not editable, capped at 2000 lines.
-fn read_view(key: &str, b: &Buffer) -> El {
-    let all: Vec<&str> = b.text().split('\n').collect();
-    let capped = all.len() > editor::MAX_HIGHLIGHT_LINES;
-    let shown = &all[..all.len().min(editor::MAX_HIGHLIGHT_LINES)];
-    let mut col = div()
-        .id(scroller_id(key))
-        .col()
-        .grow()
-        .min_h(0.0)
-        .scroll_y()
-        .child(
-            div().row().child(gutter(shown.len(), 0.0)).child(
-                div().grow().min_w0().px(4.0).child(
-                    text(shown.join("\n"), 13.0, c(look::GRAY_400))
-                        .mono()
-                        .line_height(LINE_HEIGHT)
-                        .silent(),
-                ),
-            ),
-        );
-    if capped {
-        col = col.child(
-            div().px(12.0).py(8.0).child(
-                text(
-                    format!(
-                        "Showing first {} of {} lines",
-                        editor::MAX_HIGHLIGHT_LINES,
-                        all.len()
-                    ),
-                    11.0,
-                    c(look::GRAY_600),
-                )
-                .italic()
-                .line_height(16.0)
-                .silent(),
-            ),
-        );
-    }
-    col
 }
 
 /// The shells a session holds, one in front.
@@ -1289,7 +500,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
 
 /// `owner`'s panes stacked, resizable, one maximized over
 /// the rest.
-fn column(s: &Screen<'_>, owner: &str, session: &Session) -> Option<El> {
+fn column(s: &Screen<'_>, owner: &str) -> Option<El> {
     let entries = s.st.side.entries(owner);
     if entries.is_empty() {
         return None;
@@ -1310,7 +521,7 @@ fn column(s: &Screen<'_>, owner: &str, session: &Session) -> Option<El> {
             ));
         }
         let el = match kind {
-            SideKind::Files => files_card(s, owner, session),
+            SideKind::Files => files_card(s, owner),
             SideKind::Terminals => terminals_card(s, owner),
         };
         let share = if max.is_some() {
@@ -1330,7 +541,7 @@ fn all_panes(s: &Screen<'_>, owner: &str, session: &Session) -> Option<(El, bool
     if web.is_some() && super::panes::maximized(s, owner) {
         return web.map(|w| (w, true));
     }
-    let own = column(s, owner, session);
+    let own = column(s, owner);
     if s.st.side.maximized_in(owner).is_some() {
         return own.map(|o| (o, true));
     }
@@ -1400,16 +611,17 @@ pub(super) fn frame(
         .child(div().row().flex(1.0 - r).min_w0().min_h(0.0).child(panes))
 }
 
-/// A file popped out of a session, as a cell of its own.
-pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
-    let Some(cd) = s.st.side.saved.cards.get(card) else {
+/// A card an extension's rows make, as a file popped out of a session: its
+/// tree drawn for the row, with the session's project and branch before the
+/// card's own buttons.
+pub(super) fn ext_card(s: &Screen<'_>, card: &str) -> El {
+    let Some((key, owner)) = card_of(s, card) else {
         return div();
     };
-    let Some(owner) = s.store.session(&cd.session_id) else {
+    let Some(owner) = s.store.session(&owner) else {
         return div();
     };
     let selected = s.st.selected.as_deref() == Some(card);
-    let name = base(&cd.file_path);
     let label = div()
         .row()
         .items_center()
@@ -1430,30 +642,9 @@ pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
             .silent(),
         )
         .child_if(cards::branch_chip(s, owner, 1.0));
-    let ctl = div()
-        .row()
-        .items_center()
-        .gap(2.0)
-        .shrink0()
-        .child(icon_button(
-            s,
-            "card-return",
-            pane(SideAct::ReturnCard(card.to_owned())),
-            "corner-down-left",
-            "Put back in its session card",
-            false,
-        ))
-        .child(icon_button(
-            s,
-            "card-close",
-            pane(SideAct::CloseCard(card.to_owned())),
-            "x",
-            "Close",
-            false,
-        ));
-    let extra = div().row().items_center().gap(4.0).child(label).child(ctl);
-    let cwd = crate::git::session_cwd(&owner.info);
+    let name = card_title(s, card);
     let id = crate::act::Acts::id("editor-card", &pane(SideAct::SelectCard(card.to_owned())));
+    let body = super::points::draw_scoped(s, &key, None, Some(label)).unwrap_or_else(div);
     let el = div()
         .col()
         .grow()
@@ -1468,9 +659,9 @@ pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
                 white(0.06).mix(white(0.12), s.ui.hover(id))
             },
         )
-        .role(Role::Group, name)
+        .role(Role::Group, name.as_str())
         .selected(selected)
-        .child(file_panel(s, card, &cwd, Some(extra)).grow());
+        .child(body.grow());
     s.acts
         .click(
             el,
@@ -1480,45 +671,18 @@ pub(super) fn editor_card(s: &Screen<'_>, card: &str) -> El {
         .sense(Sense::HOVER)
 }
 
-/// The Files pane's overflow list of its tabs.
-pub(super) fn tab_items(s: &Screen<'_>, owner: &str) -> Vec<super::menus::Item> {
-    let Some(fp) = s.st.side.saved.files.get(owner) else {
-        return Vec::new();
+/// The question an extension's tree asks, as `window.confirm` asks it.
+pub(super) fn ask(s: &Screen<'_>) -> El {
+    let Some((_, q)) = &s.st.ask else {
+        return div();
     };
-    let mut out: Vec<super::menus::Item> = fp
-        .tabs
-        .iter()
-        .map(|p| {
-            let mut it = super::menus::Item::option(
-                base(p),
-                fp.active.as_deref() == Some(p.as_str()),
-                pane(SideAct::Tab(owner.to_owned(), p.clone())),
-            )
-            .mark(file_icon(base(p), 12.0));
-            it.picker = true;
-            it
-        })
-        .collect();
-    out.push(
-        super::menus::Item::option(
-            "Close saved tabs",
-            false,
-            pane(SideAct::CloseSavedTabs(owner.to_owned())),
-        )
-        .sep(),
-    );
-    out
-}
-
-/// "Discard unsaved changes?", as `window.confirm` asks it.
-pub(super) fn discard(s: &Screen<'_>) -> El {
     alert(
         s,
         "discard",
-        "Discard unsaved changes?",
+        &q.title,
         None,
-        ("OK", edit(EditAct::ConfirmDiscard)),
-        edit(EditAct::CancelDiscard),
+        (q.ok.as_deref().unwrap_or("OK"), Act::Answer(true)),
+        Act::Answer(false),
     )
 }
 
@@ -1609,11 +773,14 @@ pub(super) fn header_buttons(
     session: &Session,
 ) -> Vec<(Act, &'static str, &'static str)> {
     let sid = session.info.id.clone();
-    let mut out = vec![(
-        pane(SideAct::ToggleFiles(sid.clone())),
-        "folder-open",
-        "Browse files",
-    )];
+    let mut out = Vec::new();
+    if files_key(s, &sid).is_some() {
+        out.push((
+            pane(SideAct::ToggleFiles(sid.clone())),
+            "folder-open",
+            "Browse files",
+        ));
+    }
     let has = s.st.side.saved.panels.contains_key(&sid);
     if !session.is_shell() || has {
         out.push((
@@ -1646,35 +813,3 @@ pub(super) fn branch_act(session: &Session) -> Act {
     Act::Git(GitAct::Branches(session.info.id.clone()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_active_match_is_laid_over_the_colours() {
-        let a = Rgba::hex(0x111111);
-        let b = Rgba::hex(0x222222);
-        let m = Rgba::hex(0);
-        let out = overlay(&[(0..4, a), (4..8, b)], 2..6, m);
-        let ranges: Vec<_> = out.iter().map(|(r, _)| r.clone()).collect();
-        assert_eq!(ranges, vec![0..2, 2..6, 6..8]);
-        assert!(out.windows(2).all(|w| w[0].0.end <= w[1].0.start));
-    }
-
-    #[test]
-    fn long_paths_keep_their_ends() {
-        assert_eq!(tail("src/app.ts", 48), "src/app.ts");
-        let t = tail(
-            "a/very/long/path/that/goes/on/and/on/and/on/to/the/file.ts",
-            20,
-        );
-        assert!(t.starts_with('\u{2026}') && t.ends_with("file.ts"));
-        assert_eq!(t.chars().count(), 20);
-    }
-
-    #[test]
-    fn tabs_overflow_by_their_names() {
-        assert!(!overflows(&["a.ts"], 400.0));
-        assert!(overflows(&["a-long-file-name.ts"; 6], 400.0));
-    }
-}

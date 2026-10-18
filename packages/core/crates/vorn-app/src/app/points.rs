@@ -149,12 +149,15 @@ impl App {
                     .focus()
                     .map(|id| ui.edit_text(id).to_owned())
                     .unwrap_or_default();
-                let event = vorn_tree::Event {
-                    id: node,
-                    kind: vorn_tree::EventKind::Submit,
-                    value: text,
-                    selected: Vec::new(),
-                };
+                let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, text);
+                self.tell(&key, &event);
+            }
+            PointAct::TreeLive { key, node } => {
+                let text = ui
+                    .focus()
+                    .map(|id| ui.edit_text(id).to_owned())
+                    .unwrap_or_default();
+                let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Change, text);
                 self.tell(&key, &event);
             }
             PointAct::TreeCheck {
@@ -185,7 +188,7 @@ impl App {
     }
 
     /// Tells tree point `key`'s extension what happened; a bulk button's checks go with it.
-    fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
+    pub(super) fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
         let Some(params) = self.st.points.tell(key, event) else {
             return;
         };
@@ -277,6 +280,9 @@ impl App {
         if let Some(t) = a.toast {
             self.st.toast(t, false);
         }
+        if let Some(q) = a.ask {
+            self.ask(key.to_owned(), q);
+        }
         if let Some(e) = a.error {
             self.st.toast(e, true);
         }
@@ -346,7 +352,7 @@ impl App {
                 let ops = params["ops"].as_array().cloned().unwrap_or_default();
                 let raised = self.st.points.changed(ext, coll, &ops);
                 self.raised.extend(raised);
-                self.st.points.trees_changed(ext);
+                self.st.points.trees_changed(ext, &ops);
             }
             "extension:contributionsChanged" => {
                 self.st.points.stale = true;
@@ -481,6 +487,8 @@ impl App {
             .collect();
         out.extend(page.flatten());
         out.extend(self.open_panes());
+        out.extend(self.files_trees());
+        out.extend(self.shell_trees());
         out.extend(pts.dialog.clone());
         if pts.floating {
             out.extend(pts.windows.iter().cloned());

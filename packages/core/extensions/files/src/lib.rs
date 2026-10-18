@@ -372,6 +372,9 @@ impl Files {
                 p.tree_visible = !p.tree_visible;
                 self.save_pane(host, owner, &p).map(|_| Value::Null)
             }
+            ("pop", EventKind::Click) if !v.is_empty() => {
+                self.pop(host, owner, v, false, false).map(|_| Value::Null)
+            }
             ("pop", EventKind::Click) => {
                 let Some(path) = self.pane(host, owner)?.and_then(|p| p.active) else {
                     return Ok(Value::Null);
@@ -424,7 +427,6 @@ impl Files {
                 self.open_file(host, owner, v, false, narrow).map(|_| Value::Null)
             }
             ("tree", EventKind::Open) => self.open_file(host, owner, v, true, narrow).map(|_| Value::Null),
-            ("tree", EventKind::Click) => self.pop(host, owner, v, false, false).map(|_| Value::Null),
             ("tree", EventKind::Change) => {
                 self.tree(host, owner).filter = e.value.clone();
                 Ok(Value::Null)

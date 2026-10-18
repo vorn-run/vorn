@@ -172,7 +172,7 @@ fn a_file_pops_out_into_a_card_and_back() {
     let mut f = Files::init(&Init::default(), &mut h).unwrap();
     dispatch(&mut f, &mut h, "toggle", json!({ "session": "s" }), &Ctx::default()).unwrap();
     render(&mut f, &mut h, PANE, "s", 900.0);
-    tell(&mut f, &mut h, PANE, "s", "tree", EventKind::Click, "/p/README.md");
+    tell(&mut f, &mut h, PANE, "s", "pop", EventKind::Click, "/p/README.md");
     let cards = h.rows(CARDS).unwrap();
     assert_eq!(cards.len(), 1);
     assert_eq!((cards[0]["session"].clone(), cards[0]["title"].clone()), (json!("s"), json!("README.md")));

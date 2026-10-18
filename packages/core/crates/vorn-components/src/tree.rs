@@ -36,6 +36,12 @@ pub enum Ev {
     Hover { node: String },
     /// A lazy list's scroll view.
     Scroll { list: String },
+    /// A field that reports `change` as it is typed, holding `value`.
+    Live { node: String, value: String },
+    /// A split's divider, dragged to a ratio the client reports as `resize`.
+    Split { node: String },
+    /// A second control that tells `event`, kept apart from the first by `slot`.
+    Item { event: Event, slot: String },
 }
 
 /// How the caller binds a tree's controls.
@@ -61,6 +67,30 @@ pub trait TreeBind {
     }
     /// The workflow editor's canvas, which the client draws; `None` draws nothing.
     fn graph(&self) -> Option<El> {
+        None
+    }
+    /// Control `id` also tells the extension `event` on a double click.
+    fn double(&self, id: Id, event: Event) {
+        let _ = (id, event);
+    }
+    /// Split `node`'s ratio while its divider is being dragged.
+    fn dragging(&self, node: &str) -> Option<f32> {
+        let _ = node;
+        None
+    }
+    /// The client's own controls at the end of tab strip `node`, as a pane's.
+    fn chrome(&self, node: &str) -> Option<El> {
+        let _ = node;
+        None
+    }
+    /// A file's text to edit, which the client draws and holds; the button nodes `buttons` end its strip.
+    fn code(&self, node: &str, code: &vorn_tree::Code, buttons: &[Node]) -> Option<El> {
+        let _ = (node, code, buttons);
+        None
+    }
+    /// A shell's commands over its live rows, which the client cuts from its screen.
+    fn log(&self, log: &vorn_tree::Log) -> Option<El> {
+        let _ = log;
         None
     }
 }
@@ -229,12 +259,15 @@ impl Cx<'_> {
                 value,
                 placeholder,
                 secret,
+                live,
             } => {
                 let node = n.id.clone().unwrap_or_default();
                 let name = n.props.label.as_deref().unwrap_or(placeholder);
-                let id = self.bind.on(Ev::Field {
-                    node,
-                    value: value.clone(),
+                let value = value.clone();
+                let id = self.bind.on(if *live {
+                    Ev::Live { node, value }
+                } else {
+                    Ev::Field { node, value }
                 });
                 let input = widgets::text_input(self.ui, id, name, placeholder)
                     .grow()
@@ -267,6 +300,8 @@ impl Cx<'_> {
                     kind: EventKind::Toggle,
                     value: (!on).to_string(),
                     selected: Vec::new(),
+                    scope: None,
+                    width: None,
                 };
                 let id = self.bind.on(Ev::Send { event, ask: false });
                 let name = n.props.label.as_deref().unwrap_or(label);
@@ -385,6 +420,18 @@ impl Cx<'_> {
                 .h(0.0)
                 .border_top(1.0, Rgba::white(0.08))
                 .sem(Sem::Divider),
+            Kind::Tabs(t) => self.tabs(key(n), t),
+            Kind::Outline(o) => self.outline(key(n), o),
+            Kind::Split {
+                ratio,
+                label,
+                narrow,
+            } => self.split(n, *ratio, label, *narrow),
+            Kind::Code(c) => self
+                .bind
+                .code(key(n), c, &n.children)
+                .unwrap_or_else(|| parts::plain_code(c)),
+            Kind::Log(l) => self.bind.log(l).unwrap_or_else(|| div().sem(Sem::Hidden)),
         };
         sized(el, &n.props)
     }
@@ -502,12 +549,7 @@ impl Cx<'_> {
             .role(Role::RadioGroup, name);
         let line = self.sem(line, || Sem::Choice);
         line.children(options.iter().map(|o| {
-            let event = Event {
-                id: node.to_owned(),
-                kind: EventKind::Select,
-                value: o.id.clone(),
-                selected: Vec::new(),
-            };
+            let event = Event::new(node, EventKind::Select, o.id.clone());
             let id = self.bind.on(Ev::Send { event, ask: false });
             let hot = self.ui.hover(id);
             let on = o.selected;
@@ -850,6 +892,8 @@ impl Cx<'_> {
                     kind: EventKind::Click,
                     value: String::new(),
                     selected: l.checked.clone(),
+                    scope: None,
+                    width: None,
                 };
                 let ev = Ev::Send {
                     event,
@@ -1499,6 +1543,8 @@ fn send(id: &str, kind: EventKind, ask: bool) -> Ev {
             kind,
             value: String::new(),
             selected: Vec::new(),
+            scope: None,
+            width: None,
         },
         ask,
     }
@@ -1728,6 +1774,7 @@ fn state(copy: &str) -> El {
         )
 }
 
+mod parts;
 #[cfg(test)]
 mod tests;
 

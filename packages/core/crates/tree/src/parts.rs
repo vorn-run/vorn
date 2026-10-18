@@ -63,7 +63,8 @@ pub struct Tool {
 
 /// Rows in a tree of folders, as a file tree: a row `select`s on a click (a
 /// folder opens or shuts), a leaf `open`s on a double click, and the
-/// `action` shown on a hovered leaf `click`s with the row's id as its value.
+/// `action` shown on a hovered leaf `click`s as the action's id, with the
+/// row's id as its value; `{}` in its label stands for the row's.
 /// A `filter` field reports `change` with its text as it is typed.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Outline {

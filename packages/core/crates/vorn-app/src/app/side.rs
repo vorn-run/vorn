@@ -1,72 +1,93 @@
-//! The pane column's controls: opening and closing panes, their tabs, the file
-//! tree, the cards a file pops out into, and each open file's load, edit, find
-//! and save, with vornd reading and writing the files.
+//! The pane column's controls: opening and closing panes, the terminals
+//! panel, the dividers, and the Files extension's pane and cards, whose
+//! codes the client edits and tells the extension about.
 
 use std::collections::HashSet;
 use web_time::Instant;
 
 use serde_json::{json, Value};
 use vorn_protocol::TerminalSession;
+use vorn_tree::{CodeState, Event, EventKind, Kind, Node};
 
 use super::git::cwd_of;
 use super::{App, Call, Src};
-use crate::act::Act;
 use crate::client::rpc::{decode, RpcError};
-use crate::editor::{self, Buffer, EditAct, Stamp, DRAFT_SETTLE_MS, HIGHLIGHT_SETTLE_MS};
-use crate::screen::side::{editor_id, files_body_id, filter_id, find_id, PaneDivider};
-use crate::side::{tab_key, Entry, SideAct, SideKind, Tree};
-use crate::state::{Dialog, MenuKind};
+use crate::code::{self, CodeAct, HIGHLIGHT_SETTLE_MS, LINE_HEIGHT};
+use crate::points::{kind, scoped};
+use crate::screen::code::{editor_id, find_id, scroller_id};
+use crate::screen::side::PaneDivider;
+use crate::side::{SideAct, SideKind};
+use crate::state::Dialog;
 use crate::ui::{Id, Ui};
 
-/// A file or pane call whose answer changes the screen.
+/// Files, which keeps the Files pane and the cards files pop out into.
+pub const FILES: &str = "vorn.files";
+/// Its collection of the sessions whose pane is open.
+const OPEN: &str = "open";
+
+/// A pane call whose answer changes the screen.
 pub(super) enum SideCall {
     /// A shell for `owner`'s panel.
     Shell(String),
-    /// A directory of `owner`'s tree.
-    Listed {
-        owner: String,
-        dir: String,
-    },
-    Read(String),
-    /// The stamp of a file that would not read: binary, or gone.
-    Unread(String),
-    /// The stamp the edit is based on.
-    Base(String),
-    /// The stamp now, against a restored draft's base.
-    DraftCheck(String),
-    /// The stamp now, before a save writes.
-    PreSave(String),
-    Wrote {
-        key: String,
-        text: String,
-    },
-    /// What is on disk, to replace the edit with.
-    Disk(String),
+    /// What the Files extension answered opening or closing `owner`'s pane.
+    Toggled(String),
+    /// The desktop's own Files state handed over: the drafts file goes once it is.
+    Imported(std::path::PathBuf),
+}
+
+/// Every code node in `tree`, depth first, with its node id.
+fn codes(tree: &Node) -> Vec<(&str, &vorn_tree::Code)> {
+    let mut out = Vec::new();
+    let mut stack = vec![tree];
+    while let Some(n) = stack.pop() {
+        if let Kind::Code(c) = &n.kind {
+            out.push((n.id.as_deref().unwrap_or_default(), &**c));
+        }
+        stack.extend(&n.children);
+    }
+    out
+}
+
+/// The code node `node` of `tree`.
+pub(crate) fn code_in<'a>(tree: &'a Node, node: &str) -> Option<&'a vorn_tree::Code> {
+    codes(tree).into_iter().find(|(id, _)| *id == node).map(|(_, c)| c)
 }
 
 impl App {
-    /// The key of every buffer on screen: each open tab and card.
-    fn open_keys(&self) -> Vec<(String, String, String)> {
-        let p = &self.st.side.saved;
-        let tabs = p.files.iter().flat_map(|(owner, f)| {
-            f.tabs
-                .iter()
-                .map(move |t| (tab_key(owner, t), t.clone(), owner.clone()))
-        });
-        let cards = p
-            .cards
-            .iter()
-            .map(|(id, c)| (id.clone(), c.file_path.clone(), c.session_id.clone()));
-        tabs.chain(cards).collect()
-    }
-
     /// The working directory of the session that owns `owner`'s panes.
     pub(super) fn owner_cwd(&self, owner: &str) -> Option<String> {
         self.store.session(owner).map(|s| cwd_of(&s.info))
     }
 
-    /// Loads what newly opened panes and files need, drops what closed,
-    /// colours and drafts what settled, and keeps the Files panes' layout.
+    /// The Files pane's tree key for `owner`, when Files is on.
+    pub(crate) fn files_key(&self, owner: &str) -> Option<String> {
+        let p = self.st.points.find(FILES, kind::PANES, "files")?;
+        Some(scoped(&p.key(), owner))
+    }
+
+    /// The trees the Files extension draws now: each open pane's, and each card's.
+    pub(super) fn files_trees(&self) -> Vec<String> {
+        let pts = &self.st.points;
+        let mut out: Vec<String> = self
+            .st
+            .side
+            .files
+            .iter()
+            .filter_map(|o| self.files_key(o))
+            .collect();
+        if let Some(p) = pts.find(FILES, kind::CARDS, "file") {
+            let key = p.key();
+            out.extend(
+                pts.listed_rows(p, "")
+                    .into_iter()
+                    .map(|r| scoped(&key, &r.id)),
+            );
+        }
+        out
+    }
+
+    /// Before a frame: the panes Files lists, its codes kept in step with
+    /// the edits they hold, and what is left of the dead sessions' panes.
     pub(super) fn panes_tick(&mut self, ui: &mut Ui) {
         let live: HashSet<&str> = self
             .store
@@ -77,111 +98,127 @@ impl App {
         if self.st.side.prune(&live) {
             self.st.side.save();
         }
-        for owner in self.st.side.saved.files.keys().cloned().collect::<Vec<_>>() {
-            let Some(cwd) = self.owner_cwd(&owner) else {
+        let open = (FILES.to_owned(), OPEN.to_owned());
+        if !self.st.points.wanted.contains(&open) {
+            self.st.points.wanted.insert(open);
+        }
+        let files_on = self.st.points.find(FILES, kind::PANES, "files").is_some();
+        self.st.side.files = if files_on {
+            self.st
+                .points
+                .rows_of(FILES)
+                .get(OPEN)
+                .into_iter()
+                .flatten()
+                .map(|r| r.id.clone())
+                .filter(|id| live.contains(id.as_str()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        // Panes and cards of sessions that are gone go with them, once the store has read them.
+        let gone = files_on
+            && self.store.sessions_known
+            && self
+                .st
+                .points
+                .rows_of(FILES)
+                .values()
+                .flatten()
+                .any(|r| {
+                    let owner = r.str("session").unwrap_or(&r.id);
+                    !live.contains(owner)
+                });
+        if gone && !self.pruning {
+            self.pruning = true;
+            let ids: Vec<&str> = live.iter().copied().collect();
+            self.call(
+                Call::Ignore,
+                "extension:call",
+                json!({ "id": FILES, "action": "prune", "args": { "live": ids } }),
+            );
+        } else if !gone {
+            self.pruning = false;
+        }
+        if !self.imported.0 && files_on {
+            self.imported.0 = true;
+            self.import_files();
+        }
+        if !self.imported.1 && self.shell_key("").is_some() {
+            self.imported.1 = true;
+            self.import_history();
+        }
+        for owner in self.st.side.files.clone() {
+            let (Some(key), Some(r)) = (
+                self.files_key(&owner),
+                ui.rect_of(crate::screen::side::files_body_id(&owner)),
+            ) else {
                 continue;
             };
-            let stale = self.st.side.trees.get(&owner).is_none_or(|t| t.cwd != cwd);
-            if stale {
-                self.st.side.trees.insert(
-                    owner.clone(),
-                    Tree {
-                        cwd: cwd.clone(),
-                        loading: true,
-                        ..Tree::default()
-                    },
-                );
-                self.call(
-                    Call::Side(SideCall::Listed {
-                        owner: owner.clone(),
-                        dir: cwd.clone(),
-                    }),
-                    "file:listDir",
-                    json!({ "dirPath": cwd }),
-                );
-            }
-            if let Some(r) = ui.rect_of(files_body_id(&owner)) {
-                let narrow = r.w > 0.0 && r.w < crate::side::SIDE_BY_SIDE_MIN;
-                if narrow {
-                    self.st.side.narrow.insert(owner.clone());
-                } else {
-                    self.st.side.narrow.remove(&owner);
-                }
-            }
+            self.st.points.widths.insert(key, r.w);
         }
-        let keys = self.open_keys();
-        let open: HashSet<&str> = keys.iter().map(|(k, _, _)| k.as_str()).collect();
-        self.st
-            .editors
-            .buffers
-            .retain(|k, _| open.contains(k.as_str()));
-        for (key, path, _) in &keys {
-            let fresh = self
-                .st
-                .editors
-                .buffers
-                .get(key)
-                .is_none_or(|b| b.path != *path);
-            if fresh {
-                self.st
-                    .editors
-                    .buffers
-                    .insert(key.clone(), Buffer::new(path));
-                self.call(
-                    Call::Side(SideCall::Read(key.clone())),
-                    "file:readContent",
-                    json!({ "filePath": path }),
-                );
-            }
-        }
+        self.codes_tick(ui);
+    }
+
+    /// Each code on screen: a new `rev` taken into its edit, the edit told
+    /// as it starts or stops differing and once it settles, its colours.
+    fn codes_tick(&mut self, ui: &mut Ui) {
         let now = Instant::now();
-        let ed = &mut self.st.editors;
-        for (key, b) in &mut ed.buffers {
-            let id = editor_id(key);
-            if b.ready && !ui.focused(id) && ui.edit_text(id) != b.draft {
-                ui.set_edit_text(id, &b.draft);
-            }
-            let settled = |ms: u128| {
-                b.typed
-                    .is_none_or(|t| now.duration_since(t).as_millis() >= ms)
+        let trees = self.files_trees();
+        let mut seen = HashSet::new();
+        let mut tell = Vec::new();
+        for key in &trees {
+            let Some(tree) = self.st.points.tree(key) else {
+                continue;
             };
-            let text = b.text();
-            let stale = b.coloured.as_ref().is_none_or(|(t, _)| t != text);
-            if stale && settled(HIGHLIGHT_SETTLE_MS) && b.content.is_some() {
-                let lang = crate::highlight::lang_for(crate::state::basename(&b.path));
-                let spans = match lang {
-                    Some(l) if text.split('\n').count() <= editor::MAX_HIGHLIGHT_LINES => {
-                        crate::highlight::highlight(text, l)
-                    }
-                    _ => Vec::new(),
+            for (node, c) in codes(tree) {
+                let inst = code::instance(key, node);
+                seen.insert(inst.clone());
+                let v = self.st.codes.views.entry(inst.clone()).or_default();
+                let id = editor_id(&inst);
+                if v.rev != Some(c.rev) {
+                    v.rev = Some(c.rev);
+                    let text = c.draft.as_deref().unwrap_or(&c.text);
+                    ui.set_edit_text(id, text);
+                    v.told = Some((text.to_owned(), c.draft.is_some()));
+                    v.typed = None;
+                }
+                let editing = c.state == CodeState::Edit;
+                let text = if editing {
+                    ui.edit_text(id)
+                } else {
+                    c.text.as_str()
                 };
-                b.coloured = Some((text.to_owned(), spans));
-            }
-            if b.ready && b.content.is_some() && settled(DRAFT_SETTLE_MS) {
-                let unsaved = b.content.as_deref() != Some(b.draft.as_str());
-                let written = b.drafted.as_deref() == Some(b.draft.as_str());
-                if unsaved && !written {
-                    ed.drafts.write(key, &b.path, &b.draft, b.base);
-                    b.drafted = Some(b.draft.clone());
-                } else if !unsaved && b.drafted.is_some() {
-                    ed.drafts.forget(key);
-                    b.drafted = None;
+                if editing {
+                    if let Some(t) = code::to_tell(v, text, &c.text, now) {
+                        v.told = Some((t.clone(), t != c.text));
+                        tell.push((key.clone(), node.to_owned(), t));
+                    }
+                }
+                let settled = v
+                    .typed
+                    .is_none_or(|t| now.duration_since(t).as_millis() >= HIGHLIGHT_SETTLE_MS);
+                let stale = v.coloured.as_ref().is_none_or(|(t, _)| t != text);
+                if stale && settled && c.state != CodeState::Loading {
+                    let name = crate::state::basename(&c.path);
+                    let spans = match crate::highlight::lang_for(name) {
+                        Some(l) if text.split('\n').count() <= code::MAX_HIGHLIGHT_LINES => {
+                            crate::highlight::highlight(text, l)
+                        }
+                        _ => Vec::new(),
+                    };
+                    v.coloured = Some((text.to_owned(), spans));
+                }
+                if v.typed.is_some_and(|t| {
+                    now.duration_since(t).as_millis() < code::DRAFT_SETTLE_MS.max(HIGHLIGHT_SETTLE_MS)
+                }) {
+                    ui.wake_at(now + std::time::Duration::from_millis(50));
                 }
             }
         }
-        // An edited preview tab is kept, or the next click would replace it.
-        let pins: Vec<(String, String)> = self
-            .st
-            .side
-            .saved
-            .files
-            .iter()
-            .filter_map(|(o, f)| f.preview.clone().map(|p| (o.clone(), p)))
-            .filter(|(o, p)| self.st.editors.dirty(&tab_key(o, p)))
-            .collect();
-        for (o, p) in pins {
-            self.st.side.pin_tab(&o, &p);
-            self.st.side.save();
+        self.st.codes.views.retain(|k, _| seen.contains(k));
+        for (key, node, text) in tell {
+            self.tell(&key, &Event::new(node, EventKind::Change, text));
         }
     }
 
@@ -199,198 +236,38 @@ impl App {
                     .st
                     .toast(format!("Failed to start terminal: {e}"), true),
             },
-            SideCall::Listed { owner, dir } => {
-                let Some(t) = self.st.side.trees.get_mut(&owner) else {
-                    return;
-                };
-                let entries: Vec<Entry> = super::list(answer)
-                    .iter()
-                    .filter_map(Entry::from_value)
-                    .collect();
-                if dir == t.cwd {
-                    t.loading = false;
-                    t.root = Some(entries);
-                } else {
-                    t.pending.remove(&dir);
-                    t.dirs.entry(dir).or_insert(entries);
+            SideCall::Imported(drafts) => {
+                if answer.is_ok() {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let _ = std::fs::remove_file(drafts);
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = drafts;
+                    self.st.side.save();
                 }
             }
-            SideCall::Read(key) => {
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                match answer.ok().and_then(|v| v.as_str().map(str::to_owned)) {
-                    Some(text) => {
-                        b.loaded(Some(text), true);
-                        self.take_into(&key);
-                    }
-                    None => {
-                        let path = b.path.clone();
-                        self.call(
-                            Call::Side(SideCall::Unread(key)),
-                            "file:stamp",
-                            json!({ "filePath": path }),
-                        );
+            SideCall::Toggled(owner) => match answer {
+                Ok(v) => {
+                    let a = vorn_tree::Answer::read(&v);
+                    if let (Some(ask), Some(key)) = (a.ask, self.files_key(&owner)) {
+                        self.ask(key, ask);
                     }
                 }
-            }
-            SideCall::Unread(key) => {
-                let known = answer.ok().is_some_and(|v| !v.is_null());
-                if let Some(b) = self.st.editors.buffers.get_mut(&key) {
-                    b.loaded(None, known);
-                }
-            }
-            SideCall::Base(key) => {
-                if let Some(b) = self.st.editors.buffers.get_mut(&key) {
-                    b.base = answer.ok().as_ref().and_then(Stamp::from_value);
-                }
-            }
-            SideCall::DraftCheck(key) => {
-                if let Some(b) = self.st.editors.buffers.get_mut(&key) {
-                    let now = answer.ok().as_ref().and_then(Stamp::from_value);
-                    b.conflict = editor::has_moved(b.base, now);
-                }
-            }
-            SideCall::PreSave(key) => {
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                let now = answer.ok().as_ref().and_then(Stamp::from_value);
-                if editor::has_moved(b.base, now) {
-                    b.conflict = true;
-                    b.saving = false;
-                    return;
-                }
-                self.write_file(&key);
-            }
-            SideCall::Wrote { key, text } => {
-                let ok = match &answer {
-                    Ok(v) => v.get("success").and_then(Value::as_bool) == Some(true),
-                    Err(_) => false,
-                };
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                if !ok {
-                    b.saving = false;
-                    b.error = Some(match answer {
-                        Ok(v) => v
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Failed to save")
-                            .to_owned(),
-                        Err(e) => e.to_string(),
-                    });
-                    return;
-                }
-                let path = b.path.clone();
-                b.saved(text);
-                self.st.editors.drafts.forget(&key);
-                self.stamp_base(&key, &path);
-            }
-            SideCall::Disk(key) => {
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                match answer.ok().and_then(|v| v.as_str().map(str::to_owned)) {
-                    Some(text) => {
-                        let path = b.path.clone();
-                        b.draft = text.clone();
-                        b.saved(text);
-                        self.st.editors.drafts.forget(&key);
-                        self.stamp_base(&key, &path);
-                    }
-                    None => b.error = Some("The file could not be read.".to_owned()),
-                }
-            }
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
         }
     }
 
-    fn stamp_base(&mut self, key: &str, path: &str) {
-        self.call(
-            Call::Side(SideCall::Base(key.to_owned())),
-            "file:stamp",
-            json!({ "filePath": path }),
-        );
+    /// Asks `ask` with the app's own alert; its OK tells tree `key` the event it holds.
+    pub(super) fn ask(&mut self, key: String, ask: vorn_tree::Ask) {
+        self.st.ask = Some((key, ask));
+        self.st.dialog = Some(Dialog::Ask);
     }
 
-    /// The file, or the draft left over it, into the buffer.
-    fn take_into(&mut self, key: &str) {
-        let ed = &mut self.st.editors;
-        let Some(b) = ed.buffers.get_mut(key) else {
-            return;
-        };
-        let path = b.path.clone();
-        let kept = ed.drafts.read(key, &path).cloned();
-        if b.take(kept.as_ref()) {
-            self.call(
-                Call::Side(SideCall::DraftCheck(key.to_owned())),
-                "file:stamp",
-                json!({ "filePath": path }),
-            );
-        } else {
-            if kept.is_some() {
-                ed.drafts.forget(key);
-            }
-            if b.ready {
-                self.stamp_base(key, &path);
-            }
-        }
-    }
-
-    fn write_file(&mut self, key: &str) {
-        let Some(b) = self.st.editors.buffers.get_mut(key) else {
-            return;
-        };
-        let (path, text) = (b.path.clone(), b.draft.clone());
-        self.call(
-            Call::Side(SideCall::Wrote {
-                key: key.to_owned(),
-                text: text.clone(),
-            }),
-            "file:writeContent",
-            json!({ "filePath": path, "content": text }),
-        );
-    }
-
-    /// Checked against the base unless `force`.
-    fn save(&mut self, key: &str, force: bool) {
-        let Some(b) = self.st.editors.buffers.get_mut(key) else {
-            return;
-        };
-        if !b.dirty() || b.saving {
-            return;
-        }
-        b.saving = true;
-        b.error = None;
-        if force {
-            self.write_file(key);
-            return;
-        }
-        let path = b.path.clone();
-        self.call(
-            Call::Side(SideCall::PreSave(key.to_owned())),
-            "file:stamp",
-            json!({ "filePath": path }),
-        );
-    }
-
-    /// Runs `act` now when none of `keys` has edits,
-    /// else asks first. True when it may go ahead now.
-    fn may_discard(&mut self, keys: &[String], act: Act) -> bool {
-        if self.discarding || !keys.iter().any(|k| self.st.editors.dirty(k)) {
-            return true;
-        }
-        self.st.editors.confirm = Some(act);
-        self.st.dialog = Some(Dialog::Discard);
-        false
-    }
-
-    /// Drops buffers and drafts that are gone with their panes.
-    fn forget(&mut self, keys: &[String]) {
-        for k in keys {
-            self.st.editors.buffers.remove(k);
-            self.st.editors.drafts.forget(k);
+    /// The alert's answer: OK tells the tree, Cancel only closes.
+    pub(super) fn answer_ask(&mut self, ok: bool) {
+        self.st.dialog = None;
+        if let Some((key, ask)) = self.st.ask.take().filter(|_| ok) {
+            self.tell(&key, &ask.event);
         }
     }
 
@@ -416,22 +293,14 @@ impl App {
         }
     }
 
-    pub(super) fn run_side(&mut self, ui: &mut Ui, act: SideAct, src: Src) {
+    pub(super) fn run_side(&mut self, ui: &mut Ui, act: SideAct, _src: Src) {
         match act {
             SideAct::ToggleFiles(owner) => {
-                match self.st.side.saved.files.get(&owner) {
-                    None => self.st.side.open_files(&owner),
-                    Some(f) => {
-                        let keys: Vec<String> = f.tabs.iter().map(|t| tab_key(&owner, t)).collect();
-                        if !self.may_discard(&keys, Act::Side(SideAct::ToggleFiles(owner.clone())))
-                        {
-                            return;
-                        }
-                        let gone = self.st.side.close_files(&owner);
-                        self.forget(&gone);
-                    }
-                }
-                self.st.side.save();
+                self.call(
+                    Call::Side(SideCall::Toggled(owner.clone())),
+                    "extension:call",
+                    json!({ "id": FILES, "action": "toggle", "args": { "session": owner } }),
+                );
             }
             SideAct::ToggleTerminals(owner) => {
                 if self.st.side.saved.panels.contains_key(&owner) {
@@ -454,20 +323,9 @@ impl App {
             }
             SideAct::Close(kind, owner) => match kind {
                 SideKind::Files => {
-                    let keys: Vec<String> = self
-                        .st
-                        .side
-                        .saved
-                        .files
-                        .get(&owner)
-                        .map(|f| f.tabs.iter().map(|t| tab_key(&owner, t)).collect())
-                        .unwrap_or_default();
-                    if !self.may_discard(&keys, Act::Side(SideAct::Close(kind, owner.clone()))) {
-                        return;
+                    if let Some(key) = self.files_key(&owner) {
+                        self.tell(&key, &Event::new("pane", EventKind::Close, ""));
                     }
-                    let gone = self.st.side.close_files(&owner);
-                    self.forget(&gone);
-                    self.st.side.save();
                 }
                 SideKind::Terminals => {
                     let held = self.st.side.close_panel(&owner);
@@ -475,107 +333,6 @@ impl App {
                     self.st.side.save();
                 }
             },
-            SideAct::Tab(owner, path) => {
-                self.st.side.set_active_tab(&owner, &path);
-                if self.st.side.narrow.contains(&owner) {
-                    self.st.side.set_tree_visible(&owner, false);
-                }
-                self.st.side.save();
-            }
-            SideAct::PinTab(owner, path) => {
-                self.st.side.pin_tab(&owner, &path);
-                self.st.side.save();
-            }
-            SideAct::CloseTab(owner, path) => {
-                let key = tab_key(&owner, &path);
-                if !self.may_discard(
-                    std::slice::from_ref(&key),
-                    Act::Side(SideAct::CloseTab(owner.clone(), path.clone())),
-                ) {
-                    return;
-                }
-                self.st.side.close_tab(&owner, &path);
-                self.forget(&[key]);
-                self.st.side.save();
-            }
-            SideAct::CloseSavedTabs(owner) => {
-                let ed = &self.st.editors;
-                let gone: Vec<String> = self
-                    .st
-                    .side
-                    .saved
-                    .files
-                    .get(&owner)
-                    .map(|f| {
-                        f.tabs
-                            .iter()
-                            .map(|t| tab_key(&owner, t))
-                            .filter(|k| !ed.dirty(k))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                self.st
-                    .side
-                    .close_saved_tabs(&owner, |t| ed.dirty(&tab_key(&owner, t)));
-                self.st.side.save();
-                self.forget(&gone);
-            }
-            SideAct::TabsMenu(owner) => self.open_menu(ui, MenuKind::FileTabs(owner), src),
-            SideAct::ToggleTree(owner) => {
-                self.st.side.toggle_tree(&owner);
-                self.st.side.save();
-            }
-            SideAct::Dir(owner, dir) => {
-                let Some(t) = self.st.side.trees.get_mut(&owner) else {
-                    return;
-                };
-                if t.expanded.remove(&dir) {
-                    return;
-                }
-                t.expanded.insert(dir.clone());
-                if !t.dirs.contains_key(&dir) && t.pending.insert(dir.clone()) {
-                    self.call(
-                        Call::Side(SideCall::Listed {
-                            owner,
-                            dir: dir.clone(),
-                        }),
-                        "file:listDir",
-                        json!({ "dirPath": dir }),
-                    );
-                }
-            }
-            SideAct::File(owner, path) => self.open_file(&owner, &path, false),
-            SideAct::PinFile(owner, path) => self.open_file(&owner, &path, true),
-            SideAct::PopOut(owner, path) => {
-                let card = self.st.side.promote(&owner, &path);
-                self.st.side.save();
-                self.st.selected = Some(card);
-            }
-            SideAct::PopOutActive(owner) => {
-                let Some(path) = self
-                    .st
-                    .side
-                    .saved
-                    .files
-                    .get(&owner)
-                    .and_then(|f| f.active.clone())
-                else {
-                    return;
-                };
-                let key = tab_key(&owner, &path);
-                if !self.may_discard(
-                    std::slice::from_ref(&key),
-                    Act::Side(SideAct::PopOutActive(owner.clone())),
-                ) {
-                    return;
-                }
-                let p = &mut self.st.side;
-                let card = p.promote(&owner, &path);
-                p.close_tab(&owner, &path);
-                p.save();
-                self.forget(&[key]);
-                self.st.selected = Some(card);
-            }
             SideAct::PanelTab(owner, i) => {
                 self.st.side.set_active_panel(&owner, i);
                 self.st.side.focus = self
@@ -606,188 +363,140 @@ impl App {
                     ui.set_focus(None);
                 }
             }
-            SideAct::ReturnCard(card) => {
-                if !self.may_discard(
-                    std::slice::from_ref(&card),
-                    Act::Side(SideAct::ReturnCard(card.clone())),
-                ) {
-                    return;
-                }
-                let p = &mut self.st.side;
-                let Some(c) = p.saved.cards.remove(&card) else {
-                    return;
-                };
-                p.open_tab(&c.session_id, &c.file_path, true, false);
-                p.save();
-                self.forget(&[card]);
-                self.st.selected = Some(c.session_id);
-            }
-            SideAct::CloseCard(card) => {
-                if !self.may_discard(
-                    std::slice::from_ref(&card),
-                    Act::Side(SideAct::CloseCard(card.clone())),
-                ) {
-                    return;
-                }
-                self.st.side.saved.cards.remove(&card);
-                self.st.side.save();
-                self.forget(&[card]);
-            }
             SideAct::SelectCard(card) => {
                 self.st.selected = Some(card);
                 self.st.side.focus = None;
             }
-            SideAct::ClearFilter(owner) => {
-                if let Some(t) = self.st.side.trees.get_mut(&owner) {
-                    t.filter.clear();
-                }
-                ui.set_edit_text(filter_id(&owner), "");
-            }
         }
     }
 
-    /// A click previews, a double click pins; a narrow pane
-    /// hides the tree to show the file.
-    fn open_file(&mut self, owner: &str, path: &str, pin: bool) {
-        let preview_dirty = self
-            .st
-            .side
-            .saved
-            .files
-            .get(owner)
-            .and_then(|f| f.preview.as_deref())
-            .is_some_and(|pv| self.st.editors.dirty(&tab_key(owner, pv)));
-        let p = &mut self.st.side;
-        p.open_tab(owner, path, pin, preview_dirty);
-        if p.narrow.contains(owner) {
-            p.set_tree_visible(owner, false);
-        }
-        p.save();
+    /// The code `inst` draws from its tree.
+    fn code_node(&self, inst: &str) -> Option<&vorn_tree::Code> {
+        let (key, node) = code::parts(inst);
+        code_in(self.st.points.tree(key)?, node)
     }
 
-    pub(super) fn run_edit(&mut self, ui: &mut Ui, act: EditAct) {
+    /// Whether code `inst` holds an edit not on disk.
+    pub(crate) fn code_dirty(&self, ui: &Ui, inst: &str) -> bool {
+        self.code_node(inst).is_some_and(|c| {
+            c.state == CodeState::Edit
+                && self.st.codes.views.get(inst).is_some_and(|v| v.rev == Some(c.rev))
+                && ui.edit_text(editor_id(inst)) != c.text
+        })
+    }
+
+    fn tell_code(&mut self, inst: &str, kind: EventKind, value: String) {
+        let (key, node) = code::parts(inst);
+        let (key, node) = (key.to_owned(), node.to_owned());
+        self.tell(&key, &Event::new(node, kind, value));
+    }
+
+    pub(super) fn run_code(&mut self, ui: &mut Ui, act: CodeAct) {
         match act {
-            EditAct::ToggleFind(key) => {
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
+            CodeAct::ToggleFind(inst) => {
+                let can = self
+                    .code_node(&inst)
+                    .is_some_and(|c| matches!(c.state, CodeState::Edit | CodeState::Read));
+                let Some(v) = self.st.codes.views.get_mut(&inst).filter(|_| can) else {
                     return;
                 };
-                if b.content.is_none() || b.loading {
-                    return;
-                }
-                if b.find.take().is_none() {
-                    b.find = Some(editor::Find::default());
-                    ui.set_edit_text(find_id(&key), "");
-                    ui.set_focus(Some(find_id(&key)));
+                if v.find.take().is_none() {
+                    v.find = Some(code::Find::default());
+                    ui.set_edit_text(find_id(&inst), "");
+                    ui.set_focus(Some(find_id(&inst)));
                 }
             }
-            EditAct::FindStep(key, d) => {
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                let n = b.matches().len();
-                if let Some(f) = b.find.as_mut().filter(|_| n > 0) {
+            CodeAct::FindStep(inst, d) => {
+                let n = self.matches(ui, &inst).len();
+                if let Some(f) = self
+                    .st
+                    .codes
+                    .views
+                    .get_mut(&inst)
+                    .and_then(|v| v.find.as_mut())
+                    .filter(|_| n > 0)
+                {
                     f.index = (f.index as i64 + i64::from(d)).rem_euclid(n as i64) as usize;
                 }
-                self.reveal_match(ui, &key);
+                self.reveal_match(ui, &inst);
             }
-            EditAct::CloseFind(key) => {
-                if let Some(b) = self.st.editors.buffers.get_mut(&key) {
-                    b.find = None;
+            CodeAct::CloseFind(inst) => {
+                if let Some(v) = self.st.codes.views.get_mut(&inst) {
+                    v.find = None;
                 }
                 ui.set_focus(None);
             }
-            EditAct::Save(key) => self.save(&key, false),
-            EditAct::SaveAnyway(key) => self.save(&key, true),
-            EditAct::Discard(key) => {
-                if !self.may_discard(
-                    std::slice::from_ref(&key),
-                    Act::Edit(EditAct::Discard(key.clone())),
-                ) {
-                    return;
-                }
-                let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                    return;
-                };
-                let Some(content) = b.content.clone() else {
-                    return;
-                };
-                b.draft = content.clone();
-                b.error = None;
-                b.conflict = false;
-                b.drafted = None;
-                ui.set_edit_text(editor_id(&key), &content);
-                self.st.editors.drafts.forget(&key);
-            }
-            EditAct::TakeDisk(key) => {
-                let Some(path) = self.st.editors.buffers.get(&key).map(|b| b.path.clone()) else {
-                    return;
-                };
-                self.call(
-                    Call::Side(SideCall::Disk(key)),
-                    "file:readContent",
-                    json!({ "filePath": path }),
-                );
-            }
-            EditAct::KeepEditing(key) => {
-                if let Some(b) = self.st.editors.buffers.get_mut(&key) {
-                    b.conflict = false;
-                }
-            }
-            EditAct::ConfirmDiscard => {
-                self.st.dialog = None;
-                if let Some(act) = self.st.editors.confirm.take() {
-                    self.discarding = true;
-                    self.run(ui, act, Src::default());
-                    self.discarding = false;
-                }
-            }
-            EditAct::CancelDiscard => {
-                self.st.dialog = None;
-                self.st.editors.confirm = None;
+            CodeAct::Save(inst) => self.save_code(ui, &inst),
+            CodeAct::Tell(inst, what) => {
+                self.tell_code(&inst, EventKind::Click, what.to_owned());
             }
         }
     }
 
+    /// Writes code `inst`'s edit, through its extension.
+    fn save_code(&mut self, ui: &Ui, inst: &str) {
+        if !self.code_dirty(ui, inst) {
+            return;
+        }
+        let text = ui.edit_text(editor_id(inst)).to_owned();
+        if let Some(v) = self.st.codes.views.get_mut(inst) {
+            v.told = Some((text.clone(), false));
+        }
+        self.tell_code(inst, EventKind::Submit, text);
+    }
+
+    /// The find hits in what code `inst` shows.
+    pub(crate) fn matches(&self, ui: &Ui, inst: &str) -> Vec<code::Match> {
+        let Some(f) = self.st.codes.views.get(inst).and_then(|v| v.find.as_ref()) else {
+            return Vec::new();
+        };
+        let text = match self.code_node(inst) {
+            Some(c) if c.state == CodeState::Edit => ui.edit_text(editor_id(inst)),
+            Some(c) => c.text.as_str(),
+            None => return Vec::new(),
+        };
+        code::matches(text, &f.query)
+    }
+
     /// Scrolls the current find match to the middle of the editor.
-    fn reveal_match(&mut self, ui: &mut Ui, key: &str) {
-        let Some(b) = self.st.editors.buffers.get(key) else {
+    fn reveal_match(&mut self, ui: &mut Ui, inst: &str) {
+        let m = self.matches(ui, inst);
+        let Some(f) = self.st.codes.views.get(inst).and_then(|v| v.find.as_ref()) else {
             return;
         };
-        let m = b.matches();
-        let Some(f) = &b.find else { return };
         let Some(hit) = m.get(f.index % m.len().max(1)) else {
             return;
         };
-        let scroller = crate::screen::side::scroller_id(key);
+        let scroller = scroller_id(inst);
         let h = ui.rect_of(scroller).map_or(0.0, |r| r.h);
-        let y = hit.line as f32 * editor::LINE_HEIGHT - h / 2.0;
+        let y = hit.line as f32 * LINE_HEIGHT - h / 2.0;
         ui.set_scroll_offset(scroller, y.max(0.0));
     }
 
     /// Keeps the caret's line inside the editor's view as it moves.
-    pub(super) fn follow_caret(&mut self, ui: &mut Ui, key: &str) {
-        let id = editor_id(key);
+    pub(super) fn follow_caret(&mut self, ui: &mut Ui, inst: &str) {
+        let id = editor_id(inst);
         let Some(caret) = ui.edit(id).map(|e| e.caret()) else {
             return;
         };
         let text = ui.edit_text(id);
         let line = text[..caret.min(text.len())].matches('\n').count() as f32;
-        let scroller = crate::screen::side::scroller_id(key);
+        let scroller = scroller_id(inst);
         let Some(r) = ui.rect_of(scroller) else {
             return;
         };
-        let top = line * editor::LINE_HEIGHT;
+        let top = line * LINE_HEIGHT;
         let off = ui.scroll_offset(scroller);
         if top < off {
             ui.set_scroll_offset(scroller, top);
-        } else if top + editor::LINE_HEIGHT + 8.0 > off + r.h {
-            ui.set_scroll_offset(scroller, top + editor::LINE_HEIGHT + 8.0 - r.h);
+        } else if top + LINE_HEIGHT + 8.0 > off + r.h {
+            ui.set_scroll_offset(scroller, top + LINE_HEIGHT + 8.0 - r.h);
         }
     }
 
-    /// A buffer's key from its editor or find field, when `id` is one.
-    pub(super) fn buffer_of(&self, id: Id) -> Option<(String, bool)> {
-        self.st.editors.buffers.keys().find_map(|k| {
+    /// A code's instance from its editor or find field, when `id` is one.
+    pub(super) fn code_of(&self, id: Id) -> Option<(String, bool)> {
+        self.st.codes.views.keys().find_map(|k| {
             if editor_id(k) == id {
                 Some((k.clone(), false))
             } else if find_id(k) == id {
@@ -798,86 +507,65 @@ impl App {
         })
     }
 
-    /// Typing in an editor, a find bar or a tree filter.
+    /// Typing in a code or its find bar.
     pub(super) fn pane_changed(&mut self, ui: &mut Ui, id: Id) -> bool {
-        if let Some((key, find)) = self.buffer_of(id) {
-            let text = ui.edit_text(id).to_owned();
-            let Some(b) = self.st.editors.buffers.get_mut(&key) else {
-                return true;
-            };
-            if find {
-                if let Some(f) = b.find.as_mut() {
-                    f.query = text;
-                    f.index = 0;
-                }
-                self.reveal_match(ui, &key);
-            } else if b.ready {
-                b.draft = text;
-                b.typed = Some(Instant::now());
-                self.follow_caret(ui, &key);
-            }
+        let Some((inst, find)) = self.code_of(id) else {
+            return false;
+        };
+        let text = ui.edit_text(id).to_owned();
+        let Some(v) = self.st.codes.views.get_mut(&inst) else {
             return true;
-        }
-        let owner = self
-            .st
-            .side
-            .trees
-            .keys()
-            .find(|o| filter_id(o) == id)
-            .cloned();
-        if let Some(owner) = owner {
-            let text = ui.edit_text(id).to_owned();
-            if let Some(t) = self.st.side.trees.get_mut(&owner) {
-                t.filter = text;
+        };
+        if find {
+            if let Some(f) = v.find.as_mut() {
+                f.query = text;
+                f.index = 0;
             }
-            return true;
+            self.reveal_match(ui, &inst);
+        } else {
+            v.typed = Some(Instant::now());
+            self.follow_caret(ui, &inst);
         }
-        false
+        true
     }
 
-    /// The editor's keys before the UI's: Mod+S saves, the find bar's Enter
-    /// steps and Escape closes it, a tree filter's Escape clears it.
-    pub(super) fn pane_key(
-        &mut self,
-        ui: &mut Ui,
-        code: &str,
-        with_mod: bool,
-        shift: bool,
-    ) -> bool {
+    /// A code's keys before the UI's: Mod+S saves, the find bar's Enter
+    /// steps and Escape closes it.
+    pub(super) fn pane_key(&mut self, ui: &mut Ui, code: &str, with_mod: bool, shift: bool) -> bool {
         let Some(focus) = ui.focus() else {
             return false;
         };
-        if let Some((key, find)) = self.buffer_of(focus) {
-            if code == "KeyS" && with_mod {
-                self.save(&key, false);
-                return true;
+        // A tree's live filter: Escape clears it.
+        if let Some(crate::act::Act::Point(a @ crate::points::PointAct::TreeLive { .. })) =
+            self.acts.text_of(focus)
+        {
+            if code != "Escape" || ui.edit_text(focus).is_empty() {
+                return false;
             }
-            if find && code == "Enter" {
-                self.run_edit(ui, EditAct::FindStep(key, if shift { -1 } else { 1 }));
-                return true;
-            }
-            if find && code == "Escape" {
-                self.run_edit(ui, EditAct::CloseFind(key));
-                return true;
-            }
-            return false;
+            ui.set_edit_text(focus, "");
+            self.run_point(ui, a);
+            return true;
         }
-        let owner = self
-            .st
-            .side
-            .trees
-            .keys()
-            .find(|o| filter_id(o) == focus)
-            .cloned();
-        if let (Some(owner), "Escape") = (owner, code) {
-            self.run_side(ui, SideAct::ClearFilter(owner), Src::default());
+        let Some((inst, find)) = self.code_of(focus) else {
+            return false;
+        };
+        if code == "KeyS" && with_mod {
+            self.save_code(ui, &inst);
+            return true;
+        }
+        if find && code == "Enter" {
+            self.run_code(ui, CodeAct::FindStep(inst, if shift { -1 } else { 1 }));
+            return true;
+        }
+        if find && code == "Escape" {
+            self.run_code(ui, CodeAct::CloseFind(inst));
             return true;
         }
         false
     }
 
-    /// A divider moved: the card's split, a column's weights, a Files
-    /// pane's tree, or the Changes panel's width. Saved when it ends.
+    /// A divider moved: the card's split, a column's weights, a tree's split,
+    /// or the Changes panel's width. Saved when it ends.
     pub(super) fn pane_resized(&mut self, ui: &Ui, id: Id, ratio: f32, end: bool) -> bool {
         if id == crate::screen::sidebar::SIDEBAR_HANDLE {
             // The handle sits on the sidebar's right edge, so the sidebar's
@@ -891,6 +579,16 @@ impl App {
                 self.st.sidebar_width = Some(w.round());
             }
             self.sidebar_left = if end { None } else { left };
+            return true;
+        }
+        if let Some((key, node)) = crate::screen::points::split_of(&self.st.points, id) {
+            let ratio = ratio.clamp(vorn_tree::MIN_SPLIT, vorn_tree::MAX_SPLIT);
+            if end {
+                self.st.split_drag = None;
+                self.tell(&key, &Event::new(node, EventKind::Resize, ratio.to_string()));
+            } else {
+                self.st.split_drag = Some((key, node, ratio));
+            }
             return true;
         }
         let Some(which) = crate::screen::side::divider_of(&self.st, id) else {
@@ -917,15 +615,6 @@ impl App {
                     p.drag_panes = Some((owner, w));
                 }
             }
-            PaneDivider::Tree => {
-                if end {
-                    p.drag_tree = None;
-                    p.saved.tree_ratio = Some(crate::side::clamp_split(ratio));
-                    p.save();
-                } else {
-                    p.drag_tree = Some(ratio);
-                }
-            }
             PaneDivider::Changes => {
                 // The handle sits inside the panel; the width is the row's
                 // right edge less the pointer.
@@ -942,4 +631,29 @@ impl App {
         }
         true
     }
+
+    /// Hands what the desktop kept of the Files pane before (its panes,
+    /// cards and drafts) to the Files extension once, then lets it go.
+    pub(super) fn import_files(&mut self) {
+        let Some(dir) = self.data_dir.clone() else {
+            return;
+        };
+        let drafts_file = dir.join("desktop").join("drafts.json");
+        let read = |p: &std::path::Path| {
+            crate::keep::read(p).and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        };
+        let drafts = read(&drafts_file);
+        let view = read(&crate::side::view_file(&dir));
+        let had = |k: &str| view.as_ref().and_then(|v| v.get(k)).is_some();
+        if drafts.is_none() && !had("files") && !had("cards") {
+            return;
+        }
+        let args = json!({ "drafts": drafts, "view": view });
+        self.call(
+            Call::Side(SideCall::Imported(drafts_file)),
+            "extension:call",
+            json!({ "id": FILES, "action": "import", "args": args }),
+        );
+    }
 }
+

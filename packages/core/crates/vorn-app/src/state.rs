@@ -215,8 +215,6 @@ pub enum MenuKind {
     Branch(String),
     /// The editors a session's project opens in.
     OpenIn(String),
-    /// A Files pane's list of every open tab.
-    FileTabs(String),
 }
 
 impl MenuKind {
@@ -266,8 +264,8 @@ pub enum Dialog {
     GateReview,
     /// The Changes panel's CommitDialog.
     GitCommit,
-    /// "Discard unsaved changes?" before a buffer goes.
-    Discard,
+    /// A question an extension's tree asks before something is done (`State::ask`).
+    Ask,
     /// "Paste N lines?" before a paste the program could run line by line.
     Paste,
     /// CommandPalette.
@@ -516,10 +514,10 @@ pub struct State {
     pub last_output: HashMap<String, Instant>,
     /// Panes whose size this device does not drive.
     pub locked: HashSet<String>,
-    /// Each shell's command blocks.
-    pub shells: HashMap<String, crate::blocks::Shell>,
-    /// Each shell's typed commands, and the composer's menu.
-    pub intent: crate::intent::Intent,
+    /// Each shell's command blocks, cut from its screen.
+    pub shells: HashMap<String, crate::log::Shell>,
+    /// Each shell composer's menu.
+    pub intent: crate::prompt::Intent,
     /// Sidebar projects folded shut.
     pub collapsed: HashSet<String>,
     /// Projects the sidebar has drawn, so only a new one takes its fold.
@@ -534,7 +532,12 @@ pub struct State {
     pub settings: crate::settings::Settings,
     pub git: crate::git::Git,
     pub side: crate::side::Side,
-    pub editors: crate::editor::Editors,
+    /// Each code drawn from a tree: its find bar, colours and what was told.
+    pub codes: crate::code::Codes,
+    /// The question an extension's tree asks, by the tree's key.
+    pub ask: Option<(String, vorn_tree::Ask)>,
+    /// A tree split's divider being dragged: the tree's key and node, and its ratio.
+    pub split_drag: Option<(String, String, f32)>,
     /// The build of the vornd this app talks to, from `server:identity`.
     pub server_version: Option<String>,
     pub bench: crate::panes::Workbench,

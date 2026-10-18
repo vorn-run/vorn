@@ -5,7 +5,7 @@ use super::{faint, ink, primary, secondary};
 use crate::act::Act;
 use crate::git::{DiffOp, GitAct};
 use crate::look;
-use crate::screen::side::file_icon;
+use crate::screen::code::file_icon;
 use crate::screen::{c, ico, mod_label, white, Screen};
 use crate::tasks::{Diff, DiffFile, TaskAct};
 use crate::ui::{area, div, text, Action, El, Id, Rgba, Role, TextStyle};

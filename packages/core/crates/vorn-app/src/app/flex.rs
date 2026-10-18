@@ -75,7 +75,7 @@ impl App {
                 continue;
             }
             out.push((id.clone(), None));
-            for card in self.st.side.cards_of(id) {
+            for card in crate::screen::side::cards_of(&self.st, id) {
                 out.push((card.to_owned(), Some(id.clone())));
             }
         }
@@ -89,7 +89,7 @@ impl App {
         for i in self.st.gridded(&self.store) {
             let id = &self.store.sessions[i].info.id;
             out.push((id.clone(), None));
-            for card in self.st.side.cards_of(id) {
+            for card in crate::screen::side::cards_of(&self.st, id) {
                 out.push((card.to_owned(), Some(id.clone())));
             }
         }

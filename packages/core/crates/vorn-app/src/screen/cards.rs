@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::act::{Act, Acts};
-use crate::blocks::{self, Block, Running, Shell};
+use crate::log::{self as blocks, Block, Running, Shell};
 use crate::client::Session;
-use crate::intent::{self, IntentAct, Row};
+use crate::prompt::{self as intent, IntentAct, Row};
 use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
@@ -596,7 +596,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
             .on(Action::Click);
     }
     let mut inner = div().row().grow().min_h(0.0);
-    if session.is_shell() {
+    if session.is_shell() && intent::blocks_on(&s.st.points) {
         inner = inner.child(spine(s, session)).child(div().w(8.0).shrink0());
     }
     let mut screen = custom(CARD_ID_BASE + i as u64).grow();
@@ -614,7 +614,12 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
 
 /// The shell's blocks when it shows them.
 pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
-    blocks::split(&s.store.config, session, s.st.shells.get(&session.info.id))
+    blocks::split(
+        &s.store.config,
+        &s.st.points,
+        session,
+        s.st.shells.get(&session.info.id),
+    )
 }
 
 /// The terminal's split: the finished commands, the running one, then the
@@ -1007,9 +1012,7 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     // The ghost: what is typed, unseen, then the rest of a past command.
     let ghost = (focused && menu.is_none_or(|m| m.highlight.is_none()))
         .then(|| {
-            s.st.intent
-                .history
-                .ghost(typed, Some(session.info.project_path.as_str()))
+            intent::ghost_over(menu.and_then(|m| m.ghost.as_deref()), typed)
         })
         .flatten()
         .map(|g| {
@@ -1122,7 +1125,7 @@ fn intent_menu(s: &Screen<'_>, sid: &str, m: &intent::Menu) -> El {
                 },
             ),
             Row::Completion(c) => (
-                c.kind.icon(c.continues),
+                c.icon.as_str(),
                 c.label.as_str(),
                 if hi {
                     "\u{21e5}".to_owned()
@@ -1195,7 +1198,8 @@ pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Opti
     if session.ended() {
         return Some(ended_strip(s, session, compact));
     }
-    (session.is_shell() && !stands_aside(s, session)).then(|| intent_bar(s, session, compact))
+    (session.is_shell() && intent::blocks_on(&s.st.points) && !stands_aside(s, session))
+        .then(|| intent_bar(s, session, compact))
 }
 
 /// The terminal and its composer: what every layout shows of a session
@@ -1291,7 +1295,7 @@ fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
     let mut out = Vec::new();
     for i in s.st.gridded(s.store) {
         out.push(Cell::Session(i));
-        for card in s.st.side.cards_of(&s.store.sessions[i].info.id) {
+        for card in super::side::cards_of(s.st, &s.store.sessions[i].info.id) {
             out.push(Cell::Card(card));
         }
     }
@@ -1312,7 +1316,7 @@ pub fn flex_divider_id(path: crate::flex::Path) -> Id {
 fn cell_card(s: &Screen<'_>, cell: &Cell<'_>, n: usize) -> El {
     match cell {
         Cell::Session(i) => card(s, *i, n, &s.store.sessions[*i]),
-        Cell::Card(c) => super::side::editor_card(s, c),
+        Cell::Card(c) => super::side::ext_card(s, c),
     }
 }
 

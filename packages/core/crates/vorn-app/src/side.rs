@@ -1,9 +1,9 @@
-//! The panes a session owns beside its terminal, and the
-//! files popped out of them into cards of their own: which are open, how
-//! a card's space is split between them, and which shells each session's
-//! terminals panel holds. Kept per device.
+//! The panes a session owns beside its terminal: which are open, how a
+//! card's space is split between them, and which shells each session's
+//! terminals panel holds. Kept per device. The Files pane and the cards files
+//! pop out into are the Files extension's, which keeps them itself.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -12,10 +12,6 @@ use serde::{Deserialize, Serialize};
 pub const MIN_SPLIT: f32 = 0.15;
 pub const MAX_SPLIT: f32 = 0.85;
 pub const DEFAULT_SPLIT: f32 = 0.5;
-/// The file tree's share of the Files pane (`DEFAULT_TREE_RATIO`).
-pub const DEFAULT_TREE: f32 = 0.38;
-/// Below this width the tree and the file take turns (`SIDE_BY_SIDE_MIN_PX`).
-pub const SIDE_BY_SIDE_MIN: f32 = 480.0;
 
 /// A ratio inside the visible range, an even split for
 /// anything that is not a number.
@@ -72,10 +68,10 @@ pub fn resize_weights(weights: &[f32], index: usize, ratio: f32) -> Vec<f32> {
     next
 }
 
-/// What the panes, their tabs, the file tree and the cards do.
+/// What the panes, their tabs and the cards do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SideAct {
-    /// Opens or closes the files pane.
+    /// Opens or closes the files pane, which the Files extension keeps.
     ToggleFiles(String),
     /// Opened with a first shell, closed with them all.
     ToggleTerminals(String),
@@ -84,32 +80,14 @@ pub enum SideAct {
     /// Maximizes a pane over its owner's card, or restores it.
     Maximize(String),
     Close(SideKind, String),
-    Tab(String, String),
-    PinTab(String, String),
-    CloseTab(String, String),
-    CloseSavedTabs(String),
-    /// The overflow list of a Files pane's tabs.
-    TabsMenu(String),
-    ToggleTree(String),
-    /// A directory row: open or shut it.
-    Dir(String, String),
-    /// A file row: preview it; a double click pins it.
-    File(String, String),
-    PinFile(String, String),
-    /// A file into a card of its own.
-    PopOut(String, String),
-    /// The front file of a Files pane into a card of its own.
-    PopOutActive(String),
     PanelTab(String, usize),
     /// A shell out of the panel, as a session of its own.
     Extract(String, String),
     CloseTerminal(String),
     /// A panel shell takes the keyboard.
     FocusTerminal(String),
-    ReturnCard(String),
-    CloseCard(String),
+    /// A card of its own, as a popped-out file's, is chosen.
     SelectCard(String),
-    ClearFilter(String),
 }
 
 /// What a session's column can hold, in the order it draws them.
@@ -140,34 +118,6 @@ pub fn pane_id(kind: SideKind, owner: &str) -> String {
     format!("{}:{owner}", kind.key())
 }
 
-/// An open file tab's buffer and draft key.
-pub fn tab_key(owner: &str, path: &str) -> String {
-    format!("files:{owner}:{path}")
-}
-
-/// A session's Files pane.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilesPane {
-    pub tabs: Vec<String>,
-    pub active: Option<String>,
-    /// The tab a single click opened, replaced by the next one until it is
-    /// pinned or typed in.
-    pub preview: Option<String>,
-    pub tree_visible: bool,
-}
-
-impl Default for FilesPane {
-    fn default() -> FilesPane {
-        FilesPane {
-            tabs: Vec::new(),
-            active: None,
-            preview: None,
-            tree_visible: true,
-        }
-    }
-}
-
 /// The shells a session holds beside its agent.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,14 +133,6 @@ impl Panel {
     }
 }
 
-/// A file popped out of a session into a card of its own.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Card {
-    pub session_id: String,
-    pub file_path: String,
-}
-
 /// How a session card divides its interior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Split {
@@ -198,172 +140,13 @@ pub struct Split {
     pub panes: Vec<f32>,
 }
 
-/// What the column, the Files panes and the cards keep across launches.
+/// What the column keeps across launches.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Saved {
-    pub files: BTreeMap<String, FilesPane>,
     pub panels: BTreeMap<String, Panel>,
-    pub cards: BTreeMap<String, Card>,
     pub splits: BTreeMap<String, Split>,
     pub maximized: Option<String>,
-    pub tree_ratio: Option<f32>,
-    pub next_card: u32,
-}
-
-/// One entry of a directory.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Entry {
-    pub name: String,
-    pub path: String,
-    pub dir: bool,
-}
-
-impl Entry {
-    pub fn from_value(v: &serde_json::Value) -> Option<Entry> {
-        Some(Entry {
-            name: v.get("name")?.as_str()?.to_owned(),
-            path: v.get("path")?.as_str()?.to_owned(),
-            dir: v
-                .get("isDirectory")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-        })
-    }
-}
-
-/// A Files pane's tree: what has been listed, what is
-/// open, and the filter.
-#[derive(Debug, Clone, Default)]
-pub struct Tree {
-    /// The directory listed at the top.
-    pub cwd: String,
-    pub root: Option<Vec<Entry>>,
-    pub loading: bool,
-    pub dirs: HashMap<String, Vec<Entry>>,
-    pub expanded: HashSet<String>,
-    /// Directories being listed.
-    pub pending: HashSet<String>,
-    pub filter: String,
-}
-
-/// One drawn row of a tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TreeRow {
-    Dir {
-        entry: Entry,
-        depth: usize,
-        open: bool,
-        loading: bool,
-    },
-    File {
-        entry: Entry,
-        depth: usize,
-    },
-    /// An open directory with nothing in it.
-    Empty {
-        depth: usize,
-    },
-}
-
-impl Tree {
-    /// Entries that match or hold a match, and the
-    /// directories opened to show them; only what has been listed counts.
-    pub fn filter_sets(&self) -> (HashSet<String>, HashSet<String>) {
-        let (mut matched, mut expand) = (HashSet::new(), HashSet::new());
-        if self.filter.is_empty() {
-            return (matched, expand);
-        }
-        let lc = self.filter.to_lowercase();
-        fn visit(
-            t: &Tree,
-            e: &Entry,
-            lc: &str,
-            matched: &mut HashSet<String>,
-            expand: &mut HashSet<String>,
-        ) -> bool {
-            let own = e.name.to_lowercase().contains(lc);
-            if !e.dir {
-                if own {
-                    matched.insert(e.path.clone());
-                }
-                return own;
-            }
-            let mut below = false;
-            for c in t.dirs.get(&e.path).into_iter().flatten() {
-                below |= visit(t, c, lc, matched, expand);
-            }
-            if below {
-                expand.insert(e.path.clone());
-            }
-            if own || below {
-                matched.insert(e.path.clone());
-            }
-            own || below
-        }
-        for e in self.root.iter().flatten() {
-            visit(self, e, &lc, &mut matched, &mut expand);
-        }
-        (matched, expand)
-    }
-
-    /// The rows as `TreeNode` draws them, depth first.
-    pub fn rows(&self) -> Vec<TreeRow> {
-        let (matched, expand) = self.filter_sets();
-        let filtering = !self.filter.is_empty();
-        let mut out = Vec::new();
-        fn walk(
-            t: &Tree,
-            entries: &[Entry],
-            depth: usize,
-            filter: Option<(&HashSet<String>, &HashSet<String>)>,
-            out: &mut Vec<TreeRow>,
-        ) {
-            for e in entries {
-                if filter.is_some_and(|(m, _)| !m.contains(&e.path)) {
-                    continue;
-                }
-                if !e.dir {
-                    out.push(TreeRow::File {
-                        entry: e.clone(),
-                        depth,
-                    });
-                    continue;
-                }
-                let open = t.expanded.contains(&e.path)
-                    || filter.is_some_and(|(_, x)| x.contains(&e.path));
-                out.push(TreeRow::Dir {
-                    entry: e.clone(),
-                    depth,
-                    open,
-                    loading: t.pending.contains(&e.path),
-                });
-                if !open {
-                    continue;
-                }
-                if let Some(children) = t.dirs.get(&e.path) {
-                    if children.is_empty() {
-                        out.push(TreeRow::Empty { depth: depth + 1 });
-                    }
-                    walk(t, children, depth + 1, filter, out);
-                }
-            }
-        }
-        let filter = filtering.then_some((&matched, &expand));
-        walk(
-            self,
-            self.root.as_deref().unwrap_or(&[]),
-            0,
-            filter,
-            &mut out,
-        );
-        out
-    }
-
-    /// Whether the filter matched nothing listed.
-    pub fn no_match(&self) -> bool {
-        !self.filter.is_empty() && self.filter_sets().0.is_empty()
-    }
 }
 
 /// Every pane, panel and card, with what is being dragged.
@@ -373,15 +156,12 @@ pub struct Side {
     /// A drag in flight: the session and its weights, or its card split.
     pub drag_panes: Option<(String, Vec<f32>)>,
     pub drag_card: Option<(String, f32)>,
-    pub drag_tree: Option<f32>,
-    /// The trees, by owning session.
-    pub trees: HashMap<String, Tree>,
+    /// The sessions whose Files pane is open, as the Files extension lists them.
+    pub files: HashSet<String>,
     /// A panel shell holding the keyboard.
     pub focus: Option<String>,
     /// Where the view is kept between launches; none keeps it in memory.
     pub file: Option<PathBuf>,
-    /// Files panes too narrow to show tree and file side by side.
-    pub narrow: HashSet<String>,
 }
 
 impl Side {
@@ -409,16 +189,10 @@ impl Side {
         }
     }
 
-    pub fn tree_ratio(&self) -> f32 {
-        self.drag_tree
-            .or(self.saved.tree_ratio)
-            .map_or(DEFAULT_TREE, clamp_split)
-    }
-
     /// What `owner`'s column draws, in order.
     pub fn entries(&self, owner: &str) -> Vec<SideKind> {
         let mut out = Vec::new();
-        if self.saved.files.contains_key(owner) {
+        if self.files.contains(owner) {
             out.push(SideKind::Files);
         }
         if self.saved.panels.contains_key(owner) {
@@ -499,116 +273,6 @@ impl Side {
             .map(|(k, _)| k.as_str())
     }
 
-    /// Opens the files pane.
-    pub fn open_files(&mut self, owner: &str) {
-        self.saved.files.entry(owner.to_owned()).or_default();
-    }
-
-    /// The tab keys whose buffers go with it.
-    pub fn close_files(&mut self, owner: &str) -> Vec<String> {
-        let tabs = self
-            .saved
-            .files
-            .remove(owner)
-            .map(|p| p.tabs)
-            .unwrap_or_default();
-        self.trees.remove(owner);
-        self.clear_placement(&pane_id(SideKind::Files, owner));
-        tabs.iter().map(|t| tab_key(owner, t)).collect()
-    }
-
-    /// A single click previews, replacing the last preview
-    /// unless that one has edits; `pin` keeps the tab.
-    pub fn open_tab(&mut self, owner: &str, path: &str, pin: bool, preview_dirty: bool) {
-        let pane = self.saved.files.entry(owner.to_owned()).or_default();
-        if pane.tabs.iter().any(|t| t == path) {
-            if pin && pane.preview.as_deref() == Some(path) {
-                pane.preview = None;
-            }
-        } else if pin {
-            pane.tabs.push(path.to_owned());
-        } else {
-            match pane.preview.clone().filter(|_| !preview_dirty) {
-                Some(old) => {
-                    for t in &mut pane.tabs {
-                        if *t == old {
-                            *t = path.to_owned();
-                        }
-                    }
-                }
-                None => pane.tabs.push(path.to_owned()),
-            }
-            pane.preview = Some(path.to_owned());
-        }
-        pane.active = Some(path.to_owned());
-    }
-
-    /// Pins a preview tab.
-    pub fn pin_tab(&mut self, owner: &str, path: &str) {
-        if let Some(p) = self.saved.files.get_mut(owner) {
-            if p.preview.as_deref() == Some(path) {
-                p.preview = None;
-            }
-        }
-    }
-
-    /// Brings a file tab to the front.
-    pub fn set_active_tab(&mut self, owner: &str, path: &str) {
-        if let Some(p) = self.saved.files.get_mut(owner) {
-            if p.tabs.iter().any(|t| t == path) {
-                p.active = Some(path.to_owned());
-            }
-        }
-    }
-
-    /// The next tab along takes the front.
-    pub fn close_tab(&mut self, owner: &str, path: &str) {
-        let Some(p) = self.saved.files.get_mut(owner) else {
-            return;
-        };
-        let Some(i) = p.tabs.iter().position(|t| t == path) else {
-            return;
-        };
-        p.tabs.remove(i);
-        if p.active.as_deref() == Some(path) {
-            p.active = p
-                .tabs
-                .get(i)
-                .or_else(|| i.checked_sub(1).and_then(|j| p.tabs.get(j)))
-                .cloned();
-        }
-        if p.preview.as_deref() == Some(path) {
-            p.preview = None;
-        }
-    }
-
-    /// Only tabs with edits stay.
-    pub fn close_saved_tabs(&mut self, owner: &str, dirty: impl Fn(&str) -> bool) {
-        let Some(p) = self.saved.files.get_mut(owner) else {
-            return;
-        };
-        p.tabs.retain(|t| dirty(t));
-        if p.active.as_ref().is_some_and(|a| !p.tabs.contains(a)) {
-            p.active = p.tabs.first().cloned();
-        }
-        if p.preview.as_ref().is_some_and(|a| !p.tabs.contains(a)) {
-            p.preview = None;
-        }
-    }
-
-    /// Shows or hides the file tree.
-    pub fn toggle_tree(&mut self, owner: &str) {
-        if let Some(p) = self.saved.files.get_mut(owner) {
-            p.tree_visible = !p.tree_visible;
-        }
-    }
-
-    pub fn set_tree_visible(&mut self, owner: &str, visible: bool) {
-        if let Some(p) = self.saved.files.get_mut(owner) {
-            p.tree_visible = visible;
-        }
-    }
-
     /// Shown in front, never listed twice.
     pub fn open_panel(&mut self, owner: &str, terminal: &str) {
         let p = self.saved.panels.entry(owner.to_owned()).or_default();
@@ -663,50 +327,6 @@ impl Side {
         released
     }
 
-    /// One card per file per session; an existing one is
-    /// returned rather than a second made.
-    pub fn promote(&mut self, owner: &str, path: &str) -> String {
-        if let Some((id, _)) = self
-            .saved
-            .cards
-            .iter()
-            .find(|(_, c)| c.session_id == owner && c.file_path == path)
-        {
-            return id.clone();
-        }
-        self.saved.next_card += 1;
-        let id = format!("card:{owner}:{}", self.saved.next_card);
-        self.saved.cards.insert(
-            id.clone(),
-            Card {
-                session_id: owner.to_owned(),
-                file_path: path.to_owned(),
-            },
-        );
-        id
-    }
-
-    /// The cards `owner` popped out, in the order they were made.
-    pub fn cards_of(&self, owner: &str) -> Vec<&str> {
-        let mut ids: Vec<(&str, u32)> = self
-            .saved
-            .cards
-            .iter()
-            .filter(|(_, c)| c.session_id == owner)
-            .map(|(id, _)| {
-                (
-                    id.as_str(),
-                    id.rsplit(':')
-                        .next()
-                        .and_then(|n| n.parse().ok())
-                        .unwrap_or(0),
-                )
-            })
-            .collect();
-        ids.sort_by_key(|(_, n)| *n);
-        ids.into_iter().map(|(id, _)| id).collect()
-    }
-
     fn clear_placement(&mut self, pane: &str) {
         if self.saved.maximized.as_deref() == Some(pane) {
             self.saved.maximized = None;
@@ -716,29 +336,14 @@ impl Side {
     /// Drops what belongs to sessions that no longer exist, as the store
     /// prunes on load; true when anything went.
     pub fn prune(&mut self, live: &HashSet<&str>) -> bool {
-        let before = (
-            self.saved.files.len(),
-            self.saved.panels.len(),
-            self.saved.cards.len(),
-            self.saved.splits.len(),
-        );
-        self.saved.files.retain(|k, _| live.contains(k.as_str()));
+        let before = (self.saved.panels.len(), self.saved.splits.len());
         self.saved.panels.retain(|k, _| live.contains(k.as_str()));
         for p in self.saved.panels.values_mut() {
             p.terminals.retain(|t| live.contains(t.as_str()));
         }
         self.saved.panels.retain(|_, p| !p.terminals.is_empty());
-        self.saved
-            .cards
-            .retain(|_, c| live.contains(c.session_id.as_str()));
         self.saved.splits.retain(|k, _| live.contains(k.as_str()));
-        self.trees.retain(|k, _| live.contains(k.as_str()));
-        let after = (
-            self.saved.files.len(),
-            self.saved.panels.len(),
-            self.saved.cards.len(),
-            self.saved.splits.len(),
-        );
+        let after = (self.saved.panels.len(), self.saved.splits.len());
         before != after
     }
 }
@@ -782,25 +387,6 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_tab_is_replaced_until_pinned_or_edited() {
-        let mut p = Side::default();
-        p.open_tab("s", "/a", false, false);
-        p.open_tab("s", "/b", false, false);
-        assert_eq!(p.saved.files["s"].tabs, ["/b"]);
-        p.open_tab("s", "/c", false, true);
-        assert_eq!(p.saved.files["s"].tabs, ["/b", "/c"]);
-        p.pin_tab("s", "/c");
-        p.open_tab("s", "/d", true, false);
-        assert_eq!(p.saved.files["s"].tabs, ["/b", "/c", "/d"]);
-        assert_eq!(p.saved.files["s"].active.as_deref(), Some("/d"));
-        p.close_tab("s", "/d");
-        assert_eq!(p.saved.files["s"].active.as_deref(), Some("/c"));
-        p.close_saved_tabs("s", |t| t == "/b");
-        assert_eq!(p.saved.files["s"].tabs, ["/b"]);
-        assert_eq!(p.saved.files["s"].active.as_deref(), Some("/b"));
-    }
-
-    #[test]
     fn panels_claim_shells_and_close_when_their_last_one_leaves() {
         let mut p = Side::default();
         p.open_panel("agent", "sh1");
@@ -818,68 +404,14 @@ mod tests {
     }
 
     #[test]
-    fn a_file_has_one_card_per_session() {
-        let mut p = Side::default();
-        let a = p.promote("s", "/x");
-        assert_eq!(p.promote("s", "/x"), a);
-        let b = p.promote("s", "/y");
-        assert_ne!(a, b);
-        assert_eq!(p.cards_of("s"), [a.as_str(), b.as_str()]);
-        assert_ne!(p.promote("t", "/x"), a);
-    }
-
-    #[test]
     fn pruning_drops_what_dead_sessions_held() {
         let mut p = Side::default();
-        p.open_files("live");
-        p.open_files("dead");
         p.open_panel("live", "gone");
-        p.promote("dead", "/x");
+        p.set_terminal_ratio("dead", 0.3);
         let live: HashSet<&str> = ["live"].into();
         assert!(p.prune(&live));
-        assert_eq!(p.saved.files.keys().collect::<Vec<_>>(), ["live"]);
-        assert!(p.saved.panels.is_empty() && p.saved.cards.is_empty());
+        assert!(p.saved.panels.is_empty() && p.saved.splits.is_empty());
         assert!(!p.prune(&live));
-    }
-
-    fn e(name: &str, path: &str, dir: bool) -> Entry {
-        Entry {
-            name: name.into(),
-            path: path.into(),
-            dir,
-        }
-    }
-
-    #[test]
-    fn the_filter_opens_directories_down_to_what_matches() {
-        let mut t = Tree {
-            root: Some(vec![
-                e("src", "/src", true),
-                e("README.md", "/README.md", false),
-            ]),
-            ..Tree::default()
-        };
-        t.dirs.insert(
-            "/src".into(),
-            vec![
-                e("app.ts", "/src/app.ts", false),
-                e("lib", "/src/lib", true),
-            ],
-        );
-        t.dirs.insert("/src/lib".into(), Vec::new());
-        assert_eq!(t.rows().len(), 2);
-        t.expanded.insert("/src".into());
-        t.expanded.insert("/src/lib".into());
-        let rows = t.rows();
-        assert_eq!(rows.len(), 5);
-        assert_eq!(rows[3], TreeRow::Empty { depth: 2 });
-        t.filter = "APP".into();
-        t.expanded.clear();
-        let rows = t.rows();
-        assert_eq!(rows.len(), 2, "{rows:?}");
-        assert!(matches!(&rows[0], TreeRow::Dir { open: true, .. }));
-        t.filter = "zzz".into();
-        assert!(t.rows().is_empty() && t.no_match());
     }
 
     #[test]
@@ -887,7 +419,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vorn-panes-{}", std::process::id()));
         let file = view_file(&dir);
         let mut p = Side::load(Some(file.clone()));
-        p.open_tab("s", "/a", true, false);
         p.open_panel("s", "sh");
         p.set_terminal_ratio("s", 0.6);
         p.save();

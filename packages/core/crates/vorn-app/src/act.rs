@@ -20,7 +20,7 @@ pub enum Act {
     /// Selects a card (the active tab in the tabs layout).
     Select(String),
     /// A shell's command blocks and its composer's menu.
-    Intent(crate::intent::IntentAct),
+    Intent(crate::prompt::IntentAct),
     /// Expands a card onto the focused stage.
     Expand(String),
     /// Puts the focused stage back into the grid.
@@ -182,7 +182,10 @@ pub enum Act {
     Set(crate::settings::SetAct),
     Git(crate::git::GitAct),
     Side(crate::side::SideAct),
-    Edit(crate::editor::EditAct),
+    /// A tree code's controls.
+    Code(crate::code::CodeAct),
+    /// The answer to the question an extension's tree asks: OK or Cancel.
+    Answer(bool),
     Pane(crate::panes::PaneAct),
     /// The command palette's controls.
     Palette(crate::palette::PalAct),
