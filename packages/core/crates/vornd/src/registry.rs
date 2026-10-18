@@ -1452,6 +1452,18 @@ impl Registry {
         self.take_program(id, &p, at)
     }
 
+    /// Terminal `id` is `cols`x`rows` now, as its last resize record says: its
+    /// record keeps the size it has, not the one it was launched with.
+    pub fn resized(&mut self, id: &str, cols: u16, rows: u16) -> Option<Value> {
+        let record = &mut self.terminals.get_mut(id)?.record;
+        let now = (Some(u32::from(cols)), Some(u32::from(rows)));
+        if (record.cols, record.rows) == now {
+            return None;
+        }
+        (record.cols, record.rows) = now;
+        self.decided(id)
+    }
+
     /// A person looked at terminal `id`: a finished report is seen.
     pub fn seen(&mut self, id: &str) -> Option<Value> {
         let p = self.terminals.get_mut(id)?.record.program_status.as_mut()?;
@@ -2539,6 +2551,13 @@ impl SessionRegistry {
         self.tell(note);
     }
 
+    /// [`Registry::resized`].
+    pub fn resized(&self, id: &str, cols: u16, rows: u16) {
+        let mut fed = self.lock();
+        let note = fed.registry.resized(id, cols, rows);
+        self.tell(note);
+    }
+
     /// [`Registry::seen`].
     pub fn seen(&self, id: &str) {
         let mut fed = self.lock();
@@ -3477,6 +3496,19 @@ mod tests {
             Registry::new(Gen(1)).input("a", None),
             Err(RegistryError::NotDeciding { .. })
         ));
+    }
+
+    #[test]
+    fn a_resize_updates_the_size_its_record_tells() {
+        let mut r = deciding();
+        let note = r.resized("a", 132, 41).expect("a changed record is told");
+        assert_eq!(note["record"]["cols"], 132);
+        assert_eq!(note["record"]["rows"], 41);
+        assert!(
+            r.resized("a", 132, 41).is_none(),
+            "the same size is no change"
+        );
+        assert!(r.resized("nope", 80, 24).is_none());
     }
 
     #[test]
