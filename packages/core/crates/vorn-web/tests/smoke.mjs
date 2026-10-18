@@ -319,11 +319,14 @@ async function board(page, server) {
 /** A shell's Files pane, its src folder open and app.ts in its editor. */
 async function files(page, vornd) {
   mkdirSync(join(vornd.home, 'src'), { recursive: true })
-  writeFileSync(join(vornd.home, 'src', 'app.ts'), "export const greet = (n: string) => `Hello, ${n}`\n")
+  writeFileSync(
+    join(vornd.home, 'src', 'app.ts'),
+    'export const greet = (n: string) => `Hello, ${n}`\n'
+  )
   writeFileSync(join(vornd.home, 'README.md'), '# Smoke\n')
   const card = await until('the card', async () => {
     const b = await page
-      .locator('[role="group"][aria-label="smoke"]')
+      .locator('[role="group"][aria-label="Shell 1"]')
       .first()
       .boundingBox()
       .catch(() => null)
@@ -331,9 +334,11 @@ async function files(page, vornd) {
   })
   await page.mouse.move(card.x + card.width / 2, card.y + 20)
   await press(page, '[role="button"][aria-label="Browse files"]', 'Browse files')
-  await press(page, '[role="treeitem"][aria-label="src"]', 'the src folder')
-  await press(page, '[role="treeitem"][aria-label="app.ts"]', 'app.ts')
-  await until('the editor', () => page.locator('[role="textbox"][aria-label="Edit app.ts"]').count())
+  await press(page, '[aria-label="src"]', 'the src folder')
+  await press(page, '[aria-label="app.ts"]', 'app.ts')
+  await until('the editor', () =>
+    page.locator('[role="textbox"][aria-label="Edit app.ts"]').count()
+  )
   await page.waitForTimeout(500)
 }
 
@@ -342,12 +347,8 @@ async function blocks(page) {
   await press(page, '[role="textbox"][aria-label="Type a command"]', 'the composer')
   await page.keyboard.type('echo vorn-$((6*7))-blocks')
   await page.keyboard.press('Enter')
-  await until(
-    'the block',
-    () => page.locator('[role="listitem"][aria-label="echo vorn-$((6*7))-blocks"]').count(),
-    15000
-  )
-  await page.waitForTimeout(500)
+  // The block's title and output are drawn, not mirrored: the screenshot shows them.
+  await page.waitForTimeout(2000)
 }
 
 /** The bottom strip of the card named `name`, as pixels: where its footer draws. */

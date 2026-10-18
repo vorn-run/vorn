@@ -78,10 +78,11 @@ pub struct Files {
     pending: Option<Pending>,
 }
 
-/// What an event answers: nothing to change, a part to draw again, the whole tree, or a question.
+/// The question before edits go: its OK comes back as [`CONFIRMED`], drawn for `event`'s scope.
 fn answer_ask(event: &Event) -> Value {
-    json!({ "ask": { "title": DISCARD, "event": Event::new(CONFIRMED, EventKind::Click, "")
-        .scoped(event.scope.clone()) } })
+    let mut ok = Event::new(CONFIRMED, EventKind::Click, "");
+    ok.scope = event.scope.clone();
+    json!({ "ask": { "title": DISCARD, "event": ok } })
 }
 
 /// What follows something shown anew: the card or session `id` comes to the front; none or empty draws again.
@@ -89,17 +90,6 @@ fn focus(id: Option<String>) -> Value {
     match id.filter(|i| !i.is_empty()) {
         Some(id) => json!({ "focus": id }),
         None => Value::Null,
-    }
-}
-
-trait Scoped {
-    fn scoped(self, scope: Option<String>) -> Self;
-}
-
-impl Scoped for Event {
-    fn scoped(mut self, scope: Option<String>) -> Event {
-        self.scope = scope;
-        self
     }
 }
 
@@ -532,13 +522,12 @@ impl Files {
         match action {
             "toggle" => {
                 let owner = arg(args, "session", action)?;
-                Ok(if self.toggle(host, owner, false)? {
-                    json!({})
-                } else {
-                    answer_ask(
-                        &Event::new(CONFIRMED, EventKind::Click, "").scoped(Some(owner.to_owned())),
-                    )
-                })
+                if self.toggle(host, owner, false)? {
+                    return Ok(json!({}));
+                }
+                let mut e = Event::new(CONFIRMED, EventKind::Click, "");
+                e.scope = Some(owner.to_owned());
+                Ok(answer_ask(&e))
             }
             // What sessions are left: panes and cards of the rest go.
             "prune" => {

@@ -175,33 +175,33 @@ any of the extension's collections.
 A click, a toggle, a choice, a field's Return or a part's own event comes back as `ui.event`
 (`{point, event}` in). Its answer, every field optional, says what follows:
 
-| field    | does                                                                        |
-| -------- | --------------------------------------------------------------------------- |
-| `toast`  | a line that says what happened                                              |
-| `error`  | a line that says what failed                                                |
-| `patch`  | nodes changed in place, without a render                                    |
-| `open`   | opens one of its dialogs, by id                                             |
-| `window` | opens one of its windows by id, in place of the one open                    |
-| `close`  | `true` closes the dialog or window the tree is in                           |
-| `focus`  | a session to show in the main window, which comes forward                   |
-| `show`   | `true` brings the main window forward                                       |
-| `url`    | an `https:` page to open in the browser                                     |
-| `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id` |
+| field    | does                                                                               |
+| -------- | ---------------------------------------------------------------------------------- |
+| `toast`  | a line that says what happened                                                     |
+| `error`  | a line that says what failed                                                       |
+| `patch`  | nodes changed in place, without a render                                           |
+| `open`   | opens one of its dialogs, by id                                                    |
+| `window` | opens one of its windows by id, in place of the one open                           |
+| `close`  | `true` closes the dialog or window the tree is in                                  |
+| `focus`  | a session to show in the main window, which comes forward                          |
+| `show`   | `true` brings the main window forward                                              |
+| `url`    | an `https:` page to open in the browser                                            |
+| `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id`        |
 | `ask`    | `{title, ok?, event}`: Vorn's own alert asks first; OK tells the extension `event` |
-| `same`   | `true`: nothing changed that the tree draws, so it is not asked for again   |
+| `same`   | `true`: nothing changed that the tree draws, so it is not asked for again          |
 
 ### The parts a pane draws
 
 These hold data rather than children, and the client keeps what changes with
 every key or pointer move (hover, typing, a drag) to itself:
 
-| part      | holds                                                                         | reports                                                     |
-| --------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `tabs`    | tabs (label, file, preview, dirty, active), `lead`, `tools` and `more` tools  | `select`, `open` (double click) and `close` a tab; `click` a tool |
-| `outline` | rows a tree of folders deep, the one chosen, a `filter`, an `action`          | `select` a row, `open` a leaf, `change` the filter, `click` the action with the row's id |
-| `split`   | one child or two, side by side, `ratio` to the first; under `narrow` px only the first | `resize` with the ratio dragged to                          |
-| `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error` | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
-| `log`     | a shell's commands, one per prompt, oldest first                              |                                                             |
+| part      | holds                                                                                  | reports                                                                                       |
+| --------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `tabs`    | tabs (label, file, preview, dirty, active), `lead`, `tools` and `more` tools           | `select`, `open` (double click) and `close` a tab; `click` a tool                             |
+| `outline` | rows a tree of folders deep, the one chosen, a `filter`, an `action`                   | `select` a row, `open` a leaf, `change` the filter, `click` the action with the row's id      |
+| `split`   | one child or two, side by side, `ratio` to the first; under `narrow` px only the first | `resize` with the ratio dragged to                                                            |
+| `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error`  | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
+| `log`     | a shell's commands, one per prompt, oldest first                                       |                                                                                               |
 
 A `code`'s text is typed, coloured and searched in the client, which takes
 `draft`, else `text`, whenever `rev` changes, and tells the extension the
@@ -276,11 +276,11 @@ stdio, `data` and what `get` answers are base64 strings.
 ### Calls and events Files and Shell blocks use
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,
-  isDirectory}`, folders first, without what git ignores; `files.stat`
+isDirectory}`, folders first, without what git ignores; `files.stat`
   (`{path}`) answers `{size, mtimeMs}` or null. Both under `files.read`.
 - `shell.executables` answers the names of the programs on the shell's path,
   under `files.read`; `git.branches` (`{worktree}`) answers `{local,
-  current, isGitRepo}`, under `git.read`.
+current, isGitRepo}`, under `git.read`.
 - `session.mark` carries `at` (when vornd read it) and `cwd`, the folder the
   shell last reported.
 
