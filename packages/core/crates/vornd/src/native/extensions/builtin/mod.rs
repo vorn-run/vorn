@@ -100,6 +100,46 @@ pub trait Builtin: Send + Sync + 'static {
     }
 }
 
+/// Compiles every component Vorn ships into the cache, one after another
+/// and Tasks first, so the first task written or board opened after an
+/// install or upgrade waits for nothing. A call that comes first compiles as
+/// it always did. A test's vornd (`VORN_EXIT_WITH`) skips it: its start stays
+/// cheap, and each component compiles at its first use.
+pub fn precompile(router: &Arc<Router>) {
+    if std::env::var_os(vorn_spawn::watch::EXIT_WITH).is_some() {
+        return;
+    }
+    let shipped: Vec<(&'static str, &'static [u8])> = [
+        (tasks::MANIFEST, tasks::WASM),
+        (
+            wasm::workflow_editor().manifest,
+            wasm::workflow_editor().wasm,
+        ),
+        (wasm::widget().manifest, wasm::widget().wasm),
+        (wasm::worktrees().manifest, wasm::worktrees().wasm),
+    ]
+    .into_iter()
+    .collect();
+    let router = Arc::clone(router);
+    tokio::spawn(async move {
+        for (manifest, wasm) in shipped {
+            let Ok(manifest) = file::parse_builtin(manifest) else {
+                continue;
+            };
+            let bundled = vorn_extensions::component::Bundled {
+                manifest: Arc::new(manifest),
+                wasm,
+            };
+            if let Err(err) = router.prepare_bundled(&bundled).await {
+                warn!(
+                    "[extensions] could not compile {} ahead: {err}",
+                    bundled.manifest.name
+                );
+            }
+        }
+    });
+}
+
 /// Whether built-in `id` is switched on in `file`, `default` when the person never switched it.
 pub fn switched_on(file: &std::path::Path, id: &str, default: bool) -> bool {
     std::fs::read(file)

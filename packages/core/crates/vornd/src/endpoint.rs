@@ -291,6 +291,7 @@ impl Daemon {
         }
         native.set_extensions(Arc::clone(&extensions));
         extensions.start();
+        crate::native::extensions::builtin::precompile(extensions.router());
     }
 
     /// Answers `vornd:spawn` from clients from now on, for tests.

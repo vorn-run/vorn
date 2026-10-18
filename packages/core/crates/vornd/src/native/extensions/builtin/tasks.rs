@@ -39,7 +39,7 @@ pub const NODE_DOCS: &str = include_str!("../../../../../../extensions/tasks/gen
 const TOOLS: &str = include_str!("../../../../../../extensions/tasks/generated/tools.json");
 
 /// The component, built for wasm32-wasip2 by vornd's build script.
-const WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tasks.wasm"));
+pub(crate) const WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tasks.wasm"));
 
 /// What a call to a task method is told while Tasks is off.
 pub const OFF: &str = "Tasks is off. Turn it on in Settings → Extensions.";
