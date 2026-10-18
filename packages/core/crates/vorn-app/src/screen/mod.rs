@@ -36,7 +36,7 @@ use crate::ui::{div, icon, El, Place, Rgba, Ui};
 use crate::view::PaneView;
 
 pub use cards::{
-    block_of, card_index, intent_id, log_id, rename_id, term_id, CARD_ID_BASE, SETTLE,
+    block_of, card_box_id, card_index, intent_id, log_id, rename_id, term_id, CARD_ID_BASE, SETTLE,
 };
 pub use cards::{scrollbar_id, thumb_id};
 pub use composer::COMPOSER_INPUT;

@@ -207,6 +207,8 @@ fn a_per_session_tree_finds_each_sessions_child() {
     assert!(for_session(&t, "t3").is_none());
     assert!(is_blank(&per_session(Vec::<(String, Node)>::new())));
     assert!(is_blank(&col([col([])])));
+    assert!(is_blank(&col([text(" ")])));
+    assert!(!is_blank(&col([text("3 idle")])));
     assert!(!is_blank(&t));
 }
 

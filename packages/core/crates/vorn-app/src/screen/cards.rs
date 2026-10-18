@@ -42,6 +42,11 @@ pub fn intent_id(session: &str) -> Id {
     Id::new("intent").child(session)
 }
 
+/// A grid card's outer box.
+pub fn card_box_id(session: &str) -> Id {
+    Acts::id("card-box", &Act::Select(session.to_owned()))
+}
+
 /// The terminal's box: right-click opens its menu, the wheel scrolls it.
 pub fn term_id(session: &str) -> Id {
     Id::new("term").child(session)
@@ -1221,7 +1226,7 @@ fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) ->
 fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
     let sid = session.info.id.as_str();
     let selected = s.st.selected.as_deref() == Some(sid);
-    let card_id = Acts::id("card-box", &Act::Select(sid.to_owned()));
+    let card_id = card_box_id(sid);
     let hot = s.ui.hover(card_id) > 0.0 || s.ui.hovered(term_id(sid));
     let dim = if s.st.selected.is_some() && !selected && !hot {
         0.6

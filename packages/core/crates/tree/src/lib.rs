@@ -458,9 +458,14 @@ pub fn for_session<'a>(tree: &'a Node, session: &str) -> Option<&'a Node> {
         .find(|c| c.id.as_deref() == Some(session))
 }
 
-/// Whether `tree` draws nothing: a box with nothing in it.
+/// Whether `tree` draws nothing: a box, or text of only spaces, with nothing else in it.
 pub fn is_blank(tree: &Node) -> bool {
-    matches!(tree.kind, Kind::Box) && tree.children.iter().all(is_blank)
+    let own = match &tree.kind {
+        Kind::Box => true,
+        Kind::Text { text, .. } => text.trim().is_empty(),
+        _ => false,
+    };
+    own && tree.children.iter().all(is_blank)
 }
 
 /// A change to a drawn tree: node `id` becomes `node`, or goes when there is none.
