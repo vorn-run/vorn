@@ -73,7 +73,11 @@ tree = true
             .collect();
         assert_eq!(
             kinds,
-            [("panes", "pane"), ("commands", "refresh"), ("views", "board")]
+            [
+                ("panes", "pane"),
+                ("commands", "refresh"),
+                ("views", "board")
+            ]
         );
         assert!(listed.iter().all(|p| p["extension"] == "checks"));
         assert_eq!(listed[2]["tree"], true);

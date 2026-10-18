@@ -174,10 +174,7 @@ fn drawn(s: &Screen<'_>, p: &Point) -> Option<El> {
 
 /// Every point at a whole-screen place, each drawn.
 fn every(s: &Screen<'_>, at: &str) -> Vec<El> {
-    s.st.points
-        .at(at)
-        .filter_map(|p| drawn(s, p))
-        .collect()
+    s.st.points.at(at).filter_map(|p| drawn(s, p)).collect()
 }
 
 /// The points at a per-session place, each its tree's child for that session;
@@ -341,11 +338,7 @@ pub(super) fn settings_page(s: &Screen<'_>, key: &str) -> El {
 /// An extension pane's body.
 pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
     match s.st.points.get(key) {
-        Some(p) => div()
-            .col()
-            .p(12.0)
-            .gap(8.0)
-            .child_if(drawn(s, p)),
+        Some(p) => div().col().p(12.0).gap(8.0).child_if(drawn(s, p)),
         None => text("This pane's extension is off", 12.0, k::GRAY_500).line_height(16.0),
     }
 }

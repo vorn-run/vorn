@@ -117,7 +117,11 @@ fn task_image(rest: &str, data_dir: &Path) -> Response<Body> {
         return invalid();
     };
     // A task id, then a file name of its own: never a path out of the folder.
-    let id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let id = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
     if !id(&task) || name.contains('/') {
         return invalid();
     }

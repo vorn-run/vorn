@@ -194,8 +194,7 @@ impl Board<'_> {
             let mut section = div().col().sem(Sem::Section(lane.title.to_owned()));
             if group.is_empty() {
                 if let Some(empty) = self.empty {
-                    section =
-                        section.child(text(empty, 12.0, faint()).sem(Sem::Text("secondary")));
+                    section = section.child(text(empty, 12.0, faint()).sem(Sem::Text("secondary")));
                 }
             }
             for &i in group {
@@ -742,7 +741,13 @@ mod tests {
         frame(&mut ui, &cards, &bind);
         let done = ui.rect_of(column_id("b", "done")).unwrap();
         assert_eq!(
-            column_at(&ui, "b", &LANES, done.x + done.w / 2.0, done.y + done.h / 2.0),
+            column_at(
+                &ui,
+                "b",
+                &LANES,
+                done.x + done.w / 2.0,
+                done.y + done.h / 2.0
+            ),
             Some("done")
         );
         assert_eq!(column_at(&ui, "b", &LANES, -10.0, -10.0), None);
@@ -773,7 +778,14 @@ mod tests {
         ui.begin(Rgba::TRANSPARENT);
         ui.layout(el, (390.0, 844.0));
         let json = ui.native_tree().unwrap().to_json();
-        for s in ["To do", "Done", "Card 1", "APP-1", "Created Mar 5", "section"] {
+        for s in [
+            "To do",
+            "Done",
+            "Card 1",
+            "APP-1",
+            "Created Mar 5",
+            "section",
+        ] {
             assert!(json.contains(s), "{s} in {json}");
         }
     }

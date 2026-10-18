@@ -113,8 +113,14 @@ mod tests {
         assert_eq!(asked[0]["project"], "app");
         assert_eq!(asked[0]["connectionId"], "c");
         assert_eq!(answer["status"], "success");
-        assert_eq!(answer["output"], format!("Imported #7 \"{}...\"", "x".repeat(57)));
-        assert!(answer["logs"].as_str().unwrap().ends_with("(no url)\nTaskId: t1"));
+        assert_eq!(
+            answer["output"],
+            format!("Imported #7 \"{}...\"", "x".repeat(57))
+        );
+        assert!(answer["logs"]
+            .as_str()
+            .unwrap()
+            .ends_with("(no url)\nTaskId: t1"));
         let failed = create_task_from_item(&request, |_| Err("gone".into()));
         assert_eq!(failed, json!({ "status": "error", "error": "gone" }));
     }

@@ -33,8 +33,7 @@ pub const ID: &str = "vorn.tasks";
 pub const MANIFEST: &str = include_str!("../../../../../../extensions/tasks/vorn-extension.toml");
 
 /// What `describe_workflow_nodes` tells of the node types it declares, by id.
-pub const NODE_DOCS: &str =
-    include_str!("../../../../../../extensions/tasks/generated/nodes.json");
+pub const NODE_DOCS: &str = include_str!("../../../../../../extensions/tasks/generated/nodes.json");
 
 /// Its MCP tools, as `tools/list` lists them.
 const TOOLS: &str = include_str!("../../../../../../extensions/tasks/generated/tools.json");

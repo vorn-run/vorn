@@ -109,7 +109,11 @@ fn save(host: &mut dyn Host, task: &str, source: &str) -> Result<String, String>
             json!({ "path": source, "encoding": "base64" }),
         )
         .map_err(|e| e.message)?;
-    let bytes = decode_base64(read.get("base64").and_then(Value::as_str).unwrap_or_default());
+    let bytes = decode_base64(
+        read.get("base64")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
     let name = fresh_name(&ext);
     host.put_file(&format!("{task}/{name}"), &bytes)
         .map_err(|e| e.message)?;
@@ -221,7 +225,10 @@ mod tests {
         assert!(copied.ends_with(".jpg"));
         assert_eq!(host.files[&format!("t-1/{copied}")], b"jpeg");
         let delete = json!({ "taskId": "t-1", "filename": copied });
-        assert_eq!(ask(&mut host, "task:imageDelete", delete.clone()), Ok(Value::Null));
+        assert_eq!(
+            ask(&mut host, "task:imageDelete", delete.clone()),
+            Ok(Value::Null)
+        );
         assert_eq!(ask(&mut host, "task:imageDelete", delete), Ok(Value::Null));
         ask(&mut host, "task:imageCleanup", json!("t-1")).unwrap();
         assert!(host.files.is_empty());
@@ -231,9 +238,7 @@ mod tests {
     #[test]
     fn refuses_names_and_types_that_could_escape_or_run() {
         let mut host = FakeHost::default();
-        let upload = |task: &str, b64: &str, name: &str| {
-            json!({ "taskId": task, "base64": b64, "filename": name })
-        };
+        let upload = |task: &str, b64: &str, name: &str| json!({ "taskId": task, "base64": b64, "filename": name });
         assert_eq!(
             ask(&mut host, "task:imageUpload", upload("../x", "", "a.png")).unwrap_err(),
             "Invalid taskId: ../x"
@@ -242,18 +247,17 @@ mod tests {
             ask(&mut host, "task:imageUpload", upload("t", "", "a.svg")).unwrap_err(),
             "Unsupported image type: .svg"
         );
-        assert_eq!(
-            file("t", "../etc").unwrap_err(),
-            "Invalid filename: ../etc"
-        );
+        assert_eq!(file("t", "../etc").unwrap_err(), "Invalid filename: ../etc");
         assert_eq!(
             file("t", ".hidden").unwrap_err(),
             "Invalid filename: .hidden"
         );
         let big = "A".repeat(14 * 1024 * 1024);
-        assert!(ask(&mut host, "task:imageUpload", upload("t", &big, "a.png"))
-            .unwrap_err()
-            .starts_with("Image too large (10.5MB)"));
+        assert!(
+            ask(&mut host, "task:imageUpload", upload("t", &big, "a.png"))
+                .unwrap_err()
+                .starts_with("Image too large (10.5MB)")
+        );
         let named = ask(&mut host, "task:imageUpload", upload("t", "aGk", "noext")).unwrap();
         assert!(named.as_str().unwrap().ends_with(".png"));
         // A file that is not an image is never read.

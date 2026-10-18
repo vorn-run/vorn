@@ -213,8 +213,8 @@ impl Panel {
         let Some(p) = self.points.get(&self.key) else {
             return div();
         };
-        let body = crate::screen::points::draw_tree(ui, &self.acts, &self.points, p)
-            .unwrap_or_else(div);
+        let body =
+            crate::screen::points::draw_tree(ui, &self.acts, &self.points, p).unwrap_or_else(div);
         let hide = Id::new("panel-hide");
         self.acts.bind(
             hide,

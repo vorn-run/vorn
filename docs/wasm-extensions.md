@@ -144,9 +144,10 @@ selection, and boards. A program answers the same tree as JSON. The host
 draws it on every client: the desktop, the web client, a terminal's cells
 (`surface.cells`) and the phone.
 
-Any contribution that draws says `tree = true`: a sidebar section, a card's
-badges and footer, a sidebar row's marks (`decorations`), a pane, the
-composer's strip, a settings page, a window and a dialog. Each is asked for
+Any contribution that draws says `tree = true`: a main view (`views`), a
+sidebar section, a card's badges and footer, a sidebar row's marks
+(`decorations`), a pane, the composer's strip, a settings page, a window and
+a dialog. Each is asked for
 its tree with `ui.render` (`{point, surface}` in, `{tokens, tree}` out),
 `point` being the contribution's id, so a tree contribution's id is unique
 in its manifest. The host asks again whenever the extension's rows change,
@@ -174,8 +175,16 @@ A click, a toggle, a choice or a field's Return comes back as `ui.event`
 | `url`    | an `https:` page to open in the browser                                     |
 | `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id` |
 
+A board holds columns, each holding its cards. A board of thousands cannot
+travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list
+instead, each `lane(status, title)` a column, and the client reads the tasks
+a page at a time, windows them, drags them between columns and opens them.
+`graph()` places the workflow editor's canvas, which the client draws whole.
+
 `examples/extensions/turns` draws a tree in every place, and
-`examples/extensions/agent-footer` a card footer.
+`examples/extensions/agent-footer` a card footer. Vorn's own Tasks
+(`packages/core/extensions/tasks`) and Workflow editor
+(`packages/core/extensions/workflow-editor`) draw their main views this way.
 
 ## The new API
 
@@ -226,6 +235,21 @@ A name is segments of letters, digits, `.`, `_` and `-`, joined by `/`, none
 starting with `.`, at most 200 bytes. A file holds up to 10 MiB, and an
 extension keeps up to 256 MiB in all. Its files go when it is removed. Over
 stdio, `data` and what `get` answers are base64 strings.
+
+### Calls and events the workflow editor and Tasks use
+
+- `files.read` with `encoding: "base64"` answers `{base64}`, a file's bytes,
+  under `files.read`.
+- `workflow.run` (`{workflowId, inputs}`) runs a workflow by hand and
+  `workflow.resolveGate` (`{runId, nodeId, decision}`) answers a gate, under
+  `workflows.write`; `workflow.gates` lists the gates waiting for a person,
+  under `workflows.read`.
+- The events `workflow.changed` (`{}`: a workflow was made, edited, switched
+  or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
+  changed).
+
+Vorn's own Tasks keeps the board's tables, `tasks` and `task_source_links`,
+which it is lent by name beside its own; no installed extension is.
 
 ## Limits
 

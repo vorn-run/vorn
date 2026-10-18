@@ -324,14 +324,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let images = dir.path().join("task-images");
         let s = BlobStore::with_quota(dir.path().join("blobs"), 4).place("vorn.tasks", &images);
-        assert!(matches!(put(&s, "vorn.tasks", "t1/a.png", b"123456"), Ok(BlobAnswer::Put)));
+        assert!(matches!(
+            put(&s, "vorn.tasks", "t1/a.png", b"123456"),
+            Ok(BlobAnswer::Put)
+        ));
         assert_eq!(fs::read(images.join("t1/a.png")).unwrap(), b"123456");
-        assert_eq!(s.path("vorn.tasks", "t1/a.png").unwrap(), images.join("t1/a.png"));
+        assert_eq!(
+            s.path("vorn.tasks", "t1/a.png").unwrap(),
+            images.join("t1/a.png")
+        );
         assert!(s.path("vorn.tasks", "../x").is_err());
         // Another extension is still held to the quota.
         assert!(put(&s, "a.b", "big", b"123456").is_err());
         s.forget("vorn.tasks").unwrap();
-        assert!(images.join("t1/a.png").exists(), "a placed folder is never removed");
+        assert!(
+            images.join("t1/a.png").exists(),
+            "a placed folder is never removed"
+        );
     }
 
     fn get(s: &BlobStore, id: &str, name: &str) -> Option<Vec<u8>> {

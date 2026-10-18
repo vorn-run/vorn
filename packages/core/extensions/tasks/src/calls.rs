@@ -350,7 +350,6 @@ pub fn archive(store: &mut dyn Db, params: &Value, now: &str) -> Result<(Value, 
     Ok((ok(true), true))
 }
 
-
 /// Whether `method` writes one task, whose change may fire a trigger.
 fn written(method: &str) -> bool {
     matches!(

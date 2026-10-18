@@ -115,7 +115,11 @@ fn in_main(ctx: &AuthContext<'_>) -> bool {
 }
 
 /// What the authorizer decides for `ctx`, and why when it refuses.
-fn decide(prefix: &str, grants: &[Grant], ctx: &AuthContext<'_>) -> std::result::Result<(), String> {
+fn decide(
+    prefix: &str,
+    grants: &[Grant],
+    ctx: &AuthContext<'_>,
+) -> std::result::Result<(), String> {
     let schema = |t: &str| {
         t.eq_ignore_ascii_case("sqlite_master") || t.eq_ignore_ascii_case("sqlite_schema")
     };
@@ -261,11 +265,8 @@ impl ExtensionTables {
                 .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
             return Ok(());
         }
-        let (prefix, grants, refused) = (
-            self.prefix.clone(),
-            self.grants,
-            Arc::clone(&self.refused),
-        );
+        let (prefix, grants, refused) =
+            (self.prefix.clone(), self.grants, Arc::clone(&self.refused));
         self.conn.authorizer(Some(move |ctx: AuthContext<'_>| {
             match decide(&prefix, grants, &ctx) {
                 Ok(()) => Authorization::Allow,
@@ -558,8 +559,14 @@ mod tests {
         let writer = ExtensionTables::open_with(&path, "vorn.x", &WRITE).unwrap();
         let ran = writer
             .transaction(&[
-                ("UPDATE tasks SET title = ? WHERE id = ?".into(), vec![json!("T"), json!("t1")]),
-                ("INSERT INTO tasks VALUES (?, ?)".into(), vec![json!("t2"), json!("U")]),
+                (
+                    "UPDATE tasks SET title = ? WHERE id = ?".into(),
+                    vec![json!("T"), json!("t1")],
+                ),
+                (
+                    "INSERT INTO tasks VALUES (?, ?)".into(),
+                    vec![json!("t2"), json!("U")],
+                ),
             ])
             .unwrap();
         assert_eq!(ran, [json!(1), json!(1)]);

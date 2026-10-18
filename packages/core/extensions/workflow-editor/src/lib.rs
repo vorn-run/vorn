@@ -72,7 +72,13 @@ impl Editor {
     fn all_gates(host: &mut dyn Host) -> Result<(), Error> {
         let rows = host.call("workflow.gates", Value::Null)?;
         let mut ops = vec![Op::Clear];
-        ops.extend(rows.as_array().into_iter().flatten().cloned().map(Op::Upsert));
+        ops.extend(
+            rows.as_array()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .map(Op::Upsert),
+        );
         host.publish(GATES, ops);
         Ok(())
     }
@@ -129,7 +135,10 @@ impl Extension for Editor {
             "run" => {
                 let id = arg(&args, "id", method)?;
                 let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-                host.call("workflow.run", json!({ "workflowId": id, "inputs": inputs }))
+                host.call(
+                    "workflow.run",
+                    json!({ "workflowId": id, "inputs": inputs }),
+                )
             }
             "approve" | "reject" => {
                 let (run, node) = Editor::gate_of(&args, method)?;
@@ -158,7 +167,11 @@ impl Extension for Editor {
             }
         }
         for e in batch.iter().filter(|e| e.name == "workflow.gates") {
-            let run = e.data.get("runId").and_then(Value::as_str).unwrap_or_default();
+            let run = e
+                .data
+                .get("runId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let gates = e.data["gates"].as_array().cloned().unwrap_or_default();
             Editor::gates(host, run, &gates);
         }
@@ -167,7 +180,10 @@ impl Extension for Editor {
     fn render(&mut self, _: &mut dyn Host, point: &str, _: Surface) -> Result<tree::Node, Error> {
         match point {
             "workflows" => Ok(sdk::graph()),
-            other => Err(Error::new("unknown-action", format!("nothing draws {other}"))),
+            other => Err(Error::new(
+                "unknown-action",
+                format!("nothing draws {other}"),
+            )),
         }
     }
 }
@@ -176,8 +192,8 @@ vorn_extension_sdk::export!(Editor);
 
 #[cfg(test)]
 mod tests {
-    use vorn_extension_sdk::testing::FakeHost;
     use vorn_extension_sdk::dispatch;
+    use vorn_extension_sdk::testing::FakeHost;
 
     use super::*;
 
@@ -209,7 +225,10 @@ mod tests {
         let mut h = host();
         call(&mut h, "refresh", Value::Null).unwrap();
         let manual = h.rows(MANUAL).unwrap();
-        assert_eq!(manual, [json!({ "id": "a", "title": "A", "workspace": "personal" })]);
+        assert_eq!(
+            manual,
+            [json!({ "id": "a", "title": "A", "workspace": "personal" })]
+        );
         assert_eq!(h.rows(CONTEXTUAL).unwrap()[0]["workspace"], "w");
         assert_eq!(h.rows(GATES).unwrap(), [gate("r1", "g")]);
     }
@@ -228,10 +247,16 @@ mod tests {
         e.on_events(&mut h, vec![told("r1", json!([]))]);
         assert_eq!(h.rows(GATES).unwrap(), [gate("r2", "x")]);
         let answered = call(&mut h, "approve", json!({ "id": "r2|x" })).unwrap();
-        assert_eq!(answered, json!({ "runId": "r2", "nodeId": "x", "decision": "approve" }));
+        assert_eq!(
+            answered,
+            json!({ "runId": "r2", "nodeId": "x", "decision": "approve" })
+        );
         assert!(call(&mut h, "reject", json!({ "id": "nogate" })).is_err());
         let ran = call(&mut h, "run", json!({ "id": "a", "inputs": { "k": 1 } })).unwrap();
-        assert_eq!(ran["asked"], json!({ "workflowId": "a", "inputs": { "k": 1 } }));
+        assert_eq!(
+            ran["asked"],
+            json!({ "workflowId": "a", "inputs": { "k": 1 } })
+        );
         assert_eq!(call(&mut h, "move", json!({})).unwrap(), Value::Null);
     }
 

@@ -188,7 +188,11 @@ fn card(s: &Screen<'_>, t: &TaskConfig) -> Card {
         live: agent.is_some() && live,
         agent,
         note: format!("Created {}", tasks::short_date(&t.created_at)),
-        actions: menu.into_iter().filter(|(_, on)| *on).map(|(a, _)| a).collect(),
+        actions: menu
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(a, _)| a)
+            .collect(),
     }
 }
 
@@ -228,7 +232,10 @@ impl BoardBind for Binding<'_, '_> {
     }
 
     fn add(&self, lane: &str, foot: bool) -> Id {
-        let id = Id::new(self.key.as_str()).child("add").child(lane).child(foot);
+        let id = Id::new(self.key.as_str())
+            .child("add")
+            .child(lane)
+            .child(foot);
         self.s
             .acts
             .bind(id, Act::Task(tasks::TaskAct::New(lane.to_owned())));

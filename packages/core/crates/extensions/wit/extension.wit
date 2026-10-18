@@ -26,8 +26,7 @@
 // it draws, MCP tools or events beside its kind section; its service then also
 // runs as an extension, and the first message it is sent, `guest.init` or
 // `vorn/hello`, says which role a process plays. What it draws is an element
-// tree it answers `ui.render` with (`vorn-tree`); templates are files in their
-// own format, `vorn:view@1`, not an API.
+// tree it answers `ui.render` with (`vorn-tree`).
 //
 // A service is a program (`[service] command`) or a Wasm component
 // (`[service] component = "x.wasm"`) built for this world on
@@ -88,8 +87,8 @@
 // Paths start with `~`, `{data}`, `{env:NAME|fallback}` or `/`, and never
 // hold `..`; the hook files Vorn writes are `.json`. A session's status is
 // read in this order: what the agent reports itself (OSC 7501), then its
-// hooks, then its screen rules. An adapter may add templates beside the
-// section and fill them as any extension does (examples/extensions/agent-footer).
+// hooks, then its screen rules. An adapter may draw trees beside the section
+// as any extension does (examples/extensions/agent-footer).
 
 package vorn:extension@0.9.0;
 
@@ -263,8 +262,6 @@ interface guest {
   /// answers what follows a click, a toggle, a choice or a field's Return:
   /// `{toast?, error?, patch?, open?, window?, close?, focus?, show?, url?, signin?}`,
   /// `signin` being the window's target, `{id, name, browser: {signInUrl, origins, check}}`.
-  /// A template button's `signin="{row.id}"` calls `signin` with `{id}`; it
-  /// answers the window's target, `{name, browser: {signInUrl, origins, check}}`.
   /// An agent adapter whose `[agent.headless]` says `stream = true` is called
   /// `agent.stream` with `{session, lines}`, what a headless run printed, and
   /// answers `{conversation?, events?: [{event, tool?}]}`: the conversation

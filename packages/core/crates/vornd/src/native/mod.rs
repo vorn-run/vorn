@@ -519,7 +519,6 @@ impl Native {
         self.tasks.get()
     }
 
-
     /// The approval gates told waiting, which `workflow.gates` follows.
     pub fn waiting(&self) -> &work::waiting::Waiting {
         &self.waiting

@@ -178,4 +178,3 @@ pub fn import(
 pub fn link(store: &mut dyn Db, task_id: &str) -> Result<Value> {
     store.call("dbGetTaskSourceLink", json!([task_id]))
 }
-

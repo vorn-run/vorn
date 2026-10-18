@@ -79,10 +79,7 @@ impl<'h> HostDb<'h> {
             if let Some(s) = status {
                 params["status"] = json!(s);
             }
-            let page = self
-                .host
-                .call("task.list", params)
-                .map_err(|e| e.message)?;
+            let page = self.host.call("task.list", params).map_err(|e| e.message)?;
             all.extend(page["tasks"].as_array().cloned().unwrap_or_default());
             offset = page.get("next").cloned().unwrap_or(Value::Null);
         }
@@ -142,7 +139,10 @@ fn camel(row: Value) -> Value {
 /// `UPDATE tasks` for `dbUpdateTask(id, updates, present)`: a missing field
 /// is left as it is, but `completedAt` and `archivedAt` clear when `present`
 /// names them without a value.
-fn update_task(updates: &Map<String, Value>, present: &[String]) -> (Vec<&'static str>, Vec<Value>) {
+fn update_task(
+    updates: &Map<String, Value>,
+    present: &[String],
+) -> (Vec<&'static str>, Vec<Value>) {
     let mut sets = Vec::new();
     let mut args = Vec::new();
     for (key, column) in [
@@ -207,7 +207,9 @@ fn insert_task(t: &Value) -> Vec<Value> {
         field("projectName"),
         field("title"),
         or_empty("description"),
-        t.get("status").filter(|s| !s.is_null()).map_or(json!("todo"), bind),
+        t.get("status")
+            .filter(|s| !s.is_null())
+            .map_or(json!("todo"), bind),
         t.get("order").map_or(json!(0), bind),
         field("assignedSessionId"),
         field("assignedAgent"),
@@ -376,7 +378,8 @@ mod tests {
 
     #[test]
     fn an_update_sets_what_it_names_and_clears_the_dates_it_lists() {
-        let updates = json!({ "title": "T", "order": 2.0, "useWorktree": "yes", "completedAt": null });
+        let updates =
+            json!({ "title": "T", "order": 2.0, "useWorktree": "yes", "completedAt": null });
         let (sets, args) = update_task(updates.as_object().unwrap(), &["archivedAt".into()]);
         assert_eq!(
             sets,
@@ -388,6 +391,9 @@ mod tests {
                 "archived_at = ?"
             ]
         );
-        assert_eq!(args, [json!("T"), json!(2), json!(1), Value::Null, Value::Null]);
+        assert_eq!(
+            args,
+            [json!("T"), json!(2), json!(1), Value::Null, Value::Null]
+        );
     }
 }

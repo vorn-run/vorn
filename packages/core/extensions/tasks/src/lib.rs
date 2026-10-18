@@ -109,7 +109,12 @@ fn failed(message: impl Into<String>) -> Error {
 
 impl Tasks {
     /// Answers a `task:*` call.
-    pub fn answer(&mut self, host: &mut dyn Host, method: &str, params: &Value) -> Result<Value, Error> {
+    pub fn answer(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, Error> {
         if method.starts_with("task:image") {
             return images::answer(host, method, params).map_err(failed);
         }
@@ -132,7 +137,10 @@ impl Tasks {
     /// Tells clients `change`, and moves the badges when it can have moved one.
     fn told(&mut self, host: &mut dyn Host, change: &Change) {
         if let Err(err) = host.call(CHANGED, change.args()) {
-            host.log(vorn_extension_sdk::Level::Warn, &format!("could not tell clients the tasks changed: {err}"));
+            host.log(
+                vorn_extension_sdk::Level::Warn,
+                &format!("could not tell clients the tasks changed: {err}"),
+            );
         }
         if self.touches_badges(host, change) {
             self.badges(host);
@@ -288,7 +296,12 @@ impl Tasks {
 
     /// What a client that draws the board from its tree alone asks of it: a
     /// card dropped on a column, or a card's menu entry.
-    fn board_action(&mut self, host: &mut dyn Host, action: &str, args: &Value) -> Result<Value, Error> {
+    fn board_action(
+        &mut self,
+        host: &mut dyn Host,
+        action: &str,
+        args: &Value,
+    ) -> Result<Value, Error> {
         let id = arg(args, "id", action)?.to_owned();
         let status = |s: &str| json!({ "id": id, "status": s });
         let (method, params) = match action {
@@ -301,7 +314,12 @@ impl Tasks {
             "delete" => ("task:delete", json!({ "id": id })),
             // Opening a card is the client's; there is nothing to write.
             "open" => return Ok(Value::Null),
-            _ => return Err(Error::new("unknown-action", format!("Tasks has no action {action}"))),
+            _ => {
+                return Err(Error::new(
+                    "unknown-action",
+                    format!("Tasks has no action {action}"),
+                ))
+            }
         };
         self.answer(host, method, &params)
     }
@@ -339,8 +357,7 @@ impl Extension for Tasks {
         _: &Ctx,
     ) -> Result<Value, Error> {
         if let Some(tool) = method.strip_prefix("mcp.") {
-            return tools::call(self, host, tool, args)
-                .ok_or_else(|| Error::unknown(method));
+            return tools::call(self, host, tool, args).ok_or_else(|| Error::unknown(method));
         }
         match method {
             m if m.starts_with("task:") => self.answer(host, m, &args),
@@ -384,7 +401,10 @@ impl Extension for Tasks {
                 let shown = self.shown(host);
                 Ok(view::badges(shown.values()))
             }
-            other => Err(Error::new("unknown-action", format!("nothing draws {other}"))),
+            other => Err(Error::new(
+                "unknown-action",
+                format!("nothing draws {other}"),
+            )),
         }
     }
 }

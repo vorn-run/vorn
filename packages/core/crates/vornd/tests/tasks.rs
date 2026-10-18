@@ -91,7 +91,10 @@ async fn tasks_write_through_its_component_and_keep_the_board_when_off() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    assert_eq!(rows, json!([{ "id": "s1", "task": id, "title": "Ship it" }]));
+    assert_eq!(
+        rows,
+        json!([{ "id": "s1", "task": id, "title": "Ship it" }])
+    );
 
     // An image is kept where the board always kept them, and its path reads.
     let name = c

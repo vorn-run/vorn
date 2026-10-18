@@ -171,8 +171,12 @@ mod tests {
     #[test]
     fn lists_every_waiting_gate_with_its_workflows_names() {
         let waiting = [serde_json::to_value(run("running", true)).unwrap()];
-        let workflows = [json!({ "id": "w1", "name": "Named", "nodes": [{ "id": "g", "label": "" }] })];
+        let workflows =
+            [json!({ "id": "w1", "name": "Named", "nodes": [{ "id": "g", "label": "" }] })];
         let rows = all_rows(&waiting, &workflows);
-        assert_eq!((rows[0]["subtitle"].as_str(), rows[0]["title"].as_str()), (Some("Named"), Some("Approval")));
+        assert_eq!(
+            (rows[0]["subtitle"].as_str(), rows[0]["title"].as_str()),
+            (Some("Named"), Some("Approval"))
+        );
     }
 }

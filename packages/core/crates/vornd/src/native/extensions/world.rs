@@ -47,7 +47,12 @@ async fn read_bytes(path: String) -> Result<Value, ExtError> {
 /// then the rows it changed or removed, told to every client.
 async fn task_changed(native: &Arc<Native>, args: &Value) {
     use vorn_extensions::events::{TASK_CREATED, TASK_STATUS_CHANGED};
-    for e in args.get("events").and_then(Value::as_array).into_iter().flatten() {
+    for e in args
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let name = match e.get("kind").and_then(Value::as_str) {
             Some("taskCreated") => TASK_CREATED,
             _ => TASK_STATUS_CHANGED,

@@ -1,7 +1,8 @@
 //! An extension's element tree ([`vorn_tree`]) drawn with the kit on pixels and cells; the caller binds ids.
 
 use vorn_tree::{
-    ButtonStyle, Cards, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token, Tone,
+    ButtonStyle, Cards, Entry, Event, EventKind, Kind, Meter, Node, Paint, Props, TextStyle, Token,
+    Tone,
 };
 use vornui::accesskit::Role;
 use vornui::native::Sem;
@@ -377,10 +378,7 @@ impl Cx<'_> {
                 .gap(12.0)
                 .min_w0()
                 .children(n.children.iter().map(|c| self.column(c))),
-            Kind::Graph => self
-                .bind
-                .graph()
-                .unwrap_or_else(|| div().sem(Sem::Hidden)),
+            Kind::Graph => self.bind.graph().unwrap_or_else(|| div().sem(Sem::Hidden)),
             Kind::Column { .. } => self.column(n),
             Kind::Divider => div()
                 .w_full()
@@ -1446,10 +1444,7 @@ impl Cx<'_> {
 
     /// A board's column: its title, a count, and each child on a card.
     fn column(&self, n: &Node) -> El {
-        let Kind::Column {
-            title, tone: t, ..
-        } = &n.kind
-        else {
+        let Kind::Column { title, tone: t, .. } = &n.kind else {
             return self.node(n);
         };
         let ink = t.map_or(color::GRAY_500, tone);
@@ -1747,10 +1742,14 @@ pub fn invalid(place: &str, errors: &[String]) -> El {
         .border(1.0, color::DANGER)
         .role(Role::Alert, place)
         .child(
-            text(format!("{place} cannot be drawn"), size::XS.0, color::RED_300)
-                .line_height(size::XS.1)
-                .weight(600)
-                .wrapping(),
+            text(
+                format!("{place} cannot be drawn"),
+                size::XS.0,
+                color::RED_300,
+            )
+            .line_height(size::XS.1)
+            .weight(600)
+            .wrapping(),
         );
     for e in errors {
         b = b.child(

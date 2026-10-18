@@ -26,8 +26,8 @@ use vorn_extensions::api::ExtError;
 use vorn_extensions::events::{Owner, Queue, QUEUE};
 use vorn_extensions::gate::{self, Caller};
 use vorn_extensions::manifest::{file, Manifest};
-use vorn_extensions::router::Router;
 use vorn_extensions::points;
+use vorn_extensions::router::Router;
 
 use super::guard;
 

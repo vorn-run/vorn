@@ -402,17 +402,12 @@ impl Contributions {
 
     /// Whether it draws only from trees, as a program on the extension API does.
     pub fn templated_only(&self) -> bool {
-        self.footers().is_empty()
-            && self
-                .panes()
-                .iter()
-                .all(|p| p.draws == PaneDraws::Tree)
+        self.footers().is_empty() && self.panes().iter().all(|p| p.draws == PaneDraws::Tree)
     }
 
     /// Whether it uses anything only the extension API can fill: a tree, or rows a menu or attention lists.
     pub fn templated(&self) -> bool {
-        !self.points.is_empty()
-            || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
+        !self.points.is_empty() || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
     }
 
     /// Every contribution's own rule, of every kind.
@@ -1624,7 +1619,8 @@ fn read_point(
     if place.needs_view() && !tree {
         return Err((
             "",
-            "draws from the element tree its extension answers ui.render with: give it tree = true".into(),
+            "draws from the element tree its extension answers ui.render with: give it tree = true"
+                .into(),
         ));
     }
     let icon = opt("icon");

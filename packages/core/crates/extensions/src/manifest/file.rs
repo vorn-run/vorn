@@ -885,13 +885,17 @@ impl Raw {
                     "are retired where card_footers draw from trees; draw each footer as a card_footers tree".into(),
                 ));
             }
-            let (viewed, unviewed) = c.panes.iter().fold((0, 0), |(v, u), p| {
-                if p.tree {
-                    (v + 1, u)
-                } else {
-                    (v, u + 1)
-                }
-            });
+            let (viewed, unviewed) =
+                c.panes.iter().fold(
+                    (0, 0),
+                    |(v, u), p| {
+                        if p.tree {
+                            (v + 1, u)
+                        } else {
+                            (v, u + 1)
+                        }
+                    },
+                );
             if viewed > 0 && unviewed > 0 {
                 return Err(at(
                     "contributes.panes",
@@ -2157,7 +2161,7 @@ tree = true
         assert_eq!(parse(&to_toml(&m)).unwrap(), m);
 
         let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
-        assert!(err("tree = true", "tree = true\nview = \"views/page.kdl\"").contains("view"));
+        assert!(err("tree = true", "tree = true\nview = \"page\"").contains("view"));
         assert!(err("contributes.settings", "contributes.launchers")
             .starts_with("vorn-extension.toml:9: contributes.launchers[0].tree: draws in a place that shows one"));
         assert!(parse(&text.replace("contributes.settings", "contributes.views")).is_ok());
@@ -2281,10 +2285,7 @@ call = "refresh"
         let m = parse(text).unwrap();
         assert_eq!(m.kind, super::super::Kind::Connector);
         assert_eq!(m.protocol, Some(CONNECTOR_PROTOCOL));
-        assert!(
-            m.speaks_api(),
-            "its trees are drawn over the extension API"
-        );
+        assert!(m.speaks_api(), "its trees are drawn over the extension API");
         assert_eq!(parse(&to_toml(&m)).unwrap(), m);
 
         // Where a place is drawn from a tree, the protocol's older way is retired.
