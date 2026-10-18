@@ -654,10 +654,16 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
     let hid = block_id(sid, j);
     let hot = s.ui.hover(hid);
     let faint = white(0.25);
-    let meta_text = |t: String, color: Rgba| text(t, 10.0, color).mono().line_height(19.0);
-    let mut meta = div().row().items_center().gap(8.0).shrink0();
+    let meta_text =
+        |t: String, color: Rgba| text(t, 10.0, color).mono().line_height(19.0).shrink0();
+    // On a narrow card the folder gives way first, so the rest stays inside it.
+    let mut meta = div().row().items_center().gap(8.0).min_w0();
     if let Some(cwd) = b.cwd.as_deref() {
-        meta = meta.child(meta_text(blocks::shorten_cwd(cwd), faint));
+        let folder = text(blocks::shorten_cwd(cwd), 10.0, faint)
+            .mono()
+            .line_height(19.0)
+            .truncate();
+        meta = meta.child(div().min_w0().child(folder));
     }
     if let Some(code) = b.exit_code.filter(|_| b.failed()) {
         meta = meta.child(meta_text(format!("exit {code}"), c(look::RED_400)));
@@ -679,6 +685,7 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
     let copy = div()
         .id(copy_id)
         .on(Action::Click)
+        .shrink0()
         .p(2.0)
         .rounded(3.0)
         .role(Role::Button, if copied { "Copied" } else { "Copy" })
