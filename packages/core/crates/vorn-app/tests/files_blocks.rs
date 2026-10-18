@@ -70,7 +70,12 @@ fn the_files_pane_browses_edits_finds_saves_and_pops_out() {
     let browse = wait(&mut shot, &mut app, "Button", "Browse files");
     shot.click(&mut app, browse);
     let src = wait(&mut shot, &mut app, "TreeItem", "src");
-    both(&mut shot, &mut app, "files-tree", &["Files", "src", "README.md"]);
+    both(
+        &mut shot,
+        &mut app,
+        "files-tree",
+        &["Files", "src", "README.md"],
+    );
     shot.click(&mut app, src);
     let file = wait(&mut shot, &mut app, "TreeItem", "app.ts");
     shot.click(&mut app, file);
@@ -114,8 +119,18 @@ fn the_files_pane_browses_edits_finds_saves_and_pops_out() {
     shot.hover(&mut app, tab);
     let close = wait(&mut shot, &mut app, "Button", "Close app.ts");
     shot.click(&mut app, close);
-    wait(&mut shot, &mut app, "AlertDialog", "Discard unsaved changes?");
-    both(&mut shot, &mut app, "files-discard", &["Discard unsaved changes?"]);
+    wait(
+        &mut shot,
+        &mut app,
+        "AlertDialog",
+        "Discard unsaved changes?",
+    );
+    both(
+        &mut shot,
+        &mut app,
+        "files-discard",
+        &["Discard unsaved changes?"],
+    );
     let cancel = wait(&mut shot, &mut app, "Button", "Cancel");
     shot.click(&mut app, cancel);
     wait(&mut shot, &mut app, "Tab", "app.ts");
@@ -123,11 +138,21 @@ fn the_files_pane_browses_edits_finds_saves_and_pops_out() {
     // A file pops out into a card of its own, and back.
     let readme = wait(&mut shot, &mut app, "TreeItem", "README.md");
     shot.hover(&mut app, readme);
-    let pop = wait(&mut shot, &mut app, "Button", "Open README.md as its own card");
+    let pop = wait(
+        &mut shot,
+        &mut app,
+        "Button",
+        "Open README.md as its own card",
+    );
     shot.click(&mut app, pop);
     wait(&mut shot, &mut app, "MultilineTextInput", "Edit README.md");
     both(&mut shot, &mut app, "files-card", &["README.md"]);
-    let back = wait(&mut shot, &mut app, "Button", "Put back in its session card");
+    let back = wait(
+        &mut shot,
+        &mut app,
+        "Button",
+        "Put back in its session card",
+    );
     shot.click(&mut app, back);
     wait(&mut shot, &mut app, "Tab", "README.md");
 
@@ -175,7 +200,12 @@ fn a_shells_commands_show_as_blocks_with_history_and_completions() {
     shot.type_line(&mut app, "sleep 2");
     wait(&mut shot, &mut app, "Status", "Running sleep 2");
     std::thread::sleep(Duration::from_millis(400));
-    both(&mut shot, &mut app, "blocks-running", &["sleep 2", "to interrupt"]);
+    both(
+        &mut shot,
+        &mut app,
+        "blocks-running",
+        &["sleep 2", "to interrupt"],
+    );
     wait(&mut shot, &mut app, "ListItem", "sleep 2");
     wait_for("the composer back", || {
         app.pump();

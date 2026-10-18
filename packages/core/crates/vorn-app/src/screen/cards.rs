@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::act::{Act, Acts};
-use crate::log::{self as blocks, Block, Running, Shell};
 use crate::client::Session;
-use crate::prompt::{self as intent, IntentAct, Row};
 use crate::layout::{self, Mode};
+use crate::log::{self as blocks, Block, Running, Shell};
 use crate::look::{self, Rgb};
+use crate::prompt::{self as intent, IntentAct, Row};
 use crate::state::MenuKind;
 use crate::ui::widgets::scroll_view;
 use crate::ui::{
@@ -1011,9 +1011,7 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     .min_w0();
     // The ghost: what is typed, unseen, then the rest of a past command.
     let ghost = (focused && menu.is_none_or(|m| m.highlight.is_none()))
-        .then(|| {
-            intent::ghost_over(menu.and_then(|m| m.ghost.as_deref()), typed)
-        })
+        .then(|| intent::ghost_over(menu.and_then(|m| m.ghost.as_deref()), typed))
         .flatten()
         .map(|g| {
             div()

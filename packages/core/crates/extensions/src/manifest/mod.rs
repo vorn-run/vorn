@@ -1720,7 +1720,10 @@ fn read_point(
             return Err(("", "needs rows and the call that approves one".into()));
         }
         Place::Cards if rows.is_none() => {
-            return Err(("rows", "names the collection whose rows are the cards".into()));
+            return Err((
+                "rows",
+                "names the collection whose rows are the cards".into(),
+            ));
         }
         Place::Attention | Place::Menus | Place::Cards => {}
         _ if rows.is_some() => {

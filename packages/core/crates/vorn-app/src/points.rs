@@ -574,7 +574,11 @@ impl Points {
         let all: Vec<(String, String)> = self
             .all
             .iter()
-            .flat_map(|p| p.collections().into_iter().map(|c| (p.extension.clone(), c)))
+            .flat_map(|p| {
+                p.collections()
+                    .into_iter()
+                    .map(|c| (p.extension.clone(), c))
+            })
             .chain(wanted)
             .collect();
         for k in all {

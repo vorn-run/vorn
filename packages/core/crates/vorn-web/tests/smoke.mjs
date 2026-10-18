@@ -10,7 +10,9 @@
 // footer to show it. `phone-chromium` and `phone-webkit` do the templates run
 // at a phone's size (390x844 at 3x, touch) and check every control fits the width.
 // `board` opens the Tasks board with a card in each column and opens a card's menu.
-//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [board] [phone-chromium] [phone-webkit]
+// `files` opens a shell's Files pane, a folder and a file; `blocks` runs a
+// command in a shell and waits for its block.
+//   node crates/vorn-web/tests/smoke.mjs [webgpu] [webgl] [pair] [templates] [adapters] [board] [files] [blocks] [phone-chromium] [phone-webkit]
 // VORN_BIN (default target/ci) holds vornd and vorn-sessiond; WEB_DIST is the
 // build-web.sh output; SHOTS, when set, is where screenshots go.
 import { execFileSync, spawn } from 'node:child_process'
@@ -314,6 +316,40 @@ async function board(page, server) {
   await until('the menu', () => page.locator('[role="menuitem"][aria-label="Edit"]').count())
 }
 
+/** A shell's Files pane, its src folder open and app.ts in its editor. */
+async function files(page, vornd) {
+  mkdirSync(join(vornd.home, 'src'), { recursive: true })
+  writeFileSync(join(vornd.home, 'src', 'app.ts'), "export const greet = (n: string) => `Hello, ${n}`\n")
+  writeFileSync(join(vornd.home, 'README.md'), '# Smoke\n')
+  const card = await until('the card', async () => {
+    const b = await page
+      .locator('[role="group"][aria-label="smoke"]')
+      .first()
+      .boundingBox()
+      .catch(() => null)
+    return b && b.width > 0 ? b : null
+  })
+  await page.mouse.move(card.x + card.width / 2, card.y + 20)
+  await press(page, '[role="button"][aria-label="Browse files"]', 'Browse files')
+  await press(page, '[role="treeitem"][aria-label="src"]', 'the src folder')
+  await press(page, '[role="treeitem"][aria-label="app.ts"]', 'app.ts')
+  await until('the editor', () => page.locator('[role="textbox"][aria-label="Edit app.ts"]').count())
+  await page.waitForTimeout(500)
+}
+
+/** A command run from a shell's composer, shown as its block. */
+async function blocks(page) {
+  await press(page, '[role="textbox"][aria-label="Type a command"]', 'the composer')
+  await page.keyboard.type('echo vorn-$((6*7))-blocks')
+  await page.keyboard.press('Enter')
+  await until(
+    'the block',
+    () => page.locator('[role="listitem"][aria-label="echo vorn-$((6*7))-blocks"]').count(),
+    15000
+  )
+  await page.waitForTimeout(500)
+}
+
 /** The bottom strip of the card named `name`, as pixels: where its footer draws. */
 async function cardFoot(page, name) {
   const card = await until('the card', async () => {
@@ -362,7 +398,7 @@ async function run(what, vornd, server) {
   try {
     if (what === 'pair') {
       await pair(page, vornd, server)
-    } else if (what === 'board') {
+    } else if (what === 'board' || what === 'files' || what === 'blocks') {
       const device = (await server.call('token:create', { name: 'smoke board' })).plaintext
       await page.goto(`http://127.0.0.1:${vornd.port}/app/#token=${device}`)
     } else if (what === 'adapters') {
@@ -398,6 +434,12 @@ async function run(what, vornd, server) {
       await until('the footer', async () => !(await cardFoot(page, 'smoke')).equals(before))
       if (shots) await page.screenshot({ path: join(shots, 'web-adapters.png') })
       console.log(`ok adapters (${used})`)
+      return
+    }
+    if (what === 'files' || what === 'blocks') {
+      await (what === 'files' ? files(page, vornd) : blocks(page))
+      if (shots) await page.screenshot({ path: join(shots, `web-${what}.png`) })
+      console.log(`ok ${what} (${used})`)
       return
     }
     if (what === 'board') {

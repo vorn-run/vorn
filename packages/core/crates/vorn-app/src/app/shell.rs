@@ -58,7 +58,9 @@ impl App {
 
     /// A `terminal:command` mark: a command starting closes the composer's menu.
     pub(super) fn shell_notified(&mut self, method: &str, params: &Value) {
-        if method != "terminal:command" || params.get("phase").and_then(Value::as_str) != Some("start") {
+        if method != "terminal:command"
+            || params.get("phase").and_then(Value::as_str) != Some("start")
+        {
             return;
         }
         if let Some(m) = params
@@ -106,7 +108,12 @@ impl App {
                 continue;
             };
             let gen = self.st.points.generation(&key);
-            if self.st.shells.get(&id).is_some_and(|sh| sh.generation == gen) {
+            if self
+                .st
+                .shells
+                .get(&id)
+                .is_some_and(|sh| sh.generation == gen)
+            {
                 continue;
             }
             let commands = match self.st.points.tree(&key).map(|t| &t.kind) {
@@ -214,9 +221,10 @@ impl App {
             IntentCall::History { text, .. } => {
                 ("history", json!({ "text": text, "project": project }))
             }
-            IntentCall::Complete { text, .. } => {
-                ("complete", json!({ "text": text, "cwd": cwd, "repo": repo }))
-            }
+            IntentCall::Complete { text, .. } => (
+                "complete",
+                json!({ "text": text, "cwd": cwd, "repo": repo }),
+            ),
         };
         self.call(
             Call::Intent(a),
@@ -499,7 +507,9 @@ impl App {
             return;
         };
         let file = dir.join("desktop").join("command-history.json");
-        let Some(entries) = crate::keep::read(&file).and_then(|s| serde_json::from_str::<Value>(&s).ok()) else {
+        let Some(entries) =
+            crate::keep::read(&file).and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        else {
             return;
         };
         self.call(
@@ -534,7 +544,10 @@ impl App {
     }
 
     /// The shell's blocks when it shows them as a log over its live rows.
-    pub(crate) fn split_of<'a>(&'a self, session: &crate::client::Session) -> Option<&'a crate::log::Shell> {
+    pub(crate) fn split_of<'a>(
+        &'a self,
+        session: &crate::client::Session,
+    ) -> Option<&'a crate::log::Shell> {
         crate::log::split(
             &self.store.config,
             &self.st.points,

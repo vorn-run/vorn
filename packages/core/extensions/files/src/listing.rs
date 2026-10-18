@@ -165,7 +165,10 @@ mod tests {
         };
         t.dirs.insert(
             "/src".into(),
-            vec![e("app.ts", "/src/app.ts", false), e("lib", "/src/lib", true)],
+            vec![
+                e("app.ts", "/src/app.ts", false),
+                e("lib", "/src/lib", true),
+            ],
         );
         t.dirs.insert("/src/lib".into(), Vec::new());
         assert_eq!(t.rows().0.len(), 2);
@@ -180,7 +183,13 @@ mod tests {
         let (rows, none) = t.rows();
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert!(!none);
-        assert_eq!(rows[0].kind, LineKind::Folder { open: true, busy: false });
+        assert_eq!(
+            rows[0].kind,
+            LineKind::Folder {
+                open: true,
+                busy: false
+            }
+        );
         t.filter = "zzz".into();
         let (rows, none) = t.rows();
         assert!(rows.is_empty() && none);

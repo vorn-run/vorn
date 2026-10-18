@@ -1423,7 +1423,13 @@ impl App {
     fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
         let Some(id) = self.current() else { return };
         let as_blocks = self.store.session(&id).is_some_and(|s| {
-            crate::log::split(&self.store.config, &self.st.points, s, self.st.shells.get(&id)).is_some()
+            crate::log::split(
+                &self.store.config,
+                &self.st.points,
+                s,
+                self.st.shells.get(&id),
+            )
+            .is_some()
         });
         if as_blocks {
             return;
@@ -2714,14 +2720,24 @@ impl App {
                 self.st.menu = None;
                 self.st.confirm_delete = None;
             }
-            UiEvent::Submit(id) if matches!(self.acts.text_of(id), Some(Act::Point(crate::points::PointAct::TreeField { .. }))) => {
+            UiEvent::Submit(id)
+                if matches!(
+                    self.acts.text_of(id),
+                    Some(Act::Point(crate::points::PointAct::TreeField { .. }))
+                ) =>
+            {
                 if let Some(Act::Point(a)) = self.acts.text_of(id) {
                     self.run_point(ui, a);
                 }
             }
             UiEvent::Submit(id) => self.submit(ui, id),
             UiEvent::Changed(id) if self.pane_changed(ui, id) => {}
-            UiEvent::Changed(id) if matches!(self.acts.text_of(id), Some(Act::Point(crate::points::PointAct::TreeLive { .. }))) => {
+            UiEvent::Changed(id)
+                if matches!(
+                    self.acts.text_of(id),
+                    Some(Act::Point(crate::points::PointAct::TreeLive { .. }))
+                ) =>
+            {
                 if let Some(Act::Point(a)) = self.acts.text_of(id) {
                     self.run_point(ui, a);
                 }
@@ -3480,8 +3496,13 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
-            let split = crate::log::split(&self.store.config, &self.st.points, session, self.st.shells.get(sid))
-                .is_some();
+            let split = crate::log::split(
+                &self.store.config,
+                &self.st.points,
+                session,
+                self.st.shells.get(sid),
+            )
+            .is_some();
             if !split {
                 if let Some(g) = &self.grid {
                     if !session.ended() {

@@ -140,14 +140,14 @@ its `asked` row for that reason.
 An extension's UI is an element tree (`vorn-tree`), built with `tree::sdk`:
 boxes, text, icons, status dots, buttons, toggles, fields, choices, badges,
 notices, stats, meters, sections, toolbars, lists with grouping and
-selection, and boards. A program answers the same tree as JSON. The host
+selection, boards, and the parts a pane draws (below). A program answers the same tree as JSON. The host
 draws it on every client: the desktop, the web client, a terminal's cells
 (`surface.cells`) and the phone.
 
 Any contribution that draws says `tree = true`: a main view (`views`), a
 sidebar section, a card's badges and footer, a sidebar row's marks
-(`decorations`), a pane, the composer's strip, a settings page, a window and
-a dialog. Each is asked for
+(`decorations`), a pane, the composer's strip, a shell's commands (`shell`),
+a card of its own (`cards`), a settings page, a window and a dialog. Each is asked for
 its tree with `ui.render` (`{point, surface}` in, `{tokens, tree}` out),
 `point` being the contribution's id, so a tree contribution's id is unique
 in its manifest. The host asks again whenever the extension's rows change,
@@ -159,7 +159,20 @@ id, and each card draws its own. `per_session` builds it; a session with no
 child draws nothing. A sidebar section whose tree is an empty box does not
 show.
 
-A click, a toggle, a choice or a field's Return comes back as `ui.event`
+A pane, a shell's commands and a card draw once for each place they show
+in, so their tree is asked for with that place as `surface.scope`: the
+session a pane or a shell's commands draw for, the row a card draws for. Its
+events carry the same `scope`, and the `width` its place drew at. A tree with
+a scope is asked for again when a row whose `id` is that scope changes, in
+any of the extension's collections.
+
+- `[[contributes.cards]]` names `rows`: each row of that collection is a
+  card in the grid, after the session its `session` field names, called by
+  its `title`.
+- `[[contributes.shell]]`: a shell's commands, drawn over its live rows as
+  blocks. Its tree holds a `log`.
+
+A click, a toggle, a choice, a field's Return or a part's own event comes back as `ui.event`
 (`{point, event}` in). Its answer, every field optional, says what follows:
 
 | field    | does                                                                        |
@@ -174,6 +187,28 @@ A click, a toggle, a choice or a field's Return comes back as `ui.event`
 | `show`   | `true` brings the main window forward                                       |
 | `url`    | an `https:` page to open in the browser                                     |
 | `signin` | opens Vorn's sign-in window: the target a `signin` method answers, and `id` |
+| `ask`    | `{title, ok?, event}`: Vorn's own alert asks first; OK tells the extension `event` |
+| `same`   | `true`: nothing changed that the tree draws, so it is not asked for again   |
+
+### The parts a pane draws
+
+These hold data rather than children, and the client keeps what changes with
+every key or pointer move (hover, typing, a drag) to itself:
+
+| part      | holds                                                                         | reports                                                     |
+| --------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `tabs`    | tabs (label, file, preview, dirty, active), `lead`, `tools` and `more` tools  | `select`, `open` (double click) and `close` a tab; `click` a tool |
+| `outline` | rows a tree of folders deep, the one chosen, a `filter`, an `action`          | `select` a row, `open` a leaf, `change` the filter, `click` the action with the row's id |
+| `split`   | one child or two, side by side, `ratio` to the first; under `narrow` px only the first | `resize` with the ratio dragged to                          |
+| `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error` | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
+| `log`     | a shell's commands, one per prompt, oldest first                              |                                                             |
+
+A `code`'s text is typed, coloured and searched in the client, which takes
+`draft`, else `text`, whenever `rev` changes, and tells the extension the
+edit when it starts or stops differing from `text` and once typing settles.
+A `log` is cut into blocks by the client, from the shell's screen, pairing
+the newest command with the newest prompt. A field with `live` reports
+`change` as it is typed.
 
 A board holds columns, each holding its cards. A board of thousands cannot
 travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list
@@ -184,7 +219,9 @@ a page at a time, windows them, drags them between columns and opens them.
 `examples/extensions/turns` draws a tree in every place, and
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
 (`packages/core/extensions/tasks`) and Workflow editor
-(`packages/core/extensions/workflow-editor`) draw their main views this way.
+(`packages/core/extensions/workflow-editor`) draw their main views this way;
+Files (`packages/core/extensions/files`) draws its pane and cards, and Shell
+blocks (`packages/core/extensions/blocks`) a shell's commands.
 
 ## The new API
 
@@ -235,6 +272,17 @@ A name is segments of letters, digits, `.`, `_` and `-`, joined by `/`, none
 starting with `.`, at most 200 bytes. A file holds up to 10 MiB, and an
 extension keeps up to 256 MiB in all. Its files go when it is removed. Over
 stdio, `data` and what `get` answers are base64 strings.
+
+### Calls and events Files and Shell blocks use
+
+- `files.list` (`{path}`) answers a folder's entries, `{name, path,
+  isDirectory}`, folders first, without what git ignores; `files.stat`
+  (`{path}`) answers `{size, mtimeMs}` or null. Both under `files.read`.
+- `shell.executables` answers the names of the programs on the shell's path,
+  under `files.read`; `git.branches` (`{worktree}`) answers `{local,
+  current, isGitRepo}`, under `git.read`.
+- `session.mark` carries `at` (when vornd read it) and `cwd`, the folder the
+  shell last reported.
 
 ### Calls and events the workflow editor and Tasks use
 

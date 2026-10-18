@@ -6,7 +6,9 @@ use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::code::{self, CodeAct, View, LINE_HEIGHT};
 use crate::look;
-use crate::ui::{code as code_input, div, field, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
+use crate::ui::{
+    code as code_input, div, field, text, tooltip, Action, El, Id, Rgba, Role, TextStyle,
+};
 use vorn_tree::{Code, CodeState};
 
 pub fn editor_id(inst: &str) -> Id {
@@ -121,7 +123,11 @@ pub(crate) fn panel(s: &Screen<'_>, inst: &str, node: &Code, extra: Option<El>) 
                 s,
                 act(CodeAct::Save(inst.to_owned())),
                 "save",
-                if node.saving { "Saving\u{2026}" } else { "Save" },
+                if node.saving {
+                    "Saving\u{2026}"
+                } else {
+                    "Save"
+                },
                 false,
                 node.saving,
             ))
@@ -165,11 +171,13 @@ pub(crate) fn panel(s: &Screen<'_>, inst: &str, node: &Code, extra: Option<El>) 
         );
     }
     let body = match node.state {
-        CodeState::Loading => div()
-            .col()
-            .center()
-            .grow()
-            .child(ico("loader-circle", 16.0, 2.0, c(look::GRAY_500))),
+        CodeState::Loading => {
+            div()
+                .col()
+                .center()
+                .grow()
+                .child(ico("loader-circle", 16.0, 2.0, c(look::GRAY_500)))
+        }
         CodeState::Binary | CodeState::Unreadable => {
             let msg = if node.state == CodeState::Binary {
                 "Binary file \u{2014} preview unavailable"

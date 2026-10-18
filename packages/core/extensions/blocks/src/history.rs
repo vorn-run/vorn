@@ -51,7 +51,8 @@ impl History {
     }
 
     fn save(&self, host: &mut dyn Host) -> Result<(), Error> {
-        let v = serde_json::to_value(&self.entries).map_err(|e| Error::new("failed", e.to_string()))?;
+        let v =
+            serde_json::to_value(&self.entries).map_err(|e| Error::new("failed", e.to_string()))?;
         host.set(KEY, &v)
     }
 
@@ -90,7 +91,11 @@ impl History {
     pub fn import(&mut self, host: &mut dyn Host, more: Vec<Entry>) -> Result<usize, Error> {
         let before = self.entries.len();
         for e in more {
-            if !self.entries.iter().any(|k| k.text == e.text && k.kind == e.kind) {
+            if !self
+                .entries
+                .iter()
+                .any(|k| k.text == e.text && k.kind == e.kind)
+            {
                 self.entries.push(e);
             }
         }

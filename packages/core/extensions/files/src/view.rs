@@ -79,7 +79,11 @@ pub fn pane(files: &mut Files, host: &mut dyn Host, owner: &str) -> Result<tree:
     lead.on = tree_shown;
     let mut tools = Vec::new();
     if p.active.is_some() {
-        tools.push(tool("pop", "Open as its own card", "square-arrow-out-up-right"));
+        tools.push(tool(
+            "pop",
+            "Open as its own card",
+            "square-arrow-out-up-right",
+        ));
     }
     let bar = tabs(
         "tabs",
@@ -108,7 +112,11 @@ pub fn pane(files: &mut Files, host: &mut dyn Host, owner: &str) -> Result<tree:
                 loading: false,
                 empty: empty.then(|| "Empty directory".to_owned()),
                 note: none.then(|| "No matching files loaded".to_owned()),
-                action: Some(tool("pop", "Open {} as its own card", "square-arrow-out-up-right")),
+                action: Some(tool(
+                    "pop",
+                    "Open {} as its own card",
+                    "square-arrow-out-up-right",
+                )),
                 files: true,
             },
         ));

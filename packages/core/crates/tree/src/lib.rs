@@ -733,7 +733,10 @@ impl Checker {
             if t.id.is_empty() {
                 self.err(&p, "a tool needs an id");
             } else if !ids.insert(t.id.as_str()) {
-                self.err(&format!("{p}.id"), format_args!("'{}' names two tools", t.id));
+                self.err(
+                    &format!("{p}.id"),
+                    format_args!("'{}' names two tools", t.id),
+                );
             }
             self.text(&p, "label", &t.label);
         }
@@ -744,7 +747,11 @@ impl Checker {
         if t.tabs.len() > parts::MAX_TABS {
             self.err(
                 &format!("{at}.tabs"),
-                format_args!("{} tabs; a strip holds {} at most", t.tabs.len(), parts::MAX_TABS),
+                format_args!(
+                    "{} tabs; a strip holds {} at most",
+                    t.tabs.len(),
+                    parts::MAX_TABS
+                ),
             );
         }
         let mut ids = std::collections::HashSet::new();
@@ -753,7 +760,10 @@ impl Checker {
             if tab.id.is_empty() {
                 self.err(&p, "a tab needs an id");
             } else if !ids.insert(tab.id.as_str()) {
-                self.err(&format!("{p}.id"), format_args!("'{}' names two tabs", tab.id));
+                self.err(
+                    &format!("{p}.id"),
+                    format_args!("'{}' names two tabs", tab.id),
+                );
             }
             self.text(&p, "label", &tab.label);
         }
@@ -767,7 +777,11 @@ impl Checker {
         if o.rows.len() > parts::MAX_LINES {
             self.err(
                 &format!("{at}.rows"),
-                format_args!("{} rows; an outline holds {} at most", o.rows.len(), parts::MAX_LINES),
+                format_args!(
+                    "{} rows; an outline holds {} at most",
+                    o.rows.len(),
+                    parts::MAX_LINES
+                ),
             );
         }
         for (i, l) in o.rows.iter().enumerate().take(parts::MAX_LINES) {
@@ -944,7 +958,10 @@ impl Checker {
                 }
                 for (i, c) in n.children.iter().enumerate() {
                     if !matches!(c.kind, Kind::Button { .. }) {
-                        self.err(&format!("{at}.children[{i}]"), "a code's strip holds buttons only");
+                        self.err(
+                            &format!("{at}.children[{i}]"),
+                            "a code's strip holds buttons only",
+                        );
                     }
                 }
             }
@@ -952,7 +969,11 @@ impl Checker {
                 if log.commands.len() > parts::MAX_COMMANDS {
                     self.err(
                         &format!("{at}.commands"),
-                        format_args!("{} commands; a log holds {} at most", log.commands.len(), parts::MAX_COMMANDS),
+                        format_args!(
+                            "{} commands; a log holds {} at most",
+                            log.commands.len(),
+                            parts::MAX_COMMANDS
+                        ),
                     );
                 }
                 for (i, c) in log.commands.iter().enumerate() {

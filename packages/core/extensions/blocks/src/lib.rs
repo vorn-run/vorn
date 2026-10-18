@@ -11,7 +11,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use vorn_extension_sdk::tree::{self, sdk, Command, Log, Surface};
-use vorn_extension_sdk::{arg, json, serde_json, Ctx, Error, Event, Extension, Host, Init, Op, Value};
+use vorn_extension_sdk::{
+    arg, json, serde_json, Ctx, Error, Event, Extension, Host, Init, Op, Value,
+};
 
 pub mod complete;
 pub mod history;
@@ -49,7 +51,9 @@ fn now_ms() -> u64 {
 }
 
 fn text<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
-    args.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
 }
 
 impl Blocks {
@@ -169,7 +173,13 @@ impl Extension for Blocks {
         Ok(Blocks::default())
     }
 
-    fn handle(&mut self, host: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+    fn handle(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
+        args: Value,
+        _: &Ctx,
+    ) -> Result<Value, Error> {
         self.act(host, method, &args)
     }
 
@@ -182,9 +192,17 @@ impl Extension for Blocks {
         }
     }
 
-    fn render(&mut self, host: &mut dyn Host, point: &str, surface: Surface) -> Result<tree::Node, Error> {
+    fn render(
+        &mut self,
+        host: &mut dyn Host,
+        point: &str,
+        surface: Surface,
+    ) -> Result<tree::Node, Error> {
         if point != COMMANDS {
-            return Err(Error::new("unknown-action", format!("nothing draws {point}")));
+            return Err(Error::new(
+                "unknown-action",
+                format!("nothing draws {point}"),
+            ));
         }
         let commands = match surface.scope.as_deref() {
             Some(session) => self.commands(host, session)?.clone(),

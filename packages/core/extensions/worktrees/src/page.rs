@@ -213,10 +213,8 @@ mod tests {
     #[test]
     fn a_click_names_its_action_and_rows() {
         let click = |id: &str, selected: &[&str]| Event {
-            id: id.into(),
-            kind: vorn_extension_sdk::tree::EventKind::Click,
-            value: String::new(),
             selected: selected.iter().map(|s| (*s).to_owned()).collect(),
+            ..Event::new(id, vorn_extension_sdk::tree::EventKind::Click, "")
         };
         assert_eq!(
             event(&click("remove:/w/a", &[])).unwrap(),

@@ -327,7 +327,10 @@ fn the_parts_a_pane_draws_travel_and_check() {
         field("q", "").live(),
     ]);
     let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
-    assert_eq!(v["tree"]["children"][1]["children"][0]["rows"][0]["line"], "folder");
+    assert_eq!(
+        v["tree"]["children"][1]["children"][0]["rows"][0]["line"],
+        "folder"
+    );
     assert_eq!(read(&v).unwrap().tree, tree);
     let Kind::Log(l) = &tree.children[2].kind else {
         panic!("a log")
@@ -349,7 +352,10 @@ fn a_part_that_cannot_be_drawn_says_why() {
         ),
     ]);
     let errs = check(&bad).unwrap_err().join("\n");
-    assert!(errs.contains("$.children[0].ratio: goes from 0 to 1"), "{errs}");
+    assert!(
+        errs.contains("$.children[0].ratio: goes from 0 to 1"),
+        "{errs}"
+    );
     assert!(errs.contains("a split holds one child or two"), "{errs}");
     assert!(errs.contains("a code's strip holds buttons only"), "{errs}");
     assert!(errs.contains("a tab needs an id"), "{errs}");
@@ -361,7 +367,10 @@ fn an_event_carries_its_scope_and_an_answer_can_ask_first() {
         json!({"id": "tabs", "kind": "close", "value": "/a", "scope": "s1", "width": 400}),
     )
     .unwrap();
-    assert_eq!((e.kind, e.scope.as_deref(), e.width), (EventKind::Close, Some("s1"), Some(400)));
+    assert_eq!(
+        (e.kind, e.scope.as_deref(), e.width),
+        (EventKind::Close, Some("s1"), Some(400))
+    );
     let a = Answer::read(&json!({"ask": {"title": "Discard unsaved changes?", "event": e}}));
     assert_eq!(a.ask.map(|q| q.event.value), Some("/a".to_owned()));
     let s: Surface = serde_json::from_value(json!({"cells": true, "scope": "s1"})).unwrap();

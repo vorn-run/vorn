@@ -106,7 +106,8 @@ mod tests {
 
     #[test]
     fn marks_read_from_the_event() {
-        let start = json!({"sessionId": "s1", "phase": "start", "command": "ls", "at": 5, "cwd": "/a"});
+        let start =
+            json!({"sessionId": "s1", "phase": "start", "command": "ls", "at": 5, "cwd": "/a"});
         assert_eq!(
             Marked::read(&start),
             Some(Marked {
@@ -116,7 +117,8 @@ mod tests {
                 cwd: Some("/a".into()),
             })
         );
-        let end = json!({"sessionId": "s1", "phase": "end", "exitCode": 2, "durationMs": 40, "at": 9});
+        let end =
+            json!({"sessionId": "s1", "phase": "end", "exitCode": 2, "durationMs": 40, "at": 9});
         assert_eq!(
             Marked::read(&end).map(|m| m.mark),
             Some(Mark::End {
@@ -124,7 +126,10 @@ mod tests {
                 duration_ms: Some(40)
             })
         );
-        assert_eq!(Marked::read(&json!({"sessionId": "s1", "phase": "?"})), None);
+        assert_eq!(
+            Marked::read(&json!({"sessionId": "s1", "phase": "?"})),
+            None
+        );
         assert_eq!(Marked::read(&json!({"phase": "prompt"})), None);
     }
 
@@ -173,7 +178,10 @@ mod tests {
             90,
             None,
         );
-        assert_eq!((c[1].started, c[1].exit, c[1].duration_ms), (true, Some(0), Some(0)));
+        assert_eq!(
+            (c[1].started, c[1].exit, c[1].duration_ms),
+            (true, Some(0), Some(0))
+        );
         // A start with no prompt before it still makes a command of its own.
         fold(&mut c, Mark::Start(Some("ls".into())), 100, None);
         assert_eq!(c.len(), 3);

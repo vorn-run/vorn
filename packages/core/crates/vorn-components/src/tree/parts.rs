@@ -70,7 +70,9 @@ impl Cx<'_> {
             .p(4.0)
             .rounded(4.0)
             .shrink0()
-            .bg(white(0.10 * self.ui.hover(id).max(if t.on { 1.0 } else { 0.0 })))
+            .bg(white(
+                0.10 * self.ui.hover(id).max(if t.on { 1.0 } else { 0.0 }),
+            ))
             .role(Role::Button, t.label.as_str())
             .child(self.icon(&t.icon, 14.0, color::INK));
         let b = self.sem(b, || Sem::Button {
@@ -112,8 +114,7 @@ impl Cx<'_> {
         }
         for tab in &t.tabs {
             let id = self.send(node, EventKind::Select, &tab.id);
-            self.bind
-                .double(id, event(node, EventKind::Open, &tab.id));
+            self.bind.double(id, event(node, EventKind::Open, &tab.id));
             let close_id = self.send(node, EventKind::Close, &tab.id);
             let hot = self.ui.hovered(id) || self.ui.hovered(close_id);
             let fg = if tab.active {
@@ -179,7 +180,7 @@ impl Cx<'_> {
                         color::GRAY_600.mix(color::WHITE, self.ui.hover(close_id)),
                     ))
             };
-            list = list.child(self.sem(el.child(slot), || Sem::Text("tab".into())));
+            list = list.child(el.child(slot));
         }
         let mut strip = div()
             .id(strip_id)
@@ -300,13 +301,7 @@ impl Cx<'_> {
                 _ => self.send(node, EventKind::Select, &l.id),
             })
             .collect();
-        let list = div()
-            .id(scroll)
-            .col()
-            .grow()
-            .min_h(0.0)
-            .py(2.0)
-            .scroll_y();
+        let list = div().id(scroll).col().grow().min_h(0.0).py(2.0).scroll_y();
         let list = if self.ui.is_native() {
             list.children(o.rows.iter().map(|l| self.line(node, o, l)))
         } else {
@@ -407,7 +402,11 @@ impl Cx<'_> {
                     crate::lucide("loader-circle", 14.0, 2.0, color::GRAY_600)
                 } else {
                     crate::lucide(
-                        if open { "chevron-down" } else { "chevron-right" },
+                        if open {
+                            "chevron-down"
+                        } else {
+                            "chevron-right"
+                        },
                         14.0,
                         2.0,
                         color::GRAY_500,
@@ -501,7 +500,13 @@ impl Cx<'_> {
         }
     }
 
-    pub(super) fn split(&self, n: &vorn_tree::Node, ratio: f32, label: &str, narrow: Option<f32>) -> El {
+    pub(super) fn split(
+        &self,
+        n: &vorn_tree::Node,
+        ratio: f32,
+        label: &str,
+        narrow: Option<f32>,
+    ) -> El {
         let node = super::key(n);
         let id = Id::new("tree-split").child(node);
         let mut body = div()
@@ -513,7 +518,8 @@ impl Cx<'_> {
             .pt(2.0);
         let width = self.ui.rect_of(id).map(|r| r.w);
         let tight = matches!((width, narrow), (Some(w), Some(n)) if w > 0.0 && w < n);
-        let kids: Vec<&vorn_tree::Node> = n.children.iter().take(if tight { 1 } else { 2 }).collect();
+        let kids: Vec<&vorn_tree::Node> =
+            n.children.iter().take(if tight { 1 } else { 2 }).collect();
         if kids.len() < 2 {
             for k in kids {
                 body = body.child(self.node(k).flex(1.0));

@@ -118,7 +118,12 @@ fn controls(s: &Screen<'_>, kind: SideKind, owner: &str) -> El {
 fn controls_after(s: &Screen<'_>, kind: SideKind, owner: &str, tools: Vec<El>) -> El {
     let id = pane_id(kind, owner);
     let max = s.st.side.saved.maximized.as_deref() == Some(id.as_str());
-    let row = div().row().items_center().gap(2.0).shrink0().children(tools);
+    let row = div()
+        .row()
+        .items_center()
+        .gap(2.0)
+        .shrink0()
+        .children(tools);
     let (glyph, label) = if max {
         ("minimize-2", "Restore")
     } else {
@@ -339,17 +344,20 @@ fn Acts_id(place: &str, act: &Act) -> Id {
 
 /// The Files pane's tree for `owner`, when Files is on.
 fn files_key(s: &Screen<'_>, owner: &str) -> Option<String> {
-    let p = s
-        .st
-        .points
-        .find(crate::app::FILES, crate::points::kind::PANES, "files")?;
+    let p =
+        s.st.points
+            .find(crate::app::FILES, crate::points::kind::PANES, "files")?;
     Some(crate::points::scoped(&p.key(), owner))
 }
 
 /// The row of `card` among the cards points list: the point's key and the row.
 fn card_row<'a>(s: &'a Screen<'_>, card: &str) -> Option<(String, &'a crate::points::Row)> {
     s.st.points.at(crate::points::kind::CARDS).find_map(|p| {
-        let row = s.st.points.listed_rows(p, "").into_iter().find(|r| r.id == card)?;
+        let row =
+            s.st.points
+                .listed_rows(p, "")
+                .into_iter()
+                .find(|r| r.id == card)?;
         Some((p.key(), row))
     })
 }
@@ -357,12 +365,17 @@ fn card_row<'a>(s: &'a Screen<'_>, card: &str) -> Option<(String, &'a crate::poi
 /// Card `card`'s tree key, and the session it sits beside.
 fn card_of(s: &Screen<'_>, card: &str) -> Option<(String, String)> {
     let (key, row) = card_row(s, card)?;
-    Some((crate::points::scoped(&key, card), row.str("session")?.to_owned()))
+    Some((
+        crate::points::scoped(&key, card),
+        row.str("session")?.to_owned(),
+    ))
 }
 
 /// What card `card` is called.
 fn card_title(s: &Screen<'_>, card: &str) -> String {
-    card_row(s, card).map(|(_, r)| r.text("title")).unwrap_or_default()
+    card_row(s, card)
+        .map(|(_, r)| r.text("title"))
+        .unwrap_or_default()
 }
 
 /// The cards each session's points list, by the session they sit beside, in their order.
@@ -808,4 +821,3 @@ pub(super) fn status_items(s: &Screen<'_>, session: &Session, dim: f32) -> Vec<E
 pub(super) fn branch_act(session: &Session) -> Act {
     Act::Git(GitAct::Branches(session.info.id.clone()))
 }
-

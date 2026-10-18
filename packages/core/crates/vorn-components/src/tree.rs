@@ -81,7 +81,12 @@ pub trait TreeBind {
     /// The end of tab strip `node`: its `tools`, and the client's own controls after them, as a pane's.
     fn chrome(&self, node: &str, tools: Vec<El>) -> El {
         let _ = node;
-        div().row().items_center().gap(2.0).shrink0().children(tools)
+        div()
+            .row()
+            .items_center()
+            .gap(2.0)
+            .shrink0()
+            .children(tools)
     }
     /// A file's text to edit, which the client draws and holds; the button nodes `buttons` end its strip.
     fn code(&self, node: &str, code: &vorn_tree::Code, buttons: &[Node]) -> Option<El> {

@@ -174,7 +174,13 @@ impl Buffer {
     }
 
     /// The client's text: kept as a draft while it differs from the file.
-    pub fn edited(&mut self, host: &mut dyn Host, key: &str, text: String, now_ms: u64) -> Result<(), Error> {
+    pub fn edited(
+        &mut self,
+        host: &mut dyn Host,
+        key: &str,
+        text: String,
+        now_ms: u64,
+    ) -> Result<(), Error> {
         if !self.editable() {
             return Ok(());
         }
@@ -200,7 +206,13 @@ impl Buffer {
     }
 
     /// Writes `text`, unless the file moved since the edit started and not `force`.
-    pub fn save(&mut self, host: &mut dyn Host, key: &str, text: String, force: bool) -> Result<(), Error> {
+    pub fn save(
+        &mut self,
+        host: &mut dyn Host,
+        key: &str,
+        text: String,
+        force: bool,
+    ) -> Result<(), Error> {
         if !self.editable() {
             return Ok(());
         }
@@ -289,15 +301,20 @@ mod tests {
         assert!(has_moved(Some(s), Some(Stamp { size: 2.0, ..s })));
     }
 
-    /// A file on a fake disk: its text and stamp, which tests change under the edit.
-    fn disk(text: &str) -> (FakeHost, Rc<RefCell<(Option<String>, f64)>>) {
+    /// A file's text and modification time, which tests change under the edit.
+    type File = Rc<RefCell<(Option<String>, f64)>>;
+
+    /// A file on a fake disk.
+    fn disk(text: &str) -> (FakeHost, File) {
         let file = Rc::new(RefCell::new((Some(text.to_owned()), 1.0)));
         let (r, s, w) = (file.clone(), file.clone(), file.clone());
         let host = FakeHost::default()
             .answer("files.read", move |_| Ok(json!(r.borrow().0)))
             .answer("files.stat", move |_| {
                 let f = s.borrow();
-                Ok(f.0.as_ref().map_or(Value::Null, |t| json!({"size": t.len(), "mtimeMs": f.1})))
+                Ok(f.0
+                    .as_ref()
+                    .map_or(Value::Null, |t| json!({"size": t.len(), "mtimeMs": f.1})))
             })
             .answer("files.write", move |a| {
                 let mut f = w.borrow_mut();
@@ -350,7 +367,10 @@ mod tests {
     #[test]
     fn binary_gone_and_capped_files_are_not_editable() {
         let (mut host, file) = disk("x\n\n--- truncated ---");
-        assert_eq!(Buffer::load(&mut host, "a", "/f", 1).unwrap().state, CodeState::Read);
+        assert_eq!(
+            Buffer::load(&mut host, "a", "/f", 1).unwrap().state,
+            CodeState::Read
+        );
         file.borrow_mut().0 = None;
         assert_eq!(
             Buffer::load(&mut host, "b", "/f", 1).unwrap().state,
@@ -359,6 +379,9 @@ mod tests {
         let mut host = FakeHost::default()
             .answer("files.read", |_| Ok(Value::Null))
             .answer("files.stat", |_| Ok(json!({"size": 4, "mtimeMs": 1})));
-        assert_eq!(Buffer::load(&mut host, "c", "/f", 1).unwrap().state, CodeState::Binary);
+        assert_eq!(
+            Buffer::load(&mut host, "c", "/f", 1).unwrap().state,
+            CodeState::Binary
+        );
     }
 }

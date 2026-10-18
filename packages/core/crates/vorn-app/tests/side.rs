@@ -320,7 +320,6 @@ fn panes_split_the_card_and_hold_terminals() {
         .visible(&app.store)
         .iter()
         .any(|&i| app.store.sessions[i].info.id == held));
-
 }
 
 #[test]

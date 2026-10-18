@@ -37,7 +37,11 @@ fn report(name: &str, v: Vec<f64>) {
 }
 
 /// Milliseconds from now until `f` answers, a frame laid out between tries.
-fn timed<T>(shot: &mut Shot, app: &mut App, mut f: impl FnMut(&mut Shot, &mut App) -> Option<T>) -> f64 {
+fn timed<T>(
+    shot: &mut Shot,
+    app: &mut App,
+    mut f: impl FnMut(&mut Shot, &mut App) -> Option<T>,
+) -> f64 {
     let t = Instant::now();
     loop {
         app.pump();
@@ -78,17 +82,26 @@ fn bench_open_a_large_folder() {
         app.pump();
         app.store.session(&sid).map(|_| ())
     });
+    // Where Files is a component, compile it first: a test's vornd compiles at first use, a real one at start.
+    let _ = app.rpc().call(
+        "extension:call",
+        json!({ "id": "vorn.files", "action": "prune", "args": { "live": [sid] } }),
+    );
     let mut shot = Shot::new();
     let card = App::control("card-box", &vorn_app::act::Act::Select(sid.clone()));
     shot.click(&mut app, card);
     shot.hover(&mut app, card);
     let browse = wait(&mut shot, &mut app, "Button", "Browse files");
     shot.click(&mut app, browse);
-    let open = timed(&mut shot, &mut app, |s, a| s.labelled(a, "TreeItem", "many"));
+    let open = timed(&mut shot, &mut app, |s, a| {
+        s.labelled(a, "TreeItem", "many")
+    });
     println!("BENCH files: root of 201 entries listed in {open:.1}ms");
     let many = wait(&mut shot, &mut app, "TreeItem", "many");
     shot.click(&mut app, many);
-    let expand = timed(&mut shot, &mut app, |s, a| s.labelled(a, "TreeItem", "file-00000.txt"));
+    let expand = timed(&mut shot, &mut app, |s, a| {
+        s.labelled(a, "TreeItem", "file-00000.txt")
+    });
     println!("BENCH files: folder of 5000 entries opened in {expand:.1}ms");
     let mut frames = Vec::new();
     for _ in 0..60 {
@@ -145,7 +158,6 @@ fn bench_block_log_and_keystrokes() {
     shot.click(&mut app, field);
     for i in 0..100 {
         shot.type_line(&mut app, &format!("seq 1 {}", 3 + i % 5));
-        let label = format!("seq 1 {}", 3 + i % 5);
         let want = i + 1;
         wait_for("the block", || {
             app.pump();
@@ -153,9 +165,11 @@ fn bench_block_log_and_keystrokes() {
             let n = tree
                 .nodes
                 .iter()
-                .filter(|(_, n)| format!("{:?}", n.role()) == "ListItem" && n.label().is_some_and(|l| l.starts_with("seq 1 ")))
+                .filter(|(_, n)| {
+                    format!("{:?}", n.role()) == "ListItem"
+                        && n.label().is_some_and(|l| l.starts_with("seq 1 "))
+                })
                 .count();
-            let _ = &label;
             (n >= want.min(100)).then_some(())
         });
     }
@@ -178,9 +192,10 @@ fn bench_block_log_and_keystrokes() {
     std::thread::sleep(Duration::from_millis(800));
     shot.frame(&mut app);
     let mut keys = Vec::new();
-    for (i, ch) in "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx".chars().enumerate() {
-        let before = shot.size;
-        let _ = before;
+    for (i, ch) in "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx"
+        .chars()
+        .enumerate()
+    {
         let t = Instant::now();
         shot.send(&mut app, Input::char(ch));
         let want = i + 1;
@@ -191,11 +206,20 @@ fn bench_block_log_and_keystrokes() {
                 .pane(&id)
                 .map(|p| String::from_utf8_lossy(&p.text).into_owned())
                 .unwrap_or_default();
-            let last = text.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("").trim().len();
+            let last = text
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .len();
             if last >= want {
                 break;
             }
-            assert!(t.elapsed() < Duration::from_secs(10), "echo of {ch}: {text:?}");
+            assert!(
+                t.elapsed() < Duration::from_secs(10),
+                "echo of {ch}: {text:?}"
+            );
         }
         keys.push(t.elapsed().as_secs_f64() * 1000.0);
     }
@@ -214,6 +238,8 @@ fn bench_block_log_and_keystrokes() {
         typed.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     report("composer keystroke to frame", typed);
-    let done = timed(&mut shot, &mut app, |s, a| s.labelled(a, "ListBoxOption", "checkout"));
+    let done = timed(&mut shot, &mut app, |s, a| {
+        s.labelled(a, "ListBoxOption", "checkout")
+    });
     println!("BENCH composer: completions {done:.1}ms after the last key");
 }

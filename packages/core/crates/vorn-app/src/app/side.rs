@@ -50,7 +50,10 @@ fn codes(tree: &Node) -> Vec<(&str, &vorn_tree::Code)> {
 
 /// The code node `node` of `tree`.
 pub(crate) fn code_in<'a>(tree: &'a Node, node: &str) -> Option<&'a vorn_tree::Code> {
-    codes(tree).into_iter().find(|(id, _)| *id == node).map(|(_, c)| c)
+    codes(tree)
+        .into_iter()
+        .find(|(id, _)| *id == node)
+        .map(|(_, c)| c)
 }
 
 impl App {
@@ -119,16 +122,10 @@ impl App {
         // Panes and cards of sessions that are gone go with them, once the store has read them.
         let gone = files_on
             && self.store.sessions_known
-            && self
-                .st
-                .points
-                .rows_of(FILES)
-                .values()
-                .flatten()
-                .any(|r| {
-                    let owner = r.str("session").unwrap_or(&r.id);
-                    !live.contains(owner)
-                });
+            && self.st.points.rows_of(FILES).values().flatten().any(|r| {
+                let owner = r.str("session").unwrap_or(&r.id);
+                !live.contains(owner)
+            });
         if gone && !self.pruning {
             self.pruning = true;
             let ids: Vec<&str> = live.iter().copied().collect();
@@ -212,7 +209,8 @@ impl App {
                     v.coloured = Some((text.to_owned(), spans));
                 }
                 if v.typed.is_some_and(|t| {
-                    now.duration_since(t).as_millis() < code::DRAFT_SETTLE_MS.max(HIGHLIGHT_SETTLE_MS)
+                    now.duration_since(t).as_millis()
+                        < code::DRAFT_SETTLE_MS.max(HIGHLIGHT_SETTLE_MS)
                 }) {
                     ui.wake_at(now + std::time::Duration::from_millis(50));
                 }
@@ -544,7 +542,13 @@ impl App {
 
     /// A code's keys before the UI's: Mod+S saves, the find bar's Enter
     /// steps and Escape closes it.
-    pub(super) fn pane_key(&mut self, ui: &mut Ui, code: &str, with_mod: bool, shift: bool) -> bool {
+    pub(super) fn pane_key(
+        &mut self,
+        ui: &mut Ui,
+        code: &str,
+        with_mod: bool,
+        shift: bool,
+    ) -> bool {
         let Some(focus) = ui.focus() else {
             return false;
         };
@@ -598,7 +602,10 @@ impl App {
             let ratio = ratio.clamp(vorn_tree::MIN_SPLIT, vorn_tree::MAX_SPLIT);
             if end {
                 self.st.split_drag = None;
-                self.tell(&key, &Event::new(node, EventKind::Resize, ratio.to_string()));
+                self.tell(
+                    &key,
+                    &Event::new(node, EventKind::Resize, ratio.to_string()),
+                );
             } else {
                 self.st.split_drag = Some((key, node, ratio));
             }
@@ -669,4 +676,3 @@ impl App {
         );
     }
 }
-

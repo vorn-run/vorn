@@ -184,7 +184,9 @@ pub struct Intent {
 
 /// The ghost `ghost` offers over `typed`: what it adds, when it carries on from it.
 pub fn ghost_over<'a>(ghost: Option<&'a str>, typed: &str) -> Option<&'a str> {
-    ghost.filter(|g| !typed.is_empty() && !typed.contains('\n') && g.len() > typed.len() && g.starts_with(typed))
+    ghost.filter(|g| {
+        !typed.is_empty() && !typed.contains('\n') && g.len() > typed.len() && g.starts_with(typed)
+    })
 }
 
 /// Relative time for a history row: now, m, h, d.

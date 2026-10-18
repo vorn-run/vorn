@@ -5,8 +5,8 @@
 
 mod cards;
 pub use cards::{flex_divider_id, grid_id};
-pub mod code;
 mod chrome;
+pub mod code;
 pub use chrome::{DOCK, VIEWS, VIEW_ORDER};
 mod composer;
 mod dialogs;

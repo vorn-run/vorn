@@ -99,7 +99,11 @@ impl Pane {
         if self.active.as_ref().is_some_and(|a| !self.tabs.contains(a)) {
             self.active = self.tabs.first().cloned();
         }
-        if self.preview.as_ref().is_some_and(|a| !self.tabs.contains(a)) {
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|a| !self.tabs.contains(a))
+        {
             self.preview = None;
         }
     }

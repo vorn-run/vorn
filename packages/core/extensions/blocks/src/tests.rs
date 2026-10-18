@@ -37,19 +37,32 @@ fn a_shells_marks_become_its_commands_and_outlive_the_instance() {
         ],
     );
     let running = log_of(&mut b, &mut host, "s1");
-    assert_eq!(running.running().and_then(|c| c.command.as_deref()), Some("ls"));
+    assert_eq!(
+        running.running().and_then(|c| c.command.as_deref()),
+        Some("ls")
+    );
     // One row per shell touched, so a client asks again for those alone.
     let rows = host.rows(SHELLS).unwrap();
-    assert_eq!(rows.iter().map(|r| r["id"].clone()).collect::<Vec<_>>(), [json!("s1"), json!("s2")]);
+    assert_eq!(
+        rows.iter().map(|r| r["id"].clone()).collect::<Vec<_>>(),
+        [json!("s1"), json!("s2")]
+    );
     b.on_events(
         &mut host,
-        vec![mark("s1", "end", json!({ "exitCode": 2, "durationMs": 40 }))],
+        vec![mark(
+            "s1",
+            "end",
+            json!({ "exitCode": 2, "durationMs": 40 }),
+        )],
     );
     let mut again = Blocks::init(&Init::default(), &mut host).unwrap();
     let done = log_of(&mut again, &mut host, "s1");
     assert_eq!(done.commands.len(), 1);
     let c = &done.commands[0];
-    assert_eq!((c.exit, c.duration_ms, c.cwd.as_deref()), (Some(2), Some(40), Some("/a/b")));
+    assert_eq!(
+        (c.exit, c.duration_ms, c.cwd.as_deref()),
+        (Some(2), Some(40), Some("/a/b"))
+    );
     assert!(done.running().is_none());
     // An ended shell's commands go.
     again.on_events(
@@ -76,11 +89,26 @@ fn the_composer_asks_for_history_completions_and_keeps_what_ran() {
     let call = |b: &mut Blocks, host: &mut FakeHost, action: &str, args: Value| {
         dispatch(b, host, action, args, &ctx).unwrap()
     };
-    call(&mut b, &mut host, "record", json!({ "text": "git status", "project": "/p" }));
+    call(
+        &mut b,
+        &mut host,
+        "record",
+        json!({ "text": "git status", "project": "/p" }),
+    );
     call(&mut b, &mut host, "record", json!({ "text": "echo hi" }));
-    let h = call(&mut b, &mut host, "history", json!({ "text": "", "project": "/p" }));
+    let h = call(
+        &mut b,
+        &mut host,
+        "history",
+        json!({ "text": "", "project": "/p" }),
+    );
     assert_eq!(h["rows"][0]["text"], "git status");
-    let h = call(&mut b, &mut host, "history", json!({ "text": "git s", "project": "/p" }));
+    let h = call(
+        &mut b,
+        &mut host,
+        "history",
+        json!({ "text": "git s", "project": "/p" }),
+    );
     assert_eq!(h["ghost"], "git status");
     let c = call(
         &mut b,
@@ -103,6 +131,13 @@ fn the_composer_asks_for_history_completions_and_keeps_what_ran() {
     );
     assert_eq!(n["imported"], 1);
     let mut again = Blocks::init(&Init::default(), &mut host).unwrap();
-    let h = dispatch(&mut again, &mut host, "history", json!({ "text": "ma" }), &ctx).unwrap();
+    let h = dispatch(
+        &mut again,
+        &mut host,
+        "history",
+        json!({ "text": "ma" }),
+        &ctx,
+    )
+    .unwrap();
     assert_eq!(h["rows"][0]["text"], "make");
 }

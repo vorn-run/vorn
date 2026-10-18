@@ -132,7 +132,7 @@ pub struct Codes {
 /// once its dirtiness flipped, or once typing settled on a text not yet told.
 pub fn to_tell(view: &View, text: &str, on_disk: &str, now: Instant) -> Option<String> {
     let dirty = text != on_disk;
-    let told_dirty = view.told.as_ref().map_or(false, |(_, d)| *d);
+    let told_dirty = view.told.as_ref().is_some_and(|(_, d)| *d);
     if dirty != told_dirty && view.told.as_ref().is_none_or(|(t, _)| t != text) {
         return Some(text.to_owned());
     }
@@ -189,7 +189,10 @@ mod tests {
         // Still typing: nothing until it settles.
         assert_eq!(to_tell(&v, "disk!!", "disk", t0), None);
         let later = t0 + std::time::Duration::from_millis(450);
-        assert_eq!(to_tell(&v, "disk!!", "disk", later).as_deref(), Some("disk!!"));
+        assert_eq!(
+            to_tell(&v, "disk!!", "disk", later).as_deref(),
+            Some("disk!!")
+        );
         v.told = Some(("disk!!".into(), true));
         assert_eq!(to_tell(&v, "disk!!", "disk", later), None);
         // Typed back to the file: told at once.

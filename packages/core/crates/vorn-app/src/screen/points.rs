@@ -115,7 +115,8 @@ impl TreeBind for TreeBinder<'_> {
 
     fn double(&self, id: Id, event: vorn_tree::Event) {
         let key = self.key.to_owned();
-        self.acts.double(id, self.act(PointAct::Tree { key, event }));
+        self.acts
+            .double(id, self.act(PointAct::Tree { key, event }));
     }
 
     fn confirming(&self, id: Id) -> Option<(Id, Id)> {
@@ -251,12 +252,14 @@ impl TreeBind for ScopedBinder<'_, '_> {
             .collect();
         let label = self.label.borrow_mut().take();
         let extra = (label.is_some() || !buttons.is_empty()).then(|| {
-            div()
-                .row()
-                .items_center()
-                .gap(4.0)
-                .child_if(label)
-                .child(div().row().items_center().gap(2.0).shrink0().children(buttons))
+            div().row().items_center().gap(4.0).child_if(label).child(
+                div()
+                    .row()
+                    .items_center()
+                    .gap(2.0)
+                    .shrink0()
+                    .children(buttons),
+            )
         });
         Some(super::code::panel(self.s, &inst, code, extra))
     }

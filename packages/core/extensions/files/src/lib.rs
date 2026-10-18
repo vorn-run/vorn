@@ -113,7 +113,10 @@ impl Files {
     fn save_pane(&self, host: &mut dyn Host, owner: &str, p: &Pane) -> Result<(), Error> {
         host.set(&pane_key(owner), &serde_json::to_value(p).map_err(failed)?)?;
         // Every change announces the session's row again, so clients draw that pane again.
-        host.publish(OPEN, vec![Op::Upsert(json!({ "id": owner, "at": now_ms() }))]);
+        host.publish(
+            OPEN,
+            vec![Op::Upsert(json!({ "id": owner, "at": now_ms() }))],
+        );
         Ok(())
     }
 
@@ -146,7 +149,9 @@ impl Files {
             .call("sessions.get", json!({ "sessionId": owner }))
             .ok()?;
         let text = |k: &str| s.get(k).and_then(Value::as_str).filter(|p| !p.is_empty());
-        text("worktreePath").or(text("projectPath")).map(str::to_owned)
+        text("worktreePath")
+            .or(text("projectPath"))
+            .map(str::to_owned)
     }
 
     /// `owner`'s tree, its top listed again when the session's folder moved.
@@ -176,16 +181,19 @@ impl Files {
             let b = Buffer::load(host, key, path, now_ms())?;
             self.buffers.insert(key.to_owned(), b);
         }
-        Ok(self.buffers.entry(key.to_owned()).or_insert_with(|| Buffer {
-            path: path.to_owned(),
-            content: None,
-            state: tree::CodeState::Loading,
-            draft: None,
-            base: None,
-            conflict: false,
-            error: None,
-            rev: 0,
-        }))
+        Ok(self
+            .buffers
+            .entry(key.to_owned())
+            .or_insert_with(|| Buffer {
+                path: path.to_owned(),
+                content: None,
+                state: tree::CodeState::Loading,
+                draft: None,
+                base: None,
+                conflict: false,
+                error: None,
+                rev: 0,
+            }))
     }
 
     /// Whether buffer `key` holds edits, as this instance or its kept draft knows.
@@ -223,7 +231,14 @@ impl Files {
     }
 
     /// A file clicked (previewed) or double-clicked (kept); a narrow pane hides the tree to show it.
-    fn open_file(&mut self, host: &mut dyn Host, owner: &str, path: &str, pin: bool, narrow: bool) -> Result<(), Error> {
+    fn open_file(
+        &mut self,
+        host: &mut dyn Host,
+        owner: &str,
+        path: &str,
+        pin: bool,
+        narrow: bool,
+    ) -> Result<(), Error> {
         let mut p = self.pane(host, owner)?.unwrap_or_default();
         let preview_dirty = p
             .preview
@@ -236,7 +251,13 @@ impl Files {
         self.save_pane(host, owner, &p)
     }
 
-    fn close_tab(&mut self, host: &mut dyn Host, owner: &str, path: &str, force: bool) -> Result<bool, Error> {
+    fn close_tab(
+        &mut self,
+        host: &mut dyn Host,
+        owner: &str,
+        path: &str,
+        force: bool,
+    ) -> Result<bool, Error> {
         let key = tab_key(owner, path);
         if !force && self.dirty(host, &key) {
             self.pending = Some(Pending::CloseTab(owner.to_owned(), path.to_owned()));
@@ -251,7 +272,14 @@ impl Files {
 
     /// A file into a card of its own; `from_tab` takes it out of the pane, asking first over edits.
     /// Answers the card's id, or none when it asked first.
-    fn pop(&mut self, host: &mut dyn Host, owner: &str, path: &str, from_tab: bool, force: bool) -> Result<Option<String>, Error> {
+    fn pop(
+        &mut self,
+        host: &mut dyn Host,
+        owner: &str,
+        path: &str,
+        from_tab: bool,
+        force: bool,
+    ) -> Result<Option<String>, Error> {
         let key = tab_key(owner, path);
         if from_tab && !force && self.dirty(host, &key) {
             self.pending = Some(Pending::PopActive(owner.to_owned()));
@@ -270,7 +298,13 @@ impl Files {
     }
 
     /// A card closed, or put `back` in its session's pane; answers the session to show, or none when it asked first.
-    fn card_out(&mut self, host: &mut dyn Host, id: &str, back: bool, force: bool) -> Result<Option<String>, Error> {
+    fn card_out(
+        &mut self,
+        host: &mut dyn Host,
+        id: &str,
+        back: bool,
+        force: bool,
+    ) -> Result<Option<String>, Error> {
         if !force && self.dirty(host, id) {
             self.pending = Some(if back {
                 Pending::ReturnCard(id.to_owned())
@@ -318,7 +352,13 @@ impl Files {
     }
 
     /// Something done to an open file's code: an edit, a save, a discard or the moved-file banner's answers.
-    fn code_event(&mut self, host: &mut dyn Host, key: &str, path: &str, e: &Event) -> Result<Value, Error> {
+    fn code_event(
+        &mut self,
+        host: &mut dyn Host,
+        key: &str,
+        path: &str,
+        e: &Event,
+    ) -> Result<Value, Error> {
         let b = self.buffer(host, key, path)?;
         match (e.kind, e.value.as_str()) {
             (EventKind::Change, _) => {
@@ -439,9 +479,12 @@ impl Files {
                     }
                     return Ok(Value::Null);
                 }
-                self.open_file(host, owner, v, false, narrow).map(|_| Value::Null)
+                self.open_file(host, owner, v, false, narrow)
+                    .map(|_| Value::Null)
             }
-            ("tree", EventKind::Open) => self.open_file(host, owner, v, true, narrow).map(|_| Value::Null),
+            ("tree", EventKind::Open) => self
+                .open_file(host, owner, v, true, narrow)
+                .map(|_| Value::Null),
             ("tree", EventKind::Change) => {
                 self.tree(host, owner).filter = e.value.clone();
                 Ok(Value::Null)
@@ -492,7 +535,9 @@ impl Files {
                 Ok(if self.toggle(host, owner, false)? {
                     json!({})
                 } else {
-                    answer_ask(&Event::new(CONFIRMED, EventKind::Click, "").scoped(Some(owner.to_owned())))
+                    answer_ask(
+                        &Event::new(CONFIRMED, EventKind::Click, "").scoped(Some(owner.to_owned())),
+                    )
                 })
             }
             // What sessions are left: panes and cards of the rest go.
@@ -570,7 +615,10 @@ impl Files {
                     None => key.clone(),
                 };
                 if buffer::read_draft(host, &key)?.is_none() {
-                    host.set(&format!("draft/{key}"), &serde_json::to_value(&d).map_err(failed)?)?;
+                    host.set(
+                        &format!("draft/{key}"),
+                        &serde_json::to_value(&d).map_err(failed)?,
+                    )?;
                     n += 1;
                 }
             }
@@ -584,16 +632,30 @@ impl Extension for Files {
         Ok(Files::default())
     }
 
-    fn handle(&mut self, host: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+    fn handle(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
+        args: Value,
+        _: &Ctx,
+    ) -> Result<Value, Error> {
         self.act(host, method, &args)
     }
 
-    fn render(&mut self, host: &mut dyn Host, point: &str, surface: Surface) -> Result<tree::Node, Error> {
+    fn render(
+        &mut self,
+        host: &mut dyn Host,
+        point: &str,
+        surface: Surface,
+    ) -> Result<tree::Node, Error> {
         let scope = surface.scope.unwrap_or_default();
         match point {
             PANE => view::pane(self, host, &scope),
             CARD => view::card(self, host, &scope),
-            _ => Err(Error::new("unknown-action", format!("nothing draws {point}"))),
+            _ => Err(Error::new(
+                "unknown-action",
+                format!("nothing draws {point}"),
+            )),
         }
     }
 
@@ -602,7 +664,12 @@ impl Extension for Files {
         let done = match point {
             PANE => self.pane_event(host, &scope, &e)?,
             CARD => self.card_event(host, &scope, &e)?,
-            _ => return Err(Error::new("unknown-action", format!("{point} has no {}", e.id))),
+            _ => {
+                return Err(Error::new(
+                    "unknown-action",
+                    format!("{point} has no {}", e.id),
+                ))
+            }
         };
         // Null: the tree is drawn again; an object is the answer as it stands.
         Ok(match done {
