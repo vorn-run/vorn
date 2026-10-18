@@ -52,6 +52,9 @@ struct Held {
     fallback: Option<Checkpoint>,
     /// Bytes vornd wrote to the program, in order.
     writes: Vec<Vec<u8>>,
+    /// Resizes vornd asked for since its last Hello: an approximate session
+    /// asks for two (a redraw nudge) as soon as it is live.
+    resizes: u32,
 }
 
 impl Held {
@@ -133,6 +136,7 @@ impl Fake {
                 newest: None,
                 fallback: None,
                 writes: Vec::new(),
+                resizes: 0,
             })),
             grew: Arc::new(Notify::new()),
         };
@@ -214,12 +218,15 @@ impl Fake {
     fn answer(&self, m: ToSessiond, pump: &mut Option<Cursor>) -> Vec<ToVornd> {
         let mut h = self.held();
         match m {
-            ToSessiond::Hello(_) => vec![ToVornd::Welcome(Welcome {
-                proto: PROTO,
-                sessiond_instance: 1,
-                sessiond_build: "fake".into(),
-                sessions: vec![h.info()],
-            })],
+            ToSessiond::Hello(_) => {
+                h.resizes = 0;
+                vec![ToVornd::Welcome(Welcome {
+                    proto: PROTO,
+                    sessiond_instance: 1,
+                    sessiond_build: "fake".into(),
+                    sessions: vec![h.info()],
+                })]
+            }
             ToSessiond::Attach(a) => {
                 let (cp, from) = match a.from {
                     AttachFrom::NewestCheckpoint => match &h.newest {
@@ -255,6 +262,7 @@ impl Fake {
                 Vec::new()
             }
             ToSessiond::Resize(r) => {
+                h.resizes += 1;
                 h.size = (r.cols, r.rows);
                 h.push(Record::Resize {
                     cols: r.cols,
@@ -363,15 +371,26 @@ impl Vornd {
                 .report()
                 .get("sessions")
                 .and_then(|s| s.get(0))
-                .map(|s| (s["state"].clone(), s["cursor"]["nextRseq"].as_u64()));
-            if let Some((state, Some(rseq))) = &at {
-                if state == "live" && *rseq == head.next_rseq {
+                .map(|s| {
+                    (
+                        s["state"].clone(),
+                        s["cursor"]["nextRseq"].as_u64(),
+                        s["fidelity"] == "approximate",
+                    )
+                });
+            if let Some((state, Some(rseq), approximate)) = &at {
+                // An approximate session asks its program to redraw once it
+                // is live: two resizes, which are records like any other.
+                let nudged = !approximate || fake.held().resizes >= 2;
+                if state == "live" && *rseq == head.next_rseq && nudged {
                     return;
                 }
             }
             assert!(
                 t.elapsed() < PATIENCE,
-                "never caught up: {at:?} vs {head:?}"
+                "never caught up: {at:?} vs {head:?}, resizes {} {}",
+                fake.held().resizes,
+                self.engine.report()
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -848,7 +867,9 @@ async fn a_snapshot_cut_after_a_record_continues_at_its_last_byte() {
                 a.cursor,
                 Cursor {
                     epoch: 0,
-                    next_rseq: 8 + extra as u64,
+                    // A log with a resize and no known spawn size is approximate:
+                    // its program is asked to redraw, with two more resizes.
+                    next_rseq: 8 + extra as u64 + if extra > 0 { 2 } else { 0 },
                     next_offset: 100 + len as u64,
                 }
             );

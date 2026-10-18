@@ -1307,11 +1307,15 @@ impl Run {
                 ..
             } => {
                 if !self.size_known {
-                    // The output before this was parsed at a size that may
-                    // not have been the spawn size.
                     self.size_known = true;
-                    self.term.fidelity = Fidelity::Approximate;
-                    reason.get_or_insert("spawn size unknown");
+                    // During replay, the output before this was parsed at a
+                    // size that may not have been the spawn size. Live, the
+                    // replay saw no resize, so the size never changed and
+                    // this one continues it.
+                    if !self.live {
+                        self.term.fidelity = Fidelity::Approximate;
+                        reason.get_or_insert("spawn size unknown");
+                    }
                 }
                 if self
                     .term
@@ -1430,6 +1434,12 @@ impl Run {
                 return;
             }
             self.live = true;
+            // A screen that may differ from the program's own is redrawn by
+            // the program: one that repaints with relative moves would
+            // otherwise keep drawing over the stale cells.
+            if self.term.fidelity == Fidelity::Approximate {
+                self.nudge = true;
+            }
             out.push(Out::Ready(self.term.fidelity));
         }
         if std::mem::take(&mut self.nudge) && pty {
