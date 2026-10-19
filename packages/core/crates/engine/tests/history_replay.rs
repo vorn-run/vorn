@@ -54,7 +54,18 @@ fn a_history_log_replays_cleanly() {
         .and_then(|b| b.parse().ok())
         .unwrap_or(1);
     let mut pending: Vec<Entry> = Vec::new();
+    // The output with a marker at each resize, as the capture fixtures hold it.
+    let mut raw = std::env::var_os("VORN_HISTORY_RAW").map(|p| (p, Vec::new()));
     for (i, f) in frames.into_iter().enumerate() {
+        if let Some((_, out)) = &mut raw {
+            match &f.record {
+                Record::Data { bytes, .. } => out.extend_from_slice(bytes),
+                Record::Resize { cols, rows, .. } => {
+                    out.extend_from_slice(format!("\n<<<RESIZE {cols}x{rows}>>>\n").as_bytes())
+                }
+                _ => {}
+            }
+        }
         let is_resize = matches!(f.record, Record::Resize { .. });
         if let Record::Resize { cols, rows, .. } = f.record {
             eprintln!(
@@ -91,11 +102,16 @@ fn a_history_log_replays_cleanly() {
         if is_resize || i <= show_until || i + 1 == n {
             let t = m.term();
             eprintln!(
-                "--- after frame {i} ({}x{}):\n{}",
+                "--- after frame {i} ({}x{}, {:?}, {} history):\n{}",
                 t.cols,
                 t.rows,
+                t.screen,
+                t.history_lines,
                 screen(m)
             );
         }
+    }
+    if let Some((path, out)) = raw {
+        std::fs::write(path, out).expect("the raw output writes");
     }
 }

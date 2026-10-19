@@ -18,7 +18,10 @@
 //! - a viewport within [`Rules::near_cols`] and [`Rules::near_rows`] of the
 //!   current size is a near miss and resizes nothing: the owner scales its
 //!   font instead;
-//! - a new size is applied once it has stood for [`Rules::settle`];
+//! - a new size is applied once it has stood for [`Rules::settle`], and a
+//!   size that keeps moving (a long window drag) at most [`Rules::max_wait`]
+//!   after it started to, so one drag costs the program one or two redraws,
+//!   not one for every pause in it;
 //! - a session nobody has typed into keeps the size it was launched with,
 //!   except that the client that opened it fits it to its viewport the first
 //!   time it shows it, so a new terminal fills the pane it was opened in;
@@ -136,6 +139,9 @@ pub struct Rules {
     pub grace: Duration,
     /// How long a new size must stand before it is applied.
     pub settle: Duration,
+    /// The longest a size that keeps changing waits: a resize goes out this
+    /// long after the first change, even while changes keep coming.
+    pub max_wait: Duration,
     /// A viewport this many columns or fewer from the current size, and
     /// [`Rules::near_rows`] rows or fewer, resizes nothing.
     pub near_cols: u16,
@@ -147,7 +153,8 @@ impl Default for Rules {
         Rules {
             quiet: Duration::from_secs(3),
             grace: Duration::from_secs(10),
-            settle: Duration::from_millis(150),
+            settle: Duration::from_millis(100),
+            max_wait: Duration::from_millis(400),
             near_cols: 2,
             near_rows: 1,
         }
@@ -218,6 +225,8 @@ struct Client {
 struct Pending<C> {
     decision: Decision<C>,
     due: Instant,
+    /// When the size first started to move, for [`Rules::max_wait`].
+    since: Instant,
 }
 
 /// One session's size rule.
@@ -558,7 +567,9 @@ impl<C: Copy + Ord + Debug> Policy<C> {
     /// Asks for `size`, once it has settled. A near miss (for the automatic
     /// reasons) or the size the session already has cancels what was
     /// waiting instead; the same size again keeps its deadline, so an owner
-    /// typing steadily does not hold its own resize back.
+    /// typing steadily does not hold its own resize back. A new size while
+    /// one waits restarts the settle, but never past [`Rules::max_wait`]
+    /// from the first.
     fn want(&mut self, size: Size, reason: Reason, now: Instant) {
         let exact = matches!(reason, Reason::Explicit | Reason::Locked);
         let skip = if exact {
@@ -577,10 +588,15 @@ impl<C: Copy + Ord + Debug> Policy<C> {
         };
         match &mut self.pending {
             Some(p) if p.decision.size == size => p.decision = decision,
-            _ => {
+            Some(p) => {
+                p.decision = decision;
+                p.due = (now + self.rules.settle).min(p.since + self.rules.max_wait);
+            }
+            None => {
                 self.pending = Some(Pending {
                     decision,
                     due: now + self.rules.settle,
+                    since: now,
                 })
             }
         }
@@ -632,19 +648,19 @@ mod tests {
         let mut p = Policy::new(Size::new(80, 24));
         attach(&mut p, 1, true, Size::new(120, 40), t0);
         p.on(Event::Input { client: 1 }, t0);
-        assert_eq!(p.due(), Some(at(t0, 150)));
-        p.on(Event::Input { client: 1 }, at(t0, 100));
-        assert_eq!(p.due(), Some(at(t0, 150)), "typing does not hold it back");
+        assert_eq!(p.due(), Some(at(t0, 100)));
+        p.on(Event::Input { client: 1 }, at(t0, 60));
+        assert_eq!(p.due(), Some(at(t0, 100)), "typing does not hold it back");
         p.on(
             Event::Viewport {
                 client: 1,
                 size: Size::new(130, 40),
             },
-            at(t0, 120),
+            at(t0, 80),
         );
-        assert_eq!(p.due(), Some(at(t0, 270)));
-        assert_eq!(p.poll(at(t0, 269)), None);
-        let d = p.poll(at(t0, 270)).unwrap();
+        assert_eq!(p.due(), Some(at(t0, 180)));
+        assert_eq!(p.poll(at(t0, 179)), None);
+        let d = p.poll(at(t0, 180)).unwrap();
         assert_eq!(
             (d.size, d.owner, d.reason),
             (Size::new(130, 40), Some(1), Reason::Input)
@@ -665,7 +681,7 @@ mod tests {
             },
             t0,
         );
-        let d = p.poll(at(t0, 150)).unwrap();
+        let d = p.poll(at(t0, 100)).unwrap();
         assert_eq!((d.size, d.reason), (Size::new(50, 30), Reason::Locked));
         // The desktop types long after: the lock holds.
         p.on(Event::Input { client: 1 }, at(t0, 10_000));
@@ -693,7 +709,7 @@ mod tests {
         assert_eq!(p.due(), Some(at(t0, 31_000)));
         let d = p.poll(at(t0, 31_000));
         assert_eq!(d, None, "it settles first");
-        let d = p.poll(at(t0, 31_150)).unwrap();
+        let d = p.poll(at(t0, 31_100)).unwrap();
         assert_eq!(
             (d.size, d.owner, d.reason),
             (Size::new(120, 40), Some(1), Reason::Returned)
@@ -722,6 +738,46 @@ mod tests {
         assert!(p.may_lock(1));
         p.on(lock(1, true), at(t0, 3_000));
         assert_eq!(p.locked_by(), Some(1));
+    }
+
+    /// A drag that never pauses for the settle still resizes once
+    /// `max_wait` after it began, then once more where it ends.
+    #[test]
+    fn a_size_that_keeps_moving_resizes_at_most_every_max_wait() {
+        let t0 = Instant::now();
+        let mut p = Policy::new(Size::new(80, 24));
+        attach(&mut p, 1, true, Size::new(80, 24), t0);
+        p.on(
+            Event::TakeSize {
+                client: 1,
+                size: None,
+            },
+            t0,
+        );
+        let mut sent = Vec::new();
+        // A second of drag, a new size every 16 ms.
+        for i in 1..=60u16 {
+            let now = at(t0, u64::from(i) * 16);
+            if let Some(d) = p.poll(now) {
+                sent.push((now.duration_since(t0).as_millis(), d.size));
+            }
+            p.on(
+                Event::Viewport {
+                    client: 1,
+                    size: Size::new(80 + i * 2, 24),
+                },
+                now,
+            );
+        }
+        let end = p.due().expect("the last size waits");
+        let last = p.poll(end).expect("and goes out");
+        assert_eq!(last.size, Size::new(200, 24));
+        assert_eq!(end, at(t0, 960 + 100), "one settle after the drag ends");
+        assert_eq!(
+            sent.iter().map(|s| s.0).collect::<Vec<_>>(),
+            [416, 816],
+            "every max_wait from the first change"
+        );
     }
 
     #[test]

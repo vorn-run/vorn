@@ -2,6 +2,12 @@
 //! session on screen. Panes are attached and detached as cards come and go;
 //! an I/O thread keeps each pane's mirror, returns every frame's credit as
 //! soon as it is applied, and marks the pane dirty for the next frame.
+//!
+//! A card's size goes to vornd once a resize gesture ends, and at most every
+//! [`HOLD_MAX`] while one goes on: every size sent costs the program a
+//! SIGWINCH and a full redraw, and a redraw still in flight when the next
+//! size lands is parsed at the wrong width. The card draws its last screen
+//! clipped or padded to the box meanwhile.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -13,6 +19,7 @@ use vorn_term_proto::msg::{
     KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 use vorn_term_proto::screen::Screen;
+use web_time::{Duration, Instant};
 
 use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
 
@@ -44,7 +51,12 @@ struct Pane {
     /// Known once vornd says the attach took.
     sid: Option<u32>,
     dirty: bool,
+    /// The card's box, in cells.
     size: (u16, u16),
+    /// The size last sent to vornd.
+    sent: (u16, u16),
+    /// Since when a resize gesture has held [`Pane::size`] back.
+    held: Option<Instant>,
     /// History lines asked for on attach and after each scrollback epoch.
     history: u16,
     /// The scrollback epoch history was last asked for in.
@@ -69,6 +81,10 @@ struct State {
     next_req: u32,
     replies: Vec<Reply>,
 }
+
+/// The longest a resize gesture holds a card's new size back: a long drag
+/// still resizes the program this often on the way.
+pub const HOLD_MAX: Duration = Duration::from_millis(400);
 
 /// History fetched ahead of a scrolled view, above it.
 const AHEAD: u64 = 200;
@@ -250,6 +266,8 @@ impl Grid {
                 sid: None,
                 dirty: false,
                 size: (cols, rows),
+                sent: (cols, rows),
+                held: None,
                 history,
                 epoch: None,
                 top: None,
@@ -570,24 +588,41 @@ impl Grid {
 
     /// The card's terminal is now `cols`x`rows`: says so and takes the
     /// size, so the session follows the window. Nothing is sent when the
-    /// size is what it was.
-    pub fn resize(&self, session: &str, cols: u16, rows: u16) {
-        let (cols, rows) = (cols.max(2), rows.max(1));
+    /// size is what was sent last. While `gesture` (a divider or the
+    /// window's edge held) the size waits, up to [`HOLD_MAX`] at a time;
+    /// while one waits, when to draw again to send it.
+    pub fn resize(
+        &self,
+        session: &str,
+        cols: u16,
+        rows: u16,
+        gesture: bool,
+        now: Instant,
+    ) -> Option<Instant> {
+        let want = (cols.max(2), rows.max(1));
         {
             let mut st = self.lock();
-            let Some(pane) = st.panes.iter_mut().find(|p| p.session == session) else {
-                return;
-            };
-            if pane.size == (cols, rows) {
-                return;
+            let pane = st.panes.iter_mut().find(|p| p.session == session)?;
+            pane.size = want;
+            if pane.sent == want {
+                pane.held = None;
+                return None;
             }
-            pane.size = (cols, rows);
-            let Some(sid) = pane.sid else {
-                return;
-            };
-            Self::send_size(&mut st.client, sid, cols, rows);
+            let sid = pane.sid?;
+            if gesture {
+                let since = *pane.held.get_or_insert(now);
+                if now.saturating_duration_since(since) < HOLD_MAX {
+                    return Some(since + HOLD_MAX);
+                }
+                pane.held = Some(now);
+            } else {
+                pane.held = None;
+            }
+            pane.sent = want;
+            Self::send_size(&mut st.client, sid, want.0, want.1);
         }
         self.flush();
+        None
     }
 
     fn send_size(client: &mut Client, sid: u32, cols: u16, rows: u16) {
@@ -634,6 +669,8 @@ impl Grid {
                             p.sid = Some(a.sid);
                             // The card may have changed size while the attach was on its way.
                             let (cols, rows) = p.size;
+                            p.sent = p.size;
+                            p.held = None;
                             Self::send_size(&mut st.client, a.sid, cols, rows);
                         }
                         // Detached before vornd answered.

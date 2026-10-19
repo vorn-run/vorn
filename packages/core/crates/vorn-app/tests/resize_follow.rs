@@ -2,6 +2,7 @@
 //! or a divider moves, the PTY takes the box's size, the program repaints at
 //! it, and what the card shows is that repaint, with nothing left over from
 //! the size before. A new card paints at its box's size without a nudge.
+//! One drag costs the program one or two resizes, not one per pause.
 //!
 //! The program is a full-screen stand-in (`fixtures/tui-standin.py`) that
 //! repaints every row with the size it sees on every SIGWINCH, as an
@@ -34,6 +35,10 @@ const FOLLOW: Duration = Duration::from_millis(800);
 const OPEN: Duration = Duration::from_secs(3);
 /// How long after that the program's repaint may take to show.
 const REPAINT: Duration = Duration::from_millis(1200);
+/// The most resizes a short drag may cost the program.
+const DRAG_RESIZES: u64 = 2;
+/// How long a hand rests on the way through a drag.
+const PAUSE: Duration = Duration::from_millis(200);
 
 /// What a card's box holds in whole cells, as the frame measures it.
 fn box_cells(app: &App, ui: &Ui, id: &str) -> Option<(u16, u16)> {
@@ -114,6 +119,40 @@ fn follow(
     out
 }
 
+/// Each card's repaint serial now: the stand-in repaints once per SIGWINCH.
+fn serials(app: &App, ui: &Ui, ids: &[String]) -> Vec<u64> {
+    ids.iter()
+        .map(|id| {
+            let cells = box_cells(app, ui, id).expect("the card is drawn");
+            let v = app.pane(id).expect("the card has a screen");
+            painted(v, cells).expect("a whole repaint")
+        })
+        .collect()
+}
+
+/// Every card was resized at least once and at most `most` times between
+/// the serials `before` and now.
+fn assert_resizes(
+    app: &App,
+    ui: &Ui,
+    ids: &[String],
+    before: &[u64],
+    most: u64,
+    what: &str,
+) -> Vec<u64> {
+    let got: Vec<u64> = serials(app, ui, ids)
+        .iter()
+        .zip(before)
+        .map(|(after, before)| after - before)
+        .collect();
+    eprintln!("{what}: resizes {got:?}");
+    assert!(
+        got.iter().all(|&n| (1..=most).contains(&n)),
+        "{what}: each card should be resized once to {most} times, was {got:?}"
+    );
+    got
+}
+
 fn screens(app: &App, ui: &Ui, ids: &[String]) -> String {
     ids.iter()
         .map(|id| {
@@ -159,11 +198,34 @@ fn assert_prompt(got: &[Followed], what: &str, open: bool) {
     }
 }
 
-/// A window drag: `steps` frames from `from` to `to`, a frame's time apart.
-fn drag_window(app: &mut App, shot: &mut Shot, from: (f32, f32), to: (f32, f32), steps: u32) {
+/// A window drag by its edge: `steps` frames from `from` to `to`, a frame's
+/// time apart, inside a live resize as the window reports one. A person's
+/// hand pauses on the way: `pause` after a third and two thirds of it.
+fn drag_window(
+    app: &mut App,
+    shot: &mut Shot,
+    (from, to): ((f32, f32), (f32, f32)),
+    steps: u32,
+    pause: Duration,
+) {
+    shot.ui.set_live_resize(true);
     for s in 1..=steps {
         let k = s as f32 / steps as f32;
         shot.size = (from.0 + (to.0 - from.0) * k, from.1 + (to.1 - from.1) * k);
+        shot.frame(app);
+        app.pump();
+        std::thread::sleep(Duration::from_millis(16));
+        if s == steps / 3 || s == 2 * steps / 3 {
+            hold_still(app, shot, pause);
+        }
+    }
+    shot.ui.set_live_resize(false);
+}
+
+/// Frames for `d` with nothing moving, as the window draws while a hand rests.
+fn hold_still(app: &mut App, shot: &mut Shot, d: Duration) {
+    let until = Instant::now() + d;
+    while Instant::now() < until {
         shot.frame(app);
         app.pump();
         std::thread::sleep(Duration::from_millis(16));
@@ -188,6 +250,9 @@ fn drag_divider(app: &mut App, shot: &mut Shot, dx: f32, steps: u32) {
         shot.frame(app);
         app.pump();
         std::thread::sleep(Duration::from_millis(16));
+        if s == steps / 3 || s == 2 * steps / 3 {
+            hold_still(app, shot, PAUSE);
+        }
     }
     shot.ui.pointer_up();
     app.events(&mut shot.ui);
@@ -251,6 +316,7 @@ fn follows(script: &str) {
 
     // The window dragged smaller, then larger, over a dozen frames each.
     let mut legs = Vec::new();
+    let mut resizes = Vec::new();
     // Both sides, then the width alone, then the height alone.
     for (from, to) in [
         ((1400.0, 900.0), (1000.0, 640.0)),
@@ -258,13 +324,37 @@ fn follows(script: &str) {
         ((1500.0, 980.0), (1100.0, 980.0)),
         ((1100.0, 980.0), (1100.0, 700.0)),
     ] {
-        drag_window(&mut app, &mut shot, from, to, 12);
+        let before = serials(&app, &shot.ui, &ids);
+        drag_window(&mut app, &mut shot, (from, to), 12, PAUSE);
         let since = Instant::now();
         let got = follow(&mut app, &mut shot, &ids, since, "window drag", &mut frames);
         assert_clean(&app, &shot.ui, &ids, "after the window drag");
+        // Settled: nothing more is on its way.
+        std::thread::sleep(Duration::from_millis(400));
+        app.pump();
+        let n = assert_resizes(&app, &shot.ui, &ids, &before, DRAG_RESIZES, "window drag");
+        resizes.push(n);
         legs.push(got);
     }
+    // A long drag, a second and a half of it: one resize per HOLD_MAX on
+    // the way, and the last where it ends.
+    let before = serials(&app, &shot.ui, &ids);
+    drag_window(
+        &mut app,
+        &mut shot,
+        ((1100.0, 700.0), (1400.0, 900.0)),
+        90,
+        Duration::ZERO,
+    );
+    let since = Instant::now();
+    let got = follow(&mut app, &mut shot, &ids, since, "long drag", &mut frames);
+    assert_clean(&app, &shot.ui, &ids, "after the long drag");
+    std::thread::sleep(Duration::from_millis(400));
+    app.pump();
+    let n = assert_resizes(&app, &shot.ui, &ids, &before, 6, "long drag");
+    report.insert("long".into(), json!({ "follow": got, "resizes": n }));
     report.insert("window".into(), json!(legs));
+    report.insert("window_resizes".into(), json!(resizes));
 
     // Flexible: one divider dragged resizes the panes beside it only.
     shot.click(
@@ -281,7 +371,8 @@ fn follows(script: &str) {
     follow(&mut app, &mut shot, &ids, since, "flexible", &mut frames);
     let mut dragged = Vec::new();
     for dx in [-220.0, 180.0] {
-        drag_divider(&mut app, &mut shot, dx, 8);
+        let before = serials(&app, &shot.ui, &ids);
+        drag_divider(&mut app, &mut shot, dx, 12);
         let since = Instant::now();
         let got = follow(
             &mut app,
@@ -292,7 +383,17 @@ fn follows(script: &str) {
             &mut frames,
         );
         assert_clean(&app, &shot.ui, &ids, "after the divider drag");
-        dragged.push(got);
+        std::thread::sleep(Duration::from_millis(400));
+        app.pump();
+        // Only the panes beside the divider change size.
+        let after = serials(&app, &shot.ui, &ids);
+        let n: Vec<u64> = after.iter().zip(&before).map(|(a, b)| a - b).collect();
+        eprintln!("divider drag: resizes {n:?}");
+        assert!(
+            n.iter().all(|&k| k <= DRAG_RESIZES) && n.iter().any(|&k| k > 0),
+            "divider drag: resizes {n:?}"
+        );
+        dragged.push(json!({ "follow": got, "resizes": n }));
     }
     report.insert("divider".into(), json!(dragged));
 
@@ -407,7 +508,7 @@ fn an_agent_cli_resized_in_a_card_diagnostic() {
         ((1000.0, 640.0), (1500.0, 980.0)),
         ((1500.0, 980.0), (900.0, 700.0)),
     ] {
-        drag_window(&mut app, &mut shot, from, to, 12);
+        drag_window(&mut app, &mut shot, (from, to), 12, PAUSE);
         let got = settle(&mut app, &mut shot, &ids, Instant::now(), 3000);
         eprintln!("drag to {to:?}: {got:?}\n{}", screens(&app, &shot.ui, &ids));
     }

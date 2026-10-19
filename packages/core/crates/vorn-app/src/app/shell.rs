@@ -402,7 +402,9 @@ impl App {
             let rows = (pane.h * ui.scale() / cell.h).floor() as u16;
             g.attach(sid, cols, rows, crate::grid::SHELL_HISTORY);
             if !self.st.locked.contains(sid) {
-                g.resize(sid, cols.max(2), rows.max(1));
+                if let Some(at) = g.resize(sid, cols, rows, ui.resizing(), ui.now()) {
+                    ui.wake_at(at);
+                }
             }
         }
         let v = self.views.get(sid)?;

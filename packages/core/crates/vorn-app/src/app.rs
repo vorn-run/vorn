@@ -3430,7 +3430,10 @@ impl App {
                             },
                         );
                         if !self.st.locked.contains(sid) {
-                            g.resize(sid, cols.max(2), rows.max(1));
+                            let again = g.resize(sid, cols, rows, ui.resizing(), ui.now());
+                            if let Some(at) = again {
+                                ui.wake_at(at);
+                            }
                         }
                     }
                 }
@@ -3487,7 +3490,9 @@ impl App {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
             g.attach(id, cols, rows, 0);
-            g.resize(id, cols.max(2), rows.max(1));
+            if let Some(at) = g.resize(id, cols, rows, ui.resizing(), ui.now()) {
+                ui.wake_at(at);
+            }
         }
         if let Some(v) = self.views.get(id) {
             let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
