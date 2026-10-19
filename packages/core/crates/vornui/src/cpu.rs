@@ -131,6 +131,11 @@ impl CpuRaster {
         bytemuck::cast_slice(&self.pixels)
     }
 
+    /// The last frame, row-major, one pixel each in memory order.
+    pub fn pixels(&self) -> &[u32] {
+        &self.pixels
+    }
+
     /// Row ranges `[y0, y1)` the last [`CpuRaster::render`] changed.
     pub fn damage(&self) -> &[(u32, u32)] {
         &self.damage
@@ -171,6 +176,33 @@ impl CpuRaster {
     /// Draws `scene` into a `size` frame, redrawing only tiles whose
     /// content changed since the last call.
     pub fn render(&mut self, scene: &Scene, atlases: &Atlases, clear: Rgba, size: (u32, u32)) {
+        self.render_without(scene, atlases, clear, size, 0..0);
+    }
+
+    /// The side of the square tiles damage is tracked in, in pixels.
+    pub const TILE_PX: u32 = TILE as u32;
+
+    /// Per tile, row-major and [`CpuRaster::tiles_x`] wide: whether the
+    /// last [`CpuRaster::render`] changed it.
+    pub fn dirty_tiles(&self) -> &[bool] {
+        &self.dirty
+    }
+
+    /// How many tiles a row of the frame has.
+    pub fn tiles_x(&self) -> usize {
+        (self.size.0 as usize).div_ceil(TILE)
+    }
+
+    /// [`CpuRaster::render`] leaving out the layers in `skip`: what is
+    /// under a terminal's overlays, which it shows as images of their own.
+    pub fn render_without(
+        &mut self,
+        scene: &Scene,
+        atlases: &Atlases,
+        clear: Rgba,
+        size: (u32, u32),
+        skip: std::ops::Range<usize>,
+    ) {
         RAISED.with(|r| {
             if !r.replace(true) {
                 raise_priority();
@@ -204,7 +236,12 @@ impl CpuRaster {
             self.luts.clear();
         }
         let frame = [0, 0, w as i32, h as i32];
-        for l in &scene.layers {
+        for (_, l) in scene
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !skip.contains(i))
+        {
             let blur_prims = l
                 .blurs
                 .iter()
@@ -480,6 +517,35 @@ fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
         a[2].min(b[2]),
         a[3].min(b[3]),
     ]
+}
+
+/// The pixels the layers `range` of `scene` may touch in a `size` frame,
+/// as `[x0, y0, x1, y1)`; `None` when they draw nothing there.
+pub fn layers_bounds(
+    scene: &Scene,
+    range: std::ops::Range<usize>,
+    size: (u32, u32),
+) -> Option<[i32; 4]> {
+    let frame = [0, 0, size.0 as i32, size.1 as i32];
+    let layers = scene.layers.get(range).unwrap_or_default();
+    let blurs = layers
+        .iter()
+        .flat_map(|l| &l.blurs)
+        .map(|b| coverage(b.rect, b.clip, 1.0));
+    let quads = layers
+        .iter()
+        .flat_map(|l| &l.quads)
+        .map(|q| coverage(q.rect, q.clip, q.reach()));
+    let sprites = layers
+        .iter()
+        .flat_map(|l| &l.sprites)
+        .map(|s| coverage(s.rect, s.clip, 0.0));
+    blurs
+        .chain(quads)
+        .chain(sprites)
+        .map(|b| intersect(b, frame))
+        .filter(|b| b[0] < b[2] && b[1] < b[3])
+        .reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])
 }
 
 /// What every band of one frame reads.

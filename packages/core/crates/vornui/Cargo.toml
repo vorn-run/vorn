@@ -34,6 +34,9 @@ arboard = { version = "3", default-features = false }
 softbuffer = { version = "0.4", default-features = false }
 # The Cells backend's terminal: raw mode, diffed writes and input.
 crossterm = "0.29"
+# The pixel terminal (tty/): images deflated over a network, and the tty
+# read with a timeout without a reader thread.
+flate2 = "1"
 vorn-spawn = { path = "../spawn" }
 
 # In a browser wgpu draws through WebGPU, or WebGL2 where there is none (web.rs).
@@ -58,6 +61,9 @@ web-sys = { version = "0.3", features = [
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06", "accesskit_unix", "async-io"] }
 softbuffer = { version = "0.4", default-features = false, features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # The traffic lights' place, image drops and the clipboard's image, through
 # the AppKit bindings winit already uses.

@@ -96,6 +96,9 @@ pub struct Ui {
     pub(crate) cells: Option<PaintList>,
     /// Set on a native surface: each layout records its semantic tree here.
     pub(crate) native: Option<crate::native::Node>,
+    /// The scene layers the last layout's overlays (menus, popovers,
+    /// tooltips) drew into; empty when none was open.
+    pub(crate) overlays: std::ops::Range<usize>,
 }
 
 enum Measure<'a> {
@@ -226,6 +229,7 @@ impl Ui {
             wake: Cell::new(None),
             cells: None,
             native: None,
+            overlays: 0..0,
         }
     }
 
@@ -342,6 +346,7 @@ impl Ui {
         self.st.now = now;
         self.wake.set(None);
         self.scene.clear();
+        self.overlays = 0..0;
         self.clear = clear;
         if let Some(list) = &mut self.cells {
             list.begin(clear);
@@ -396,11 +401,13 @@ impl Ui {
             Rect::new(0.0, 0.0, size.0, size.1),
             &mut root_children,
         );
+        let first = self.scene.layers.len();
         let mut i = 0;
         while let Some(&(ov, host, clip)) = cx.overlays.get(i) {
             i += 1;
             self.place_overlay(&mut cx, ov, (host, clip), size, &mut root_children);
         }
+        self.overlays = first..self.scene.layers.len();
         self.scene.set_layer(main_layer);
         self.after_layout(&cx);
         let k = self.scale();
@@ -1665,6 +1672,31 @@ impl Ui {
         );
         self.text.trim();
         true
+    }
+
+    /// Draws the scene into each raster of `jobs` without its range of
+    /// layers, for a host that shows the overlays apart from what is under
+    /// them. Same `false` as [`Ui::render_offscreen`].
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn render_rasters(
+        &mut self,
+        jobs: &mut [(&mut crate::cpu::CpuRaster, std::ops::Range<usize>)],
+        size: (u32, u32),
+    ) -> bool {
+        if self.atlases.full {
+            self.reset_atlases();
+            return false;
+        }
+        for (raster, skip) in jobs.iter_mut() {
+            raster.render_without(&self.scene, &self.atlases, self.clear, size, skip.clone());
+        }
+        self.text.trim();
+        true
+    }
+
+    /// The scene layers the last layout's overlays drew into.
+    pub fn overlay_layers(&self) -> std::ops::Range<usize> {
+        self.overlays.clone()
     }
 
     /// Copies the CPU renderer's last frame into `dst`, a window's buffer
