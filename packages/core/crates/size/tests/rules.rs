@@ -266,18 +266,30 @@ fn t9b_no_ping_pong() {
     assert_eq!(s.p.size(), Size::new(120, 40));
 }
 
-/// TP-T9c: fewer SIGWINCHes. A window drag, a phone rotation and a
-/// 1-column snap produce at most one, one and zero resizes.
+/// TP-T9c: fewer SIGWINCHes. A short window drag, a phone rotation and a
+/// 1-column snap produce one, one and zero resizes; a long drag one per
+/// `max_wait` on the way and one where it ends.
 #[test]
 fn t9c_drags_rotations_and_snaps() {
-    // A drag: a new box every frame for a second.
+    // A short drag: a new box every frame for a fifth of a second.
+    let mut s = desktop_owns();
+    for i in 0..12u16 {
+        s.view(DESKTOP, 120 + i * 5, 40 + i);
+        s.wait(16);
+    }
+    s.wait(1_000);
+    assert_eq!(s.sizes(), [(175, 51)]);
+
+    // A long one: a second of it.
     let mut s = desktop_owns();
     for i in 0..60u16 {
         s.view(DESKTOP, 120 + i, 40 + i / 6);
         s.wait(16);
     }
     s.wait(1_000);
-    assert_eq!(s.sizes(), [(179, 49)]);
+    let sizes = s.sizes();
+    assert!(sizes.len() <= 3, "{sizes:?}");
+    assert_eq!(sizes.last(), Some(&(179, 49)));
 
     // A rotation, with the keyboard sliding up and down on the way.
     let mut s = Sim::new(Size::new(120, 40));

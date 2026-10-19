@@ -27,6 +27,13 @@ fn content_view(window: &Window) -> Option<&NSView> {
     Some(unsafe { h.ns_view.cast::<NSView>().as_ref() })
 }
 
+/// Whether the window's edge is being dragged right now: AppKit's live
+/// resize, which winit does not report.
+pub(crate) fn in_live_resize(window: &Window) -> bool {
+    // SAFETY: a property read on the main thread that owns the view.
+    content_view(window).is_some_and(|v| unsafe { v.inLiveResize() })
+}
+
 /// Puts the close, minimize and zoom buttons at `(x, y)` logical points
 /// from the window's top left, centred in a title area `2y` taller than
 /// them.

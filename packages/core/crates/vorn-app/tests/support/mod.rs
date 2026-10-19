@@ -138,6 +138,24 @@ impl TestVornd {
         std::mem::forget(old);
     }
 
+    /// Stops vornd alone and starts it again on the same HOME: the session
+    /// holder keeps the terminals, and the new vornd takes them on.
+    pub fn restart_server(&mut self) {
+        drop(self.child.stdin.take());
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let next = TestVornd::spawn(self.home.clone());
+        let old = std::mem::replace(self, next);
+        std::mem::forget(old);
+    }
+
     fn stop(&mut self) {
         let holders = self.holder_pids();
         drop(self.child.stdin.take());

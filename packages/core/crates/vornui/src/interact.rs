@@ -255,6 +255,9 @@ pub(crate) struct State {
     pub ime: Option<Rect>,
     pub requests: Vec<WindowRequest>,
     pub maximized: bool,
+    /// The window's edge is being dragged (a live resize), as the window
+    /// last said.
+    pub live_resize: bool,
     /// Values moving under [`Ui::animate`], and whether each was asked for
     /// since the last layout; a value nobody asks for is dropped.
     pub motions: RefCell<HashMap<Id, (Motion, bool)>>,
@@ -296,6 +299,7 @@ impl State {
             ime: None,
             requests: Vec::new(),
             maximized: false,
+            live_resize: false,
             motions: RefCell::new(HashMap::new()),
             reduced_motion: motion::system_reduced_motion(),
             window_focused: true,
@@ -1035,6 +1039,23 @@ impl Ui {
 
     pub fn set_maximized(&mut self, m: bool) {
         self.st.maximized = m;
+    }
+
+    /// Whether a person is resizing something right now: a divider held,
+    /// or the window's edge dragged. A view whose size is costly to change
+    /// elsewhere (a terminal's PTY) can wait for it to end.
+    pub fn resizing(&self) -> bool {
+        self.st.drag.is_some() || self.st.live_resize
+    }
+
+    /// Whether the window is in a live resize, as the window says; it asks
+    /// for a frame when one ends.
+    pub fn live_resize(&self) -> bool {
+        self.st.live_resize
+    }
+
+    pub fn set_live_resize(&mut self, on: bool) {
+        self.st.live_resize = on;
     }
 
     /// The primary button went up.

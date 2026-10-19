@@ -32,6 +32,17 @@ pub fn pane(
     let (x0, y0) = (r.x.round(), r.y.round() + dy);
     let at = |col: u16, row: u16| (x0 + f32::from(col) * cell.w, y0 + f32::from(row) * cell.h);
     let thin = ui.scale().round().max(1.0);
+    // A box larger than the screen, its resize still on the way, is padded
+    // with the screen's background; a smaller one clips it (the caller's clip).
+    let (sw, sh) = (f32::from(v.cols) * cell.w, f32::from(v.rows) * cell.h);
+    if r.w > sw {
+        let pad = Rect::new(x0 + sw, r.y, r.w - sw, r.h);
+        ui.scene.quad(pad, Rgba::hex(v.bg), 0.0, None);
+    }
+    if r.h > sh {
+        let pad = Rect::new(x0, r.y.round() + sh, sw.min(r.w), r.h - sh);
+        ui.scene.quad(pad, Rgba::hex(v.bg), 0.0, None);
+    }
     // What a scroll uncovers above or below the rows is the screen's background.
     let bottom = r.y.round() + f32::from(v.rows) * cell.h;
     if dy > 0.0 {

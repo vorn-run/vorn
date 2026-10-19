@@ -43,6 +43,8 @@ mod onboarding;
 mod palette;
 mod plugins;
 mod points;
+#[cfg(not(target_arch = "wasm32"))]
+mod relink;
 mod settings;
 mod shell;
 mod side;
@@ -387,6 +389,9 @@ pub struct App {
     pub data_dir: Option<std::path::PathBuf>,
     /// The health check on its way.
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
+    /// New links on their way after vornd went away.
+    #[cfg(not(target_arch = "wasm32"))]
+    relinking: Option<Receiver<relink::Relinked>>,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
     /// A discard the person agreed to is being run.
@@ -545,6 +550,8 @@ impl App {
             carried: Vec::new(),
             data_dir: None,
             health: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relinking: None,
             last_focus: None,
             discarding: false,
             web,
@@ -804,6 +811,8 @@ impl App {
 
     pub fn pump(&mut self) {
         self.sync_update();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.relink();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {
@@ -3430,7 +3439,10 @@ impl App {
                             },
                         );
                         if !self.st.locked.contains(sid) {
-                            g.resize(sid, cols.max(2), rows.max(1));
+                            let again = g.resize(sid, cols, rows, ui.resizing(), ui.now());
+                            if let Some(at) = again {
+                                ui.wake_at(at);
+                            }
                         }
                     }
                 }
@@ -3487,7 +3499,9 @@ impl App {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
             g.attach(id, cols, rows, 0);
-            g.resize(id, cols.max(2), rows.max(1));
+            if let Some(at) = g.resize(id, cols, rows, ui.resizing(), ui.now()) {
+                ui.wake_at(at);
+            }
         }
         if let Some(v) = self.views.get(id) {
             let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();

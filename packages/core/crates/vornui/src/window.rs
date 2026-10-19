@@ -32,6 +32,10 @@ use crate::pace::Pacer;
 use crate::render::RenderMode;
 use crate::ui::{Ui, UiConfig};
 
+/// How often a live resize is checked for its end, which no event reports.
+#[cfg(target_os = "macos")]
+const LIVE_RESIZE_POLL: Duration = Duration::from_millis(50);
+
 /// The system clipboard; a failed read or write is an empty clipboard,
 /// as in a browser without the permission.
 struct System(arboard::Clipboard);
@@ -487,6 +491,20 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
+        // A live resize ends with no event of its own: look again shortly,
+        // and draw once more when it has ended, for what waited on it.
+        #[cfg(target_os = "macos")]
+        let wake = match l.ui.live_resize() {
+            true if crate::macos::in_live_resize(&l.window) => {
+                let again = now + LIVE_RESIZE_POLL;
+                Some(wake.map_or(again, |w| w.min(again)))
+            }
+            true => {
+                l.ui.set_live_resize(false);
+                Some(now)
+            }
+            false => wake,
+        };
         let tick = l.app.tick();
         match wake {
             Some(t) if t <= now => {
@@ -588,6 +606,9 @@ impl<A: App> Live<A> {
 
     fn redraw(&mut self) -> Result<(), String> {
         let now = Instant::now();
+        #[cfg(target_os = "macos")]
+        self.ui
+            .set_live_resize(crate::macos::in_live_resize(&self.window));
         let laid = match &mut self.present {
             Present::Gpu { surface, config } => {
                 let Some(gpu) = &self.ui.gpu else {

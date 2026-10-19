@@ -52,6 +52,12 @@ use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT, FORMAT_NO_PROGRAMS};
 /// nothing ever resizes it.
 pub const PIPED_SIZE: (u16, u16) = (120, 40);
 
+/// How long after a resize a program has to start its screen over (clear
+/// it, or switch screens) before it is asked to redraw: a program that
+/// repaints with relative moves would otherwise keep drawing over cells
+/// laid out for the size before, or for one its output was in flight for.
+pub const HEAL_AFTER: Duration = Duration::from_millis(250);
+
 /// When to cut a checkpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cadence {
@@ -314,8 +320,11 @@ pub enum Out {
     Checkpoint(Checkpoint),
     /// Bytes for the program: replies to queries parsed live.
     Write(Vec<u8>),
-    /// A resize for the program, sent after output was lost so a
-    /// full-screen program repaints: once a row shorter, then back.
+    /// A resize for the program, so a full-screen program repaints: once a
+    /// row shorter, then back. Sent after output was lost, and
+    /// [`HEAL_AFTER`] after a resize the program did not repaint for. The
+    /// size is the one the session has; a host that decided a newer one
+    /// sends that instead.
     Nudge {
         cols: u16,
         rows: u16,
@@ -456,6 +465,11 @@ struct Run<T = Term> {
     history: Option<History>,
     /// A redraw nudge owed to the program once the session is live.
     nudge: bool,
+    /// A resize the program has until then to repaint for, and the
+    /// terminal's repaint count when it came.
+    heal: Option<(Instant, u64)>,
+    /// The nudge's own resize records still to come, which arm no heal.
+    nudging: u8,
     /// The session's grid clients, carried from one run to the next.
     hub: Hub,
     /// Whether [`Out::Live`] was sent for going live.
@@ -479,6 +493,8 @@ impl<T> Run<T> {
             watched,
             history,
             nudge,
+            heal,
+            nudging,
             hub,
             live_reported,
         } = self;
@@ -496,6 +512,8 @@ impl<T> Run<T> {
             watched,
             history,
             nudge,
+            heal,
+            nudging,
             hub,
             live_reported,
         };
@@ -877,16 +895,21 @@ impl Session {
         out.extend(hub_out.into_iter().map(Out::Grid));
     }
 
-    /// When the grid's render clock next wants [`Session::frame`] called.
+    /// When the grid's render clock, or a resize's [`HEAL_AFTER`], next
+    /// wants [`Session::frame`] called.
     pub fn due(&self) -> Option<Instant> {
         match &self.phase {
-            Phase::Running(r) => r.hub.due(),
+            Phase::Running(r) => match (r.hub.due(), r.heal.map(|(at, _)| at)) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            },
             _ => None,
         }
     }
 
     /// Cuts the grid frame that was waiting on the render clock, if it is
-    /// due by `now`.
+    /// due by `now`, and asks the program to redraw after a resize it did
+    /// not repaint for.
     pub fn frame(&mut self, now: Instant, out: &mut Vec<Out>) {
         let Phase::Running(run) = &mut self.phase else {
             return;
@@ -895,6 +918,7 @@ impl Session {
         let ctx = grid_ctx(&run.term, run.cursor, run.live, &self.id);
         run.hub.tick(&ctx, now, &mut hub_out);
         out.extend(hub_out.into_iter().map(Out::Grid));
+        run.heal(now, self.open.pty, out);
     }
 
     /// Applies records in order: what [`Input::Entries`] does.
@@ -1223,6 +1247,8 @@ impl Session {
             watched: false,
             history,
             nudge: false,
+            heal: None,
+            nudging: 0,
             hub,
             live_reported: false,
         });
@@ -1331,6 +1357,13 @@ impl Run {
                 {
                     self.term.fidelity = Fidelity::Approximate;
                     reason.get_or_insert("resize refused");
+                }
+                if self.live {
+                    if self.nudging > 0 {
+                        self.nudging -= 1;
+                    } else {
+                        self.heal = Some((now + HEAL_AFTER, self.term.em.repaints()));
+                    }
                 }
             }
             Record::Gap { .. } => self.lost_output(reason, "output lost"),
@@ -1443,10 +1476,30 @@ impl Run {
             out.push(Out::Ready(self.term.fidelity));
         }
         if std::mem::take(&mut self.nudge) && pty {
-            out.push(Out::Nudge {
-                cols: self.term.em.cols(),
-                rows: self.term.em.rows(),
-            });
+            self.send_nudge(out);
+        }
+    }
+
+    fn send_nudge(&mut self, out: &mut Vec<Out>) {
+        self.nudging = 2;
+        self.heal = None;
+        out.push(Out::Nudge {
+            cols: self.term.em.cols(),
+            rows: self.term.em.rows(),
+        });
+    }
+
+    /// Once a resize's [`HEAL_AFTER`] is up: asks the program to redraw
+    /// when it has not started its screen over since, and the screen is a
+    /// program's rather than a shell prompt's, which redraws itself.
+    fn heal(&mut self, now: Instant, pty: bool, out: &mut Vec<Out>) {
+        let Some((_, repaints)) = self.heal.filter(|&(due, _)| due <= now) else {
+            return;
+        };
+        self.heal = None;
+        let em = &self.term.em;
+        if pty && em.repaints() == repaints && em.program_owns_screen() {
+            self.send_nudge(out);
         }
     }
 
