@@ -101,3 +101,41 @@ fn a_full_screen_agents_resizes_replay_exactly() {
         }
     }
 }
+
+/// Output the program drew for the old size can already sit in the PTY when
+/// it is resized, so it is recorded after the Resize and parsed at the new
+/// size, as any terminal would. On the alternate screen the program's
+/// repaint (clear, then every row) must leave nothing of it behind.
+#[test]
+fn old_width_output_after_a_resize_is_cleared_by_the_repaint() {
+    let pieces = pieces();
+    let (first, _) = &pieces[0];
+    let (repaint_100, _) = &pieces[1];
+    let mut b = LogBuilder::new(Size::new(120, 40));
+    b.data(first.clone());
+    b.resize(Size::new(100, 40));
+    // The 120-column frame again: in flight when the PTY shrank.
+    b.data(first.clone());
+    b.data(repaint_100.clone());
+    let entries = b.build().entries;
+    let mut rig = Rig::new((120, 40), SCROLLBACK);
+    rig.attach(1, 1, true, None);
+    rig.feed(&entries);
+    rig.settle();
+    let m = rig.mirror(1, 1);
+    assert_same(rig.em(), m, "after the repaint");
+    let text = screen(m);
+    assert!(
+        text.lines().all(|l| l.chars().count() <= 100),
+        "no row is wider than 100:\n{text}"
+    );
+    let rules = text
+        .lines()
+        .filter(|l| !l.is_empty() && l.chars().all(|c| c == '─'))
+        .count();
+    assert_eq!(rules, 2, "two rules span the width:\n{text}");
+    assert!(
+        text.lines().any(|l| l.trim_end().ends_with("/effort")),
+        "the model line is on its own row:\n{text}"
+    );
+}

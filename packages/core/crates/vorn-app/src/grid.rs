@@ -581,6 +581,12 @@ impl Grid {
             if pane.size == (cols, rows) {
                 return;
             }
+            if std::env::var_os("VORN_SIZE_TRACE").is_some() {
+                eprintln!(
+                    "size-trace resize {session} {:?} -> {cols}x{rows}",
+                    pane.size
+                );
+            }
             pane.size = (cols, rows);
             let Some(sid) = pane.sid else {
                 return;
