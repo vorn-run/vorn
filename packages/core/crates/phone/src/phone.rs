@@ -546,7 +546,7 @@ impl vornui::App for Phone {
                     0
                 },
             );
-            g.resize(&sid, cols.max(2), rows.max(1));
+            g.resize(&sid, cols.max(2), rows.max(1), false, std::time::Instant::now());
         }
         let dy = self.scroll_frame(ui, &sid, r.h);
         let live = ui.focus().is_none() && self.typing;
