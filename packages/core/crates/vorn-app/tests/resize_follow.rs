@@ -214,8 +214,9 @@ fn percentile(sorted: &[u128], p: f64) -> u128 {
     sorted[i]
 }
 
-#[test]
-fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
+/// The stand-in `script` under the test vornd, through the app, with the
+/// timings written under `name`.
+fn follows(script: &str) {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -226,7 +227,7 @@ fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
         eprintln!("skipped: no python3 for the stand-in");
         return;
     };
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tui-standin.py");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join(script);
     let mut app = connect(&v);
     let dir = add_project(&mut app, &v, "demo", json!({}));
     let mut config = app.rpc().call("config:load", Value::Null).expect("config");
@@ -297,6 +298,8 @@ fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
     eprintln!("frames: {} at p50 {p50} us, p99 {p99} us", sorted.len());
     report.insert("frame_us".into(), json!({ "p50": p50, "p99": p99 }));
     if let Some(path) = std::env::var_os("VORN_RESIZE_REPORT") {
+        let name = Path::new(script).file_stem().unwrap_or_default().to_string_lossy();
+        let path = format!("{}-{name}.json", path.to_string_lossy());
         std::fs::write(path, Value::Object(report).to_string()).expect("report");
     }
 
@@ -308,4 +311,17 @@ fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
         assert_prompt(got, "divider drag");
     }
     assert_prompt(&late, "new card");
+}
+
+/// A program that repaints every row on SIGWINCH, as a curses-style TUI does.
+#[test]
+fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
+    follows("tests/fixtures/tui-standin.py");
+}
+
+/// A program that paints like an agent's terminal UI: on the alternate
+/// screen, inside a synchronized-output hold, after probing the terminal.
+#[test]
+fn a_synchronized_repaint_on_the_alternate_screen_follows_the_box_too() {
+    follows("tests/fixtures/tui-standin-sync.py");
 }
