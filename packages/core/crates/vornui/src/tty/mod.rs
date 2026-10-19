@@ -4,11 +4,13 @@
 //! changed, and input is read at pixel precision. Elsewhere the Cells
 //! backend draws text cells as before.
 
+mod frames;
 pub mod input;
 pub mod kitty;
 pub mod present;
 mod screen;
 
+pub use frames::PixelFrames;
 pub use screen::{probe, Caps, PixelTerminal, Probe};
 
 /// How the terminal UI draws: the choice in Settings and `vorn --drawing`.

@@ -1,17 +1,17 @@
 //! The terminal while it is drawn as pixels: finding out what it can do,
 //! taking it over, reading its input raw (crossterm's mouse reader has no
 //! pixel reports, and its keys are reused once parsed), and sending each
-//! frame the CPU renderer draws through a [`Presenter`].
+//! frame through [`PixelFrames`].
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use super::frames::PixelFrames;
 use super::input::{MouseAction, MouseReport, Parsed, Parser, Reply};
 use super::kitty::{self, Wrap};
-use super::present::{Frame, Placing, Presenter, Rect, Sent, Transport};
+use super::present::{Placing, Sent, Transport};
 use crate::cells::term::{map_key, pointer_name, pointer_shapes_from_env, TermEvent};
-use crate::cpu::{layers_bounds, CpuRaster};
 use crate::interact::WHEEL_LINE;
 use crate::ui::Ui;
 
@@ -185,10 +185,7 @@ pub struct PixelTerminal {
     parser: Parser,
     parsed: Vec<Parsed>,
     events: VecDeque<TermEvent>,
-    presenter: Presenter,
-    /// What is under the overlays, and (while there are any) the whole frame.
-    under: CpuRaster,
-    all: CpuRaster,
+    frames: PixelFrames,
     grid: (u16, u16),
     cell: (u32, u32),
     buf: Vec<u8>,
@@ -225,9 +222,7 @@ impl PixelTerminal {
             parser: Parser::default(),
             parsed: Vec::new(),
             events: VecDeque::new(),
-            presenter: Presenter::new(wrap, placing, cell, transport),
-            under: CpuRaster::new(false),
-            all: CpuRaster::new(false),
+            frames: PixelFrames::new(wrap, placing, cell, transport),
             grid: crossterm::terminal::size()?,
             cell,
             buf: Vec::with_capacity(256 * 1024),
@@ -287,9 +282,7 @@ impl PixelTerminal {
 
     /// Forgets what the terminal shows, so the next frame is sent whole.
     pub fn invalidate(&mut self) {
-        self.presenter.invalidate();
-        self.under.invalidate();
-        self.all.invalidate();
+        self.frames.invalidate();
     }
 
     /// The next event within `timeout`, if any.
@@ -348,7 +341,7 @@ impl PixelTerminal {
     fn set_cell(&mut self, cell: (u32, u32)) {
         if cell != self.cell && cell.0 > 0 && cell.1 > 0 {
             self.cell = cell;
-            self.presenter.set_cell(cell);
+            self.frames.set_cell(cell);
         }
     }
 
@@ -390,33 +383,12 @@ impl PixelTerminal {
     /// frame out again and call this again.
     pub fn present(&mut self, ui: &mut Ui) -> io::Result<Option<Sent>> {
         let px = self.frame_px();
-        let overlays = match self.presenter.placing() {
-            Placing::Cursor => ui.overlay_layers(),
-            // Placeholder cells cannot stack: one image for everything.
-            Placing::Cells => 0..0,
-        };
-        let split = !overlays.is_empty();
-        let drawn = if split {
-            ui.render_rasters(
-                &mut [(&mut self.under, overlays.clone()), (&mut self.all, 0..0)],
-                px,
-            )
-        } else {
-            ui.render_rasters(&mut [(&mut self.under, 0..0)], px)
-        };
-        if !drawn {
-            return Ok(None);
-        }
-        let rect: Option<Rect> = split
-            .then(|| layers_bounds(&ui.scene, overlays, px))
-            .flatten()
-            .map(|b| b.map(|v| v.max(0) as u32));
         self.buf.clear();
         self.buf.extend_from_slice(b"\x1b[?2026h");
         let mark = self.buf.len();
-        let under = frame_of(&self.under);
-        let overlay = rect.map(|r| (frame_of(&self.all), r));
-        let sent = self.presenter.present(under, overlay, &mut self.buf);
+        let Some(sent) = self.frames.draw(ui, px, &mut self.buf) else {
+            return Ok(None);
+        };
         let pointer = pointer_name(ui.cursor());
         if self.shapes && pointer != self.pointer {
             self.pointer = pointer;
@@ -437,7 +409,7 @@ impl PixelTerminal {
         }
         self.active = false;
         let mut seq = Vec::new();
-        self.presenter.clear(&mut seq);
+        self.frames.clear(&mut seq);
         kitty::delete_all(&mut seq, self.wrap);
         if self.pointer != "default" {
             seq.extend_from_slice(b"\x1b]22;default\x1b\\");
@@ -463,16 +435,6 @@ impl PixelTerminal {
 impl Drop for PixelTerminal {
     fn drop(&mut self) {
         let _ = self.leave();
-    }
-}
-
-fn frame_of(r: &CpuRaster) -> Frame<'_> {
-    Frame {
-        px: r.pixels(),
-        size: r.size(),
-        dirty: r.dirty_tiles(),
-        tiles_x: r.tiles_x(),
-        tile: CpuRaster::TILE_PX,
     }
 }
 
