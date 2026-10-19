@@ -1,0 +1,311 @@
+//! A card's terminal follows its box promptly and exactly: after the window
+//! or a divider moves, the PTY takes the box's size, the program repaints at
+//! it, and what the card shows is that repaint, with nothing left over from
+//! the size before. A new card paints at its box's size without a nudge.
+//!
+//! The program is a full-screen stand-in (`fixtures/tui-standin.py`) that
+//! repaints every row with the size it sees on every SIGWINCH, as an
+//! agent's TUI does. Timings go to stderr and, when `VORN_RESIZE_REPORT`
+//! names a file, there as JSON.
+
+#![cfg(unix)]
+
+mod support;
+
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use serde_json::{json, Value};
+use support::{add_project, connect, wait_for, Shot, TestVornd};
+use vorn_app::act::Act;
+use vorn_app::screen::flex_divider_id;
+use vorn_app::screen::menus::MENU;
+use vorn_app::state::MenuKind;
+use vorn_app::ui::{item_id, Ui};
+use vorn_app::view::PaneView;
+use vorn_app::App;
+
+/// The agent the stand-in runs as.
+const AGENT: &str = "acme";
+
+/// How long after the last size change the terminal may take to follow.
+const FOLLOW: Duration = Duration::from_millis(800);
+/// How long after that the program's repaint may take to show.
+const REPAINT: Duration = Duration::from_millis(1200);
+
+/// What a card's box holds in whole cells, as the frame measures it.
+fn box_cells(app: &App, ui: &Ui, id: &str) -> Option<(u16, u16)> {
+    let r = app.term_box(id)?;
+    let cell = ui.text.cell();
+    Some(((r.w / cell.w).floor() as u16, (r.h / cell.h).floor() as u16))
+}
+
+/// The stand-in's repaint serial when every row of `v` reads as one repaint
+/// at `cols`x`rows`; `None` when any row is missing, stale or differs.
+fn painted(v: &PaneView, (cols, rows): (u16, u16)) -> Option<u64> {
+    if (v.cols, v.rows) != (cols, rows) {
+        return None;
+    }
+    let text = v.text();
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut serial = None;
+    for y in 0..rows {
+        let line = lines.get(usize::from(y))?;
+        let head = format!("R{y:02} {cols}x{rows} #");
+        let rest = line.strip_prefix(head.as_str())?;
+        let n: u64 = rest.split(' ').next()?.parse().ok()?;
+        if *serial.get_or_insert(n) != n {
+            return None;
+        }
+    }
+    serial
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize)]
+struct Followed {
+    /// Milliseconds from the last size change to the terminal having the box's size.
+    term_ms: Option<u128>,
+    /// Milliseconds from the last size change to the card showing a whole repaint at it.
+    paint_ms: Option<u128>,
+}
+
+/// Frames until every card's terminal follows its box and shows the
+/// program's repaint at it; how long each took from `since`.
+fn follow(
+    app: &mut App,
+    shot: &mut Shot,
+    ids: &[String],
+    since: Instant,
+    what: &str,
+    frames: &mut Vec<u128>,
+) -> Vec<Followed> {
+    let mut out = vec![Followed::default(); ids.len()];
+    loop {
+        let t = Instant::now();
+        shot.frame(app);
+        app.pump();
+        frames.push(t.elapsed().as_micros());
+        let now = since.elapsed().as_millis();
+        for (i, id) in ids.iter().enumerate() {
+            let Some(cells) = box_cells(app, &shot.ui, id) else {
+                continue;
+            };
+            let Some(v) = app.pane(id) else { continue };
+            if out[i].term_ms.is_none() && (v.cols, v.rows) == cells {
+                out[i].term_ms = Some(now);
+            }
+            if out[i].paint_ms.is_none() && painted(v, cells).is_some() {
+                out[i].paint_ms = Some(now);
+            }
+        }
+        if out.iter().all(|f| f.paint_ms.is_some()) {
+            break;
+        }
+        assert!(
+            since.elapsed() < support::PATIENCE,
+            "{what}: the terminals never followed their boxes: {out:?}\n{}",
+            screens(app, &shot.ui, ids)
+        );
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    eprintln!("{what}: {out:?}");
+    out
+}
+
+fn screens(app: &App, ui: &Ui, ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| {
+            let cells = box_cells(app, ui, id);
+            let v = app.pane(id);
+            format!(
+                "{id}: box {cells:?}, term {:?}\n{}",
+                v.map(|v| (v.cols, v.rows)),
+                v.map(PaneView::text).unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n---\n")
+}
+
+/// Every card shows one whole repaint at its box's size: nothing stale.
+fn assert_clean(app: &App, ui: &Ui, ids: &[String], what: &str) {
+    for id in ids {
+        let cells = box_cells(app, ui, id).expect("the card is drawn");
+        let v = app.pane(id).expect("the card has a screen");
+        assert!(
+            painted(v, cells).is_some(),
+            "{what}: {id} shows a stale or partial screen at {cells:?}\n{}",
+            screens(app, ui, ids)
+        );
+    }
+}
+
+fn assert_prompt(got: &[Followed], what: &str) {
+    for (i, f) in got.iter().enumerate() {
+        let term = f.term_ms.expect("followed");
+        let paint = f.paint_ms.expect("painted");
+        assert!(
+            term <= FOLLOW.as_millis(),
+            "{what}: card {i}'s terminal took {term} ms to take its box's size"
+        );
+        assert!(
+            paint <= (FOLLOW + REPAINT).as_millis(),
+            "{what}: card {i} took {paint} ms to show the repaint"
+        );
+    }
+}
+
+/// A window drag: `steps` frames from `from` to `to`, a frame's time apart.
+fn drag_window(app: &mut App, shot: &mut Shot, from: (f32, f32), to: (f32, f32), steps: u32) {
+    for s in 1..=steps {
+        let k = s as f32 / steps as f32;
+        shot.size = (from.0 + (to.0 - from.0) * k, from.1 + (to.1 - from.1) * k);
+        shot.frame(app);
+        app.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
+/// Drags the root divider `dx` across in `steps` frames.
+fn drag_divider(app: &mut App, shot: &mut Shot, dx: f32, steps: u32) {
+    shot.frame(app);
+    let r = shot
+        .ui
+        .rect_of(flex_divider_id(1))
+        .expect("the root divider is on screen");
+    let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    shot.ui.pointer_move(x, y);
+    shot.ui.pointer_down();
+    app.events(&mut shot.ui);
+    shot.frame(app);
+    for s in 1..=steps {
+        shot.ui.pointer_move(x + dx * s as f32 / steps as f32, y);
+        app.events(&mut shot.ui);
+        shot.frame(app);
+        app.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    shot.frame(app);
+}
+
+fn create(app: &mut App, dir: &Path) -> String {
+    let info = app
+        .rpc()
+        .call(
+            "terminal:create",
+            json!({ "agentType": AGENT, "projectName": "demo", "projectPath": dir }),
+        )
+        .expect("agent");
+    let id = info["id"].as_str().expect("id").to_owned();
+    wait_for("the card", || {
+        app.pump();
+        app.store.session(&id).map(|_| ())
+    });
+    id
+}
+
+fn percentile(sorted: &[u128], p: f64) -> u128 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let i = ((sorted.len() - 1) as f64 * p).round() as usize;
+    sorted[i]
+}
+
+#[test]
+fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let python = ["/usr/bin/python3", "/opt/homebrew/bin/python3"]
+        .iter()
+        .find(|p| Path::new(p).is_file());
+    let Some(python) = python else {
+        eprintln!("skipped: no python3 for the stand-in");
+        return;
+    };
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tui-standin.py");
+    let mut app = connect(&v);
+    let dir = add_project(&mut app, &v, "demo", json!({}));
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    config["agentCommands"][AGENT] = json!({ "command": python, "args": [script] });
+    app.rpc().call("config:save", config).expect("saved");
+
+    let mut shot = Shot::at((1400.0, 900.0), 1.0);
+    shot.frame(&mut app);
+    let mut frames = Vec::new();
+    let mut report = serde_json::Map::new();
+
+    // Three cards open: each paints at its box's size without a nudge.
+    let opened = Instant::now();
+    let ids: Vec<String> = (0..3).map(|_| create(&mut app, &dir)).collect();
+    let first = follow(&mut app, &mut shot, &ids, opened, "open", &mut frames);
+    report.insert("open".into(), json!(first));
+
+    // The window dragged smaller, then larger, over a dozen frames each.
+    let mut legs = Vec::new();
+    for (from, to) in [
+        ((1400.0, 900.0), (1000.0, 640.0)),
+        ((1000.0, 640.0), (1500.0, 980.0)),
+    ] {
+        drag_window(&mut app, &mut shot, from, to, 12);
+        let since = Instant::now();
+        let got = follow(&mut app, &mut shot, &ids, since, "window drag", &mut frames);
+        assert_clean(&app, &shot.ui, &ids, "after the window drag");
+        legs.push(got);
+    }
+    report.insert("window".into(), json!(legs));
+
+    // Flexible: one divider dragged resizes the panes beside it only.
+    shot.click(
+        &mut app,
+        App::control("toolbar", &Act::Open(MenuKind::ViewOptions)),
+    );
+    let labels = app.menu_labels(&shot.ui);
+    let i = labels
+        .iter()
+        .position(|l| l == "Flexible")
+        .unwrap_or_else(|| panic!("Flexible in {labels:?}"));
+    shot.click(&mut app, item_id(MENU, i));
+    let since = Instant::now();
+    follow(&mut app, &mut shot, &ids, since, "flexible", &mut frames);
+    let mut dragged = Vec::new();
+    for dx in [-220.0, 180.0] {
+        drag_divider(&mut app, &mut shot, dx, 8);
+        let since = Instant::now();
+        let got = follow(&mut app, &mut shot, &ids, since, "divider drag", &mut frames);
+        assert_clean(&app, &shot.ui, &ids, "after the divider drag");
+        dragged.push(got);
+    }
+    report.insert("divider".into(), json!(dragged));
+
+    // A new card beside them paints at its box's size, and the others keep theirs.
+    let opened = Instant::now();
+    let new = create(&mut app, &dir);
+    let mut all = ids.clone();
+    all.push(new);
+    let late = follow(&mut app, &mut shot, &all, opened, "new card", &mut frames);
+    assert_clean(&app, &shot.ui, &all, "after a new card");
+    report.insert("new".into(), json!(late));
+
+    let mut sorted = frames.clone();
+    sorted.sort_unstable();
+    let p50 = percentile(&sorted, 0.5);
+    let p99 = percentile(&sorted, 0.99);
+    eprintln!("frames: {} at p50 {p50} us, p99 {p99} us", sorted.len());
+    report.insert("frame_us".into(), json!({ "p50": p50, "p99": p99 }));
+    if let Some(path) = std::env::var_os("VORN_RESIZE_REPORT") {
+        std::fs::write(path, Value::Object(report).to_string()).expect("report");
+    }
+
+    assert_prompt(&first, "open");
+    for got in &legs {
+        assert_prompt(got, "window drag");
+    }
+    for got in &dragged {
+        assert_prompt(got, "divider drag");
+    }
+    assert_prompt(&late, "new card");
+}
