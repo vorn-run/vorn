@@ -23,8 +23,16 @@ fn a_history_log_replays_cleanly() {
         eprintln!("skipped: VORN_HISTORY_LOG names no log");
         return;
     };
-    let bytes = std::fs::read(&path).expect("the log reads");
-    let (_, start, frames, _) = vorn_pipeline::history::parse(&bytes).expect("a history log");
+    // Segments in order, separated by ':' (`<name>.log.1:<name>.log`).
+    let mut frames = Vec::new();
+    let mut start = None;
+    for file in path.split(':') {
+        let bytes = std::fs::read(file).expect("the log reads");
+        let (_, at, part, _) = vorn_pipeline::history::parse(&bytes).expect("a history log");
+        start.get_or_insert(at);
+        frames.extend(part);
+    }
+    let start = start.expect("one segment");
     let size = std::env::var("VORN_HISTORY_SIZE")
         .ok()
         .and_then(|s| {

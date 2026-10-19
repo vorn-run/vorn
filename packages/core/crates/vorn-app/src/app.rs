@@ -3215,9 +3215,6 @@ impl App {
             .and_then(Value::as_f64)
             .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
         ui.text.set_term_size(font);
-        if self.size != size && std::env::var_os("VORN_SIZE_TRACE").is_some() {
-            eprintln!("size-trace frame {:?} -> {size:?}", self.size);
-        }
         self.size = size;
         self.agents.load(
             ui,
@@ -3397,8 +3394,7 @@ impl App {
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
         let current = self.typing_target();
-        let last = std::mem::take(&mut self.term_boxes);
-        let trace = std::env::var_os("VORN_SIZE_TRACE").is_some();
+        self.term_boxes.clear();
         for (id, r) in &laid.customs {
             if let Some(tid) =
                 crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
@@ -3415,13 +3411,6 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
-            if trace && last.get(sid) != Some(r) {
-                eprintln!(
-                    "size-trace box {sid} {:?} -> {r:?} cell {cell:?} win {:?}",
-                    last.get(sid),
-                    self.size
-                );
-            }
             let split = crate::blocks::split(&self.store.config, session, self.st.shells.get(sid))
                 .is_some();
             if !split {
