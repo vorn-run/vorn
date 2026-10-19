@@ -1274,6 +1274,13 @@ impl Driver<'_> {
             }
             Out::Write(bytes) => self.write(session, bytes),
             Out::Nudge { cols, rows } => {
+                // Back to the size the rule last decided, which a resize on
+                // its way may have moved past the terminal's.
+                let (cols, rows) = self
+                    .engine
+                    .sizes
+                    .state(id)
+                    .map_or((cols, rows), |(s, _)| (s.cols, s.rows));
                 for rows in [rows.saturating_sub(1).max(1), rows] {
                     self.next_req += 1;
                     let r = Resize {

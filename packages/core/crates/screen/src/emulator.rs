@@ -413,6 +413,38 @@ impl Emulator {
         self.scan.clears
     }
 
+    /// Whole-screen repaints a program started: ED 2, ED 3, RIS and the
+    /// alternate screen's switches. Only its moves mean anything, and only
+    /// within one terminal: a rebuilt one counts from zero.
+    pub fn repaints(&self) -> u64 {
+        self.scan.repaints + self.scan.clears
+    }
+
+    /// Whether a program rather than a shell at its prompt has the screen:
+    /// the alternate screen, or a primary screen whose cursor row is no
+    /// prompt. Such a screen can stay stale after a resize until the
+    /// program draws all of it again; a shell's prompt redraws itself.
+    pub fn program_owns_screen(&self) -> bool {
+        use libghostty_vt::screen::{RowSemanticPrompt, Screen as Which};
+        if matches!(self.term.active_screen(), Ok(Which::Alternate)) {
+            return true;
+        }
+        let y = self.term.cursor_y().unwrap_or(0);
+        let mark = self
+            .term
+            .grid_ref(Point::Active(PointCoordinate {
+                x: 0,
+                y: u32::from(y),
+            }))
+            .ok()
+            .and_then(|g| g.row().ok())
+            .and_then(|r| r.semantic_prompt().ok());
+        !matches!(
+            mark,
+            Some(RowSemanticPrompt::Prompt | RowSemanticPrompt::Continuation)
+        )
+    }
+
     /// OSC 133 marks seen. A mark flags the cursor's row without touching its cells, so Ghostty
     /// does not call that row dirty: a reader that skips clean rows must look again when this moves.
     pub fn prompt_marks(&self) -> u64 {

@@ -43,6 +43,8 @@ mod onboarding;
 mod palette;
 mod plugins;
 mod points;
+#[cfg(not(target_arch = "wasm32"))]
+mod relink;
 mod settings;
 mod shell;
 mod side;
@@ -387,6 +389,9 @@ pub struct App {
     pub data_dir: Option<std::path::PathBuf>,
     /// The health check on its way.
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
+    /// New links on their way after vornd went away.
+    #[cfg(not(target_arch = "wasm32"))]
+    relinking: Option<Receiver<relink::Relinked>>,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
     /// A discard the person agreed to is being run.
@@ -545,6 +550,8 @@ impl App {
             carried: Vec::new(),
             data_dir: None,
             health: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relinking: None,
             last_focus: None,
             discarding: false,
             web,
@@ -804,6 +811,8 @@ impl App {
 
     pub fn pump(&mut self) {
         self.sync_update();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.relink();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {

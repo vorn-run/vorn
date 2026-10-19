@@ -404,7 +404,8 @@ impl Sizes {
             })
     }
 
-    /// The owner and size of `session`, for tests and the report.
+    /// The owner and size of `session`: the size a redraw nudge returns
+    /// to, and what tests and the report read.
     pub fn state(&self, session: &str) -> Option<(Size, Option<Who>)> {
         self.inner()
             .sessions

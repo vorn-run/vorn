@@ -370,6 +370,7 @@ fn follows(script: &str) {
     let since = Instant::now();
     follow(&mut app, &mut shot, &ids, since, "flexible", &mut frames);
     let mut dragged = Vec::new();
+    let mut divider_resizes = Vec::new();
     for dx in [-220.0, 180.0] {
         let before = serials(&app, &shot.ui, &ids);
         drag_divider(&mut app, &mut shot, dx, 12);
@@ -393,9 +394,11 @@ fn follows(script: &str) {
             n.iter().all(|&k| k <= DRAG_RESIZES) && n.iter().any(|&k| k > 0),
             "divider drag: resizes {n:?}"
         );
-        dragged.push(json!({ "follow": got, "resizes": n }));
+        divider_resizes.push(n);
+        dragged.push(got);
     }
     report.insert("divider".into(), json!(dragged));
+    report.insert("divider_resizes".into(), json!(divider_resizes));
 
     // A new card beside them paints at its box's size, and the others keep theirs.
     let opened = Instant::now();

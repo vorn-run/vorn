@@ -2,12 +2,43 @@
 //! `history/<id>.log` file) through the engine, record by record, checking
 //! the grid client's screen against the emulator at every step and printing
 //! the screen around each resize, so a garbled live session can be followed.
+//!
+//! With `VORN_HISTORY_CLEAN` set it also checks the end is clean: the
+//! program started its screen over after the last resize, and what the
+//! session shows is what that repaint and the output after it draw on a
+//! fresh terminal of the final size. A frame drawn for another size, a row
+//! clamped to the bottom or columns written over one another all differ.
 
 mod gridrig;
 
 use gridrig::{assert_same, Rig, SCROLLBACK};
 use vorn_term_mirror::row_text;
 use vorn_term_proto::{Entry, Record, RecordHeader};
+
+/// What starts a screen over: ED 2 and the alternate screen's entry.
+const REPAINTS: [&[u8]; 2] = [b"\x1b[2J", b"\x1b[?1049h"];
+
+/// Where the last repaint in `bytes` starts.
+fn last_repaint(bytes: &[u8]) -> Option<usize> {
+    REPAINTS
+        .iter()
+        .filter_map(|p| bytes.windows(p.len()).rposition(|w| w == *p))
+        .max()
+}
+
+/// `bytes` drawn on a fresh terminal of `size`, on the alternate screen if
+/// `alt`, as rows of text.
+fn drawn_fresh(bytes: &[u8], (cols, rows): (u16, u16), alt: bool) -> String {
+    let mut em = vorn_screen::Emulator::new(u32::from(cols), u32::from(rows)).expect("a terminal");
+    let mut fx = Vec::new();
+    if alt {
+        em.feed(b"\x1b[?1049h", &mut fx);
+    }
+    em.feed(bytes, &mut fx);
+    let mut out = Vec::new();
+    em.rows_text(0, rows.saturating_sub(1), &mut out);
+    out.join("\n").trim_end().to_owned()
+}
 
 fn screen(m: &vorn_term_mirror::Mirror) -> String {
     m.rows()
@@ -56,7 +87,14 @@ fn a_history_log_replays_cleanly() {
     let mut pending: Vec<Entry> = Vec::new();
     // The output with a marker at each resize, as the capture fixtures hold it.
     let mut raw = std::env::var_os("VORN_HISTORY_RAW").map(|p| (p, Vec::new()));
+    // The output since the last resize, for the clean check.
+    let mut since_resize: Vec<u8> = Vec::new();
     for (i, f) in frames.into_iter().enumerate() {
+        match &f.record {
+            Record::Data { bytes, .. } => since_resize.extend_from_slice(bytes),
+            Record::Resize { .. } => since_resize.clear(),
+            _ => {}
+        }
         if let Some((_, out)) = &mut raw {
             match &f.record {
                 Record::Data { bytes, .. } => out.extend_from_slice(bytes),
@@ -114,4 +152,26 @@ fn a_history_log_replays_cleanly() {
     if let Some((path, out)) = raw {
         std::fs::write(path, out).expect("the raw output writes");
     }
+    if std::env::var_os("VORN_HISTORY_CLEAN").is_none() {
+        return;
+    }
+    let m = rig.mirror(1, 1);
+    let t = m.term();
+    let Some(at) = last_repaint(&since_resize) else {
+        panic!(
+            "the program never started its screen over after the last resize ({}x{}):\n{}",
+            t.cols,
+            t.rows,
+            screen(m)
+        );
+    };
+    let alt = t.screen == vorn_term_proto::screen::Screen::Alternate;
+    let want = drawn_fresh(&since_resize[at..], (t.cols, t.rows), alt);
+    let got: Vec<String> = screen(m).lines().map(str::to_owned).collect();
+    let got = got.join("\n").trim_end().to_owned();
+    assert_eq!(
+        got, want,
+        "the final screen is not the program's last repaint at {}x{}",
+        t.cols, t.rows
+    );
 }
