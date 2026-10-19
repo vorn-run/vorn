@@ -4,7 +4,7 @@
 //! ended too). The cards attach again on the next paint, showing their last
 //! screen until the first frame comes.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -80,7 +80,7 @@ impl App {
 }
 
 /// Tries the vornd `dir` names until one answers, while `alive` holds.
-fn dial(dir: &PathBuf, rpc: bool, wake: &Wake, alive: &Weak<Grid>) -> Option<Relinked> {
+fn dial(dir: &Path, rpc: bool, wake: &Wake, alive: &Weak<Grid>) -> Option<Relinked> {
     while alive.strong_count() > 0 {
         if let Some(r) = Endpoint::find(dir).ok().and_then(|ep| open(&ep, rpc, wake)) {
             return Some(r);

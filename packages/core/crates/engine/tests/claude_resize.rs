@@ -13,9 +13,12 @@ use vorn_term_mirror::row_text;
 
 const CAPTURE: &[u8] = include_bytes!("fixtures/claude-2.1.303-resize.bin");
 
+/// Bytes, then the size the program was resized to after them, if it was.
+type Piece = (Vec<u8>, Option<(u16, u16)>);
+
 /// The capture's pieces: the bytes before each resize marker, and the size
 /// the marker names.
-fn pieces() -> Vec<(Vec<u8>, Option<(u16, u16)>)> {
+fn pieces() -> Vec<Piece> {
     let mut out = Vec::new();
     let mut rest = CAPTURE;
     loop {
