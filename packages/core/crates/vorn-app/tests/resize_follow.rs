@@ -251,9 +251,12 @@ fn follows(script: &str) {
 
     // The window dragged smaller, then larger, over a dozen frames each.
     let mut legs = Vec::new();
+    // Both sides, then the width alone, then the height alone.
     for (from, to) in [
         ((1400.0, 900.0), (1000.0, 640.0)),
         ((1000.0, 640.0), (1500.0, 980.0)),
+        ((1500.0, 980.0), (1100.0, 980.0)),
+        ((1100.0, 980.0), (1100.0, 700.0)),
     ] {
         drag_window(&mut app, &mut shot, from, to, 12);
         let since = Instant::now();
