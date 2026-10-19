@@ -30,6 +30,8 @@ const AGENT: &str = "acme";
 
 /// How long after the last size change the terminal may take to follow.
 const FOLLOW: Duration = Duration::from_millis(800);
+/// How long a card just opened may take: the program's spawn is in it.
+const OPEN: Duration = Duration::from_secs(3);
 /// How long after that the program's repaint may take to show.
 const REPAINT: Duration = Duration::from_millis(1200);
 
@@ -140,16 +142,18 @@ fn assert_clean(app: &App, ui: &Ui, ids: &[String], what: &str) {
     }
 }
 
-fn assert_prompt(got: &[Followed], what: &str) {
+/// `open` allows for the program starting: its first paint comes after the spawn.
+fn assert_prompt(got: &[Followed], what: &str, open: bool) {
+    let follow = if open { OPEN } else { FOLLOW };
     for (i, f) in got.iter().enumerate() {
         let term = f.term_ms.expect("followed");
         let paint = f.paint_ms.expect("painted");
         assert!(
-            term <= FOLLOW.as_millis(),
+            term <= follow.as_millis(),
             "{what}: card {i}'s terminal took {term} ms to take its box's size"
         );
         assert!(
-            paint <= (FOLLOW + REPAINT).as_millis(),
+            paint <= (follow + REPAINT).as_millis(),
             "{what}: card {i} took {paint} ms to show the repaint"
         );
     }
@@ -276,7 +280,14 @@ fn follows(script: &str) {
     for dx in [-220.0, 180.0] {
         drag_divider(&mut app, &mut shot, dx, 8);
         let since = Instant::now();
-        let got = follow(&mut app, &mut shot, &ids, since, "divider drag", &mut frames);
+        let got = follow(
+            &mut app,
+            &mut shot,
+            &ids,
+            since,
+            "divider drag",
+            &mut frames,
+        );
         assert_clean(&app, &shot.ui, &ids, "after the divider drag");
         dragged.push(got);
     }
@@ -298,19 +309,19 @@ fn follows(script: &str) {
     eprintln!("frames: {} at p50 {p50} us, p99 {p99} us", sorted.len());
     report.insert("frame_us".into(), json!({ "p50": p50, "p99": p99 }));
     if let Some(path) = std::env::var_os("VORN_RESIZE_REPORT") {
-        let name = Path::new(script).file_stem().unwrap_or_default().to_string_lossy();
+        let name = script.file_stem().unwrap_or_default().to_string_lossy();
         let path = format!("{}-{name}.json", path.to_string_lossy());
         std::fs::write(path, Value::Object(report).to_string()).expect("report");
     }
 
-    assert_prompt(&first, "open");
+    assert_prompt(&first, "open", true);
     for got in &legs {
-        assert_prompt(got, "window drag");
+        assert_prompt(got, "window drag", false);
     }
     for got in &dragged {
-        assert_prompt(got, "divider drag");
+        assert_prompt(got, "divider drag", false);
     }
-    assert_prompt(&late, "new card");
+    assert_prompt(&late, "new card", true);
 }
 
 /// A program that repaints every row on SIGWINCH, as a curses-style TUI does.
@@ -324,4 +335,89 @@ fn a_cards_terminal_follows_its_box_promptly_and_shows_one_repaint() {
 #[test]
 fn a_synchronized_repaint_on_the_alternate_screen_follows_the_box_too() {
     follows("tests/fixtures/tui-standin-sync.py");
+}
+
+/// Frames for `for_ms` after `since`, noting when each card's screen last
+/// changed and when its terminal took the box's size.
+fn settle(
+    app: &mut App,
+    shot: &mut Shot,
+    ids: &[String],
+    since: Instant,
+    for_ms: u64,
+) -> Vec<(Option<u128>, u128)> {
+    let mut last_rev: Vec<u64> = vec![0; ids.len()];
+    let mut out: Vec<(Option<u128>, u128)> = vec![(None, 0); ids.len()];
+    while since.elapsed() < Duration::from_millis(for_ms) {
+        shot.frame(app);
+        app.pump();
+        let now = since.elapsed().as_millis();
+        for (i, id) in ids.iter().enumerate() {
+            let (Some(cells), Some(v)) = (box_cells(app, &shot.ui, id), app.pane(id)) else {
+                continue;
+            };
+            if out[i].0.is_none() && (v.cols, v.rows) == cells {
+                out[i].0 = Some(now);
+            }
+            if v.rev != last_rev[i] {
+                last_rev[i] = v.rev;
+                out[i].1 = now;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    out
+}
+
+/// The real agent CLI named by `VORN_RESIZE_AGENT_BIN`, resized the same
+/// way: its screens and timings go to stderr for a person to read.
+#[test]
+fn an_agent_cli_resized_in_a_card_diagnostic() {
+    let Ok(bin) = std::env::var("VORN_RESIZE_AGENT_BIN") else {
+        eprintln!("skipped: VORN_RESIZE_AGENT_BIN names no agent CLI");
+        return;
+    };
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let dir = add_project(&mut app, &v, "demo", json!({}));
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    config["agentCommands"][AGENT] = json!({ "command": bin, "args": [] });
+    app.rpc().call("config:save", config).expect("saved");
+    let mut shot = Shot::at((1400.0, 900.0), 1.0);
+    shot.frame(&mut app);
+    let ids: Vec<String> = (0..2).map(|_| create(&mut app, &dir)).collect();
+    let got = settle(&mut app, &mut shot, &ids, Instant::now(), 9000);
+    eprintln!("open: {got:?}\n{}", screens(&app, &shot.ui, &ids));
+    // A long line typed into the first card's input, never sent.
+    shot.click(&mut app, vorn_app::screen::term_id(&ids[0]));
+    let typed = std::env::var("VORN_RESIZE_TYPE").unwrap_or_default();
+    for ch in typed.chars() {
+        shot.send(&mut app, vorn_app::ui::Input::char(ch));
+        app.pump();
+    }
+    let got = settle(&mut app, &mut shot, &ids, Instant::now(), 2500);
+    eprintln!("typed: {got:?}\n{}", screens(&app, &shot.ui, &ids));
+    for (from, to) in [
+        ((1400.0, 900.0), (1000.0, 640.0)),
+        ((1000.0, 640.0), (1500.0, 980.0)),
+        ((1500.0, 980.0), (900.0, 700.0)),
+    ] {
+        drag_window(&mut app, &mut shot, from, to, 12);
+        let got = settle(&mut app, &mut shot, &ids, Instant::now(), 3000);
+        eprintln!("drag to {to:?}: {got:?}\n{}", screens(&app, &shot.ui, &ids));
+    }
+    eprintln!(
+        "log tail:\n{}",
+        v.log()
+            .lines()
+            .rev()
+            .take(60)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
