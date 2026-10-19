@@ -603,7 +603,10 @@ mod tests {
         };
         // Pixels at scale 2: the pixel's centre, halved.
         assert_eq!(mouse_point(at(0, 0), true, (16, 34), 2.0), (0.25, 0.25));
-        assert_eq!(mouse_point(at(201, 99), true, (16, 34), 2.0), (100.75, 49.75));
+        assert_eq!(
+            mouse_point(at(201, 99), true, (16, 34), 2.0),
+            (100.75, 49.75)
+        );
         // Over the padding the report goes negative; it is held at the edge.
         assert_eq!(mouse_point(at(-6, -3), true, (16, 34), 2.0), (0.25, 0.25));
         // Cells (1-based): the cell's centre in pixels, then logical.

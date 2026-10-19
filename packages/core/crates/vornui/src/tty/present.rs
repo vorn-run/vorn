@@ -212,7 +212,17 @@ impl Presenter {
         match self.placing {
             Placing::Cursor => {
                 out.extend_from_slice(b"\x1b[1;1H");
-                self.send_image(f, full, id, Show::Cursor { offset: (0, 0), z: 0 }, out, sent);
+                self.send_image(
+                    f,
+                    full,
+                    id,
+                    Show::Cursor {
+                        offset: (0, 0),
+                        z: 0,
+                    },
+                    out,
+                    sent,
+                );
                 self.next_z = 1;
             }
             Placing::Cells => {
@@ -277,9 +287,7 @@ impl Presenter {
                 self.counts.insert(id, cols * rows);
                 for row in at.1..at.1 + rows {
                     for col in at.0..at.0 + cols {
-                        let Some(owner) = self
-                            .owners
-                            .get_mut(row as usize * grid_w + col as usize)
+                        let Some(owner) = self.owners.get_mut(row as usize * grid_w + col as usize)
                         else {
                             continue;
                         };
@@ -448,7 +456,12 @@ pub fn dirty_rects(f: Frame<'_>, max: usize) -> Vec<Rect> {
     done.append(&mut open);
     if done.len() > max {
         let b = done.iter().fold([usize::MAX, usize::MAX, 0, 0], |a, r| {
-            [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[2]), a[3].max(r[3])]
+            [
+                a[0].min(r[0]),
+                a[1].min(r[1]),
+                a[2].max(r[2]),
+                a[3].max(r[3]),
+            ]
         });
         done = vec![b];
     }
@@ -608,12 +621,19 @@ mod tests {
         );
         out.clear();
         let sent = p.present(f.frame(), None, &mut out);
-        assert!(text(&out).ends_with("\x1b_Ga=d,d=I,i=2,q=2\x1b\\"), "the patch it covers goes");
+        assert!(
+            text(&out).ends_with("\x1b_Ga=d,d=I,i=2,q=2\x1b\\"),
+            "the patch it covers goes"
+        );
         assert_eq!(sent.images, 1);
         f.clean();
         out.clear();
         let sent = p.present(f.frame(), None, &mut out);
-        assert_eq!((sent.images, out.len()), (0, 0), "nothing changed, nothing sent");
+        assert_eq!(
+            (sent.images, out.len()),
+            (0, 0),
+            "nothing changed, nothing sent"
+        );
     }
 
     #[test]
@@ -645,9 +665,8 @@ mod tests {
         out.clear();
         let sent = p.present(f.frame(), Some((all.frame(), [5, 6, 9, 8])), &mut out);
         assert_eq!(sent.images, 1);
-        assert!(text(&out).starts_with(
-            "\x1b[2;2H\x1b_Ga=T,f=24,s=4,v=2,i=2,q=2,C=1,z=1073741824,X=1,Y=2,m=0;"
-        ));
+        assert!(text(&out)
+            .starts_with("\x1b[2;2H\x1b_Ga=T,f=24,s=4,v=2,i=2,q=2,C=1,z=1073741824,X=1,Y=2,m=0;"));
         out.clear();
         p.present(f.frame(), None, &mut out);
         assert_eq!(text(&out), "\x1b_Ga=d,d=I,i=2,q=2\x1b\\");
@@ -704,7 +723,11 @@ mod tests {
         out.clear();
         let sent = p.present(f.frame(), None, &mut out);
         assert!(text(&out).contains(",o=z,m=0;"));
-        assert!(sent.bytes < 2048, "a flat frame deflates to little: {}", sent.bytes);
+        assert!(
+            sent.bytes < 2048,
+            "a flat frame deflates to little: {}",
+            sent.bytes
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

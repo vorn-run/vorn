@@ -545,7 +545,14 @@ pub fn layers_bounds(
         .chain(sprites)
         .map(|b| intersect(b, frame))
         .filter(|b| b[0] < b[2] && b[1] < b[3])
-        .reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])
+        .reduce(|a, b| {
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]
+        })
 }
 
 /// What every band of one frame reads.

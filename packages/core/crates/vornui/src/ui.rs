@@ -255,6 +255,15 @@ impl Ui {
         self.cells.is_some()
     }
 
+    /// Moves this UI to the Cells surface (`cells`) or to pixels at
+    /// `scale`, keeping its state and images: a terminal changing how it
+    /// draws keeps every image id the app holds.
+    pub fn set_surface(&mut self, cells: bool, scale: f32) {
+        self.text.cells = cells;
+        self.cells = cells.then(PaintList::default);
+        self.set_scale(if cells { 1.0 } else { scale });
+    }
+
     /// The last frame's paint list, on a cells surface.
     pub fn paint_list(&self) -> Option<&PaintList> {
         self.cells.as_ref()

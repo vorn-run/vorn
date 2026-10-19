@@ -205,13 +205,15 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
         ],
         12.0,
     );
+    let mut rows_col = div().col().gap(4.0);
+    if let Some(d) = s.term_drawing {
+        rows_col = rows_col.child(drawing_row(s, d));
+    }
     div()
         .col()
         .child(header("Appearance", "Customize how Vorn looks", None))
         .child(
-            div()
-                .col()
-                .gap(4.0)
+            rows_col
                 .child(row(
                     "Font Size",
                     "Terminal font size in pixels",
@@ -241,6 +243,44 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                     false,
                 )),
         )
+}
+
+/// The terminal UI's Drawing choice: pixels look like the desktop app,
+/// where the terminal shows images; text cells work everywhere.
+fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
+    let chosen = defaults(s)
+        .and_then(|v| v.get("tuiDrawing"))
+        .and_then(Value::as_str)
+        .unwrap_or("auto");
+    let seg = |label, v: &str, disabled| Seg {
+        label,
+        icon: None,
+        act: default_act("tuiDrawing", format!("\"{v}\"")),
+        on: chosen == v,
+        disabled,
+    };
+    let choice = segmented(
+        s,
+        "tui-drawing",
+        vec![
+            seg("Automatic", "auto", false),
+            seg("Pixels", "pixels", !d.supported),
+            seg("Text", "text", false),
+        ],
+        12.0,
+    );
+    let note = match (d.supported, d.pixels) {
+        (false, _) => "This terminal does not show images",
+        (true, true) => "Drawing pixels now",
+        (true, false) => "Drawing text now",
+    };
+    row(
+        "Drawing",
+        "Pixels look like the desktop app where the terminal shows images; Text works in any terminal",
+        Some(note),
+        choice,
+        false,
+    )
 }
 
 /// The family's sigil in a 24 px frame.

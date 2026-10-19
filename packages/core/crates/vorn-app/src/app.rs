@@ -383,6 +383,8 @@ pub struct App {
     pub chrome: bool,
     /// macOS: the traffic lights sit over the app's top bar.
     pub traffic: bool,
+    /// In the terminal UI: how it draws, shown in Settings.
+    pub term_drawing: Option<crate::screen::TermDrawing>,
     /// The last frame's size.
     size: (f32, f32),
     /// vornd's HTTP port, for pages it serves (a gate's review page).
@@ -551,6 +553,7 @@ impl App {
             notices: Vec::new(),
             chrome: !cfg!(target_os = "macos"),
             traffic: cfg!(target_os = "macos"),
+            term_drawing: None,
             size: look::WINDOW,
             port: ep.port,
             carried: Vec::new(),
@@ -3181,6 +3184,7 @@ impl App {
             chrome: self.chrome,
             traffic: self.traffic,
             web_url: &self.web_url,
+            term_drawing: self.term_drawing,
         }
     }
 

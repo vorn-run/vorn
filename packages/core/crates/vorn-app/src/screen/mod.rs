@@ -65,6 +65,15 @@ pub struct Composer {
     pub launching: bool,
 }
 
+/// How the terminal UI draws, for its Settings row: the desktop has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TermDrawing {
+    /// The terminal shows images, so the UI can be drawn as pixels.
+    pub supported: bool,
+    /// It is drawn as pixels now.
+    pub pixels: bool,
+}
+
 /// What one frame of the screen shows.
 pub struct Screen<'a> {
     pub ui: &'a Ui,
@@ -83,6 +92,8 @@ pub struct Screen<'a> {
     pub traffic: bool,
     /// The web client of the vornd this app talks to, on this machine.
     pub web_url: &'a str,
+    /// In the terminal UI: how it draws.
+    pub term_drawing: Option<TermDrawing>,
 }
 
 impl Screen<'_> {

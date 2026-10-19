@@ -341,9 +341,7 @@ fn csi(params: &[u8], fin: u8) -> Option<Parsed> {
     }
     let nums: Vec<&str> = s.split(';').collect();
     let num = |i: usize| nums.get(i).and_then(|n| n.parse::<u32>().ok());
-    let key = |code: KeyCode, m: Option<u32>| {
-        Some(Parsed::Key(KeyEvent::new(code, modifiers(m))))
-    };
+    let key = |code: KeyCode, m: Option<u32>| Some(Parsed::Key(KeyEvent::new(code, modifiers(m))));
     match fin {
         b't' => {
             let reply = match num(0)? {
@@ -422,7 +420,10 @@ fn apc(body: &[u8]) -> Option<Reply> {
         .find_map(|kv| kv.strip_prefix("i="))?
         .parse()
         .ok()?;
-    Some(Reply::Graphics { id, ok: msg == "OK" })
+    Some(Reply::Graphics {
+        id,
+        ok: msg == "OK",
+    })
 }
 
 #[cfg(test)]

@@ -407,7 +407,11 @@ mod tests {
             Medium::Direct { zlib: false },
             &vec![0; CHUNK + 3],
         );
-        assert_eq!(text(&out).matches("\x1bPtmux;").count(), 2, "one wrap a chunk");
+        assert_eq!(
+            text(&out).matches("\x1bPtmux;").count(),
+            2,
+            "one wrap a chunk"
+        );
     }
 
     #[test]
