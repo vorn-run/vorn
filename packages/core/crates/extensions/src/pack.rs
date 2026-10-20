@@ -210,7 +210,51 @@ pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
     file::parse(&text).map_err(|e| e.to_string())
 }
 
+/// Relabels the manifest in `dir` from a pre-1.0 API to this Vorn's
+/// ([`crate::compat::relabel`]); whether it wrote. Install runs it on an
+/// unpacked package and vornd on every installed one at start, the one
+/// rewrite for both.
+pub fn relabel_dir(dir: &Path) -> Result<bool, String> {
+    let toml = dir.join(file::FILE);
+    let Ok(text) = fs::read_to_string(&toml) else {
+        return Ok(false);
+    };
+    let Some(next) = crate::compat::relabel(&text) else {
+        return Ok(false);
+    };
+    let tmp = dir.join(format!("{}.tmp", file::FILE));
+    fs::write(&tmp, next)
+        .and_then(|()| fs::rename(&tmp, &toml))
+        .map_err(|e| format!("cannot relabel {}: {e}", toml.display()))?;
+    Ok(true)
+}
+
 impl PackStore {
+    /// Relabels every installed version's manifest written for the pre-1.0
+    /// API; a linked folder is the person's own and is left alone. Answers
+    /// the folders it rewrote, and the ones it could not with why.
+    pub fn relabel_installed(&self) -> (Vec<PathBuf>, Vec<String>) {
+        let (mut done, mut failed) = (Vec::new(), Vec::new());
+        for id in self.ids() {
+            let Ok(entries) = fs::read_dir(self.root.join(&id)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                let named = entry.file_name().to_str().is_some_and(is_safe_version);
+                if !named || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    continue;
+                }
+                match relabel_dir(&dir) {
+                    Ok(true) => done.push(dir),
+                    Ok(false) => {}
+                    Err(why) => failed.push(why),
+                }
+            }
+        }
+        (done, failed)
+    }
+
     pub fn new(root: impl Into<PathBuf>) -> PackStore {
         PackStore { root: root.into() }
     }
@@ -414,6 +458,36 @@ mod tests {
         format!(
             "name = \"{name}\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n[[contributes.footers]]\nid = \"f\"\nevery = 5.0\n"
         )
+    }
+
+    #[test]
+    fn installed_packages_written_for_0_9_are_relabelled_and_read_again() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = install(root.path(), "old", "1.0.0", &extension("Old"));
+        let toml = dir.join(file::FILE);
+        let text = fs::read_to_string(&toml).unwrap();
+        fs::write(&toml, text.replace(manifest::API, "vorn:extension@0.9")).unwrap();
+        let linked = tempfile::tempdir().unwrap();
+        fs::write(linked.path().join(file::FILE), "api = \"vorn:extension@0.9\"\n").unwrap();
+        fs::create_dir_all(root.path().join("mine")).unwrap();
+        fs::write(
+            root.path().join("mine").join(CURRENT_FILE),
+            json!({ "linked": linked.path() }).to_string(),
+        )
+        .unwrap();
+        let store = PackStore::new(root.path());
+        assert!(store.describe("old").is_none(), "0.9 is refused as it is");
+
+        let (done, failed) = store.relabel_installed();
+        assert_eq!((done, failed), (vec![dir], Vec::<String>::new()));
+        assert_eq!(fs::read_to_string(&toml).unwrap(), text);
+        assert!(store.describe("old").is_some());
+        assert_eq!(
+            fs::read_to_string(linked.path().join(file::FILE)).unwrap(),
+            "api = \"vorn:extension@0.9\"\n",
+            "a linked folder is the person's own"
+        );
+        assert_eq!(store.relabel_installed().0, Vec::<PathBuf>::new());
     }
 
     #[test]

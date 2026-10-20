@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use bytes::Bytes;
-use common::{connect, next, send, serve, Socket, CREDENTIAL};
+use common::{connect, next, send, serve, serve_in, Socket, CREDENTIAL};
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
 use hyper_util::client::legacy::Client;
@@ -195,6 +195,26 @@ fn rows(db: &Path, sql: &str) -> Vec<Vec<String>> {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn packages_installed_for_0_9_are_relabelled_once_at_start() {
+    let data = tempfile::tempdir().unwrap();
+    let pack = data.path().join("connectors").join("tickets");
+    std::fs::create_dir_all(pack.join("1.0.0")).unwrap();
+    let old = MANIFEST.replace("vorn:extension@1.0", "vorn:extension@0.9");
+    std::fs::write(pack.join("1.0.0").join("vorn-extension.toml"), &old).unwrap();
+    std::fs::write(pack.join("current.json"), r#"{"version":"1.0.0"}"#).unwrap();
+
+    let served = serve_in(data);
+    let mut c = Ws {
+        ws: connect(served.port, CREDENTIAL).await,
+        next_id: 0,
+    };
+    let packs = c.result("connector:listPacks", json!(null)).await;
+    assert_eq!(packs[0]["id"], "tickets", "{packs}");
+    let toml = served.data.path().join("connectors/tickets/1.0.0/vorn-extension.toml");
+    assert_eq!(std::fs::read_to_string(toml).unwrap(), MANIFEST);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

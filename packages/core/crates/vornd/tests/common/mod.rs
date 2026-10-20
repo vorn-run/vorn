@@ -36,7 +36,12 @@ impl Drop for Served {
 }
 
 pub fn serve() -> Served {
-    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    serve_in(tempfile::tempdir().unwrap())
+}
+
+/// vornd serving `data`, which the test may have filled first.
+pub fn serve_in(data: tempfile::TempDir) -> Served {
+    let home = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_vornd"))
         .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
         .env("VORN_TAILSCALE", "none")

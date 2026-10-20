@@ -104,6 +104,46 @@ pub fn imported<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<ApiVersi
         .max()
 }
 
+/// The API label packages carried before 1.0, whose surface 1.0 kept unchanged.
+const RELABELLED: &[&str] = &["vorn:extension@0.9", "vorn:extension@0.9.0"];
+
+/// A manifest's text with a pre-1.0 `api` relabelled as this Vorn's, the
+/// rest kept byte for byte; `None` when there is nothing to relabel.
+pub fn relabel(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut top = true;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        top &= !trimmed.starts_with('[');
+        if top && !changed {
+            if let Some(next) = relabel_line(line) {
+                out.push_str(&next);
+                changed = true;
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    changed.then_some(out)
+}
+
+/// `api = "vorn:extension@0.9"` as `api = "<API>"`, keeping spacing and any comment.
+fn relabel_line(line: &str) -> Option<String> {
+    let (key, rest) = line.split_once('=')?;
+    if key.trim() != "api" {
+        return None;
+    }
+    let value = rest.trim_start();
+    let quoted = value.strip_prefix('"')?;
+    let end = quoted.find('"')?;
+    if !RELABELLED.contains(&&quoted[..end]) {
+        return None;
+    }
+    let lead = &rest[..rest.len() - value.len()];
+    Some(format!("{key}={lead}\"{API}\"{}", &quoted[end + 1..]))
+}
+
 /// A comparator of a range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Op {
@@ -161,12 +201,22 @@ impl Comparator {
         })
     }
 
+    /// `v` to as many parts as the comparator wrote.
+    fn cut(&self, v: ApiVersion) -> (u32, u32, u32) {
+        match self.parts {
+            1 => (v.major, 0, 0),
+            2 => (v.major, v.minor, 0),
+            _ => (v.major, v.minor, v.patch),
+        }
+    }
+
     fn matches(&self, v: ApiVersion) -> bool {
         let c = self.version;
         match self.op {
             Op::Ge => v >= c,
-            Op::Gt => v > c,
-            Op::Le => v <= c,
+            // A partial version is its whole family: `<=1` holds 1.2 and `>1` starts at 2.
+            Op::Gt => self.cut(v) > self.cut(c),
+            Op::Le => self.cut(v) <= self.cut(c),
             Op::Lt => v < c,
             Op::Eq => match self.parts {
                 1 => v.major == c.major,
@@ -338,6 +388,20 @@ mod tests {
     }
 
     #[test]
+    fn relabels_only_a_top_level_pre_1_0_api() {
+        let old = "id = \"a.b\"\napi  =  \"vorn:extension@0.9\" # kept\n[x]\napi = \"vorn:extension@0.9\"\n";
+        assert_eq!(
+            relabel(old).unwrap(),
+            "id = \"a.b\"\napi  =  \"vorn:extension@1.0\" # kept\n[x]\napi = \"vorn:extension@0.9\"\n"
+        );
+        assert_eq!(relabel("api = \"vorn:extension@0.9.0\"").unwrap(), "api = \"vorn:extension@1.0\"");
+        assert_eq!(relabel("api = \"vorn:extension@1.0\"\n"), None);
+        assert_eq!(relabel("api = \"vorn:extension@0.8\"\n"), None);
+        assert_eq!(relabel("[a]\napi = \"vorn:extension@0.9\"\n"), None);
+        assert_eq!(relabel("apis = \"vorn:extension@0.9\"\n"), None);
+    }
+
+    #[test]
     fn ranges_hold_their_comparators() {
         let at = |r: &str, v: ApiVersion| Range::parse(r).unwrap().matches(v);
         assert!(at(">=1.0", V1_0));
@@ -357,6 +421,11 @@ mod tests {
         assert!(at("~1.0", V1_0));
         assert!(!at("~1.0", V1_2));
         assert!(at("~1", V1_2));
+        assert!(at("<=1", V1_2));
+        assert!(!at(">1", ApiVersion::new(1, 1)));
+        assert!(at(">1", ApiVersion::new(2, 0)));
+        assert!(at("<=1.0", ApiVersion { patch: 3, ..V1_0 }));
+        assert!(!at(">1.0", ApiVersion { patch: 3, ..V1_0 }));
     }
 
     #[test]

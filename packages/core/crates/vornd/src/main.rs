@@ -396,6 +396,7 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
         tokio::task::spawn_blocking(move || take_old_table(&engine, &db));
     }
     daemon.set_database(db);
+    daemon.relabel_installed().await;
     daemon.set_desktop_token(credential.clone());
     let serving =
         match vornd::serve::Serving::start(config, held, daemon.native(), credential).await {

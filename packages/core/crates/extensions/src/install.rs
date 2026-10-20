@@ -710,6 +710,7 @@ fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     if !dir.join(file::FILE).is_file() {
         return Err(format!("The repository has no {} at its root", file::FILE));
     }
+    crate::pack::relabel_dir(dir)?;
     let manifest = read_dir_manifest(dir)?;
     if !is_safe_id(&manifest.id) {
         return Err(format!("\"{}\" is not an extension id", manifest.id));
@@ -1032,7 +1033,7 @@ migrations = "migrations"
 
     #[test]
     fn install_and_link_check_the_api_and_vorn_range_against_this_vorn() {
-        let attempt = |from: &str, to: &str| {
+        let both = |from: &str, to: &str| {
             let folder = tempfile::tempdir().unwrap();
             let text = MANIFEST
                 .replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "")
@@ -1044,6 +1045,10 @@ migrations = "migrations"
             let path = folder.path().display().to_string();
             let copied = installs.inspect_git(&path, None).map(|_| ());
             let linked = installs.inspect_link(folder.path()).map(|_| ());
+            (copied, linked)
+        };
+        let attempt = |from: &str, to: &str| {
+            let (copied, linked) = both(from, to);
             assert_eq!(copied, linked);
             copied
         };
@@ -1063,13 +1068,17 @@ migrations = "migrations"
             "vorn-extension.toml:5: vorn: runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
         );
         // Older.
-        let older = attempt(api, "api = \"vorn:extension@0.9\"").unwrap_err();
+        let older = attempt(api, "api = \"vorn:extension@0.8\"").unwrap_err();
         assert!(
-            older.contains("built for vorn:extension@0.9, which this Vorn no longer speaks; it speaks vorn:extension@1.0"),
+            older.contains("built for vorn:extension@0.8, which this Vorn no longer speaks; it speaks vorn:extension@1.0"),
             "{older}"
         );
         let older = attempt(api, &format!("{api}\nvorn = \"<1.0\"")).unwrap_err();
         assert!(older.contains("update the extension"), "{older}");
+        // A 0.9 package is relabelled as it installs; a linked folder is not.
+        let (copied, linked) = both(api, "api = \"vorn:extension@0.9\"");
+        assert_eq!(copied, Ok(()));
+        assert!(linked.unwrap_err().contains("built for vorn:extension@0.9"));
     }
 
     #[test]

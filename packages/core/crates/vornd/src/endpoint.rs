@@ -120,6 +120,26 @@ impl Daemon {
         self.native.set_database(db);
     }
 
+    /// Relabels installed packages written for the pre-1.0 API, whose
+    /// surface 1.0 kept, before anything reads them; once, as each is rewritten.
+    pub async fn relabel_installed(&self) {
+        let Some(dir) = self.native.database().and_then(std::path::Path::parent) else {
+            return;
+        };
+        let store = vorn_extensions::pack::PackStore::new(dir.join("connectors"));
+        let Ok((done, failed)) =
+            tokio::task::spawn_blocking(move || store.relabel_installed()).await
+        else {
+            return;
+        };
+        for dir in done {
+            debug!(dir = %dir.display(), "relabelled for vorn:extension@1.0");
+        }
+        for why in failed {
+            warn!("{why}");
+        }
+    }
+
     /// Starts the work model ([`crate::native::work`]) once vornd has a
     /// database, its own address and a credential for it: the desktop's, or
     /// the local one published beside the database.
