@@ -278,6 +278,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             });
         let make = self.make.take().ok_or("app already made")?;
         ui.set_maximized(window.is_maximized());
+        ui.set_system_dark(window.theme() != Some(winit::window::Theme::Light));
         #[cfg(target_os = "macos")]
         if let Some(at) = o.inset_title {
             crate::macos::place_traffic_lights(&window, at);
@@ -442,7 +443,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.wheel_phase(dy, phase);
                 l.dispatch();
             }
+            WindowEvent::ThemeChanged(theme) => {
+                l.ui.set_system_dark(*theme != winit::window::Theme::Light);
+                l.window.request_redraw();
+            }
             WindowEvent::Focused(focused) => {
+                // Reduce transparency sends no event; a window coming forward looks again.
+                if *focused {
+                    l.ui.set_reduced_transparency(crate::palette::system_reduced_transparency());
+                }
                 l.ui.set_window_focused(*focused);
                 if !*focused {
                     l.ui.pointer_leave();

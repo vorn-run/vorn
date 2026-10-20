@@ -239,7 +239,10 @@ impl App {
     pub(super) fn point_answered(&mut self, call: PointCall, answer: Result<Value, RpcError>) {
         match call {
             PointCall::List => match answer {
-                Ok(Value::Array(list)) => self.st.points.listed(&list),
+                Ok(Value::Array(list)) => {
+                    self.st.settings.appearance.listed(&list);
+                    self.st.points.listed(&list);
+                }
                 Ok(_) => self.st.points.listed(&[]),
                 // An older vornd has no contributions; ask no more.
                 Err(_) => self.st.points.listed(&[]),

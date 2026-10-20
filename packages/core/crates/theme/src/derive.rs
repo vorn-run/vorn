@@ -178,6 +178,15 @@ impl Deriver<'_> {
             Purple400 => self.step(PURPLE, 400),
             Pink400 => self.step(PINK, 400),
             Pink500 => self.step(PINK, 500),
+            SyntaxText | SyntaxVariable => self.get(Ink),
+            SyntaxComment | SyntaxPunct => self.get(Gray500),
+            SyntaxString => self.terminal.ansi[2],
+            SyntaxNumber | SyntaxProperty => self.terminal.ansi[6],
+            SyntaxKeyword => self.terminal.ansi[5],
+            SyntaxStorage => self.terminal.ansi[1],
+            SyntaxConstant | SyntaxList => self.get(Orange400),
+            SyntaxFunction => self.terminal.ansi[4],
+            SyntaxType => self.terminal.ansi[3],
         }
     }
 }

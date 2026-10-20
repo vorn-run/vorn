@@ -434,7 +434,7 @@ fn trace(s: &Screen<'_>, ns: &Value, key: &str, nid: &str, can_resume: bool) -> 
             .max_h(280.0)
             .scroll_y()
             .rounded(4.0)
-            .bg(Rgba::hexa(0x000000, 0.30))
+            .bg(crate::ui::theme::shadow(0.30))
             .border(1.0, white(0.05));
         for l in &timeline {
             // A closing line break opens no new line in a `<pre>`.

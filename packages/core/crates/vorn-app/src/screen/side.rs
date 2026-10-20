@@ -769,7 +769,7 @@ pub(super) fn alert(
         .on(Action::Click)
         .absolute(0.0, 0.0)
         .size(s.size.0, s.size.1)
-        .bg(Rgba::hexa(0, 0.3))
+        .bg(crate::ui::theme::shadow(0.3))
         .layered()
         .center()
         .child(panel)

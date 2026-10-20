@@ -384,7 +384,7 @@ fn editor_view(inst: &str, node: &Code, view: &View) -> El {
         .filter(|(t, _)| t == text_)
         .map(|(_, sp)| {
             sp.iter()
-                .map(|(r, (rgb, a))| (r.clone(), Rgba::hexa(*rgb, f32::from(*a) / 255.0)))
+                .map(|(r, (token, a))| (r.clone(), c(*token).alpha(f32::from(*a) / 255.0)))
                 .collect()
         })
         .unwrap_or_default();
@@ -401,7 +401,7 @@ fn editor_view(inst: &str, node: &Code, view: &View) -> El {
             spans = overlay(
                 &spans,
                 hit.range.0..hit.range.1,
-                if on { c(0x000000) } else { c(look::GRAY_100) },
+                if on { crate::ui::theme::shadow(1.0) } else { c(look::GRAY_100) },
             );
         }
     }

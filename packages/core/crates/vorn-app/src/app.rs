@@ -344,6 +344,8 @@ pub struct App {
     /// Why the grid is not there, when it is not.
     pub grid_error: Option<String>,
     views: HashMap<String, PaneView>,
+    /// The system's appearance and Reduce transparency, as the window last said.
+    system_look: (bool, bool),
     /// Where each session's terminal was painted (physical pixels), for the pointer.
     term_boxes: HashMap<String, crate::ui::Rect>,
     /// A double-click asked vornd for a word; the click that ends it keeps the selection.
@@ -541,6 +543,7 @@ impl App {
             grid,
             grid_error,
             views: HashMap::new(),
+            system_look: (true, false),
             term_boxes: HashMap::new(),
             word_pending: false,
             scrolls: HashMap::new(),
@@ -834,6 +837,24 @@ impl App {
         }
     }
 
+    /// Installs the palette the appearance settings resolve to; when the
+    /// colours change, every terminal is drawn again in the new ones.
+    fn retheme(&mut self) {
+        let (dark, reduced) = self.system_look;
+        let preview = self.st.settings.theme_preview.as_deref();
+        let changed = self.st.settings.appearance.apply(
+            self.store.config.get("defaults"),
+            dark,
+            reduced,
+            preview,
+        );
+        if changed {
+            if let Some(g) = &self.grid {
+                g.touch_all();
+            }
+        }
+    }
+
     pub fn pump(&mut self) {
         self.sync_update();
         while let Ok(event) = self.events.try_recv() {
@@ -930,6 +951,7 @@ impl App {
                 Some(answer) => self.answered(kind, answer),
             }
         }
+        self.retheme();
         let mut shells = Vec::new();
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
@@ -3254,6 +3276,7 @@ impl App {
     /// The frame's element tree for a `size` window, after taking in what
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
+        self.system_look = (ui.system_dark(), ui.reduced_transparency());
         self.pump();
         self.flex_tick(ui);
         self.grid_replies(ui);

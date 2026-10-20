@@ -37,25 +37,25 @@ pub fn pane(
     let (sw, sh) = (f32::from(v.cols) * cell.w, f32::from(v.rows) * cell.h);
     if r.w > sw {
         let pad = Rect::new(x0 + sw, r.y, r.w - sw, r.h);
-        ui.scene.quad(pad, Rgba::hex(v.bg), 0.0, None);
+        ui.scene.quad(pad, cell_colour(v.bg), 0.0, None);
     }
     if r.h > sh {
         let pad = Rect::new(x0, r.y.round() + sh, sw.min(r.w), r.h - sh);
-        ui.scene.quad(pad, Rgba::hex(v.bg), 0.0, None);
+        ui.scene.quad(pad, cell_colour(v.bg), 0.0, None);
     }
     // What a scroll uncovers above or below the rows is the screen's background.
     let bottom = r.y.round() + f32::from(v.rows) * cell.h;
     if dy > 0.0 {
         ui.scene.quad(
             Rect::new(x0, r.y.round(), r.w, dy),
-            Rgba::hex(v.bg),
+            cell_colour(v.bg),
             0.0,
             None,
         );
     } else if dy < 0.0 {
         ui.scene.quad(
             Rect::new(x0, bottom + dy, r.w, -dy),
-            Rgba::hex(v.bg),
+            cell_colour(v.bg),
             0.0,
             None,
         );
@@ -65,17 +65,17 @@ pub fn pane(
         let w = f32::from(run.ncols) * cell.w;
         if run.bg != v.bg {
             ui.scene
-                .quad(Rect::new(x, y, w, cell.h), Rgba::hex(run.bg), 0.0, None);
+                .quad(Rect::new(x, y, w, cell.h), cell_colour(run.bg), 0.0, None);
         }
         if run.flags & flags::UNDERLINE != 0 {
             let uy = y + cell.baseline + thin;
             ui.scene
-                .quad(Rect::new(x, uy, w, thin), Rgba::hex(run.fg), 0.0, None);
+                .quad(Rect::new(x, uy, w, thin), cell_colour(run.fg), 0.0, None);
         }
         if run.flags & flags::STRIKE != 0 {
             let sy = y + (cell.h / 2.0).round();
             ui.scene
-                .quad(Rect::new(x, sy, w, thin), Rgba::hex(run.fg), 0.0, None);
+                .quad(Rect::new(x, sy, w, thin), cell_colour(run.fg), 0.0, None);
         }
     }
     let sel_bg = crate::ui::palette::terminal().selection;
@@ -93,7 +93,7 @@ pub fn pane(
     };
     if let Some((cx, cy)) = cursor {
         let (x, y) = at(cx, cy);
-        let cc = Rgba::hex(v.cursor_color);
+        let cc = cell_colour(v.cursor_color);
         let rect = match shape {
             Cursor::Bar => Rect::new(x, y, thin * 2.0, cell.h),
             Cursor::Underline => Rect::new(x, y + cell.h - thin * 2.0, cell.w, thin * 2.0),
@@ -110,13 +110,13 @@ pub fn pane(
     for run in &v.runs {
         let style = (run.flags & (flags::BOLD | flags::ITALIC)) as u8;
         debug_assert_eq!((flags::BOLD as u8, flags::ITALIC as u8), (BOLD, ITALIC));
-        let mut fg = Rgba::hex(run.fg);
+        let mut fg = cell_colour(run.fg);
         if run.flags & flags::FAINT != 0 {
             fg = fg.alpha(0.5);
         }
         let text = v.run_text(run);
         let color_at = |col: u16| match block_at {
-            Some((cx, cy)) if cx == col && cy == run.row => Rgba::hex(v.bg),
+            Some((cx, cy)) if cx == col && cy == run.row => cell_colour(v.bg),
             _ => fg,
         };
         if run.flags & flags::CLUSTER != 0 {
@@ -258,13 +258,13 @@ fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
     let cell = ui.text.cell();
     let mut x = origin.0 + f32::from(v.cursor_x) * cell.w;
     let y = origin.1 + f32::from(v.cursor_y) * cell.h;
-    let fg = Rgba::hex(v.fg);
+    let fg = cell_colour(v.fg);
     let start = x;
     let mut buf = [0u8; 4];
     for ch in s.chars() {
         let w = if ch.is_ascii() { 1.0 } else { 2.0 } * cell.w;
         ui.scene
-            .quad(Rect::new(x, y, w, cell.h), Rgba::hex(v.bg), 0.0, None);
+            .quad(Rect::new(x, y, w, cell.h), cell_colour(v.bg), 0.0, None);
         ui.text.draw_cell(
             &mut ui.scene,
             &mut ui.atlases,
@@ -282,6 +282,12 @@ fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
         0.0,
         None,
     );
+}
+
+/// A terminal cell's colour: the view already resolved it from the theme's
+/// terminal palette or the program's own truecolour.
+fn cell_colour(rgb: u32) -> Rgba {
+    crate::ui::palette::Color::Content(rgb).rgba()
 }
 
 #[cfg(test)]
@@ -315,3 +321,4 @@ mod tests {
         assert_eq!(row.trim_end(), "─┼─");
     }
 }
+

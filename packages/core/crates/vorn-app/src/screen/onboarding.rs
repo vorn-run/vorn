@@ -214,7 +214,7 @@ fn step_agents(s: &Screen<'_>) -> El {
                         28.0,
                         14.0,
                         6.0,
-                        Rgba::hexa(a.color, a.bg_alpha),
+                        c(a.color).alpha(a.bg_alpha),
                     ))
                     .child(t(&a.name, 14.0, 20.0, c(look::GRAY_200)).grow())
                     .child(
@@ -366,7 +366,7 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
                     20.0,
                     10.0,
                     4.0,
-                    Rgba::hexa(def.color, def.bg_alpha),
+                    c(def.color).alpha(def.bg_alpha),
                 ))
                 .child(caps_label(&title, 10.0)),
         );
@@ -588,7 +588,7 @@ fn step_sessions(s: &Screen<'_>) -> El {
                 .px(12.0)
                 .py(8.0)
                 .rounded(6.0)
-                .bg(Rgba::hexa(0, 0.3))
+                .bg(crate::ui::theme::shadow(0.3))
                 .border(1.0, white(0.06))
                 .child(t(
                     "Type a prompt to direct the agent...",
@@ -675,7 +675,7 @@ fn step_workspace() -> El {
         let (fg, bg) = if i == 0 {
             (c(look::BRONZO), look::BRONZO.alpha(0.08))
         } else {
-            (c(0x555555), white(0.03))
+            (c(look::GRAY_600), white(0.03))
         };
         tabs = tabs.child(tag(name, fg, bg));
     }

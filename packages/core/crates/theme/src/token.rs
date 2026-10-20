@@ -109,6 +109,20 @@ tokens! {
     Purple400 = "purple-400",
     Pink400 = "pink-400",
     Pink500 = "pink-500",
+    /// Code in the editor, by what each word is.
+    SyntaxText = "syntax-text",
+    SyntaxComment = "syntax-comment",
+    SyntaxString = "syntax-string",
+    SyntaxNumber = "syntax-number",
+    SyntaxKeyword = "syntax-keyword",
+    SyntaxStorage = "syntax-storage",
+    SyntaxConstant = "syntax-constant",
+    SyntaxFunction = "syntax-function",
+    SyntaxVariable = "syntax-variable",
+    SyntaxProperty = "syntax-property",
+    SyntaxType = "syntax-type",
+    SyntaxPunct = "syntax-punct",
+    SyntaxList = "syntax-list",
 }
 
 /// The families "interface style: neutral" takes from Vorn's own theme
@@ -187,6 +201,19 @@ impl Token {
                 | Violet400
                 | Purple400
                 | Pink400
+                | SyntaxText
+                | SyntaxComment
+                | SyntaxString
+                | SyntaxNumber
+                | SyntaxKeyword
+                | SyntaxStorage
+                | SyntaxConstant
+                | SyntaxFunction
+                | SyntaxVariable
+                | SyntaxProperty
+                | SyntaxType
+                | SyntaxPunct
+                | SyntaxList
         )
     }
 }

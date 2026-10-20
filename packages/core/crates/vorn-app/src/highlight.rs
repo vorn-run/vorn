@@ -1,5 +1,5 @@
 //! Syntax colour for the editor: the language a file name
-//! implies, and the colours of its tokens in the vitesse-dark theme.
+//! implies, and the theme's syntax token for each of its words.
 //!
 //! A lexer per family of languages, matched to Shiki per token class (comments,
 //! strings, numbers, keywords, storage words, constants, types, functions,
@@ -9,26 +9,29 @@
 
 use std::ops::Range;
 
-/// vitesse-dark's colours, as `0xRRGGBB` and alpha.
+/// The syntax tokens of the theme; Vorn Dark gives them vitesse-dark's colours.
 mod theme {
-    pub const TEXT: (u32, u8) = (0xdbd7ca, 0xee);
-    pub const COMMENT: (u32, u8) = (0x758575, 0xdd);
-    pub const STRING: (u32, u8) = (0xc98a7d, 0xff);
-    pub const QUOTE: (u32, u8) = (0xc98a7d, 0x77);
-    pub const NUMBER: (u32, u8) = (0x4c9a91, 0xff);
-    pub const KEYWORD: (u32, u8) = (0x4d9375, 0xff);
-    pub const STORAGE: (u32, u8) = (0xcb7676, 0xff);
-    pub const CONSTANT: (u32, u8) = (0xc99076, 0xff);
-    pub const FUNCTION: (u32, u8) = (0x80a665, 0xff);
-    pub const VARIABLE: (u32, u8) = (0xbd976a, 0xff);
-    pub const PROPERTY: (u32, u8) = (0xb8a965, 0xff);
-    pub const TYPE: (u32, u8) = (0x5da994, 0xff);
-    pub const PUNCT: (u32, u8) = (0x666666, 0xff);
-    pub const LIST: (u32, u8) = (0xd4976c, 0xff);
+    use vornui::theme::Token;
+
+    pub const TEXT: super::Color = (Token::SyntaxText, 0xff);
+    pub const COMMENT: super::Color = (Token::SyntaxComment, 0xff);
+    pub const STRING: super::Color = (Token::SyntaxString, 0xff);
+    pub const QUOTE: super::Color = (Token::SyntaxString, 0x77);
+    pub const NUMBER: super::Color = (Token::SyntaxNumber, 0xff);
+    pub const KEYWORD: super::Color = (Token::SyntaxKeyword, 0xff);
+    pub const STORAGE: super::Color = (Token::SyntaxStorage, 0xff);
+    pub const CONSTANT: super::Color = (Token::SyntaxConstant, 0xff);
+    pub const FUNCTION: super::Color = (Token::SyntaxFunction, 0xff);
+    pub const VARIABLE: super::Color = (Token::SyntaxVariable, 0xff);
+    pub const PROPERTY: super::Color = (Token::SyntaxProperty, 0xff);
+    pub const TYPE: super::Color = (Token::SyntaxType, 0xff);
+    pub const PUNCT: super::Color = (Token::SyntaxPunct, 0xff);
+    pub const LIST: super::Color = (Token::SyntaxList, 0xff);
 }
 
-/// A token's colour as `0xRRGGBB` and alpha.
-pub type Color = (u32, u8);
+/// A token's colour: the theme's syntax token, and its alpha out of 255
+/// on top of the token's own (quote marks are faint).
+pub type Color = (vornui::theme::Token, u8);
 
 /// Colours by byte range, sorted and apart.
 pub type Spans = Vec<(Range<usize>, Color)>;

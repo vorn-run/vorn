@@ -277,7 +277,7 @@ fn icon_color(s: &Screen<'_>, icon: &str, color: &str) -> El {
             .border(1.0, if on { white(0.2) } else { white(0.0) })
             .role(Role::Button, tip)
             .selected(on)
-            .child(ico(glyph, 16.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+            .child(ico(glyph, 16.0, 1.5, if on { tint } else { c(look::GRAY_400) }));
         grid = grid.child(tooltip(s.ui, b, id, tip, None));
     }
     let mut swatches = div().row().wrap_children().items_center().gap(8.0);

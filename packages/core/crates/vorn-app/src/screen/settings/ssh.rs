@@ -11,7 +11,7 @@ use crate::settings::{
     host_subtitle, truncate_key, HostField, KeyField, SetAct, TestResult, AUTH_METHODS,
 };
 use crate::state::MenuKind;
-use crate::ui::{area, div, field, text, Action, El, Id, Rgba, Role, TextStyle};
+use crate::ui::{area, div, field, text, Action, El, Id, Role, TextStyle};
 
 /// A host's text field.
 pub fn host_id(host: &str, f: HostField) -> Id {
@@ -34,7 +34,7 @@ fn frame(s: &Screen<'_>, id: Id, inner: El) -> El {
         .px(10.0)
         .py(6.0)
         .rounded(6.0)
-        .bg(Rgba::hexa(0, 0.3))
+        .bg(crate::ui::theme::shadow(0.3))
         .border(
             1.0,
             if s.ui.focused(id) {
@@ -277,7 +277,7 @@ fn host_form(s: &Screen<'_>, h: &Value, id: &str) -> El {
                     .px(10.0)
                     .py(6.0)
                     .rounded(6.0)
-                    .bg(Rgba::hexa(0, 0.3))
+                    .bg(crate::ui::theme::shadow(0.3))
                     .border(1.0, white(0.06))
                     .role(Role::ComboBox, "Stored Key")
                     .child(
@@ -318,7 +318,7 @@ fn host_form(s: &Screen<'_>, h: &Value, id: &str) -> El {
                         .px(8.0)
                         .py(6.0)
                         .rounded(6.0)
-                        .bg(Rgba::hexa(0, 0.3).mix(white(0.08), hot))
+                        .bg(crate::ui::theme::shadow(0.3).mix(white(0.08), hot))
                         .border(1.0, white(0.06))
                         .role(Role::Button, "Browse")
                         .child(ico(
@@ -706,7 +706,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
                 .py(12.0)
                 .rounded(8.0)
                 .border(1.0, look::AMBER_500.alpha(0.3))
-                .bg(Rgba::hexa(0xf59e0b, 0.08))
+                .bg(look::AMBER_500.alpha(0.08))
                 .child(
                     text(
                         "Keychain encryption is not available on this system. Install libsecret (gnome-keyring) to use the SSH key vault.",
@@ -808,7 +808,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
                         .px(10.0)
                         .py(8.0)
                         .rounded(6.0)
-                        .bg(Rgba::hexa(0, 0.3))
+                        .bg(crate::ui::theme::shadow(0.3))
                         .border(1.0, white(0.06))
                         .child(
                             text(p, 11.0, c(look::GRAY_500))

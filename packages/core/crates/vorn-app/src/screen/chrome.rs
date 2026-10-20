@@ -930,7 +930,7 @@ pub(super) fn banner(s: &Screen<'_>) -> Option<El> {
         .bg(c(look::BRONZO))
         .role(Role::Button, label)
         .child(
-            text(label, 12.0, c(0x000000))
+            text(label, 12.0, crate::ui::theme::shadow(1.0))
                 .weight(500)
                 .line_height(16.0)
                 .silent(),

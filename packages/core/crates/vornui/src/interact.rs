@@ -263,6 +263,10 @@ pub(crate) struct State {
     pub motions: RefCell<HashMap<Id, (Motion, bool)>>,
     pub reduced_motion: bool,
     pub window_focused: bool,
+    /// The system's appearance is dark, as the window last said.
+    pub system_dark: bool,
+    /// The system asks for less transparency.
+    pub reduced_transparency: bool,
 }
 
 impl State {
@@ -303,6 +307,8 @@ impl State {
             motions: RefCell::new(HashMap::new()),
             reduced_motion: motion::system_reduced_motion(),
             window_focused: true,
+            system_dark: true,
+            reduced_transparency: crate::palette::system_reduced_transparency(),
         }
     }
 
@@ -1035,6 +1041,24 @@ impl Ui {
 
     pub fn set_window_focused(&mut self, focused: bool) {
         self.st.window_focused = focused;
+    }
+
+    /// Whether the system's appearance is dark: what a System colour scheme follows.
+    pub fn system_dark(&self) -> bool {
+        self.st.system_dark
+    }
+
+    pub fn set_system_dark(&mut self, dark: bool) {
+        self.st.system_dark = dark;
+    }
+
+    /// Whether the system asks for less transparency, so materials stay solid.
+    pub fn reduced_transparency(&self) -> bool {
+        self.st.reduced_transparency
+    }
+
+    pub fn set_reduced_transparency(&mut self, reduced: bool) {
+        self.st.reduced_transparency = reduced;
     }
 
     pub fn set_maximized(&mut self, m: bool) {

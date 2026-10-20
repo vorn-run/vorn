@@ -557,7 +557,7 @@ fn project_glyph(s: &Screen<'_>, name: &str) -> El {
 /// `ProjectPicker` (`variant="form"`): the project, or From Context.
 fn project(s: &Screen<'_>, node: &str, path: &str, current: &str, from_context: bool) -> El {
     let (label, glyph) = if from_context {
-        (Some("From Context"), ico("zap", 13.0, 1.5, c(0x60a5fa)))
+        (Some("From Context"), ico("zap", 13.0, 1.5, c(look::BLUE_400)))
     } else {
         (
             (!current.is_empty()).then_some(current),
@@ -647,7 +647,7 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
                     "zap",
                     13.0,
                     1.5,
-                    c(0x60a5fa),
+                    c(look::BLUE_400),
                 )));
             }
             if allow_none {
@@ -3757,7 +3757,7 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                         c(look::GRAY_200),
                     )
                     // The browser's own `darkGray`: this input sets no placeholder colour.
-                    .placeholder_color(c(0xa9a9a9))
+                    .placeholder_color(c(look::GRAY_400))
                     .w_full(),
                 ),
         ))

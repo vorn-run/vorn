@@ -316,6 +316,13 @@ impl Grid {
             .collect()
     }
 
+    /// Marks every pane changed, so each is drawn again: after a theme change.
+    pub fn touch_all(&self) {
+        for p in &mut self.lock().panes {
+            p.dirty = true;
+        }
+    }
+
     /// Whether the connection has ended.
     pub fn closed(&self) -> bool {
         self.lock().closed

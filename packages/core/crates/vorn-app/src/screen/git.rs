@@ -714,7 +714,7 @@ pub(super) fn toast(
         .max_w(360.0)
         .rounded(8.0)
         .border(1.0, c(tint).alpha(0.2))
-        .bg(Rgba::hexa(0x1a1a1e, 0.92))
+        .bg(look::SURFACE_OVERLAY.alpha(0.92))
         .role(Role::Status, message)
         .child(ico(glyph, 15.0, 2.5, c(tint)))
         .child(

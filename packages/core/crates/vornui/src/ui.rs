@@ -1280,6 +1280,7 @@ impl Ui {
         let chip = |c: Rgba| {
             let small = rl.h <= 1.0 && rl.w <= 24.0 && el.radius > 0.0;
             if small && c.0[3] > 0.01 && c.0[3] < 0.10 {
+                // literal-colour: the chip's own colour, only its alpha raised.
                 Rgba([c.0[0], c.0[1], c.0[2], 0.10])
             } else {
                 c

@@ -7045,6 +7045,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-mirror",
  "vorn-term-proto",
+ "vorn-theme",
  "vorn-tree",
  "vornui",
  "wasm-bindgen",

@@ -452,7 +452,7 @@ pub(super) fn footers(s: &Screen<'_>, session: &str) -> Option<El> {
             .gap(4.0)
             .px(8.0)
             .py(4.0)
-            .border_top(1.0, Rgba::white(0.06))
+            .border_top(1.0, crate::ui::theme::bright(0.06))
             .children(all)
     })
 }
@@ -517,7 +517,7 @@ pub(super) fn launchers(s: &Screen<'_>) -> Option<El> {
                     .px(8.0)
                     .py(4.0)
                     .rounded(4.0)
-                    .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), h))
+                    .bg(Rgba::TRANSPARENT.mix(crate::ui::theme::bright(0.06), h))
                     .ring(4.0)
                     .role(Role::Button, p.title.as_str())
                     .child(vorn_components::lucide(
@@ -564,7 +564,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         .p(16.0)
         .gap(12.0)
         .rounded(4.0)
-        .border(1.0, Rgba::white(0.1))
+        .border(1.0, crate::ui::theme::bright(0.1))
         .bg(k::SURFACE_OVERLAY)
         .role(Role::Dialog, p.title.as_str())
         .child(body);
@@ -576,7 +576,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
             .on(Action::Click)
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(Rgba::hexa(0, 0.3))
+            .bg(crate::ui::theme::shadow(0.3))
             .layered()
             .center()
             .child(panel),
@@ -591,7 +591,7 @@ pub fn close_button(ui: &Ui, id: Id, label: &str) -> El {
         .on(Action::Click)
         .p(4.0)
         .rounded(4.0)
-        .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), ui.hover(id)))
+        .bg(Rgba::TRANSPARENT.mix(crate::ui::theme::bright(0.06), ui.hover(id)))
         .ring(4.0)
         .role(Role::Button, label)
         .child(vorn_components::lucide("x", 12.0, 2.0, ink))
@@ -632,7 +632,7 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
                 .max_h(h)
                 .rounded(4.0)
                 .bg(k::SURFACE_OVERLAY)
-                .border(1.0, Rgba::white(0.08))
+                .border(1.0, crate::ui::theme::bright(0.08))
                 .role(Role::Dialog, p.title.as_str())
                 .child(
                     div()
@@ -640,7 +640,7 @@ pub(super) fn floating(s: &Screen<'_>) -> Option<El> {
                         .items_center()
                         .px(12.0)
                         .py(8.0)
-                        .border_bottom(1.0, Rgba::white(0.06))
+                        .border_bottom(1.0, crate::ui::theme::bright(0.06))
                         .child(div().grow().min_w0().child(heading(&p.title)))
                         .child(close_button(s.ui, close, "Close")),
                 )

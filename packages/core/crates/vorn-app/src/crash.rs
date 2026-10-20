@@ -82,7 +82,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
             .px(16.0)
             .py(6.0)
             .rounded(6.0)
-            .bg(bg.mix(Rgba::white(0.12), hot * 0.3))
+            .bg(bg.mix(crate::ui::theme::bright(0.12), hot * 0.3))
             .border(1.0, border)
             .role(Role::Button, label)
             .child(text(label, 13.0, fg).line_height(18.0).silent())
@@ -117,7 +117,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
                 .mb(16.0)
                 .rounded(8.0)
                 .bg(look::SURFACE_SUNKEN.rgba())
-                .border(1.0, Rgba::white(0.06))
+                .border(1.0, crate::ui::theme::bright(0.06))
                 .child(
                     text(error, 12.0, look::GRAY_300.rgba())
                         .mono()
@@ -132,15 +132,15 @@ pub fn view(ui: &Ui, error: &str) -> El {
                 .child(button(
                     RELOAD,
                     "Reload",
-                    Rgba::white(0.08),
-                    Rgba::white(0.1),
-                    Rgba::hex(0xe5e5e5),
+                    crate::ui::theme::bright(0.08),
+                    crate::ui::theme::bright(0.1),
+                    crate::ui::theme::color::GRAY_200.rgba(),
                 ))
                 .child(button(
                     COPY,
                     "Copy error",
                     Rgba::TRANSPARENT,
-                    Rgba::white(0.06),
+                    crate::ui::theme::bright(0.06),
                     look::GRAY_400.rgba(),
                 )),
         );

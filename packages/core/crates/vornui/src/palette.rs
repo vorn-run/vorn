@@ -195,6 +195,25 @@ pub fn materials() -> Materials {
     CURRENT.with(|c| c.borrow().0.materials)
 }
 
+/// Whether the platform asks for less transparency:
+/// `VORNUI_REDUCE_TRANSPARENCY=1`, or macOS's Reduce transparency.
+pub fn system_reduced_transparency() -> bool {
+    if let Some(v) = std::env::var_os("VORNUI_REDUCE_TRANSPARENCY") {
+        return v != "0" && !v.is_empty();
+    }
+    platform_reduced_transparency()
+}
+
+#[cfg(target_os = "macos")]
+fn platform_reduced_transparency() -> bool {
+    crate::macos::reduce_transparency()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_reduced_transparency() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

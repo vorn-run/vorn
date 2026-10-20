@@ -534,6 +534,7 @@ impl Waiting {
                         .on(vorn_app::ui::Action::Click)
                         .size(46.0, 32.0)
                         .center()
+                        // literal-colour: the system's close-button red on Windows.
                         .bg(Rgba::hexa(0xe81123, hot))
                         .role(vorn_app::ui::Role::Button, "Close")
                         .child(vorn_app::ui::icon(

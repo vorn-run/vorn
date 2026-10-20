@@ -22,6 +22,9 @@ pub use color::{Oklch, Rgba8};
 pub use prefs::{Chrome, Materials, Prefs, Resolved, Scheme};
 pub use token::Token;
 
+/// A `[theme]` section as written, for clients that receive it as data.
+pub type Section = toml::Value;
+
 /// Whether a theme is drawn on a dark window or a light one: the colour
 /// scheme setting picks between the person's dark and light theme by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

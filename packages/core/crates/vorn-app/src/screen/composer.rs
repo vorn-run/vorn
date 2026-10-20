@@ -573,7 +573,7 @@ pub(super) fn overlay(s: &Screen<'_>) -> Option<El> {
             .on(Action::Click)
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(Rgba::hexa(0, 0.5))
+            .bg(crate::ui::theme::shadow(0.5))
             .layered()
             .center()
             .child(modal),

@@ -260,6 +260,23 @@ pub(crate) fn set_background(window: &Window, (r, g, b): (f64, f64, f64)) {
 
 /// Puts what the window shows on screen now rather than when the run loop
 /// next turns: a window shown before slow setup appears before it.
+/// Accessibility › Display › Reduce transparency.
+pub(crate) fn reduce_transparency() -> bool {
+    let Some(cls) = objc2::runtime::AnyClass::get("NSWorkspace") else {
+        return false;
+    };
+    // SAFETY: NSWorkspace's shared instance always exists, and the property
+    // is a plain BOOL getter on it.
+    unsafe {
+        let ws: *mut AnyObject = objc2::msg_send![cls, sharedWorkspace];
+        if ws.is_null() {
+            return false;
+        }
+        let on: Bool = objc2::msg_send![ws, accessibilityDisplayShouldReduceTransparency];
+        on.as_bool()
+    }
+}
+
 pub(crate) fn flush() {
     if let Some(cls) = objc2::runtime::AnyClass::get("CATransaction") {
         // SAFETY: `+[CATransaction flush]` takes nothing and returns nothing, on the main thread.

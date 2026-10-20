@@ -352,6 +352,7 @@ pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: impl Into<Rgba>) -> 
 pub fn image(id: u32, w: f32, h: f32) -> El {
     div().size(w, h).content(Content::Image {
         id,
+        // literal-colour: an untinted image, its own pixels as they are.
         color: Rgba([1.0; 4]),
     })
 }

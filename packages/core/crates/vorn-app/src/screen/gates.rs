@@ -1052,7 +1052,7 @@ pub fn review(s: &Screen<'_>) -> Option<El> {
         div()
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(Rgba::hexa(0, 0.6))
+            .bg(crate::ui::theme::shadow(0.6))
             .layered()
             .center()
             .child(panel),

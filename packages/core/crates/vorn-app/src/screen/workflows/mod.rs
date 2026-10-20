@@ -231,7 +231,7 @@ pub fn icon_colors_from(
     on_icon: impl Fn(String) -> Act,
     on_color: impl Fn(String) -> Act,
 ) -> El {
-    let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
+    let tint = hex(Some(color)).unwrap_or(c(look::BLUE_500));
     let mut grid = div().row().wrap_children().gap(4.0);
     for &(name, glyph, label) in options {
         let id = s.acts.on(place, on_icon(name.to_owned()));
@@ -251,7 +251,7 @@ pub fn icon_colors_from(
             .border(1.0, if on { white(0.2) } else { white(0.0) })
             .role(Role::Button, label)
             .selected(on)
-            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(look::GRAY_400) }));
         grid = grid.child(tooltip(s.ui, b, id, label, None));
     }
     let mut swatches = div().row().gap(6.0);
@@ -363,7 +363,7 @@ pub fn is_off(s: &Screen<'_>) -> bool {
 /// What the view says while the Workflow editor is switched off: the
 /// workflows are kept and still run.
 pub fn off() -> El {
-    let faint = || Rgba::white(0.45);
+    let faint = || crate::ui::theme::bright(0.45);
     div()
         .col()
         .grow()
