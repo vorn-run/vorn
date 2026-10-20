@@ -1158,7 +1158,8 @@ impl App {
                 return;
             }
             if v.get("reason").and_then(Value::as_str) == Some("gone") {
-                self.store.remove(old);
+                // Resumed elsewhere under the same id, so its updates must still bring it back.
+                self.store.forget(old);
                 self.views.remove(old);
                 self.st
                     .toast("That session was resumed somewhere else", false);

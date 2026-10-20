@@ -353,6 +353,11 @@ impl Store {
         self.gone.insert(id.to_owned());
     }
 
+    /// Takes the session with `id` off the screen while it may still live: its next update brings it back.
+    pub fn forget(&mut self, id: &str) {
+        self.sessions.retain(|s| s.info.id != id);
+    }
+
     /// Folds one notification in.
     pub fn apply(&mut self, method: &str, params: Value) -> Change {
         match method {
@@ -661,6 +666,9 @@ mod tests {
         s.apply("session:updated", session("a", "waiting"));
         assert_eq!(ids(&s), ["b", "a"]);
         assert_eq!(s.sessions[1].status(), "waiting");
+        s.forget("b");
+        s.apply("session:updated", session("b", "running"));
+        assert_eq!(ids(&s), ["a", "b"]);
     }
 
     #[test]
