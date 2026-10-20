@@ -31,7 +31,6 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
-mod browser;
 pub mod canvas;
 mod extensions;
 mod flex;
@@ -52,6 +51,8 @@ pub use side::FILES;
 pub mod signin;
 mod tasks;
 mod term;
+mod video;
+mod web;
 mod workflows;
 
 /// The modifier the app's shortcuts use: Cmd on a Mac, Ctrl elsewhere.
@@ -281,7 +282,7 @@ enum Call {
     Side(side::SideCall),
     /// Nothing to do with the answer, an error included.
     Ignore,
-    Pane(browser::PaneCall),
+    Pane(web::PaneCall),
     Plug(plugins::PlugCall),
     Ext(extensions::ExtCall),
     Point(points::PointCall),
@@ -410,8 +411,10 @@ pub struct App {
     imported: (bool, bool),
     /// Ghosts a composer took before they came, to put in: its shell and the text.
     fills: Vec<(String, String)>,
-    /// The browser and device panes' web views and calls in flight.
-    web: browser::Web,
+    /// The Browser's web views and calls in flight.
+    web: web::Web,
+    /// The simulators the Device's video parts show, and their frames.
+    video: video::Video,
     /// Wakes the window from another thread.
     wake: Wake,
     /// The connections' hidden pages and the calls in flight on them.
@@ -513,7 +516,7 @@ impl App {
         grid: std::io::Result<Arc<Grid>>,
     ) -> App {
         let app_wake = Arc::clone(&wake);
-        let web = browser::Web::new(Arc::clone(&wake));
+        let web = web::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
         let (grid, grid_error) = match grid {
             Ok(g) => (Some(g), None),
@@ -573,6 +576,7 @@ impl App {
             imported: (false, false),
             fills: Vec::new(),
             web,
+            video: video::Video::new(Arc::clone(&app_wake)),
             wake: app_wake,
             sessions: Default::default(),
             windowed: false,
@@ -969,6 +973,7 @@ impl App {
             .shells
             .retain(|id, _| self.store.session(id).is_some());
         self.pump_web();
+        self.pump_video();
         self.detect_mobile();
         let now = web_time::Instant::now();
         self.st.toasts.retain(|t| t.until > now);
@@ -3569,6 +3574,7 @@ impl App {
             self.term_boxes.insert(sid.to_owned(), *r);
         }
         self.paint_web(ui, laid);
+        self.paint_video(ui, laid);
     }
 
     /// An extension's program terminal, attached and sized to its box.

@@ -1,6 +1,6 @@
 //! The panes beside a session's terminal: the page the Browser extension
-//! shows and the review drawn around it, its device, what each shows
-//! between frames, and what their controls do. The Browser's tabs live in
+//! shows and the review drawn around it, the simulator the Device extension
+//! shows, what each shows between frames, and what their controls do. The Browser's tabs live in
 //! the extension; what is here lives as long as the app.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -10,7 +10,6 @@ use serde_json::{Map, Value};
 
 use crate::act::{Act, Acts};
 use crate::artifact::{self, Anchor, Comment, Manifest};
-use crate::device::Listed;
 use crate::points::{kind, scoped, Points};
 use crate::ui::Id;
 
@@ -25,6 +24,37 @@ pub const BROWSER_OPEN: &str = "open";
 pub fn browser_key(points: &Points, session: &str) -> Option<String> {
     let p = points.find(BROWSER, kind::PANES, BROWSER_PANE)?;
     Some(scoped(&p.key(), session))
+}
+
+/// The Device, the built-in that keeps which simulator a session holds and
+/// draws its pane over the screens this app takes.
+pub const DEVICE: &str = "vorn.device";
+/// Its pane, and its collection of the sessions whose pane is open.
+pub const DEVICE_PANE: &str = "device";
+pub const DEVICE_OPEN: &str = "open";
+
+/// The Device's pane tree for `session`, while the Device is on.
+pub fn device_key(points: &Points, session: &str) -> Option<String> {
+    let p = points.find(DEVICE, kind::PANES, DEVICE_PANE)?;
+    Some(scoped(&p.key(), session))
+}
+
+/// The video part of a Device tree that shows `session`'s simulator, and
+/// its node's id, which its events are told on.
+pub fn video_part<'a>(
+    tree: &'a vorn_tree::Node,
+    session: &str,
+) -> Option<(&'a str, &'a vorn_tree::Video)> {
+    let mut stack = vec![tree];
+    while let Some(n) = stack.pop() {
+        if let vorn_tree::Kind::Video(v) = &n.kind {
+            if v.view == session {
+                return Some((n.id.as_deref().unwrap_or_default(), v));
+            }
+        }
+        stack.extend(&n.children);
+    }
+    None
 }
 
 /// The artifact an address shows, `(id, version)`: vornd serves each
@@ -55,6 +85,10 @@ pub struct PageArtifact {
     pub title: String,
 }
 
+/// Custom ids from this up to [`WEB_ID_BASE`] are simulator screens:
+/// `VIDEO_ID_BASE + i` shows `Workbench::videos[i]`.
+pub const VIDEO_ID_BASE: u64 = 700_000;
+
 /// Custom ids at and above this are web views: `WEB_ID_BASE + i` shows
 /// `Workbench::slots[i]`.
 pub const WEB_ID_BASE: u64 = 900_000;
@@ -70,13 +104,13 @@ pub fn web_index(id: u64) -> Option<usize> {
 pub enum PaneKind {
     /// The Browser extension's pane: its tabs over the page.
     Browser,
+    /// The Device extension's pane: a simulator's screen and its controls.
     Device,
     /// The pane an extension opened.
     Extension,
 }
 
-/// The view keys: a session's page, its compare page, its artboards and
-/// its device.
+/// The view keys: a session's page, its compare page and its artboards.
 pub fn page_key(session: &str) -> String {
     session.to_owned()
 }
@@ -89,10 +123,6 @@ pub fn board_key(session: &str, board: &str) -> String {
     format!("{session}#board:{board}")
 }
 
-pub fn device_key(session: &str) -> String {
-    format!("{session}#device")
-}
-
 /// The session a view key belongs to.
 pub fn session_of(key: &str) -> &str {
     key.split_once('#').map_or(key, |(s, _)| s)
@@ -103,7 +133,7 @@ pub fn canvas_id(session: &str) -> Id {
     Id::new("pane-canvas").child(session)
 }
 
-/// The custom box of the device frame, whose size fits the screen.
+/// The stage a simulator's screen is fitted to.
 pub fn stage_id(session: &str) -> Id {
     Id::new("pane-stage").child(session)
 }
@@ -189,40 +219,6 @@ pub const SELECTION_SETTLE: web_time::Duration = web_time::Duration::from_millis
 /// How many console messages and requests a page keeps for the agent.
 pub const LOG_LIMIT: usize = 500;
 
-/// A simulator a session holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Claim {
-    pub udid: String,
-    pub name: String,
-    /// The app booted it, so releasing it shuts it down.
-    pub booted_here: bool,
-}
-
-/// A session's device pane.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct DevicePane {
-    pub error: Option<String>,
-    pub dismissed: Option<String>,
-    pub picking: bool,
-    pub typing: bool,
-    pub saving: bool,
-    /// The frame's size against fitting the pane; `None` fits.
-    pub zoom: Option<f64>,
-    /// The picker under the pane's name is open.
-    pub switching: bool,
-}
-
-/// The device picker over a card.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Picker {
-    pub session: String,
-    /// Opened from the device pane's name rather than the card's button.
-    pub from_pane: bool,
-    pub loading: bool,
-    pub devices: Vec<Listed>,
-    pub error: Option<String>,
-}
-
 /// One web view this frame may show.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WebSlot {
@@ -242,12 +238,10 @@ pub struct Workbench {
     pub live: HashMap<String, Live>,
     /// `artifact:get` answers, by artifact id.
     pub artifacts: HashMap<String, artifact::State>,
-    pub devices: HashMap<String, DevicePane>,
-    /// The simulator each session holds, pane or not.
-    pub claims: HashMap<String, Claim>,
-    /// Sessions whose device is booting.
-    pub claiming: HashSet<String>,
-    pub picker: Option<Picker>,
+    /// The sessions whose Device pane is open.
+    pub devices: HashSet<String>,
+    /// The session whose simulator picker is open, over the web views.
+    pub video_picker: Option<String>,
     /// `project:detectMobile` answers, by project path.
     pub mobile: HashMap<String, bool>,
     pub maximized: HashMap<String, PaneKind>,
@@ -255,8 +249,10 @@ pub struct Workbench {
     pub unavailable: Option<String>,
     /// The web views of this frame, in custom-id order.
     pub slots: Vec<WebSlot>,
-    /// Each device's latest screenshot size, in pixels.
-    pub frames: HashMap<String, (u32, u32)>,
+    /// Each open simulator's latest screen, by the session showing it.
+    pub frames: HashMap<String, crate::video::Frame>,
+    /// The sessions whose screen this frame draws, in custom-id order.
+    pub videos: Vec<String>,
 }
 
 impl Workbench {
@@ -274,18 +270,10 @@ impl Workbench {
         if self.pages.contains_key(session) {
             out.push(PaneKind::Browser);
         }
-        if self.devices.contains_key(session) {
+        if self.devices.contains(session) {
             out.push(PaneKind::Device);
         }
         out
-    }
-
-    /// Who holds each simulator, as `device::list` takes it.
-    pub fn holders(&self) -> HashMap<String, String> {
-        self.claims
-            .iter()
-            .map(|(s, c)| (c.udid.clone(), s.clone()))
-            .collect()
     }
 
     /// The custom id of the web view `key`, when it is in this frame.
@@ -326,25 +314,34 @@ impl Workbench {
         }
     }
 
-    /// The device frame's scale and its screen in points: the zoom chosen,
-    /// else what fits `area`.
-    pub fn device_scale(&self, session: &str, area: Option<(f32, f32)>) -> (f64, (f64, f64)) {
-        let points = self.frames.get(session).map_or((0.0, 0.0), |&(w, h)| {
-            let k = crate::device::point_scale(w, h);
-            (f64::from(w) / k, f64::from(h) / k)
-        });
-        let chosen = self.devices.get(session).and_then(|d| d.zoom);
-        let scale = chosen.unwrap_or_else(|| {
+    /// A simulator screen's scale and its size in points: the zoom
+    /// chosen, else what fits `area`.
+    pub fn video_scale(
+        &self,
+        session: &str,
+        zoom: Option<f64>,
+        area: Option<(f32, f32)>,
+    ) -> (f64, (f64, f64)) {
+        let points = self.frames.get(session).map_or((0.0, 0.0), |f| f.points);
+        let scale = zoom.unwrap_or_else(|| {
             area.map_or(1.0, |(w, h)| {
-                crate::device::fit_scale(points, (f64::from(w), f64::from(h)))
+                crate::video::fit_scale(points, (f64::from(w), f64::from(h)))
             })
         });
         (scale, points)
     }
 
+    /// The custom id of the screen `session`'s pane draws, when it is in this frame.
+    pub fn video_id(&self, session: &str) -> Option<u64> {
+        self.videos
+            .iter()
+            .position(|s| s == session)
+            .map(|i| VIDEO_ID_BASE + i as u64)
+    }
+
     /// An overlay the web views would cover is open.
     pub fn covered(&self) -> bool {
-        self.picker.is_some() || self.live.values().any(|l| l.versions)
+        self.video_picker.is_some() || self.live.values().any(|l| l.versions)
     }
 
     /// The artifact the session's page shows, and what vornd said of it:
@@ -379,15 +376,8 @@ impl Workbench {
 pub enum PaneAct {
     /// The card's globe: asks the Browser to open or close the pane.
     ToggleBrowser(String),
-    /// The card's phone: the picker, or closes the device.
+    /// The card's phone: asks the Device to open or close the pane.
     DeviceButton(String),
-    /// The device pane's name: the picker, to switch simulators.
-    SwitchDevice(String),
-    PickDevice {
-        session: String,
-        udid: String,
-    },
-    ClosePicker,
     Close(String, PaneKind),
     Maximize(String, PaneKind),
     Back(String),
@@ -431,10 +421,6 @@ pub enum PaneAct {
     AddNote(String),
     /// The rail's comment-edit field.
     RailText(String),
-    DismissDeviceError(String),
-    /// A device control: `home`, `lock`, `save`, `keyboard`, `rotate`,
-    /// `zoom-in`, `zoom-out`, `fit`, `actual`, `pick`, `draw`.
-    Device(String, &'static str),
 }
 
 #[cfg(test)]
@@ -447,7 +433,6 @@ mod tests {
             page_key("s1"),
             compare_key("s1"),
             board_key("s1", "m"),
-            device_key("s1"),
         ] {
             assert_eq!(session_of(&key), "s1");
         }

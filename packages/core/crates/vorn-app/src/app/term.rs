@@ -275,7 +275,7 @@ impl App {
             "task:imageUpload",
             serde_json::json!({
                 "taskId": PASTE_TASK,
-                "base64": crate::device::base64(bytes),
+                "base64": crate::client::base64(bytes),
                 "filename": name,
             }),
         );

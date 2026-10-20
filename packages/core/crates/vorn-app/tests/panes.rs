@@ -2,10 +2,11 @@
 //! the Browser's pane from the card's globe with its address bar and tabs
 //! (the `vorn.browser` built-in's tree), switched off, an
 //! artifact the agent publishes with its bar, versions, doc editor and
-//! comments rail, a design's canvas and tweaks, and the device picker and
-//! pane. No web view is seated offscreen, so the page itself never loads;
-//! what a page would report (a design's manifest, a device's frame) is set
-//! on the app's state. `VORN_APP_SHOT=<prefix>` saves a frame of each.
+//! comments rail, a design's canvas and tweaks, and the Device's pane (the
+//! `vorn.device` built-in's tree) with its picker and controls, switched
+//! off. No web view is seated offscreen, so the page itself never loads, and
+//! no simulator is started; what a page would report (a design's manifest)
+//! is set on the app's state. `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
 
@@ -15,11 +16,13 @@ use serde_json::{json, Value};
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::{Act, Acts};
 use vorn_app::app::MOD;
-use vorn_app::panes::{browser_key, note_id, stage_id, DevicePane, PaneAct, PaneKind, BROWSER};
+use vorn_app::panes::{
+    browser_key, device_key, note_id, video_part, PaneAct, PaneKind, BROWSER, DEVICE,
+};
 use vorn_app::screen::term_id;
 use vorn_app::ui::Id;
 use vorn_app::App;
-use vorn_app::{artifact, device};
+use vorn_app::artifact;
 use vorn_tree::Kind;
 
 fn pane(act: PaneAct) -> Id {
@@ -373,78 +376,172 @@ fn a_design_lays_its_artboards_on_the_canvas_with_its_tweaks() {
     shot.save(&mut app, "design-tweaks");
 }
 
+/// The Device's video part for the session, as its tree last drew it.
+fn video(app: &App, sid: &str) -> Option<vorn_tree::Video> {
+    let key = device_key(&app.st.points, sid)?;
+    let tree = app.st.points.tree(&key)?;
+    video_part(tree, sid).map(|(_, v)| v.clone())
+}
+
+/// Frames until the Device's pane shows what `ready` looks for.
+fn until_video(
+    shot: &mut Shot,
+    app: &mut App,
+    sid: &str,
+    what: &str,
+    ready: impl Fn(&vorn_tree::Video) -> bool,
+) -> vorn_tree::Video {
+    shot.until(app, what, |app, _| {
+        app.pump();
+        video(app, sid).filter(|v| ready(v))
+    })
+}
+
+/// An agent session in a React Native project, which offers the phone.
+fn mobile_agent(shot: &mut Shot, app: &mut App, v: &TestVornd) -> String {
+    let project = add_project(app, v, "demo", json!({}));
+    std::fs::write(
+        project.join("package.json"),
+        r#"{ "dependencies": { "react-native": "0.80.0" } }"#,
+    )
+    .expect("package.json");
+    let sid = agent(shot, app);
+    let path = project.to_string_lossy().into_owned();
+    shot.until(app, "the project seen as mobile", |app, _| {
+        app.st.bench.mobile.get(&path).copied()?.then_some(())
+    });
+    sid
+}
+
 #[test]
 fn the_device_button_opens_the_picker_and_the_pane() {
     let Some(v) = TestVornd::start() else {
         return;
     };
     let mut app = connect(&v);
-    let project = add_project(&mut app, &v, "demo", json!({}));
-    std::fs::write(
-        project.join("package.json"),
-        r#"{ "dependencies": { "react-native": "0.80.0" } }"#,
-    )
-    .expect("package.json");
     let mut shot = Shot::new();
-    let sid = agent(&mut shot, &mut app);
+    let sid = mobile_agent(&mut shot, &mut app, &v);
 
-    // A mobile project offers the phone; it opens the picker.
-    let path = project.to_string_lossy().into_owned();
-    shot.until(&mut app, "the project seen as mobile", |app, _| {
-        app.st.bench.mobile.get(&path).copied()?.then_some(())
-    });
-    shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
-    shot.until(&mut app, "the picker's list", |app, _| {
-        app.st
-            .bench
-            .picker
-            .as_ref()
-            .filter(|p| !p.loading)
-            .map(|_| ())
-    });
-    shot.save(&mut app, "device-picker");
-    shot.send(&mut app, key("Escape", 0, None));
-    if app.st.bench.picker.is_some() {
-        app.st.bench.picker = None;
-    }
-
-    // The pane as a claimed simulator draws it, without booting one here.
-    app.st
-        .bench
-        .devices
-        .insert(sid.clone(), DevicePane::default());
-    app.st.bench.claims.insert(
-        sid.clone(),
-        vorn_app::panes::Claim {
-            udid: "TEST-UDID".into(),
-            name: "iPhone 17 Pro".into(),
-            booted_here: false,
-        },
-    );
-    // A PNG's header is all the pane reads of a frame's size.
-    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
-    png.extend(1206u32.to_be_bytes());
-    png.extend(2622u32.to_be_bytes());
-    app.device_frames()
-        .lock()
-        .expect("frames")
-        .insert(sid.clone(), png);
-    shot.until(&mut app, "the frame's size", |app, _| {
-        app.pump();
-        app.st.bench.frames.get(&sid).map(|_| ())
+    // The phone opens the pane with its picker listing the simulators.
+    shot.hover(&mut app, term_id(&sid));
+    let phone = shot
+        .labelled(&mut app, "Button", "Open device")
+        .expect("the card's phone");
+    shot.click(&mut app, phone);
+    let open = until_video(&mut shot, &mut app, &sid, "the picker", |v| {
+        v.picker.as_ref().is_some_and(|p| !p.loading)
     });
     assert_eq!(app.st.bench.kinds(&sid), [PaneKind::Device]);
-    let (scale, points) = app.st.bench.device_scale(&sid, None);
-    assert_eq!(points, (402.0, 874.0));
-    assert_eq!(scale, 1.0);
-    let area = shot.ui.rect_of(stage_id(&sid)).map(|r| (r.w, r.h));
-    let (fit, _) = app.st.bench.device_scale(&sid, area);
-    assert!(fit > 0.0 && fit < 1.0, "the phone fits the stage: {fit}");
+    assert_eq!((open.title.as_str(), open.device.as_deref()), ("Simulator", None));
+    let picker = open.picker.expect("picker");
+    assert_eq!(picker.heading, "Simulators");
+    assert!(
+        !picker.choices.is_empty() || picker.empty.as_deref() == Some("No simulators found"),
+        "{picker:?}"
+    );
+    assert!(
+        shot.labelled(&mut app, "ListBox", "Simulators").is_some(),
+        "the picker is drawn"
+    );
+    assert_eq!(app.st.bench.video_picker.as_deref(), Some(sid.as_str()));
+    shot.save(&mut app, "device-picker");
+
+    // Escape shuts it and leaves the pane.
+    shot.send(&mut app, key("Escape", 0, None));
+    until_video(&mut shot, &mut app, &sid, "the picker shut", |v| {
+        v.picker.is_none()
+    });
+    shot.frame(&mut app);
+    assert!(app.st.bench.video_picker.is_none());
+    assert!(
+        shot.labelled(&mut app, "Toolbar", "Device controls").is_some(),
+        "the control bar"
+    );
     shot.save(&mut app, "device-pane");
 
-    shot.click(&mut app, pane(PaneAct::Device(sid.clone(), "zoom-in")));
-    assert_eq!(
-        app.st.bench.devices.get(&sid).and_then(|d| d.zoom),
-        Some(device::stepped_zoom(fit, true))
+    // A simulator that is not there: the app's start fails into the pane's notice.
+    let key = device_key(&app.st.points, &sid).expect("the pane's tree");
+    let mut pick = vorn_tree::Event::new("screen", vorn_tree::EventKind::Select, "TEST-UDID");
+    pick.scope = Some(sid.clone());
+    let params = app.st.points.tell(&key, &pick).expect("told");
+    let pending = app.rpc().request("extension:call", params);
+    shot.until(&mut app, "the pick", |app, _| {
+        app.pump();
+        pending.poll()
+    })
+    .expect("picked");
+    let failed = until_video(&mut shot, &mut app, &sid, "the failed start", |v| {
+        v.notice.is_some()
+    });
+    assert!(
+        failed
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.starts_with("No simulator with udid TEST-UDID")),
+        "{failed:?}"
+    );
+    assert!(!failed.boot && failed.device.is_none(), "{failed:?}");
+    let dismiss = shot
+        .labelled(&mut app, "Button", "Dismiss error")
+        .expect("the notice's ✕");
+    shot.click(&mut app, dismiss);
+    until_video(&mut shot, &mut app, &sid, "the notice gone", |v| {
+        v.notice.is_none()
+    });
+
+    // The zoom is the pane's, kept by the Device.
+    let zoom_in = shot
+        .labelled(&mut app, "Button", "Zoom in")
+        .expect("zoom in");
+    shot.click(&mut app, zoom_in);
+    until_video(&mut shot, &mut app, &sid, "zoomed", |v| v.zoom.is_some());
+    let fit = shot
+        .labelled(&mut app, "Button", "Fit the device to the pane")
+        .expect("fit");
+    shot.click(&mut app, fit);
+    until_video(&mut shot, &mut app, &sid, "fitted", |v| v.zoom.is_none());
+
+    // The pane's ✕ closes it.
+    let close = shot
+        .labelled(&mut app, "Button", "Close Simulator")
+        .expect("the pane's close");
+    shot.click(&mut app, close);
+    shot.until(&mut app, "the pane closed", |app, _| {
+        app.pump();
+        app.st.bench.kinds(&sid).is_empty().then_some(())
+    });
+}
+
+#[test]
+fn switched_off_the_device_leaves_no_phone_and_refuses_its_calls() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let sid = mobile_agent(&mut shot, &mut app, &v);
+    shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
+    until_video(&mut shot, &mut app, &sid, "the pane", |_| true);
+
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": DEVICE, "on": false }))
+        .expect("switched off");
+    shot.until(&mut app, "the pane gone", |app, _| {
+        app.pump();
+        (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
+    });
+    shot.hover(&mut app, term_id(&sid));
+    assert!(
+        shot.labelled(&mut app, "Button", "Open device").is_none(),
+        "no phone while it is off"
+    );
+    let refused = app
+        .rpc()
+        .call("device:list", json!({ "sessionId": sid }))
+        .expect_err("refused");
+    let refused = format!("{refused:?}");
+    assert!(
+        refused.contains("Device is off. Turn it on in Settings \u{2192} Extensions."),
+        "{refused}"
     );
 }

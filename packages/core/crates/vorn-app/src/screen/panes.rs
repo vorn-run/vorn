@@ -1,8 +1,8 @@
 //! The panes beside a session's terminal: the Browser extension's tree,
 //! and in its page part the address or artifact bar, banner, design canvas,
-//! doc editor and comment rail; the device with its frame and controls;
-//! and the simulator picker. Pages and the device's screen
-//! are native web views the app seats in the custom boxes left for them.
+//! doc editor and comment rail; and the Device extension's tree, whose
+//! screen `super::video` draws. Pages are native web views the app seats in
+//! the custom boxes left for them.
 
 use super::{c, ico, white, Screen};
 use crate::act::{Act, Acts};
@@ -12,7 +12,7 @@ use crate::components::card::{card_button, CardButton, CardVariant};
 use crate::look;
 use crate::panes::{
     board_key, browser_key, canvas_id, compare_key, device_key, note_id, page_key, rail_text_id,
-    stage_id, Live, PageArtifact, PaneAct, PaneKind,
+    video_part, Live, PageArtifact, PaneAct, PaneKind,
 };
 use crate::ui::{
     custom, div, field, text, textarea, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
@@ -1675,184 +1675,28 @@ fn rail_field(s: &Screen<'_>, id: Id, name: &str, placeholder: &str) -> El {
 
 // ---- device -------------------------------------------------------------
 
+/// The Device's tree for the session, its header ending with the pane's
+/// own controls; its screen is drawn by `super::video`.
 fn device_pane(s: &Screen<'_>, session: &Session) -> El {
     let sid = session.info.id.as_str();
-    let bench = &s.st.bench;
-    let dev = bench.devices.get(sid).cloned().unwrap_or_default();
-    let claim = bench.claims.get(sid);
-    let name = claim.map_or("Simulator", |c| c.name.as_str());
-    let claiming = bench.claiming.contains(sid);
-
-    let nid = s
-        .acts
-        .on("pane", pane(PaneAct::SwitchDevice(sid.to_owned())));
-    let picker_here = bench
-        .picker
-        .as_ref()
-        .is_some_and(|p| p.session == sid && p.from_pane);
-    let mut name_btn = div()
-        .id(nid)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .gap(4.0)
-        .min_w0()
-        .px(4.0)
-        .py(2.0)
-        .rounded(4.0)
-        .bg(white(0.0).mix(white(0.06), s.ui.hover(nid)))
-        .role(Role::Button, format!("Switch simulator, currently {name}"))
-        .has_popup()
-        .expanded(picker_here)
-        .child(
-            text(name, 11.0, c(look::GRAY_300))
-                .weight(500)
-                .truncate()
-                .silent(),
-        )
-        .child(if claiming {
-            ico("loader-circle", 10.0, 2.5, c(look::GRAY_300))
-        } else {
-            ico("chevron-down", 10.0, 2.5, c(look::GRAY_500))
-        });
-    if picker_here {
-        name_btn = name_btn.overlay(picker(s), Place::BelowStart, 4.0);
-    }
-    let name_btn = tooltip(s.ui, name_btn, nid, "Switch simulator", None);
-    let sky_on = |on: bool| on.then(|| white(0.06));
-    let header = div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .px(8.0)
-        .py(4.0)
-        .shrink0()
-        .child(ico("smartphone", 12.0, 2.0, c(look::GRAY_500)))
-        .child(name_btn)
-        .child(div().grow())
-        .child(
-            icon_btn(
-                s,
-                PaneAct::Device(sid.to_owned(), "pick"),
-                "mouse-pointer-click",
-                "Point at an element for the agent",
-                Some("Point at an element to describe it to this session's agent"),
-                sky_on(dev.picking),
-                true,
-            )
-            .toggled(dev.picking),
-        )
-        .child(icon_btn(
-            s,
-            PaneAct::Device(sid.to_owned(), "draw"),
-            "pencil",
-            "Draw on the screen for the agent",
-            Some("Draw over the screen, then click again to send it to this session's agent"),
-            None,
-            true,
-        ))
-        .child(controls(s, sid, PaneKind::Device, name));
-
-    let error = dev
-        .error
+    let key = device_key(&s.st.points, sid);
+    let title = key
         .as_deref()
-        .filter(|e| dev.dismissed.as_deref() != Some(*e));
-    let error_row = error.map(|e| {
-        let id = s
-            .acts
-            .on("pane", pane(PaneAct::DismissDeviceError(sid.to_owned())));
+        .and_then(|k| s.st.points.tree(k))
+        .and_then(|t| video_part(t, sid))
+        .map_or("Simulator", |(_, v)| v.title.as_str());
+    let chrome = |tools: Vec<El>| {
         div()
             .row()
+            .items_center()
             .gap(4.0)
-            .px(8.0)
-            .py(4.0)
             .shrink0()
-            .child(
-                text(e, 10.0, Rgba::hexa(look::AMBER_400, 0.9))
-                    .wrapping()
-                    .min_w0()
-                    .grow()
-                    .role(Role::Alert, e),
-            )
-            .child(
-                div()
-                    .id(id)
-                    .on(Action::Click)
-                    .p(2.0)
-                    .rounded(4.0)
-                    .shrink0()
-                    .role(Role::Button, "Dismiss error")
-                    .child(ico(
-                        "x",
-                        10.0,
-                        2.5,
-                        c(look::GRAY_500).mix(c(look::GRAY_200), s.ui.hover(id)),
-                    )),
-            )
-    });
-
-    let area = s.ui.rect_of(stage_id(sid)).map(|r| (r.w, r.h));
-    let (scale, points) = bench.device_scale(sid, area);
-    let mut stage = div()
-        .id(stage_id(sid))
-        // Sensed so the box has a measured rect to fit the zoom against.
-        .sense(Sense::HOVER)
-        .grow()
-        .min_h(0.0)
-        .min_w0()
-        .clip()
-        .center()
-        .p(8.0)
-        .bg(c(look::SURFACE_PANEL));
-    let shown = bench.slot_id(&device_key(sid));
-    stage = match shown {
-        Some(cid) if points.0 > 0.0 => {
-            let (w, h) = (
-                (points.0 * scale).round() as f32,
-                (points.1 * scale).round() as f32,
-            );
-            let inset = area.map_or(8.0, |(aw, ah)| {
-                crate::device::bezel_thickness((f64::from(aw), f64::from(ah)), points) as f32
-            });
-            let outer = crate::device::outer_radius((f64::from(w), f64::from(h)), points) as f32;
-            let inner = (outer - inset).max(2.0);
-            stage.child(
-                div()
-                    .p(inset)
-                    .shrink0()
-                    .rounded(outer)
-                    .bg(c(look::SURFACE_OVERLAY))
-                    .border(1.0, white(0.07))
-                    .role(Role::Image, format!("Screen of {name}"))
-                    .child(
-                        div()
-                            .size(w, h)
-                            .rounded(inner)
-                            .clip()
-                            .opacity(if dev.error.is_some() { 0.4 } else { 1.0 })
-                            .child(custom(cid).w_full().h_full()),
-                    ),
-            )
-        }
-        _ => {
-            let words = match (&bench.unavailable, dev.error.is_some()) {
-                (Some(why), _) => why.as_str(),
-                (None, true) => "No frame",
-                (None, false) => "Waiting for the device\u{2026}",
-            };
-            stage.child(text(words, 11.0, c(look::GRAY_500)).wrapping().min_w0())
-        }
+            .children(tools)
+            .child(controls(s, sid, PaneKind::Device, title))
     };
-    let typing = dev.typing.then(|| {
-        div().px(8.0).py(2.0).shrink0().child(
-            text(
-                format!("Typing goes to {name} \u{2014} Esc gives the keyboard back"),
-                10.0,
-                Rgba::hexa(look::SKY_400, 0.9),
-            )
-            .silent(),
-        )
-    });
+    let body = key
+        .and_then(|key| super::points::draw_scoped(s, &key, Some(&chrome), None))
+        .unwrap_or_else(|| div().grow());
     div()
         .col()
         .grow()
@@ -1860,236 +1704,17 @@ fn device_pane(s: &Screen<'_>, session: &Session) -> El {
         .min_w0()
         .clip()
         .bg(c(look::SURFACE_PANEL))
-        .role(Role::Region, name)
-        .child(header)
-        .child_if(error_row)
-        .child(stage)
-        .child_if(typing)
-        .child(control_bar(s, sid, &dev, scale))
+        .role(Role::Region, "Device")
+        .child(body)
 }
 
-/// `DeviceControlBar`.
-fn control_bar(s: &Screen<'_>, sid: &str, dev: &crate::panes::DevicePane, scale: f64) -> El {
-    let op = |name: &'static str| PaneAct::Device(sid.to_owned(), name);
-    let divider = || div().w(1.0).h(14.0).mx(4.0).bg(white(0.08));
-    let sky = |on: bool| on.then(|| white(0.06));
-    let btn = |act: PaneAct, icon: &str, label: &str, tip: &str, on: Option<Rgba>, dim: bool| {
-        let b = icon_btn(s, act, icon, label, Some(tip), on, true);
-        if dim {
-            b.opacity(0.4)
-        } else {
-            b
-        }
-    };
-    let can_in = scale < crate::device::ZOOM_MAX;
-    let can_out = scale > crate::device::ZOOM_MIN;
-    let actual = s.acts.on("pane", pane(op("actual")));
-    let one = div()
-        .id(actual)
-        .on(Action::Click)
-        .p(4.0)
-        .rounded(4.0)
-        .bg(white(0.0).mix(white(0.10), s.ui.hover(actual)))
-        .role(Role::Button, "Show the device at actual size")
-        .child(
-            text("1:1", 10.0, ink())
-                .weight(500)
-                .line_height(14.0)
-                .silent(),
-        );
-    div()
-        .row()
-        .wrap_children()
-        .items_center()
-        .justify_center()
-        .gap(2.0)
-        .px(8.0)
-        .py(4.0)
-        .shrink0()
-        .border_top(1.0, white(0.06))
-        .role(Role::Toolbar, "Device controls")
-        .child(btn(op("home"), "house", "Press Home", "Home", None, false))
-        .child(btn(op("lock"), "lock", "Press Lock", "Lock", None, false))
-        .child(divider())
-        .child(btn(
-            op("save"),
-            if dev.saving {
-                "loader-circle"
-            } else {
-                "image-down"
-            },
-            "Save a screenshot",
-            "Save a screenshot",
-            None,
-            dev.saving,
-        ))
-        .child(
-            btn(
-                op("keyboard"),
-                "keyboard",
-                if dev.typing {
-                    "Stop typing on the device"
-                } else {
-                    "Type on the device"
-                },
-                if dev.typing {
-                    "Stop typing on the device (Esc)"
-                } else {
-                    "Type on the device"
-                },
-                sky(dev.typing),
-                false,
-            )
-            .toggled(dev.typing),
-        )
-        .child(btn(
-            op("rotate"),
-            "rotate-cw",
-            "Rotate the device",
-            "Rotate",
-            None,
-            false,
-        ))
-        .child(divider())
-        .child(btn(
-            op("zoom-out"),
-            "minus",
-            "Zoom out",
-            "Zoom out",
-            None,
-            !can_out,
-        ))
-        .child(
-            div().w(36.0).row().justify_center().child(
-                text(
-                    format!("{}%", (scale * 100.0).round()),
-                    10.0,
-                    c(look::GRAY_500),
-                )
-                .silent(),
-            ),
-        )
-        .child(btn(
-            op("zoom-in"),
-            "plus",
-            "Zoom in",
-            "Zoom in",
-            None,
-            !can_in,
-        ))
-        .child(
-            btn(
-                op("fit"),
-                "scan",
-                "Fit the device to the pane",
-                "Fit the device to the pane",
-                sky(dev.zoom.is_none()),
-                false,
-            )
-            .toggled(dev.zoom.is_none()),
-        )
-        .child(tooltip(s.ui, one, actual, "One pixel per point", None))
-}
-
-/// The simulators this session may take.
-pub(super) fn picker(s: &Screen<'_>) -> El {
-    let Some(p) = &s.st.bench.picker else {
-        return div();
-    };
-    let list = div()
-        .col()
-        .min_w(240.0)
-        .max_h(280.0)
-        .rounded(8.0)
-        .border(1.0, white(0.08))
-        .bg(c(look::SURFACE_OVERLAY))
-        .clip()
-        .role(Role::ListBox, "Simulators")
-        .child(
-            div()
-                .px(12.0)
-                .py(8.0)
-                .border_bottom(1.0, white(0.06))
-                .child(
-                    text("SIMULATORS", 10.0, c(look::GRAY_500))
-                        .tracking(0.05)
-                        .silent(),
-                ),
-        );
-    let state = |el: El| div().px(12.0).py(12.0).row().center().child(el);
-    if p.loading {
-        return list.child(state(ico("loader-circle", 14.0, 2.0, c(look::GRAY_500))));
+/// An open pane always keeps its button; a shell never offers one;
+/// otherwise only a mobile project does.
+fn should_show_button(mobile: Option<bool>, has_pane: bool, shell: bool) -> bool {
+    if has_pane {
+        return true;
     }
-    if let Some(e) = &p.error {
-        return list.child(state(
-            text(e.as_str(), 11.0, Rgba::hexa(look::RED_400, 0.8))
-                .wrapping()
-                .min_w0()
-                .role(Role::Alert, e.as_str()),
-        ));
-    }
-    if p.devices.is_empty() {
-        return list.child(state(text("No simulators found", 12.0, c(look::GRAY_500))));
-    }
-    let mut rows = div()
-        .id(Id::new("device-picker"))
-        .col()
-        .scroll_y()
-        .min_h(0.0);
-    for l in &p.devices {
-        let d = &l.device;
-        let act = pane(PaneAct::PickDevice {
-            session: p.session.clone(),
-            udid: d.udid.clone(),
-        });
-        let id = s.acts.on("picker", act);
-        let fg = if l.selectable {
-            c(look::GRAY_300)
-        } else {
-            c(look::GRAY_600)
-        };
-        let dot = if d.booted {
-            Rgba::hexa(look::GREEN_400, 0.7)
-        } else {
-            c(look::GRAY_600)
-        };
-        let tag = if !l.selectable {
-            Some(text("in use", 9.0, Rgba::hexa(look::AMBER_400, 0.6)))
-        } else if d.booted {
-            Some(text("booted", 9.0, Rgba::hexa(look::GREEN_400, 0.6)))
-        } else {
-            None
-        };
-        let mut row = div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(8.0)
-            .px(12.0)
-            .py(6.0)
-            .bg(white(0.0).mix(white(0.06), s.ui.hover(id)))
-            .role(Role::ListBoxOption, d.name.as_str())
-            .child(ico("smartphone", 11.0, 2.0, dot))
-            .child(
-                div()
-                    .col()
-                    .grow()
-                    .min_w0()
-                    .child(text(d.name.as_str(), 12.0, fg).truncate().silent())
-                    .child_if(
-                        l.subtitle
-                            .as_deref()
-                            .map(|t| text(t, 9.0, c(look::GRAY_500)).truncate().silent()),
-                    ),
-            )
-            .child_if(tag.map(El::silent));
-        if !l.selectable {
-            row = row.disabled(true);
-        }
-        rows = rows.child(row);
-    }
-    list.child(rows)
+    !shell && mobile == Some(true)
 }
 
 /// The card's globe and phone, after its More button.
@@ -2117,37 +1742,17 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
             "Open browser",
         ));
     }
-    let has = bench.devices.contains_key(sid);
+    let device_on = device_key(&s.st.points, sid).is_some();
+    let has = bench.devices.contains(sid);
     let mobile = bench.mobile.get(&session.info.project_path).copied();
-    if crate::device::should_show_button(mobile, has, session.is_shell()) {
-        let claiming = bench.claiming.contains(sid);
-        let (label, tip) = match (has, claiming) {
-            (true, _) => ("Hide device", "Hide device"),
-            (false, true) => ("Opening device", "Booting the simulator\u{2026}"),
-            (false, false) => ("Open device", "Open device"),
-        };
-        let icon = if claiming {
-            "loader-circle"
-        } else {
-            "smartphone"
-        };
-        let mut b = button(
+    if device_on && should_show_button(mobile, has, session.is_shell()) {
+        let label = if has { "Hide device" } else { "Open device" };
+        out.push(button(
             Act::Pane(PaneAct::DeviceButton(sid.to_owned())),
-            icon,
+            "smartphone",
             label,
-            tip,
-        );
-        if claiming {
-            b = b.disabled(true).opacity(0.5);
-        }
-        if bench
-            .picker
-            .as_ref()
-            .is_some_and(|p| p.session == sid && !p.from_pane)
-        {
-            b = b.overlay(picker(s), Place::BelowStart, 4.0);
-        }
-        out.push(b);
+            label,
+        ));
     }
     out
 }
@@ -2161,5 +1766,13 @@ mod tests {
         assert_eq!(js_number(6000.0), "6000");
         assert_eq!(js_number(1.5), "1.5");
         assert_eq!(js_number(-2.0), "-2");
+    }
+
+    #[test]
+    fn the_device_button_follows_the_pane_then_the_project() {
+        assert!(should_show_button(None, true, true));
+        assert!(!should_show_button(Some(true), false, true));
+        assert!(should_show_button(Some(true), false, false));
+        assert!(!should_show_button(None, false, false));
     }
 }

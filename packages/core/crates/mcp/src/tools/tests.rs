@@ -186,6 +186,20 @@ fn page_reads_are_fenced_and_failures_reported() {
         text(&run(&rpc, "device_claim", json!({ "udid": "u" }))),
         "Error: held by s2"
     );
+
+    // So do the device tools while the Device is off.
+    let off = "Device is off. Turn it on in Settings → Extensions.";
+    for (tool, method) in [
+        ("device_list", "device:list"),
+        ("device_screenshot", "device:screenshot"),
+    ] {
+        rpc.fail(method, off);
+        assert_eq!(
+            text(&run(&rpc, tool, json!({}))),
+            format!("Error: {off}"),
+            "{tool}"
+        );
+    }
 }
 
 #[test]

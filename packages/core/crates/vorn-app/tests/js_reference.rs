@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use vorn_app::artifact::{self, Artboard, DocEdit};
-use vorn_app::device;
+use vorn_app::video;
 use vorn_app::web::address;
 
 const EPSILON: f64 = 1e-9;
@@ -172,18 +172,18 @@ fn the_device_frame_fits_and_zooms() {
     for c in cases(&all, "bezel") {
         let points = pair(&c["screen"], "width", "height");
         let area = pair(&c["container"], "width", "height");
-        let scale = device::fit_scale(points, area);
+        let scale = video::fit_scale(points, area);
         close(scale, &c["scale"], c);
         let drawn = ((points.0 * scale).round(), (points.1 * scale).round());
         close(drawn.0, &c["width"], c);
         close(drawn.1, &c["height"], c);
-        close(device::bezel_thickness(area, points), &c["thickness"], c);
-        close(device::outer_radius(drawn, points), &c["outerRadius"], c);
+        close(video::bezel_thickness(area, points), &c["thickness"], c);
+        close(video::outer_radius(drawn, points), &c["outerRadius"], c);
     }
     for c in cases(&all, "steppedZoom") {
         let inward = c["direction"].as_i64() == Some(1);
         close(
-            device::stepped_zoom(num(&c["current"]), inward),
+            video::stepped_zoom(num(&c["current"]), inward),
             &c["out"],
             c,
         );

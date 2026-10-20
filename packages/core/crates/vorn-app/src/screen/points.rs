@@ -280,6 +280,17 @@ impl TreeBind for ScopedBinder<'_, '_> {
             &session.info.agent_type,
         ))
     }
+
+    /// A simulator's screen, for the Device drawing the pane of the
+    /// session it names, as the web part is for the Browser.
+    fn video(&self, node: &str, video: &vorn_tree::Video) -> Option<El> {
+        let (base, scope) = crate::points::unscope(self.key);
+        let device = self.s.st.points.get(base)?.extension == crate::panes::DEVICE;
+        if !device || scope != Some(video.view.as_str()) {
+            return None;
+        }
+        Some(super::video::part(self, node, video))
+    }
 }
 
 /// Tree `key` drawn for its scope, or its error box; nothing until it renders.

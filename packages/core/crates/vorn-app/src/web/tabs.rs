@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use web_time::Instant;
 
-use super::{Frames, Slot, WebEvent, NO_PANE};
+use super::{Slot, WebEvent, NO_PANE};
 use crate::client::rpc::Wake;
 use crate::ui::NativeWindow;
 
@@ -15,8 +15,6 @@ pub const IN_A_TAB: &str = "In the browser, pages open in a tab of their own.";
 /// The pages each pane opened, by key.
 pub struct Host {
     opened: HashMap<String, String>,
-    /// Device frames, which the device pane draws itself.
-    pub frames: Frames,
 }
 
 impl Host {
@@ -26,7 +24,6 @@ impl Host {
     pub fn new(_wake: Wake) -> Host {
         Host {
             opened: HashMap::new(),
-            frames: Frames::default(),
         }
     }
 

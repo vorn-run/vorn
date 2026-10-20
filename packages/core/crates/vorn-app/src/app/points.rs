@@ -500,6 +500,7 @@ impl App {
         out.extend(self.open_panes());
         out.extend(self.files_trees());
         out.extend(self.browser_trees());
+        out.extend(self.device_trees());
         out.extend(self.shell_trees());
         out.extend(pts.dialog.clone());
         if pts.floating {

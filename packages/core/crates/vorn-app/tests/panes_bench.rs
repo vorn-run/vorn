@@ -5,7 +5,8 @@
 //! the app places it. The device pane on a real simulator, booted only for
 //! the bench and shut down after: the card's phone pressed until the
 //! picker has its list, an agent's claim and `device:openPane` until the
-//! pane has its first frame, and the frames a second that reach the pane.
+//! pane has its first frame, and the frames a second that reach the pane
+//! while the screen changes (a page counting in Safari).
 //! `cargo test --test panes_bench -- --ignored --nocapture`.
 
 #![cfg(unix)]
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use support::{add_project, key, wait_for, Shot, TestVornd};
 use vorn_app::screen::term_id;
+use vorn_app::panes::{device_key, video_part};
 use vorn_app::ui::Id;
 use vorn_app::App;
 
@@ -189,22 +191,24 @@ fn bench_device_pane() {
     });
     shot.until(&mut app, "its screen", |app, _| app.pane(&sid).map(|_| ()));
 
-    // The phone, pressed until the picker has its list, then Escape.
+    // The phone, pressed until the picker has its list; pressed again, the
+    // pane the picker opens in goes.
     let mut picks = Vec::with_capacity(ROUNDS);
     for _ in 0..=ROUNDS {
-        let phone = phone(&mut shot, &mut app, &sid, "Open device");
+        let open = phone(&mut shot, &mut app, &sid, "Open device");
         let t = Instant::now();
-        shot.click(&mut app, phone);
-        picks.push(since(t, &mut shot, &mut app, picker_listed));
-        shot.send(&mut app, key("Escape", 0, None));
-        since(Instant::now(), &mut shot, &mut app, picker_closed);
+        shot.click(&mut app, open);
+        picks.push(since(t, &mut shot, &mut app, |a| picker_listed(a, &sid)));
+        let hide = phone(&mut shot, &mut app, &sid, "Hide device");
+        shot.click(&mut app, hide);
+        since(Instant::now(), &mut shot, &mut app, |a| pane_closed(a, &sid));
     }
     let first = picks.remove(0);
     println!("BENCH device picker open (phone), first: {first:.2}ms");
     report("device picker open (phone)", picks);
 
     // An agent's claim, booting the simulator, until the pane's first frame.
-    // vornd gives the app 15 s to answer; a slower boot is asked again.
+    // A boot that runs past the call's limit is asked again.
     let t = Instant::now();
     loop {
         let pending = app
@@ -226,6 +230,20 @@ fn bench_device_pane() {
     let cold = since(t, &mut shot, &mut app, |a| first_frame(a, &sid));
     println!("BENCH device claim (boot) to first frame: {cold:.2}ms");
 
+    // A page that changes every frame, so each screen taken differs.
+    let counting = "data:text/html,<body style='font:20vw monospace'><script>\
+        setInterval(()=>document.body.textContent=Date.now(),16)</script>";
+    ask(
+        &mut app,
+        "device:launch",
+        json!({ "sessionId": sid, "bundleId": "com.apple.mobilesafari" }),
+    );
+    ask(
+        &mut app,
+        "device:openUrl",
+        json!({ "sessionId": sid, "url": counting }),
+    );
+    std::thread::sleep(Duration::from_secs(3));
     let fps = frame_rate(&mut shot, &mut app, &sid, Duration::from_secs(10));
     println!("BENCH device frames reaching the pane: {fps:.2}/s");
 
@@ -255,34 +273,36 @@ fn phone(shot: &mut Shot, app: &mut App, sid: &str, label: &str) -> Id {
     })
 }
 
-fn picker_listed(app: &App) -> Option<()> {
-    app.st
-        .bench
+/// The Device's video part for the session, as its tree last drew it.
+fn video(app: &App, sid: &str) -> Option<vorn_tree::Video> {
+    let key = device_key(&app.st.points, sid)?;
+    video_part(app.st.points.tree(&key)?, sid).map(|(_, v)| v.clone())
+}
+
+fn picker_listed(app: &App, sid: &str) -> Option<()> {
+    video(app, sid)?
         .picker
-        .as_ref()
         .filter(|p| !p.loading)
         .map(|_| ())
 }
 
-fn picker_closed(app: &App) -> Option<()> {
-    app.st.bench.picker.is_none().then_some(())
+fn pane_closed(app: &App, sid: &str) -> Option<()> {
+    app.st.bench.kinds(sid).is_empty().then_some(())
 }
 
-/// The pane has a frame to draw: its size read from the session's PNG.
+/// The pane has a frame to draw.
 fn first_frame(app: &App, sid: &str) -> Option<()> {
     app.st.bench.frames.get(sid).map(|_| ())
 }
 
 /// Drops the session's last frame, so the next open waits for a fresh one.
 fn forget_frame(app: &mut App, sid: &str) {
-    app.device_frames().lock().expect("frames").remove(sid);
+    app.st.bench.frames.remove(sid);
 }
 
-/// A fresh PNG in the session's slot of the pane's frames, as a token.
-fn frame_token(app: &App, sid: &str) -> Option<usize> {
-    let frames = app.device_frames();
-    let f = frames.lock().expect("frames");
-    f.get(sid).map(|p| p.as_ptr() as usize)
+/// The session's latest frame, as a token.
+fn frame_token(app: &App, sid: &str) -> Option<u64> {
+    app.st.bench.frames.get(sid).map(|f| f.key)
 }
 
 /// New frames a second reaching the pane's frames for `sid`.

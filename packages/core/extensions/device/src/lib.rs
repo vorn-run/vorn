@@ -524,6 +524,11 @@ impl DeviceExt {
                 DeviceExt::button(host, arg(args, "session", action)?)?;
                 Ok(json!({}))
             }
+            // The pane's own ✕: it goes, and the simulator stays held.
+            "close" => {
+                DeviceExt::close(host, arg(args, "session", action)?)?;
+                Ok(json!({}))
+            }
             // Escape over the pane: the picker shuts, as a click outside it does.
             "closePicker" => {
                 let session = arg(args, "session", action)?;

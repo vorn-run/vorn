@@ -257,3 +257,23 @@ fn pruning_lets_the_simulators_of_gone_sessions_go() {
     let listed = agent(&mut h, T, "list", json!({})).unwrap();
     assert_eq!(listed[0]["claimedBy"], T, "the live session keeps its own");
 }
+
+#[test]
+fn the_panes_close_keeps_the_claim() {
+    let mut h = host();
+    button(&mut h);
+    tell(&mut h, EventKind::Select, "u1");
+    page(&mut h, json!({ "type": "booted", "bootedHere": false }));
+    call(&mut DeviceExt, &mut h, "close", json!({ "session": S })).unwrap();
+    assert!(open_rows(&mut h).is_empty(), "the pane went");
+    assert!(video(&mut h, S).is_none());
+    let claim = call(&mut DeviceExt, &mut h, "device:list", json!({ "sessionId": S })).unwrap();
+    let held: Vec<&Value> = claim
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["claimedBy"] == S)
+        .collect();
+    assert_eq!(held.len(), 1, "still held: {claim}");
+    assert!(shutdowns(&h).is_empty(), "nothing shut down");
+}
