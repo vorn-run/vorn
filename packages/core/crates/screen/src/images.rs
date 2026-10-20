@@ -1,9 +1,9 @@
 //! Kitty graphics: the switch that lets a terminal decode PNG and load images from files, and
 //! what a renderer reads of the images a program stored and where it placed them.
 //!
-//! Ghostty parses the protocol and keeps the images, their placements and its storage limit;
-//! nothing here stores pixels. A renderer reads [`Emulator::placements`] after an update and
-//! fetches an image's pixels once per generation with [`Emulator::picture`].
+//! The terminal library parses the protocol and keeps the images, their placements and its
+//! storage limit; nothing here stores pixels. A renderer reads [`Emulator::placements`] after an
+//! update and fetches an image's pixels once per generation with [`Emulator::picture`].
 
 use std::cell::Cell;
 
@@ -13,7 +13,7 @@ use libghostty_vt::kitty::graphics::{
     self, DecodePng, DecodedImage, ImageFormat, PlacementIterator, RustPngDecoder,
 };
 
-use crate::Emulator;
+use crate::{Emulator, Result};
 
 /// One image's pixels, as straight-alpha RGBA rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub struct Virtual {
 thread_local! {
     /// Whether the terminal being fed on this thread may decode PNG.
     static PNG_ON: Cell<bool> = const { Cell::new(false) };
-    /// Whether this thread's decoder is installed: Ghostty's hook is global, the decoder per thread.
+    /// Whether this thread's decoder is installed: the terminal library's hook is global, the decoder per thread.
     static PNG_SET: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -90,8 +90,8 @@ pub(crate) fn allow_png(on: bool) {
 
 impl Emulator {
     /// Turns images on or off: with them on, PNG decodes and files the program could read itself
-    /// load (Ghostty's own checks on paths and temp files apply), and a checkpoint keeps the live
-    /// terminal, since it cannot carry them. Off is how a terminal always behaved.
+    /// load (the terminal library's own checks on paths and temp files apply), and a checkpoint
+    /// keeps the live terminal, since it cannot carry them. Off is how a terminal always behaved.
     pub fn set_images(&mut self, on: bool) {
         if self.images == on {
             return;
@@ -108,6 +108,13 @@ impl Emulator {
     /// Whether images are on (see [`Emulator::set_images`]).
     pub fn images(&self) -> bool {
         self.images
+    }
+
+    /// Sets the bytes of images each screen may hold, past which the oldest are evicted; the
+    /// terminal library starts at 10 MB.
+    pub fn set_image_limit(&mut self, bytes: u64) -> Result<()> {
+        self.term.set_kitty_image_storage_limit(bytes)?;
+        Ok(())
     }
 
     /// Bytes of image pixels either screen holds.
