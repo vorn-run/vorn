@@ -1584,6 +1584,8 @@ export interface AppConfig {
     hasSeededDevServerWorkflow?: boolean
     /** Which worktrees the manager treats as stale, and what counts as build output. */
     worktreeRetention?: WorktreeRetentionConfig
+    /** How `vorn` draws in a terminal: as images where it shows them, or in text cells. */
+    tuiDrawing?: 'auto' | 'pixels' | 'text'
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>
