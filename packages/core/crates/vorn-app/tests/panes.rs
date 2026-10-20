@@ -475,16 +475,14 @@ fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
     until_video(&mut shot, &mut app, &sid, "the picker again", |v| {
         v.picker.as_ref().is_some_and(|p| !p.loading)
     });
+    // The pointer rests on the card first and every frame is looked at:
+    // where simulators cannot run the start fails within a frame or two.
+    let r = shot.ui.rect_of(term_id(&sid)).expect("the card");
+    shot.ui.pointer_move(r.x + r.w / 2.0, r.y + r.h / 2.0);
     tell_screen(&mut app, &sid, vorn_tree::EventKind::Select, "TEST-UDID");
-    until_video(&mut shot, &mut app, &sid, "the pick", |v| {
-        v.picker.is_none() && v.busy
-    });
-    shot.hover(&mut app, term_id(&sid));
-    assert!(
+    wait_for("the card's phone, waiting", || {
         shot.labelled(&mut app, "Button", "Opening device")
-            .is_some(),
-        "the card's phone, waiting"
-    );
+    });
     assert!(
         app.st.bench.kinds(&sid).is_empty(),
         "no pane while it starts"
@@ -611,11 +609,13 @@ fn switched_off_the_device_leaves_no_phone_and_refuses_its_calls() {
         app.pump();
         (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
     });
-    shot.hover(&mut app, term_id(&sid));
-    assert!(
-        shot.labelled(&mut app, "Button", "Open device").is_none(),
-        "no phone while it is off"
-    );
+    // The card's buttons follow the refreshed contributions, a beat after the pane.
+    wait_for("no phone while it is off", || {
+        shot.hover(&mut app, term_id(&sid));
+        shot.labelled(&mut app, "Button", "Open device")
+            .is_none()
+            .then_some(())
+    });
     let refused = app
         .rpc()
         .call("device:list", json!({ "sessionId": sid }))
