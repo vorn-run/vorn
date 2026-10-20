@@ -532,7 +532,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El
                 .px(12.0)
                 .py(8.0)
                 .rounded(8.0)
-                .bg(Rgba::hexa(look::RED_500, 0.10))
+                .bg(look::RED_500.alpha(0.10))
                 .child(text(e, 13.0, c(look::RED_400)).line_height(18.0).wrapping()),
         );
     }

@@ -291,7 +291,7 @@ fn session_row(p: &Phone, ui: &Ui, s: &Session) -> El {
                         ),
                 ),
         )
-        .child(lucide("chevron-right", 16.0, 2.0, INK_FAINT).sem(Sem::Hidden))
+        .child(lucide("chevron-right", 16.0, 2.0, INK_FAINT.rgba()).sem(Sem::Hidden))
 }
 
 pub(crate) fn tone(s: Status) -> &'static str {
@@ -376,7 +376,12 @@ fn tab_bar(p: &Phone) -> El {
             .grow()
             .h(49.0)
             .center()
-            .child(lucide(icon, 24.0, 2.0, if on { INK } else { INK_FAINT }))
+            .child(lucide(
+                icon,
+                24.0,
+                2.0,
+                if on { INK.rgba() } else { INK_FAINT.rgba() },
+            ))
     };
     div()
         .row()
@@ -412,7 +417,7 @@ fn session_screen(p: &Phone, ui: &Ui, sid: &str, back: bool) -> El {
                 .items_center()
                 .h(TOUCH)
                 .pr(4.0)
-                .child(lucide("chevron-left", 24.0, 2.0, BRONZO))
+                .child(lucide("chevron-left", 24.0, 2.0, BRONZO.rgba()))
                 .child(text("Sessions", 17.0, BRONZO))
         }))
         .child(
@@ -479,7 +484,7 @@ fn composer(_p: &Phone, ui: &Ui) -> El {
                 .bg(BRONZO)
                 .center()
                 .hit_slop(4.0, 4.0)
-                .child(lucide("arrow-up", 18.0, 2.5, SURFACE_BASE)),
+                .child(lucide("arrow-up", 18.0, 2.5, SURFACE_BASE.rgba())),
         )
 }
 
@@ -495,7 +500,7 @@ fn key_bar(p: &Phone) -> El {
             let latched = *label == "ctrl" && p.ctrl;
             let fg = if latched { SURFACE_BASE } else { INK_SECONDARY };
             let face = match icon {
-                Some(name) => lucide(name, 16.0, 2.0, fg),
+                Some(name) => lucide(name, 16.0, 2.0, fg.rgba()),
                 None => text(*label, 13.0, fg).mono(),
             };
             div()
@@ -506,7 +511,11 @@ fn key_bar(p: &Phone) -> El {
                 .h(36.0)
                 .px(6.0)
                 .rounded(8.0)
-                .bg(if latched { INK } else { Rgba::TRANSPARENT })
+                .bg(if latched {
+                    INK.rgba()
+                } else {
+                    Rgba::TRANSPARENT
+                })
                 .center()
                 .child(face)
         }))
@@ -518,7 +527,8 @@ fn key_bar(p: &Phone) -> El {
         ))
 }
 
-fn icon_button(id: Id, icon: &str, label: &str, c: Rgba) -> El {
+fn icon_button(id: Id, icon: &str, label: &str, c: impl Into<Rgba>) -> El {
+    let c = c.into();
     div()
         .id(id)
         .on(Action::Click)
@@ -554,7 +564,7 @@ fn settings_sheet(p: &Phone, ui: &Ui, key: Option<&str>) -> El {
                 .row()
                 .items_center()
                 .h(TOUCH)
-                .child(lucide("chevron-left", 24.0, 2.0, BRONZO))
+                .child(lucide("chevron-left", 24.0, 2.0, BRONZO.rgba()))
                 .child(text("Back", 17.0, BRONZO))
         })))
         .child(text(title, 17.0, INK).weight(600).truncate().min_w0())
@@ -638,7 +648,7 @@ pub fn settings_list(p: &Phone) -> El {
                                 .sem(Sem::Text("secondary")),
                         ),
                 )
-                .child(lucide("chevron-right", 16.0, 2.0, INK_FAINT).sem(Sem::Hidden))
+                .child(lucide("chevron-right", 16.0, 2.0, INK_FAINT.rgba()).sem(Sem::Hidden))
         }))
 }
 

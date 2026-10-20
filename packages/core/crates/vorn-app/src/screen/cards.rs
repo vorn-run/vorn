@@ -13,7 +13,7 @@ use crate::act::{Act, Acts};
 use crate::client::Session;
 use crate::layout::{self, Mode};
 use crate::log::{self as blocks, Block, Running, Shell};
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::prompt::{self as intent, IntentAct, Row};
 use crate::state::MenuKind;
 use crate::ui::widgets::scroll_view;
@@ -114,8 +114,8 @@ pub(super) fn visible(
 
 /// `color` at `a` of its alpha: vornui has no subtree opacity, so a dimmed
 /// card's chrome multiplies it in.
-fn fade(color: Rgb, alpha: f32, dim: f32) -> Rgba {
-    Rgba::hexa(color, alpha * dim)
+fn fade(color: Color, alpha: f32, dim: f32) -> Rgba {
+    color.alpha(alpha * dim)
 }
 
 /// The agent's own icon, or the running glyph while an
@@ -564,14 +564,14 @@ fn spine(s: &Screen<'_>, session: &Session) -> El {
         let (color, alpha) = if n == last && session.ended_cause().is_none() {
             (look::BLUE_400, 0.85)
         } else {
-            (0x6b6b76, 0.55)
+            (look::GRAY_500, 0.55)
         };
         gutter = gutter.child(
             div()
                 .absolute(3.0, f32::from(start) * cell + look::CARD_BODY_PT)
                 .size(2.0, (rows * cell - 2.0).max(2.0))
                 .rounded(1.0)
-                .bg(Rgba::hexa(color, alpha))
+                .bg(color.alpha(alpha))
                 .role(Role::Image, "Command"),
         );
     }
@@ -959,21 +959,13 @@ fn ended_strip(s: &Screen<'_>, session: &Session, compact: bool) -> El {
                 .py(6.0)
                 .pl(12.0)
                 .pr(8.0)
-                .child(
-                    div()
-                        .size(7.0, 7.0)
-                        .bg(Rgba::hexa(look::INK, look::INK_FAINT)),
-                )
+                .child(div().size(7.0, 7.0).bg(look::INK.alpha(look::INK_FAINT)))
                 .child(
                     div().row().grow().min_w0().child(
-                        text(
-                            copy.as_str(),
-                            11.0,
-                            Rgba::hexa(look::INK, look::INK_SECONDARY),
-                        )
-                        .line_height(14.0)
-                        .truncate()
-                        .silent(),
+                        text(copy.as_str(), 11.0, look::INK.alpha(look::INK_SECONDARY))
+                            .line_height(14.0)
+                            .truncate()
+                            .silent(),
                     ),
                 )
                 .child(action)
@@ -1059,7 +1051,7 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
     if !compact {
         let cwd = session.info.shell_cwd.as_deref().unwrap_or("");
         let shown = focused || !typed.is_empty();
-        let tone = Rgba::hexa(look::GRAY_700, if shown { 1.0 } else { 0.0 });
+        let tone = look::GRAY_700.alpha(if shown { 1.0 } else { 0.0 });
         let hint = |t: &str| text(t, 10.0, tone).line_height(12.0).silent();
         col = col.child(
             div()
@@ -1337,7 +1329,7 @@ fn flex_divider(s: &Screen<'_>, path: crate::flex::Path, dir: crate::flex::Dir) 
     let lit = if s.ui.is_cells() {
         white(0.18)
     } else {
-        Rgba::hexa(look::BLUE_500, 0.4)
+        look::BLUE_500.alpha(0.4)
     };
     s.acts.double(id, Act::EqualizePanes);
     let line = div()

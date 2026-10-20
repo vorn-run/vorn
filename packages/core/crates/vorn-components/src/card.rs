@@ -45,14 +45,14 @@ pub fn card_button(ui: &Ui, b: &CardButton<'_>, place: Place) -> El {
     let fg = if b.danger {
         color::INK.mix(color::DANGER, hot)
     } else {
-        color::INK
+        color::INK.rgba()
     };
     let el = div()
         .id(b.id)
         .on(Action::Click)
         .p(4.0)
         .rounded(radius::SM)
-        .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.10), hot))
+        .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.10), hot))
         .ring(radius::SM)
         .role(Role::Button, b.label)
         .child(crate::lucide(b.icon, 14.0, 2.0, fg));

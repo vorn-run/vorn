@@ -12,7 +12,7 @@ use crate::runs::{self, s as sv, Line, RunAct};
 use crate::ui::{div, text, tooltip, Action, El, Rgba, Role};
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -70,7 +70,7 @@ pub fn status_dot(status: &str) -> El {
     div()
         .size(8.0, 8.0)
         .rounded(4.0)
-        .bg(Rgba::hexa(rgb, a))
+        .bg(rgb.alpha(a))
         .role(Role::Image, runs::label(status))
 }
 

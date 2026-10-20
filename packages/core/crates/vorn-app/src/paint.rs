@@ -78,7 +78,7 @@ pub fn pane(
                 .quad(Rect::new(x, sy, w, thin), Rgba::hex(run.fg), 0.0, None);
         }
     }
-    let sel_bg = Rgba::hex(crate::look::term::SELECTION);
+    let sel_bg = crate::ui::palette::terminal().selection;
     for &(row, a, b) in sel {
         let (x, y) = at(a, row);
         let w = f32::from(b - a) * cell.w;

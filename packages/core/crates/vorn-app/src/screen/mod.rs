@@ -32,7 +32,7 @@ use std::collections::HashMap;
 
 use crate::act::Acts;
 use crate::client::Store;
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::state::{LayoutMode, State};
 use crate::ui::{div, icon, El, Place, Rgba, Ui};
 use crate::view::PaneView;
@@ -274,17 +274,19 @@ impl Screen<'_> {
     }
 }
 
-pub(crate) fn c(rgb: Rgb) -> Rgba {
-    Rgba::hex(rgb)
+/// A token, or a content colour as `0xRRGGBB`, in the installed theme.
+pub(crate) fn c(color: impl Into<Color>) -> Rgba {
+    color.into().rgba()
 }
 
-/// Tailwind's `white/[a]`.
+/// Tailwind's `white/[a]`: the theme's brightest ink, black on a light theme.
 pub(crate) fn white(a: f32) -> Rgba {
-    Rgba::hexa(look::WHITE, a)
+    crate::ui::theme::bright(a)
 }
 
 /// A lucide icon at `size` with `stroke`, tinted.
-pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
+pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     icon(look::icon(name, stroke).unwrap_or_default(), size, color)
 }
 
@@ -321,7 +323,8 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
 }
 
 /// A dashed outline over a `w`×`h` box.
-pub(crate) fn dashed(w: f32, h: f32, r: f32, color: Rgba) -> El {
+pub(crate) fn dashed(w: f32, h: f32, r: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     let svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1\" stroke-dasharray=\"3 3\"/></svg>",
         w - 1.0,

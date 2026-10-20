@@ -92,7 +92,7 @@ impl App {
             // Output reads in the log's grey, as the desktop's; colours a program chose stay.
             for r in &mut v.runs {
                 if r.fg == v.fg {
-                    r.fg = look::GRAY_300;
+                    r.fg = look::GRAY_300.hex();
                 }
             }
             Some(v)

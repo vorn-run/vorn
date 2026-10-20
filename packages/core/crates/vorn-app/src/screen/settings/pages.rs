@@ -451,7 +451,7 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
                     text("Full command blocks", 11.0, c(look::GRAY_500))
                 } else {
                     let tone = if sh.level == "limited" {
-                        Rgba::hexa(look::AMBER_500, 0.8)
+                        look::AMBER_500.alpha(0.8)
                     } else {
                         c(look::GRAY_500)
                     };
@@ -822,8 +822,8 @@ fn tone_dot(t: Tone) -> Rgba {
         Tone::Blocked => c(look::BRONZO),
         Tone::Broken => c(look::DANGER),
         Tone::Live => c(look::INK),
-        Tone::Settled => Rgba::hexa(look::INK, look::INK_FAINT),
-        Tone::Idle => Rgba::hexa(look::INK, 0.18),
+        Tone::Settled => look::INK.alpha(look::INK_FAINT),
+        Tone::Idle => look::INK.alpha(0.18),
     }
 }
 

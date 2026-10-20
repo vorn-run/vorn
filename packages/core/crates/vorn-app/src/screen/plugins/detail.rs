@@ -632,7 +632,8 @@ fn item(title: &str, detail: Option<&str>, when: Option<&str>) -> El {
         .child_if(when.map(|w| line(w, k::GRAY_600).mt(2.0)))
 }
 
-fn para(t: &str, fg: crate::ui::Rgba) -> El {
+fn para(t: &str, fg: impl Into<crate::ui::Rgba>) -> El {
+    let fg = fg.into();
     text(t, 12.5, fg).line_height(18.75).wrapping()
 }
 

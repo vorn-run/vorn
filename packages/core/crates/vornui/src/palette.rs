@@ -55,9 +55,7 @@ impl Color {
 
     /// `0xRRGGBB` under the current theme, for code that keeps colours as numbers.
     pub fn hex(self) -> u32 {
-        let [r, g, b, _] = self.rgba().0;
-        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-        byte(r) << 16 | byte(g) << 8 | byte(b)
+        self.rgba().to_hex()
     }
 }
 

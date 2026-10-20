@@ -563,6 +563,6 @@ impl vornui::App for Phone {
     }
 
     fn background(&self) -> vornui::Rgba {
-        vornui::theme::color::SURFACE_BASE
+        vornui::theme::color::SURFACE_BASE.rgba()
     }
 }

@@ -130,20 +130,20 @@ const ENTRY_METER_CELLS: usize = 8;
 /// The colour token `t` stands for, in token set [`vorn_tree::TOKENS`].
 pub fn token(t: Token) -> Rgba {
     match t {
-        Token::Base => color::SURFACE_BASE,
-        Token::Sunken => color::SURFACE_SUNKEN,
-        Token::Raised => Rgba::white(0.02),
-        Token::Overlay => color::SURFACE_OVERLAY,
-        Token::Line => Rgba::white(0.08),
-        Token::Ink | Token::Unknown => color::INK,
-        Token::InkSecondary => color::INK_SECONDARY,
-        Token::InkFaint => color::INK_FAINT,
-        Token::Accent => color::STATUS_BLUE,
-        Token::Good => color::GREEN_400,
-        Token::Warn => color::AMBER_400,
-        Token::Bad => color::RED_400,
-        Token::Info => color::SKY_400,
-        Token::White => color::WHITE,
+        Token::Base => color::SURFACE_BASE.rgba(),
+        Token::Sunken => color::SURFACE_SUNKEN.rgba(),
+        Token::Raised => vornui::theme::bright(0.02),
+        Token::Overlay => color::SURFACE_OVERLAY.rgba(),
+        Token::Line => vornui::theme::bright(0.08),
+        Token::Ink | Token::Unknown => color::INK.rgba(),
+        Token::InkSecondary => color::INK_SECONDARY.rgba(),
+        Token::InkFaint => color::INK_FAINT.rgba(),
+        Token::Accent => color::STATUS_BLUE.rgba(),
+        Token::Good => color::GREEN_400.rgba(),
+        Token::Warn => color::AMBER_400.rgba(),
+        Token::Bad => color::RED_400.rgba(),
+        Token::Info => color::SKY_400.rgba(),
+        Token::White => color::WHITE.rgba(),
     }
 }
 
@@ -160,15 +160,15 @@ pub fn paint(p: Paint) -> Rgba {
 /// The colour a tone draws in.
 pub fn tone(t: Tone) -> Rgba {
     match t {
-        Tone::Neutral => color::GRAY_300,
-        Tone::Good => color::GREEN_400,
-        Tone::Warn => color::AMBER_400,
-        Tone::Bad => color::RED_400,
-        Tone::Info => color::SKY_400,
-        Tone::Accent => color::STATUS_BLUE,
-        Tone::Busy => color::BRONZO,
-        Tone::Muted => color::INK_FAINT,
-        Tone::Idle => color::STATUS_SLATE,
+        Tone::Neutral => color::GRAY_300.rgba(),
+        Tone::Good => color::GREEN_400.rgba(),
+        Tone::Warn => color::AMBER_400.rgba(),
+        Tone::Bad => color::RED_400.rgba(),
+        Tone::Info => color::SKY_400.rgba(),
+        Tone::Accent => color::STATUS_BLUE.rgba(),
+        Tone::Busy => color::BRONZO.rgba(),
+        Tone::Muted => color::INK_FAINT.rgba(),
+        Tone::Idle => color::STATUS_SLATE.rgba(),
     }
 }
 
@@ -242,7 +242,7 @@ impl Cx<'_> {
                 }
             }
             Kind::Icon { name, tone: tn } => {
-                let e = self.icon(name, 14.0, tn.map_or(color::GRAY_400, tone));
+                let e = self.icon(name, 14.0, tn.map_or(color::GRAY_400.rgba(), tone));
                 self.sem(e, || Sem::Icon {
                     name: name.clone(),
                     tone: tn.map_or("", sem_tone),
@@ -256,7 +256,7 @@ impl Cx<'_> {
                 h,
                 ink,
             } => {
-                let ink = ink.map_or(color::GRAY_300, paint);
+                let ink = ink.map_or(color::GRAY_300.rgba(), paint);
                 let name = n.props.label.as_deref().unwrap_or(glyph.as_str());
                 let e = vornui::shape(svg.as_str(), *w, *h, ink)
                     .glyph(glyph.as_str())
@@ -461,7 +461,7 @@ impl Cx<'_> {
             Kind::Divider => div()
                 .w_full()
                 .h(0.0)
-                .border_top(1.0, Rgba::white(0.08))
+                .border_top(1.0, vornui::theme::bright(0.08))
                 .sem(Sem::Divider),
             Kind::Tabs(t) => self.tabs(key(n), t),
             Kind::Outline(o) => self.outline(key(n), o),
@@ -546,8 +546,10 @@ impl Cx<'_> {
         };
         let ink = rest.mix(lit, hot);
         let fill = match style {
-            ButtonStyle::Primary => Rgba::white(0.10).mix(Rgba::white(0.15), hot),
-            _ => Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot),
+            ButtonStyle::Primary => {
+                vornui::theme::bright(0.10).mix(vornui::theme::bright(0.15), hot)
+            }
+            _ => Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot),
         };
         let b = div()
             .id(id)
@@ -605,7 +607,7 @@ impl Cx<'_> {
             let hot = self.ui.hover(id);
             let on = o.selected;
             let ink = if on {
-                color::WHITE
+                color::WHITE.rgba()
             } else {
                 color::GRAY_400.mix(color::WHITE, hot)
             };
@@ -615,11 +617,11 @@ impl Cx<'_> {
                 .px(8.0)
                 .py(3.0)
                 .rounded(radius::SM)
-                .border(1.0, Rgba::white(if on { 0.25 } else { 0.10 }))
+                .border(1.0, vornui::theme::bright(if on { 0.25 } else { 0.10 }))
                 .bg(if on {
-                    Rgba::white(0.14)
+                    vornui::theme::bright(0.14)
                 } else {
-                    Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot)
+                    Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot)
                 })
                 .ring(radius::SM)
                 .role(Role::RadioButton, o.label.as_str())
@@ -717,7 +719,7 @@ impl Cx<'_> {
                     title: label.unwrap_or(value).to_owned(),
                     detail: String::new(),
                 })
-                .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500)))
+                .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500.rgba())))
                 .child_if(label.map(|_| {
                     let e = text(value, size::XS.0, color::GRAY_100);
                     e.sem(Sem::Text(text_role(TextStyle::Number, t)))
@@ -730,7 +732,7 @@ impl Cx<'_> {
                 .items_center()
                 .gap(8.0)
                 .min_w0()
-                .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500)))
+                .child_if(icon.map(|i| self.icon(i, 12.0, color::GRAY_500.rgba())))
                 .child(
                     text(l.to_uppercase(), 11.0, color::GRAY_500)
                         .line_height(16.0)
@@ -740,7 +742,7 @@ impl Cx<'_> {
                         .silent(),
                 )
         });
-        let ink = t.map_or(color::GRAY_100, tone);
+        let ink = t.map_or(color::GRAY_100.rgba(), tone);
         let big = if end { size::XL } else { size::XL2 };
         let e = div()
             .col()
@@ -844,7 +846,7 @@ impl Cx<'_> {
                 .w_full()
                 .h(if short { 4.0 } else { 6.0 })
                 .rounded(2.0)
-                .bg(Rgba::white(0.06))
+                .bg(vornui::theme::bright(0.06))
                 .clip();
             for (share, ink, _) in &parts {
                 track = track.child(div().h_full().w_pct(*share).bg(*ink));
@@ -1048,12 +1050,12 @@ impl Cx<'_> {
                 .center()
                 .border(1.0, edge)
                 .bg(if on {
-                    color::GRAY_200
+                    color::GRAY_200.rgba()
                 } else {
-                    Rgba::white(0.05)
+                    vornui::theme::bright(0.05)
                 });
             if on {
-                b.child(crate::lucide("check", 9.0, 3.0, color::SURFACE_BASE))
+                b.child(crate::lucide("check", 9.0, 3.0, color::SURFACE_BASE.rgba()))
             } else {
                 b
             }
@@ -1077,8 +1079,8 @@ impl Cx<'_> {
             .col()
             .min_w0()
             .rounded(radius::SM)
-            .border(1.0, Rgba::white(0.06))
-            .bg(Rgba::white(0.02))
+            .border(1.0, vornui::theme::bright(0.06))
+            .bg(vornui::theme::bright(0.02))
             .clip()
             .children(entries.into_iter().enumerate().map(|(i, n)| {
                 let e = match &n.kind {
@@ -1088,7 +1090,7 @@ impl Cx<'_> {
                 if i == 0 {
                     e
                 } else {
-                    e.border_top(1.0, Rgba::white(0.06))
+                    e.border_top(1.0, vornui::theme::bright(0.06))
                 }
             }));
         self.sem(items, || Sem::List)
@@ -1139,7 +1141,10 @@ impl Cx<'_> {
         if self.ui.is_native() {
             let quiet = |s: &str| text(s, size::XS.0, color::GRAY_500).sem(Sem::Text("secondary"));
             return div()
-                .child_if(icon.as_deref().map(|i| self.icon(i, 14.0, color::GRAY_400)))
+                .child_if(
+                    icon.as_deref()
+                        .map(|i| self.icon(i, 14.0, color::GRAY_400.rgba())),
+                )
                 .child_if(note.map(quiet))
                 .child_if(aside.as_deref().filter(|a| !a.is_empty()).map(quiet))
                 .children(actions.iter().map(|b| self.node(b)));
@@ -1154,8 +1159,8 @@ impl Cx<'_> {
                             .shrink0()
                             .center()
                             .rounded(radius::SM)
-                            .bg(Rgba::white(0.04))
-                            .child(self.icon(i, 14.0, color::GRAY_400)),
+                            .bg(vornui::theme::bright(0.04))
+                            .child(self.icon(i, 14.0, color::GRAY_400.rgba())),
                     );
                 }
                 head = head.child(div().col().grow().min_w0().child(title).child_if(note.map(
@@ -1224,14 +1229,16 @@ impl Cx<'_> {
             .h(LAZY_HEIGHT)
             .min_w0()
             .rounded(radius::SM)
-            .border(1.0, Rgba::white(0.06))
-            .bg(Rgba::white(0.02))
+            .border(1.0, vornui::theme::bright(0.06))
+            .bg(vornui::theme::bright(0.02))
             .scroll_y();
         self.ui
             .windowed(scroll, &keys, 52.0, &[])
             .fill(view, |i| match &items[i] {
                 Item::Head(g) => self.group_head(g).id(keys[i]).px(12.0).pt(16.0).pb(8.0),
-                Item::Row(r, e) => self.entry(r, e, Some(l)).border_top(1.0, Rgba::white(0.06)),
+                Item::Row(r, e) => self
+                    .entry(r, e, Some(l))
+                    .border_top(1.0, vornui::theme::bright(0.06)),
             })
     }
 
@@ -1295,7 +1302,7 @@ impl Cx<'_> {
             .child_if(
                 e.icon
                     .as_deref()
-                    .map(|i| self.icon(i, 14.0, color::GRAY_400)),
+                    .map(|i| self.icon(i, 14.0, color::GRAY_400.rgba())),
             )
             .child_if(e.status.map(|t| {
                 div().sem(Sem::Status {
@@ -1384,8 +1391,8 @@ impl Cx<'_> {
                 .shrink0()
                 .center()
                 .rounded(radius::SM)
-                .bg(Rgba::white(0.04))
-                .child(self.icon(i, 14.0, color::GRAY_400))
+                .bg(vornui::theme::bright(0.04))
+                .child(self.icon(i, 14.0, color::GRAY_400.rgba()))
         });
         let dot = e.status.map(|t| {
             let ink = tone(t);
@@ -1455,7 +1462,7 @@ impl Cx<'_> {
                         .py(2.0)
                         .min_w0()
                         .rounded(radius::SM)
-                        .bg(Rgba::white(0.04))
+                        .bg(vornui::theme::bright(0.04))
                         .child(
                             text(c, 11.0, color::GRAY_400)
                                 .line_height(16.0)
@@ -1609,7 +1616,7 @@ impl Cx<'_> {
             .py(4.0)
             .shrink0()
             .rounded(radius::SM)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot))
             .ring(radius::SM)
             .role(Role::Button, "More")
             .child(crate::lucide(
@@ -1624,7 +1631,7 @@ impl Cx<'_> {
                 .min_w(160.0)
                 .py(4.0)
                 .bg(color::SURFACE_OVERLAY)
-                .border(1.0, Rgba::white(0.10))
+                .border(1.0, vornui::theme::bright(0.10))
                 .rounded(radius::SM)
                 .role(Role::Menu, "More")
                 .children(entries);
@@ -1654,7 +1661,7 @@ impl Cx<'_> {
             .px(8.0)
             .py(5.0)
             .rounded(radius::SM)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot))
             .role(Role::MenuItem, label)
             .child_if(icon.map(|i| self.icon(i, 12.0, ink)))
             .child(
@@ -1670,7 +1677,7 @@ impl Cx<'_> {
         let Kind::Column { title, tone: t, .. } = &n.kind else {
             return self.node(n);
         };
-        let ink = t.map_or(color::GRAY_500, tone);
+        let ink = t.map_or(color::GRAY_500.rgba(), tone);
         let head = div()
             .row()
             .items_center()
@@ -1708,7 +1715,7 @@ impl Cx<'_> {
                     .p(12.0)
                     .min_w0()
                     .rounded(radius::SM)
-                    .border(1.0, Rgba::white(0.08))
+                    .border(1.0, vornui::theme::bright(0.08))
                     .bg(color::SURFACE_PANEL)
                     .child(self.node(c))
             }))
@@ -1913,7 +1920,7 @@ fn styled(s: &str, style: TextStyle, ink: Option<Rgba>) -> El {
 fn badge(s: &str, t: Tone) -> El {
     let ink = tone(t);
     let bg = if t == Tone::Neutral {
-        Rgba::white(0.06)
+        vornui::theme::bright(0.06)
     } else {
         ink.alpha(0.12)
     };
@@ -1923,10 +1930,10 @@ fn badge(s: &str, t: Tone) -> El {
 /// A line that stands out, as an error says what happened.
 fn notice(s: &str, t: Option<Tone>) -> El {
     let (icon, ink) = match t {
-        Some(Tone::Bad) => ("circle-alert", color::RED_400),
-        Some(Tone::Warn) => ("triangle-alert", color::AMBER_400),
+        Some(Tone::Bad) => ("circle-alert", color::RED_400.rgba()),
+        Some(Tone::Warn) => ("triangle-alert", color::AMBER_400.rgba()),
         Some(other) => ("info", tone(other)),
-        None => ("info", color::GRAY_500),
+        None => ("info", color::GRAY_500.rgba()),
     };
     div()
         .row()
@@ -1936,7 +1943,7 @@ fn notice(s: &str, t: Option<Tone>) -> El {
         .py(8.0)
         .min_w0()
         .rounded(radius::SM)
-        .border(1.0, Rgba::white(0.08))
+        .border(1.0, vornui::theme::bright(0.08))
         .bg(color::SURFACE_SUNKEN)
         .role(Role::Status, s)
         .child(crate::lucide(icon, 14.0, 2.0, ink).mt(1.0).shrink0())
@@ -1957,7 +1964,7 @@ fn state(copy: &str) -> El {
         .py(16.0)
         .min_w0()
         .rounded(radius::SM)
-        .border(1.0, Rgba::white(0.06))
+        .border(1.0, vornui::theme::bright(0.06))
         .role(Role::Status, copy)
         .child(
             text(copy, size::XS.0, color::GRAY_500)

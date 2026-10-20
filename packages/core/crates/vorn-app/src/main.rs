@@ -369,7 +369,7 @@ fn paint_view(
     );
     let target = ui.offscreen(px);
     for _ in 0..2 {
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        ui.begin(look::SURFACE_BASE.rgba());
         let _ = ui.layout(div(), size);
         let r = Rect {
             x: 0.0,
@@ -506,7 +506,7 @@ impl Waiting {
 
     fn view(&self, ui: &Ui) -> El {
         let (w, h) = ui.viewport();
-        let ink = |a| Rgba::hexa(look::INK, a);
+        let ink = |a| look::INK.alpha(a);
         let body = div()
             .col()
             .center()
@@ -546,7 +546,7 @@ impl Waiting {
         div()
             .size(w, h)
             .col()
-            .bg(Rgba::hex(look::SURFACE_BASE))
+            .bg(look::SURFACE_BASE.rgba())
             .child_if(bar)
             .child(body)
     }
@@ -695,7 +695,7 @@ impl WindowApp for Win {
     }
 
     fn background(&self) -> Rgba {
-        Rgba::hex(look::SURFACE_BASE)
+        look::SURFACE_BASE.rgba()
     }
 
     // Terminals take composed text.

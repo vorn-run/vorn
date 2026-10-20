@@ -37,10 +37,10 @@ impl Status {
     /// `STATUS_DOT`: live ink, blocked bronzo, idle ghost, broken danger.
     pub fn dot(self) -> Rgba {
         match self {
-            Status::Running => color::INK,
-            Status::Waiting => color::BRONZO,
-            Status::Idle => color::INK_GHOST,
-            Status::Error => color::DANGER,
+            Status::Running => color::INK.rgba(),
+            Status::Waiting => color::BRONZO.rgba(),
+            Status::Idle => color::INK_GHOST.rgba(),
+            Status::Error => color::DANGER.rgba(),
         }
     }
 }
@@ -63,9 +63,9 @@ mod tests {
     #[test]
     fn only_waiting_takes_the_accent() {
         for s in [Status::Running, Status::Idle, Status::Error] {
-            assert_ne!(s.dot(), color::BRONZO, "{s:?}");
+            assert_ne!(s.dot(), color::BRONZO.rgba(), "{s:?}");
         }
-        assert_eq!(Status::Waiting.dot(), color::BRONZO);
+        assert_eq!(Status::Waiting.dot(), color::BRONZO.rgba());
     }
 
     #[test]

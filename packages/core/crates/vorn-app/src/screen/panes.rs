@@ -25,11 +25,11 @@ fn ink() -> Rgba {
 }
 
 fn ink2() -> Rgba {
-    Rgba::hexa(look::INK, look::INK_SECONDARY)
+    look::INK.alpha(look::INK_SECONDARY)
 }
 
 fn faint() -> Rgba {
-    Rgba::hexa(look::INK, look::INK_FAINT)
+    look::INK.alpha(look::INK_FAINT)
 }
 
 fn pane(a: PaneAct) -> Act {
@@ -380,7 +380,7 @@ pub(super) fn web_part(s: &Screen<'_>, sid: &str, agent: &str) -> El {
         .child_if(banner(s, sid, live))
         .child_if(live.and_then(|l| l.failed.as_deref()).map(|f| {
             div().px(8.0).py(4.0).shrink0().child(
-                text(f, 10.0, Rgba::hexa(look::AMBER_400, 0.9))
+                text(f, 10.0, look::AMBER_400.alpha(0.9))
                     .wrapping()
                     .min_w0()
                     .role(Role::Alert, f),

@@ -34,6 +34,12 @@ impl Rgba {
         Rgba([1.0, 1.0, 1.0, a])
     }
 
+    /// `0xRRGGBB`, its alpha dropped: for code that keeps colours as numbers.
+    pub fn to_hex(self) -> u32 {
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+        byte(self.0[0]) << 16 | byte(self.0[1]) << 8 | byte(self.0[2])
+    }
+
     /// The same color with its alpha multiplied by `a`.
     pub fn alpha(self, a: f32) -> Rgba {
         Rgba([self.0[0], self.0[1], self.0[2], self.0[3] * a])

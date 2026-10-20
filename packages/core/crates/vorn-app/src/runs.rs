@@ -5,10 +5,10 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 
 /// `WORKFLOW_STATUS_DOT`: a run or step state's colour and alpha.
-pub fn dot(status: &str) -> (Rgb, f32) {
+pub fn dot(status: &str) -> (Color, f32) {
     match status {
         "waiting" => (look::BRONZO, 1.0),
         "error" => (look::DANGER, 1.0),

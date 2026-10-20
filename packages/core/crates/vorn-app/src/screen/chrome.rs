@@ -6,7 +6,7 @@ use super::{c, ico, mod_label, truncate, white, MainView, Screen};
 use crate::act::Act;
 use crate::components::glyph;
 use crate::headless::Headless;
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::state::{now_ms, time_ago, MenuKind};
 use crate::ui::widgets::{self, Pill, ToastKind};
 use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
@@ -333,7 +333,7 @@ fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     let expanded = s.st.headless.expanded(&h.id);
     let running = h.running();
     let errored = h.errored();
-    let mono = |t: String, size: f32, color: Rgb| {
+    let mono = |t: String, size: f32, color: Color| {
         text(t, size, c(color)).mono().line_height(14.0).silent()
     };
     let dot_color = if running {
@@ -406,7 +406,7 @@ fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     }
     row = row.child(div().grow());
     if hot {
-        let small = |act: Act, name: &str, label: &str, color: Rgb, over: Rgb, wash: Rgba| {
+        let small = |act: Act, name: &str, label: &str, color: Color, over: Color, wash: Rgba| {
             let id = s.acts.on("headless", act);
             let t = s.ui.hover(id);
             let b = div()
@@ -713,7 +713,7 @@ pub(super) fn window_controls(s: &Screen<'_>) -> Option<El> {
         let id = s.acts.on("window", act);
         let hot = s.ui.hover(id);
         let bg = if close {
-            white(0.0).mix(crate::ui::Rgba::hexa(look::RED_500, 0.8), hot)
+            white(0.0).mix(look::RED_500.alpha(0.8), hot)
         } else {
             white(0.0).mix(white(0.08), hot)
         };
@@ -770,7 +770,7 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
                 div()
                     .size(6.0, 6.0)
                     .rounded(3.0)
-                    .bg(crate::ui::Rgba::hexa(look::INK, look::INK_SECONDARY))
+                    .bg(look::INK.alpha(look::INK_SECONDARY))
                     .absolute_right(2.0, 2.0),
             );
         }
@@ -807,7 +807,7 @@ fn task_options(s: &Screen<'_>) -> El {
     let changed = s.st.tasks.options_changed();
     let id = s.acts.on("toolbar", Act::Open(MenuKind::TaskOptions));
     let hot = s.ui.hover(id);
-    let secondary = crate::ui::Rgba::hexa(look::INK, look::INK_SECONDARY);
+    let secondary = look::INK.alpha(look::INK_SECONDARY);
     let (fg, bg) = if open {
         (c(look::WHITE), white(0.10))
     } else if changed {

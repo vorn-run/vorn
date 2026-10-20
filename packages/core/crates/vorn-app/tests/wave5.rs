@@ -140,7 +140,7 @@ fn the_crash_screen_shows_the_error_and_copies_it() {
         crash::guard::<()>(|| panic!("index out of bounds: the len is 3")).expect_err("caught");
     assert!(error.starts_with("index out of bounds"));
     let lay = |ui: &mut Ui| {
-        ui.begin(vorn_app::ui::Rgba::hex(look::SURFACE_BASE));
+        ui.begin(look::SURFACE_BASE);
         ui.layout(crash::view(ui, &error), look::WINDOW)
     };
     lay(&mut ui);

@@ -1,17 +1,19 @@
 //! The look as values: colours and grays from vornui's tokens, sizes and
 //! the logo. Screens read these.
 
-/// 0xRRGGBB.
+/// 0xRRGGBB: a colour that is content (a terminal cell, a stored icon
+/// colour), not part of the look.
 pub type Rgb = u32;
 
-// The palette lives once, in vornui's tokens.
-pub use crate::ui::theme::rgb::{
+// The palette lives once, in vornui's tokens; the installed theme sets them.
+pub use crate::ui::theme::color::{
     AMBER_300, AMBER_400, AMBER_500, BLUE_300, BLUE_400, BLUE_500, BLUE_600, BRONZO, DANGER,
     DIFF_ADD, DIFF_REMOVE, EMERALD_400, GRAY_100, GRAY_200, GRAY_300, GRAY_400, GRAY_500, GRAY_600,
     GRAY_700, GRAY_900, GREEN_300, GREEN_400, GREEN_500, GREEN_600, INK, RED_200, RED_300, RED_400,
     RED_500, RED_600, SKY_400, STATUS_BLUE, STATUS_SAGE, STATUS_SLATE, SURFACE_BASE,
-    SURFACE_OVERLAY, SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, WHITE, YELLOW_500,
+    SURFACE_OVERLAY, SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, VIOLET_400, WHITE, YELLOW_500,
 };
+pub use crate::ui::theme::Color;
 /// `--color-ink-secondary` and `--color-ink-faint`: white at these alphas.
 pub const INK_SECONDARY: f32 = 0.55;
 pub const INK_FAINT: f32 = 0.35;
@@ -137,17 +139,26 @@ pub fn icon(name: &str, stroke: f32) -> Option<String> {
     crate::ui::icons::lucide(name, stroke)
 }
 
-/// The terminal's colours.
-pub mod term {
-    use super::Rgb;
-
-    pub const FG: Rgb = 0xd4d4d8;
-    pub const BG: Rgb = 0x141416;
-    pub const CURSOR: Rgb = 0xd4d4d8;
+/// The terminal's colours, from the installed theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Term {
+    pub fg: Rgb,
+    pub bg: Rgb,
+    pub cursor: Rgb,
     /// Behind selected text.
-    pub const SELECTION: Rgb = 0x3f3f46;
-    pub const ANSI16: [Rgb; 16] = [
-        0x27272a, 0xef4444, 0x22c55e, 0xeab308, 0x3b82f6, 0xa855f7, 0x06b6d4, 0xd4d4d8, 0x52525b,
-        0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xfafafa,
-    ];
+    pub selection: Rgb,
+    pub ansi: [Rgb; 16],
+}
+
+/// The installed theme's terminal colours.
+pub fn term() -> Term {
+    let t = crate::ui::palette::terminal();
+    let hex = |c: crate::ui::Rgba| c.to_hex();
+    Term {
+        fg: hex(t.foreground),
+        bg: hex(t.background),
+        cursor: hex(t.cursor),
+        selection: hex(t.selection),
+        ansi: t.ansi.map(hex),
+    }
 }

@@ -81,7 +81,7 @@ fn connect_box(s: &Screen<'_>, a: &Adding) -> El {
             let id = s.acts.on("plug-mcp-tab", act(PlugAct::McpManual(manual)));
             let on = package != manual;
             let fg = if on {
-                k::GRAY_200
+                k::GRAY_200.rgba()
             } else {
                 k::GRAY_500.mix(k::GRAY_300, s.ui.hover(id))
             };
@@ -229,7 +229,7 @@ fn buttons(s: &Screen<'_>, label: &str, enabled: bool, busy: bool, done: PlugAct
             .ring(R)
             .bg(white(0.1 + 0.05 * hot));
     } else {
-        fg = k::WHITE.alpha(0.5);
+        fg = k::WHITE.faded(0.5);
         b = b.bg(white(0.05)).disabled(true);
     }
     if busy {
@@ -409,7 +409,8 @@ fn panel() -> El {
         .border(1.0, white(0.08))
 }
 
-fn small(t: impl Into<String>, color: crate::ui::Rgba) -> El {
+fn small(t: impl Into<String>, color: impl Into<crate::ui::Rgba>) -> El {
+    let color = color.into();
     text(t, 11.0, color).line_height(16.0).wrapping()
 }
 
@@ -436,7 +437,7 @@ fn sdk(s: &Screen<'_>, a: &Adding, f: &SdkForm) -> El {
                 .ring(R)
                 .bg(white(0.1 + 0.05 * s.ui.hover(id)));
         } else {
-            fg = k::WHITE.alpha(0.5);
+            fg = k::WHITE.faded(0.5);
             look_up = look_up.bg(white(0.05)).disabled(true);
         }
         let (g, l) = if f.probing {
@@ -866,7 +867,7 @@ fn profile(s: &Screen<'_>, a: &Adding, f: &ProfileForm) -> El {
         .rounded(R)
         .border(1.0, white(0.1))
         .role(Role::Button, label);
-    let mut fg = k::GRAY_200;
+    let mut fg = k::GRAY_200.rgba();
     if ready {
         let id = s.acts.on("plug-save", act(PlugAct::Save));
         let hot = s.ui.hover(id);

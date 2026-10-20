@@ -6,7 +6,7 @@
 //! What a click, a drag or a wheel does is the client's: the kit gives each
 //! control an [`Id`] and draws what the client's state says.
 
-use vornui::theme::{color, rgb};
+use vornui::theme::color;
 use vornui::widgets::{tooltip, tooltip_at};
 use vornui::{div, shape, text, Action, Cursor, El, Id, Place, Rgba, Sense};
 
@@ -26,7 +26,7 @@ pub const MINI: (f64, f64) = (96.0, 64.0);
 const STRAIGHT: f64 = 16.0;
 
 fn white(a: f32) -> Rgba {
-    Rgba::white(a)
+    vornui::theme::bright(a)
 }
 
 fn f(v: f64) -> f32 {
@@ -211,11 +211,11 @@ pub fn edge_label(label: &str) -> El {
 /// opened is open, `hot` while hovered.
 pub fn plus(id: Id, label: &str, active: bool, hot: f32) -> El {
     let (fg, bg, border) = if active {
-        (color::WHITE, white(0.08), white(0.40))
+        (color::WHITE.rgba(), white(0.08), white(0.40))
     } else {
         (
             color::GRAY_500.mix(color::WHITE, hot),
-            color::SURFACE_SUNKEN,
+            color::SURFACE_SUNKEN.rgba(),
             white(0.10).mix(white(0.20), hot),
         )
     };
@@ -274,7 +274,7 @@ pub fn card(id: Id, label: &str, look: CardLook, content: El) -> El {
     let border = if look.selected {
         white(0.40)
     } else if look.failed {
-        Rgba::hexa(rgb::DANGER, 0.6)
+        color::DANGER.alpha(0.6)
     } else {
         white(0.08)
     };
@@ -387,7 +387,7 @@ pub fn minimap_view(id: Id, m: &Minimap, h: f32) -> El {
         .clip()
         .role(Role::Image, "Mini map")
         .child(shape(nodes, mw, mh, white(0.25)).absolute(1.0, 1.0))
-        .child(shape(mask, mw, mh, Rgba::hexa(0x000000, 0.55)).absolute(1.0, 1.0))
+        .child(shape(mask, mw, mh, vornui::theme::shadow(0.55)).absolute(1.0, 1.0))
 }
 
 /// The canvas pane `size` big at `view`: the dot grid under `world` (cards

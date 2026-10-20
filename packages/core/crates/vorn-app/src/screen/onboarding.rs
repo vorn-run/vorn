@@ -4,15 +4,12 @@
 
 use super::{agent_icon, alt_label, c, ico, mod_label, white, Screen};
 use crate::act::Act;
-use crate::look;
+use crate::look::{self, Color};
 use crate::onboarding::{self, OnbAct, Then, EXPLORE, MCP_CAPS, STEPS};
 use crate::ui::{div, text, Action, El, Id, Rgba, Role};
 
 /// Tailwind v4's `emerald-400`, `cyan-400` and `violet-400`: the guide's
 /// status and demo tints.
-const EMERALD_400: u32 = 0x00d492;
-const CYAN_400: u32 = 0x00d3f2;
-const VIOLET_400: u32 = 0xa684ff;
 
 const W: f32 = 520.0;
 /// The header's and footer's heights with their hairlines, for the body's
@@ -52,7 +49,7 @@ fn kbd(keys: &str) -> El {
 
 /// A paragraph laid word by word, so highlighted words and keys wrap
 /// with the rest.
-fn para(segs: &[Seg<'_>], size: f32, line: f32, color: u32) -> El {
+fn para(segs: &[Seg<'_>], size: f32, line: f32, color: Color) -> El {
     let mut row = div().row().wrap_children().items_center().w_full();
     for seg in segs {
         let (s, col) = match seg {
@@ -103,7 +100,7 @@ fn accent(s: &Screen<'_>, glyph: &str, label: &str, then: Then) -> El {
         .px(14.0)
         .py(6.0)
         .rounded(8.0)
-        .bg(Rgba::hexa(look::BRONZO, 0.04))
+        .bg(look::BRONZO.alpha(0.04))
         .border(1.0, white(0.08).mix(white(0.14), h))
         .ring(8.0)
         .role(Role::Button, label)
@@ -157,7 +154,12 @@ fn copy_btn(s: &Screen<'_>, command: &str) -> El {
             .as_ref()
             .is_some_and(|(c, at)| c == command && at.elapsed() < COPIED_FOR);
     let glyph = if copied {
-        ico("circle-check", 12.0, 2.0, c(EMERALD_400))
+        ico(
+            "circle-check",
+            12.0,
+            2.0,
+            c(crate::ui::theme::color::EMERALD_400),
+        )
     } else {
         ico("copy", 12.0, 2.0, c(look::GRAY_500).mix(c(look::WHITE), h))
     };
@@ -220,8 +222,18 @@ fn step_agents(s: &Screen<'_>) -> El {
                             .row()
                             .items_center()
                             .gap(4.0)
-                            .child(ico("check", 10.0, 2.0, c(EMERALD_400)))
-                            .child(t("Ready", 11.0, 16.0, c(EMERALD_400))),
+                            .child(ico(
+                                "check",
+                                10.0,
+                                2.0,
+                                c(crate::ui::theme::color::EMERALD_400),
+                            ))
+                            .child(t(
+                                "Ready",
+                                11.0,
+                                16.0,
+                                c(crate::ui::theme::color::EMERALD_400),
+                            )),
                     ),
             );
         }
@@ -296,7 +308,7 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
                 .px(6.0)
                 .py(2.0)
                 .rounded(4.0)
-                .bg(Rgba::hexa(look::BRONZO, 0.08))
+                .bg(look::BRONZO.alpha(0.08))
                 .child(t("Recommended", 10.0, 14.0, c(look::BRONZO)).weight(500)),
         )
         .child(ico(
@@ -324,7 +336,12 @@ fn mcp(s: &Screen<'_>, known: Option<&[String]>) -> El {
                 .py(2.0)
                 .rounded(4.0)
                 .bg(white(0.03))
-                .child(ico("check", 8.0, 2.0, Rgba::hexa(EMERALD_400, 0.5)))
+                .child(ico(
+                    "check",
+                    8.0,
+                    2.0,
+                    crate::ui::theme::color::EMERALD_400.alpha(0.5),
+                ))
                 .child(t(cap, 10.0, 14.0, c(look::GRAY_400))),
         );
     }
@@ -410,7 +427,7 @@ fn tag(label: &str, fg: Rgba, bg: Rgba) -> El {
 }
 
 fn step_projects(s: &Screen<'_>) -> El {
-    let branch = |name: &str, col: u32, tag_el: El| {
+    let branch = |name: &str, col: Color, tag_el: El| {
         div()
             .row()
             .items_center()
@@ -427,7 +444,12 @@ fn step_projects(s: &Screen<'_>) -> El {
                 .row()
                 .items_center()
                 .gap(12.0)
-                .child(ico("folder-git-2", 15.0, 2.0, c(CYAN_400)))
+                .child(ico(
+                    "folder-git-2",
+                    15.0,
+                    2.0,
+                    c(crate::ui::theme::color::CYAN_400),
+                ))
                 .child(t("my-app/", 12.0, 16.0, c(look::GRAY_200)).weight(500)),
         )
         .child(
@@ -444,11 +466,11 @@ fn step_projects(s: &Screen<'_>) -> El {
                 ))
                 .child(branch(
                     "feat/auth",
-                    VIOLET_400,
+                    look::VIOLET_400,
                     tag(
                         "worktree",
-                        Rgba::hexa(VIOLET_400, 0.6),
-                        Rgba::hexa(VIOLET_400, 0.06),
+                        look::VIOLET_400.alpha(0.6),
+                        look::VIOLET_400.alpha(0.06),
                     ),
                 ))
                 .child(branch(
@@ -456,8 +478,8 @@ fn step_projects(s: &Screen<'_>) -> El {
                     look::AMBER_400,
                     tag(
                         "worktree",
-                        Rgba::hexa(look::AMBER_400, 0.6),
-                        Rgba::hexa(look::AMBER_400, 0.06),
+                        look::AMBER_400.alpha(0.6),
+                        look::AMBER_400.alpha(0.06),
                     ),
                 )),
         );
@@ -620,7 +642,7 @@ fn step_workspace() -> El {
             .bg(white(0.04))
             .border(1.0, white(0.06))
     };
-    let title = |glyph: &str, col: u32, label: &str| {
+    let title = |glyph: &str, col: Color, label: &str| {
         div()
             .row()
             .items_center()
@@ -641,13 +663,17 @@ fn step_workspace() -> El {
         .flex(1.0)
         .gap(8.0)
         .p(12.0)
-        .child(title("layout-grid", CYAN_400, "Grid"))
+        .child(title(
+            "layout-grid",
+            crate::ui::theme::color::CYAN_400,
+            "Grid",
+        ))
         .child(div().col().gap(6.0).child(pair()).child(pair()))
         .child(caption("Side-by-side comparison"));
     let mut tabs = div().row().gap(4.0);
     for (i, name) in ["Agent 1", "Agent 2", "Agent 3"].into_iter().enumerate() {
         let (fg, bg) = if i == 0 {
-            (c(look::BRONZO), Rgba::hexa(look::BRONZO, 0.08))
+            (c(look::BRONZO), look::BRONZO.alpha(0.08))
         } else {
             (c(0x555555), white(0.03))
         };
@@ -657,7 +683,7 @@ fn step_workspace() -> El {
         .flex(1.0)
         .gap(8.0)
         .p(12.0)
-        .child(title("columns-3", VIOLET_400, "Tabs"))
+        .child(title("columns-3", look::VIOLET_400, "Tabs"))
         .child(div().col().gap(6.0).child(tabs).child(slot(48.0)))
         .child(caption("Maximum terminal space"));
     let feature = |glyph: &str, label: &str| {
@@ -901,7 +927,7 @@ fn header(s: &Screen<'_>) -> El {
             div()
                 .size(40.0, 40.0)
                 .rounded(12.0)
-                .bg(Rgba::hexa(look::BRONZO, 0.06))
+                .bg(look::BRONZO.alpha(0.06))
                 .center()
                 .shrink0()
                 .child(ico(step.icon, 20.0, 2.0, c(look::BRONZO))),
@@ -974,7 +1000,7 @@ fn footer(s: &Screen<'_>) -> El {
     }
     let next = s.acts.on("onboard", onb(OnbAct::Next));
     let label = if o.is_last() { "Get Started" } else { "Next" };
-    let fill = c(look::BRONZO).mix(c(crate::ui::theme::rgb::BRONZO_DARK), s.ui.hover(next));
+    let fill = c(look::BRONZO).mix(c(crate::ui::theme::color::BRONZO_DARK), s.ui.hover(next));
     row.child(
         div()
             .id(next)

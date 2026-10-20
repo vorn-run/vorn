@@ -25,8 +25,8 @@ use crate::state::{
     basename, now_ms, Dialog, Filter, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
-    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
-    WheelPhase, WindowRequest,
+    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Role, TreeUpdate, Ui, WheelPhase,
+    WindowRequest,
 };
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
@@ -3244,7 +3244,7 @@ impl App {
     /// Builds, lays out and paints a frame into `ui.scene`, attaching and
     /// sizing each card's terminal to the box it got.
     pub fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        ui.begin(look::SURFACE_BASE.rgba());
         let root = self.view(ui, size);
         let laid = ui.layout(root, size);
         self.paint(ui, &laid);

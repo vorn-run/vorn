@@ -15,7 +15,7 @@ use crate::ui::{div, field, text, textarea, tooltip, Action, El, Place, Rgba, Ro
 use crate::workflows::{self as wf, Bind, Conv, Draft, WfAct};
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -229,7 +229,7 @@ fn var_area(
             };
             col = col.child(
                 div().pt(4.0).child(
-                    text(msg, 10.5, Rgba::hexa(look::DANGER, 0.9))
+                    text(msg, 10.5, look::DANGER.alpha(0.9))
                         .mono()
                         .line_height(15.75)
                         .truncate(),
@@ -331,7 +331,7 @@ fn dropdown(s: &Screen<'_>, groups: &[crate::vars::StepGroup]) -> El {
                         );
                     if let Some(st) = &g.run_status {
                         let (rgb, a) = runs::dot(st);
-                        head = head.child(div().size(6.0, 6.0).rounded(3.0).bg(Rgba::hexa(rgb, a)));
+                        head = head.child(div().size(6.0, 6.0).rounded(3.0).bg(rgb.alpha(a)));
                     }
                     if let Some(at) = &g.run_completed {
                         head = head.child(div().grow()).child(
@@ -2030,7 +2030,7 @@ fn inputs_editor(s: &Screen<'_>, id: &str, n: &Value) -> El {
                 .border(
                     1.0,
                     if bad {
-                        Rgba::hexa(look::DANGER, 0.6)
+                        look::DANGER.alpha(0.6)
                     } else if focus {
                         white(0.2)
                     } else {
@@ -2699,8 +2699,8 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             label("Output Schema"),
             div().w_full().px(12.0).py(8.0).rounded(6.0).bg(white(0.06))
                 .border(1.0, match (err.is_some(), s.ui.focused(fid)) {
-                    (true, true) => Rgba::hexa(look::DANGER, 0.7),
-                    (true, false) => Rgba::hexa(look::DANGER, 0.5),
+                    (true, true) => look::DANGER.alpha(0.7),
+                    (true, false) => look::DANGER.alpha(0.5),
                     (false, true) => white(0.2),
                     (false, false) => white(0.10),
                 })
@@ -3798,7 +3798,7 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                 .row()
                 .items_center()
                 .gap(8.0)
-                .child(div().size(6.0, 6.0).rounded(3.0).bg(Rgba::hexa(rgb, a)))
+                .child(div().size(6.0, 6.0).rounded(3.0).bg(rgb.alpha(a)))
                 .child(
                     text(
                         if started.is_empty() {

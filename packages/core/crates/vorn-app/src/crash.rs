@@ -92,7 +92,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
         .w_full()
         .max_w(560.0)
         .child(
-            text("Something went wrong", 18.0, Rgba::hex(look::RED_400))
+            text("Something went wrong", 18.0, look::RED_400.rgba())
                 .weight(600)
                 .line_height(24.0)
                 .mb(8.0)
@@ -102,7 +102,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
             text(
                 "The app encountered an unexpected error. You can try reloading or check the details below.",
                 13.0,
-                Rgba::hex(look::GRAY_400),
+                look::GRAY_400.rgba(),
             )
             .line_height(18.0)
             .wrapping()
@@ -116,10 +116,10 @@ pub fn view(ui: &Ui, error: &str) -> El {
                 .p(16.0)
                 .mb(16.0)
                 .rounded(8.0)
-                .bg(Rgba::hex(look::SURFACE_SUNKEN))
+                .bg(look::SURFACE_SUNKEN.rgba())
                 .border(1.0, Rgba::white(0.06))
                 .child(
-                    text(error, 12.0, Rgba::hex(look::GRAY_300))
+                    text(error, 12.0, look::GRAY_300.rgba())
                         .mono()
                         .line_height(18.0)
                         .wrapping(),
@@ -141,7 +141,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
                     "Copy error",
                     Rgba::TRANSPARENT,
                     Rgba::white(0.06),
-                    Rgba::hex(look::GRAY_400),
+                    look::GRAY_400.rgba(),
                 )),
         );
     div()
@@ -150,7 +150,7 @@ pub fn view(ui: &Ui, error: &str) -> El {
         .h_full()
         .center()
         .p(32.0)
-        .bg(Rgba::hex(look::SURFACE_OVERLAY))
+        .bg(look::SURFACE_OVERLAY.rgba())
         .child(column)
 }
 

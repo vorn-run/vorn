@@ -7,7 +7,7 @@ use super::{c, ico, sidebar_project_icon, truncate, white, Screen};
 use crate::act::Act;
 use crate::client::Session;
 use crate::git::{files_label, CommitOp, DiffOp, GitAct};
-use crate::look::{self, AMBER_500, BLUE_300, BLUE_500, DIFF_ADD, DIFF_REMOVE, RED_300};
+use crate::look::{self, Color, AMBER_500, BLUE_300, BLUE_500, DIFF_ADD, DIFF_REMOVE, RED_300};
 use crate::ui::{div, field, icon, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle};
 
 pub fn commit_id() -> Id {
@@ -338,7 +338,7 @@ pub(super) fn branch_panel(s: &Screen<'_>) -> El {
 }
 
 /// The panel's `p-1` icon buttons.
-fn panel_button(s: &Screen<'_>, act: Act, name: &str, label: &str, base: u32) -> El {
+fn panel_button(s: &Screen<'_>, act: Act, name: &str, label: &str, base: Color) -> El {
     let id = s.acts.on("changes", act);
     let b = div()
         .id(id)
@@ -697,7 +697,7 @@ fn feedback(s: &Screen<'_>) -> El {
 /// One toast, with its action buttons.
 pub(super) fn toast(
     s: &Screen<'_>,
-    (glyph, tint): (&str, u32),
+    (glyph, tint): (&str, Color),
     message: &str,
     actions: Vec<(&str, Act, bool)>,
     dismiss: Option<Act>,

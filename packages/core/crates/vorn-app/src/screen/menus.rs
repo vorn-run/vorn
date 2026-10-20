@@ -5,7 +5,7 @@
 
 use super::{c, ico, white, Screen};
 use crate::act::Act;
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::state::{Filter, LayoutMode, MenuKind, SidebarMode, Sort};
 use crate::ui::menu::Inset;
 use crate::ui::{div, text, Action, El, Id, Role, Ui};
@@ -384,7 +384,7 @@ fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {
 }
 
 fn view_options(s: &Screen<'_>) -> Vec<Item> {
-    const DOTS: [Rgb; 5] = [
+    const DOTS: [Color; 5] = [
         look::GRAY_400,
         look::GREEN_500,
         look::YELLOW_500,
