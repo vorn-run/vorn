@@ -275,7 +275,7 @@ fn fork_on_terminal(
     if pid == 0 {
         // SAFETY: in the child, with every pointer alive in its copy.
         unsafe {
-            let rc = if libc::setsid() == -1 || libc::ioctl(slave, libc::TIOCSCTTY, 0) == -1 {
+            let rc = if libc::setsid() == -1 || libc::ioctl(slave, libc::TIOCSCTTY.into(), 0) == -1 {
                 *libc::__error()
             } else {
                 let mut me = 0;

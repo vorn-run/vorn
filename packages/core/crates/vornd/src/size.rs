@@ -97,6 +97,31 @@ struct Held {
     sent: VecDeque<Decision<Who>>,
     /// Its policy's [`Policy::due`], as filed in [`Inner::due`].
     due: Option<Instant>,
+    /// Each client's last viewport with its size in pixels, for the pixel
+    /// size of a resize its viewport decides.
+    measures: HashMap<Who, Measure>,
+}
+
+/// A viewport and what it measures in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Measure {
+    view: Size,
+    px_w: u32,
+    px_h: u32,
+}
+
+impl Measure {
+    /// What `size` measures at this viewport's cell size; 0 past what a
+    /// terminal's pixel size can say.
+    fn scaled(self, size: Size) -> (u16, u16) {
+        let scale = |px: u32, to: u16, from: u16| {
+            u16::try_from(u64::from(px) * u64::from(to) / u64::from(from.max(1))).unwrap_or(0)
+        };
+        (
+            scale(self.px_w, size.cols, self.view.cols),
+            scale(self.px_h, size.rows, self.view.rows),
+        )
+    }
 }
 
 #[derive(Debug, Default)]
@@ -172,6 +197,7 @@ impl Sizes {
                         opener,
                         sent: VecDeque::new(),
                         due: None,
+                        measures: HashMap::new(),
                     },
                 );
             }
@@ -235,6 +261,7 @@ impl Sizes {
             let opener = matches!(who, Who::Bytes { conn, .. } if h.opener == Some(conn));
             let p = &mut h.policy;
             if ev == Ev::Detach {
+                h.measures.remove(&who);
                 p.on(Event::Detach { client: who }, now);
             } else {
                 if !p.has(who) {
@@ -320,6 +347,7 @@ impl Sizes {
                     left.push(id.clone());
                 }
                 for client in leaving {
+                    h.measures.remove(&client);
                     h.policy.on(Event::Detach { client }, now);
                 }
             }
@@ -412,6 +440,31 @@ impl Sizes {
             .get(session)
             .map(|h| (h.policy.size(), h.policy.owner()))
     }
+
+    /// `who`'s viewport `view` measures `px_w` by `px_h` pixels. A report
+    /// without pixels forgets what it measured before.
+    pub fn measured(&self, session: &str, who: Who, view: Size, px_w: u32, px_h: u32) {
+        let mut inner = self.inner();
+        let Some(h) = inner.sessions.get_mut(session) else {
+            return;
+        };
+        if view.usable().is_some() && px_w > 0 && px_h > 0 {
+            h.measures.insert(who, Measure { view, px_w, px_h });
+        } else {
+            h.measures.remove(&who);
+        }
+    }
+
+    /// What `size` measures in pixels on `session`'s owner, whose viewport
+    /// decides it: the pixel size the PTY reports. 0 when unknown.
+    pub fn pixels(&self, session: &str, size: Size) -> (u16, u16) {
+        let inner = self.inner();
+        inner
+            .sessions
+            .get(session)
+            .and_then(|h| h.measures.get(&h.policy.owner()?))
+            .map_or((0, 0), |m| m.scaled(size))
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +478,32 @@ mod tests {
 
     fn peer(conn: u64, sid: u32) -> Who {
         Who::Grid(Peer { conn, sid })
+    }
+
+    /// A resize carries the pixel size the owner's viewport measures, scaled
+    /// to the decided size, so programs reading the window size see real
+    /// pixels; a client that reported none, or left, leaves them unknown.
+    #[test]
+    fn a_resize_measures_pixels_at_the_owners_cell_size() {
+        let sizes = Sizes::new();
+        sizes.opened(S, Size::new(100, 30));
+        let t0 = Instant::now();
+        let a = peer(1, 1);
+        let attach = Ev::Attach {
+            viewport: Some(Size::new(120, 40)),
+            presence: Presence::Watching,
+        };
+        sizes.on(S, a, attach, t0);
+        sizes.on(S, a, Ev::Input, t0);
+        assert_eq!(sizes.pixels(S, Size::new(60, 20)), (0, 0));
+        sizes.measured(S, a, Size::new(120, 40), 960, 640);
+        assert_eq!(sizes.pixels(S, Size::new(120, 40)), (960, 640));
+        assert_eq!(sizes.pixels(S, Size::new(60, 20)), (480, 320));
+        sizes.measured(S, a, Size::new(120, 40), 0, 0);
+        assert_eq!(sizes.pixels(S, Size::new(120, 40)), (0, 0));
+        sizes.measured(S, a, Size::new(120, 40), 960, 640);
+        sizes.on(S, a, Ev::Detach, t0);
+        assert_eq!(sizes.pixels(S, Size::new(120, 40)), (0, 0));
     }
 
     /// TP-T9a's last clause: whether a bytes client is a desktop comes from

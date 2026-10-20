@@ -508,7 +508,7 @@ mod bench {
         draw(&mut app, &mut ui, &target, opts.size);
         let grid = app.grid().ok_or("no grid connection")?.clone();
         for id in &ids {
-            grid.attach(id, 80, 24, 0);
+            grid.attach(id, 80, 24, (0, 0), 0);
         }
         wait_for("every pane's first screen", || {
             draw(&mut app, &mut ui, &target, opts.size);
