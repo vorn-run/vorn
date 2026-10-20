@@ -273,6 +273,7 @@ fn a_grid_attach_to_a_session_that_left_fails_closed() {
             session: "a".into(),
             ..Attach::default()
         },
+        images: false,
     };
     assert!(!pool.grid("a", attach(1)));
     let mut d = Sessiond::new(0, SIZE);

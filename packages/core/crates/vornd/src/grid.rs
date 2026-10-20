@@ -217,14 +217,16 @@ where
             Err(e) => return e.to_string(),
         }
     };
-    match welcome(&hello, build, instance) {
+    let caps = match welcome(&hello, build, instance) {
         Ok(w) => {
             info!(build = %hello.build, client = ?hello.client, major = hello.proto_major, "grid client");
+            let caps = w.caps;
             ServerMsg::Welcome(w).encode(&mut out);
             if let Err(e) = write(&mut wr, &out, write_timeout).await {
                 return e;
             }
             out.clear();
+            caps
         }
         Err(refusal) => {
             refusal.encode(&mut out);
@@ -233,7 +235,7 @@ where
             }
             return "unsupported protocol".into();
         }
-    }
+    };
 
     let (conn, mut queue) = engine.grid_open();
     if !desktop {
@@ -244,6 +246,7 @@ where
         conn,
         sids: HashMap::new(),
         next_sid: 0,
+        images: caps & caps::IMAGES != 0,
     };
     let why = loop {
         // Whatever arrived already, before waiting for more.
@@ -283,10 +286,13 @@ where
             },
             m = queue.recv() => match m {
                 Some(m) => {
-                    m.encode(&mut out);
+                    let mut over = !m.encode(&mut out);
                     // Everything else waiting goes in the same write.
                     while let Ok(m) = queue.try_recv() {
-                        m.encode(&mut out);
+                        over |= !m.encode(&mut out);
+                    }
+                    if over {
+                        warn!(conn, "a grid frame over the frame limit was left out");
                     }
                 }
                 None => break "fell behind".to_owned(),
@@ -339,6 +345,8 @@ struct Conn<'a> {
     /// The session each attachment is on.
     sids: HashMap<u32, String>,
     next_sid: u32,
+    /// Whether the client said it draws kitty images.
+    images: bool,
 }
 
 impl Conn<'_> {
@@ -387,6 +395,7 @@ impl Conn<'_> {
                     GridIn::Attach {
                         peer: peer(sid),
                         attach: a,
+                        images: self.images,
                     },
                 )
             }

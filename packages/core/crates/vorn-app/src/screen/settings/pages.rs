@@ -245,6 +245,25 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
         )
 }
 
+/// Settings › Experimental: one switch for everything still being tried.
+pub(super) fn experimental(s: &Screen<'_>) -> El {
+    div()
+        .col()
+        .child(header(
+            "Experimental",
+            "Features still being tried. They may change or go away.",
+            None,
+        ))
+        .child(switch_row(
+            s,
+            "experimental",
+            flag(s, "experimental", false),
+            "Try Experimental Features",
+            "Images in terminals: pictures a program draws with the kitty graphics protocol show in its card, on every device.",
+            None,
+        ))
+}
+
 /// The terminal UI's Drawing choice: pixels look like the desktop app,
 /// where the terminal shows images; text cells work everywhere.
 fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {

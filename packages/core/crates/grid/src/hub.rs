@@ -31,7 +31,7 @@ use vorn_term_proto::msg::{
     Attach, Attached, CopyFormat, EventId, EventKind, Fidelity, GridPoint, GridResume, InputEvent,
     Resume, ResyncReason, SelectKind, ServerMsg,
 };
-use vorn_term_proto::screen::Row;
+use vorn_term_proto::screen::{shrink, Image, Row, IMAGE_MAX_SIDE};
 use vorn_term_proto::Cursor;
 
 use crate::grid::{Grid, Held};
@@ -51,6 +51,9 @@ pub enum GridIn {
     Attach {
         peer: Peer,
         attach: Attach,
+        /// The connection agreed on images: its frames carry placements, and it gets the
+        /// pixels they show.
+        images: bool,
     },
     Detach {
         peer: Peer,
@@ -180,6 +183,64 @@ struct Attachment {
     in_flight: u8,
     history_tail: u16,
     note: Option<Note>,
+    /// Whether frames carry placements (see [`GridIn::Attach`]).
+    images: bool,
+    /// The images, by id and generation, the client was sent and still shows, sorted.
+    sent: Vec<(u32, u64)>,
+}
+
+/// Before a frame that places images, sends `a` the pixels it lacks; a client that did not
+/// agree on images gets the frame without placements.
+fn images_for(a: &mut Attachment, em: &Emulator, msg: &mut ServerMsg, out: &mut Vec<HubOut>) {
+    let (placements, snapshot) = match msg {
+        ServerMsg::Snapshot { snap, .. } => (&mut snap.placements, true),
+        ServerMsg::Delta { delta, .. } => (&mut delta.placements, false),
+        _ => return,
+    };
+    if !a.images {
+        *placements = None;
+        return;
+    }
+    // A snapshot starts the client over, as after a refused frame, so its images go again.
+    if snapshot {
+        a.sent.clear();
+    }
+    let Some(p) = placements else {
+        return;
+    };
+    let mut shown: Vec<(u32, u64)> = p.images().collect();
+    shown.sort_unstable();
+    shown.dedup();
+    // An image whose pixels changed since the update is left out; the next frame places it.
+    shown.retain(|&(id, gen)| {
+        if a.sent.binary_search(&(id, gen)).is_ok() {
+            return true;
+        }
+        let Some(pic) = em.picture(id, gen) else {
+            return false;
+        };
+        // Shrunk so its frame stays far below the limit a client closes the connection over.
+        let (width, height, rgba) = shrink(pic.width, pic.height, &pic.rgba, IMAGE_MAX_SIDE)
+            .unwrap_or((pic.width, pic.height, pic.rgba));
+        let image = Image {
+            id,
+            gen,
+            width,
+            height,
+            source_width: pic.width,
+            source_height: pic.height,
+            rgba,
+        };
+        out.push(send(
+            a.peer,
+            ServerMsg::Image {
+                sid: a.peer.sid,
+                image: Box::new(image),
+            },
+        ));
+        true
+    });
+    a.sent = shown;
 }
 
 /// One session's grid clients and its grid, built on the first attach.
@@ -321,7 +382,11 @@ impl Hub {
     pub fn handle(&mut self, msg: GridIn, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
         self.live = ctx.live;
         match msg {
-            GridIn::Attach { peer, attach } => self.attach(peer, &attach, ctx, now, out),
+            GridIn::Attach {
+                peer,
+                attach,
+                images,
+            } => self.attach(peer, &attach, images, ctx, now, out),
             GridIn::Detach { peer } => self.atts.retain(|a| a.peer != peer),
             GridIn::Gone { conn } => self.atts.retain(|a| a.peer.conn != conn),
             GridIn::SetVisible { peer, visible } => {
@@ -437,6 +502,7 @@ impl Hub {
         &mut self,
         peer: Peer,
         req: &Attach,
+        images: bool,
         ctx: &Ctx<'_>,
         now: Instant,
         out: &mut Vec<HubOut>,
@@ -459,6 +525,8 @@ impl Hub {
             in_flight: 0,
             history_tail: req.history_tail.min(query::MAX_FETCH),
             note: None,
+            images,
+            sent: Vec::new(),
         };
         if let Some(Resume::Grid(r)) = req.resume {
             let (held, note) = self.resume(&r);
@@ -629,6 +697,8 @@ impl Hub {
                     }
                 }
             };
+            let mut msg = msg;
+            images_for(a, ctx.em, &mut msg, out);
             a.held = Some(g.held());
             a.in_flight += 1;
             out.push(send(a.peer, msg));
@@ -818,7 +888,11 @@ mod tests {
         };
         let peer = Peer { conn: 1, sid: 1 };
         hub.handle(
-            GridIn::Attach { peer, attach },
+            GridIn::Attach {
+                peer,
+                attach,
+                images: false,
+            },
             &ctx(&em, false),
             now,
             &mut out,
@@ -863,7 +937,11 @@ mod tests {
         };
         let peer = Peer { conn: 1, sid: 1 };
         hub.handle(
-            GridIn::Attach { peer, attach },
+            GridIn::Attach {
+                peer,
+                attach,
+                images: false,
+            },
             &ctx(&em, true),
             t0,
             &mut out,
@@ -923,7 +1001,11 @@ mod tests {
         let peer = Peer { conn: 1, sid: 1 };
         let mut out = Vec::new();
         hub.handle(
-            GridIn::Attach { peer, attach },
+            GridIn::Attach {
+                peer,
+                attach,
+                images: false,
+            },
             &ctx(em, true),
             t0,
             &mut out,
@@ -931,6 +1013,162 @@ mod tests {
         hub.records(&ctx(em, true), t0, &mut out);
         assert_eq!(frames(&out), 1);
         (hub, peer)
+    }
+
+    /// The messages one connection was sent.
+    fn sent(out: &[HubOut], to: u64) -> Vec<&ServerMsg> {
+        out.iter()
+            .filter_map(|o| match o {
+                HubOut::Send { conn, msg } if *conn == to => Some(msg),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An image's pixels go once to a connection that agreed on images, before the frame
+    /// placing it; frames that move it go without them; one that did not agree gets frames
+    /// with no placements.
+    #[test]
+    fn images_go_once_before_the_frame_that_places_them() {
+        let mut em = Emulator::with_scrollback(20, 4, 1 << 16).unwrap();
+        em.resize_px(20, 4, 200, 80, &mut Vec::new()).unwrap();
+        em.set_images(true);
+        let mut hub = Hub::new(HubConfig {
+            credits: u8::MAX,
+            ..HubConfig::default()
+        });
+        let t0 = Instant::now();
+        let mut out = Vec::new();
+        for (conn, images) in [(1, true), (2, false)] {
+            let attach = Attach {
+                session: "s".into(),
+                mode: AttachMode::Grid,
+                view: Size::default(),
+                visible: true,
+                resume: None,
+                history_tail: 0,
+            };
+            let peer = Peer { conn, sid: 1 };
+            let input = GridIn::Attach {
+                peer,
+                attach,
+                images,
+            };
+            hub.handle(input, &ctx(&em, true), t0, &mut out);
+        }
+        // A 1×1 RGBA image, put at the cursor.
+        em.feed(
+            b"\x1b_Ga=T,f=32,s=1,v=1,i=5,q=2;AQIDBA==\x1b\\",
+            &mut Vec::new(),
+        );
+        out.clear();
+        hub.records(&ctx(&em, true), t0, &mut out);
+        let one = sent(&out, 1);
+        let ServerMsg::Image { image, .. } = one[0] else {
+            panic!("{one:?}");
+        };
+        assert_eq!(
+            (image.id, image.width, image.rgba.as_slice()),
+            (5, 1, &[1, 2, 3, 4][..])
+        );
+        let ServerMsg::Snapshot { snap, .. } = one[1] else {
+            panic!("{one:?}");
+        };
+        let p = snap.placements.as_ref().unwrap();
+        assert_eq!((p.cell_w, p.cell_h, p.list[0].line), (10, 20, 0));
+        let two = sent(&out, 2);
+        assert_eq!(two.len(), 1);
+        assert!(matches!(two[0], ServerMsg::Snapshot { snap, .. } if snap.placements.is_none()));
+
+        em.feed(b"\r\n\n\n\n", &mut Vec::new());
+        out.clear();
+        hub.records(&ctx(&em, true), t0 + Duration::from_secs(1), &mut out);
+        let one = sent(&out, 1);
+        assert_eq!(one.len(), 1, "no pixels again");
+        let ServerMsg::Delta { delta, .. } = one[0] else {
+            panic!("{one:?}");
+        };
+        assert_eq!(delta.scrolled, 1);
+        assert!(
+            delta.placements.is_none(),
+            "its absolute line stays put as it scrolls"
+        );
+
+        em.feed(b"\x1b_Ga=d,d=I,i=5,q=2\x1b\\", &mut Vec::new());
+        out.clear();
+        hub.records(&ctx(&em, true), t0 + Duration::from_secs(2), &mut out);
+        let ServerMsg::Delta { delta, .. } = sent(&out, 1)[0] else {
+            panic!();
+        };
+        assert_eq!(delta.placements.as_ref().map(|p| p.is_empty()), Some(true));
+    }
+
+    /// An image far past the side images are sent at goes shrunk, keeping its aspect, in a
+    /// frame a client reads, and the frames after it still arrive.
+    #[test]
+    fn a_huge_image_goes_shrunk_and_the_stream_stays_up() {
+        let mut em = Emulator::with_scrollback(20, 4, 1 << 16).unwrap();
+        em.resize_px(20, 4, 200, 80, &mut Vec::new()).unwrap();
+        em.set_images(true);
+        em.set_image_limit(100_000_000).unwrap();
+        let mut hub = Hub::new(HubConfig {
+            credits: u8::MAX,
+            ..HubConfig::default()
+        });
+        let t0 = Instant::now();
+        let mut out = Vec::new();
+        let attach = Attach {
+            session: "s".into(),
+            mode: AttachMode::Grid,
+            view: Size::default(),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        };
+        let peer = Peer { conn: 1, sid: 1 };
+        let input = GridIn::Attach {
+            peer,
+            attach,
+            images: true,
+        };
+        hub.handle(input, &ctx(&em, true), t0, &mut out);
+        // 6000×4000 opaque red RGB, in the protocol's 4096 byte chunks.
+        let (w, h) = (6000usize, 4000usize);
+        let chunk = "/wAA".repeat(1000);
+        let chunks = w * h / 1000;
+        let mut seq = format!("\x1b_Ga=T,f=24,s={w},v={h},i=9,q=2,m=1;{chunk}\x1b\\").into_bytes();
+        for i in 1..chunks {
+            let more = u8::from(i + 1 < chunks);
+            seq.extend_from_slice(format!("\x1b_Gm={more};{chunk}\x1b\\").as_bytes());
+        }
+        em.feed(&seq, &mut Vec::new());
+        drop(seq);
+        out.clear();
+        hub.records(&ctx(&em, true), t0, &mut out);
+        em.feed(b"x", &mut Vec::new());
+        hub.records(&ctx(&em, true), t0 + Duration::from_secs(1), &mut out);
+
+        let mut wire = Vec::new();
+        for msg in sent(&out, 1) {
+            assert!(msg.encode(&mut wire), "every frame fits");
+        }
+        let mut r = vorn_term_proto::msg::FrameReader::new();
+        r.push(&wire);
+        let mut got = Vec::new();
+        while let Some((k, payload)) = r.next_frame().unwrap() {
+            got.push(ServerMsg::decode(k, payload).unwrap().unwrap());
+        }
+        let ServerMsg::Image { image, .. } = &got[0] else {
+            panic!("{:?}", got.first().map(ServerMsg::kind));
+        };
+        assert_eq!((image.width, image.height), (1024, 683));
+        assert_eq!((image.source_width, image.source_height), (6000, 4000));
+        assert_eq!(&image.rgba[..4], &[255, 0, 0, 255]);
+        assert!(matches!(got[1], ServerMsg::Snapshot { .. }));
+        assert!(
+            matches!(got.last(), Some(ServerMsg::Delta { .. })),
+            "and the next frame too"
+        );
     }
 
     fn typed(hub: &mut Hub, em: &Emulator, peer: Peer, at: Instant) {

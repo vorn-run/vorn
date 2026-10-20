@@ -82,10 +82,15 @@ impl Emulator {
         }
     }
 
-    /// Cuts a checkpoint and carries on from its decode, page memory and all, as a recovery would.
+    /// Cuts a checkpoint and carries on from its decode, page memory and all, as a recovery would,
+    /// unless the terminal holds images, which the decode would drop.
     pub fn checkpoint(&mut self) -> std::result::Result<Checkpoint, Uncut> {
         let (cp, mut rebuilt) = self.cut()?;
+        if self.keeps_images() {
+            return Ok(cp);
+        }
         rebuilt.carry_counters(self);
+        rebuilt.set_images(self.images);
         *self = rebuilt;
         Ok(cp)
     }

@@ -10,13 +10,16 @@
 //! Like the native app, it links no terminal: everything it shows is a frame
 //! vornd sent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use vorn_term_mirror::{Mirror, Refused};
 use vorn_term_proto::msg::{
     caps, Attach, Attached, ClientKind, ClientMsg, EventId, EventKind, FrameReader, GridResume,
     Hello, MsgError, ServerMsg, Welcome, PROTO_MAJOR, PROTO_MINOR,
 };
+use vorn_term_proto::screen::Image;
 
 /// One attachment as the client sees it.
 #[derive(Default)]
@@ -37,7 +40,20 @@ pub struct Pane {
     /// Resyncs and table resets announced.
     pub resyncs: u64,
     pub resets: u64,
+    /// The kitty images the mirror's placements show, by id.
+    images: HashMap<u32, Shown>,
 }
+
+/// A kitty image as received, shared with the views that draw it.
+#[derive(Debug, Clone)]
+pub struct Shown {
+    /// Unique to these pixels in this process, so a renderer can cache what it uploaded by it.
+    pub key: u64,
+    pub image: Arc<Image>,
+}
+
+/// Hands out [`Shown::key`]s.
+static NEXT_KEY: AtomicU64 = AtomicU64::new(1);
 
 impl std::fmt::Debug for Pane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -54,6 +70,21 @@ impl Pane {
     /// The mirror, unless its tables were reset and no snapshot came yet.
     pub fn mirror(&self) -> Option<&Mirror> {
         self.mirror.as_ref().filter(|_| !self.stale)
+    }
+
+    /// A kitty image the placements show, by id.
+    pub fn image(&self, id: u32) -> Option<&Shown> {
+        self.images.get(&id)
+    }
+
+    /// Forgets the images no placement shows any more, as vornd does.
+    fn prune_images(&mut self) {
+        let Some(m) = self.mirror.as_ref().filter(|_| !self.images.is_empty()) else {
+            return;
+        };
+        let shown = m.placements();
+        self.images
+            .retain(|id, s| shown.images().any(|(i, g)| i == *id && g == s.image.gen));
     }
 
     /// What to resume from after a reconnect.
@@ -79,6 +110,11 @@ pub enum Got {
         sid: u32,
         rev: u64,
         snapshot: bool,
+    },
+    /// A kitty image's pixels arrived for the placements that follow.
+    Image {
+        sid: u32,
+        id: u32,
     },
     /// A frame the mirror would not apply.
     Refused {
@@ -201,6 +237,7 @@ impl Client {
                 pane.stale = false;
                 match applied {
                     Ok(()) => {
+                        pane.prune_images();
                         pane.frames += 1;
                         pane.snapshots += 1;
                         pane.frame_bytes += len;
@@ -226,6 +263,7 @@ impl Client {
                 };
                 match applied {
                     Ok(()) => {
+                        pane.prune_images();
                         pane.frames += 1;
                         pane.frame_bytes += len;
                         Got::Frame {
@@ -239,6 +277,16 @@ impl Client {
                         Got::Refused { sid, why }
                     }
                 }
+            }
+            ServerMsg::Image { sid, image } => {
+                let id = image.id;
+                let key = NEXT_KEY.fetch_add(1, Ordering::Relaxed);
+                let shown = Shown {
+                    key,
+                    image: Arc::from(image),
+                };
+                self.panes.entry(sid).or_default().images.insert(id, shown);
+                Got::Image { sid, id }
             }
             ServerMsg::ResetTables { sid, .. } => {
                 let pane = self.panes.entry(sid).or_default();

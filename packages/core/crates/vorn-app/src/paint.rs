@@ -105,6 +105,8 @@ pub fn pane(
         }
     }
     let block_at = cursor.filter(|_| shape == Cursor::Block);
+    // Sprites draw over every quad of the layer: under the text, but over cell backgrounds.
+    pictures(ui, v, r, (x0, y0), true);
     for run in &v.runs {
         let style = (run.flags & (flags::BOLD | flags::ITALIC)) as u8;
         debug_assert_eq!((flags::BOLD as u8, flags::ITALIC as u8), (BOLD, ITALIC));
@@ -146,11 +148,37 @@ pub fn pane(
             );
         }
     }
+    pictures(ui, v, r, (x0, y0), false);
     if !preedit.is_empty() {
         // A layer of its own so it covers the glyphs under it.
         ui.scene.layer();
         draw_preedit(ui, v, (x0, y0), preedit);
     }
+}
+
+/// Draws `v`'s kitty images below its text (`below`) or over it, clipped to `clip`, row 0 at
+/// `origin`: scaled from the server's cell pixels to the cells drawn here.
+fn pictures(ui: &mut Ui, v: &PaneView, clip: Rect, origin: (f32, f32), below: bool) {
+    let (cw, ch) = v.cell_px;
+    let mut these = v.pictures.iter().filter(|p| (p.z < 0) == below).peekable();
+    if cw == 0 || ch == 0 || these.peek().is_none() {
+        return;
+    }
+    let cell = ui.text.cell();
+    let (sx, sy) = (cell.w / cw as f32, cell.h / ch as f32);
+    ui.scene.push_clip(clip);
+    for p in these {
+        let [x, y, w, h] = p.dst;
+        let dst = Rect::new(
+            (origin.0 + x * sx).round(),
+            (origin.1 + y * sy).round(),
+            (w * sx).round(),
+            (h * sy).round(),
+        );
+        let img = &p.image;
+        ui.picture(p.key, (img.width, img.height), &img.rgba, p.src, dst);
+    }
+    ui.scene.pop_clip();
 }
 
 /// Draws `v` into `r` (cells) on a cells surface: the session's own cells

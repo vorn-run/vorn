@@ -64,7 +64,7 @@ version = "0.8.0-beta.18"
 
 # Terminal snapshots (encode, decode and the parser continuation) are in no published release yet.
 [workspace.dependencies]
-libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "3ddcb1027cdfad14991242d501cf4604cbb20c71", default-features = false }
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "3ddcb1027cdfad14991242d501cf4604cbb20c71", default-features = false, features = ["kitty-graphics", "png"] }
 
 # The same bindings, building a newer Ghostty (see its Cargo.toml).
 [patch."https://github.com/uzaaft/libghostty-rs"]

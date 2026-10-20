@@ -68,6 +68,12 @@ struct Image {
     uv: Option<[f32; 4]>,
 }
 
+/// A picture [`Ui::picture`] keeps in the colour atlas while frames draw it.
+struct Picture {
+    uv: Option<[f32; 4]>,
+    used: bool,
+}
+
 pub struct Ui {
     /// `None` when the CPU draws: frames stay in memory, to be read back
     /// or presented by a window without a device.
@@ -87,6 +93,10 @@ pub struct Ui {
     pub(crate) viewport: (f32, f32),
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
+    pictures: HashMap<u64, Picture>,
+    /// A picture filled the atlas and the frame is being drawn again on an empty one: one that
+    /// still does not fit is left out rather than emptying it again and again.
+    pictures_redo: bool,
     anon: u64,
     /// The earliest frame a view asked for while building this one, for
     /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
@@ -225,6 +235,8 @@ impl Ui {
             viewport: (0.0, 0.0),
             icons: HashMap::new(),
             images: Vec::new(),
+            pictures: HashMap::new(),
+            pictures_redo: false,
             anon: 0,
             wake: Cell::new(None),
             cells: None,
@@ -345,6 +357,37 @@ impl Ui {
         Some(self.images.len() as u32 - 1)
     }
 
+    /// Draws `src` (x, y, width, height in picture pixels) of a straight-alpha RGBA picture
+    /// `size` into `dst`, uploading it the first frame `key` is drawn: a key names one picture's
+    /// pixels for as long as frames draw it. Senders keep pictures small (vornd sends at most
+    /// 1024 px a side); one the atlas cannot take is not drawn.
+    pub fn picture(&mut self, key: u64, size: (u32, u32), rgba: &[u8], src: [f32; 4], dst: Rect) {
+        let (w, h) = size;
+        if w == 0 || h == 0 || rgba.len() < w as usize * h as usize * 4 {
+            return;
+        }
+        let pic = match self.pictures.get_mut(&key) {
+            Some(p) => p,
+            None => {
+                let uv = self.atlases.color.insert(w, h, rgba);
+                if uv.is_none() && !self.pictures_redo {
+                    self.atlases.full = true;
+                    self.pictures_redo = true;
+                    return;
+                }
+                self.pictures
+                    .entry(key)
+                    .or_insert(Picture { uv, used: false })
+            }
+        };
+        pic.used = true;
+        let Some([u, v, _, _]) = pic.uv else {
+            return;
+        };
+        let uv = [u + src[0], v + src[1], src[2], src[3]];
+        self.scene.sprite(dst, uv, Rgba::white(1.0), true);
+    }
+
     /// Starts a frame on an empty scene.
     pub fn begin(&mut self, clear: Rgba) {
         self.begin_at(clear, Instant::now());
@@ -357,6 +400,8 @@ impl Ui {
         self.scene.clear();
         self.overlays = 0..0;
         self.clear = clear;
+        // Pictures the last frame did not draw give their entry back.
+        self.pictures.retain(|_, p| std::mem::take(&mut p.used));
         if let Some(list) = &mut self.cells {
             list.begin(clear);
         }
@@ -1644,6 +1689,7 @@ impl Ui {
         self.atlases.reset();
         self.text.clear_rasters();
         self.icons.clear();
+        self.pictures.clear();
         for img in &mut self.images {
             img.uv = self.atlases.insert_color(img.w, img.h, &img.rgba);
         }
@@ -1671,6 +1717,7 @@ impl Ui {
             self.reset_atlases();
             return false;
         }
+        self.pictures_redo = false;
         self.renderer.draw(
             self.gpu.as_ref(),
             &self.scene,
@@ -1696,6 +1743,7 @@ impl Ui {
             self.reset_atlases();
             return false;
         }
+        self.pictures_redo = false;
         for (raster, skip) in jobs.iter_mut() {
             raster.render_without(&self.scene, &self.atlases, self.clear, size, skip.clone());
         }

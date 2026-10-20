@@ -182,6 +182,8 @@ pub struct Snapshot {
     pub links: Vec<LinkDef>,
     pub rows: Vec<Row>,
     pub history: Vec<Row>,
+    /// Kitty image placements, for a client that asked for images and a session that has some.
+    pub placements: Option<Placements>,
 }
 
 /// The rows that changed since `base_rev`, and every table definition past
@@ -199,6 +201,121 @@ pub struct Delta {
     pub styles: Vec<StyleDef>,
     pub links: Vec<LinkDef>,
     pub rows: Vec<Row>,
+    /// Every placement, when any moved, appeared or left since `base_rev`.
+    pub placements: Option<Placements>,
+}
+
+/// One kitty image's pixels, sent to a client once per generation, before the first placement
+/// that shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Image {
+    pub id: u32,
+    /// Changes whenever the pixels do.
+    pub gen: u64,
+    pub width: u32,
+    pub height: u32,
+    /// The size the program sent it at, which placement crops are measured in: larger than
+    /// `width` × `height` when it was shrunk to [`IMAGE_MAX_SIDE`].
+    pub source_width: u32,
+    pub source_height: u32,
+    /// Straight-alpha RGBA, `width * height * 4` bytes.
+    pub rgba: Vec<u8>,
+}
+
+/// The longest side an image is sent at, so its frame stays far below the frame limit.
+pub const IMAGE_MAX_SIDE: u32 = 1024;
+
+/// Straight-alpha RGBA `width` × `height` shrunk to at most `max` px a side, keeping its aspect,
+/// each pixel the alpha-weighted average of those it covers; `None` when it already fits or
+/// `rgba` is short.
+pub fn shrink(width: u32, height: u32, rgba: &[u8], max: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let (w, h) = (width, height);
+    if (w <= max && h <= max) || max == 0 || rgba.len() < w as usize * h as usize * 4 {
+        return None;
+    }
+    let f = f64::from(w.max(h)) / f64::from(max);
+    let sw = ((f64::from(w) / f).round() as u32).clamp(1, max);
+    let sh = ((f64::from(h) / f).round() as u32).clamp(1, max);
+    let mut out = vec![0u8; sw as usize * sh as usize * 4];
+    for (y, line) in (0..sh).zip(out.chunks_exact_mut(sw as usize * 4)) {
+        let (y0, y1) = (y * h / sh, ((y + 1) * h / sh).max(y * h / sh + 1));
+        for (x, o) in (0..sw).zip(line.chunks_exact_mut(4)) {
+            let (x0, x1) = (x * w / sw, ((x + 1) * w / sw).max(x * w / sw + 1));
+            let mut sum = [0u64; 4];
+            for py in y0..y1 {
+                let row =
+                    &rgba[(py as usize * w as usize + x0 as usize) * 4..][..(x1 - x0) as usize * 4];
+                for p in row.chunks_exact(4) {
+                    let a = u64::from(p[3]);
+                    for c in 0..3 {
+                        sum[c] += u64::from(p[c]) * a;
+                    }
+                    sum[3] += a;
+                }
+            }
+            let n = u64::from((x1 - x0) * (y1 - y0));
+            for c in 0..3 {
+                o[c] = sum[c].checked_div(sum[3]).unwrap_or(0) as u8;
+            }
+            o[3] = (sum[3] / n) as u8;
+        }
+    }
+    Some((sw, sh, out))
+}
+
+/// An image placed on the grid, in the server's cell pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Placement {
+    pub image: u32,
+    pub gen: u64,
+    /// The line of its top left cell: absolute on the primary screen, a viewport row on the
+    /// alternate one.
+    pub line: i64,
+    pub col: i32,
+    /// Pixels from the top left of that cell.
+    pub x_off: u32,
+    pub y_off: u32,
+    /// The size it is drawn at, in pixels.
+    pub width: u32,
+    pub height: u32,
+    /// The part of the image drawn: x, y, width, height in its source pixels.
+    pub src: [u32; 4],
+    /// Below text when negative; below cell backgrounds under `i32::MIN / 2`.
+    pub z: i32,
+}
+
+/// A virtual placement: unicode placeholder cells (U+10EEEE) draw it, a grid of `cols` × `rows`
+/// cells the client lays out itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Virtual {
+    pub image: u32,
+    pub gen: u64,
+    /// Zero for one placed without an id.
+    pub placement: u32,
+    pub cols: u32,
+    pub rows: u32,
+}
+
+/// Every image placement on the active screen.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Placements {
+    /// The server's cell size in pixels, which placement pixels are measured in.
+    pub cell_w: u32,
+    pub cell_h: u32,
+    pub list: Vec<Placement>,
+    pub virtuals: Vec<Virtual>,
+}
+
+impl Placements {
+    /// The images, by id and generation, its placements show.
+    pub fn images(&self) -> impl Iterator<Item = (u32, u64)> + '_ {
+        let placed = self.list.iter().map(|p| (p.image, p.gen));
+        placed.chain(self.virtuals.iter().map(|v| (v.image, v.gen)))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty() && self.virtuals.is_empty()
+    }
 }
 
 /// Stable name of a side effect: the record that caused it and its index in
@@ -209,4 +326,38 @@ pub struct EffectId {
     pub epoch: u32,
     pub rseq: u64,
     pub index: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shrink_keeps_the_aspect_and_averages_by_alpha() {
+        let (w, h) = (6000u32, 4000u32);
+        let mut rgba = vec![0u8; w as usize * h as usize * 4];
+        // Left half opaque red, right half transparent green.
+        for (i, p) in rgba.chunks_exact_mut(4).enumerate() {
+            let x = i as u32 % w;
+            p.copy_from_slice(if x < w / 2 {
+                &[255, 0, 0, 255]
+            } else {
+                &[0, 255, 0, 0]
+            });
+        }
+        let (sw, sh, px) = shrink(w, h, &rgba, IMAGE_MAX_SIDE).unwrap();
+        assert_eq!((sw, sh), (1024, 683));
+        assert_eq!(px.len(), 1024 * 683 * 4);
+        assert_eq!(&px[..4], &[255, 0, 0, 255]);
+        let last = (1024 * 683 - 1) * 4;
+        assert_eq!(px[last + 3], 0);
+    }
+
+    #[test]
+    fn shrink_leaves_small_or_short_images() {
+        assert!(shrink(1024, 10, &[0; 1024 * 10 * 4], IMAGE_MAX_SIDE).is_none());
+        assert!(shrink(2000, 10, &[0; 4], IMAGE_MAX_SIDE).is_none());
+        let (w, h, _) = shrink(1, 5000, &[9; 5000 * 4], IMAGE_MAX_SIDE).unwrap();
+        assert_eq!((w, h), (1, 1024));
+    }
 }

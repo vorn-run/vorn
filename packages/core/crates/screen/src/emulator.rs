@@ -163,7 +163,7 @@ impl Theme {
 pub struct Emulator {
     pub(crate) term: Terminal<'static, 'static>,
     /// `term`'s handle, which program status reports are routed by.
-    raw: libghostty_vt::ffi::Terminal,
+    pub(crate) raw: libghostty_vt::ffi::Terminal,
     effects: Rc<RefCell<Vec<Effect>>>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
@@ -179,6 +179,8 @@ pub struct Emulator {
     pub(crate) parsed: u64,
     /// Synchronized output holds started, counted by Ghostty's render hold callback.
     holds: Rc<Cell<u64>>,
+    /// Whether kitty images are on (see [`Emulator::set_images`]).
+    pub(crate) images: bool,
 }
 
 impl Drop for Emulator {
@@ -314,6 +316,7 @@ impl Emulator {
             changed,
             parsed: 0,
             holds,
+            images: false,
         })
     }
 
@@ -450,6 +453,7 @@ impl Emulator {
     /// Feeds one flush of output, appending what it asks of the host to `out`.
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<Effect>) {
         self.parsed += bytes.len() as u64;
+        crate::images::allow_png(self.images);
         self.term.vt_write(bytes);
         let (cwd, effects, pending) = (&mut self.cwd, &self.effects, &mut self.pending);
         self.scan.feed(bytes, |kind, payload| match kind {
