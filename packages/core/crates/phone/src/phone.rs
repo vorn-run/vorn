@@ -536,23 +536,20 @@ impl vornui::App for Phone {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
             let shell = self.model.store.session(&sid).is_some_and(|s| s.is_shell());
+            // f32 to u32 saturates.
+            let px = (cell.w.round() as u32, cell.h.round() as u32);
             g.attach(
                 &sid,
                 cols,
                 rows,
+                px,
                 if shell {
                     vorn_app::grid::SHELL_HISTORY
                 } else {
                     0
                 },
             );
-            g.resize(
-                &sid,
-                cols.max(2),
-                rows.max(1),
-                false,
-                std::time::Instant::now(),
-            );
+            g.resize(&sid, cols.max(2), rows.max(1), px);
         }
         let dy = self.scroll_frame(ui, &sid, r.h);
         let live = ui.focus().is_none() && self.typing;
