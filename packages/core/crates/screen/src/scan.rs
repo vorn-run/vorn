@@ -1,5 +1,5 @@
-//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks,
-//! scrollback clears and whole-screen repaints.
+//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks
+//! and scrollback clears, in two vectorised passes over each feed.
 
 use std::sync::LazyLock;
 
@@ -11,21 +11,10 @@ const PRIVATE: &[u8] = b"\x1b]5522;";
 const MARK: &[u8] = b"\x1b]133;";
 /// ED 3, DECSED 3 and RIS, as programs write them.
 const CLEARS: [&[u8]; 3] = [b"\x1b[3J", b"\x1b[?3J", b"\x1bc"];
-/// ED 2 and the alternate screen's switches: a program starting its screen over.
-const REPAINTS: [&[u8]; 5] = [
-    b"\x1b[2J",
-    b"\x1b[?1049h",
-    b"\x1b[?1049l",
-    b"\x1b[?1047h",
-    b"\x1b[?47h",
-];
+/// RIS, the one clear no `J` ends.
+static RIS: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(CLEARS[2]));
 /// The longest pattern, which bounds the bytes held between feeds.
 const LONGEST: usize = PRIVATE.len();
-/// Built once: on a feed of a few hundred bytes building a searcher costs more than searching.
-static FINDERS: LazyLock<([Finder<'static>; 3], Finder<'static>)> =
-    LazyLock::new(|| (CLEARS.map(Finder::new), Finder::new(b"\x1b]")));
-static REPAINT_FINDERS: LazyLock<[Finder<'static>; 5]> =
-    LazyLock::new(|| REPAINTS.map(Finder::new));
 /// How much of one OSC payload is kept; the rest is dropped.
 const MAX_OSC_CAPTURE: usize = 16 * 1024;
 
@@ -85,17 +74,11 @@ pub(crate) struct Scan {
     pub(crate) clears: u64,
     /// OSC 133 marks seen.
     pub(crate) marks: u64,
-    /// [`REPAINTS`] seen within one feed; one split across two is missed,
-    /// which costs a reader only a redundant redraw request.
-    pub(crate) repaints: u64,
 }
 
 impl Scan {
     /// Scans a feed, calling `report` with each OSC 5522 and OSC 133 payload.
     pub(crate) fn feed(&mut self, bytes: &[u8], mut report: impl FnMut(Osc, &[u8])) {
-        for finder in &*REPAINT_FINDERS {
-            self.repaints += finder.find_iter(bytes).count() as u64;
-        }
         let mut from = 0;
         if let Some((kind, payload)) = self.osc.take() {
             match self.payload(bytes, 0, kind, payload, &mut report) {
@@ -124,30 +107,31 @@ impl Scan {
             }
         }
         let rest = &bytes[from..];
-        let (clears, osc_start) = &*FINDERS;
-        for finder in clears {
-            self.clears += finder.find_iter(rest).count() as u64;
-        }
+        // Most ESCs start an SGR no pattern starts, so the scan looks for the
+        // rarer bytes that end or follow one: `J` and `]`, and `ESC c` whole.
+        self.clears += RIS.find_iter(rest).count() as u64;
         let mut at = from;
-        while let Some(n) = osc_start.find(&bytes[at..]) {
-            let start = at + n;
-            let Seen::Osc(kind) = seen(&bytes[start..]) else {
-                at = start + 2;
+        for i in memchr::memchr2_iter(b'J', b']', rest).map(|n| from + n) {
+            if bytes[i] == b'J' {
+                let clear = |pat: &[u8]| i + 1 >= from + pat.len() && bytes[..=i].ends_with(pat);
+                self.clears += u64::from(clear(b"\x1b[3J") || clear(b"\x1b[?3J"));
                 continue;
-            };
-            match self.payload(
-                bytes,
-                start + kind.pattern().len(),
-                kind,
-                Vec::new(),
-                &mut report,
-            ) {
-                Some(end) => at = end,
-                None => return,
+            }
+            // Inside an OSC payload this scan already took, or not after an ESC.
+            if i < at + 1 || bytes[i - 1] != 0x1b {
+                continue;
+            }
+            if let Seen::Osc(kind) = seen(&bytes[i - 1..]) {
+                let begin = i - 1 + kind.pattern().len();
+                match self.payload(bytes, begin, kind, Vec::new(), &mut report) {
+                    Some(end) => at = end,
+                    None => return,
+                }
             }
         }
-        let near = bytes.len().saturating_sub(LONGEST - 1).max(from);
-        if let Some(esc) = memchr::memrchr(0x1b, &bytes[near..]).map(|n| near + n) {
+        // Only the feed's last bytes can be too short to tell.
+        let last = bytes.len().saturating_sub(LONGEST - 1).max(from);
+        if let Some(esc) = memchr::memrchr(0x1b, &bytes[last..]).map(|n| last + n) {
             if matches!(seen(&bytes[esc..]), Seen::Prefix) {
                 self.tail.extend_from_slice(&bytes[esc..]);
             }
@@ -250,6 +234,9 @@ mod tests {
         let (_, n) =
             split_everywhere(b"\x1b[3J\x1b[?3J\x1b[2J\x1b[13J\x1b[>3J\x1bc\x1b(c\x1b]5522;\x1b[3J");
         assert_eq!(n, 4);
+        let (seen, n) = split_everywhere(b"3J ?3J c ] [3J \x1b[33J\x1b[38;5;3J\x1b]c");
+        assert!(seen.is_empty(), "{seen:?}");
+        assert_eq!(n, 0);
     }
 
     #[test]

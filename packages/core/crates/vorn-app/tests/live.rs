@@ -315,7 +315,7 @@ fn an_attach_before_the_session_exists_is_asked_again() {
     };
     let app = connect(&v);
     let grid = app.grid().expect("grid");
-    grid.attach("not-yet", 80, 24, 0);
+    grid.attach("not-yet", 80, 24, (0, 0), 0);
     assert_eq!(grid.attached(), ["not-yet"]);
     wait_for("the refused attach to be forgotten", || {
         grid.attached().is_empty().then_some(())

@@ -137,6 +137,12 @@ impl Core {
         self.waiting.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn fail_waiting(&self, error: &RpcError) {
+        for (_, reply) in self.waiting().drain() {
+            let _ = reply.send(Err(error.clone()));
+        }
+    }
+
     fn out(&self) -> Option<mpsc::UnboundedSender<Frame>> {
         self.out
             .lock()
@@ -193,9 +199,12 @@ impl Core {
         } else {
             RpcError::Closed
         };
-        for (_, reply) in self.waiting().drain() {
-            let _ = reply.send(Err(error.clone()));
-        }
+        // Taken first, so a call made from now on fails at once.
+        self.out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        self.fail_waiting(&error);
         let _ = self.events.send(Event::Closed);
         (self.wake)();
     }
@@ -333,6 +342,8 @@ impl Drop for Rpc {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
+        // Nothing answers them now; their waiters must not spin forever.
+        self.core.fail_waiting(&RpcError::Closed);
     }
 }
 
@@ -541,9 +552,7 @@ mod tests {
         ] {
             let (rpc, _events) = Rpc::over(Box::new(Fake(Some(why))), Arc::new(|| {})).unwrap();
             let deadline = Instant::now() + Duration::from_secs(5);
-            while !matches!(rpc.core.out.lock().unwrap().as_ref(), Some(o) if o.is_closed())
-                && Instant::now() < deadline
-            {
+            while rpc.core.out.lock().unwrap().is_some() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(5));
             }
             assert_eq!(
@@ -552,5 +561,30 @@ mod tests {
                 Err(err)
             );
         }
+    }
+
+    /// A link that takes calls and never answers them.
+    struct Silent;
+
+    impl Transport for Silent {
+        fn start(
+            self: Box<Self>,
+            out: mpsc::UnboundedReceiver<Frame>,
+            inbound: Inbound,
+        ) -> Result<(), String> {
+            std::mem::forget((out, inbound));
+            Ok(())
+        }
+    }
+
+    /// A call still waiting when its link is dropped (the app took a new
+    /// one) fails, so whoever waits on it stops waiting.
+    #[test]
+    fn a_dropped_link_fails_the_calls_it_was_waiting_on() {
+        let (rpc, _events) = Rpc::over(Box::new(Silent), Arc::new(|| {})).unwrap();
+        let pending = rpc.request("config:load", Value::Null);
+        assert_eq!(pending.poll(), None);
+        drop(rpc);
+        assert_eq!(pending.poll(), Some(Err(RpcError::Closed)));
     }
 }

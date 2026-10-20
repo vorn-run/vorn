@@ -396,7 +396,7 @@ pub struct App {
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
     /// New links on their way after vornd went away.
     #[cfg(not(target_arch = "wasm32"))]
-    relinking: Option<Receiver<relink::Relinked>>,
+    relinking: relink::Relinking,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
     /// A discard the person agreed to is being run.
@@ -557,7 +557,7 @@ impl App {
             data_dir: None,
             health: None,
             #[cfg(not(target_arch = "wasm32"))]
-            relinking: None,
+            relinking: Default::default(),
             last_focus: None,
             discarding: false,
             web,
@@ -817,8 +817,6 @@ impl App {
 
     pub fn pump(&mut self) {
         self.sync_update();
-        #[cfg(not(target_arch = "wasm32"))]
-        self.relink();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {
@@ -902,6 +900,9 @@ impl App {
                 Event::Closed => self.closed = true,
             }
         }
+        // After the events, so a vornd gone takes both its links in one dial.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.relink();
         self.see_projects();
         let calls = std::mem::take(&mut self.calls);
         for (kind, pending) in calls {
@@ -3463,6 +3464,7 @@ impl App {
                             sid,
                             cols,
                             rows,
+                            cell_px(ui),
                             if session.is_shell() {
                                 crate::grid::SHELL_HISTORY
                             } else {
@@ -3470,10 +3472,7 @@ impl App {
                             },
                         );
                         if !self.st.locked.contains(sid) {
-                            let again = g.resize(sid, cols, rows, ui.resizing(), ui.now());
-                            if let Some(at) = again {
-                                ui.wake_at(at);
-                            }
+                            g.resize(sid, cols, rows, cell_px(ui));
                         }
                     }
                 }
@@ -3529,10 +3528,8 @@ impl App {
         if let Some(g) = &self.grid {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (r.h / cell.h).floor() as u16;
-            g.attach(id, cols, rows, 0);
-            if let Some(at) = g.resize(id, cols, rows, ui.resizing(), ui.now()) {
-                ui.wake_at(at);
-            }
+            g.attach(id, cols, rows, cell_px(ui), 0);
+            g.resize(id, cols, rows, cell_px(ui));
         }
         if let Some(v) = self.views.get(id) {
             let focused = focused && self.st.dialog.is_none() && ui.focus().is_none();
@@ -3551,6 +3548,17 @@ impl App {
             ui.scene.pop_clip();
         }
     }
+}
+
+/// One terminal cell in device pixels, for the pixel size a program reads
+/// from its terminal; unknown (0) when drawing to a character grid.
+fn cell_px(ui: &Ui) -> (u32, u32) {
+    if ui.is_cells() {
+        return (0, 0);
+    }
+    let cell = ui.text.cell();
+    // f32 to u32 saturates.
+    (cell.w.round() as u32, cell.h.round() as u32)
 }
 
 /// An answer that should be a list, else none.

@@ -350,6 +350,7 @@ impl Conn<'_> {
         let mut attaching = None;
         // What the size rule hears of this request, once it is routed.
         let mut sized: Option<(u32, Ev)> = None;
+        let mut measured: Option<vorn_term_proto::msg::Size> = None;
         let routed = match m {
             ClientMsg::Hello(_) => {
                 return Some(error(code::BAD_REQUEST, "Hello was already said"));
@@ -368,6 +369,7 @@ impl Conn<'_> {
                 let sid = self.next_sid;
                 self.sids.insert(sid, a.session.clone());
                 attaching = Some(sid);
+                measured = Some(a.view);
                 sized = Some((
                     sid,
                     Ev::Attach {
@@ -496,8 +498,12 @@ impl Conn<'_> {
                 },
             ),
             // The size rule's alone: the actor has no part in them.
-            ClientMsg::Viewport { sid, size } => {
-                let size = vorn_size::Size::new(size.cols, size.rows);
+            ClientMsg::Viewport { sid, size: px } => {
+                let size = vorn_size::Size::new(px.cols, px.rows);
+                let session = self.sids.get(&sid)?;
+                self.engine
+                    .sizes()
+                    .measured(session, Who::Grid(peer(sid)), size, px.px_w, px.px_h);
                 return self.size(sid, Ev::Viewport(size), now);
             }
             ClientMsg::Presence { sid, state } => {
@@ -531,6 +537,15 @@ impl Conn<'_> {
             self.engine
                 .sizes()
                 .on(&session, Who::Grid(peer(sid)), ev, now);
+            if let Some(v) = measured {
+                self.engine.sizes().measured(
+                    &session,
+                    Who::Grid(peer(sid)),
+                    vorn_size::Size::new(v.cols, v.rows),
+                    v.px_w,
+                    v.px_h,
+                );
+            }
         }
         match self.engine.grid_input(&session, m) {
             Ok(()) => None,

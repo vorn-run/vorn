@@ -402,8 +402,8 @@ fn term(args: &Args) -> Result<(), String> {
     let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
     let grid = vorn_app::grid::Grid::connect(&ep.grid, &ep.token, Arc::new(|| {}))
         .map_err(|e| e.to_string())?;
-    grid.attach(session, cols, rows, 0);
-    grid.resize(session, cols, rows, false, web_time::Instant::now());
+    grid.attach(session, cols, rows, (0, 0), 0);
+    grid.resize(session, cols, rows, (0, 0));
     let until = Instant::now() + Duration::from_secs(10);
     while grid.view(session).is_none() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));

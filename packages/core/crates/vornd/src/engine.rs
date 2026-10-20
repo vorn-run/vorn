@@ -1282,14 +1282,15 @@ impl Driver<'_> {
                     .state(id)
                     .map_or((cols, rows), |(s, _)| (s.cols, s.rows));
                 for rows in [rows.saturating_sub(1).max(1), rows] {
+                    let (px_w, px_h) = self.engine.sizes.pixels(id, size_of((cols, rows)));
                     self.next_req += 1;
                     let r = Resize {
                         session: session.clone(),
                         req: self.next_req,
                         cols,
                         rows,
-                        px_w: 0,
-                        px_h: 0,
+                        px_w,
+                        px_h,
                     };
                     self.send(ToSessiond::Resize(r));
                 }
@@ -1407,14 +1408,15 @@ impl Driver<'_> {
     fn resize_due(&mut self) {
         for (session, d) in self.engine.sizes.poll(std::time::Instant::now()) {
             debug!(session, ?d, "resize");
+            let (px_w, px_h) = self.engine.sizes.pixels(&session, d.size);
             self.next_req += 1;
             self.send(ToSessiond::Resize(Resize {
                 session,
                 req: self.next_req,
                 cols: d.size.cols,
                 rows: d.size.rows,
-                px_w: 0,
-                px_h: 0,
+                px_w,
+                px_h,
             }));
         }
     }
@@ -1553,14 +1555,15 @@ impl Driver<'_> {
                 self.send(ToSessiond::CloseStdin(SessionRef { session }));
             }
             Command::Resize(session, cols, rows) => {
+                let (px_w, px_h) = self.engine.sizes.pixels(&session, size_of((cols, rows)));
                 self.next_req += 1;
                 self.send(ToSessiond::Resize(Resize {
                     session,
                     req: self.next_req,
                     cols,
                     rows,
-                    px_w: 0,
-                    px_h: 0,
+                    px_w,
+                    px_h,
                 }));
             }
             Command::Fetch(session, from) => {

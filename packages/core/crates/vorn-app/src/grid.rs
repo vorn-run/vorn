@@ -3,11 +3,9 @@
 //! an I/O thread keeps each pane's mirror, returns every frame's credit as
 //! soon as it is applied, and marks the pane dirty for the next frame.
 //!
-//! A card's size goes to vornd once a resize gesture ends, and at most every
-//! [`HOLD_MAX`] while one goes on: every size sent costs the program a
-//! SIGWINCH and a full redraw, and a redraw still in flight when the next
-//! size lands is parsed at the wrong width. The card draws its last screen
-//! clipped or padded to the box meanwhile.
+//! A card's size, with what it measures in pixels, goes to vornd whenever it
+//! changes; vornd's size rule coalesces a drag's sizes into a few resizes.
+//! The card draws its last screen clipped or padded to the box meanwhile.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -19,7 +17,6 @@ use vorn_term_proto::msg::{
     KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 use vorn_term_proto::screen::Screen;
-use web_time::{Duration, Instant};
 
 use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
 
@@ -53,10 +50,10 @@ struct Pane {
     dirty: bool,
     /// The card's box, in cells.
     size: (u16, u16),
-    /// The size last sent to vornd.
-    sent: (u16, u16),
-    /// Since when a resize gesture has held [`Pane::size`] back.
-    held: Option<Instant>,
+    /// One cell in device pixels, 0 when unknown.
+    cell: (u32, u32),
+    /// The size and cell last sent to vornd.
+    sent: ((u16, u16), (u32, u32)),
     /// History lines asked for on attach and after each scrollback epoch.
     history: u16,
     /// The scrollback epoch history was last asked for in.
@@ -73,6 +70,8 @@ struct State {
     /// The id of the next history fetch.
     req: u32,
     errors: Vec<String>,
+    /// Why vornd will not serve this client: dialing it again cannot help.
+    refused: Option<String>,
     closed: bool,
     /// Recent pastes by input sequence, kept until vornd may ask to confirm one.
     pastes: VecDeque<(u64, String, String)>,
@@ -82,9 +81,18 @@ struct State {
     replies: Vec<Reply>,
 }
 
-/// The longest a resize gesture holds a card's new size back: a long drag
-/// still resizes the program this often on the way.
-pub const HOLD_MAX: Duration = Duration::from_millis(400);
+/// `cols`x`rows` of `cell`-sized cells, with their size in pixels.
+fn measured(cols: u16, rows: u16, (w, h): (u32, u32)) -> Size {
+    Size {
+        cols,
+        rows,
+        px_w: u32::from(cols).saturating_mul(w),
+        px_h: u32::from(rows).saturating_mul(h),
+    }
+}
+
+/// vornd's error for a grid protocol it does not serve.
+const UPGRADE: u16 = 426;
 
 /// History fetched ahead of a scrolled view, above it.
 const AHEAD: u64 = 200;
@@ -206,6 +214,7 @@ impl Grid {
                 panes: Vec::new(),
                 req: 0,
                 errors: Vec::new(),
+                refused: None,
                 closed: false,
                 pastes: VecDeque::new(),
                 asks: Vec::new(),
@@ -239,9 +248,10 @@ impl Grid {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Attaches `session` at `cols`x`rows` with up to `history` lines of
-    /// scrollback, unless it is already.
-    pub fn attach(&self, session: &str, cols: u16, rows: u16, history: u16) {
+    /// Attaches `session` at `cols`x`rows` of `cell`-sized cells (device
+    /// pixels, 0 when unknown) with up to `history` lines of scrollback,
+    /// unless it is already.
+    pub fn attach(&self, session: &str, cols: u16, rows: u16, cell: (u32, u32), history: u16) {
         {
             let mut st = self.lock();
             if st.pane(session).is_some() {
@@ -251,12 +261,7 @@ impl Grid {
             st.client.attach(Attach {
                 session: session.to_owned(),
                 mode: AttachMode::Grid,
-                view: Size {
-                    cols,
-                    rows,
-                    px_w: 0,
-                    px_h: 0,
-                },
+                view: measured(cols, rows, cell),
                 visible: true,
                 resume: None,
                 history_tail: history,
@@ -266,8 +271,8 @@ impl Grid {
                 sid: None,
                 dirty: false,
                 size: (cols, rows),
-                sent: (cols, rows),
-                held: None,
+                cell,
+                sent: ((cols, rows), cell),
                 history,
                 epoch: None,
                 top: None,
@@ -314,6 +319,11 @@ impl Grid {
     /// Whether the connection has ended.
     pub fn closed(&self) -> bool {
         self.lock().closed
+    }
+
+    /// Why vornd refused this client, when it did.
+    pub fn refused(&self) -> Option<String> {
+        self.lock().refused.clone()
     }
 
     /// What went wrong on the connection, oldest first.
@@ -594,54 +604,32 @@ impl Grid {
         Some(input_seq)
     }
 
-    /// The card's terminal is now `cols`x`rows`: says so and takes the
-    /// size, so the session follows the window. Nothing is sent when the
-    /// size is what was sent last. While `gesture` (a divider or the
-    /// window's edge held) the size waits, up to [`HOLD_MAX`] at a time;
-    /// while one waits, when to draw again to send it.
-    pub fn resize(
-        &self,
-        session: &str,
-        cols: u16,
-        rows: u16,
-        gesture: bool,
-        now: Instant,
-    ) -> Option<Instant> {
+    /// The card's terminal is now `cols`x`rows` of `cell`-sized cells: says
+    /// so and takes the size, so the session follows the window. Nothing is
+    /// sent when that is what was sent last; vornd's size rule paces a drag.
+    pub fn resize(&self, session: &str, cols: u16, rows: u16, cell: (u32, u32)) {
         let want = (cols.max(2), rows.max(1));
         {
             let mut st = self.lock();
-            let pane = st.panes.iter_mut().find(|p| p.session == session)?;
+            let Some(pane) = st.panes.iter_mut().find(|p| p.session == session) else {
+                return;
+            };
             pane.size = want;
-            if pane.sent == want {
-                pane.held = None;
-                return None;
+            pane.cell = cell;
+            if pane.sent == (want, cell) {
+                return;
             }
-            let sid = pane.sid?;
-            if gesture {
-                let since = *pane.held.get_or_insert(now);
-                if now.saturating_duration_since(since) < HOLD_MAX {
-                    return Some(since + HOLD_MAX);
-                }
-                pane.held = Some(now);
-            } else {
-                pane.held = None;
-            }
-            pane.sent = want;
-            Self::send_size(&mut st.client, sid, want.0, want.1);
+            let Some(sid) = pane.sid else { return };
+            pane.sent = (want, cell);
+            Self::send_size(&mut st.client, sid, want, cell);
         }
         self.flush();
-        None
     }
 
-    fn send_size(client: &mut Client, sid: u32, cols: u16, rows: u16) {
+    fn send_size(client: &mut Client, sid: u32, (cols, rows): (u16, u16), cell: (u32, u32)) {
         client.send(&ClientMsg::Viewport {
             sid,
-            size: Size {
-                cols,
-                rows,
-                px_w: 0,
-                px_h: 0,
-            },
+            size: measured(cols, rows, cell),
         });
         client.send(&ClientMsg::TakeSize { sid });
     }
@@ -676,10 +664,8 @@ impl Grid {
                         Some(p) => {
                             p.sid = Some(a.sid);
                             // The card may have changed size while the attach was on its way.
-                            let (cols, rows) = p.size;
-                            p.sent = p.size;
-                            p.held = None;
-                            Self::send_size(&mut st.client, a.sid, cols, rows);
+                            p.sent = (p.size, p.cell);
+                            Self::send_size(&mut st.client, a.sid, p.size, p.cell);
                         }
                         // Detached before vornd answered.
                         None => {
@@ -747,6 +733,9 @@ impl Grid {
                         st.panes.retain(|p| p.session != session || p.sid.is_some());
                         changed = true;
                     } else {
+                        if code == UPGRADE {
+                            st.refused = Some(message.clone());
+                        }
                         st.errors.push(format!("error {code}: {message}"));
                     }
                 }

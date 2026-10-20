@@ -7,10 +7,7 @@
 //! SIGTERM or Ctrl-C. Either way it takes its endpoint and announcement back.
 //!
 //! On Linux it starts its programs through a copy of itself run as
-//! `vorn-sessiond --spawn-helper` ([`vorn_sessiond::spawn::helper`]). On
-//! macOS a terminal's program starts through `vorn-sessiond --tty-exec`,
-//! which gives it its terminal as the controlling one
-//! ([`vorn_sessiond::spawn::tty_exec`]).
+//! `vorn-sessiond --spawn-helper` ([`vorn_sessiond::spawn::helper`]).
 //!
 //! `VORN_SESSIOND_HANDOFF_FAULT=<step>:<fail|stall>` (Unix) makes a handoff
 //! fail or hang at that step, for tests that check nothing is lost when it does.
@@ -26,16 +23,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use vorn_sessiond::server::{self, Config, Sessiond};
 
 fn main() {
-    // A terminal program on its way to exec, before anything else.
-    #[cfg(target_os = "macos")]
-    if std::env::args_os().nth(1).is_some_and(|a| {
-        use std::os::unix::ffi::OsStrExt;
-        a.as_bytes() == vorn_sessiond::spawn::TTY_EXEC.to_bytes()
-    }) {
-        let e = vorn_sessiond::spawn::tty_exec(std::env::args_os().skip(2).collect());
-        eprintln!("vorn-sessiond: {e}");
-        std::process::exit(127);
-    }
     // Before any thread starts: nothing sessiond was handed reaches a terminal.
     #[cfg(unix)]
     {
@@ -69,11 +56,6 @@ fn main() {
                 std::process::exit(2);
             }
         }
-    }
-    // Terminal programs start through this binary, to take their terminal.
-    #[cfg(target_os = "macos")]
-    if let Ok(exe) = std::env::current_exe() {
-        vorn_sessiond::spawn::tty_exec_through(&exe);
     }
     // The running binary even after an upgrade replaced the file.
     #[cfg(target_os = "linux")]

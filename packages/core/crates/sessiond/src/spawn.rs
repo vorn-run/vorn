@@ -13,9 +13,10 @@
 //! leads a session of its own with the terminal as its controlling one, so
 //! it hears SIGWINCH when the terminal is resized. On Linux opening the
 //! terminal as the session's leader makes it so. macOS only gives it to a
-//! leader that asks (`TIOCSCTTY`), which bash does and zsh and most programs
-//! do not, so there a terminal's program starts through
-//! `vorn-sessiond --tty-exec` ([`tty_exec`]), which asks and then execs it.
+//! leader that asks (`TIOCSCTTY`), and `posix_spawn` cannot ask, so there a
+//! terminal's program is forked: the child starts the session, takes the
+//! terminal, and becomes the program with `POSIX_SPAWN_SETEXEC`; an exec
+//! that fails sends its errno back over a close-on-exec pipe.
 //!
 //! On macOS a program is also responsible for itself: the system would
 //! otherwise attribute it to the app that started sessiond, so a program
@@ -40,59 +41,21 @@ pub mod helper;
 
 /// Signals whose disposition the child gets back at its default: one sessiond
 /// ignores (Rust ignores SIGPIPE) would otherwise stay ignored across exec.
-const DEFAULT_SIGNALS: [libc::c_int; 7] = [
-    libc::SIGCHLD,
-    libc::SIGHUP,
-    libc::SIGINT,
-    libc::SIGQUIT,
-    libc::SIGTERM,
+const DEFAULT_SIGNALS: [libc::c_int; 13] = [
+    libc::SIGABRT,
     libc::SIGALRM,
+    libc::SIGBUS,
+    libc::SIGCHLD,
+    libc::SIGFPE,
+    libc::SIGHUP,
+    libc::SIGILL,
+    libc::SIGINT,
     libc::SIGPIPE,
+    libc::SIGSEGV,
+    libc::SIGTRAP,
+    libc::SIGTERM,
+    libc::SIGQUIT,
 ];
-
-/// The argument that runs `vorn-sessiond` as [`tty_exec`].
-#[cfg(target_os = "macos")]
-pub const TTY_EXEC: &CStr = c"--tty-exec";
-
-/// The `vorn-sessiond` that terminal programs start through, once set.
-#[cfg(target_os = "macos")]
-static TTY_EXEC_BY: OnceLock<CString> = OnceLock::new();
-
-/// Starts terminal programs through `binary --tty-exec` from here on, so
-/// each takes its terminal as its controlling one. Set once, by sessiond's
-/// `main`; without it (another host, a unit test) programs start directly.
-#[cfg(target_os = "macos")]
-pub fn tty_exec_through(binary: &Path) {
-    if let Ok(b) = CString::new(binary.as_os_str().as_bytes()) {
-        let _ = TTY_EXEC_BY.set(b);
-    }
-}
-
-/// What `vorn-sessiond --tty-exec <path> <argv...>` does, first thing:
-/// takes the terminal on stdin as the controlling one, then execs `path`
-/// with `argv` and the environment it was given. Returns only on failure.
-#[cfg(target_os = "macos")]
-pub fn tty_exec(args: Vec<OsString>) -> io::Error {
-    let c = |a: OsString| CString::new(a.into_vec());
-    let Some((path, argv)) = args.split_first() else {
-        return io::Error::other("--tty-exec needs a program");
-    };
-    let (Ok(path), Ok(argv)) = (
-        c(path.clone()),
-        argv.iter().cloned().map(c).collect::<Result<Vec<_>, _>>(),
-    ) else {
-        return io::Error::other("a NUL in the command");
-    };
-    // SAFETY: TIOCSCTTY on stdin, the terminal the spawn opened there, in a
-    // process that leads its own session. A refusal leaves the program
-    // without a controlling terminal, as it would have started anyway.
-    unsafe { libc::ioctl(0, libc::TIOCSCTTY as _, 0) };
-    let argv = ptrs(&argv);
-    // SAFETY: NUL-terminated strings and a null-terminated array of them,
-    // alive for the call; execv returns only on failure.
-    unsafe { libc::execv(path.as_ptr(), argv.as_ptr().cast()) };
-    io::Error::last_os_error()
-}
 
 /// Not in the `libc` crate for macOS; `<sys/spawn.h>` has it.
 #[cfg(target_os = "macos")]
@@ -215,7 +178,12 @@ impl Program {
         if let Some(cwd) = &self.cwd {
             chdir_by_shell = !acts.chdir(cwd)?;
         }
-        attr.setup()?;
+        #[cfg(target_os = "macos")]
+        if let Stdio::Terminal { slave, .. } = stdio {
+            attr.setup(libc::POSIX_SPAWN_SETEXEC)?;
+            return fork_on_terminal(slave, &self.path, &acts, &attr, &self.argv, &self.env);
+        }
+        attr.setup(POSIX_SPAWN_SETSID)?;
         // Only an older glibc lacks a chdir action; a shell changes into
         // the directory and execs the program there instead.
         let shell_argv;
@@ -238,21 +206,6 @@ impl Program {
             (&self.path, ptrs(&self.argv))
         };
         let envp = ptrs(&self.env);
-        #[cfg(target_os = "macos")]
-        if let (Stdio::Terminal { .. }, Some(by)) = (stdio, TTY_EXEC_BY.get()) {
-            let argv: Vec<*mut libc::c_char> = [by.as_c_str(), TTY_EXEC, &self.path]
-                .into_iter()
-                .chain(self.argv.iter().map(CString::as_c_str))
-                .map(|a| a.as_ptr().cast_mut())
-                .chain(std::iter::once(std::ptr::null_mut()))
-                .collect();
-            match spawn_with(by, &acts, &attr, &argv, &envp) {
-                // A sessiond binary gone since (an upgrade removed its
-                // directory) only costs the program its controlling terminal.
-                Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::EACCES)) => {}
-                started => return started,
-            }
-        }
         spawn_with(path, &acts, &attr, &argv, &envp)
     }
 }
@@ -283,6 +236,95 @@ fn spawn_with(
         return Err(io::Error::from_raw_os_error(rc));
     }
     Ok(pid)
+}
+
+/// Start a terminal's program on macOS: fork, lead a new session, take
+/// `slave` as the controlling terminal, then become the program through
+/// `attr`, which has `POSIX_SPAWN_SETEXEC`. A failed exec is an error here,
+/// as `posix_spawn` would report it.
+#[cfg(target_os = "macos")]
+fn fork_on_terminal(
+    slave: RawFd,
+    path: &CStr,
+    acts: &Actions,
+    attr: &Attr,
+    argv: &[CString],
+    env: &[CString],
+) -> io::Result<libc::pid_t> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    let argv = ptrs(argv);
+    let envp = ptrs(env);
+    let mut ends = [0; 2];
+    // SAFETY: pipe into an array this frame owns; each end is owned once.
+    let (read_end, write_end) = unsafe {
+        if libc::pipe(ends.as_mut_ptr()) == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        for fd in ends {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+        (OwnedFd::from_raw_fd(ends[0]), OwnedFd::from_raw_fd(ends[1]))
+    };
+    // SAFETY: the child touches only what was built before the fork and
+    // makes only async-signal-safe calls (setsid, ioctl, the spawn syscall,
+    // write, _exit) until it execs or exits.
+    let pid = unsafe { libc::fork() };
+    if pid == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if pid == 0 {
+        // SAFETY: in the child, with every pointer alive in its copy.
+        unsafe {
+            let rc = if libc::setsid() == -1 || libc::ioctl(slave, libc::TIOCSCTTY.into(), 0) == -1
+            {
+                *libc::__error()
+            } else {
+                let mut me = 0;
+                libc::posix_spawn(
+                    &mut me,
+                    path.as_ptr(),
+                    &acts.0,
+                    &attr.0,
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            let e = rc.to_ne_bytes();
+            libc::write(write_end.as_raw_fd(), e.as_ptr().cast(), e.len());
+            libc::_exit(127)
+        }
+    }
+    drop(write_end);
+    let mut why = [0u8; 4];
+    let mut got = 0;
+    while got < why.len() {
+        // SAFETY: a read into the rest of a buffer this frame owns.
+        let n = unsafe {
+            libc::read(
+                read_end.as_raw_fd(),
+                why[got..].as_mut_ptr().cast(),
+                why.len() - got,
+            )
+        };
+        match usize::try_from(n) {
+            Ok(0) => break,
+            Ok(n) => got += n,
+            Err(_) if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => break,
+        }
+    }
+    if got == 0 {
+        return Ok(pid);
+    }
+    let mut status = 0;
+    // SAFETY: waitpid on the child just forked, which exits at once.
+    while unsafe { libc::waitpid(pid, &mut status, 0) } == -1
+        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+    {}
+    Err(match got {
+        4 => io::Error::from_raw_os_error(i32::from_ne_bytes(why)),
+        _ => io::Error::other("the program could not start"),
+    })
 }
 
 fn ptrs(strings: &[CString]) -> Vec<*mut libc::c_char> {
@@ -334,7 +376,9 @@ impl Attr {
         Ok(Attr(a))
     }
 
-    fn setup(&mut self) -> io::Result<()> {
+    /// Default signals and an empty mask, plus `session`: how the program
+    /// comes to lead its session.
+    fn setup(&mut self, session: libc::c_int) -> io::Result<()> {
         // SAFETY: sigsets this frame owns, filled by their own init calls.
         unsafe {
             let mut defaults: libc::sigset_t = std::mem::zeroed();
@@ -347,7 +391,7 @@ impl Attr {
             check(libc::posix_spawnattr_setsigdefault(&mut self.0, &defaults))?;
             check(libc::posix_spawnattr_setsigmask(&mut self.0, &empty))?;
         }
-        let base = POSIX_SPAWN_SETSID | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+        let base = session | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
         #[cfg(target_os = "macos")]
         let flags = base | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
         #[cfg(not(target_os = "macos"))]

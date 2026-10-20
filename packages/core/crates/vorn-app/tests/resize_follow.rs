@@ -2,7 +2,7 @@
 //! or a divider moves, the PTY takes the box's size, the program repaints at
 //! it, and what the card shows is that repaint, with nothing left over from
 //! the size before. A new card paints at its box's size without a nudge.
-//! One drag costs the program one or two resizes, not one per pause.
+//! A drag resizes the program as it goes, never more than once a frame.
 //!
 //! The program is a full-screen stand-in (`fixtures/tui-standin.py`) that
 //! repaints every row with the size it sees on every SIGWINCH, as an
@@ -35,8 +35,8 @@ const FOLLOW: Duration = Duration::from_millis(800);
 const OPEN: Duration = Duration::from_secs(3);
 /// How long after that the program's repaint may take to show.
 const REPAINT: Duration = Duration::from_millis(1200);
-/// The most resizes a short drag may cost the program.
-const DRAG_RESIZES: u64 = 2;
+/// Frames in a short drag: it may resize the program at most this often.
+const DRAG_STEPS: u32 = 12;
 /// How long a hand rests on the way through a drag.
 const PAUSE: Duration = Duration::from_millis(200);
 
@@ -325,19 +325,20 @@ fn follows(script: &str) {
         ((1100.0, 980.0), (1100.0, 700.0)),
     ] {
         let before = serials(&app, &shot.ui, &ids);
-        drag_window(&mut app, &mut shot, (from, to), 12, PAUSE);
+        drag_window(&mut app, &mut shot, (from, to), DRAG_STEPS, PAUSE);
         let since = Instant::now();
         let got = follow(&mut app, &mut shot, &ids, since, "window drag", &mut frames);
         assert_clean(&app, &shot.ui, &ids, "after the window drag");
         // Settled: nothing more is on its way.
         std::thread::sleep(Duration::from_millis(400));
         app.pump();
-        let n = assert_resizes(&app, &shot.ui, &ids, &before, DRAG_RESIZES, "window drag");
+        let most = u64::from(DRAG_STEPS);
+        let n = assert_resizes(&app, &shot.ui, &ids, &before, most, "window drag");
         resizes.push(n);
         legs.push(got);
     }
-    // A long drag, a second and a half of it: one resize per HOLD_MAX on
-    // the way, and the last where it ends.
+    // A long drag, a second and a half of it: the program follows on the
+    // way, at most once a frame, and ends at the last size.
     let before = serials(&app, &shot.ui, &ids);
     drag_window(
         &mut app,
@@ -351,7 +352,7 @@ fn follows(script: &str) {
     assert_clean(&app, &shot.ui, &ids, "after the long drag");
     std::thread::sleep(Duration::from_millis(400));
     app.pump();
-    let n = assert_resizes(&app, &shot.ui, &ids, &before, 6, "long drag");
+    let n = assert_resizes(&app, &shot.ui, &ids, &before, 90, "long drag");
     report.insert("long".into(), json!({ "follow": got, "resizes": n }));
     report.insert("window".into(), json!(legs));
     report.insert("window_resizes".into(), json!(resizes));
@@ -373,7 +374,7 @@ fn follows(script: &str) {
     let mut divider_resizes = Vec::new();
     for dx in [-220.0, 180.0] {
         let before = serials(&app, &shot.ui, &ids);
-        drag_divider(&mut app, &mut shot, dx, 12);
+        drag_divider(&mut app, &mut shot, dx, DRAG_STEPS);
         let since = Instant::now();
         let got = follow(
             &mut app,
@@ -391,7 +392,7 @@ fn follows(script: &str) {
         let n: Vec<u64> = after.iter().zip(&before).map(|(a, b)| a - b).collect();
         eprintln!("divider drag: resizes {n:?}");
         assert!(
-            n.iter().all(|&k| k <= DRAG_RESIZES) && n.iter().any(|&k| k > 0),
+            n.iter().all(|&k| k <= u64::from(DRAG_STEPS)) && n.iter().any(|&k| k > 0),
             "divider drag: resizes {n:?}"
         );
         divider_resizes.push(n);
@@ -511,7 +512,7 @@ fn an_agent_cli_resized_in_a_card_diagnostic() {
         ((1000.0, 640.0), (1500.0, 980.0)),
         ((1500.0, 980.0), (900.0, 700.0)),
     ] {
-        drag_window(&mut app, &mut shot, (from, to), 12, PAUSE);
+        drag_window(&mut app, &mut shot, (from, to), DRAG_STEPS, PAUSE);
         let got = settle(&mut app, &mut shot, &ids, Instant::now(), 3000);
         eprintln!("drag to {to:?}: {got:?}\n{}", screens(&app, &shot.ui, &ids));
     }

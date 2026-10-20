@@ -400,11 +400,15 @@ impl App {
         if let (Some(g), Some(pane)) = (&self.grid, ui.rect_of(term_id(sid))) {
             let cols = (r.w / cell.w).floor() as u16;
             let rows = (pane.h * ui.scale() / cell.h).floor() as u16;
-            g.attach(sid, cols, rows, crate::grid::SHELL_HISTORY);
+            g.attach(
+                sid,
+                cols,
+                rows,
+                super::cell_px(ui),
+                crate::grid::SHELL_HISTORY,
+            );
             if !self.st.locked.contains(sid) {
-                if let Some(at) = g.resize(sid, cols, rows, ui.resizing(), ui.now()) {
-                    ui.wake_at(at);
-                }
+                g.resize(sid, cols, rows, super::cell_px(ui));
             }
         }
         let v = self.views.get(sid)?;
