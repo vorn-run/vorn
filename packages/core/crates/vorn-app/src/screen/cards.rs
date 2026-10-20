@@ -632,8 +632,10 @@ pub(super) fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
         let mut log = scroll_view(log_id(sid))
             .min_h(0.0)
             .role(Role::List, "Finished commands");
+        // A narrow log on pixels (a phone's) leaves the folder out, so each block's controls stay inside it.
+        let wide = s.ui.is_cells() || s.ui.rect_of(log_id(sid)).is_none_or(|r| r.w >= NARROW_LOG);
         for (j, b) in sh.blocks.iter().enumerate() {
-            log = log.child(block(s, i, j, sid, b, cell_h));
+            log = log.child(block(s, i, j, sid, b, cell_h, wide));
         }
         col = col.child(log);
     }
@@ -650,20 +652,14 @@ pub(super) fn split_body(s: &Screen<'_>, i: usize, sh: &Shell) -> El {
 }
 
 /// A finished command: its title, where and how it ended, its output.
-fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) -> El {
+fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32, wide: bool) -> El {
     let hid = block_id(sid, j);
     let hot = s.ui.hover(hid);
     let faint = white(0.25);
-    let meta_text =
-        |t: String, color: Rgba| text(t, 10.0, color).mono().line_height(19.0).shrink0();
-    // On a narrow card the folder gives way first, so the rest stays inside it.
-    let mut meta = div().row().items_center().gap(8.0).min_w0();
-    if let Some(cwd) = b.cwd.as_deref() {
-        let folder = text(blocks::shorten_cwd(cwd), 10.0, faint)
-            .mono()
-            .line_height(19.0)
-            .truncate();
-        meta = meta.child(div().min_w0().child(folder));
+    let meta_text = |t: String, color: Rgba| text(t, 10.0, color).mono().line_height(19.0);
+    let mut meta = div().row().items_center().gap(8.0).shrink0();
+    if let Some(cwd) = b.cwd.as_deref().filter(|_| wide) {
+        meta = meta.child(meta_text(blocks::shorten_cwd(cwd), faint));
     }
     if let Some(code) = b.exit_code.filter(|_| b.failed()) {
         meta = meta.child(meta_text(format!("exit {code}"), c(look::RED_400)));
@@ -685,7 +681,6 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
     let copy = div()
         .id(copy_id)
         .on(Action::Click)
-        .shrink0()
         .p(2.0)
         .rounded(3.0)
         .role(Role::Button, if copied { "Copied" } else { "Copy" })
@@ -748,6 +743,9 @@ fn block(s: &Screen<'_>, i: usize, j: usize, sid: &str, b: &Block, cell_h: f32) 
         ),
     }
 }
+
+/// Narrower than this, a block's line leaves out its folder.
+const NARROW_LOG: f32 = 480.0;
 
 /// `font-semibold` in the terminal face: it has no 600, and asking for one falls back to the UI face.
 const MONO_SEMIBOLD: u16 = 700;
