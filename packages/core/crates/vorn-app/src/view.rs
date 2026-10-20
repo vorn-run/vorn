@@ -390,7 +390,7 @@ pub fn pictures<'a>(v: &mut PaneView, m: &Mirror, image: impl Fn(u32) -> Option<
         v.pictures.push(Picture {
             key: s.key,
             image: Arc::clone(&s.image),
-            src: pl.src.map(|n| n as f32),
+            src: sent_px(&s.image, pl.src.map(|n| n as f32)),
             dst,
             z: pl.z,
         });
@@ -402,7 +402,7 @@ pub fn pictures<'a>(v: &mut PaneView, m: &Mirror, image: impl Fn(u32) -> Option<
         let Some(s) = shown(t.image, t.gen) else {
             continue;
         };
-        let size = (s.image.width, s.image.height);
+        let size = (s.image.source_width, s.image.source_height);
         let Some(piece) = kitty::piece(run, &t, size, (p.cell_w, p.cell_h)) else {
             continue;
         };
@@ -411,12 +411,19 @@ pub fn pictures<'a>(v: &mut PaneView, m: &Mirror, image: impl Fn(u32) -> Option<
         v.pictures.push(Picture {
             key: s.key,
             image: Arc::clone(&s.image),
-            src: piece.src,
+            src: sent_px(&s.image, piece.src),
             dst: [x + d[0], y + d[1], d[2], d[3]],
             z: 0,
         });
     }
     v.pictures.sort_by_key(|p| p.z);
+}
+
+/// `src` in an image's source pixels as pixels of the copy it was sent, which may be shrunk.
+fn sent_px(image: &Image, src: [f32; 4]) -> [f32; 4] {
+    let kx = image.width as f32 / image.source_width.max(1) as f32;
+    let ky = image.height as f32 / image.source_height.max(1) as f32;
+    [src[0] * kx, src[1] * ky, src[2] * kx, src[3] * ky]
 }
 
 impl PaneView {
@@ -542,9 +549,20 @@ mod tests {
                 gen,
                 width,
                 height,
+                source_width: width,
+                source_height: height,
                 rgba: vec![255; (width * height * 4) as usize],
             }),
         }
+    }
+
+    #[test]
+    fn crops_of_a_shrunk_image_scale_to_the_copy_sent() {
+        let mut s = shown(1, 1, (1024, 683));
+        let img = Arc::get_mut(&mut s.image).unwrap();
+        (img.source_width, img.source_height) = (6000, 4000);
+        let src = sent_px(&s.image, [3000.0, 0.0, 3000.0, 4000.0]);
+        assert_eq!(src, [512.0, 0.0, 512.0, 683.0]);
     }
 
     fn placed(image: u32, line: i64, z: i32) -> vorn_term_proto::screen::Placement {

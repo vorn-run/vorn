@@ -1,5 +1,5 @@
 //! Pictures drawn with [`Ui::picture`] on the CPU renderer: scaled into their rect, cut to their
-//! source rect, and a large one shrunk to fit the atlas but still drawn whole.
+//! source rect, and one as large as vornd sends drawn whole.
 
 use vornui::{Rect, RenderMode, Rgba, Ui, UiConfig};
 
@@ -92,8 +92,8 @@ fn only_the_source_rect_is_drawn() {
 }
 
 #[test]
-fn a_picture_larger_than_the_atlas_takes_is_shrunk_not_dropped() {
-    let (w, h) = (4000, 2000);
+fn a_picture_as_large_as_vornd_sends_is_drawn_whole() {
+    let (w, h) = (1024, 683);
     let rgba = quadrants(w, h);
     let px = frame(|ui| {
         let src = [0.0, 0.0, w as f32, h as f32];
