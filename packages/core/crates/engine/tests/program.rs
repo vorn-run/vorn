@@ -210,6 +210,48 @@ fn the_query_is_answered_once_live_and_never_in_replay() {
 }
 
 #[test]
+fn size_reports_follow_the_cards_pixels_across_resizes() {
+    let mut b = LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    let queries = "\x1b[14t\x1b[16t\x1b[18t";
+    // 10 by 20 pixel cells, then the same font at a scale of 1.5 on a larger card.
+    for (cols, rows, px_w, px_h) in [(40, 8, 400, 160), (60, 12, 900, 360)] {
+        b.push(Record::Resize {
+            cols,
+            rows,
+            px_w,
+            px_h,
+            req: None,
+        });
+        b.data(queries);
+    }
+    let entries = b.build().entries;
+    let cfg = config(1 << 20);
+    let mut d = Sessiond::new(0, SIZE);
+    d.append(&entries);
+    let mut first = Vec::new();
+    let mut s = Session::open(
+        "s",
+        Arc::clone(&cfg),
+        Open::spawned(Cursor::start(0), Some(SIZE)),
+        Instant::now(),
+        &mut first,
+    );
+    let mut out = Vec::new();
+    d.serve(&mut s, first, &mut out, Some(entries.len() as u64));
+    let writes: Vec<_> = out
+        .iter()
+        .filter_map(|o| match o {
+            Out::Write(w) => Some(String::from_utf8_lossy(w).into_owned()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        writes.concat(),
+        "\x1b[4;160;400t\x1b[6;20;10t\x1b[8;8;40t\x1b[4;360;900t\x1b[6;30;15t\x1b[8;12;60t"
+    );
+}
+
+#[test]
 fn records_survive_a_checkpoint() {
     let mut b = LogBuilder::new(Size::new(SIZE.0, SIZE.1));
     scripted(&mut b);

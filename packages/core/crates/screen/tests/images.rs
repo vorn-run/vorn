@@ -280,3 +280,23 @@ fn size_reports_follow_the_cell_pixels_at_any_scale() {
     let replies = feed(&mut em, b"\x1b[14t\x1b[16t\x1b[18t");
     assert_eq!(replies, ["\x1b[4;1020;1600t", "\x1b[6;34;16t", "\x1b[8;30;100t"]);
 }
+
+#[test]
+fn many_images_stay_within_the_storage_limit() {
+    let mut em = card();
+    // 400 images of 100×100 RGBA, 16 MB sent: the oldest are evicted past the 10 MB a screen keeps.
+    let data = b64(&rgba(100, 100, [5, 6, 7, 255]));
+    let start = std::time::Instant::now();
+    for id in 1..=400u32 {
+        feed(&mut em, &apc(&format!("a=T,f=32,s=100,v=100,i={id},q=2"), &data));
+        feed(&mut em, b"\r\n");
+    }
+    let held = em.image_bytes();
+    eprintln!(
+        "400 images of 40 kB: {} kB held, {:?} to parse",
+        held / 1000,
+        start.elapsed()
+    );
+    assert!(held <= 10 << 20, "{held} bytes held");
+    assert!(held >= 100 * 100 * 4);
+}
