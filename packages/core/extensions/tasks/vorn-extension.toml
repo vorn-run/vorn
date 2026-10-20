@@ -1,7 +1,7 @@
 id = "vorn.tasks"
 name = "Tasks"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, and the MCP task tools. Off, the tasks are kept as they are."
 

@@ -2,7 +2,7 @@
 id = "vorn.agents.opencode"
 name = "OpenCode"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Runs OpenCode: launches and resumes it, lists its models and reads its status."
 
 [agent]

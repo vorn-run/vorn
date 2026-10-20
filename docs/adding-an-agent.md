@@ -22,7 +22,7 @@ Start the manifest with the package's own fields, then the agent's:
 id = "example.acme"
 name = "Acme"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Runs the Acme coding agent."
 
 [agent]

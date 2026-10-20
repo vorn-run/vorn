@@ -3,7 +3,7 @@
 id = "example.shout"
 name = "Shout"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "A workflow step that repeats its text in capitals, and a workflow to try it."
 
 [service]

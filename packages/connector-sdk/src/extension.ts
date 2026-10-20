@@ -15,7 +15,7 @@ export const MANIFEST_FILE = 'vorn-extension.toml'
  * with a `[connector]` section, whose program speaks the connector protocol
  * that this API version includes.
  */
-export const EXTENSION_API = 'vorn:extension@0.9'
+export const EXTENSION_API = 'vorn:extension@1.0'
 
 /** Every check a receipt may record: the names `check` writes into `verified.json`. */
 export const RECORDED_CHECKS = [

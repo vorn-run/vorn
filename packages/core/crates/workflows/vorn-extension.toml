@@ -1,7 +1,7 @@
 id = "vorn.workflows"
 name = "Workflow steps and triggers"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "The steps and triggers workflows are built from: agents, scripts and HTTP requests; manual runs, schedules, webhooks and a session coming back. Off, a workflow stops at those steps and its schedules and webhooks do not fire; the workflows are kept."
 

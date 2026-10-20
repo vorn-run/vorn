@@ -100,7 +100,7 @@ fn program_manifest(id: &str, extra: &str) -> String {
         r#"id = "{id}"
 name = "{id}"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "program.mjs"]

@@ -376,7 +376,7 @@ mod tests {
             r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [service]
 command = ["x"]
 [declares]

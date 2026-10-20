@@ -685,23 +685,6 @@ fn check_command(at: &At<'_>, field: &str, argv: &[String]) -> Result<(), FileEr
     Ok(())
 }
 
-/// A version range of comparators such as `>=0.9, <2`; checked for its form only.
-pub fn is_range(range: &str) -> bool {
-    range.split(',').map(str::trim).all(|part| {
-        let version = part.trim_start_matches(['>', '<', '=', '^', '~']);
-        let op = &part[..part.len() - version.len()];
-        matches!(op, "" | ">=" | ">" | "<=" | "<" | "=" | "^" | "~")
-            && !version.is_empty()
-            && version
-                .split(['.', '-', '+'])
-                .all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'*'))
-            && version
-                .split('.')
-                .next()
-                .is_some_and(|major| major.bytes().all(|c| c.is_ascii_digit()))
-    })
-}
-
 impl Raw {
     fn check(&self, at: &At<'_>, builtin: bool) -> Result<(), FileError> {
         if let Some(agent) = &self.agent {
@@ -735,16 +718,12 @@ impl Raw {
                 format!("`{}` is not a version like 1.2.0", self.version),
             ));
         }
-        if self.api != API {
-            return Err(at(
-                "api",
-                format!("this Vorn speaks {API}; the package asks for {}", self.api),
-            ));
-        }
+        let host = crate::compat::ApiVersion::host();
+        crate::compat::admit_api(&self.api, host).map_err(|why| at("api", why))?;
         if let Some(range) = &self.vorn {
-            if !is_range(range) {
-                return Err(at("vorn", format!("`{range}` is not a range like >=0.9")));
-            }
+            crate::compat::Range::parse(range)
+                .and_then(|r| r.admit(host))
+                .map_err(|why| at("vorn", why))?;
         }
         if let Some(build) = &self.build {
             check_command(at, "build.command", &build.command)?;
@@ -1975,7 +1954,7 @@ mod tests {
     const SERVICE: &str = r#"id = "example.pr-checks"
 name = "PR checks"
 version = "0.1.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 vorn = ">=0.9"
 
 [service]
@@ -2051,7 +2030,7 @@ header = "Authorization: Bearer {token}"
 
     #[test]
     fn needs_something_to_run_or_show() {
-        let bare = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n";
+        let bare = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n";
         assert_eq!(
             parse(bare).unwrap_err().message,
             "declares no service, action, connector or contribution"
@@ -2060,7 +2039,7 @@ header = "Authorization: Bearer {token}"
 
     #[test]
     fn reads_layout_contributions_and_names_a_file_outside_layouts() {
-        let head = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[[contributes.layouts]]\nid = \"dev\"\ntitle = \"Dev\"\n";
+        let head = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n\n[[contributes.layouts]]\nid = \"dev\"\ntitle = \"Dev\"\n";
         let m = parse(&format!("{head}file = \"layouts/dev.toml\"\n")).unwrap();
         let layouts = m.contributes.as_ref().unwrap().layouts();
         assert_eq!(
@@ -2087,7 +2066,7 @@ header = "Authorization: Bearer {token}"
         let text = r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [[contributes.sidebar]]
 id = "checks"
@@ -2145,8 +2124,8 @@ tree = true
             "vorn-extension.toml:6: contributes.sidebar[0]: draws from the element tree its extension answers ui.render with: give it tree = true"
         );
         assert_eq!(
-            err("vorn:extension@0.9", "vorn:connector@1"),
-            "vorn-extension.toml:4: api: this Vorn speaks vorn:extension@0.9; the package asks for vorn:connector@1"
+            err("vorn:extension@1.0", "vorn:connector@1"),
+            "vorn-extension.toml:4: api: `vorn:connector@1` is not an extension API; this Vorn speaks vorn:extension@1.0"
         );
     }
 
@@ -2155,7 +2134,7 @@ tree = true
         let text = r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [[contributes.settings]]
 id = "page"
@@ -2185,7 +2164,7 @@ tree = true
         let text = r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [[contributes.settings]]
 id = "page"
@@ -2212,7 +2191,7 @@ after = "agents"
     #[test]
     fn every_place_that_shows_one_and_a_pane_draw_from_a_tree() {
         let mut text = String::from(
-            "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n",
+            "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n",
         );
         let places = [
             "sidebar",
@@ -2251,7 +2230,7 @@ after = "agents"
         let text = r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 component = "target/x.wasm"
@@ -2281,7 +2260,7 @@ events = ["session.status"]
         let text = r#"id = "x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [[contributes.footers]]
 id = "f"
@@ -2305,7 +2284,7 @@ every = 5
         let text = r#"id = "tickets"
 name = "Tickets"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "index.js"]
@@ -2341,12 +2320,48 @@ call = "refresh"
     }
 
     #[test]
-    fn reads_ranges_by_their_form() {
-        for ok in [">=0.9", ">=0.9.0, <2", "^1.2.3", "=0.9.0-beta.1", "1.*"] {
-            assert!(is_range(ok), "{ok}");
+    fn a_vorn_range_that_does_not_read_is_named_by_field_and_line() {
+        let with = |range: &str| SERVICE.replace(">=0.9", range);
+        for ok in [">=0.9", ">=1.0, <2", "^1.0", "=1.0", "1", "~1.0"] {
+            assert!(parse(&with(ok)).is_ok(), "{ok}");
         }
-        for bad in ["", ">=", "=>0.9", "latest", ">=a.9"] {
-            assert!(!is_range(bad), "{bad}");
-        }
+        let err = |range: &str| parse(&with(range)).unwrap_err().to_string();
+        assert_eq!(
+            err("=>1.0"),
+            "vorn-extension.toml:5: vorn: `=>1.0` starts with `=>`, which is not a comparator; use >=, >, <=, <, =, ^ or ~"
+        );
+        assert_eq!(
+            err(">=1.0, latest"),
+            "vorn-extension.toml:5: vorn: `latest` does not name a version like 1.0; an API version is MAJOR.MINOR"
+        );
+        assert_eq!(
+            err(""),
+            "vorn-extension.toml:5: vorn: is empty; write the API versions it runs on, like >=1.0"
+        );
+    }
+
+    #[test]
+    fn installs_check_the_api_and_range_against_the_version_vorn_speaks() {
+        let api = |v: &str| SERVICE.replace("vorn:extension@1.0", v);
+        // Older: a major this Vorn no longer speaks.
+        assert_eq!(
+            parse(&api("vorn:extension@0.9")).unwrap_err().to_string(),
+            "vorn-extension.toml:4: api: built for vorn:extension@0.9, which this Vorn no longer speaks; it speaks vorn:extension@1.0, so rebuild it against vorn:extension@1.0"
+        );
+        // Equal.
+        assert!(parse(&api("vorn:extension@1.0")).is_ok());
+        // Newer.
+        assert_eq!(
+            parse(&api("vorn:extension@1.1")).unwrap_err().to_string(),
+            "vorn-extension.toml:4: api: built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
+
+        let range = |r: &str| SERVICE.replace(">=0.9", r);
+        assert!(parse(&range("<1.0")).is_err());
+        assert!(parse(&range(">=1.0")).is_ok());
+        assert_eq!(
+            parse(&range(">=1.1")).unwrap_err().to_string(),
+            "vorn-extension.toml:5: vorn: runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
     }
 }

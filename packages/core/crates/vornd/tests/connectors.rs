@@ -25,7 +25,7 @@ const FIXTURE: &str = include_str!("../../../../../tests/fixtures/native-connect
 const MANIFEST: &str = r#"id = "tickets"
 name = "Tickets"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn tests"
 
 [service]

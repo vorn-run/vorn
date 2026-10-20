@@ -25,7 +25,7 @@ inside the package, in place of `command`.
 id = "acme.hello"
 name = "Hello"
 version = "0.1.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [build]
 command = ["cargo", "build", "--release", "--target", "wasm32-wasip2"]

@@ -20,7 +20,7 @@ const PROGRAM: &str = include_str!("../../extensions/tests/fixtures/program.mjs"
 const MANIFEST: &str = r#"id = "test.events"
 name = "Events"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "program.mjs"]

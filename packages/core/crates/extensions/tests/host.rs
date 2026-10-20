@@ -37,7 +37,7 @@ fn extension(id: &str, connector: bool) -> String {
         "[[contributes.sidebar]]\nid = \"s\"\ntree = true\n"
     };
     format!(
-        "id = \"{id}\"\nname = \"{name}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\
+        "id = \"{id}\"\nname = \"{name}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n\
          [service]\ncommand = [\"node\", \"index.js\"]\n{draws}"
     )
 }

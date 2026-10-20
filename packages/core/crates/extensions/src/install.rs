@@ -934,7 +934,7 @@ mod tests {
     const MANIFEST: &str = r#"id = "test.marker"
 name = "Marker"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "test"
 
 [build]
@@ -1031,6 +1031,51 @@ migrations = "migrations"
     }
 
     #[test]
+    fn install_and_link_check_the_api_and_vorn_range_against_this_vorn() {
+        let attempt = |from: &str, to: &str| {
+            let folder = tempfile::tempdir().unwrap();
+            let text = MANIFEST
+                .replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "")
+                .replace(from, to);
+            fs::write(folder.path().join(file::FILE), text).unwrap();
+            fs::write(folder.path().join("hello.sh"), "").unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let installs = Installs::new(PackStore::new(root.path()), "git", env());
+            let path = folder.path().display().to_string();
+            let copied = installs.inspect_git(&path, None).map(|_| ());
+            let linked = installs.inspect_link(folder.path()).map(|_| ());
+            assert_eq!(copied, linked);
+            copied
+        };
+        let api = "api = \"vorn:extension@1.0\"";
+        // Equal.
+        assert_eq!(attempt(api, api), Ok(()));
+        assert_eq!(
+            attempt(api, &format!("{api}\nvorn = \">=1.0\"")),
+            Ok(())
+        );
+        // Newer.
+        let newer = attempt(api, "api = \"vorn:extension@1.1\"").unwrap_err();
+        assert_eq!(
+            newer,
+            "vorn-extension.toml:4: api: built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
+        let newer = attempt(api, &format!("{api}\nvorn = \">=1.1\"")).unwrap_err();
+        assert_eq!(
+            newer,
+            "vorn-extension.toml:5: vorn: runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
+        // Older.
+        let older = attempt(api, "api = \"vorn:extension@0.9\"").unwrap_err();
+        assert!(
+            older.contains("built for vorn:extension@0.9, which this Vorn no longer speaks; it speaks vorn:extension@1.0"),
+            "{older}"
+        );
+        let older = attempt(api, &format!("{api}\nvorn = \"<1.0\"")).unwrap_err();
+        assert!(older.contains("update the extension"), "{older}");
+    }
+
+    #[test]
     fn a_failed_build_installs_nothing() {
         let Some(git) = git() else { return };
         let source = repo(&[
@@ -1124,7 +1169,7 @@ migrations = "migrations"
         let folder = tempfile::tempdir().unwrap();
         let manifest = |agent: &str| {
             format!(
-                "id = \"test.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\npublisher = \"test\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n\n[activates]\nagent = [\"{agent}\"]\n"
+                "id = \"test.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"test\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n\n[activates]\nagent = [\"{agent}\"]\n"
             )
         };
         let write =
@@ -1210,7 +1255,7 @@ migrations = "migrations"
             r#"id = "test.gh"
 name = "GitHub"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "index.js"]
@@ -1245,7 +1290,7 @@ type = "issue"
             r#"id = "test.x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [service]
 command = ["node", "index.js"]
 [declares]

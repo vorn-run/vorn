@@ -1,7 +1,7 @@
 id = "vorn.device"
 name = "Device"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "An iOS simulator beside a session's terminal, chosen from its card or claimed by its agent, which launches, installs and opens its apps and reads its screen with its device tools. Off, the device pane and the agent's device tools are gone."
 

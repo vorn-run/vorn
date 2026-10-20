@@ -83,7 +83,7 @@ const ID: &str = "test.probe";
 
 fn manifest(uses: &str) -> String {
     format!(
-        "id = \"{ID}\"\nname = \"Probe\"\nversion = \"1.2.3\"\napi = \"vorn:extension@0.9\"\n\n\
+        "id = \"{ID}\"\nname = \"Probe\"\nversion = \"1.2.3\"\napi = \"vorn:extension@1.0\"\n\n\
          [declares]\nuses = [{uses}]\n\n\
          [service]\ncomponent = \"probe.wasm\"\nevents = [\"session.status\"]\n"
     )
@@ -91,9 +91,14 @@ fn manifest(uses: &str) -> String {
 
 /// The probe as an installed package declaring `uses`, linked and routed.
 fn rig(uses: &str, policy: Policy, call_timeout: Duration) -> Rig {
+    rig_of(&fs::read(probe()).unwrap(), uses, policy, call_timeout)
+}
+
+/// [`rig`] for the component `wasm`.
+fn rig_of(wasm: &[u8], uses: &str, policy: Policy, call_timeout: Duration) -> Rig {
     let (folder, root) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     fs::write(folder.path().join("vorn-extension.toml"), manifest(uses)).unwrap();
-    fs::copy(probe(), folder.path().join("probe.wasm")).unwrap();
+    fs::write(folder.path().join("probe.wasm"), wasm).unwrap();
     // Compiled code a package ships is never run: only what Vorn compiled.
     fs::write(folder.path().join("probe.cwasm"), b"not Vorn's").unwrap();
     let store = PackStore::new(root.path().join("extensions"));
@@ -135,6 +140,49 @@ impl Rig {
 }
 
 const ALL: &str = "\"sessions.read\", \"sessions.launch\", \"storage\"";
+
+/// The probe as if built against API `version`: its import names rewritten
+/// in place, the same length, so the component stays valid.
+fn probe_built_for(version: &str) -> Vec<u8> {
+    let mut wasm = fs::read(probe()).unwrap();
+    let (from, to) = ("@1.0.0".as_bytes(), version.as_bytes());
+    assert_eq!(from.len(), to.len());
+    let prefix = b"vorn:extension/";
+    let mut i = 0;
+    while let Some(at) = wasm[i..].windows(prefix.len()).position(|w| w == prefix) {
+        let start = i + at + prefix.len();
+        let end = (start..wasm.len()).find(|&j| !(wasm[j].is_ascii_alphanumeric() || wasm[j] == b'-')).unwrap();
+        if wasm[end..].starts_with(from) {
+            wasm[end..end + from.len()].copy_from_slice(to);
+        }
+        i = end;
+    }
+    wasm
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_component_built_for_a_newer_or_retired_api_is_refused_naming_both() {
+    let started = |version: &str| {
+        let rig = rig_of(&probe_built_for(version), ALL, Policy::default(), Duration::from_secs(10));
+        async move { rig.call("whoami", Value::Null).await.map(|_| ()) }
+    };
+    // Equal.
+    started("@1.0.0").await.expect("a component built for 1.0 runs on 1.0");
+    // Newer.
+    let newer = started("@1.1.0").await.unwrap_err();
+    assert!(
+        newer.message.contains("built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0"),
+        "{}",
+        newer.message
+    );
+    // Older: a major this Vorn no longer speaks.
+    let older = started("@0.9.0").await.unwrap_err();
+    assert!(
+        older.message.contains("built for vorn:extension@0.9, which this Vorn no longer speaks; it speaks vorn:extension@1.0"),
+        "{}",
+        older.message
+    );
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_component_answers_publishes_and_reads_back_through_the_bridge() {

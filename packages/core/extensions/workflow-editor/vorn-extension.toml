@@ -1,7 +1,7 @@
 id = "vorn.workflow-editor"
 name = "Workflow editor"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "The Workflows view: its runs and the editor, where each step is a card on a canvas; Run workflow in the grid's, a card's and a terminal's menus; and approval gates waiting for you beside agents asking. Off, workflows still run and keep their files."
 

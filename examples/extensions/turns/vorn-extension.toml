@@ -3,7 +3,7 @@
 id = "example.turns"
 name = "Turns"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Counts each agent's turns, shows them on its card and lists the latest finishes."
 
 [declares]

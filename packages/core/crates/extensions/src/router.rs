@@ -602,6 +602,7 @@ impl Router {
             id: pack.id.clone(),
             version: pack.version.clone(),
             vorn: self.settings.version.clone(),
+            api: crate::api::API.to_owned(),
         };
         if let Some(component) = &service.component {
             let source = Source::File(pack.path.join(component));
@@ -632,6 +633,7 @@ impl Router {
             id: m.id.clone(),
             version: m.version.clone(),
             vorn: self.settings.version.clone(),
+            api: crate::api::API.to_owned(),
         };
         self.start_component(Source::Bundled(bundled.wasm), Arc::clone(m), ctx)
             .await

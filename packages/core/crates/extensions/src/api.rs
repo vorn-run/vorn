@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(Method::NetFetch.side(), Side::Host);
         assert!(Method::HostPublish.is_notification() && Method::GuestOnEvent.is_notification());
         assert!(!Method::GuestInit.is_notification());
-        assert_eq!(API, "vorn:extension@0.9");
+        assert_eq!(API, "vorn:extension@1.0");
     }
 
     #[test]

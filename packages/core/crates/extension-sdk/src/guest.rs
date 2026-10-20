@@ -199,6 +199,7 @@ pub fn init<E: Extension>(ctx: types::InitCtx) -> Result<(), types::ExtError> {
         id: ctx.id,
         version: ctx.version,
         vorn: ctx.vorn,
+        api: ctx.api,
     };
     let ext = E::init(&init, &mut Vorn).map_err(to_wit)?;
     EXT.with(|cell| *cell.borrow_mut() = Some(Box::new(ext)));

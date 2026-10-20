@@ -1,7 +1,7 @@
 id = "vorn.worktrees"
 name = "Worktree cleanup"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Offers to remove a worktree once its last session ends, and lists every worktree with what removing it frees."
 
 [declares]

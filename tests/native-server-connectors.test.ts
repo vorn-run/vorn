@@ -51,7 +51,7 @@ function release(dir: string, version: string): void {
       'id = "tickets"',
       'name = "Tickets"',
       `version = "${version}"`,
-      'api = "vorn:extension@0.9"',
+      'api = "vorn:extension@1.0"',
       '',
       '[service]',
       'command = ["node", "index.js"]',

@@ -1,7 +1,7 @@
 id = "review"
 name = "Review"
 version = "0.1.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Reads the session"
 
 [service]

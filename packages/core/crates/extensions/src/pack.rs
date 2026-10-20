@@ -499,7 +499,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         fs::write(
             folder.path().join(file::FILE),
-            "id = \"local.hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\napi = \"vorn:extension@0.9\"\n[actions.greet]\ncommand = [\"bash\", \"greet.sh\"]\n",
+            "id = \"local.hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\napi = \"vorn:extension@1.0\"\n[actions.greet]\ncommand = [\"bash\", \"greet.sh\"]\n",
         )
         .unwrap();
         fs::write(folder.path().join("greet.sh"), "echo hi\n").unwrap();

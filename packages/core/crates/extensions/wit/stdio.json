@@ -1,6 +1,6 @@
 {
-  "package": "vorn:extension@0.9.0",
-  "api": "vorn:extension@0.9",
+  "package": "vorn:extension@1.0.0",
+  "api": "vorn:extension@1.0",
   "types": {
     "json": { "inline": "any JSON value" },
     "ext-error": { "record": [["code", "string"], ["message", "string"]] },

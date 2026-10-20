@@ -20,6 +20,7 @@ pub mod api;
 pub mod blobs;
 pub mod bridge;
 pub mod child;
+pub mod compat;
 pub mod component;
 pub mod connector;
 pub mod events;

@@ -52,7 +52,7 @@ fn manifest(id: &str, wasm: bool) -> String {
         "id = \"{id}\"
 name = \"{name}\"
 version = \"0.1.0\"
-api = \"vorn:extension@0.9\"
+api = \"vorn:extension@1.0\"
 description = \"Lists the sessions running, and says hello.\"
 
 {service}
@@ -139,6 +139,13 @@ const PROGRAM_MJS: &str = r#"// A settings page that lists the sessions running,
 // Vorn speaks to it over stdio, one JSON-RPC message per line.
 import { createInterface } from 'node:readline'
 
+// The extension API this program was built for; a Vorn speaking an older minor or another major is refused.
+const API = 'vorn:extension@1.0'
+const runsOn = (api) => {
+  const [host, built] = [api, API].map((v) => String(v).split('@')[1]?.split('.').map(Number) ?? [])
+  return host[0] === built[0] && host[1] >= built[1]
+}
+
 let next = 100
 const waiting = new Map()
 const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n')
@@ -183,7 +190,12 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     else w?.resolve(m.result)
     return
   }
-  if (m.method === 'guest.init') return send({ id: m.id, result: null })
+  if (m.method === 'guest.init') {
+    const api = m.params.ctx.api
+    if (runsOn(api)) return send({ id: m.id, result: null })
+    const message = `built for ${API}; this Vorn speaks ${api}, so update Vorn to run it`
+    return send({ id: m.id, error: { code: -32000, message, data: { code: 'version' } } })
+  }
   if (m.method !== 'guest.handle') return
   try {
     send({ id: m.id, result: await handle(m.params.method, m.params.args) })

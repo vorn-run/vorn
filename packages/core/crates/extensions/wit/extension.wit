@@ -17,7 +17,7 @@
 // exits after answering. A service is sent `guest.init` first, then calls and
 // events until its stdin closes.
 //
-// Every package names this one API, `api = "vorn:extension@0.9"`; what kind
+// Every package names this one API, `api = "vorn:extension@1.0"`; what kind
 // of package it is beyond an extension is a section of its manifest, not
 // another api id. A `[connector]` section (auth, triggers, actions) means its
 // service speaks the connector protocol instead of these interfaces: the
@@ -89,8 +89,16 @@
 // read in this order: what the agent reports itself (OSC 7501), then its
 // hooks, then its screen rules. An adapter may draw trees beside the section
 // as any extension does (examples/extensions/agent-footer).
+//
+// Versioning: the package version is MAJOR.MINOR.PATCH, and a manifest's
+// `api` names MAJOR.MINOR. A minor release only adds (a function, a bridge
+// method, an event), so a package built for 1.0 runs on every 1.x Vorn; a
+// package built for a newer minor or another major is refused, at install
+// and when it starts, with a message naming both versions. A component's
+// imports carry the version it was built against, read before it is linked;
+// a program learns the version Vorn speaks from `init-ctx.api`.
 
-package vorn:extension@0.9.0;
+package vorn:extension@1.0.0;
 
 interface types {
   /// Any JSON value.
@@ -126,11 +134,14 @@ interface types {
     project: option<string>,
   }
 
-  /// What a service is started with.
+  /// What a service is started with: its own id and version, the Vorn
+  /// release, and the API that Vorn speaks (`vorn:extension@1.0`), which a
+  /// program built for a newer one refuses to start on.
   record init-ctx {
     id: string,
     version: string,
     vorn: string,
+    api: string,
   }
 
   /// One change to a collection of keyed rows; a row's key is its `id`.
