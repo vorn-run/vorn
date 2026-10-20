@@ -151,7 +151,9 @@ fn probe_built_for(version: &str) -> Vec<u8> {
     let mut i = 0;
     while let Some(at) = wasm[i..].windows(prefix.len()).position(|w| w == prefix) {
         let start = i + at + prefix.len();
-        let end = (start..wasm.len()).find(|&j| !(wasm[j].is_ascii_alphanumeric() || wasm[j] == b'-')).unwrap();
+        let end = (start..wasm.len())
+            .find(|&j| !(wasm[j].is_ascii_alphanumeric() || wasm[j] == b'-'))
+            .unwrap();
         if wasm[end..].starts_with(from) {
             wasm[end..end + from.len()].copy_from_slice(to);
         }
@@ -163,15 +165,24 @@ fn probe_built_for(version: &str) -> Vec<u8> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_component_built_for_a_newer_or_retired_api_is_refused_naming_both() {
     let started = |version: &str| {
-        let rig = rig_of(&probe_built_for(version), ALL, Policy::default(), Duration::from_secs(10));
+        let rig = rig_of(
+            &probe_built_for(version),
+            ALL,
+            Policy::default(),
+            Duration::from_secs(10),
+        );
         async move { rig.call("whoami", Value::Null).await.map(|_| ()) }
     };
     // Equal.
-    started("@1.0.0").await.expect("a component built for 1.0 runs on 1.0");
+    started("@1.0.0")
+        .await
+        .expect("a component built for 1.0 runs on 1.0");
     // Newer.
     let newer = started("@1.1.0").await.unwrap_err();
     assert!(
-        newer.message.contains("built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0"),
+        newer
+            .message
+            .contains("built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0"),
         "{}",
         newer.message
     );

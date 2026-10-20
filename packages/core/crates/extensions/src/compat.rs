@@ -238,7 +238,11 @@ impl Range {
         let newer = self.all.iter().any(|c| {
             matches!(c.op, Op::Ge | Op::Gt | Op::Eq | Op::Caret | Op::Tilde) && c.version > host
         });
-        let advice = if newer { "update Vorn" } else { "update the extension" };
+        let advice = if newer {
+            "update Vorn"
+        } else {
+            "update the extension"
+        };
         Err(format!(
             "runs on {} {}; this Vorn speaks {host}, so {advice} to run it",
             package_name(),
@@ -380,7 +384,10 @@ mod tests {
             "runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
         );
         let older = Range::parse("<1.0").unwrap().admit(V1_0).unwrap_err();
-        assert!(older.ends_with("so update the extension to run it"), "{older}");
+        assert!(
+            older.ends_with("so update the extension to run it"),
+            "{older}"
+        );
         assert_eq!(Range::parse(">=1.0").unwrap().admit(V1_0), Ok(()));
     }
 }

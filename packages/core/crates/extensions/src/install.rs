@@ -1050,10 +1050,7 @@ migrations = "migrations"
         let api = "api = \"vorn:extension@1.0\"";
         // Equal.
         assert_eq!(attempt(api, api), Ok(()));
-        assert_eq!(
-            attempt(api, &format!("{api}\nvorn = \">=1.0\"")),
-            Ok(())
-        );
+        assert_eq!(attempt(api, &format!("{api}\nvorn = \">=1.0\"")), Ok(()));
         // Newer.
         let newer = attempt(api, "api = \"vorn:extension@1.1\"").unwrap_err();
         assert_eq!(

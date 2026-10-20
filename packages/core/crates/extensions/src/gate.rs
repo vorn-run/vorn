@@ -454,7 +454,11 @@ header = "Authorization: Bearer {token}"
             ("task.changed", Permission::TasksWrite),
             ("remote.hosts", Permission::Remote),
         ] {
-            assert_eq!(admit_call(&m, method).unwrap_err().code, "denied", "{method}");
+            assert_eq!(
+                admit_call(&m, method).unwrap_err().code,
+                "denied",
+                "{method}"
+            );
             m.permissions.get_or_insert_with(Vec::new).push(needs);
             assert_eq!(admit_call(&m, method), Ok(needs), "{method}");
         }

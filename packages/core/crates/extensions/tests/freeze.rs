@@ -47,11 +47,19 @@ fn a_built_in_past_the_public_api_and_an_unlisted_hook_are_each_named() {
     );
     let says = |needle: &str| found.iter().any(|f| f.message.contains(needle));
     assert!(says("built for vorn:extension@0.9"), "{found:#?}");
-    assert!(says("depends on crates/core; a built-in builds on crates/extension-sdk alone"));
+    assert!(says(
+        "depends on crates/core; a built-in builds on crates/extension-sdk alone"
+    ));
     assert!(says("uses vorn_extension_sdk::bindings"));
-    assert!(says("names task.secretly, which is no public bridge method"));
-    assert!(says("crates/stray is neither core, host, tooling, a built-in nor an exception"));
+    assert!(says(
+        "names task.secretly, which is no public bridge method"
+    ));
+    assert!(says(
+        "crates/stray is neither core, host, tooling, a built-in nor an exception"
+    ));
     assert!(says("crates/core is in area `billing`"));
-    assert!(says("names the built-in vorn.bad from a core or host crate"));
+    assert!(says(
+        "names the built-in vorn.bad from a core or host crate"
+    ));
     assert!(says("crates/host/src/lib.rs#vorn.gone, which is gone"));
 }

@@ -235,9 +235,8 @@ fn private_name(literal: &str) -> Option<String> {
     let public = CORE_METHODS.iter().any(|(m, _)| *m == literal)
         || CORE_EVENTS.contains(&literal)
         || Permission::named(literal).is_some();
-    (bridge && !public).then(|| {
-        format!("names {literal}, which is no public bridge method, event or permission")
-    })
+    (bridge && !public)
+        .then(|| format!("names {literal}, which is no public bridge method, event or permission"))
 }
 
 fn check_dependencies(report: &mut Report, root: &Path, dir: &str, freeze: &Freeze) {
@@ -300,16 +299,27 @@ fn check_members(
         for (member, said) in entries {
             let line = line_of(&freeze_text, &format!("\"{member}\"")).unwrap_or(1);
             if !members.contains(member) {
-                report.at(&freeze_path, line, format!("[{table}] names {member}, which is no workspace member"));
+                report.at(
+                    &freeze_path,
+                    line,
+                    format!("[{table}] names {member}, which is no workspace member"),
+                );
             }
             if said.trim().is_empty() {
-                report.at(&freeze_path, line, format!("[{table}] gives {member} no reason"));
+                report.at(
+                    &freeze_path,
+                    line,
+                    format!("[{table}] gives {member} no reason"),
+                );
             }
             if table == "core" && !AREAS.contains(&said.as_str()) {
                 report.at(
                     &freeze_path,
                     line,
-                    format!("{member} is in area `{said}`; the core holds only {}", AREAS.join(", ")),
+                    format!(
+                        "{member} is in area `{said}`; the core holds only {}",
+                        AREAS.join(", ")
+                    ),
                 );
             }
         }
@@ -317,9 +327,17 @@ fn check_members(
     let mut names = BTreeMap::new();
     for member in &members {
         let builtin = builtins.contains(member);
-        let classed = tables.iter().filter(|(_, t)| t.contains_key(member)).count() + usize::from(builtin);
+        let classed = tables
+            .iter()
+            .filter(|(_, t)| t.contains_key(member))
+            .count()
+            + usize::from(builtin);
         if classed != 1 {
-            let line = line_of(&fs::read_to_string(&cargo).unwrap_or_default(), &format!("\"{member}\"")).unwrap_or(1);
+            let line = line_of(
+                &fs::read_to_string(&cargo).unwrap_or_default(),
+                &format!("\"{member}\""),
+            )
+            .unwrap_or(1);
             let message = if classed == 0 {
                 format!("{member} is neither core, host, tooling, a built-in nor an exception in {FILE}")
             } else {
@@ -346,10 +364,18 @@ fn check_modules(report: &mut Report, root: &Path, freeze: &Freeze) {
     for (module, reason) in &freeze.exceptions.modules {
         let line = line_of(&freeze_text, &format!("\"{module}\"")).unwrap_or(1);
         if !root.join(module).is_file() {
-            report.at(&freeze_path, line, format!("[exceptions.modules] names {module}, which is gone"));
+            report.at(
+                &freeze_path,
+                line,
+                format!("[exceptions.modules] names {module}, which is gone"),
+            );
         }
         if reason.trim().is_empty() {
-            report.at(&freeze_path, line, format!("[exceptions.modules] gives {module} no reason"));
+            report.at(
+                &freeze_path,
+                line,
+                format!("[exceptions.modules] gives {module} no reason"),
+            );
         }
     }
 }
@@ -371,7 +397,12 @@ fn check_hooks(
         .map(|n| format!("{n}::"))
         .collect();
     let ids = builtin_ids(root, freeze, builtins);
-    let modules: BTreeSet<&str> = freeze.exceptions.modules.keys().map(String::as_str).collect();
+    let modules: BTreeSet<&str> = freeze
+        .exceptions
+        .modules
+        .keys()
+        .map(String::as_str)
+        .collect();
     let stems: BTreeSet<String> = modules
         .iter()
         .filter_map(|m| Path::new(m).file_stem()?.to_str())
@@ -402,7 +433,10 @@ fn check_hooks(
                 }
                 for prefix in &feature_crates {
                     let used = code.match_indices(prefix.as_str()).any(|(i, _)| {
-                        code[..i].chars().next_back().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+                        code[..i]
+                            .chars()
+                            .next_back()
+                            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'))
                     });
                     let token = prefix.trim_end_matches("::").to_owned();
                     if used && !named.iter().any(|(_, n)| *n == token) {
@@ -433,10 +467,18 @@ fn check_hooks(
     for (key, reason) in &freeze.exceptions.hooks {
         let line = line_of(&freeze_text, &format!("\"{key}\"")).unwrap_or(1);
         if !seen.contains(key) {
-            report.at(&freeze_path, line, format!("[exceptions.hooks] names {key}, which is gone; drop it"));
+            report.at(
+                &freeze_path,
+                line,
+                format!("[exceptions.hooks] names {key}, which is gone; drop it"),
+            );
         }
         if reason.trim().is_empty() {
-            report.at(&freeze_path, line, format!("[exceptions.hooks] gives {key} no reason"));
+            report.at(
+                &freeze_path,
+                line,
+                format!("[exceptions.hooks] gives {key} no reason"),
+            );
         }
     }
 }
@@ -555,7 +597,9 @@ fn scan(text: &str) -> Scanned {
                 }
             }
         } else if let Some((hashes, start)) = raw_start(b, i) {
-            let close: Vec<u8> = std::iter::once(b'"').chain(std::iter::repeat_n(b'#', hashes)).collect();
+            let close: Vec<u8> = std::iter::once(b'"')
+                .chain(std::iter::repeat_n(b'#', hashes))
+                .collect();
             let (at, mut j) = (line, start);
             while j < b.len() && !b[j..].starts_with(&close) {
                 j += 1;
@@ -582,7 +626,8 @@ fn scan(text: &str) -> Scanned {
                 }
                 j += 1;
             }
-            out.literals.push((at, String::from_utf8_lossy(&body).into_owned()));
+            out.literals
+                .push((at, String::from_utf8_lossy(&body).into_owned()));
             code.push_str("\"\"");
             i = j + 1;
         } else if c == b'\'' {
@@ -644,8 +689,14 @@ mod tests {
             s.literals,
             [(2, "task.list".to_owned()), (3, "workflow.run".to_owned())]
         );
-        assert!(s.code.iter().all(|(_, c)| !c.contains("x.y") && !c.contains("after")));
-        assert!(s.code.iter().any(|(l, c)| *l == 3 && c.contains("fn f<'a>")));
+        assert!(s
+            .code
+            .iter()
+            .all(|(_, c)| !c.contains("x.y") && !c.contains("after")));
+        assert!(s
+            .code
+            .iter()
+            .any(|(l, c)| *l == 3 && c.contains("fn f<'a>")));
     }
 
     #[test]
