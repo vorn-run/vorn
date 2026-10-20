@@ -251,12 +251,7 @@ mod tests {
 
     #[test]
     fn events_name_the_action_and_what_it_acts_on() {
-        let ev = |id: &str, kind, value: &str| Event {
-            id: id.into(),
-            kind,
-            value: value.into(),
-            selected: Vec::new(),
-        };
+        let ev = |id: &str, kind, value: &str| Event::new(id, kind, value);
         let (does, args) = event(&ev("remove:c1", EventKind::Click, "")).unwrap();
         assert_eq!((does, args), ("remove", json!({ "id": "c1" })));
         let (does, args) = event(&ev("pick", EventKind::Select, "acme")).unwrap();

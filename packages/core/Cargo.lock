@@ -7165,6 +7165,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-blocks"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-ext-files"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-probe"
 version = "0.0.0"
 dependencies = [

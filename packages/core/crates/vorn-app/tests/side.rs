@@ -1,8 +1,8 @@
 //! A session's git and panes driven as a user would, on a vornd with its
 //! own HOME: the changes indicator opens the Changes panel and its commit,
-//! the branch chip switches branches, the Files pane browses, edits, finds,
-//! saves and pops a file out, the Terminals panel holds shells, and a
-//! worktree is offered for removal when its last session ends.
+//! the branch chip switches branches, the panes split the card, the
+//! Terminals panel holds shells, and a worktree is offered for removal when
+//! its last session ends. The Files pane's own steps are in `files_blocks.rs`.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each surface.
 
 #![cfg(unix)]
@@ -13,11 +13,9 @@ use serde_json::{json, Value};
 use support::{git, key, seed_acme, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
-use vorn_app::editor::EditAct;
 use vorn_app::git::{CommitOp, GitAct};
 use vorn_app::points::PointAct;
-use vorn_app::screen::side::editor_id;
-use vorn_app::side::{tab_key, SideAct};
+use vorn_app::side::SideAct;
 use vorn_app::state::Dialog;
 use vorn_app::App;
 
@@ -248,7 +246,7 @@ fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
 }
 
 #[test]
-fn panes_browse_edit_save_and_hold_terminals() {
+fn panes_split_the_card_and_hold_terminals() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -257,116 +255,17 @@ fn panes_browse_edit_save_and_hold_terminals() {
     let mut shot = Shot::new();
     let sid = agent(&mut shot, &mut app, &repo);
 
-    // Browse files: the tree lists the repository.
+    // The Files pane opens beside the terminal: the Files extension's, drawn from its tree.
     hover_card(&mut shot, &mut app, &sid);
-    shot.click(
-        &mut app,
-        control("card", Act::Side(SideAct::ToggleFiles(sid.clone()))),
-    );
-    shot.until(&mut app, "the tree", |a, _| {
-        a.st.side.trees.get(&sid).and_then(|t| t.root.clone())
+    let browse = wait_for("Browse files", || {
+        app.pump();
+        shot.button(&mut app, "Browse files")
     });
-    let src = repo.join("src").to_string_lossy().into_owned();
-    shot.click(
-        &mut app,
-        control(
-            "tree-dir",
-            Act::Side(SideAct::Dir(sid.clone(), src.clone())),
-        ),
-    );
-    shot.until(&mut app, "src", |a, _| {
-        a.st.side
-            .trees
-            .get(&sid)
-            .and_then(|t| t.dirs.get(&src).cloned())
+    shot.click(&mut app, browse);
+    wait_for("the tree", || {
+        app.pump();
+        shot.labelled(&mut app, "TreeItem", "src")
     });
-    let file = repo.join("src/app.ts").to_string_lossy().into_owned();
-    shot.click(
-        &mut app,
-        control(
-            "tree-file",
-            Act::Side(SideAct::File(sid.clone(), file.clone())),
-        ),
-    );
-    let key_ = tab_key(&sid, &file);
-    shot.until(&mut app, "the file in its editor", |a, _| {
-        a.st.editors
-            .buffers
-            .get(&key_)
-            .filter(|b| b.ready)
-            .map(|_| ())
-    });
-    assert_eq!(
-        app.st.side.saved.files[&sid].preview.as_deref(),
-        Some(file.as_str())
-    );
-    shot.save(&mut app, "p-files");
-
-    // Typing marks it unsaved and pins the preview; Mod+S writes it.
-    shot.click(&mut app, editor_id(&key_));
-    shot.type_text(&mut app, "// edited\n");
-    assert!(app.st.editors.dirty(&key_));
-    shot.frame(&mut app);
-    assert_eq!(app.st.side.saved.files[&sid].preview, None);
-    shot.save(&mut app, "p-dirty");
-    shot.send(&mut app, key("KeyS", MOD(), None));
-    shot.until(&mut app, "the save", |a, _| {
-        a.st.editors
-            .buffers
-            .get(&key_)
-            .filter(|b| !b.dirty() && !b.saving)
-            .map(|_| ())
-    });
-    let on_disk = std::fs::read_to_string(&file).expect("read");
-    assert!(on_disk.contains("// edited"), "{on_disk}");
-
-    // Find counts and steps through the matches.
-    shot.click(
-        &mut app,
-        control("editor-tool", Act::Edit(EditAct::ToggleFind(key_.clone()))),
-    );
-    shot.type_text(&mut app, "name");
-    let hits = app.st.editors.buffers[&key_].matches().len();
-    assert_eq!(hits, 4, "names, name, names, name");
-    shot.send(&mut app, key("Enter", 0, Some("\r")));
-    assert_eq!(
-        app.st.editors.buffers[&key_].find.as_ref().map(|f| f.index),
-        Some(1)
-    );
-    shot.save(&mut app, "p-find");
-    shot.send(&mut app, key("Escape", 0, None));
-    assert!(app.st.editors.buffers[&key_].find.is_none());
-
-    // An edit left unsaved asks before its tab closes, and a draft keeps it.
-    // A second click on the same spot would be a double click selecting a word.
-    shot.ui.set_focus(Some(editor_id(&key_)));
-    shot.type_text(&mut app, "x");
-    std::thread::sleep(std::time::Duration::from_millis(450));
-    shot.frame(&mut app);
-    let drafts = std::fs::read_to_string(v.home.join("desktop/drafts.json")).expect("drafts");
-    assert!(drafts.contains(&key_), "{drafts}");
-    // An unsaved tab shows its dot until hovered, then its close button.
-    shot.hover(
-        &mut app,
-        control(
-            "files-tab",
-            Act::Side(SideAct::Tab(sid.clone(), file.clone())),
-        ),
-    );
-    shot.click(
-        &mut app,
-        control(
-            "files-tab-close",
-            Act::Side(SideAct::CloseTab(sid.clone(), file.clone())),
-        ),
-    );
-    assert_eq!(app.st.dialog, Some(Dialog::Discard));
-    shot.save(&mut app, "p-discard");
-    shot.click(
-        &mut app,
-        control("discard-cancel", Act::Edit(EditAct::CancelDiscard)),
-    );
-    assert!(app.st.side.saved.files[&sid].tabs.contains(&file));
 
     // The divider between the terminal and the panes moves and is kept.
     let divider = vorn_app::ui::Id::new("card-divider").child(&sid);
@@ -385,37 +284,6 @@ fn panes_browse_edit_save_and_hold_terminals() {
     assert!((ratio - 0.3).abs() < 0.05, "{ratio}");
     let view = std::fs::read_to_string(v.home.join("desktop/view.json")).expect("view");
     assert!(view.contains("\"terminal\""), "{view}");
-
-    // A file pops out into a card of its own beside the session, and back.
-    let readme = repo.join("README.md").to_string_lossy().into_owned();
-    shot.click(
-        &mut app,
-        control(
-            "tree-pop",
-            Act::Side(SideAct::PopOut(sid.clone(), readme.clone())),
-        ),
-    );
-    let card = app
-        .st
-        .side
-        .cards_of(&sid)
-        .first()
-        .map(|c| (*c).to_owned())
-        .expect("a card");
-    shot.until(&mut app, "the card's file", |a, _| {
-        a.st.editors
-            .buffers
-            .get(&card)
-            .filter(|b| b.ready)
-            .map(|_| ())
-    });
-    shot.save(&mut app, "p-card");
-    shot.click(
-        &mut app,
-        control("card-return", Act::Side(SideAct::ReturnCard(card.clone()))),
-    );
-    assert!(app.st.side.saved.cards.is_empty());
-    assert!(app.st.side.saved.files[&sid].tabs.contains(&readme));
 
     // The terminals panel starts a shell of its own, kept out of the grid.
     hover_card(&mut shot, &mut app, &sid);
@@ -452,20 +320,6 @@ fn panes_browse_edit_save_and_hold_terminals() {
         .visible(&app.store)
         .iter()
         .any(|&i| app.store.sessions[i].info.id == held));
-
-    // The view survives the app: a new one finds the pane and the draft.
-    drop(app);
-    let mut again = support::connect(&v);
-    let mut shot = Shot::new();
-    shot.until(&mut again, "the restored draft", |a, _| {
-        a.st.editors
-            .buffers
-            .get(&key_)
-            .filter(|b| b.dirty())
-            .map(|_| ())
-    });
-    let restored = &again.st.editors.buffers[&key_].draft;
-    assert!(restored.contains("// edited"), "{restored:?}");
 }
 
 #[test]

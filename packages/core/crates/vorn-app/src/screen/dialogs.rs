@@ -529,7 +529,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::AddTask => super::tasks::add_task(s),
         Dialog::Commit => super::tasks::commit(s, super::tasks::diff::Scope::Task),
         Dialog::GitCommit => super::tasks::commit(s, super::tasks::diff::Scope::Session),
-        Dialog::Discard => super::side::discard(s),
+        Dialog::Ask => super::side::ask(s),
         Dialog::Paste => paste(s)?,
         Dialog::Output => super::tasks::output(s),
         Dialog::RunPrompt | Dialog::Missed => super::workflows::dialog(s)?,

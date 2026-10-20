@@ -106,7 +106,7 @@ impl Panel {
                     {
                         let ops = params["ops"].as_array().cloned().unwrap_or_default();
                         self.points.changed(ext, coll, &ops);
-                        self.points.trees_changed(ext);
+                        self.points.trees_changed(ext, &ops);
                     }
                 }
                 "extension:contributionsChanged" => stale = true,
@@ -198,12 +198,11 @@ impl Panel {
 
     pub fn submit(&mut self, ui: &Ui, id: Id) {
         if let Some(Act::Point(PointAct::TreeField { key, node })) = self.acts.text_of(id) {
-            let event = vorn_tree::Event {
-                id: node,
-                kind: vorn_tree::EventKind::Submit,
-                value: ui.edit_text(id).to_owned(),
-                selected: Vec::new(),
-            };
+            let event = vorn_tree::Event::new(
+                node,
+                vorn_tree::EventKind::Submit,
+                ui.edit_text(id).to_owned(),
+            );
             self.tell(&key, &event);
         }
     }

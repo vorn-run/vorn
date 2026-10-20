@@ -23,7 +23,7 @@ pub const SESSION_CREATED: &str = "session.created";
 pub const SESSION_STATUS: &str = "session.status";
 /// A session's program ended: `{sessionId, kind, projectPath, exitCode}`.
 pub const SESSION_EXITED: &str = "session.exited";
-/// A shell's OSC 133 mark: `{sessionId, phase, command?, exitCode?, durationMs?}`.
+/// A shell's OSC 133 mark: `{sessionId, phase, at, cwd?, command?, exitCode?, durationMs?}`; `at` in epoch ms, `cwd` the folder the shell last reported.
 pub const SESSION_MARK: &str = "session.mark";
 /// What a session's program reports of itself (OSC 7501): `{sessionId, state, message?, waitingFor?}`.
 pub const SESSION_PROGRAM: &str = "session.program";

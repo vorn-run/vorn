@@ -2,9 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod parts;
 pub mod sdk;
 #[cfg(test)]
 mod tests;
+
+pub use parts::{
+    Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Tab, Tabs, Tool, MAX_SPLIT,
+    MIN_SPLIT,
+};
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
 pub const RENDER: &str = "ui.render";
@@ -73,7 +79,7 @@ pub enum Kind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         confirm: Option<String>,
     },
-    /// A one-line field: reports `submit` with what it holds on Return.
+    /// A one-line field: reports `submit` with what it holds on Return and, when `live`, `change` as it is typed.
     Field {
         #[serde(default)]
         value: String,
@@ -81,6 +87,8 @@ pub enum Kind {
         placeholder: String,
         #[serde(default, skip_serializing_if = "is_false")]
         secret: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        live: bool,
     },
     /// One of several, as chips: reports `select` with the option's id.
     Choice {
@@ -169,6 +177,25 @@ pub enum Kind {
     /// The workflow editor's canvas, which the client draws whole.
     Graph,
     Divider,
+    /// A strip of tabs and tools, as a pane's title bar.
+    Tabs(Box<Tabs>),
+    /// Rows in a tree of folders, as a file tree.
+    Outline(Box<Outline>),
+    /// Its one or two children side by side, `ratio` (0 to 1) of the width to the first, with a
+    /// divider between them that reports `resize` with the ratio it was dragged to.
+    Split {
+        ratio: f32,
+        /// The divider's accessible name.
+        #[serde(default)]
+        label: String,
+        /// Narrower than this many logical pixels, only the first child draws.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        narrow: Option<f32>,
+    },
+    /// A file's text being edited; its children are buttons at the end of its strip.
+    Code(Box<Code>),
+    /// A shell's commands over its live rows; drawn in a shell's `shell` place.
+    Log(Box<Log>),
 }
 
 /// Where a board's cards come from when the client reads them itself.
@@ -378,7 +405,7 @@ impl Props {
 }
 
 /// What the client tells `ui.render` about where the tree draws.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Surface {
     /// A terminal's cells rather than pixels.
     #[serde(default)]
@@ -387,6 +414,10 @@ pub struct Surface {
     pub width: f32,
     #[serde(default)]
     pub height: f32,
+    /// Which of the point's places it draws: the session a pane or a shell's
+    /// log draws for, or the row a card draws; none for a point drawn once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// `ui.render`'s answer.
@@ -412,6 +443,14 @@ pub enum EventKind {
     Submit,
     Select,
     Toggle,
+    /// A double click: a tab or a row kept open.
+    Open,
+    /// A tab's ✕.
+    Close,
+    /// What a live field or a code holds changed.
+    Change,
+    /// A split's divider was dragged to the ratio in `value`.
+    Resize,
 }
 
 /// Something that happened to node `id`.
@@ -425,6 +464,37 @@ pub struct Event {
     /// A bulk button's list's checked ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
+    /// The scope the tree was drawn for ([`Surface::scope`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// How wide, in logical pixels, the place the tree drew in was, for a tree that lays itself out by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+}
+
+impl Event {
+    /// `kind` on node `id`, with `value`.
+    pub fn new(id: impl Into<String>, kind: EventKind, value: impl Into<String>) -> Event {
+        Event {
+            id: id.into(),
+            kind,
+            value: value.into(),
+            selected: Vec::new(),
+            scope: None,
+            width: None,
+        }
+    }
+}
+
+/// A question the client asks with its own alert before anything is done:
+/// `title`, Cancel and `ok`; OK tells the extension `event`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ask {
+    pub title: String,
+    /// The default button's words; `OK` when none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<String>,
+    pub event: Event,
 }
 
 /// What `ui.event` answers: what follows the event, each part optional.
@@ -460,6 +530,12 @@ pub struct Answer {
     /// Vorn's sign-in window to open: the target a `signin` method answers, with the `id` it signs in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signin: Option<serde_json::Value>,
+    /// A question to ask first; its OK tells the extension the event it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
+    /// The tree stands as drawn: nothing is asked for again.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub same: bool,
 }
 
 impl Answer {
@@ -650,6 +726,82 @@ impl Checker {
         }
     }
 
+    fn tools(&mut self, at: &str, field: &str, tools: &[Tool]) {
+        let mut ids = std::collections::HashSet::new();
+        for (i, t) in tools.iter().enumerate() {
+            let p = format!("{at}.{field}[{i}]");
+            if t.id.is_empty() {
+                self.err(&p, "a tool needs an id");
+            } else if !ids.insert(t.id.as_str()) {
+                self.err(
+                    &format!("{p}.id"),
+                    format_args!("'{}' names two tools", t.id),
+                );
+            }
+            self.text(&p, "label", &t.label);
+        }
+    }
+
+    fn tabs(&mut self, n: &Node, at: &str, t: &Tabs) {
+        self.named(n, at, "tab strip");
+        if t.tabs.len() > parts::MAX_TABS {
+            self.err(
+                &format!("{at}.tabs"),
+                format_args!(
+                    "{} tabs; a strip holds {} at most",
+                    t.tabs.len(),
+                    parts::MAX_TABS
+                ),
+            );
+        }
+        let mut ids = std::collections::HashSet::new();
+        for (i, tab) in t.tabs.iter().enumerate() {
+            let p = format!("{at}.tabs[{i}]");
+            if tab.id.is_empty() {
+                self.err(&p, "a tab needs an id");
+            } else if !ids.insert(tab.id.as_str()) {
+                self.err(
+                    &format!("{p}.id"),
+                    format_args!("'{}' names two tabs", tab.id),
+                );
+            }
+            self.text(&p, "label", &tab.label);
+        }
+        self.tools(at, "lead", &t.lead);
+        self.tools(at, "tools", &t.tools);
+        self.tools(at, "more", &t.more);
+    }
+
+    fn outline(&mut self, n: &Node, at: &str, o: &Outline) {
+        self.named(n, at, "outline");
+        if o.rows.len() > parts::MAX_LINES {
+            self.err(
+                &format!("{at}.rows"),
+                format_args!(
+                    "{} rows; an outline holds {} at most",
+                    o.rows.len(),
+                    parts::MAX_LINES
+                ),
+            );
+        }
+        for (i, l) in o.rows.iter().enumerate().take(parts::MAX_LINES) {
+            let p = format!("{at}.rows[{i}]");
+            if l.id.is_empty() && l.kind != LineKind::Note {
+                self.err(&p, "a row needs an id");
+            }
+            self.text(&p, "label", &l.label);
+            if usize::from(l.depth) > MAX_DEPTH * 4 {
+                self.err(&format!("{p}.depth"), "nests too deep");
+            }
+        }
+        if let Some(f) = &o.filter {
+            self.text(at, "filter", &f.value);
+        }
+        if let Some(a) = &o.action {
+            self.tools(at, "action", std::slice::from_ref(a));
+        }
+    }
+
     fn buttons(&mut self, at: &str, field: &str, nodes: &[Node], depth: usize) {
         for (i, b) in nodes.iter().enumerate() {
             let p = format!("{at}.{field}[{i}]");
@@ -693,6 +845,8 @@ impl Checker {
                 | Kind::Entry(_)
                 | Kind::Board { .. }
                 | Kind::Column { .. }
+                | Kind::Split { .. }
+                | Kind::Code(_)
         );
         if !holds && !n.children.is_empty() {
             self.err(at, "holds no children");
@@ -774,6 +928,59 @@ impl Checker {
                 }
                 self.buttons(at, "actions", &e.actions, depth);
                 self.buttons(at, "more", &e.more, depth);
+            }
+            Kind::Tabs(t) => self.tabs(n, at, t),
+            Kind::Outline(o) => self.outline(n, at, o),
+            Kind::Split { ratio, label, .. } => {
+                self.text(at, "label", label);
+                if !ratio.is_finite() || !(0.0..=1.0).contains(ratio) {
+                    self.err(&format!("{at}.ratio"), "goes from 0 to 1");
+                }
+                if n.children.is_empty() || n.children.len() > 2 {
+                    self.err(at, "a split holds one child or two");
+                }
+                if n.children.len() == 2 {
+                    self.named(n, at, "split that can be dragged");
+                }
+            }
+            Kind::Code(code) => {
+                self.named(n, at, "code");
+                self.text(at, "path", &code.path);
+                let size = code.text.len() + code.draft.as_ref().map_or(0, String::len);
+                if size > parts::MAX_CODE {
+                    self.err(
+                        &format!("{at}.text"),
+                        format_args!("{size} bytes; code is {} at most", parts::MAX_CODE),
+                    );
+                }
+                if let Some(e) = &code.error {
+                    self.text(at, "error", e);
+                }
+                for (i, c) in n.children.iter().enumerate() {
+                    if !matches!(c.kind, Kind::Button { .. }) {
+                        self.err(
+                            &format!("{at}.children[{i}]"),
+                            "a code's strip holds buttons only",
+                        );
+                    }
+                }
+            }
+            Kind::Log(log) => {
+                if log.commands.len() > parts::MAX_COMMANDS {
+                    self.err(
+                        &format!("{at}.commands"),
+                        format_args!(
+                            "{} commands; a log holds {} at most",
+                            log.commands.len(),
+                            parts::MAX_COMMANDS
+                        ),
+                    );
+                }
+                for (i, c) in log.commands.iter().enumerate() {
+                    if let Some(t) = &c.command {
+                        self.text(&format!("{at}.commands[{i}]"), "command", t);
+                    }
+                }
             }
             Kind::Board { cards, empty } => {
                 if let Some(e) = empty {

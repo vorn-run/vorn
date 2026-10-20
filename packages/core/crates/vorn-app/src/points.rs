@@ -65,7 +65,25 @@ pub mod kind {
     pub const MENUS: &str = "menus";
     pub const DIALOGS: &str = "dialogs";
     pub const VIEWS: &str = "views";
+    pub const SHELL: &str = "shell";
+    pub const CARDS: &str = "cards";
     pub const ATTENTION: &str = "attention";
+}
+
+/// Between a point's key and the scope a tree of it draws for: `ext/kind/id#scope`.
+const SCOPE: char = '#';
+
+/// The key of point `key`'s tree drawn for `scope`.
+pub fn scoped(key: &str, scope: &str) -> String {
+    format!("{key}{SCOPE}{scope}")
+}
+
+/// A tree's key as its point's key and the scope it draws for, if any.
+pub fn unscope(key: &str) -> (&str, Option<&str>) {
+    match key.split_once(SCOPE) {
+        Some((k, s)) => (k, Some(s)),
+        None => (key, None),
+    }
 }
 
 /// One contribution: where it shows, and what choosing it does.
@@ -215,6 +233,11 @@ pub enum PointAct {
         key: String,
         node: String,
     },
+    /// A live tree field changed: what it holds is told as `change`.
+    TreeLive {
+        key: String,
+        node: String,
+    },
     /// Checks or unchecks `rows` of list `list` in tree point `key`.
     TreeCheck {
         key: String,
@@ -268,6 +291,12 @@ pub struct Points {
     pub stale_trees: BTreeSet<String>,
     /// Rows checked in a tree's lists, by point key and list id.
     pub checked: HashMap<(String, String), BTreeSet<String>>,
+    /// How wide each scoped tree last drew, by its key, which its renders and events say.
+    pub widths: HashMap<String, f32>,
+    /// Collections the client reads although no point lists them, as `(extension, collection)`.
+    pub wanted: BTreeSet<(String, String)>,
+    /// How many times each tree was drawn afresh, so what is cut from one is cut once.
+    pub gens: HashMap<String, u64>,
 }
 
 static NONE: BTreeMap<String, Vec<Row>> = BTreeMap::new();
@@ -287,8 +316,15 @@ impl Points {
         }
     }
 
+    /// The point of tree `key`, scoped or not.
     pub fn get(&self, key: &str) -> Option<&Point> {
+        let key = unscope(key).0;
         self.all.iter().find(|p| p.key() == key)
+    }
+
+    /// The tree drawn for `key`, when it drew one.
+    pub fn tree(&self, key: &str) -> Option<&vorn_tree::Node> {
+        self.trees.get(key)?.as_ref().ok()
     }
 
     /// The point `id` of `kind` that `extension` contributes.
@@ -374,6 +410,12 @@ impl Points {
         }
         self.index(key, tree.as_ref().ok());
         self.trees.insert(key.to_owned(), tree);
+        *self.gens.entry(key.to_owned()).or_default() += 1;
+    }
+
+    /// How many times tree `key` was drawn afresh.
+    pub fn generation(&self, key: &str) -> u64 {
+        self.gens.get(key).copied().unwrap_or(0)
     }
 
     /// Indexes a per-session tree's children by their session's id.
@@ -403,7 +445,12 @@ impl Points {
 
     /// What telling tree point `key`'s extension `event` asks of vornd; a bulk button's checks go with it.
     pub fn tell(&mut self, key: &str, event: &vorn_tree::Event) -> Option<Value> {
-        let params = tree_event_params(self.get(key)?, event);
+        let mut event = event.clone();
+        if let Some(scope) = unscope(key).1 {
+            event.scope = Some(scope.to_owned());
+            event.width = self.widths.get(key).map(|w| w.round() as u32);
+        }
+        let params = tree_event_params(self.get(key)?, &event);
         if !event.selected.is_empty() {
             self.checked.retain(|(k, _), _| k != key);
         }
@@ -414,6 +461,9 @@ impl Points {
     /// again; what else it asks of the client is answered for the caller to do.
     pub fn told(&mut self, key: &str, answer: Option<&Value>) -> vorn_tree::Answer {
         let answer = answer.map(vorn_tree::Answer::read).unwrap_or_default();
+        if answer.same {
+            return answer;
+        }
         let patched = !answer.patch.is_empty()
             && match self.trees.get_mut(key) {
                 Some(Ok(tree)) => vorn_tree::patch(tree, &answer.patch).is_ok(),
@@ -422,6 +472,7 @@ impl Points {
         if patched {
             let tree = self.trees.get(key).and_then(|t| t.as_ref().ok()).cloned();
             self.index(key, tree.as_ref());
+            *self.gens.entry(key.to_owned()).or_default() += 1;
         } else {
             self.stale_trees.insert(key.to_owned());
         }
@@ -448,19 +499,47 @@ impl Points {
         if self.trees.contains_key(key) && !self.stale_trees.contains(key) {
             return None;
         }
-        let params = tree_render_params(p, cells);
+        let mut params = tree_render_params(p, cells);
+        if let Some(scope) = unscope(key).1 {
+            params["args"]["surface"]["scope"] = json!(scope);
+            if let Some(w) = self.widths.get(key) {
+                params["args"]["surface"]["width"] = json!(w);
+            }
+        }
         self.stale_trees.remove(key);
         Some(params)
     }
 
-    /// Marks the tree points of `extension` to render again.
-    pub fn trees_changed(&mut self, extension: &str) {
+    /// Marks the trees of `extension` to render again after `ops` changed its rows: every
+    /// tree drawn once, and of those drawn per scope only the ones whose scope a row is.
+    pub fn trees_changed(&mut self, extension: &str, ops: &[Value]) {
         let keys: Vec<String> = self
             .all
             .iter()
             .filter(|p| p.tree && p.extension == extension)
             .map(Point::key)
             .collect();
+        let clear = ops.iter().any(|o| s(o, "op") == Some("clear"));
+        let ids: BTreeSet<&str> = ops
+            .iter()
+            .filter_map(|o| s(o, "id").or_else(|| o.get("row").and_then(|r| s(r, "id"))))
+            .collect();
+        let mut scoped: Vec<String> = keys
+            .iter()
+            .flat_map(|b| ids.iter().map(move |id| scoped(b, id)))
+            .collect();
+        if clear {
+            scoped.extend(
+                self.trees
+                    .keys()
+                    .filter(|k| {
+                        let (base, scope) = unscope(k);
+                        scope.is_some() && keys.iter().any(|b| b == base)
+                    })
+                    .cloned(),
+            );
+        }
+        self.stale_trees.extend(scoped);
         self.stale_trees.extend(keys);
     }
 
@@ -474,7 +553,7 @@ impl Points {
             .retain(|ext, _| all.iter().any(|p| &p.extension == ext));
         let keys: BTreeSet<String> = self.all.iter().map(Point::key).collect();
         self.windows.retain(|k| keys.contains(k));
-        self.trees.retain(|k, _| keys.contains(k));
+        self.trees.retain(|k, _| keys.contains(unscope(k).0));
         self.sessions.retain(|k, _| keys.contains(k));
         self.checked.retain(|(k, _), _| keys.contains(k));
         self.stale_trees.extend(self.trees.keys().cloned());
@@ -486,14 +565,27 @@ impl Points {
     /// The `(extension, collection)` pairs no one has asked for yet, now marked asked.
     pub fn to_ask(&mut self) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        for p in &self.all {
-            for c in p.collections() {
-                let k = (p.extension.clone(), c);
-                if !self.asked.contains(&k) {
-                    self.asked.insert(k.clone());
-                    self.pending.insert(k.clone(), false);
-                    out.push(k);
-                }
+        let listed: BTreeSet<&str> = self.all.iter().map(|p| p.extension.as_str()).collect();
+        let wanted = self
+            .wanted
+            .iter()
+            .filter(|(e, _)| listed.contains(e.as_str()))
+            .cloned();
+        let all: Vec<(String, String)> = self
+            .all
+            .iter()
+            .flat_map(|p| {
+                p.collections()
+                    .into_iter()
+                    .map(|c| (p.extension.clone(), c))
+            })
+            .chain(wanted)
+            .collect();
+        for k in all {
+            if !self.asked.contains(&k) {
+                self.asked.insert(k.clone());
+                self.pending.insert(k.clone(), false);
+                out.push(k);
             }
         }
         out

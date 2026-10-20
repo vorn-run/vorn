@@ -1,7 +1,8 @@
 //! Building trees: one function per component and chained setters for the optional parts.
 
 use crate::{
-    Badge, ButtonStyle, Cards, Choose, Entry, Kind, Meter, Node, Paint, Segment, TextStyle, Tone,
+    Badge, ButtonStyle, Cards, Choose, Code, Entry, Kind, Log, Meter, Node, Outline, Paint,
+    Segment, Tabs, TextStyle, Tone,
 };
 
 fn node(kind: Kind) -> Node {
@@ -75,6 +76,7 @@ pub fn field(id: impl Into<String>, value: impl Into<String>) -> Node {
         value: value.into(),
         placeholder: String::new(),
         secret: false,
+        live: false,
     })
     .id(id)
 }
@@ -280,6 +282,44 @@ pub fn divider() -> Node {
     node(Kind::Divider)
 }
 
+/// A strip of tabs and tools.
+pub fn tabs(id: impl Into<String>, t: Tabs) -> Node {
+    node(Kind::Tabs(Box::new(t))).id(id)
+}
+
+/// Rows in a tree of folders.
+pub fn outline(id: impl Into<String>, o: Outline) -> Node {
+    node(Kind::Outline(Box::new(o))).id(id)
+}
+
+/// `children` side by side, `ratio` of the width to the first.
+pub fn split(
+    id: impl Into<String>,
+    ratio: f32,
+    label: impl Into<String>,
+    children: impl IntoIterator<Item = Node>,
+) -> Node {
+    holding(
+        Kind::Split {
+            ratio,
+            label: label.into(),
+            narrow: None,
+        },
+        children,
+    )
+    .id(id)
+}
+
+/// A file's text being edited; `buttons` end its strip.
+pub fn code(id: impl Into<String>, c: Code, buttons: impl IntoIterator<Item = Node>) -> Node {
+    holding(Kind::Code(Box::new(c)), buttons).id(id)
+}
+
+/// A shell's commands.
+pub fn log(l: Log) -> Node {
+    node(Kind::Log(Box::new(l)))
+}
+
 /// `items` in runs by `key`, in the order each key first shows.
 pub fn group_by<T, K: PartialEq>(
     items: impl IntoIterator<Item = T>,
@@ -298,6 +338,22 @@ pub fn group_by<T, K: PartialEq>(
 
 /// Setters; each applies to the kinds that have it and leaves the rest alone.
 impl Node {
+    /// A split that draws only its first child narrower than `w`.
+    pub fn narrow(mut self, w: f32) -> Node {
+        if let Kind::Split { narrow, .. } = &mut self.kind {
+            *narrow = Some(w);
+        }
+        self
+    }
+
+    /// A field that reports `change` as it is typed.
+    pub fn live(mut self) -> Node {
+        if let Kind::Field { live, .. } = &mut self.kind {
+            *live = true;
+        }
+        self
+    }
+
     pub fn id(mut self, id: impl Into<String>) -> Node {
         self.id = Some(id.into());
         self

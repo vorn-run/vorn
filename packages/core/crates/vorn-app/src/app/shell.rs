@@ -1,18 +1,32 @@
-//! A shell's command blocks and its composer's history and completions:
-//! the marks vornd reports, the blocks cut from the grid, the menu's keys.
+//! A shell's command blocks and its composer's history and completions, as
+//! the Shell blocks extension answers them: the commands it lists, cut into
+//! blocks from the grid, and the menu's keys.
 
 use web_time::Instant;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{App, Call};
-use crate::blocks::{self, Mark};
 use crate::client::rpc::RpcError;
-use crate::intent::{self, IntentAct, Need, Place, Row};
 use crate::look;
 use crate::paint;
+use crate::points::{kind, scoped};
+use crate::prompt::{self, IntentAct, Row, BLOCKS};
 use crate::screen::{block_of, intent_id, log_id, term_id, SETTLE};
 use crate::ui::{mods, Input, Rect, Ui};
+
+/// A composer's question to Shell blocks.
+#[derive(Debug)]
+pub(super) enum IntentCall {
+    /// Past commands for what was typed; `open` opens the menu on them (↑).
+    History {
+        session: String,
+        text: String,
+        open: bool,
+    },
+    /// Completions for what was typed.
+    Complete { session: String, text: String },
+}
 
 /// The chords a running command takes from the composer: ^C, ^D, ^Z, ^\.
 fn control(code: &str) -> Option<&'static str> {
@@ -26,30 +40,46 @@ fn control(code: &str) -> Option<&'static str> {
 }
 
 impl App {
-    /// A `terminal:command` mark: folded into the shell's blocks.
-    pub(super) fn shell_notified(&mut self, method: &str, params: &Value) {
-        if method != "terminal:command" {
-            return;
-        }
-        let Some((id, mark, at)) = blocks::parse(params) else {
-            return;
-        };
-        let cwd = self
-            .store
-            .session(&id)
-            .and_then(|s| s.info.shell_cwd.clone());
-        let started = matches!(mark, Mark::Start(_));
-        let sh = self.st.shells.entry(id.clone()).or_default();
-        sh.mark(mark, at, cwd.as_deref(), Instant::now());
-        if started {
-            if let Some(m) = self.st.intent.menus.get_mut(&id) {
-                m.close();
-            }
-        }
-        self.sync_shell(&id);
+    /// Shell `id`'s commands tree, when Shell blocks is on.
+    pub(crate) fn shell_key(&self, id: &str) -> Option<String> {
+        let p = self.st.points.find(BLOCKS, kind::SHELL, "commands")?;
+        Some(scoped(&p.key(), id))
     }
 
-    /// Cuts the shell's lines into blocks again, after its screen changed.
+    /// The trees Shell blocks draws now: one per live shell that has shown a prompt mark.
+    /// A shell that never reports its commands has none to show, so its extension is not woken.
+    pub(super) fn shell_trees(&self) -> Vec<String> {
+        self.store
+            .sessions
+            .iter()
+            .filter(|s| s.is_shell() && !s.ended())
+            .filter(|s| {
+                self.st
+                    .shells
+                    .get(&s.info.id)
+                    .is_some_and(|sh| !sh.lines.prompts.is_empty() || !sh.commands.is_empty())
+            })
+            .filter_map(|s| self.shell_key(&s.info.id))
+            .collect()
+    }
+
+    /// A `terminal:command` mark: a command starting closes the composer's menu.
+    pub(super) fn shell_notified(&mut self, method: &str, params: &Value) {
+        if method != "terminal:command"
+            || params.get("phase").and_then(Value::as_str) != Some("start")
+        {
+            return;
+        }
+        if let Some(m) = params
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| self.st.intent.menus.get_mut(id))
+        {
+            m.close();
+        }
+    }
+
+    /// Cuts the shell's lines into blocks again, after its screen or its commands changed.
     pub(super) fn sync_shell(&mut self, id: &str) {
         let Some(g) = &self.grid else { return };
         if !self.store.session(id).is_some_and(|s| s.is_shell()) {
@@ -69,12 +99,49 @@ impl App {
         });
     }
 
+    /// Takes each shell's commands from its tree when a new one came.
+    fn shells_listed(&mut self) {
+        let now = Instant::now();
+        let ids: Vec<String> = self
+            .store
+            .sessions
+            .iter()
+            .filter(|s| s.is_shell())
+            .map(|s| s.info.id.clone())
+            .collect();
+        for id in ids {
+            let Some(key) = self.shell_key(&id) else {
+                self.st.shells.remove(&id);
+                continue;
+            };
+            let gen = self.st.points.generation(&key);
+            if self
+                .st
+                .shells
+                .get(&id)
+                .is_some_and(|sh| sh.generation == gen)
+            {
+                continue;
+            }
+            let commands = match self.st.points.tree(&key).map(|t| &t.kind) {
+                Some(vorn_tree::Kind::Log(l)) => l.commands.clone(),
+                _ => Vec::new(),
+            };
+            let sh = self.st.shells.entry(id.clone()).or_default();
+            sh.generation = gen;
+            sh.listed(commands, now);
+            self.sync_shell(&id);
+        }
+    }
+
     /// Before a frame: the logs kept to their ends, the composers' menus
-    /// worked out over what is typed, and the keyboard handed between a
+    /// asked for over what is typed, and the keyboard handed between a
     /// composer and the command it stood aside for.
     pub(super) fn shell_frame(&mut self, ui: &mut Ui) {
+        self.fill_ghosts(ui);
+        self.shells_listed();
         let now = ui.now();
-        let mut wants = Vec::new();
+        let mut asks = Vec::new();
         for s in &self.store.sessions {
             if !s.is_shell() {
                 continue;
@@ -96,66 +163,134 @@ impl App {
                 ui.set_focus(Some(field));
             }
             let typed = ui.edit_text(field);
-            let project = Some(s.info.project_path.as_str());
             let m = self.st.intent.menus.entry(sid.to_owned()).or_default();
             if m.text != typed {
                 m.text = typed.to_owned();
-                m.history = self.st.intent.history.search(typed, project);
                 m.changed = Some(if std::mem::take(&mut m.filled) {
-                    now - intent::DEBOUNCE
+                    now - prompt::DEBOUNCE
                 } else {
                     now
                 });
                 m.completed = false;
                 m.highlight = None;
+                m.take_ghost = false;
                 m.open = !typed.is_empty();
                 if typed.is_empty() {
                     m.completions.clear();
+                    m.tab = None;
+                    m.history.clear();
+                    m.ghost = None;
+                } else {
+                    m.asking = Some(typed.to_owned());
+                    asks.push(IntentCall::History {
+                        session: sid.to_owned(),
+                        text: typed.to_owned(),
+                        open: false,
+                    });
                 }
             }
             if m.completed || m.text.is_empty() {
                 continue;
             }
-            let due = m.changed.map_or(now, |c| c + intent::DEBOUNCE);
+            let due = m.changed.map_or(now, |c| c + prompt::DEBOUNCE);
             if due > now {
                 ui.wake_at(due);
                 continue;
             }
-            let place = Place {
-                cwd: s.info.shell_cwd.as_deref(),
-                repo: Some(
-                    s.info
-                        .worktree_path
-                        .as_deref()
-                        .unwrap_or(&s.info.project_path),
-                ),
-            };
-            let (found, need) = intent::complete(&m.text, &place, &self.st.intent.sources, now);
-            m.completions = found;
             m.completed = true;
-            if m.highlight.is_some_and(|h| h >= m.len()) {
-                m.highlight = None;
-            }
-            wants.extend(need);
+            asks.push(IntentCall::Complete {
+                session: sid.to_owned(),
+                text: m.text.clone(),
+            });
         }
-        for need in wants {
-            if self.st.intent.sources.asked.insert(need.clone()) {
-                let (method, params) = need.call();
-                self.call(Call::Intent(need), method, params);
-            }
+        for a in asks {
+            self.ask_blocks(a);
         }
     }
 
-    /// vornd's answer for completions: kept, and the menus worked out again.
-    pub(super) fn intent_answered(&mut self, need: Need, answer: Result<Value, RpcError>) {
-        let now = Instant::now();
-        self.st
-            .intent
-            .sources
-            .answer(need, answer.ok().as_ref(), now);
-        for m in self.st.intent.menus.values_mut() {
-            if !m.text.is_empty() {
-                m.completed = false;
+    /// Asks Shell blocks for a composer's history or completions.
+    fn ask_blocks(&mut self, a: IntentCall) {
+        let Some(s) = (match &a {
+            IntentCall::History { session, .. } | IntentCall::Complete { session, .. } => {
+                self.store.session(session)
+            }
+        }) else {
+            return;
+        };
+        let project = s.info.project_path.clone();
+        let cwd = s.info.shell_cwd.clone();
+        let repo = s
+            .info
+            .worktree_path
+            .clone()
+            .unwrap_or_else(|| project.clone());
+        let (action, args) = match &a {
+            IntentCall::History { text, .. } => {
+                ("history", json!({ "text": text, "project": project }))
+            }
+            IntentCall::Complete { text, .. } => (
+                "complete",
+                json!({ "text": text, "cwd": cwd, "repo": repo }),
+            ),
+        };
+        self.call(
+            Call::Intent(a),
+            "extension:call",
+            json!({ "id": BLOCKS, "action": action, "args": args }),
+        );
+    }
+
+    /// Shell blocks' answer: kept when it is still for what is typed.
+    pub(super) fn intent_answered(&mut self, call: IntentCall, answer: Result<Value, RpcError>) {
+        let Ok(v) = answer else { return };
+        match call {
+            IntentCall::History {
+                session,
+                text,
+                open,
+            } => {
+                let Some(m) = self.st.intent.menus.get_mut(&session) else {
+                    return;
+                };
+                // ↑ opens on the newest whatever is typed; a search only for what is still typed.
+                if m.text != text && !open {
+                    return;
+                }
+                let (rows, ghost) = prompt::read_history(&v);
+                m.history = rows;
+                if !open {
+                    m.ghost = ghost;
+                    if m.asking.as_deref() == Some(text.as_str()) {
+                        m.asking = None;
+                    }
+                }
+                if std::mem::take(&mut m.take_ghost) {
+                    let g = prompt::ghost_over(m.ghost.as_deref(), &text).map(str::to_owned);
+                    if let Some(g) = g {
+                        self.fills.push((session.clone(), g));
+                    }
+                    return;
+                }
+                if open {
+                    m.completions.clear();
+                    m.completed = true;
+                    m.open = true;
+                    m.highlight = (!m.is_empty()).then_some(0);
+                }
+            }
+            IntentCall::Complete { session, text } => {
+                let Some(m) = self.st.intent.menus.get_mut(&session) else {
+                    return;
+                };
+                if m.text != text {
+                    return;
+                }
+                let (list, tab) = prompt::read_completions(&v);
+                m.completions = list;
+                m.tab = tab;
+                if m.highlight.is_some_and(|h| h >= m.len()) {
+                    m.highlight = None;
+                }
             }
         }
     }
@@ -168,6 +303,34 @@ impl App {
             .iter()
             .find(|s| s.is_shell() && intent_id(&s.info.id) == f)
             .map(|s| s.info.id.clone())
+    }
+
+    /// The past command the ghost shows for what is typed now.
+    pub(crate) fn ghost(&self, ui: &Ui, sid: &str) -> Option<String> {
+        let typed = ui.edit_text(intent_id(sid));
+        let m = self.st.intent.menus.get(sid)?;
+        prompt::ghost_over(m.ghost.as_deref(), typed).map(str::to_owned)
+    }
+
+    /// → or Tab before Shell blocks answered what is typed: the ghost is taken when it comes.
+    fn waits_for_ghost(&mut self, sid: &str, typed: &str) -> bool {
+        let Some(m) = self.st.intent.menus.get_mut(sid) else {
+            return false;
+        };
+        if m.asking.as_deref() != Some(typed) {
+            return false;
+        }
+        m.take_ghost = true;
+        true
+    }
+
+    /// Ghosts that came after → or Tab asked for them, put in.
+    pub(super) fn fill_ghosts(&mut self, ui: &mut Ui) {
+        for (sid, g) in std::mem::take(&mut self.fills) {
+            if self.ghost(ui, &sid).as_deref() == Some(g.as_str()) {
+                self.fill(ui, &sid, &g);
+            }
+        }
     }
 
     /// IntentBar's keys: the menu's, and a running command's chords.
@@ -200,18 +363,15 @@ impl App {
             return false;
         }
         let typed = ui.edit_text(field).to_owned();
-        let project = self
-            .store
-            .session(&sid)
-            .map(|s| s.info.project_path.clone());
+        let ghost = self.ghost(ui, &sid);
         let menu = self.st.intent.menus.entry(sid.clone()).or_default();
         match code.as_str() {
             "ArrowUp" if !menu.shown() => {
-                menu.history = self.st.intent.history.search("", project.as_deref());
-                menu.completions.clear();
-                menu.completed = true;
-                menu.open = true;
-                menu.highlight = (!menu.is_empty()).then_some(0);
+                self.ask_blocks(IntentCall::History {
+                    session: sid,
+                    text: String::new(),
+                    open: true,
+                });
                 true
             }
             "ArrowUp" => {
@@ -238,28 +398,23 @@ impl App {
             "Tab" => {
                 if let Some(h) = menu.highlight.filter(|_| menu.shown()) {
                     self.pick_fill(ui, &sid, h);
-                } else if !menu.completions.is_empty() {
-                    if let Some(t) = intent::tab(&typed, &menu.completions) {
-                        self.fill(ui, &sid, &t);
-                    }
-                } else if let Some(g) = self.st.intent.history.ghost(&typed, project.as_deref()) {
-                    let g = g.to_owned();
+                } else if let Some(t) = menu.tab.clone().filter(|_| !menu.completions.is_empty()) {
+                    self.fill(ui, &sid, &t);
+                } else if let Some(g) = ghost {
                     self.fill(ui, &sid, &g);
+                } else {
+                    self.waits_for_ghost(&sid, &typed);
                 }
                 true
             }
             "ArrowRight" => {
                 let at_end = ui.edit(field).is_some_and(|e| e.caret() == typed.len());
-                let ghost = at_end
-                    .then(|| self.st.intent.history.ghost(&typed, project.as_deref()))
-                    .flatten()
-                    .map(str::to_owned);
-                match ghost {
+                match ghost.filter(|_| at_end) {
                     Some(g) => {
                         self.fill(ui, &sid, &g);
                         true
                     }
-                    None => false,
+                    None => at_end && self.waits_for_ghost(&sid, &typed),
                 }
             }
             _ => false,
@@ -276,13 +431,12 @@ impl App {
 
     /// Row `index` taken with Tab: its text put in, nothing run.
     fn pick_fill(&mut self, ui: &mut Ui, sid: &str, index: usize) {
-        let typed = ui.edit_text(intent_id(sid)).to_owned();
         let Some(m) = self.st.intent.menus.get(sid) else {
             return;
         };
         let text = match m.rows().get(index) {
             Some(Row::History(e)) => e.text.clone(),
-            Some(Row::Completion(c)) => intent::apply(&typed, c),
+            Some(Row::Completion(c)) => c.result.clone(),
             None => return,
         };
         self.fill(ui, sid, &text);
@@ -305,7 +459,7 @@ impl App {
         }
     }
 
-    /// Runs `line` in the shell and remembers it.
+    /// Runs `line` in the shell, and Shell blocks keeps it.
     pub(super) fn run_line(&mut self, ui: &mut Ui, sid: &str, line: &str) {
         let line = line.trim();
         ui.set_edit_text(intent_id(sid), "");
@@ -313,15 +467,18 @@ impl App {
             m.close();
             m.text.clear();
             m.completions.clear();
+            m.history.clear();
+            m.ghost = None;
         }
         if line.is_empty() {
             return;
         }
         let project = self.store.session(sid).map(|s| s.info.project_path.clone());
-        self.st
-            .intent
-            .history
-            .record(line, project.as_deref(), crate::state::now_ms() as u64);
+        self.call(
+            Call::Ignore,
+            "extension:call",
+            json!({ "id": BLOCKS, "action": "record", "args": { "text": line, "project": project } }),
+        );
         if let Some(g) = self.grid.clone() {
             self.return_to_live(sid);
             g.paste(sid, line);
@@ -337,7 +494,7 @@ impl App {
                     .shells
                     .get(&session)
                     .and_then(|sh| sh.blocks.iter().find(|b| b.key == key))
-                    .map(blocks::Block::text);
+                    .map(crate::log::Block::text);
                 if let Some(t) = text {
                     ui.clipboard().set(&t);
                     self.st.intent.copied = Some((key, ui.now()));
@@ -349,6 +506,24 @@ impl App {
                 ui.set_focus(Some(intent_id(&session)));
             }
         }
+    }
+
+    /// Hands the desktop's old command history to Shell blocks once, then lets it go.
+    pub(super) fn import_history(&mut self) {
+        let Some(dir) = self.data_dir.clone() else {
+            return;
+        };
+        let file = dir.join("desktop").join("command-history.json");
+        let Some(entries) =
+            crate::keep::read(&file).and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        else {
+            return;
+        };
+        self.call(
+            Call::Imported(file),
+            "extension:call",
+            json!({ "id": BLOCKS, "action": "import", "args": { "entries": entries } }),
+        );
     }
 
     /// Paints a finished command's output into its box, inside the log.
@@ -375,11 +550,24 @@ impl App {
         true
     }
 
+    /// The shell's blocks when it shows them as a log over its live rows.
+    pub(crate) fn split_of<'a>(
+        &'a self,
+        session: &crate::client::Session,
+    ) -> Option<&'a crate::log::Shell> {
+        crate::log::split(
+            &self.store.config,
+            &self.st.points,
+            session,
+            self.st.shells.get(&session.info.id),
+        )
+    }
+
     /// Whether `id` shows as command blocks over its live rows.
     pub fn is_split(&self, id: &str) -> bool {
         self.store
             .session(id)
-            .is_some_and(|s| blocks::split(&self.store.config, s, self.st.shells.get(id)).is_some())
+            .is_some_and(|s| self.split_of(s).is_some())
     }
 
     /// A split shell's live rows: its PTY sized to the whole pane, the rows
@@ -395,7 +583,7 @@ impl App {
     ) -> Option<Rect> {
         let session = self.store.sessions.get(i)?;
         let sid = session.info.id.as_str();
-        let sh = blocks::split(&self.store.config, session, self.st.shells.get(sid))?;
+        let sh = self.split_of(session)?;
         let cell = ui.text.cell();
         if let (Some(g), Some(pane)) = (&self.grid, ui.rect_of(term_id(sid))) {
             let cols = (r.w / cell.w).floor() as u16;

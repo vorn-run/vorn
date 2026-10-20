@@ -1,67 +1,25 @@
-//! Command blocks (BlockLog, RunningCommand): a shell's finished commands,
-//! cut from its lines at each prompt and titled and timed by the
-//! `terminal:command` marks vornd sends as the shell reports them.
+//! A shell's log, the terminal-bound half of shell blocks: its finished
+//! commands cut from its lines at each prompt and paired, newest with newest,
+//! with the commands the Shell blocks extension lists from the shell's marks.
+//! This stays in the client because each cut reads the screen the client
+//! mirrors, again whenever that screen changes; the extension says what ran.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use web_time::Instant;
 
 use serde_json::Value;
+use vorn_tree::Command;
 
 use crate::grid::Lines;
 use crate::view::PaneView;
 
 /// Finished commands a log keeps, as the desktop's.
 pub const MAX_BLOCKS: usize = 100;
+/// Prompts cut at most: as many as the extension keeps commands for.
+const MAX_PROMPTS: usize = 400;
 /// An idle prompt still needs its own row plus somewhere to type.
 pub const MIN_LIVE_ROWS: u16 = 2;
-/// Prompts remembered: more than the log shows, since empty ones count.
-const MAX_ENTRIES: usize = 400;
-
-/// One of the shell's reports about a command.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mark {
-    Prompt,
-    Start(Option<String>),
-    End {
-        exit_code: Option<i32>,
-        duration_ms: Option<u64>,
-    },
-}
-
-/// A `terminal:command` note: the session, its mark and when (epoch ms).
-pub fn parse(p: &Value) -> Option<(String, Mark, u64)> {
-    let id = p.get("id")?.as_str()?.to_owned();
-    let at = p.get("at").and_then(Value::as_u64).unwrap_or(0);
-    let mark = match p.get("phase")?.as_str()? {
-        "prompt" => Mark::Prompt,
-        "start" => Mark::Start(p.get("command").and_then(Value::as_str).map(str::to_owned)),
-        "end" => Mark::End {
-            exit_code: p
-                .get("exitCode")
-                .and_then(Value::as_i64)
-                .and_then(|c| i32::try_from(c).ok()),
-            duration_ms: p.get("durationMs").and_then(Value::as_u64),
-        },
-        _ => return None,
-    };
-    Some((id, mark, at))
-}
-
-/// What the shell said about one prompt.
-#[derive(Debug, Clone, Default, PartialEq)]
-struct Entry {
-    command: Option<String>,
-    /// The directory reported at the prompt, where the command runs.
-    cwd: Option<String>,
-    started: bool,
-    start_at: u64,
-    since: Option<Instant>,
-    ended: bool,
-    exit_code: Option<i32>,
-    duration_ms: Option<u64>,
-}
-
 /// A finished command, ready to draw.
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -102,9 +60,12 @@ pub struct Running {
 /// One shell's blocks.
 #[derive(Debug, Default)]
 pub struct Shell {
-    /// The shell has reported a prompt or a command.
-    pub seen: bool,
-    entries: VecDeque<Entry>,
+    /// What the extension last listed of the shell's commands, oldest first.
+    pub commands: Vec<Command>,
+    /// When the command running now was first seen here, by its start.
+    started: Option<(u64, Instant)>,
+    /// The generation of the tree `commands` came from.
+    pub generation: u64,
     pub blocks: Vec<Block>,
     /// The screen rows the live command takes: `(first, count)`.
     pub live: (u16, u16),
@@ -113,12 +74,16 @@ pub struct Shell {
 }
 
 /// Whether `session` shows its finished commands as blocks over a live
-/// region: an integrated shell, outside a full-screen program.
+/// region: an integrated shell with Shell blocks on, outside a full-screen program.
 pub fn split<'a>(
     config: &Value,
+    points: &crate::points::Points,
     session: &crate::client::Session,
     shell: Option<&'a Shell>,
 ) -> Option<&'a Shell> {
+    if !crate::prompt::blocks_on(points) {
+        return None;
+    }
     let on = config
         .pointer("/defaults/domBlockRendering")
         .and_then(Value::as_bool)
@@ -129,76 +94,34 @@ pub fn split<'a>(
 }
 
 impl Shell {
-    /// Takes a mark the shell reported at `at` (epoch ms), seen at `now`
-    /// with the directory as `cwd`.
-    pub fn mark(&mut self, mark: Mark, at: u64, cwd: Option<&str>, now: Instant) {
-        self.seen = true;
-        match mark {
-            Mark::Prompt => {
-                self.entries.push_back(Entry {
-                    cwd: cwd.filter(|c| !c.is_empty()).map(str::to_owned),
-                    ..Entry::default()
-                });
-                while self.entries.len() > MAX_ENTRIES {
-                    self.entries.pop_front();
-                }
-            }
-            Mark::Start(command) => {
-                // A second start for one command is another integration also marking; it changes nothing.
-                if self.entries.back().is_some_and(|e| e.started && !e.ended) {
-                    return;
-                }
-                if self.entries.back().is_none_or(|e| e.started) {
-                    self.entries.push_back(Entry::default());
-                }
-                let Some(e) = self.entries.back_mut() else {
-                    return;
-                };
-                e.started = true;
-                e.command = command.filter(|c| !c.trim().is_empty());
-                e.start_at = at;
-                e.since = Some(now);
-                // The prompt's directory, by now surely reported.
-                if let Some(c) = cwd.filter(|c| !c.is_empty()) {
-                    e.cwd = Some(c.to_owned());
-                }
-            }
-            Mark::End {
-                exit_code,
-                duration_ms,
-            } => {
-                let Some(e) = self.entries.back_mut().filter(|e| !e.ended) else {
-                    return;
-                };
-                // A shell with no hook before a command reports it only once it is over.
-                if !e.started {
-                    e.started = true;
-                    e.start_at = at;
-                }
-                e.ended = true;
-                e.exit_code = Some(exit_code.unwrap_or(0));
-                e.duration_ms = Some(duration_ms.unwrap_or(at.saturating_sub(e.start_at)));
-            }
-        }
+    /// Takes the commands the extension lists, seen at `now`.
+    pub fn listed(&mut self, commands: Vec<Command>, now: Instant) {
+        let running = commands.last().filter(|c| c.running()).map(|c| c.at);
+        self.started = match (running, self.started) {
+            (Some(at), Some((seen, since))) if at == seen => Some((seen, since)),
+            (Some(at), _) => Some((at, now)),
+            (None, _) => None,
+        };
+        self.commands = commands;
     }
 
     /// The command running now, if one is.
     pub fn running(&self) -> Option<Running> {
-        let e = self.entries.back().filter(|e| e.started && !e.ended)?;
+        let c = self.commands.last().filter(|c| c.running())?;
         Some(Running {
-            command: e.command.clone(),
-            since: e.since?,
+            command: c.command.clone(),
+            since: self.started.map(|(_, at)| at)?,
         })
     }
 
     /// Whether the shell is known to report its commands.
     pub fn integrated(&self) -> bool {
-        self.seen || !self.lines.prompts.is_empty()
+        !self.commands.is_empty() || !self.lines.prompts.is_empty()
     }
 
     /// The entry each prompt in `lines` belongs to, by index.
     fn pair(&self, lines: &Lines) -> Vec<Option<usize>> {
-        let (n, m) = (lines.prompts.len() as i64, self.entries.len() as i64);
+        let (n, m) = (lines.prompts.len() as i64, self.commands.len() as i64);
         // Both come from the shell's prompt marks, so the newest of each belong together.
         let shift = m - n;
         (0..n)
@@ -216,10 +139,10 @@ impl Shell {
         let mut blocks = Vec::new();
         let mut cache = HashMap::new();
         let n = lines.prompts.len();
-        let first = n.saturating_sub(MAX_ENTRIES);
+        let first = n.saturating_sub(MAX_PROMPTS);
         for (w, p) in lines.prompts.windows(2).zip(&paired).skip(first) {
             let (start, end) = (w[0], w[1]);
-            let entry = p.map(|j| &self.entries[j]);
+            let entry = p.and_then(|j| self.commands.get(j));
             // A prompt left without a command: Enter on an empty line, or ^C.
             if entry.is_some_and(|e| !e.started) {
                 continue;
@@ -243,7 +166,7 @@ impl Shell {
                 key,
                 command,
                 cwd: entry.and_then(|e| e.cwd.clone()),
-                exit_code: entry.and_then(|e| e.exit_code),
+                exit_code: entry.and_then(|e| e.exit),
                 duration_ms: entry.and_then(|e| e.duration_ms),
                 view: v,
             });
@@ -331,8 +254,6 @@ mod tests {
         assert_eq!(prompt_jump(&[], 50, 120, false), Some(0));
         assert_eq!(prompt_jump(&[], 50, 120, true), None);
     }
-    use serde_json::json;
-
     fn lines(prompts: &[u64], top: u64, cursor_y: u16) -> Lines {
         Lines {
             epoch: 1,
@@ -351,49 +272,38 @@ mod tests {
         }
     }
 
-    #[test]
-    fn marks_parse_from_the_note() {
-        let start = json!({"id": "s1", "phase": "start", "command": "ls", "at": 5});
-        assert_eq!(
-            parse(&start),
-            Some(("s1".into(), Mark::Start(Some("ls".into())), 5))
-        );
-        let end = json!({"id": "s1", "phase": "end", "exitCode": 2, "durationMs": 40, "at": 9});
-        assert_eq!(
-            parse(&end),
-            Some((
-                "s1".into(),
-                Mark::End {
-                    exit_code: Some(2),
-                    duration_ms: Some(40)
-                },
-                9
-            ))
-        );
-        assert_eq!(parse(&json!({"id": "s1", "phase": "?"})), None);
+    fn cmd(command: Option<&str>, started: bool, ended: bool) -> Command {
+        Command {
+            command: command.map(str::to_owned),
+            cwd: Some("/a/b/c".into()),
+            started,
+            ended,
+            exit: ended.then_some(1),
+            duration_ms: ended.then_some(250),
+            at: 100,
+        }
     }
 
     #[test]
     fn finished_commands_become_blocks_and_empty_prompts_do_not() {
         let now = Instant::now();
         let mut sh = Shell::default();
-        sh.mark(Mark::Prompt, 0, Some("/a/b/c"), now);
-        sh.mark(Mark::Start(Some("ls".into())), 100, None, now);
+        sh.listed(vec![cmd(Some("ls"), true, false)], now);
         assert_eq!(sh.running().map(|r| r.command), Some(Some("ls".into())));
-        sh.mark(
-            Mark::End {
-                exit_code: Some(1),
-                duration_ms: None,
-            },
-            350,
-            None,
-            now,
+        let later = now + std::time::Duration::from_secs(1);
+        sh.listed(vec![cmd(Some("ls"), true, false)], later);
+        assert_eq!(sh.running().map(|r| r.since), Some(now), "seen once");
+        // ls ended; Enter on an empty line; the prompt now.
+        sh.listed(
+            vec![
+                cmd(Some("ls"), true, true),
+                cmd(None, false, false),
+                cmd(None, false, false),
+            ],
+            later,
         );
         assert_eq!(sh.running(), None);
-        sh.mark(Mark::Prompt, 400, Some("/a/b/c"), now);
-        // Enter on an empty line.
         let l = lines(&[0, 3, 4], 0, 4);
-        sh.mark(Mark::Prompt, 500, Some("/a/b/c"), now);
         let mut asked = Vec::new();
         sh.sync(l, |from, to| {
             asked.push((from, to));
@@ -413,18 +323,9 @@ mod tests {
     fn a_resize_keeps_titles_by_counting_prompts_from_the_end() {
         let now = Instant::now();
         let mut sh = Shell::default();
-        sh.mark(Mark::Prompt, 0, None, now);
-        sh.mark(Mark::Start(Some("make".into())), 0, None, now);
-        sh.mark(
-            Mark::End {
-                exit_code: Some(0),
-                duration_ms: Some(1200),
-            },
-            0,
-            None,
-            now,
-        );
-        sh.mark(Mark::Prompt, 0, None, now);
+        let mut make = cmd(Some("make"), true, true);
+        make.exit = Some(0);
+        sh.listed(vec![make, cmd(None, false, false)], now);
         // Reflowed: a new epoch, new numbers, an older prompt from before the app.
         let mut l2 = lines(&[0, 4, 9], 0, 9);
         l2.epoch = 2;

@@ -114,7 +114,7 @@ jobs:
         working-directory: packages/core
         env:
           SHOTS: ${{ runner.temp }}/web-shots
-        run: node crates/vorn-web/tests/smoke.mjs webgpu webgl pair templates adapters phone-chromium
+        run: node crates/vorn-web/tests/smoke.mjs webgpu webgl pair templates adapters phone-chromium files blocks
 
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}

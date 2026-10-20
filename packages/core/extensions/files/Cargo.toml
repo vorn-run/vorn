@@ -1,0 +1,16 @@
+[package]
+name = "vorn-ext-files"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Files, an extension Vorn ships as a Wasm component: a session's file tree and open files beside its terminal, edited and saved, and files popped out into cards"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../crates/extension-sdk" }
+serde = { version = "1", features = ["derive"] }

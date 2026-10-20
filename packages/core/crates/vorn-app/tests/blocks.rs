@@ -1,6 +1,7 @@
 //! A shell's finished commands as blocks, against a real vornd and an
 //! integrated shell: each command with its output, exit status and
-//! duration; the one running; and the composer's history and completions.
+//! duration; the one running; and the composer's history and completions,
+//! the commands and the menu both answered by the Shell blocks extension.
 
 mod support;
 
@@ -94,8 +95,15 @@ fn a_shells_commands_become_blocks_with_status_and_duration() {
     assert!(labels.iter().any(|l| l == "checkout"), "{labels:?}");
     shot.save(&mut app, "blocks-completions");
 
-    let kept = std::fs::read_to_string(vorn_app::intent::history_file(&v.home)).expect("history");
-    assert!(kept.contains("echo vorn-42"), "{kept}");
+    // Shell blocks keeps what ran, past this app.
+    let kept = app
+        .rpc()
+        .call(
+            "extension:call",
+            json!({ "id": "vorn.blocks", "action": "history", "args": { "text": "echo" } }),
+        )
+        .expect("history");
+    assert_eq!(kept["rows"][0]["text"], "echo vorn-42", "{kept}");
 }
 
 /// Jump by command: Mod+Shift+Up scrolls the terminal to the prompt before

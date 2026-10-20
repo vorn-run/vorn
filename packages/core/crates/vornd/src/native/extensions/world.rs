@@ -456,6 +456,23 @@ impl World for Wired {
                     }
                     ask(&native, "file:readContent", params).await
                 }
+                "files.list" => {
+                    let dir = text(&args, "path")
+                        .ok_or_else(|| needs(m, "the absolute folder to list"))?;
+                    ask(&native, "file:listDir", json!({ "dirPath": dir })).await
+                }
+                "files.stat" => {
+                    let path =
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
+                    ask(&native, "file:stamp", json!({ "filePath": path })).await
+                }
+                "shell.executables" => ask(&native, "shell:listExecutables", Value::Null).await,
+                "git.branches" => {
+                    let dir = text(&args, "worktree")
+                        .or(project)
+                        .ok_or_else(|| needs(m, "the repository to read"))?;
+                    ask(&native, "git:listBranches", json!(dir)).await
+                }
                 "files.write" => {
                     let path = text(&args, "path")
                         .ok_or_else(|| needs(m, "the absolute path to write"))?;

@@ -43,7 +43,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::SetSelect(_) => 128.0,
         MenuKind::SshKey(_) => 300.0,
         MenuKind::OpenIn(_) => 180.0,
-        MenuKind::Branch(_) | MenuKind::FileTabs(_) => 220.0,
+        MenuKind::Branch(_) => 220.0,
         _ => 200.0,
     }
 }
@@ -105,7 +105,6 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
         MenuKind::SetSelect(key) => super::settings::select_items(s, key),
         MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
-        MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
         MenuKind::Branch(_) | MenuKind::OpenIn(_) | MenuKind::LaunchModel => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter

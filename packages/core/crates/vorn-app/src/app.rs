@@ -48,6 +48,7 @@ mod relink;
 mod settings;
 mod shell;
 mod side;
+pub use side::FILES;
 pub mod signin;
 mod tasks;
 mod term;
@@ -287,7 +288,9 @@ enum Call {
     /// `connection:signedIn` after the sheet saw someone sign in.
     SignedIn(Option<String>),
     Net(network::NetCall),
-    Intent(crate::intent::Need),
+    Intent(shell::IntentCall),
+    /// What a built-in took over from a file the desktop kept: the file goes once it has.
+    Imported(std::path::PathBuf),
     TermImage(term::TermImage),
 }
 
@@ -401,8 +404,12 @@ pub struct App {
     relinking: relink::Relinking,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
-    /// A discard the person agreed to is being run.
-    discarding: bool,
+    /// The Files extension was told which sessions are left, and has not answered with fewer.
+    pruning: bool,
+    /// What the desktop kept on its own was handed to Files and to Shell blocks.
+    imported: (bool, bool),
+    /// Ghosts a composer took before they came, to put in: its shell and the text.
+    fills: Vec<(String, String)>,
     /// The browser and device panes' web views and calls in flight.
     web: browser::Web,
     /// Wakes the window from another thread.
@@ -562,7 +569,9 @@ impl App {
             #[cfg(not(target_arch = "wasm32"))]
             relinking: Default::default(),
             last_focus: None,
-            discarding: false,
+            pruning: false,
+            imported: (false, false),
+            fills: Vec::new(),
             web,
             wake: app_wake,
             sessions: Default::default(),
@@ -711,13 +720,9 @@ impl App {
 
     pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
         self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
-        self.st.editors.drafts =
-            crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
         self.st.sidebar_view =
             crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
         self.web.host.set_profiles(dir.join("connection-profiles"));
-        self.st.intent.history =
-            crate::intent::History::load(Some(crate::intent::history_file(&dir)));
         self.data_dir = Some(dir);
     }
 
@@ -1015,7 +1020,15 @@ impl App {
             Call::Git(c) => self.git_answered(c, answer),
             Call::Side(c) => self.side_answered(c, answer),
             Call::Ignore => {}
-            Call::Intent(need) => self.intent_answered(need, answer),
+            Call::Intent(c) => self.intent_answered(c, answer),
+            Call::Imported(file) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if answer.is_ok() {
+                    let _ = std::fs::remove_file(file);
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = file;
+            }
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Plug(c) => self.plug_answered(c, answer),
             Call::Ext(c) => self.ext_answered(c, answer),
@@ -1410,7 +1423,13 @@ impl App {
     fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
         let Some(id) = self.current() else { return };
         let as_blocks = self.store.session(&id).is_some_and(|s| {
-            crate::blocks::split(&self.store.config, s, self.st.shells.get(&id)).is_some()
+            crate::log::split(
+                &self.store.config,
+                &self.st.points,
+                s,
+                self.st.shells.get(&id),
+            )
+            .is_some()
         });
         if as_blocks {
             return;
@@ -1424,7 +1443,7 @@ impl App {
         if lines.alt {
             return;
         }
-        match crate::blocks::prompt_jump(&lines.prompts, view.line0, view.live_line, up) {
+        match crate::log::prompt_jump(&lines.prompts, view.line0, view.live_line, up) {
             Some(0) => self.return_to_live(&id),
             Some(back) => self.scroll_back_to(ui, &id, back),
             None => {}
@@ -1978,7 +1997,8 @@ impl App {
             }
             Act::Git(a) => self.run_git(ui, a, src),
             Act::Side(a) => self.run_side(ui, a, src),
-            Act::Edit(a) => self.run_edit(ui, a),
+            Act::Code(a) => self.run_code(ui, a),
+            Act::Answer(ok) => self.answer_ask(ok),
             Act::Expand(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id.clone());
@@ -2700,8 +2720,28 @@ impl App {
                 self.st.menu = None;
                 self.st.confirm_delete = None;
             }
+            UiEvent::Submit(id)
+                if matches!(
+                    self.acts.text_of(id),
+                    Some(Act::Point(crate::points::PointAct::TreeField { .. }))
+                ) =>
+            {
+                if let Some(Act::Point(a)) = self.acts.text_of(id) {
+                    self.run_point(ui, a);
+                }
+            }
             UiEvent::Submit(id) => self.submit(ui, id),
             UiEvent::Changed(id) if self.pane_changed(ui, id) => {}
+            UiEvent::Changed(id)
+                if matches!(
+                    self.acts.text_of(id),
+                    Some(Act::Point(crate::points::PointAct::TreeLive { .. }))
+                ) =>
+            {
+                if let Some(Act::Point(a)) = self.acts.text_of(id) {
+                    self.run_point(ui, a);
+                }
+            }
             UiEvent::Resized { id, ratio } => {
                 if !self.flex_resized(ui, id, ratio, false) {
                     self.pane_resized(ui, id, ratio, false);
@@ -2855,8 +2895,8 @@ impl App {
             {
                 return true;
             }
-            if self.st.dialog == Some(Dialog::Discard) && code == "Escape" {
-                self.run_edit(ui, crate::editor::EditAct::CancelDiscard);
+            if self.st.dialog == Some(Dialog::Ask) && code == "Escape" {
+                self.answer_ask(false);
                 return true;
             }
             if self.st.dialog == Some(Dialog::Paste) && matches!(code.as_str(), "Escape" | "Enter")
@@ -3456,8 +3496,13 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
-            let split = crate::blocks::split(&self.store.config, session, self.st.shells.get(sid))
-                .is_some();
+            let split = crate::log::split(
+                &self.store.config,
+                &self.st.points,
+                session,
+                self.st.shells.get(sid),
+            )
+            .is_some();
             if !split {
                 if let Some(g) = &self.grid {
                     if !session.ended() {

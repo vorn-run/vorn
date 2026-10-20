@@ -122,6 +122,9 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     assert_eq!(
         kinds,
         [
+            ("vorn.files", "panes"),
+            ("vorn.files", "cards"),
+            ("vorn.blocks", "shell"),
             ("vorn.worktrees", "sidebar"),
             ("vorn.worktrees", "settings"),
             ("vorn.worktrees", "menus"),

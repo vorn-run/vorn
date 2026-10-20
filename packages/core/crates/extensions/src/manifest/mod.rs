@@ -462,6 +462,13 @@ pub enum Place {
     Dialogs,
     /// A main view beside the sessions, shown as one of the window's views.
     Views,
+    /// A shell's commands over its live rows: one tree per shell, asked for
+    /// with the shell's session id as its scope.
+    Shell,
+    /// A card of its own in the grid for each row of `rows`, placed after the
+    /// session the row's `session` names; its tree is asked for with the
+    /// row's id as its scope.
+    Cards,
     /// Things waiting on a person (a gate asking), each a row of `rows`:
     /// the waiting pill counts them, and the approve and deny keys answer
     /// the oldest with `call` or `deny`.
@@ -470,7 +477,7 @@ pub enum Place {
 
 impl Place {
     /// Every place a `points` entry may be, panes aside (they are `panes`).
-    pub const POINTS: [Place; 13] = [
+    pub const POINTS: [Place; 15] = [
         Place::Sidebar,
         Place::Badges,
         Place::CardFooters,
@@ -483,6 +490,8 @@ impl Place {
         Place::Menus,
         Place::Dialogs,
         Place::Views,
+        Place::Shell,
+        Place::Cards,
         Place::Attention,
     ];
 
@@ -502,6 +511,8 @@ impl Place {
             Place::Menus => "menus",
             Place::Dialogs => "dialogs",
             Place::Views => "views",
+            Place::Shell => "shell",
+            Place::Cards => "cards",
             Place::Attention => "attention",
         }
     }
@@ -522,6 +533,8 @@ impl Place {
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
             Place::Views => "Main view",
+            Place::Shell => "Shell commands",
+            Place::Cards => "Card",
             Place::Attention => "Waiting for you",
         }
     }
@@ -1706,9 +1719,15 @@ fn read_point(
         Place::Attention if rows.is_none() || call.is_none() => {
             return Err(("", "needs rows and the call that approves one".into()));
         }
-        Place::Attention | Place::Menus => {}
+        Place::Cards if rows.is_none() => {
+            return Err((
+                "rows",
+                "names the collection whose rows are the cards".into(),
+            ));
+        }
+        Place::Attention | Place::Menus | Place::Cards => {}
         _ if rows.is_some() => {
-            return Err(("rows", "belongs to a menu item or attention".into()));
+            return Err(("rows", "belongs to a menu item, a card or attention".into()));
         }
         _ => {}
     }

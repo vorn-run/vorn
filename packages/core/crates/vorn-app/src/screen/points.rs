@@ -9,6 +9,12 @@ use crate::points::{kind, Point, PointAct, Points};
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Id, Rgba, Role, Ui};
 
+/// `file:<name>`: the file type's glyph.
+fn file_icon(name: &str, size: f32) -> Option<El> {
+    let name = name.strip_prefix("file:")?;
+    Some(super::code::file_icon(name, size))
+}
+
 /// `connector:<id>`: a connector's mark, a plug for one without.
 fn connector_icon(name: &str, size: f32) -> Option<El> {
     let id = name.strip_prefix("connector:")?;
@@ -43,7 +49,7 @@ impl TreeBind for TreeBinder<'_> {
         let key = self.key.to_owned();
         match ev {
             Ev::Send { event, ask } => {
-                let id = self.base().child(&event.id).child(&event.value);
+                let id = event_id(self.base(), &event);
                 let act = self.act(PointAct::Tree { key, event });
                 if !ask {
                     self.acts.bind(id, act);
@@ -92,7 +98,25 @@ impl TreeBind for TreeBinder<'_> {
             }
             Ev::Hover { node } => self.base().child("entry").child(&node),
             Ev::Scroll { list } => self.base().child("scroll").child(&list),
+            Ev::Live { node, value } => {
+                let id = self.base().child("live").child(&node);
+                self.acts
+                    .text(id, self.act(PointAct::TreeLive { key, node }), value);
+                id
+            }
+            Ev::Split { node } => split_id(self.key, &node),
+            Ev::Item { event, slot } => {
+                let id = event_id(self.base(), &event).child(&slot);
+                self.acts.bind(id, self.act(PointAct::Tree { key, event }));
+                id
+            }
         }
+    }
+
+    fn double(&self, id: Id, event: vorn_tree::Event) {
+        let key = self.key.to_owned();
+        self.acts
+            .double(id, self.act(PointAct::Tree { key, event }));
     }
 
     fn confirming(&self, id: Id) -> Option<(Id, Id)> {
@@ -108,7 +132,158 @@ impl TreeBind for TreeBinder<'_> {
     }
 
     fn icon(&self, name: &str, size: f32) -> Option<El> {
-        connector_icon(name, size)
+        file_icon(name, size).or_else(|| connector_icon(name, size))
+    }
+}
+
+/// The id of the control telling `event`: the kinds trees always had by node and value, the rest by kind too.
+fn event_id(base: Id, event: &vorn_tree::Event) -> Id {
+    use vorn_tree::EventKind as K;
+    let id = base.child(&event.id).child(&event.value);
+    match event.kind {
+        K::Click | K::Submit | K::Select | K::Toggle => id,
+        other => id.child(format!("{other:?}")),
+    }
+}
+
+/// The divider of split `node` in tree `key`.
+fn split_id(key: &str, node: &str) -> Id {
+    Id::new(key).child("tree").child("split").child(node)
+}
+
+/// Which tree's split divider `id` is: the tree's key and the split's node.
+pub fn split_of(points: &Points, id: Id) -> Option<(String, String)> {
+    for (key, tree) in &points.trees {
+        let Ok(tree) = tree else { continue };
+        let mut stack = vec![tree];
+        while let Some(n) = stack.pop() {
+            if let (vorn_tree::Kind::Split { .. }, Some(node)) = (&n.kind, n.id.as_deref()) {
+                if split_id(key, node) == id {
+                    return Some((key.clone(), node.to_owned()));
+                }
+            }
+            stack.extend(&n.children);
+        }
+    }
+    None
+}
+
+/// Binds a tree drawn for a scope (a session's pane, a card), with what the
+/// client draws in it: its code, a strip's pane controls and a card's label.
+pub(crate) struct ScopedBinder<'a, 'b> {
+    pub(crate) s: &'a Screen<'b>,
+    pub(crate) key: &'a str,
+    /// The pane's own controls after a tab strip's tools.
+    pub(crate) chrome: Option<&'a dyn Fn(Vec<El>) -> El>,
+    /// What a card's code strip shows before its buttons.
+    pub(crate) label: std::cell::RefCell<Option<El>>,
+}
+
+impl ScopedBinder<'_, '_> {
+    fn plain(&self) -> TreeBinder<'_> {
+        TreeBinder {
+            acts: self.s.acts,
+            points: &self.s.st.points,
+            key: self.key,
+        }
+    }
+}
+
+impl TreeBind for ScopedBinder<'_, '_> {
+    fn on(&self, ev: Ev) -> Id {
+        self.plain().on(ev)
+    }
+
+    fn confirming(&self, id: Id) -> Option<(Id, Id)> {
+        self.plain().confirming(id)
+    }
+
+    fn menu_open(&self, id: Id) -> bool {
+        self.plain().menu_open(id)
+    }
+
+    fn checked(&self, list: &str, row: &str) -> bool {
+        self.plain().checked(list, row)
+    }
+
+    fn icon(&self, name: &str, size: f32) -> Option<El> {
+        self.plain().icon(name, size)
+    }
+
+    fn double(&self, id: Id, event: vorn_tree::Event) {
+        self.plain().double(id, event);
+    }
+
+    fn dragging(&self, node: &str) -> Option<f32> {
+        match &self.s.st.split_drag {
+            Some((k, n, r)) if k == self.key && n == node => Some(*r),
+            _ => None,
+        }
+    }
+
+    fn chrome(&self, node: &str, tools: Vec<El>) -> El {
+        match self.chrome {
+            Some(f) => f(tools),
+            None => self.plain().chrome(node, tools),
+        }
+    }
+
+    fn code(&self, node: &str, code: &vorn_tree::Code, buttons: &[vorn_tree::Node]) -> Option<El> {
+        let inst = crate::code::instance(self.key, node);
+        let buttons: Vec<El> = buttons
+            .iter()
+            .filter_map(|b| {
+                let vorn_tree::Kind::Button { label, icon, .. } = &b.kind else {
+                    return None;
+                };
+                let event = vorn_tree::Event::new(
+                    b.id.clone().unwrap_or_default(),
+                    vorn_tree::EventKind::Click,
+                    "",
+                );
+                let id = self.on(Ev::Send { event, ask: false });
+                Some(super::side::icon_button_at(
+                    self.s,
+                    id,
+                    icon.as_deref().unwrap_or("circle"),
+                    label,
+                ))
+            })
+            .collect();
+        let label = self.label.borrow_mut().take();
+        let extra = (label.is_some() || !buttons.is_empty()).then(|| {
+            div().row().items_center().gap(4.0).child_if(label).child(
+                div()
+                    .row()
+                    .items_center()
+                    .gap(2.0)
+                    .shrink0()
+                    .children(buttons),
+            )
+        });
+        Some(super::code::panel(self.s, &inst, code, extra))
+    }
+}
+
+/// Tree `key` drawn for its scope, or its error box; nothing until it renders.
+pub(crate) fn draw_scoped(
+    s: &Screen<'_>,
+    key: &str,
+    chrome: Option<&dyn Fn(Vec<El>) -> El>,
+    label: Option<El>,
+) -> Option<El> {
+    let p = s.st.points.get(key)?;
+    match s.st.points.trees.get(key)? {
+        Ok(t) => {
+            let bind = ScopedBinder {
+                s,
+                key,
+                chrome,
+                label: std::cell::RefCell::new(label),
+            };
+            Some(tree::view(s.ui, t, &bind))
+        }
+        Err(errors) => Some(tree::invalid(&p.place(), errors)),
     }
 }
 

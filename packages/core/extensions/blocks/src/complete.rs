@@ -1,157 +1,19 @@
-//! The intent bar's help (IntentBar, command-history, completions): the
-//! commands typed before, and completions for the token being typed.
+//! Completions for the token being typed in a shell's composer: commands,
+//! their subcommands and flags from a small outline of each, and paths,
+//! branches and package scripts read through Vorn and kept a while.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
-use web_time::Instant;
+use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use vorn_extension_sdk::{json, serde_json, Host, Value};
 
-/// Inputs kept, most recent first.
-const MAX_ENTRIES: usize = 1000;
-/// History rows a search offers.
-pub const MAX_HISTORY: usize = 8;
-/// History rows shown above completions.
-pub const MAX_HISTORY_WITH_COMPLETIONS: usize = 3;
 const MAX_RESULTS: usize = 12;
-/// The pause in typing before completions are worked out.
-pub const DEBOUNCE: Duration = Duration::from_millis(80);
 
 const EXECUTABLES_TTL: Duration = Duration::from_secs(5 * 60);
 const DIR_TTL: Duration = Duration::from_secs(5);
 const BRANCH_TTL: Duration = Duration::from_secs(10);
 const SCRIPT_TTL: Duration = Duration::from_secs(30);
-
-/// One submitted input.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Entry {
-    pub text: String,
-    pub kind: String,
-    pub timestamp: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_path: Option<String>,
-}
-
-/// The commands typed into shells, kept on disk beside the app's view.
-#[derive(Debug, Default)]
-pub struct History {
-    file: Option<PathBuf>,
-    entries: Vec<Entry>,
-}
-
-pub fn history_file(data_dir: &Path) -> PathBuf {
-    data_dir.join("desktop").join("command-history.json")
-}
-
-/// Whether `query`'s characters appear in `text` in order.
-fn subsequence(query: &str, text: &str) -> bool {
-    let mut q = query.chars().peekable();
-    for c in text.chars() {
-        if q.peek() == Some(&c) {
-            q.next();
-        }
-    }
-    q.peek().is_none()
-}
-
-impl History {
-    pub fn load(file: Option<PathBuf>) -> History {
-        let entries = file
-            .as_deref()
-            .and_then(crate::keep::read)
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        History { file, entries }
-    }
-
-    fn shell(&self) -> impl Iterator<Item = &Entry> {
-        self.entries.iter().filter(|e| e.kind == "shell")
-    }
-
-    /// To the front, once.
-    pub fn record(&mut self, text: &str, project: Option<&str>, now_ms: u64) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-        self.entries
-            .retain(|e| !(e.text == text && e.kind == "shell"));
-        self.entries.insert(
-            0,
-            Entry {
-                text: text.to_owned(),
-                kind: "shell".to_owned(),
-                timestamp: now_ms,
-                project_path: project.map(str::to_owned),
-            },
-        );
-        self.entries.truncate(MAX_ENTRIES);
-        let Some(f) = &self.file else { return };
-        // A full disk costs the history, not the command.
-        if let Ok(s) = serde_json::to_string(&self.entries) {
-            let _ = crate::keep::write(f, &s);
-        }
-    }
-
-    /// Prefix over substring over subsequence, this
-    /// project's and recent ones first; the most recent for no query.
-    pub fn search(&self, query: &str, project: Option<&str>) -> Vec<Entry> {
-        let q = query.trim().to_lowercase();
-        let here = |e: &Entry| e.project_path.as_deref() == project;
-        if q.is_empty() {
-            let mut all: Vec<&Entry> = self.shell().collect();
-            all.sort_by(|a, b| here(b).cmp(&here(a)).then(b.timestamp.cmp(&a.timestamp)));
-            return all.into_iter().take(MAX_HISTORY).cloned().collect();
-        }
-        let mut scored: Vec<(i64, &Entry)> = Vec::new();
-        for (i, e) in self.shell().enumerate() {
-            let text = e.text.to_lowercase();
-            if text == q {
-                continue;
-            }
-            let mut score = if text.starts_with(&q) {
-                3000
-            } else if text.contains(&q) {
-                2000
-            } else if subsequence(&q, &text) {
-                1000
-            } else {
-                continue;
-            };
-            if here(e) {
-                score += 500;
-            }
-            scored.push((score - i as i64, e));
-        }
-        scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-        scored
-            .into_iter()
-            .take(MAX_HISTORY)
-            .map(|(_, e)| e.clone())
-            .collect()
-    }
-
-    /// The latest input that carries on from `input`.
-    pub fn ghost(&self, input: &str, project: Option<&str>) -> Option<&str> {
-        if input.is_empty() || input.contains('\n') {
-            return None;
-        }
-        let mut fallback = None;
-        for e in self.shell() {
-            if e.text.len() <= input.len() || !e.text.starts_with(input) {
-                continue;
-            }
-            if e.project_path.as_deref() == project {
-                return Some(&e.text);
-            }
-            fallback.get_or_insert(e.text.as_str());
-        }
-        fallback
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -431,16 +293,15 @@ pub enum Need {
 }
 
 impl Need {
-    /// The call that answers it: method and params.
-    pub fn call(&self) -> (&'static str, serde_json::Value) {
-        use serde_json::json;
+    /// The core method that answers it, and its args.
+    pub fn call(&self) -> (&'static str, Value) {
         match self {
-            Need::Executables => ("shell:listExecutables", json!({})),
-            Need::Dir(d) => ("file:listDir", json!({ "dirPath": d })),
-            Need::Branches(repo) => ("git:listBranches", json!(repo)),
+            Need::Executables => ("shell.executables", json!({})),
+            Need::Dir(d) => ("files.list", json!({ "path": d })),
+            Need::Branches(repo) => ("git.branches", json!({ "worktree": repo })),
             Need::Scripts(cwd) => (
-                "file:readContent",
-                json!({ "filePath": format!("{cwd}/package.json"), "maxBytes": 64 * 1024 }),
+                "files.read",
+                json!({ "path": format!("{cwd}/package.json"), "maxBytes": 64 * 1024 }),
             ),
         }
     }
@@ -468,8 +329,7 @@ pub struct Sources {
 
 impl Sources {
     /// Keeps vornd's answer to `need`.
-    pub fn answer(&mut self, need: Need, answer: Option<&serde_json::Value>, now: Instant) {
-        use serde_json::Value;
+    pub fn answer(&mut self, need: Need, answer: Option<&Value>, now: Instant) {
         self.asked.remove(&need);
         let names = |v: Option<&Value>| -> Vec<(String, bool)> {
             v.and_then(Value::as_array)
@@ -513,6 +373,27 @@ impl Sources {
         }
         hit.map_or(&[], |(_, l)| l.as_slice())
     }
+}
+
+/// The completions for the token at the end of `input`, reading through
+/// `host` what the cache does not hold fresh.
+pub fn complete_with(
+    host: &mut dyn Host,
+    src: &mut Sources,
+    input: &str,
+    place: &Place<'_>,
+) -> Vec<Completion> {
+    let now = Instant::now();
+    let (found, wants) = complete(input, place, src, now);
+    if wants.is_empty() {
+        return found;
+    }
+    for need in wants {
+        let (method, args) = need.call();
+        let answer = host.call(method, args).ok();
+        src.answer(need, answer.as_ref(), now);
+    }
+    complete(input, place, src, now).0
 }
 
 /// One shell word.
@@ -757,113 +638,10 @@ pub fn tab(input: &str, all: &[Completion]) -> Option<String> {
     Some(apply(input, first))
 }
 
-/// A shell composer's menu: history and completions over what is typed.
-#[derive(Debug, Default)]
-pub struct Menu {
-    pub open: bool,
-    pub history: Vec<Entry>,
-    pub completions: Vec<Completion>,
-    /// The picked row, if any.
-    pub highlight: Option<usize>,
-    /// The text the menu was worked out for.
-    pub text: String,
-    /// When the text last changed, for the debounce.
-    pub changed: Option<Instant>,
-    /// The completions are for `text`.
-    pub completed: bool,
-    /// The next text change was put in, so it skips the debounce.
-    pub filled: bool,
-}
-
-/// A menu row.
-pub enum Row<'a> {
-    History(&'a Entry),
-    Completion(&'a Completion),
-}
-
-impl Menu {
-    pub fn rows(&self) -> Vec<Row<'_>> {
-        let cap = if self.completions.is_empty() {
-            MAX_HISTORY
-        } else {
-            MAX_HISTORY_WITH_COMPLETIONS
-        };
-        self.history
-            .iter()
-            .take(cap)
-            .map(Row::History)
-            .chain(self.completions.iter().map(Row::Completion))
-            .collect()
-    }
-
-    pub fn len(&self) -> usize {
-        self.rows().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn shown(&self) -> bool {
-        self.open && !self.is_empty()
-    }
-
-    pub fn close(&mut self) {
-        self.open = false;
-        self.highlight = None;
-    }
-
-    pub fn step(&mut self, by: isize) {
-        let n = self.len();
-        if n == 0 {
-            return;
-        }
-        let at = self
-            .highlight
-            .map_or(if by > 0 { -1 } else { 0 }, |h| h as isize);
-        self.highlight = Some((at + by).clamp(0, n as isize - 1) as usize);
-    }
-}
-
-/// What a block's or the composer menu's controls do.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum IntentAct {
-    /// Copies a block's command and output.
-    Copy {
-        session: String,
-        key: (u32, u64, u64),
-    },
-    /// Runs or fills in menu row `index`.
-    Pick { session: String, index: usize },
-}
-
-/// History, caches and every shell's menu.
-#[derive(Debug, Default)]
-pub struct Intent {
-    pub history: History,
-    pub sources: Sources,
-    pub menus: HashMap<String, Menu>,
-    /// The block whose Copy was last pressed, and when.
-    pub copied: Option<((u32, u64, u64), Instant)>,
-    /// Shells whose composer stood aside for a running command while focused.
-    pub stood_aside: HashSet<String>,
-}
-
-/// Relative time for a history row: now, m, h, d.
-pub fn ago(then_ms: u64, now_ms: u64) -> String {
-    let s = now_ms.saturating_sub(then_ms) / 1000;
-    match s {
-        0..60 => "now".to_owned(),
-        60..3600 => format!("{}m", s / 60),
-        3600..86_400 => format!("{}h", s / 3600),
-        _ => format!("{}d", s / 86_400),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use vorn_extension_sdk::testing::FakeHost;
 
     fn place() -> Place<'static> {
         Place {
@@ -875,35 +653,6 @@ mod tests {
     fn labels(c: &[Completion]) -> Vec<&str> {
         c.iter().map(|c| c.label.as_str()).collect()
     }
-
-    #[test]
-    fn history_ranks_prefix_then_substring_then_subsequence() {
-        let mut h = History::default();
-        h.record("git status", Some("/a"), 1);
-        h.record("echo git", Some("/b"), 2);
-        h.record("grep -i t", Some("/a"), 3);
-        h.record("git status", Some("/a"), 4);
-        let found: Vec<_> = h
-            .search("git", Some("/a"))
-            .into_iter()
-            .map(|e| e.text)
-            .collect();
-        assert_eq!(found, vec!["git status", "echo git", "grep -i t"]);
-        assert!(h.search("git status", Some("/a")).is_empty());
-        assert_eq!(h.search("", Some("/b"))[0].text, "echo git");
-        assert_eq!(h.ghost("git s", Some("/z")), Some("git status"));
-        assert_eq!(h.ghost("git status", None), None);
-    }
-
-    #[test]
-    fn history_survives_a_restart() {
-        let dir = std::env::temp_dir().join(format!("vorn-intent-{}", std::process::id()));
-        let file = history_file(&dir);
-        History::load(Some(file.clone())).record("ls -la", None, 1);
-        assert_eq!(History::load(Some(file)).search("", None)[0].text, "ls -la");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
     #[test]
     fn commands_complete_from_outlines_then_the_path() {
         let now = Instant::now();
@@ -975,25 +724,20 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_moves_within_its_rows() {
-        let mut m = Menu {
-            history: vec![
-                Entry {
-                    text: "a".into(),
-                    kind: "shell".into(),
-                    timestamp: 0,
-                    project_path: None,
-                };
-                2
-            ],
-            ..Menu::default()
-        };
-        m.step(1);
-        assert_eq!(m.highlight, Some(0));
-        m.step(5);
-        assert_eq!(m.highlight, Some(1));
-        m.step(-1);
-        assert_eq!(m.highlight, Some(0));
-        assert_eq!(ago(0, 90_000), "1m");
+    fn what_the_cache_lacks_is_read_through_vorn_once() {
+        let mut host = FakeHost::default()
+            .answer("shell.executables", |_| Ok(json!(["gitk", "git", "go"])))
+            .answer("files.list", |a| {
+                assert_eq!(a["path"], "/p");
+                Ok(json!([{"name": "src", "isDirectory": true}]))
+            });
+        let mut src = Sources::default();
+        let c = complete_with(&mut host, &mut src, "gi", &place());
+        assert_eq!(labels(&c), vec!["git", "gitk"]);
+        let c = complete_with(&mut host, &mut src, "git", &place());
+        assert_eq!(labels(&c), vec!["gitk"]);
+        assert_eq!(host.asked("shell.executables").len(), 1);
+        let c = complete_with(&mut host, &mut src, "cd s", &place());
+        assert_eq!(labels(&c), vec!["src/"]);
     }
 }
