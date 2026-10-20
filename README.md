@@ -273,7 +273,7 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 ### More
 
 - **Web Client** — the same app in a browser or on your phone, compiled to WebAssembly and served by vornd (`vornd --web`); pair a phone or another computer with a code from the desktop app
-- **Extensions** — add sidebar sections, card badges and footers, panes, windows, palette commands, settings pages and more, drawn on the desktop, in the browser and in the terminal alike; see [`examples/extensions/turns`](examples/extensions/turns). An extension runs as a program in any language, or as a sandboxed Wasm component written in Rust with `vorn-extension-sdk` (`vorn ext new --wasm`); see [docs/wasm-extensions.md](docs/wasm-extensions.md)
+- **Extensions** — add sidebar sections, card badges and footers, panes, windows, palette commands, settings pages and more, drawn on the desktop, in the browser and in the terminal alike; see [`examples/extensions/turns`](examples/extensions/turns). An extension runs as a program in any language, or as a sandboxed Wasm component written in Rust with `vorn-extension-sdk` (`vorn ext new --wasm`); see [docs/extensions.md](docs/extensions.md) and [docs/wasm-extensions.md](docs/wasm-extensions.md)
 - **Remote Hosts** — launch terminals on remote machines via SSH
 - **Terminal Panel** — lightweight shell tabs for quick operations
 - **Project Management** — organize sessions by project with custom icons, colors, and preferred agents

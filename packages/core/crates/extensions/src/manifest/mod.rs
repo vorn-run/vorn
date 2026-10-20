@@ -596,10 +596,8 @@ pub struct Point {
     /// For attention: the method denying an item calls, with its `id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deny: Option<String>,
-    /// For a built-in's settings page: the app's own page it follows in the
-    /// sidebar, one of [`SETTINGS_PAGES`], so a page that left the app for
-    /// a built-in keeps its place. Another extension's page stays under
-    /// Extensions whatever it says.
+    /// For a settings page: the app's own page it follows in the sidebar,
+    /// one of [`SETTINGS_PAGES`]; without it the page stays under Extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
 }

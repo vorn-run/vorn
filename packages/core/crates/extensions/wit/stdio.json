@@ -8,7 +8,7 @@
     "request": { "record": [["method", "string"], ["url", "string"], ["headers", "list<header>"], ["body", "option<string>"]] },
     "response": { "record": [["status", "u16"], ["headers", "list<header>"], ["body", "string"]] },
     "call-ctx": { "record": [["caller", "string"], ["project", "option<string>"]] },
-    "init-ctx": { "record": [["id", "string"], ["version", "string"], ["vorn", "string"]] },
+    "init-ctx": { "record": [["id", "string"], ["version", "string"], ["vorn", "string"], ["api", "string"]] },
     "row-op": { "variant": [["upsert", "json"], ["delete", "string"], ["clear", null]] },
     "event": { "record": [["name", "string"], ["data", "json"]] },
     "level": { "enum": ["debug", "info", "warn", "error"] },
