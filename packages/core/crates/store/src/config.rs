@@ -194,6 +194,7 @@ impl Store {
                 "headlessStepTimeoutMinutes",
                 "enableHoverPreview",
                 "worktreeRetention",
+                "tuiDrawing",
             ],
         );
         Ok(out)

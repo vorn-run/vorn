@@ -69,6 +69,10 @@ Options common to the commands that talk to a server
   --data-dir <path>   Reach a server started with the same flag
   --timeout <ms>      Give up on a call after this long
 
+Options of `vorn` and `vorn attach`
+  --drawing <mode>    auto, pixels or text: the UI as images where the
+                      terminal shows kitty graphics, or in text cells
+
 A <target> is an id, a label, a position in `vorn session list` or the start or
 end of an id, in that order. Exit codes: 0 ok, 1 failed, 2 usage, 3 ambiguous
 target, 4 no server; `session wait` passes the session's own code, or 124.

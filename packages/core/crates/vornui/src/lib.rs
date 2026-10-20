@@ -35,6 +35,8 @@ mod render;
 pub mod scene;
 pub mod text;
 pub mod theme;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tty;
 mod ui;
 mod virt;
 #[cfg(target_arch = "wasm32")]

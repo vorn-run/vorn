@@ -18,7 +18,8 @@ use crossterm::{cursor, execute, queue, terminal};
 use super::{ansi16, ansi256, attr, Buffer, Cell, CursorShape, Depth, Sym};
 use crate::input::{mods, Input};
 
-/// What the terminal reported, in vornui's terms. Positions are cell centres.
+/// What the terminal reported, in vornui's terms. Positions are in the
+/// layout's units: cell centres in cells, logical pixels when drawn as pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TermEvent {
     Input(Input),
@@ -26,7 +27,8 @@ pub enum TermEvent {
     Down(f32, f32),
     Up(f32, f32),
     SecondaryDown(f32, f32),
-    /// Wheel in rows; positive scrolls down.
+    /// Wheel in the layout's units (rows in cells, logical pixels when
+    /// drawn as pixels); positive scrolls down.
     Wheel(f32, f32, f32),
     Paste(String),
     Resize(u16, u16),
@@ -180,10 +182,7 @@ impl Terminal {
             prev: None,
             kitty,
             active: true,
-            shapes: takes_pointer_shapes(
-                std::env::var("TERM_PROGRAM").ok().as_deref(),
-                std::env::var("TERM").ok().as_deref(),
-            ),
+            shapes: pointer_shapes_from_env(),
             pointer: "default",
             graphics: images_wanted().then(Graphics::new).flatten(),
         })
@@ -274,13 +273,7 @@ impl Terminal {
     /// Shows `cursor` as the mouse pointer, where the terminal takes OSC 22;
     /// elsewhere controls show they can be clicked by their fill instead.
     pub fn set_pointer(&mut self, cursor: crate::Cursor) -> io::Result<()> {
-        let name = match cursor {
-            crate::Cursor::Default => "default",
-            crate::Cursor::Pointer => "pointer",
-            crate::Cursor::Text => "text",
-            crate::Cursor::ColResize => "ew-resize",
-            crate::Cursor::RowResize => "ns-resize",
-        };
+        let name = pointer_name(cursor);
         if !self.shapes || name == self.pointer {
             return Ok(());
         }
@@ -327,6 +320,25 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = self.leave();
+    }
+}
+
+/// Whether this process's terminal changes the mouse pointer on OSC 22.
+pub(crate) fn pointer_shapes_from_env() -> bool {
+    takes_pointer_shapes(
+        std::env::var("TERM_PROGRAM").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    )
+}
+
+/// `cursor`'s name in OSC 22.
+pub(crate) fn pointer_name(cursor: crate::Cursor) -> &'static str {
+    match cursor {
+        crate::Cursor::Default => "default",
+        crate::Cursor::Pointer => "pointer",
+        crate::Cursor::Text => "text",
+        crate::Cursor::ColResize => "ew-resize",
+        crate::Cursor::RowResize => "ns-resize",
     }
 }
 

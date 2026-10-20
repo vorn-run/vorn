@@ -77,6 +77,7 @@ pub const CLIENT_OPTIONS: &[OptionSpec] = &[
     string("filter"),
     string("session"),
     string("status"),
+    string("drawing"),
     boolean("force"),
     boolean("trim"),
     boolean("unwrap"),
@@ -434,6 +435,8 @@ pub struct ClientArgs {
     pub session: Option<String>,
     /// `vorn session wait --status`: `idle`, `done` or `blocked`.
     pub status: Option<String>,
+    /// `vorn --drawing`: how the terminal UI draws (`auto`, `pixels` or `text`).
+    pub drawing: Option<String>,
     /// `vorn layout save --force`: replace a layout of that name.
     pub force: bool,
     pub trim: bool,
@@ -544,6 +547,15 @@ impl ClientArgs {
                 "--status must be idle, done or blocked, got \"{s}\""
             )));
         }
+        let drawing = owned("drawing");
+        if let Some(d) = drawing
+            .as_deref()
+            .filter(|d| !["auto", "pixels", "text"].contains(d))
+        {
+            return Err(ArgsError(format!(
+                "--drawing must be auto, pixels or text, got \"{d}\""
+            )));
+        }
         let filter = parsed
             .str("filter")
             .map(|f| {
@@ -561,6 +573,7 @@ impl ClientArgs {
             filter,
             session: owned("session"),
             status,
+            drawing,
             force: parsed.flag("force"),
             trim: parsed.flag("trim"),
             unwrap: parsed.flag("unwrap"),

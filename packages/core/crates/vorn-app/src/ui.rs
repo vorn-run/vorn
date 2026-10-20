@@ -5,6 +5,8 @@
 pub use vornui::accesskit::{Role, TreeUpdate};
 pub use vornui::input::{from_ime, mods};
 pub use vornui::text::{BOLD, ITALIC};
+#[cfg(not(target_arch = "wasm32"))]
+pub use vornui::tty;
 pub use vornui::widgets::{
     area, code, field, item_id, split, text_input, textarea, tooltip, tooltip_at,
 };

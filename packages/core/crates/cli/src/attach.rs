@@ -9,13 +9,18 @@ use crate::client::{CommandError, Context};
 use crate::exit::ExitCode;
 use crate::output::Io;
 use crate::target::{self, Candidate, Miss};
+use vorn_app::ui::tty::Drawing;
 
 pub const ATTACH_USAGE: &str = "Usage
-  vorn attach [<session>] [--data-dir <path>]
+  vorn attach [<session>] [--data-dir <path>] [--drawing auto|pixels|text]
 
 Opens Vorn in this terminal, full window on one session: its id (or the start
 of one), its name, or its number in `vorn session list`. With no session, the
 most recent one.
+
+--drawing pixels draws the UI as images, as the desktop app looks, in a
+terminal that shows kitty graphics; text draws it in text cells; auto (the
+Drawing setting's default) picks pixels where the terminal can show them.
 
 Keys
   Alt+B         Show or hide the sidebar
@@ -31,6 +36,8 @@ pub struct Tui {
     pub data_dir: PathBuf,
     /// The session to open full window; none opens the sessions screen.
     pub focus: Option<String>,
+    /// `--drawing`: how to draw, over the Drawing setting.
+    pub drawing: Option<Drawing>,
 }
 
 /// What a command line asks for: an exit code now, or the TUI.
@@ -95,6 +102,7 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
         return Outcome::Exit(ExitCode::Usage);
     }
     let given = args.positionals.get(1).cloned();
+    let drawing = args.drawing.as_deref().and_then(Drawing::parse);
     let mut ctx = Context::new(io, args);
     if !ctx.server().await {
         return Outcome::Exit(ExitCode::Unreachable);
@@ -108,6 +116,7 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
         return Outcome::Tui(Tui {
             data_dir,
             focus: None,
+            drawing,
         });
     }
     let listed = match crate::session::candidates(&ctx).await {
@@ -118,6 +127,7 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
         Ok(id) => Outcome::Tui(Tui {
             data_dir,
             focus: Some(id),
+            drawing,
         }),
         Err(CommandError::Refused(message)) => {
             ctx.io.write_err(&format!("vorn: {message}\n"));
@@ -131,6 +141,7 @@ pub async fn run(argv: &[String], io: &mut dyn Io, bare: bool, tty: bool) -> Out
 pub fn open(tui: &Tui) -> ExitCode {
     let opts = vorn_app::tui::Options {
         focus: tui.focus.clone(),
+        drawing: tui.drawing,
     };
     match vorn_app::tui::run(&tui.data_dir, &opts) {
         Ok(()) => ExitCode::Ok,

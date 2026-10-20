@@ -1,5 +1,9 @@
-//! The app's screens in a terminal: the same [`App`] laid out in cells and
-//! drawn through vornui's Cells backend, input read from the terminal.
+//! The app's screens in a terminal: the same [`App`], drawn as pixels
+//! where the terminal shows kitty graphics (the desktop's look, at the
+//! terminal's own pixel size) and through vornui's Cells backend in text
+//! cells elsewhere, input read from the terminal. Settings › Appearance ›
+//! Drawing and `vorn --drawing` choose between them; a change in Settings
+//! applies at once.
 //!
 //! Keys the terminal cannot send as the window's shortcuts: Alt stands in
 //! for the command key (Alt+1..9 jump to a session, Alt+[ and Alt+] cycle,
@@ -7,23 +11,118 @@
 //! Alt+S switch to Tasks and Sessions, Alt+Shift+W to Workflows), and
 //! Ctrl+\ detaches (the sessions keep running in vornd).
 
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 use crate::app::MOD;
 use crate::client::Endpoint;
+use crate::screen::TermDrawing;
 use crate::ui::backend::{Backend, Cells};
 use crate::ui::cells::term::{TermEvent, Terminal};
+use crate::ui::tty::{self, Caps, Drawing, PixelTerminal};
 use crate::ui::{mods, Input, Ui};
 use crate::App;
+
+/// How long the terminal has to answer what it can do.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// Where the TUI starts.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     /// The session to open full window, its sidebar hidden.
     pub focus: Option<String>,
+    /// How to draw, over the Drawing setting until the setting changes.
+    pub drawing: Option<Drawing>,
+}
+
+/// Where frames go.
+enum Out {
+    Text(Cells),
+    Pixels(Box<PixelTerminal>),
+}
+
+impl Out {
+    /// Takes over the terminal, as pixels when `pixels` and it can.
+    fn open(pixels: bool, caps: Caps) -> Result<Out, String> {
+        if pixels {
+            if let Ok(t) = PixelTerminal::enter(caps) {
+                return Ok(Out::Pixels(Box::new(t)));
+            }
+        }
+        let term = Terminal::enter().map_err(|e| e.to_string())?;
+        Ok(Out::Text(Cells::terminal(term)))
+    }
+
+    fn pixels(&self) -> bool {
+        matches!(self, Out::Pixels(_))
+    }
+
+    /// The UI's scale on this surface (1 in cells).
+    fn scale(&self) -> f32 {
+        match self {
+            Out::Text(_) => 1.0,
+            Out::Pixels(t) => t.scale(),
+        }
+    }
+
+    /// The layout's size: cells, or logical pixels.
+    fn size(&self) -> (f32, f32) {
+        match self {
+            Out::Text(c) => crate::ui::cells::units::px(c.buffer.cols, c.buffer.rows),
+            Out::Pixels(t) => t.logical_size(),
+        }
+    }
+
+    fn poll(&mut self, timeout: Duration) -> Result<Option<TermEvent>, String> {
+        match self {
+            Out::Text(_) => Terminal::poll(timeout),
+            Out::Pixels(t) => t.poll(timeout),
+        }
+        .map_err(|e| e.to_string())
+    }
+
+    /// Draws the frame `app` last laid out into `ui`.
+    fn present(&mut self, app: &mut App, ui: &mut Ui) -> Result<(), String> {
+        match self {
+            Out::Text(c) => c.present(ui).map(drop),
+            Out::Pixels(t) => {
+                // A full atlas empties itself; the frame is laid out again.
+                if t.present(ui).map_err(|e| e.to_string())?.is_none() {
+                    app.frame(ui, t.logical_size());
+                    t.present(ui).map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn resize(&mut self, cols: u16, rows: u16) {
+        if let Out::Text(c) = self {
+            c.resize(cols, rows);
+        }
+    }
+
+    fn drawing(&self, caps: Caps) -> TermDrawing {
+        TermDrawing {
+            supported: caps.pixels(),
+            pixels: self.pixels(),
+        }
+    }
+}
+
+/// The Drawing setting.
+fn drawing_setting(app: &App) -> Drawing {
+    app.store
+        .config
+        .pointer("/defaults/tuiDrawing")
+        .and_then(Value::as_str)
+        .and_then(Drawing::parse)
+        .unwrap_or_default()
 }
 
 /// What the TUI does with a key before the app sees it.
@@ -99,31 +198,54 @@ pub fn run(dir: &Path, opts: &Options) -> Result<(), String> {
     (app.chrome, app.traffic) = (false, false);
     app.load_panes(dir);
     app.set_data_dir(dir.to_owned());
-    let mut ui = Ui::cells(&crate::ui_config(1.0));
     let until = Instant::now() + Duration::from_secs(5);
     while app.busy() && Instant::now() < until {
         app.pump();
         std::thread::sleep(Duration::from_millis(20));
     }
-    let term = Terminal::enter().map_err(|e| e.to_string())?;
-    let mut out = Cells::terminal(term);
-    let size = |c: &Cells| crate::ui::cells::units::px(c.buffer.cols, c.buffer.rows);
-    app.frame(&mut ui, size(&out));
+    let probe = tty::probe(PROBE_TIMEOUT).unwrap_or_default();
+    let caps = probe.caps;
+    let mut typed: VecDeque<TermEvent> = probe.typed.into();
+    let mut setting = drawing_setting(&app);
+    let first = opts.drawing.unwrap_or(setting);
+    let mut out = Out::open(first.pixels(caps.pixels()), caps)?;
+    let mut ui = Ui::cells(&crate::ui_config(1.0));
+    ui.set_surface(!out.pixels(), out.scale());
+    app.term_drawing = Some(out.drawing(caps));
+    app.frame(&mut ui, out.size());
     if let Some(id) = &opts.focus {
         app.st.sidebar = false;
         app.focus_session(id);
     }
     let mut dirty = true;
     loop {
+        // A change to the setting applies at once, over the flag.
+        let now_setting = drawing_setting(&app);
+        if now_setting != setting {
+            setting = now_setting;
+            let pixels = setting.pixels(caps.pixels());
+            if pixels != out.pixels() {
+                // The old surface gives the terminal back before the new one takes it.
+                drop(out);
+                out = Out::open(pixels, caps)?;
+                ui.set_surface(!out.pixels(), out.scale());
+                app.term_drawing = Some(out.drawing(caps));
+                dirty = true;
+            }
+        }
         let now = Instant::now();
         let due = ui.next_wake().is_some_and(|t| t <= now);
         if dirty || due || woken.swap(false, Ordering::AcqRel) || ui.animating() {
-            app.frame(&mut ui, size(&out));
-            out.present(&mut ui)?;
+            app.frame(&mut ui, out.size());
+            out.present(&mut app, &mut ui)?;
             dirty = false;
         }
-        let Some(e) = Terminal::poll(Duration::from_millis(16)).map_err(|e| e.to_string())? else {
-            continue;
+        let e = match typed.pop_front() {
+            Some(e) => e,
+            None => match out.poll(Duration::from_millis(16))? {
+                Some(e) => e,
+                None => continue,
+            },
         };
         dirty = true;
         match e {
@@ -153,7 +275,13 @@ pub fn run(dir: &Path, opts: &Options) -> Result<(), String> {
                 ui.wheel(dy);
                 app.events(&mut ui);
             }
-            TermEvent::Resize(cols, rows) => out.resize(cols, rows),
+            TermEvent::Resize(cols, rows) => {
+                out.resize(cols, rows);
+                // The cells may have changed size too (a font size change).
+                if out.pixels() && out.scale() != ui.scale() {
+                    ui.set_surface(false, out.scale());
+                }
+            }
             TermEvent::Focus(f) => ui.set_window_focused(f),
         }
     }

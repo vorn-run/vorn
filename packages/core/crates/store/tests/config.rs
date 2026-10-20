@@ -95,6 +95,7 @@ fn keys_that_were_declared_but_never_listed_survive() {
         ("updateAutoDownload", json!(false)),
         ("headlessStepTimeoutMinutes", json!(45)),
         ("enableHoverPreview", json!(false)),
+        ("tuiDrawing", json!("text")),
     ] {
         round_trips(key, value);
     }
