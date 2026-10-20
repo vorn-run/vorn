@@ -243,8 +243,8 @@ pub fn shrink(width: u32, height: u32, rgba: &[u8], max: u32) -> Option<(u32, u3
             let (x0, x1) = (x * w / sw, ((x + 1) * w / sw).max(x * w / sw + 1));
             let mut sum = [0u64; 4];
             for py in y0..y1 {
-                let row = &rgba[(py as usize * w as usize + x0 as usize) * 4..]
-                    [..(x1 - x0) as usize * 4];
+                let row =
+                    &rgba[(py as usize * w as usize + x0 as usize) * 4..][..(x1 - x0) as usize * 4];
                 for p in row.chunks_exact(4) {
                     let a = u64::from(p[3]);
                     for c in 0..3 {
@@ -339,7 +339,11 @@ mod tests {
         // Left half opaque red, right half transparent green.
         for (i, p) in rgba.chunks_exact_mut(4).enumerate() {
             let x = i as u32 % w;
-            p.copy_from_slice(if x < w / 2 { &[255, 0, 0, 255] } else { &[0, 255, 0, 0] });
+            p.copy_from_slice(if x < w / 2 {
+                &[255, 0, 0, 255]
+            } else {
+                &[0, 255, 0, 0]
+            });
         }
         let (sw, sh, px) = shrink(w, h, &rgba, IMAGE_MAX_SIDE).unwrap();
         assert_eq!((sw, sh), (1024, 683));

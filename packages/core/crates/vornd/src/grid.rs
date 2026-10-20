@@ -286,10 +286,13 @@ where
             },
             m = queue.recv() => match m {
                 Some(m) => {
-                    m.encode(&mut out);
+                    let mut over = !m.encode(&mut out);
                     // Everything else waiting goes in the same write.
                     while let Ok(m) = queue.try_recv() {
-                        m.encode(&mut out);
+                        over |= !m.encode(&mut out);
+                    }
+                    if over {
+                        warn!(conn, "a grid frame over the frame limit was left out");
                     }
                 }
                 None => break "fell behind".to_owned(),

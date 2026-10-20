@@ -31,7 +31,7 @@ use vorn_term_proto::msg::{
     Attach, Attached, CopyFormat, EventId, EventKind, Fidelity, GridPoint, GridResume, InputEvent,
     Resume, ResyncReason, SelectKind, ServerMsg,
 };
-use vorn_term_proto::screen::{Image, Row};
+use vorn_term_proto::screen::{shrink, Image, Row, IMAGE_MAX_SIDE};
 use vorn_term_proto::Cursor;
 
 use crate::grid::{Grid, Held};
@@ -219,12 +219,17 @@ fn images_for(a: &mut Attachment, em: &Emulator, msg: &mut ServerMsg, out: &mut 
         let Some(pic) = em.picture(id, gen) else {
             return false;
         };
+        // Shrunk so its frame stays far below the limit a client closes the connection over.
+        let (width, height, rgba) = shrink(pic.width, pic.height, &pic.rgba, IMAGE_MAX_SIDE)
+            .unwrap_or((pic.width, pic.height, pic.rgba));
         let image = Image {
             id,
             gen,
-            width: pic.width,
-            height: pic.height,
-            rgba: pic.rgba,
+            width,
+            height,
+            source_width: pic.width,
+            source_height: pic.height,
+            rgba,
         };
         out.push(send(
             a.peer,
@@ -1096,6 +1101,74 @@ mod tests {
             panic!();
         };
         assert_eq!(delta.placements.as_ref().map(|p| p.is_empty()), Some(true));
+    }
+
+    /// An image far past the side images are sent at goes shrunk, keeping its aspect, in a
+    /// frame a client reads, and the frames after it still arrive.
+    #[test]
+    fn a_huge_image_goes_shrunk_and_the_stream_stays_up() {
+        let mut em = Emulator::with_scrollback(20, 4, 1 << 16).unwrap();
+        em.resize_px(20, 4, 200, 80, &mut Vec::new()).unwrap();
+        em.set_images(true);
+        em.set_image_limit(100_000_000).unwrap();
+        let mut hub = Hub::new(HubConfig {
+            credits: u8::MAX,
+            ..HubConfig::default()
+        });
+        let t0 = Instant::now();
+        let mut out = Vec::new();
+        let attach = Attach {
+            session: "s".into(),
+            mode: AttachMode::Grid,
+            view: Size::default(),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        };
+        let peer = Peer { conn: 1, sid: 1 };
+        let input = GridIn::Attach {
+            peer,
+            attach,
+            images: true,
+        };
+        hub.handle(input, &ctx(&em, true), t0, &mut out);
+        // 6000×4000 opaque red RGB, in the protocol's 4096 byte chunks.
+        let (w, h) = (6000usize, 4000usize);
+        let chunk = "/wAA".repeat(1000);
+        let chunks = w * h / 1000;
+        let mut seq = format!("\x1b_Ga=T,f=24,s={w},v={h},i=9,q=2,m=1;{chunk}\x1b\\").into_bytes();
+        for i in 1..chunks {
+            let more = u8::from(i + 1 < chunks);
+            seq.extend_from_slice(format!("\x1b_Gm={more};{chunk}\x1b\\").as_bytes());
+        }
+        em.feed(&seq, &mut Vec::new());
+        drop(seq);
+        out.clear();
+        hub.records(&ctx(&em, true), t0, &mut out);
+        em.feed(b"x", &mut Vec::new());
+        hub.records(&ctx(&em, true), t0 + Duration::from_secs(1), &mut out);
+
+        let mut wire = Vec::new();
+        for msg in sent(&out, 1) {
+            assert!(msg.encode(&mut wire), "every frame fits");
+        }
+        let mut r = vorn_term_proto::msg::FrameReader::new();
+        r.push(&wire);
+        let mut got = Vec::new();
+        while let Some((k, payload)) = r.next_frame().unwrap() {
+            got.push(ServerMsg::decode(k, payload).unwrap().unwrap());
+        }
+        let ServerMsg::Image { image, .. } = &got[0] else {
+            panic!("{:?}", got.first().map(ServerMsg::kind));
+        };
+        assert_eq!((image.width, image.height), (1024, 683));
+        assert_eq!((image.source_width, image.source_height), (6000, 4000));
+        assert_eq!(&image.rgba[..4], &[255, 0, 0, 255]);
+        assert!(matches!(got[1], ServerMsg::Snapshot { .. }));
+        assert!(
+            matches!(got.last(), Some(ServerMsg::Delta { .. })),
+            "and the next frame too"
+        );
     }
 
     fn typed(hub: &mut Hub, em: &Emulator, peer: Peer, at: Instant) {
