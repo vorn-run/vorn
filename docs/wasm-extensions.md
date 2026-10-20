@@ -154,7 +154,7 @@ in its manifest. The host asks again whenever the extension's rows change,
 and when the place shows.
 
 A settings page is listed under Extensions in the Settings sidebar, and in
-the palette as "<title> Settings". One of the extensions Vorn ships may name
+the palette as its title and "Settings". One of the extensions Vorn ships may name
 the app's own page it follows with `after` (`appearance`, `general`,
 `updates`, `notifications`, `experimental`, `agents`, `mcp`, `keys` or
 `network`): a page that moved out of the app into a built-in, as SSH &
@@ -220,9 +220,9 @@ before any other event from its tree, so a tab switch never overtakes it. A
 `code` whose tree shows several files gives each its own node id.
 A `log` is cut into blocks by the client, from the shell's screen, pairing
 the newest command with the newest prompt. A field with `live` reports
-`change` as it is typed. A field with `lines` above 1 (`.lines(n)`, at most
-12) is that many lines tall, for a key or a certificate; Return breaks the
-line and Cmd+Return submits it. A one-line field with `blur`
+`change` as it is typed. A field with `lines` above 1 (`.lines(n)`, up to
+twelve) is that many lines tall, for a key or a certificate; Return breaks
+the line and Cmd+Return submits it. A one-line field with `blur`
 (`.submits_on_blur()`) also submits what it holds when it loses focus, as a
 password saves once typed and left; Return there just leaves it.
 
