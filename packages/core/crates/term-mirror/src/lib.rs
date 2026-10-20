@@ -22,9 +22,12 @@
 //! `History` reply ([`Mirror::apply_history`]). A new scrollback epoch, or
 //! a snapshot under another `state_gen` or `table_gen`, empties it.
 
+pub mod kitty;
+
 use vorn_term_proto::row::{self, DecodeError, Run, ROW_FMT};
 use vorn_term_proto::screen::{
-    ColorsDelta, Delta, LinkDef, Row, Screen, Snapshot, StyleDef, TermDelta, TermState,
+    ColorsDelta, Delta, LinkDef, Placements, Row, Screen, Snapshot, StyleDef, TermDelta,
+    TermState,
 };
 use vorn_term_proto::Cursor;
 
@@ -67,6 +70,8 @@ pub struct Mirror {
     /// Rows that scrolled off the viewport or were fetched, by line, oldest
     /// first, one row a line: a cache with gaps.
     history: Vec<Row>,
+    /// The kitty image placements the last frame that carried any showed.
+    placements: Placements,
 }
 
 impl Mirror {
@@ -84,6 +89,7 @@ impl Mirror {
             links: Vec::new(),
             rows: Vec::new(),
             history: Vec::new(),
+            placements: snap.placements.unwrap_or_default(),
         };
         m.extend_tables(snap.styles, snap.links)?;
         for r in snap.rows.iter().chain(&snap.history) {
@@ -219,6 +225,9 @@ impl Mirror {
         for r in delta.rows {
             self.place(r)?;
         }
+        if let Some(p) = delta.placements {
+            self.placements = p;
+        }
         self.rev = delta.rev;
         self.resume = delta.resume;
         Ok(())
@@ -242,6 +251,11 @@ impl Mirror {
 
     pub fn term(&self) -> &TermState {
         &self.term
+    }
+
+    /// The kitty image placements on the screen, in the server's cell pixels.
+    pub fn placements(&self) -> &Placements {
+        &self.placements
     }
 
     /// How many style definitions the mirror holds: ids `0..style_mark()`.
@@ -523,6 +537,7 @@ mod tests {
             links: vec![LinkDef::default()],
             rows: vec![line(0, 0, "$ ls"), line(1, 1, "a  b")],
             history: Vec::new(),
+            placements: None,
         }
     }
 
@@ -539,6 +554,41 @@ mod tests {
             },
             ..Delta::default()
         }
+    }
+
+    #[test]
+    fn placements_stay_until_a_frame_carries_others() {
+        use vorn_term_proto::screen::{Placement, Placements};
+        let shown = Placements {
+            cell_w: 8,
+            cell_h: 16,
+            list: vec![Placement {
+                image: 1,
+                gen: 1,
+                ..Placement::default()
+            }],
+            virtuals: Vec::new(),
+        };
+        let mut m = Mirror::from_snapshot(Snapshot {
+            placements: Some(shown.clone()),
+            ..snapshot()
+        })
+        .unwrap();
+        m.apply(delta(1, 2)).unwrap();
+        assert_eq!(m.placements(), &shown);
+        m.apply(Delta {
+            placements: Some(Placements::default()),
+            ..delta(2, 3)
+        })
+        .unwrap();
+        assert!(m.placements().is_empty());
+        m.apply(Delta {
+            placements: Some(shown.clone()),
+            ..delta(3, 4)
+        })
+        .unwrap();
+        m.resnapshot(snapshot()).unwrap();
+        assert!(m.placements().is_empty(), "a snapshot without any clears them");
     }
 
     #[test]

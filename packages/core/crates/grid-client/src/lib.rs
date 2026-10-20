@@ -10,9 +10,10 @@
 //! Like the native app, it links no terminal: everything it shows is a frame
 //! vornd sent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use vorn_term_mirror::{Mirror, Refused};
+use vorn_term_proto::screen::Image;
 use vorn_term_proto::msg::{
     caps, Attach, Attached, ClientKind, ClientMsg, EventId, EventKind, FrameReader, GridResume,
     Hello, MsgError, ServerMsg, Welcome, PROTO_MAJOR, PROTO_MINOR,
@@ -37,6 +38,8 @@ pub struct Pane {
     /// Resyncs and table resets announced.
     pub resyncs: u64,
     pub resets: u64,
+    /// The kitty images the mirror's placements show, by id.
+    images: HashMap<u32, Image>,
 }
 
 impl std::fmt::Debug for Pane {
@@ -54,6 +57,21 @@ impl Pane {
     /// The mirror, unless its tables were reset and no snapshot came yet.
     pub fn mirror(&self) -> Option<&Mirror> {
         self.mirror.as_ref().filter(|_| !self.stale)
+    }
+
+    /// A kitty image the placements show, by id.
+    pub fn image(&self, id: u32) -> Option<&Image> {
+        self.images.get(&id)
+    }
+
+    /// Forgets the images no placement shows any more, as vornd does.
+    fn prune_images(&mut self) {
+        let Some(m) = &self.mirror else {
+            return;
+        };
+        let shown = m.placements();
+        self.images
+            .retain(|id, img| shown.images().any(|(i, g)| i == *id && g == img.gen));
     }
 
     /// What to resume from after a reconnect.
@@ -79,6 +97,11 @@ pub enum Got {
         sid: u32,
         rev: u64,
         snapshot: bool,
+    },
+    /// A kitty image's pixels arrived for the placements that follow.
+    Image {
+        sid: u32,
+        id: u32,
     },
     /// A frame the mirror would not apply.
     Refused {
@@ -201,6 +224,7 @@ impl Client {
                 pane.stale = false;
                 match applied {
                     Ok(()) => {
+                        pane.prune_images();
                         pane.frames += 1;
                         pane.snapshots += 1;
                         pane.frame_bytes += len;
@@ -226,6 +250,7 @@ impl Client {
                 };
                 match applied {
                     Ok(()) => {
+                        pane.prune_images();
                         pane.frames += 1;
                         pane.frame_bytes += len;
                         Got::Frame {
@@ -239,6 +264,11 @@ impl Client {
                         Got::Refused { sid, why }
                     }
                 }
+            }
+            ServerMsg::Image { sid, image } => {
+                let id = image.id;
+                self.panes.entry(sid).or_default().images.insert(id, *image);
+                Got::Image { sid, id }
             }
             ServerMsg::ResetTables { sid, .. } => {
                 let pane = self.panes.entry(sid).or_default();

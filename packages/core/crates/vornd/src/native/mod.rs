@@ -279,6 +279,8 @@ pub struct Native {
     catalog: vorn_agents::models::Catalog,
     /// The agents vornd runs, from their adapters; the engine's when it runs one.
     adapters: OnceLock<Arc<crate::adapters::Adapters>>,
+    /// The engine's Settings › Experimental switch, when vornd holds sessions.
+    experimental: OnceLock<Arc<std::sync::atomic::AtomicBool>>,
     /// The model each running session was started with, when one was chosen,
     /// which `session.created` tells.
     models: Mutex<HashMap<String, String>>,
@@ -358,6 +360,7 @@ impl Native {
             secrets,
             catalog: vorn_agents::models::Catalog::default(),
             adapters: OnceLock::new(),
+            experimental: OnceLock::new(),
             models: Mutex::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
@@ -390,6 +393,18 @@ impl Native {
     /// is kept, and only before the first call reads them.
     pub fn set_adapters(&self, adapters: Arc<crate::adapters::Adapters>) {
         let _ = self.adapters.set(adapters);
+    }
+
+    /// Shares the engine's Settings › Experimental switch, which the configuration then sets.
+    pub fn set_experimental(&self, switch: Arc<std::sync::atomic::AtomicBool>) {
+        let _ = self.experimental.set(switch);
+    }
+
+    /// Sets Settings › Experimental for the engine's sessions, if vornd holds any.
+    pub fn experimental(&self, on: bool) {
+        if let Some(switch) = self.experimental.get() {
+            switch.store(on, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// The agents vornd runs, from their adapters.

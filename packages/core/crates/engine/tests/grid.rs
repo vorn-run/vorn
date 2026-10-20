@@ -1263,3 +1263,52 @@ fn prompt_marks_survive_resizes() {
         }
     }
 }
+
+/// Kitty images behind Settings › Experimental: a card attached later, and one that reconnects
+/// with nothing kept, get the pixels before the snapshot that places them; switched off, the
+/// next batch takes them away.
+#[test]
+fn a_card_attached_later_shows_the_images_already_placed() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let cfg = Arc::new(vorn_engine::Config {
+        images: Arc::new(AtomicBool::new(true)),
+        ..(*gridrig::config(SCROLLBACK)).clone()
+    });
+    let mut b = LogBuilder::new(Size::new(40, 10));
+    b.push(Record::Resize {
+        cols: 40,
+        rows: 10,
+        px_w: 400,
+        px_h: 200,
+        req: None,
+    });
+    b.data("\x1b_Ga=T,f=32,s=2,v=1,c=4,r=2,i=7,q=2;/wAA/wD/AP8=\x1b\\\r\n\r\nafter\r\n");
+    b.data("x");
+    let entries = b.build().entries;
+    let mut rig = Rig::with_config((40, 10), Arc::clone(&cfg));
+    rig.attach(1, 1, true, None);
+    rig.feed(&entries[..2]);
+    rig.settle();
+    let shows = |rig: &Rig, conn: u64| {
+        let pane = rig.clients[&conn].pane(1).unwrap();
+        let p = pane.mirror().unwrap().placements();
+        let at: Vec<_> = p.list.iter().map(|p| (p.image, p.line, p.col, p.width, p.height)).collect();
+        let pixels = pane.image(7).map(|i| (i.width, i.height, i.rgba.len()));
+        ((p.cell_w, p.cell_h), at, pixels)
+    };
+    let placed = ((10, 20), vec![(7, 0, 0, 40, 40)], Some((2, 1, 8)));
+    assert_eq!(shows(&rig, 1), placed);
+
+    rig.attach(2, 1, true, None);
+    rig.detach(1, 1);
+    rig.clients.remove(&1);
+    rig.attach(1, 1, true, None);
+    rig.settle();
+    assert_eq!(shows(&rig, 1), placed);
+    assert_eq!(shows(&rig, 2), placed);
+
+    cfg.images.store(false, Ordering::Relaxed);
+    rig.feed(&entries[2..]);
+    rig.settle();
+    assert_eq!(shows(&rig, 2), ((0, 0), vec![], None));
+}

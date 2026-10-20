@@ -147,6 +147,7 @@ impl Rig {
                 resume: resume.map(Resume::Grid),
                 history_tail,
             },
+            images: true,
         });
     }
 

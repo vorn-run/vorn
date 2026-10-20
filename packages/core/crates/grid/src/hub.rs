@@ -201,10 +201,11 @@ fn images_for(a: &mut Attachment, em: &Emulator, msg: &mut ServerMsg, out: &mut 
         *placements = None;
         return;
     }
+    // A snapshot starts the client over, as after a refused frame, so its images go again.
+    if snapshot {
+        a.sent.clear();
+    }
     let Some(p) = placements else {
-        if snapshot {
-            a.sent.clear();
-        }
         return;
     };
     let mut shown: Vec<(u32, u64)> = p.images().collect();
