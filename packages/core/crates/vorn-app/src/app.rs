@@ -44,6 +44,7 @@ mod plugins;
 mod points;
 #[cfg(not(target_arch = "wasm32"))]
 mod relink;
+mod review;
 mod settings;
 mod shell;
 mod side;
