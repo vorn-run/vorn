@@ -68,6 +68,17 @@ struct Image {
     uv: Option<[f32; 4]>,
 }
 
+/// A picture [`Ui::picture`] keeps in the colour atlas while frames draw it.
+struct Picture {
+    uv: Option<[f32; 4]>,
+    /// Atlas texels per picture pixel, across and down: below one for a large picture.
+    k: (f32, f32),
+    used: bool,
+}
+
+/// The longest side a picture is kept at, so a few fill the colour atlas at most.
+const PICTURE_MAX: u32 = 1024;
+
 pub struct Ui {
     /// `None` when the CPU draws: frames stay in memory, to be read back
     /// or presented by a window without a device.
@@ -87,6 +98,10 @@ pub struct Ui {
     pub(crate) viewport: (f32, f32),
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
+    pictures: HashMap<u64, Picture>,
+    /// A picture filled the atlas and the frame is being drawn again on an empty one: one that
+    /// still does not fit is left out rather than emptying it again and again.
+    pictures_redo: bool,
     anon: u64,
     /// The earliest frame a view asked for while building this one, for
     /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
@@ -225,6 +240,8 @@ impl Ui {
             viewport: (0.0, 0.0),
             icons: HashMap::new(),
             images: Vec::new(),
+            pictures: HashMap::new(),
+            pictures_redo: false,
             anon: 0,
             wake: Cell::new(None),
             cells: None,
@@ -345,6 +362,43 @@ impl Ui {
         Some(self.images.len() as u32 - 1)
     }
 
+    /// Draws `src` (x, y, width, height in picture pixels) of a straight-alpha RGBA picture
+    /// `size` into `dst`, uploading it the first frame `key` is drawn: a key names one picture's
+    /// pixels for as long as frames draw it. A side over 1024 px is kept shrunk.
+    pub fn picture(&mut self, key: u64, size: (u32, u32), rgba: &[u8], src: [f32; 4], dst: Rect) {
+        let (w, h) = size;
+        if w == 0 || h == 0 || rgba.len() < w as usize * h as usize * 4 {
+            return;
+        }
+        let pic = match self.pictures.get_mut(&key) {
+            Some(p) => p,
+            None => {
+                let max = PICTURE_MAX.min(self.atlases.color.size / 2).max(1);
+                let (sw, sh, pixels) = shrink(w, h, rgba, max);
+                let uv = self
+                    .atlases
+                    .color
+                    .insert(sw, sh, pixels.as_deref().unwrap_or(rgba));
+                if uv.is_none() && !self.pictures_redo {
+                    self.atlases.full = true;
+                    self.pictures_redo = true;
+                    return;
+                }
+                let k = (sw as f32 / w as f32, sh as f32 / h as f32);
+                self.pictures
+                    .entry(key)
+                    .or_insert(Picture { uv, k, used: false })
+            }
+        };
+        pic.used = true;
+        let Some([u, v, _, _]) = pic.uv else {
+            return;
+        };
+        let (kx, ky) = pic.k;
+        let uv = [u + src[0] * kx, v + src[1] * ky, src[2] * kx, src[3] * ky];
+        self.scene.sprite(dst, uv, Rgba::white(1.0), true);
+    }
+
     /// Starts a frame on an empty scene.
     pub fn begin(&mut self, clear: Rgba) {
         self.begin_at(clear, Instant::now());
@@ -357,6 +411,8 @@ impl Ui {
         self.scene.clear();
         self.overlays = 0..0;
         self.clear = clear;
+        // Pictures the last frame did not draw give their entry back.
+        self.pictures.retain(|_, p| std::mem::take(&mut p.used));
         if let Some(list) = &mut self.cells {
             list.begin(clear);
         }
@@ -1644,6 +1700,7 @@ impl Ui {
         self.atlases.reset();
         self.text.clear_rasters();
         self.icons.clear();
+        self.pictures.clear();
         for img in &mut self.images {
             img.uv = self.atlases.insert_color(img.w, img.h, &img.rgba);
         }
@@ -1671,6 +1728,7 @@ impl Ui {
             self.reset_atlases();
             return false;
         }
+        self.pictures_redo = false;
         self.renderer.draw(
             self.gpu.as_ref(),
             &self.scene,
@@ -1696,6 +1754,7 @@ impl Ui {
             self.reset_atlases();
             return false;
         }
+        self.pictures_redo = false;
         for (raster, skip) in jobs.iter_mut() {
             raster.render_without(&self.scene, &self.atlases, self.clear, size, skip.clone());
         }
@@ -2113,6 +2172,43 @@ pub fn write_png(path: &str, size: (u32, u32), rgba: &[u8]) -> Result<(), String
     enc.set_depth(png::BitDepth::Eight);
     let mut w = enc.write_header().map_err(|e| e.to_string())?;
     w.write_image_data(rgba).map_err(|e| e.to_string())
+}
+
+/// A picture shrunk to at most `max` px a side, each pixel the alpha-weighted average of those
+/// it covers; `None` pixels when it already fits.
+fn shrink(w: u32, h: u32, rgba: &[u8], max: u32) -> (u32, u32, Option<Vec<u8>>) {
+    if w <= max && h <= max {
+        return (w, h, None);
+    }
+    let f = f64::from(w.max(h)) / f64::from(max);
+    let sw = ((f64::from(w) / f).round() as u32).clamp(1, max);
+    let sh = ((f64::from(h) / f).round() as u32).clamp(1, max);
+    let mut out = vec![0u8; sw as usize * sh as usize * 4];
+    for y in 0..sh {
+        let (y0, y1) = (y * h / sh, ((y + 1) * h / sh).max(y * h / sh + 1));
+        for x in 0..sw {
+            let (x0, x1) = (x * w / sw, ((x + 1) * w / sw).max(x * w / sw + 1));
+            let mut sum = [0u64; 4];
+            for py in y0..y1 {
+                let row = py as usize * w as usize;
+                for px in x0..x1 {
+                    let p = &rgba[(row + px as usize) * 4..][..4];
+                    let a = u64::from(p[3]);
+                    for c in 0..3 {
+                        sum[c] += u64::from(p[c]) * a;
+                    }
+                    sum[3] += a;
+                }
+            }
+            let n = u64::from((x1 - x0) * (y1 - y0));
+            let o = &mut out[(y as usize * sw as usize + x as usize) * 4..][..4];
+            for c in 0..3 {
+                o[c] = sum[c].checked_div(sum[3]).unwrap_or(0) as u8;
+            }
+            o[3] = (sum[3] / n) as u8;
+        }
+    }
+    (sw, sh, Some(out))
 }
 
 #[cfg(test)]

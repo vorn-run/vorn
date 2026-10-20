@@ -1293,7 +1293,7 @@ fn a_card_attached_later_shows_the_images_already_placed() {
         let pane = rig.clients[&conn].pane(1).unwrap();
         let p = pane.mirror().unwrap().placements();
         let at: Vec<_> = p.list.iter().map(|p| (p.image, p.line, p.col, p.width, p.height)).collect();
-        let pixels = pane.image(7).map(|i| (i.width, i.height, i.rgba.len()));
+        let pixels = pane.image(7).map(|s| (s.image.width, s.image.height, s.image.rgba.len()));
         ((p.cell_w, p.cell_h), at, pixels)
     };
     let placed = ((10, 20), vec![(7, 0, 0, 40, 40)], Some((2, 1, 8)));

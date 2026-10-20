@@ -2,11 +2,14 @@
 //! one resolved style, colours already resolved against the app's terminal
 //! theme and whatever palette the program set.
 
-use vorn_term_mirror::Mirror;
+use std::sync::Arc;
+
+use vorn_grid_client::Shown;
+use vorn_term_mirror::{kitty, Mirror};
 use vorn_term_proto::msg::GridPoint;
 use vorn_term_proto::row;
 use vorn_term_proto::screen::{
-    attrs, row_flags, Color, CursorStyle, MouseMode, Row, Screen, StyleDef, Underline,
+    attrs, row_flags, Color, CursorStyle, Image, MouseMode, Row, Screen, StyleDef, Underline,
 };
 
 use crate::look::{term, Rgb};
@@ -48,6 +51,32 @@ pub enum Cursor {
     Underline,
 }
 
+/// A kitty image drawn on a pane, over or under its text.
+#[derive(Clone)]
+pub struct Picture {
+    /// Names these pixels for the renderer's texture cache.
+    pub key: u64,
+    pub image: Arc<Image>,
+    /// The part of the image drawn: x, y, width, height in image pixels.
+    pub src: [f32; 4],
+    /// Where: x, y, width, height from the top left of row 0, in [`PaneView::cell_px`] pixels.
+    pub dst: [f32; 4],
+    /// Below text when negative.
+    pub z: i32,
+}
+
+impl std::fmt::Debug for Picture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Picture")
+            .field("key", &self.key)
+            .field("image", &self.image.id)
+            .field("src", &self.src)
+            .field("dst", &self.dst)
+            .field("z", &self.z)
+            .finish()
+    }
+}
+
 /// One pane's screen, ready to paint.
 #[derive(Debug, Clone, Default)]
 pub struct PaneView {
@@ -78,6 +107,13 @@ pub struct PaneView {
     pub primary: bool,
     /// The program tracks the mouse.
     pub mouse: bool,
+    /// Kitty images to draw, lowest z first; see [`pictures`].
+    pub pictures: Vec<Picture>,
+    /// The server's cell size in pixels, which picture pixels are measured in.
+    pub cell_px: (u32, u32),
+    /// Runs of unicode placeholder cells, by row; drawn blank, their pictures placed by
+    /// [`pictures`].
+    pub holders: Vec<(u16, kitty::Run)>,
 }
 
 /// The xterm 256-colour palette, its first sixteen the app's.
@@ -227,6 +263,10 @@ pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView
         cursor_color: term::CURSOR,
         ..PaneView::default()
     };
+    // Placeholders draw nothing without a virtual placement, so are left as text unparsed.
+    let holders = !m.placements().virtuals.is_empty();
+    let mut held = kitty::Runs::default();
+    let mut row_held = Vec::new();
     let mut n: u16 = 0;
     for (y, r) in rows.into_iter().enumerate() {
         n = y as u16 + 1;
@@ -239,11 +279,23 @@ pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView
         let y = y as u16;
         let mut col: u16 = 0;
         for run in runs {
-            let (fg, bg, f) = pal.resolve(m.style(run.style));
+            let style = m.style(run.style);
+            let (fg, bg, f) = pal.resolve(style);
             for cell in run.cells {
                 let w = if cell.wide { 2 } else { 1 };
-                let ascii = !cell.wide && cell.text.len() <= 1;
-                let text = if cell.text.is_empty() {
+                let held_cell = holders
+                    .then(|| {
+                        let (fg, ul) = style.map_or((Color::Default, Color::Default), |s| {
+                            (s.fg, s.underline_color)
+                        });
+                        kitty::Cell::parse(&cell.text, fg, ul)
+                    })
+                    .flatten();
+                if holders {
+                    held.push(col, held_cell, &mut row_held);
+                }
+                let ascii = held_cell.is_some() || (!cell.wide && cell.text.len() <= 1);
+                let text = if cell.text.is_empty() || held_cell.is_some() {
                     " "
                 } else {
                     &cell.text
@@ -285,6 +337,10 @@ pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView
                 col += w;
             }
         }
+        if holders {
+            held.end(&mut row_held);
+            v.holders.extend(row_held.drain(..).map(|r| (y, r)));
+        }
     }
     v.rows = n;
     // Runs that are only blanks on the default background draw nothing.
@@ -297,6 +353,69 @@ pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView
                 .any(|b| *b != b' ')
     });
     v
+}
+
+/// Places the kitty images `m` shows on `v`, a view of it [`build`] made, their pixels looked up
+/// by id in `image`: placements a frame carried, and the pieces of virtual ones its placeholder
+/// runs show. Those wholly off the view are left out.
+pub fn pictures<'a>(v: &mut PaneView, m: &Mirror, image: impl Fn(u32) -> Option<&'a Shown>) {
+    let p = m.placements();
+    v.pictures.clear();
+    if p.is_empty() || p.cell_w == 0 || p.cell_h == 0 {
+        return;
+    }
+    v.cell_px = (p.cell_w, p.cell_h);
+    let (cw, ch) = (p.cell_w as f32, p.cell_h as f32);
+    let shown = |id: u32, gen: u64| image(id).filter(|s| s.image.gen == gen);
+    // A scrolled view draws one row more, below its last.
+    let height = (f32::from(v.rows) + 1.0) * ch;
+    let width = f32::from(v.cols) * cw;
+    let visible = |d: [f32; 4]| d[1] < height && d[1] + d[3] > 0.0 && d[0] < width && d[0] + d[2] > 0.0;
+    let top = if v.primary { v.line0 as i64 } else { 0 };
+    for pl in &p.list {
+        let Some(s) = shown(pl.image, pl.gen) else {
+            continue;
+        };
+        let row = pl.line.saturating_sub(top) as f32;
+        let dst = [
+            pl.col as f32 * cw + pl.x_off as f32,
+            row * ch + pl.y_off as f32,
+            pl.width as f32,
+            pl.height as f32,
+        ];
+        if !visible(dst) {
+            continue;
+        }
+        v.pictures.push(Picture {
+            key: s.key,
+            image: Arc::clone(&s.image),
+            src: pl.src.map(|n| n as f32),
+            dst,
+            z: pl.z,
+        });
+    }
+    for (row, run) in &v.holders {
+        let Some(t) = kitty::target(&p.virtuals, run) else {
+            continue;
+        };
+        let Some(s) = shown(t.image, t.gen) else {
+            continue;
+        };
+        let size = (s.image.width, s.image.height);
+        let Some(piece) = kitty::piece(run, &t, size, (p.cell_w, p.cell_h)) else {
+            continue;
+        };
+        let (x, y) = (f32::from(run.x) * cw, f32::from(*row) * ch);
+        let d = piece.dst;
+        v.pictures.push(Picture {
+            key: s.key,
+            image: Arc::clone(&s.image),
+            src: piece.src,
+            dst: [x + d[0], y + d[1], d[2], d[3]],
+            z: 0,
+        });
+    }
+    v.pictures.sort_by_key(|p| p.z);
 }
 
 impl PaneView {
@@ -376,6 +495,10 @@ mod tests {
 
     /// Three screen rows at lines 2..5 under two lines of history.
     fn scrolled_mirror() -> Mirror {
+        Mirror::from_snapshot(scrolled_snapshot()).expect("valid snapshot")
+    }
+
+    fn scrolled_snapshot() -> vorn_term_proto::screen::Snapshot {
         use vorn_term_proto::row::{Cell, Run as Cells, ROW_FMT};
         use vorn_term_proto::screen::{LinkDef, Row, Snapshot, TermState};
         let at = |y: u16, line: u64, text: &str| Row {
@@ -397,7 +520,7 @@ mod tests {
         };
         term.cursor.y = 2;
         term.cursor.visible = true;
-        Mirror::from_snapshot(Snapshot {
+        Snapshot {
             state_gen: 1,
             rev: 1,
             row_fmt: ROW_FMT,
@@ -407,8 +530,132 @@ mod tests {
             rows: vec![at(0, 2, "two"), at(1, 3, "three"), at(2, 4, "four")],
             history: vec![at(0, 0, "zero"), at(0, 1, "one")],
             ..Snapshot::default()
-        })
-        .expect("valid snapshot")
+        }
+    }
+
+    fn shown(id: u32, gen: u64, (width, height): (u32, u32)) -> Shown {
+        Shown {
+            key: u64::from(id) << 8 | gen,
+            image: Arc::new(Image {
+                id,
+                gen,
+                width,
+                height,
+                rgba: vec![255; (width * height * 4) as usize],
+            }),
+        }
+    }
+
+    fn placed(image: u32, line: i64, z: i32) -> vorn_term_proto::screen::Placement {
+        vorn_term_proto::screen::Placement {
+            image,
+            gen: 1,
+            line,
+            col: 1,
+            x_off: 2,
+            y_off: 3,
+            width: 20,
+            height: 40,
+            src: [0, 0, 4, 8],
+            z,
+        }
+    }
+
+    #[test]
+    fn pictures_sit_on_their_lines_as_the_view_scrolls() {
+        use vorn_term_proto::screen::Placements;
+        let mut snap = scrolled_snapshot();
+        snap.placements = Some(Placements {
+            cell_w: 10,
+            cell_h: 20,
+            // Line 0 is two rows above the live screen: off it but for a part of this one.
+            list: vec![
+                placed(1, 3, 5),
+                placed(2, 3, -1),
+                vorn_term_proto::screen::Placement {
+                    y_off: 0,
+                    ..placed(1, 0, 0)
+                },
+                placed(1, 0, 0),
+                placed(9, 2, 0),
+            ],
+            virtuals: Vec::new(),
+        });
+        let m = Mirror::from_snapshot(snap).expect("valid snapshot");
+        let images = [shown(1, 1, (4, 8)), shown(2, 1, (4, 8))];
+        let look = |id: u32| images.iter().find(|s| s.image.id == id);
+        let mut live = build(&m, None);
+        pictures(&mut live, &m, look);
+        assert_eq!(live.cell_px, (10, 20));
+        let at: Vec<_> = live.pictures.iter().map(|p| (p.image.id, p.z, p.dst)).collect();
+        // Lowest z first; the unknown image 9 and the one wholly scrolled off are left out.
+        assert_eq!(
+            at,
+            [
+                (2, -1, [12.0, 23.0, 20.0, 40.0]),
+                (1, 0, [12.0, -37.0, 20.0, 40.0]),
+                (1, 5, [12.0, 23.0, 20.0, 40.0])
+            ]
+        );
+        assert_eq!(live.pictures[0].src, [0.0, 0.0, 4.0, 8.0]);
+        let mut back = build(&m, Some(0));
+        pictures(&mut back, &m, look);
+        let ys: Vec<_> = back.pictures.iter().map(|p| (p.image.id, p.dst[1])).collect();
+        assert_eq!(ys, [(2, 63.0), (1, 0.0), (1, 3.0), (1, 63.0)]);
+        // A newer generation than the pixels held is not drawn with the old ones.
+        let stale = [shown(1, 2, (4, 8))];
+        pictures(&mut live, &m, |id| stale.iter().find(|s| s.image.id == id));
+        assert!(live.pictures.is_empty());
+    }
+
+    #[test]
+    fn placeholder_cells_draw_blank_with_their_piece_of_the_image() {
+        use vorn_term_proto::row::{Cell, Run as Cells};
+        use vorn_term_proto::screen::{Placements, Virtual};
+        let mut snap = scrolled_snapshot();
+        snap.styles.push(StyleDef {
+            id: 1,
+            fg: Color::Palette(7),
+            ..StyleDef::default()
+        });
+        let holder = |marks: &str| Cell::new(format!("{}{marks}", kitty::PLACEHOLDER));
+        snap.rows[0].cells = row::encode(&[
+            Cells {
+                style: 0,
+                link: 0,
+                cells: vec![Cell::new("$".to_string())],
+            },
+            Cells {
+                style: 1,
+                link: 0,
+                cells: vec![holder("\u{305}\u{305}"), holder("")],
+            },
+        ]);
+        let m = Mirror::from_snapshot(snap.clone()).expect("valid snapshot");
+        let mut v = build(&m, None);
+        assert_eq!(v.text().lines().next(), Some("$\u{10EEEE}\u{305}\u{305}\u{10EEEE}"));
+        assert!(v.holders.is_empty(), "no virtual placement, nothing parsed");
+        snap.placements = Some(Placements {
+            cell_w: 10,
+            cell_h: 20,
+            list: Vec::new(),
+            virtuals: vec![Virtual {
+                image: 7,
+                gen: 1,
+                placement: 0,
+                cols: 2,
+                rows: 1,
+            }],
+        });
+        let m = Mirror::from_snapshot(snap).expect("valid snapshot");
+        v = build(&m, None);
+        assert_eq!(v.text().lines().next(), Some("$"));
+        assert_eq!(v.holders.len(), 1);
+        assert_eq!((v.holders[0].0, v.holders[0].1.x, v.holders[0].1.width), (0, 1, 2));
+        let images = [shown(7, 1, (20, 20))];
+        pictures(&mut v, &m, |id| images.iter().find(|s| s.image.id == id));
+        let at: Vec<_> = v.pictures.iter().map(|p| (p.src, p.dst)).collect();
+        assert_eq!(at, [([0.0, 0.0, 20.0, 20.0], [10.0, 0.0, 20.0, 20.0])]);
     }
 
     #[test]

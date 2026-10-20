@@ -1586,6 +1586,8 @@ export interface AppConfig {
     worktreeRetention?: WorktreeRetentionConfig
     /** How `vorn` draws in a terminal: as images where it shows them, or in text cells. */
     tuiDrawing?: 'auto' | 'pixels' | 'text'
+    /** Settings › Experimental: native work still being tried (images in terminals). */
+    experimental?: boolean
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>

@@ -15,6 +15,8 @@ pub enum Category {
     General,
     Updates,
     Notifications,
+    /// One switch for the native work still being tried.
+    Experimental,
     Agents,
     Ssh,
     Mcp,
@@ -36,6 +38,7 @@ impl Category {
             "general" => Category::General,
             "updates" => Category::Updates,
             "notifications" => Category::Notifications,
+            "experimental" => Category::Experimental,
             "agents" => Category::Agents,
             "ssh" => Category::Ssh,
             "mcp" => Category::Mcp,
@@ -54,6 +57,7 @@ impl Category {
             Category::General => "General",
             Category::Updates => "Updates",
             Category::Notifications => "Notifications",
+            Category::Experimental => "Experimental",
             Category::Agents => "Coding Agents",
             Category::Ssh => "SSH & Hosts",
             Category::Mcp => "Skills & MCP",
@@ -87,6 +91,7 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
             Category::General,
             Category::Updates,
             Category::Notifications,
+            Category::Experimental,
         ],
     ),
     (

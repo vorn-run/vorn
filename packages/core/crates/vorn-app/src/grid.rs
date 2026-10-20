@@ -336,8 +336,11 @@ impl Grid {
     pub fn view(&self, session: &str) -> Option<PaneView> {
         let st = self.lock();
         let p = st.pane(session)?;
-        let m = st.client.pane(p.sid?)?.mirror()?;
-        Some(view::build(m, p.top))
+        let pane = st.client.pane(p.sid?)?;
+        let m = pane.mirror()?;
+        let mut v = view::build(m, p.top);
+        view::pictures(&mut v, m, |id| pane.image(id));
+        Some(v)
     }
 
     /// Starts the view `back` rows above the live screen, fetching the

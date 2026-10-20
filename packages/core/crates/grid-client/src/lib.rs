@@ -11,6 +11,8 @@
 //! vornd sent.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use vorn_term_mirror::{Mirror, Refused};
 use vorn_term_proto::screen::Image;
@@ -39,8 +41,19 @@ pub struct Pane {
     pub resyncs: u64,
     pub resets: u64,
     /// The kitty images the mirror's placements show, by id.
-    images: HashMap<u32, Image>,
+    images: HashMap<u32, Shown>,
 }
+
+/// A kitty image as received, shared with the views that draw it.
+#[derive(Debug, Clone)]
+pub struct Shown {
+    /// Unique to these pixels in this process, so a renderer can cache what it uploaded by it.
+    pub key: u64,
+    pub image: Arc<Image>,
+}
+
+/// Hands out [`Shown::key`]s.
+static NEXT_KEY: AtomicU64 = AtomicU64::new(1);
 
 impl std::fmt::Debug for Pane {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -60,18 +73,18 @@ impl Pane {
     }
 
     /// A kitty image the placements show, by id.
-    pub fn image(&self, id: u32) -> Option<&Image> {
+    pub fn image(&self, id: u32) -> Option<&Shown> {
         self.images.get(&id)
     }
 
     /// Forgets the images no placement shows any more, as vornd does.
     fn prune_images(&mut self) {
-        let Some(m) = &self.mirror else {
+        let Some(m) = self.mirror.as_ref().filter(|_| !self.images.is_empty()) else {
             return;
         };
         let shown = m.placements();
         self.images
-            .retain(|id, img| shown.images().any(|(i, g)| i == *id && g == img.gen));
+            .retain(|id, s| shown.images().any(|(i, g)| i == *id && g == s.image.gen));
     }
 
     /// What to resume from after a reconnect.
@@ -267,7 +280,12 @@ impl Client {
             }
             ServerMsg::Image { sid, image } => {
                 let id = image.id;
-                self.panes.entry(sid).or_default().images.insert(id, *image);
+                let key = NEXT_KEY.fetch_add(1, Ordering::Relaxed);
+                let shown = Shown {
+                    key,
+                    image: Arc::from(image),
+                };
+                self.panes.entry(sid).or_default().images.insert(id, shown);
                 Got::Image { sid, id }
             }
             ServerMsg::ResetTables { sid, .. } => {
