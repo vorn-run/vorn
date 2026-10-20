@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use support::{add_project, key, wait_for, Shot, TestVornd};
-use vorn_app::screen::term_id;
 use vorn_app::panes::{device_key, video_part};
+use vorn_app::screen::term_id;
 use vorn_app::ui::Id;
 use vorn_app::App;
 
@@ -201,7 +201,9 @@ fn bench_device_pane() {
         picks.push(since(t, &mut shot, &mut app, |a| picker_listed(a, &sid)));
         let hide = phone(&mut shot, &mut app, &sid, "Hide device");
         shot.click(&mut app, hide);
-        since(Instant::now(), &mut shot, &mut app, |a| pane_closed(a, &sid));
+        since(Instant::now(), &mut shot, &mut app, |a| {
+            pane_closed(a, &sid)
+        });
     }
     let first = picks.remove(0);
     println!("BENCH device picker open (phone), first: {first:.2}ms");
@@ -280,10 +282,7 @@ fn video(app: &App, sid: &str) -> Option<vorn_tree::Video> {
 }
 
 fn picker_listed(app: &App, sid: &str) -> Option<()> {
-    video(app, sid)?
-        .picker
-        .filter(|p| !p.loading)
-        .map(|_| ())
+    video(app, sid)?.picker.filter(|p| !p.loading).map(|_| ())
 }
 
 fn pane_closed(app: &App, sid: &str) -> Option<()> {

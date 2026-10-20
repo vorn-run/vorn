@@ -16,8 +16,7 @@ use serde_json::{json, Value};
 use super::{App, Call};
 use crate::client::rpc::Wake;
 use crate::panes::{
-    device_key, video_part, PaneKind, DEVICE, DEVICE_OPEN, DEVICE_PANE, VIDEO_ID_BASE,
-    WEB_ID_BASE,
+    device_key, video_part, PaneKind, DEVICE, DEVICE_OPEN, DEVICE_PANE, VIDEO_ID_BASE, WEB_ID_BASE,
 };
 use crate::points::kind;
 use crate::ui::{Laid, Ui};
@@ -163,7 +162,8 @@ impl App {
             }),
             "shutdown" => Box::new(move || video::shutdown(&udid).map(|()| json!({ "ok": true }))),
             "launch" | "terminate" | "openUrl" | "install" => {
-                let (op, bundle, url, path) = (op.to_owned(), arg("bundleId"), arg("url"), arg("path"));
+                let (op, bundle, url, path) =
+                    (op.to_owned(), arg("bundleId"), arg("url"), arg("path"));
                 Box::new(move || {
                     match op.as_str() {
                         "launch" => video::launch(&udid, &bundle),
@@ -368,11 +368,8 @@ impl App {
                         Ok(here) => json!({ "type": "booted", "bootedHere": here }),
                         Err(message) => json!({ "type": "failed", "message": message }),
                     };
-                    let event = vorn_tree::Event::new(
-                        node,
-                        vorn_tree::EventKind::Page,
-                        what.to_string(),
-                    );
+                    let event =
+                        vorn_tree::Event::new(node, vorn_tree::EventKind::Page, what.to_string());
                     self.send_told(&key, &event);
                 }
             }

@@ -34,7 +34,10 @@ async fn one_main_at_a_time_and_its_close_frees_the_bridge() {
     let t = std::time::Instant::now();
     let mut id = 3;
     while identify(&mut thief, id).await["result"]["ok"] != true {
-        assert!(t.elapsed() < std::time::Duration::from_secs(5), "main never let go");
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(5),
+            "main never let go"
+        );
         id += 1;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
@@ -116,7 +119,10 @@ async fn an_agents_device_call_is_the_built_ins_and_refused_when_off() {
     )
     .await;
     let listed = wanted(&mut agent, 2).await;
-    assert_eq!(listed["error"]["message"], "No session s in this app.", "{listed}");
+    assert_eq!(
+        listed["error"]["message"], "No session s in this app.",
+        "{listed}"
+    );
     send(
         &mut agent,
         json!({ "jsonrpc": "2.0", "id": 3, "method": "device:chrome", "params": {} }),

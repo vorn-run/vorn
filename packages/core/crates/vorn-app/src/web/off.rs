@@ -10,16 +10,14 @@ use crate::ui::NativeWindow;
 const OFF: &str = "Pages show in the Vorn window; open them in your browser.";
 
 /// The web views of every open pane: none in this build.
-pub struct Host {
-}
+pub struct Host {}
 
 impl Host {
     /// Nothing holds the keyboard here.
     pub fn release_keys(&self) {}
 
     pub fn new(_wake: Wake) -> Host {
-        Host {
-        }
+        Host {}
     }
 
     pub fn set_profiles(&mut self, _dir: std::path::PathBuf) {}

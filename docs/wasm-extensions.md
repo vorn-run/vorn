@@ -203,6 +203,7 @@ every key or pointer move (hover, typing, a drag) to itself:
 | `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error`  | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
 | `log`     | a shell's commands, one per prompt, oldest first                                       |                                                                                               |
 | `web`     | a web view: its `view` (the session it shows beside), the `url` asked for, a `notice`  | `page`, a JSON object in the value: what the page or its controls did (below)                 |
+| `video`   | a device's screen: its `view` (session), `device`, `title`, `zoom`, `tools`, `picker`  | `page` (below), `click` a tool, `select` a picker's choice with its id                        |
 
 A `code`'s text is typed, coloured and searched in the client, which takes
 `draft`, else `text`, whenever `rev` changes, and tells the extension the
@@ -218,14 +219,36 @@ address bar, back and forward, and an artifact's review controls over it.
 It loads `url` whenever that changes, so an extension changes the address it
 asks for, not what the page wanders to. Its `page` events carry:
 
-| `type`   | fields                     | when                                                         |
-| -------- | -------------------------- | ------------------------------------------------------------ |
-| `state`  | `url`, `title`, `design`   | the page moved or titled itself; `design` names a design     |
-| `submit` | `text`                     | Enter in the address bar, as typed; an error is shown        |
-| `opened` | `url`                      | the page opened a window                                     |
-| `go`     | `url`, `version`           | the client's own controls moved it, as to another version    |
+| `type`   | fields                   | when                                                      |
+| -------- | ------------------------ | --------------------------------------------------------- |
+| `state`  | `url`, `title`, `design` | the page moved or titled itself; `design` names a design  |
+| `submit` | `text`                   | Enter in the address bar, as typed; an error is shown     |
+| `opened` | `url`                    | the page opened a window                                  |
+| `go`     | `url`, `version`         | the client's own controls moved it, as to another version |
 
 Only the extensions Vorn ships may hold a `web` part (the `web` permission).
+
+A `video` part is a simulator's screen the client takes and draws itself, a
+few times a second, inside its bezel, with the header's `tools`, a bar of
+`controls` and the zoom under it; no frame passes through the extension.
+`device` names the simulator shown; with `boot` set the client starts it
+first and reports how that went, and `busy` spins the title meanwhile.
+`zoom` is screen points per pixel, none fitting the screen to the pane;
+`notice` is a line over the screen, and `picker` a list under the title
+(`heading`, `loading`, `error`, `empty`, `choices` with `id`, `title`,
+`detail`, a `status` tone and a `badge`). Its `page` events carry:
+
+| `type`    | fields       | when                                                   |
+| --------- | ------------ | ------------------------------------------------------ |
+| `switch`  |              | the title was clicked, to open or shut the picker      |
+| `dismiss` |              | the notice's ✕                                         |
+| `zoom`    | `zoom`       | a zoom button; without `zoom`, fit to the pane         |
+| `booted`  | `bootedHere` | the client started `device`; whether it was off before |
+| `failed`  | `message`    | it could not                                           |
+
+Only the extensions Vorn ships may hold a `video` part (the `video`
+permission); Vorn's own Device (`packages/core/extensions/device`) draws
+the device pane with one.
 
 A board holds columns, each holding its cards. A board of thousands cannot
 travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list
@@ -238,8 +261,9 @@ a page at a time, windows them, drags them between columns and opens them.
 (`packages/core/extensions/tasks`) and Workflow editor
 (`packages/core/extensions/workflow-editor`) draw their main views this way;
 Files (`packages/core/extensions/files`) draws its pane and cards, Shell
-blocks (`packages/core/extensions/blocks`) a shell's commands, and the
-Browser (`packages/core/extensions/browser`) a session's tabs over its page.
+blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
+(`packages/core/extensions/browser`) a session's tabs over its page, and
+the Device (`packages/core/extensions/device`) a session's simulator.
 
 ## The new API
 
@@ -321,19 +345,42 @@ id, under the `web` permission, which only the extensions Vorn ships hold.
 vornd passes it to the app as `web:{op}` with `view` among the params, and
 answers what the app does; with no app connected it fails.
 
-| `op`      | params                                  | answers                                          |
-| --------- | --------------------------------------- | ------------------------------------------------ |
-| `load`    | `url`                                   | `{url}`, loaded again even when it was shown     |
-| `history` | `direction`: `back` or `forward`        | `{url}`                                          |
-| `read`    | `filter`, `cursor`, `limit`             | the page's nodes, a page at a time               |
-| `text`    | `cursor`                                | the page's text, a page at a time                |
-| `find`    | `text`, `limit`                         | the nodes that hold it                           |
-| `act`     | what `browser:interact` takes           | what clicking, typing or scrolling did           |
-| `console` | `limit`                                 | its console messages                             |
-| `network` | `limit`                                 | its requests                                     |
+| `op`      | params                           | answers                                      |
+| --------- | -------------------------------- | -------------------------------------------- |
+| `load`    | `url`                            | `{url}`, loaded again even when it was shown |
+| `history` | `direction`: `back` or `forward` | `{url}`                                      |
+| `read`    | `filter`, `cursor`, `limit`      | the page's nodes, a page at a time           |
+| `text`    | `cursor`                         | the page's text, a page at a time            |
+| `find`    | `text`, `limit`                  | the nodes that hold it                       |
+| `act`     | what `browser:interact` takes    | what clicking, typing or scrolling did       |
+| `console` | `limit`                          | its console messages                         |
+| `network` | `limit`                          | its requests                                 |
 
 The app refuses a `file:` address outside the session's project, on disk as
 well as by name, and anything it would not load from the address bar.
+
+### `video.call`: the Device's simulators
+
+`video.call` (`{view, op, params}`) asks the app for the simulators on behalf
+of the session `view`, under the `video` permission, which only the
+extensions Vorn ships hold. vornd passes it to the app as `video:{op}` with
+`view` among the params, and answers what the app does; with no app
+connected it fails. `udid` names the simulator in all but `list`.
+
+| `op`         | params             | answers                                                     |
+| ------------ | ------------------ | ----------------------------------------------------------- |
+| `list`       |                    | `[{udid, name, runtime, booted}]`, the available simulators |
+| `boot`       | `udid`             | `{name, bootedHere}`, once it is up; waits for a slow boot  |
+| `shutdown`   | `udid`             | `{ok}`                                                      |
+| `launch`     | `udid`, `bundleId` | `{ok}`                                                      |
+| `terminate`  | `udid`, `bundleId` | `{ok}`                                                      |
+| `openUrl`    | `udid`, `url`      | `{ok}`                                                      |
+| `install`    | `udid`, `path`     | `{ok}`                                                      |
+| `screenshot` | `udid`             | `{data, width, height}`, a PNG in base64                    |
+| `save`       | `udid`, `name`     | `{path}`, a screenshot saved to Downloads                   |
+
+Any other `op`, such as reading the screen or the logs, fails with a message
+saying the native app cannot yet.
 
 Vorn's own Tasks keeps the board's tables, `tasks` and `task_source_links`,
 which it is lent by name beside its own; no installed extension is.

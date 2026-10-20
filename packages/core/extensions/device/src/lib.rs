@@ -431,7 +431,11 @@ impl DeviceExt {
             zoom: p.zoom,
             notice: p.notice,
             tools: vec![
-                tool("pick", "Point at an element for the agent", "mouse-pointer-click"),
+                tool(
+                    "pick",
+                    "Point at an element for the agent",
+                    "mouse-pointer-click",
+                ),
                 tool("draw", "Draw on the screen for the agent", "pencil"),
             ],
             controls: vec![

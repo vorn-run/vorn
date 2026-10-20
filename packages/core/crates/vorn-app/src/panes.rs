@@ -429,11 +429,7 @@ mod tests {
 
     #[test]
     fn view_keys_name_their_session() {
-        for key in [
-            page_key("s1"),
-            compare_key("s1"),
-            board_key("s1", "m"),
-        ] {
+        for key in [page_key("s1"), compare_key("s1"), board_key("s1", "m")] {
             assert_eq!(session_of(&key), "s1");
         }
         assert_eq!(web_index(WEB_ID_BASE + 3), Some(3));

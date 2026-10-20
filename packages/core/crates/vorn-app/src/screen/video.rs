@@ -159,7 +159,9 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
         .center()
         .p(8.0)
         .bg(c(look::SURFACE_PANEL));
-    let shown = bench.video_id(sid).filter(|_| !v.boot && v.device.is_some());
+    let shown = bench
+        .video_id(sid)
+        .filter(|_| !v.boot && v.device.is_some());
     stage = match shown {
         Some(cid) if points.0 > 0.0 => {
             let (w, h) = (
@@ -337,9 +339,10 @@ fn picker(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, p: &Picker) -> El {
             Some(t) => tone(t).alpha(0.7),
             None => c(look::GRAY_600),
         };
-        let tag = ch.badge.as_ref().map(|b| {
-            text(b.text.as_str(), 9.0, tone(b.tone).alpha(0.6)).silent()
-        });
+        let tag = ch
+            .badge
+            .as_ref()
+            .map(|b| text(b.text.as_str(), 9.0, tone(b.tone).alpha(0.6)).silent());
         let mut row = div()
             .id(id)
             .on(Action::Click)

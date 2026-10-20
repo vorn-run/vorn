@@ -19,8 +19,8 @@ use crate::client::rpc::Wake;
 use crate::client::RpcError;
 use crate::panes::{
     artifact_address, board_key, browser_key, canvas_id, compare_key, note_id, page_key,
-    rail_text_id, session_of, DocDraft, PageArtifact, PaneAct, PaneKind, PendingComment, WebSlot, BROWSER, BROWSER_OPEN, BROWSER_PANE, LOG_LIMIT,
-    SELECTION_SETTLE,
+    rail_text_id, session_of, DocDraft, PageArtifact, PaneAct, PaneKind, PendingComment, WebSlot,
+    BROWSER, BROWSER_OPEN, BROWSER_PANE, LOG_LIMIT, SELECTION_SETTLE,
 };
 use crate::points::kind;
 use crate::ui::{Event as UiEvent, Laid, NativeWindow, Rect, Ui};
@@ -490,7 +490,10 @@ impl App {
                 }),
             "web:history" => self.has_page(&session).and_then(|()| {
                 let back = params["direction"].as_str() != Some("forward");
-                self.web.host.step(&key, back).map(|url| json!({ "url": url }))
+                self.web
+                    .host
+                    .step(&key, back)
+                    .map(|url| json!({ "url": url }))
             }),
             "web:read" => {
                 let Some(gen) = gen else {
@@ -531,21 +534,24 @@ impl App {
                 let script = format!("JSON.stringify(window.__vorn.act({}))", js(&act));
                 return self.ask_page(id, &key, &script, WaitKind::Act);
             }
-            "web:console" | "web:network" => {
-                self.has_page(&session).map(|()| {
-                    let live = self.st.bench.live(&session);
-                    let log = live.map(|l| {
-                        if method == "web:console" {
-                            &l.console
-                        } else {
-                            &l.network
-                        }
-                    });
-                    let n = limit(50);
-                    let all: Vec<&Value> = log.map(|l| l.iter().collect()).unwrap_or_default();
-                    Value::Array(all[all.len().saturating_sub(n)..].iter().map(|v| (*v).clone()).collect())
-                })
-            }
+            "web:console" | "web:network" => self.has_page(&session).map(|()| {
+                let live = self.st.bench.live(&session);
+                let log = live.map(|l| {
+                    if method == "web:console" {
+                        &l.console
+                    } else {
+                        &l.network
+                    }
+                });
+                let n = limit(50);
+                let all: Vec<&Value> = log.map(|l| l.iter().collect()).unwrap_or_default();
+                Value::Array(
+                    all[all.len().saturating_sub(n)..]
+                        .iter()
+                        .map(|v| (*v).clone())
+                        .collect(),
+                )
+            }),
             m => Err(format!("{m} is not available in the native app yet.")),
         };
         self.rpc.respond(id, answer);

@@ -16,13 +16,13 @@ use serde_json::{json, Value};
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::{Act, Acts};
 use vorn_app::app::MOD;
+use vorn_app::artifact;
 use vorn_app::panes::{
     browser_key, device_key, note_id, video_part, PaneAct, PaneKind, BROWSER, DEVICE,
 };
 use vorn_app::screen::term_id;
 use vorn_app::ui::Id;
 use vorn_app::App;
-use vorn_app::artifact;
 use vorn_tree::Kind;
 
 fn pane(act: PaneAct) -> Id {
@@ -432,7 +432,10 @@ fn the_device_button_opens_the_picker_and_the_pane() {
         v.picker.as_ref().is_some_and(|p| !p.loading)
     });
     assert_eq!(app.st.bench.kinds(&sid), [PaneKind::Device]);
-    assert_eq!((open.title.as_str(), open.device.as_deref()), ("Simulator", None));
+    assert_eq!(
+        (open.title.as_str(), open.device.as_deref()),
+        ("Simulator", None)
+    );
     let picker = open.picker.expect("picker");
     assert_eq!(picker.heading, "Simulators");
     assert!(
@@ -482,7 +485,8 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     assert!(!failed.boot && failed.device.is_none(), "{failed:?}");
     shot.save(&mut app, "device-pane");
     assert!(
-        shot.labelled(&mut app, "Toolbar", "Device controls").is_some(),
+        shot.labelled(&mut app, "Toolbar", "Device controls")
+            .is_some(),
         "the control bar"
     );
     let dismiss = shot

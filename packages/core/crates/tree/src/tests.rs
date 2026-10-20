@@ -420,13 +420,19 @@ fn a_video_travels_with_its_picker_and_names_its_view() {
         ..Video::default()
     };
     let e = check(&col([video("screen", blank)])).unwrap_err();
-    assert!(e.iter().any(|m| m.contains(".view: names the video")), "{e:?}");
+    assert!(
+        e.iter().any(|m| m.contains(".view: names the video")),
+        "{e:?}"
+    );
     let shrunk = Video {
         zoom: Some(0.0),
         ..shown
     };
     let e = check(&col([video("screen", shrunk)])).unwrap_err();
-    assert!(e.iter().any(|m| m.contains("a zoom is a positive number")), "{e:?}");
+    assert!(
+        e.iter().any(|m| m.contains("a zoom is a positive number")),
+        "{e:?}"
+    );
     let e = check(&col([video("screen", Video::default()).child(text("no"))])).unwrap_err();
     assert!(e.iter().any(|m| m.contains("holds no children")), "{e:?}");
 }

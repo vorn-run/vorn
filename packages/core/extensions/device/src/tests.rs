@@ -106,7 +106,10 @@ fn the_button_opens_the_picker_and_a_pick_boots_into_the_pane() {
     button(&mut h);
     assert_eq!(open_rows(&mut h), [S]);
     let v = video(&mut h, S).expect("the pane");
-    assert_eq!((v.view.as_str(), v.device, v.title.as_str()), (S, None, "Simulator"));
+    assert_eq!(
+        (v.view.as_str(), v.device, v.title.as_str()),
+        (S, None, "Simulator")
+    );
     let picker = v.picker.expect("the picker is open");
     let ids: Vec<&str> = picker.choices.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(ids, ["u1", "u2"], "running first");
@@ -122,7 +125,10 @@ fn the_button_opens_the_picker_and_a_pick_boots_into_the_pane() {
     let v = video(&mut h, S).unwrap();
     assert!(!v.boot && !v.busy);
     // Let go, Vorn shuts down what it started.
-    assert_eq!(agent(&mut h, S, "release", json!({})).unwrap(), json!({ "released": true }));
+    assert_eq!(
+        agent(&mut h, S, "release", json!({})).unwrap(),
+        json!({ "released": true })
+    );
     assert_eq!(shutdowns(&h), ["u2"]);
     assert!(video(&mut h, S).is_none() && open_rows(&mut h).is_empty());
 }
@@ -133,7 +139,10 @@ fn a_failed_start_brings_back_the_simulator_it_replaced() {
     agent(&mut h, S, "claim", json!({ "udid": "u1" })).unwrap();
     button(&mut h);
     tell(&mut h, EventKind::Select, "u2");
-    page(&mut h, json!({ "type": "failed", "message": "Unable to boot" }));
+    page(
+        &mut h,
+        json!({ "type": "failed", "message": "Unable to boot" }),
+    );
     let v = video(&mut h, S).unwrap();
     assert_eq!(v.device.as_deref(), Some("u1"));
     assert_eq!(v.notice.as_deref(), Some("Unable to boot"));
@@ -147,7 +156,10 @@ fn switching_shuts_down_only_what_vorn_started() {
     let mut h = host();
     agent(&mut h, S, "claim", json!({ "udid": "u2" })).unwrap();
     let said = agent(&mut h, S, "claim", json!({ "udid": "u1" })).unwrap();
-    assert_eq!(said, json!({ "ok": true, "udid": "u1", "name": "iPhone 16", "booted": true }));
+    assert_eq!(
+        said,
+        json!({ "ok": true, "udid": "u1", "name": "iPhone 16", "booted": true })
+    );
     assert_eq!(shutdowns(&h), ["u2"]);
 }
 
@@ -160,7 +172,13 @@ fn closing_the_picker_without_a_simulator_closes_the_pane() {
 
     agent(&mut h, S, "claim", json!({ "udid": "u1" })).unwrap();
     button(&mut h);
-    call(&mut DeviceExt, &mut h, "closePicker", json!({ "session": S })).unwrap();
+    call(
+        &mut DeviceExt,
+        &mut h,
+        "closePicker",
+        json!({ "session": S }),
+    )
+    .unwrap();
     let v = video(&mut h, S).expect("the pane stays with its simulator");
     assert!(v.picker.is_none());
     // The button closes the pane; the claim stays.
@@ -209,23 +227,41 @@ fn agent_calls_keep_their_answers() {
     assert_eq!(shot["screen"], json!({ "width": 2, "height": 3 }));
     assert_eq!(shot["orientation"], "portrait");
     let e = agent(&mut h, S, "launch", json!({ "bundleId": "com.x" })).unwrap_err();
-    assert_eq!(e.message, "com.x is not installed on this device. Install it first.");
+    assert_eq!(
+        e.message,
+        "com.x is not installed on this device. Install it first."
+    );
     assert_eq!(
         agent(&mut h, S, "openUrl", json!({ "url": "x://y" })).unwrap(),
         json!({ "ok": true })
     );
     let asked = h.asked("video.call");
     let open = asked.iter().find(|a| a["op"] == "openUrl").unwrap();
-    assert_eq!((open["view"].as_str(), open["params"]["udid"].as_str()), (Some(S), Some("u1")));
+    assert_eq!(
+        (open["view"].as_str(), open["params"]["udid"].as_str()),
+        (Some(S), Some("u1"))
+    );
     for m in ["readScreen", "find", "interact", "logs"] {
-        assert_eq!(agent(&mut h, S, m, json!({})).unwrap_err().message, NO_COMPANION);
+        assert_eq!(
+            agent(&mut h, S, m, json!({})).unwrap_err().message,
+            NO_COMPANION
+        );
     }
-    assert_eq!(agent(&mut h, S, "release", json!({})).unwrap(), json!({ "released": true }));
-    assert_eq!(agent(&mut h, S, "release", json!({})).unwrap(), json!({ "released": false }));
+    assert_eq!(
+        agent(&mut h, S, "release", json!({})).unwrap(),
+        json!({ "released": true })
+    );
+    assert_eq!(
+        agent(&mut h, S, "release", json!({})).unwrap(),
+        json!({ "released": false })
+    );
     let e = agent(&mut h, "s9", "list", json!({})).unwrap_err();
     assert_eq!(e.message, "No session s9 in this app.");
     // The chrome is asked without a session.
-    assert_eq!(call(&mut DeviceExt, &mut h, "device:chrome", json!({})).unwrap(), Value::Null);
+    assert_eq!(
+        call(&mut DeviceExt, &mut h, "device:chrome", json!({})).unwrap(),
+        Value::Null
+    );
 }
 
 #[test]
@@ -234,15 +270,25 @@ fn the_pane_keeps_its_zoom_and_says_what_needs_the_companion() {
     agent(&mut h, S, "openPane", json!({ "udid": "u1" })).unwrap();
     page(&mut h, json!({ "type": "zoom", "zoom": 1.0 }));
     assert_eq!(video(&mut h, S).unwrap().zoom, Some(1.0));
-    assert_eq!(page(&mut h, json!({ "type": "zoom", "zoom": 1.0 }))["same"], true);
+    assert_eq!(
+        page(&mut h, json!({ "type": "zoom", "zoom": 1.0 }))["same"],
+        true
+    );
     page(&mut h, json!({ "type": "zoom" }));
     assert_eq!(video(&mut h, S).unwrap().zoom, None, "fit");
 
     tell(&mut h, EventKind::Click, "home");
-    assert_eq!(video(&mut h, S).unwrap().notice.as_deref(), Some(NO_COMPANION));
+    assert_eq!(
+        video(&mut h, S).unwrap().notice.as_deref(),
+        Some(NO_COMPANION)
+    );
     let saved = tell(&mut h, EventKind::Click, "save");
     assert_eq!(saved["toast"], "Screenshot saved");
-    let save = h.asked("video.call").into_iter().find(|a| a["op"] == "save").unwrap();
+    let save = h
+        .asked("video.call")
+        .into_iter()
+        .find(|a| a["op"] == "save")
+        .unwrap();
     assert_eq!(save["params"], json!({ "udid": "u1", "name": "iPhone 16" }));
 }
 
@@ -267,7 +313,13 @@ fn the_panes_close_keeps_the_claim() {
     call(&mut DeviceExt, &mut h, "close", json!({ "session": S })).unwrap();
     assert!(open_rows(&mut h).is_empty(), "the pane went");
     assert!(video(&mut h, S).is_none());
-    let claim = call(&mut DeviceExt, &mut h, "device:list", json!({ "sessionId": S })).unwrap();
+    let claim = call(
+        &mut DeviceExt,
+        &mut h,
+        "device:list",
+        json!({ "sessionId": S }),
+    )
+    .unwrap();
     let held: Vec<&Value> = claim
         .as_array()
         .unwrap()
