@@ -47,16 +47,5 @@ pub fn component() -> Component {
 
 /// Answers one of its `browser:*` calls; while it is off, [`OFF`].
 pub async fn answer(native: &Native, method: &str, params: Value) -> Answer {
-    let Some(ext) = native.extensions() else {
-        return Answer::Error("vornd is not hosting extensions".to_owned());
-    };
-    let builtins = ext.builtins();
-    if !builtins.is_on(ID) {
-        return Answer::Error(OFF.to_owned());
-    }
-    match builtins.call(ID, method, params).await {
-        Some(Ok(v)) => Answer::Result(v),
-        Some(Err(e)) => Answer::Error(e.message),
-        None => Answer::Unanswered,
-    }
+    super::wasm::answer(native, ID, OFF, method, params).await
 }

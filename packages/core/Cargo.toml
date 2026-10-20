@@ -51,6 +51,7 @@ members = [
   "extensions/blocks",
   "extensions/files",
   "extensions/browser",
+  "extensions/device",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",

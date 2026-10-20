@@ -8,8 +8,8 @@ pub mod sdk;
 mod tests;
 
 pub use parts::{
-    Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Tab, Tabs, Tool, Web,
-    MAX_SPLIT, MIN_SPLIT,
+    Choice, Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Picker, Tab, Tabs,
+    Tool, Video, Web, MAX_SPLIT, MIN_SPLIT,
 };
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
@@ -198,6 +198,8 @@ pub enum Kind {
     Log(Box<Log>),
     /// A web page in a native web view, under the bar the client draws for it.
     Web(Box<Web>),
+    /// A device's live screen the client draws, under its header and over its bar.
+    Video(Box<Video>),
 }
 
 /// Where a board's cards come from when the client reads them itself.
@@ -453,7 +455,8 @@ pub enum EventKind {
     Change,
     /// A split's divider was dragged to the ratio in `value`.
     Resize,
-    /// What a [`Web`] part's page did, as a JSON object in `value`.
+    /// What a [`Web`] part's page or a [`Video`] part's screen did, as a
+    /// JSON object in `value`.
     Page,
 }
 
@@ -978,6 +981,38 @@ impl Checker {
                 self.text(at, "view", &web.view);
                 if let Some(t) = &web.notice {
                     self.text(at, "notice", t);
+                }
+            }
+            Kind::Video(video) => {
+                self.named(n, at, "video");
+                if video.view.trim().is_empty() {
+                    self.err(&format!("{at}.view"), "names the video's view; it is empty");
+                }
+                self.text(at, "view", &video.view);
+                self.text(at, "title", &video.title);
+                if let Some(d) = &video.device {
+                    self.text(at, "device", d);
+                }
+                if let Some(t) = &video.notice {
+                    self.text(at, "notice", t);
+                }
+                if video.zoom.is_some_and(|z| !(z.is_finite() && z > 0.0)) {
+                    self.err(&format!("{at}.zoom"), "a zoom is a positive number");
+                }
+                for (i, t) in video.tools.iter().chain(&video.controls).enumerate() {
+                    self.text(&format!("{at}.tools[{i}]"), "label", &t.label);
+                }
+                if let Some(p) = &video.picker {
+                    for (i, c) in p.choices.iter().enumerate() {
+                        let at = format!("{at}.picker.choices[{i}]");
+                        self.text(&at, "title", &c.title);
+                        if let Some(d) = &c.detail {
+                            self.text(&at, "detail", d);
+                        }
+                    }
+                    if let Some(e) = &p.error {
+                        self.text(at, "picker.error", e);
+                    }
                 }
             }
             Kind::Log(log) => {

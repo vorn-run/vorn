@@ -378,6 +378,60 @@ fn an_event_carries_its_scope_and_an_answer_can_ask_first() {
 }
 
 #[test]
+fn a_video_travels_with_its_picker_and_names_its_view() {
+    let shown = Video {
+        view: "s1".into(),
+        device: Some("UDID".into()),
+        title: "iPhone 17".into(),
+        zoom: Some(1.25),
+        picker: Some(Picker {
+            heading: "Simulators".into(),
+            choices: vec![Choice {
+                id: "UDID".into(),
+                title: "iPhone 17".into(),
+                status: Some(Tone::Good),
+                ..Choice::default()
+            }],
+            ..Picker::default()
+        }),
+        tools: vec![Tool {
+            id: "draw".into(),
+            label: "Draw".into(),
+            icon: "pencil".into(),
+            on: false,
+        }],
+        ..Video::default()
+    };
+    let tree = col([video("screen", shown.clone())]);
+    let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
+    let part = &v["tree"]["children"][0];
+    assert_eq!(part["kind"], "video");
+    assert_eq!(part["view"], "s1");
+    assert_eq!(part["device"], "UDID");
+    assert_eq!(part["tools"][0]["id"], "draw");
+    assert!(part.get("boot").is_none(), "false flags stay off the wire");
+    assert_eq!(part["picker"]["choices"][0]["status"], "good");
+    let back: Rendered = serde_json::from_value(v).unwrap();
+    assert_eq!(back.tree, tree);
+    assert!(check(&tree).is_ok());
+
+    let blank = Video {
+        view: " ".into(),
+        ..Video::default()
+    };
+    let e = check(&col([video("screen", blank)])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains(".view: names the video")), "{e:?}");
+    let shrunk = Video {
+        zoom: Some(0.0),
+        ..shown
+    };
+    let e = check(&col([video("screen", shrunk)])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains("a zoom is a positive number")), "{e:?}");
+    let e = check(&col([video("screen", Video::default()).child(text("no"))])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains("holds no children")), "{e:?}");
+}
+
+#[test]
 fn a_web_page_travels_and_names_its_view() {
     let tree = col([
         tabs(

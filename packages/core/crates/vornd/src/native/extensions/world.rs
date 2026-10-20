@@ -19,6 +19,9 @@ use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
 
 /// How long one `net.fetch` may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long `video.call`'s `boot` waits for a simulator to start: a cold
+/// boot takes tens of seconds, and the router gives the whole call 60.
+const VIDEO_BOOT: Duration = Duration::from_secs(55);
 
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
@@ -677,6 +680,31 @@ impl World for Wired {
                         &format!("web:{op}"),
                         Value::Object(params),
                         crate::native::desktop::TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| ExtError::new("failed", e))
+                }
+                // The app's simulators, asked as `video:{op}`. Starting one
+                // takes as long as it takes, up to just under a call's own limit.
+                "video.call" => {
+                    let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    let mut params = match args.get("params") {
+                        Some(Value::Object(p)) => p.clone(),
+                        _ => serde_json::Map::new(),
+                    };
+                    if let Some(view) = text(&args, "view") {
+                        params.insert("view".into(), Value::String(view));
+                    }
+                    let wait = if op == "boot" {
+                        VIDEO_BOOT
+                    } else {
+                        crate::native::desktop::TIMEOUT
+                    };
+                    crate::bridge::Bridge::request(
+                        native.main_process().as_ref(),
+                        &format!("video:{op}"),
+                        Value::Object(params),
+                        wait,
                     )
                     .await
                     .map_err(|e| ExtError::new("failed", e))

@@ -170,6 +170,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("signin.forget", Permission::BrowserSession),
     ("signin.completed", Permission::BrowserSession),
     ("web.call", Permission::Web),
+    ("video.call", Permission::Video),
 ];
 
 /// The core methods open only to the extensions Vorn ships: they write the
@@ -180,7 +181,8 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// called by the other built-ins; `task.changed` is Tasks' own, which tells
 /// clients the rows a write changed and emits the events it fires.
 /// `web.call` drives the client's web views, which are named by session and
-/// shared, so only the Browser that Vorn ships drives them.
+/// shared, so only the Browser that Vorn ships drives them; `video.call`
+/// drives the machine's simulators the same way, for the Device it ships.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
     "task.changed",
@@ -203,6 +205,7 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "signin.forget",
     "signin.completed",
     "web.call",
+    "video.call",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.

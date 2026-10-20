@@ -2,7 +2,7 @@
 
 use crate::{
     Badge, ButtonStyle, Cards, Choose, Code, Entry, Kind, Log, Meter, Node, Outline, Paint,
-    Segment, Tabs, TextStyle, Tone, Web,
+    Segment, Tabs, TextStyle, Tone, Video, Web,
 };
 
 fn node(kind: Kind) -> Node {
@@ -328,6 +328,11 @@ pub fn web(id: impl Into<String>, view: impl Into<String>, url: impl Into<String
         notice: None,
     })))
     .id(id)
+}
+
+/// A device's screen, as `v` says; its events come to node `id`.
+pub fn video(id: impl Into<String>, v: Video) -> Node {
+    node(Kind::Video(Box::new(v))).id(id)
 }
 
 /// `items` in runs by `key`, in the order each key first shows.

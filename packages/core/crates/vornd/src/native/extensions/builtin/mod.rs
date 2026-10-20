@@ -9,6 +9,7 @@ pub mod agents;
 pub mod artifacts;
 pub mod browser;
 pub mod connectors;
+pub mod device;
 pub mod tasks;
 pub mod wasm;
 pub mod workflows;
@@ -40,6 +41,7 @@ pub const SHIPPED: &[&str] = &[
     vorn_workflows::ID,
     wasm::EDITOR,
     browser::ID,
+    device::ID,
 ];
 
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
@@ -122,6 +124,7 @@ pub fn precompile(router: &Arc<Router>) {
         (wasm::blocks().manifest, wasm::blocks().wasm),
         (wasm::files().manifest, wasm::files().wasm),
         (browser::component().manifest, browser::component().wasm),
+        (device::component().manifest, device::component().wasm),
     ]
     .into_iter()
     .collect();
@@ -193,6 +196,7 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
         Arc::new(wasm::files()),
         Arc::new(browser::component()),
+        Arc::new(device::component()),
         Arc::new(wasm::blocks()),
         Arc::new(wasm::worktrees()),
         Arc::new(wasm::widget()),

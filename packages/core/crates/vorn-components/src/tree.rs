@@ -104,6 +104,12 @@ pub trait TreeBind {
         let _ = (node, web);
         None
     }
+    /// A device's screen the client draws and polls itself; `None` (a
+    /// client that shows no devices) draws nothing.
+    fn video(&self, node: &str, video: &vorn_tree::Video) -> Option<El> {
+        let _ = (node, video);
+        None
+    }
 }
 
 /// A lazy list's height: it scrolls on its own, building the rows in view.
@@ -446,6 +452,10 @@ impl Cx<'_> {
             Kind::Web(w) => self
                 .bind
                 .web(key(n), w)
+                .unwrap_or_else(|| div().sem(Sem::Hidden)),
+            Kind::Video(v) => self
+                .bind
+                .video(key(n), v)
                 .unwrap_or_else(|| div().sem(Sem::Hidden)),
         };
         sized(el, &n.props)

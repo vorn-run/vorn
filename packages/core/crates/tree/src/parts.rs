@@ -202,6 +202,88 @@ pub struct Web {
     pub notice: Option<String>,
 }
 
+/// A device's live screen the client draws itself, as a simulator's, under a
+/// header (an icon, `title`, `tools`, the pane's own controls) and over a
+/// bar (`controls`, then the zoom the client draws). `view` names what it is
+/// shown for, one per session's pane as its id; `device` names the device
+/// the client polls for frames and draws. Frames never travel in the tree:
+/// the client fetches and paints them itself, for as long as the part shows.
+/// A `picker` shows under the title, to choose the device from.
+///
+/// A click on a tool reports [`EventKind::Click`](crate::EventKind::Click)
+/// with the tool's id, and a choice in the picker
+/// [`EventKind::Select`](crate::EventKind::Select) with the choice's id. The
+/// rest is reported as
+/// [`EventKind::Page`](crate::EventKind::Page) on the node, its `value` a
+/// JSON object with a `type`: `switch` (the title was clicked, or the open
+/// picker dismissed), `dismiss`
+/// (the notice's ✕), `zoom` (`zoom`, the scale chosen, absent to fit the
+/// pane) and, for a part with `boot` set, `booted` (`bootedHere` when the
+/// client started the device) or `failed` (`message`) once the client has
+/// started `device` or could not.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Video {
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    /// The title shows it is working, as while a device starts.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub busy: bool,
+    /// The client starts `device` before it draws it, and reports how that went.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub boot: bool,
+    /// Screen points per logical pixel; none fits the screen to the pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    /// A line over the screen saying what went wrong; its ✕ reports `dismiss`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    /// The header's tools, after the title.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<Tool>,
+    /// The bar's tools, before the zoom.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controls: Vec<Tool>,
+    /// The list open under the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picker: Option<Picker>,
+}
+
+/// What a [`Video`]'s title offers to show instead: its `heading`, then
+/// what went wrong, `empty` with no choices, or the choices.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Picker {
+    pub heading: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub loading: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty: Option<String>,
+    #[serde(default)]
+    pub choices: Vec<Choice>,
+}
+
+/// One device a [`Picker`] offers.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Choice {
+    pub id: String,
+    pub title: String,
+    /// What tells it apart from another of the same title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Its icon's tone, as a running device's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<crate::Tone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge: Option<crate::Badge>,
+    /// Shown, but not to be chosen, as one another session holds.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
+}
+
 /// A shell's commands, one per prompt it reported, oldest first: the client
 /// cuts each one's output from the shell's screen, pairing the newest prompt
 /// with the newest command, and draws the last one while it runs.

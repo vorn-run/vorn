@@ -734,10 +734,13 @@ pub enum Permission {
     InboxWrite,
     /// Drives the client's web views: loads, reads and acts on their pages.
     Web,
+    /// Drives the devices the client shows: lists, starts and stops
+    /// simulators and acts on their apps.
+    Video,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 25] = [
+    pub const ALL: [Permission; 26] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -763,6 +766,7 @@ impl Permission {
         Permission::WorkflowsWrite,
         Permission::InboxWrite,
         Permission::Web,
+        Permission::Video,
     ];
 
     pub fn name(self) -> &'static str {
@@ -792,6 +796,7 @@ impl Permission {
             Permission::WorkflowsWrite => "workflows.write",
             Permission::InboxWrite => "inbox.write",
             Permission::Web => "web",
+            Permission::Video => "video",
         }
     }
 

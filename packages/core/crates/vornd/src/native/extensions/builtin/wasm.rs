@@ -98,6 +98,30 @@ pub fn files() -> Component {
     }
 }
 
+/// A core route's call to built-in `id`'s action of the same name, as an
+/// agent's `browser:*` or `device:*`; while it is off, `off`.
+pub async fn answer(
+    native: &crate::native::Native,
+    id: &str,
+    off: &str,
+    method: &str,
+    params: Value,
+) -> crate::native::Answer {
+    use crate::native::Answer;
+    let Some(ext) = native.extensions() else {
+        return Answer::Error("vornd is not hosting extensions".to_owned());
+    };
+    let builtins = ext.builtins();
+    if !builtins.is_on(id) {
+        return Answer::Error(off.to_owned());
+    }
+    match builtins.call(id, method, params).await {
+        Some(Ok(v)) => Answer::Result(v),
+        Some(Err(e)) => Answer::Error(e.message),
+        None => Answer::Unanswered,
+    }
+}
+
 impl Component {
     fn bundled(&self, api: &Api) -> Bundled {
         Bundled {

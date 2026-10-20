@@ -1013,6 +1013,7 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
         "browser.session" => ("Sign-in", "uses a signed-in browser window", false),
         "process.run" => ("Programs", "runs programs", false),
         "web" => ("Browser", "loads, reads and acts on web pages", true),
+        "video" => ("Devices", "starts simulators and acts on their apps", true),
         _ => return None,
     })
 }

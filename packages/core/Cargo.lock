@@ -7184,6 +7184,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-device"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-files"
 version = "0.0.0"
 dependencies = [
