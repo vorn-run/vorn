@@ -362,6 +362,20 @@ impl Ui {
     /// pixels for as long as frames draw it. Senders keep pictures small (vornd sends at most
     /// 1024 px a side); one the atlas cannot take is not drawn.
     pub fn picture(&mut self, key: u64, size: (u32, u32), rgba: &[u8], src: [f32; 4], dst: Rect) {
+        self.picture_rounded(key, size, rgba, src, dst, 0.0);
+    }
+
+    /// [`Ui::picture`] with its corners rounded to `radius`, as a screen in
+    /// a rounded frame; cut as it is drawn, so no pixel is copied for it.
+    pub fn picture_rounded(
+        &mut self,
+        key: u64,
+        size: (u32, u32),
+        rgba: &[u8],
+        src: [f32; 4],
+        dst: Rect,
+        radius: f32,
+    ) {
         let (w, h) = size;
         if w == 0 || h == 0 || rgba.len() < w as usize * h as usize * 4 {
             return;
@@ -385,7 +399,7 @@ impl Ui {
             return;
         };
         let uv = [u + src[0], v + src[1], src[2], src[3]];
-        self.scene.sprite(dst, uv, Rgba::white(1.0), true);
+        self.scene.rounded_image(dst, uv, Rgba::white(1.0), radius);
     }
 
     /// Starts a frame on an empty scene.

@@ -6,8 +6,14 @@
 //! crate). It owns which session holds which simulator and each pane's
 //! picker, zoom and notice, in its storage, and draws the pane as a tree
 //! around a `video` part. The simulator itself is the client's: `video.call`
-//! asks it to list, boot and drive one, and it draws the screen's frames
-//! itself, so no frame ever passes through here.
+//! asks it to list and drive one, and it draws the screen's frames itself,
+//! so no frame ever passes through here.
+//!
+//! Nothing here waits on `simctl` for long. The component answers one call
+//! at a time, so a simulator starting (tens of seconds) is never awaited
+//! here: a pick is started by the client, which reports `booted`, and an
+//! agent's claim by vornd, which calls [`BOOTED`] once it is up. The
+//! picker's list and a saved screenshot come back as page events too.
 
 use std::collections::HashMap;
 
@@ -21,8 +27,14 @@ use devices::Device;
 
 /// The pane beside a session's terminal, drawn for the session as its scope.
 pub const PANE: &str = "device";
-/// One row per session whose pane is open, its id the session's.
+/// One row per session whose pane is open, its id the session's; `card`
+/// when it shows on the card's button instead (its picker, or the
+/// simulator picked there while it starts).
 pub const OPEN: &str = "open";
+/// The action vornd calls once a simulator an agent claimed has started,
+/// or could not: `{session, udid, method, bootedHere}` or `{..., error}`.
+/// It answers what the agent's `device:{method}` answers.
+pub const BOOTED: &str = "booted";
 /// What a call that needs a simulator says without one.
 pub const NO_CLAIM: &str =
     "No device is claimed for this session. Call device_list to see what is available, then device_claim.";
@@ -47,6 +59,11 @@ fn failed(e: impl std::fmt::Display) -> Error {
     Error::new("failed", e.to_string())
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if takes a reference
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// A session's simulator.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,17 +73,20 @@ pub struct Claim {
     /// Vorn started it, so letting it go shuts it down.
     #[serde(default)]
     pub booted_here: bool,
-    /// Picked in the pane and still starting: the client boots it and says
-    /// how that went. The claim it replaces comes back if it fails.
+    /// Still starting. The claim it replaces comes back if it fails.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<Pending>,
 }
 
-/// What a claim still starting replaced.
+/// What a claim still starting replaced, and who starts it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pending {
     #[serde(default)]
     pub previous: Option<Box<Claim>>,
+    /// An agent's claim, which vornd starts and reports with [`BOOTED`];
+    /// otherwise it was picked in the pane, and the client starts it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub agent: bool,
 }
 
 /// An open pane: what it shows besides the simulator.
@@ -80,21 +100,63 @@ pub struct Pane {
     pub zoom: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// Shown on the card's button, not as a pane: the picker opened from
+    /// the card, then the simulator picked there while it starts. The pane
+    /// opens once it is up; if it fails, nothing opens.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub card: bool,
+    /// A screenshot is being saved; the client says where it went.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub saving: bool,
 }
 
-/// The picker's simulators as listed when it opened, or why there are none.
+/// The picker's simulators as the client listed them, or why there are
+/// none; `loading` until it has.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Listing {
     #[serde(default)]
     pub devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub loading: bool,
+}
+
+impl Listing {
+    fn loading() -> Listing {
+        Listing {
+            loading: true,
+            ..Listing::default()
+        }
+    }
+
+    /// What the client's `listed` event says.
+    fn from_event(said: &Value) -> Listing {
+        if let Some(e) = said["error"].as_str() {
+            return Listing {
+                error: Some(e.to_owned()),
+                ..Listing::default()
+            };
+        }
+        match serde_json::from_value(said["devices"].clone()) {
+            Ok(devices) => Listing {
+                devices,
+                ..Listing::default()
+            },
+            Err(e) => Listing {
+                error: Some(format!("The simulators could not be read: {e}")),
+                ..Listing::default()
+            },
+        }
+    }
 }
 
 /// How an agent's claim went: the answer for `device:claim`, and for
 /// `device:openPane` an error.
 enum Claimed {
     Held(Claim),
+    /// Down, so held while vornd starts it.
+    Booting(Claim),
     Refused(Value),
 }
 
@@ -132,12 +194,17 @@ impl DeviceExt {
         Ok(())
     }
 
-    /// Which session holds each simulator.
+    /// Which session holds each simulator, counting one a claim still
+    /// starting replaces: it is let go only once the new one is up.
     fn holders(host: &mut dyn Host) -> Result<HashMap<String, String>, Error> {
-        Ok(DeviceExt::claims(host)?
-            .into_iter()
-            .map(|(s, c)| (c.udid, s))
-            .collect())
+        let mut out = HashMap::new();
+        for (s, c) in DeviceExt::claims(host)? {
+            if let Some(old) = c.pending.and_then(|p| p.previous) {
+                out.insert(old.udid, s.clone());
+            }
+            out.insert(c.udid, s);
+        }
+        Ok(out)
     }
 
     fn pane(host: &mut dyn Host, session: &str) -> Result<Option<Pane>, Error> {
@@ -154,7 +221,9 @@ impl DeviceExt {
         // Every change announces the session's row again, so clients draw that pane again.
         host.publish(
             OPEN,
-            vec![Op::Upsert(json!({ "id": session, "at": now_ms() }))],
+            vec![Op::Upsert(
+                json!({ "id": session, "at": now_ms(), "card": p.card }),
+            )],
         );
         Ok(())
     }
@@ -174,10 +243,15 @@ impl DeviceExt {
         )
     }
 
+    /// Every simulator, as the client lists them.
+    fn listed(host: &mut dyn Host, session: &str) -> Result<Vec<Device>, Error> {
+        let listed = DeviceExt::video(host, session, "list", json!({}))?;
+        serde_json::from_value(listed).map_err(failed)
+    }
+
     /// Every simulator, each with the session holding it.
     fn list(host: &mut dyn Host, session: &str) -> Result<Vec<Device>, Error> {
-        let listed = DeviceExt::video(host, session, "list", json!({}))?;
-        let all: Vec<Device> = serde_json::from_value(listed).map_err(failed)?;
+        let all = DeviceExt::listed(host, session)?;
         Ok(devices::held(all, &DeviceExt::holders(host)?))
     }
 
@@ -189,18 +263,23 @@ impl DeviceExt {
         }
     }
 
-    /// Lets the session's simulator go. Whether there was one.
+    /// Lets the session's simulator go, and one a claim still starting
+    /// replaced. Whether there was one.
     fn release(host: &mut dyn Host, session: &str) -> Result<bool, Error> {
-        let Some(old) = DeviceExt::claim_of(host, session)? else {
+        let Some(mut old) = DeviceExt::claim_of(host, session)? else {
             return Ok(false);
         };
         DeviceExt::put_claim(host, session, None)?;
+        if let Some(previous) = old.pending.take().and_then(|p| p.previous) {
+            DeviceExt::let_go(host, session, &previous);
+        }
         DeviceExt::let_go(host, session, &old);
         Ok(true)
     }
 
-    /// Takes `udid` for `session` now, booting it if it is down; a
-    /// simulator it held before goes.
+    /// Takes `udid` for `session`: now if it is running, else as a claim
+    /// still starting, which vornd starts and reports with [`BOOTED`]. A
+    /// simulator it held before goes once the new one is held.
     fn claim(host: &mut dyn Host, session: &str, udid: &str) -> Result<Claimed, Error> {
         let holders = DeviceExt::holders(host)?;
         if let Some(holder) = holders.get(udid).filter(|h| *h != session) {
@@ -209,19 +288,42 @@ impl DeviceExt {
                 "ok": false, "reason": "held-by-session", "message": message, "holder": holder,
             })));
         }
-        let booted = match DeviceExt::video(host, session, "boot", json!({ "udid": udid })) {
-            Ok(b) => b,
+        let old = DeviceExt::claim_of(host, session)?;
+        if let Some(c) = old.as_ref().filter(|c| c.pending.is_some()) {
+            return Ok(Claimed::Refused(json!({
+                "ok": false, "reason": "booting", "message": still_starting(&c.name),
+            })));
+        }
+        let device = match DeviceExt::listed(host, session) {
+            Ok(all) => all.into_iter().find(|d| d.udid == udid),
             Err(e) => return Ok(Claimed::Refused(claim_failure(&e.message))),
         };
-        let old = DeviceExt::claim_of(host, session)?;
+        let Some(device) = device else {
+            let message = format!(
+                "No simulator with udid {udid}. Call device_list to see what is available."
+            );
+            return Ok(Claimed::Refused(claim_failure(&message)));
+        };
+        if !device.booted {
+            let claim = Claim {
+                udid: udid.to_owned(),
+                name: device.name,
+                booted_here: false,
+                pending: Some(Pending {
+                    previous: old.map(Box::new),
+                    agent: true,
+                }),
+            };
+            DeviceExt::put_claim(host, session, Some(claim.clone()))?;
+            return Ok(Claimed::Booting(claim));
+        }
         let claim = Claim {
             udid: udid.to_owned(),
-            name: booted["name"].as_str().unwrap_or(udid).to_owned(),
+            name: device.name,
             // Claimed again, it is still Vorn's to shut down if Vorn started it.
-            booted_here: booted["bootedHere"].as_bool().unwrap_or(false)
-                || old
-                    .as_ref()
-                    .is_some_and(|o| o.udid == udid && o.booted_here),
+            booted_here: old
+                .as_ref()
+                .is_some_and(|o| o.udid == udid && o.booted_here),
             pending: None,
         };
         DeviceExt::put_claim(host, session, Some(claim.clone()))?;
@@ -231,39 +333,76 @@ impl DeviceExt {
         Ok(Claimed::Held(claim))
     }
 
-    /// Opens or closes the pane from the card. Open, it lists the
-    /// simulators to choose from.
+    /// vornd says how starting an agent's claim went: it is held, or the
+    /// claim it replaced comes back. What the agent's `method` answers.
+    fn agent_booted(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
+        let session = arg(args, "session", BOOTED)?;
+        let udid = arg(args, "udid", BOOTED)?;
+        let method = args["method"].as_str().unwrap_or("claim");
+        let error = args["error"].as_str();
+        let here = args["bootedHere"].as_bool().unwrap_or(false);
+        let waiting = DeviceExt::claim_of(host, session)?
+            .filter(|c| c.udid == udid && c.pending.as_ref().is_some_and(|p| p.agent));
+        let Some(mut claim) = waiting else {
+            // Let go or replaced while it started: what Vorn started goes down again.
+            if error.is_none() && here {
+                let _ = DeviceExt::video(host, session, "shutdown", json!({ "udid": udid }));
+            }
+            let message = format!("{udid} was let go while it started.");
+            return answer_failure(
+                method,
+                json!({ "ok": false, "reason": "boot-failed", "message": message }),
+            );
+        };
+        let previous = claim.pending.take().and_then(|p| p.previous).map(|b| *b);
+        if let Some(message) = error {
+            let pane = DeviceExt::pane(host, session)?;
+            match (&previous, pane) {
+                // A pane opened for it has nothing to show.
+                (None, Some(_)) => DeviceExt::close(host, session)?,
+                (Some(_), Some(mut p)) => {
+                    p.notice = Some(message.to_owned());
+                    DeviceExt::save(host, session, &p)?;
+                }
+                (_, None) => {}
+            }
+            DeviceExt::put_claim(host, session, previous)?;
+            return answer_failure(method, claim_failure(message));
+        }
+        claim.booted_here = here;
+        DeviceExt::put_claim(host, session, Some(claim.clone()))?;
+        if let Some(old) = previous.filter(|o| o.udid != udid) {
+            DeviceExt::let_go(host, session, &old);
+        }
+        Ok(match method {
+            "openPane" => json!({ "udid": claim.udid }),
+            _ => held(&claim),
+        })
+    }
+
+    /// The card's button: hides an open pane, else opens the picker over
+    /// the card, listing afresh if it is open already. While what was
+    /// picked there starts, the button waits.
     fn button(host: &mut dyn Host, session: &str) -> Result<(), Error> {
-        if DeviceExt::pane(host, session)?.is_some() {
-            return DeviceExt::close(host, session);
-        }
-        let picker = DeviceExt::listing(host, session);
-        DeviceExt::save(
-            host,
-            session,
-            &Pane {
-                picker: Some(picker),
-                ..Pane::default()
-            },
-        )
-    }
-
-    fn listing(host: &mut dyn Host, session: &str) -> Listing {
-        match DeviceExt::list(host, session) {
-            Ok(devices) => Listing {
-                devices,
-                error: None,
-            },
-            Err(e) => Listing {
-                devices: Vec::new(),
-                error: Some(e.message),
-            },
+        match DeviceExt::pane(host, session)? {
+            Some(p) if !p.card => DeviceExt::close(host, session),
+            Some(p) if p.picker.is_none() => Ok(()),
+            _ => DeviceExt::save(
+                host,
+                session,
+                &Pane {
+                    picker: Some(Listing::loading()),
+                    card: true,
+                    ..Pane::default()
+                },
+            ),
         }
     }
 
-    /// The picker shuts; with no simulator to show, so does the pane.
+    /// The picker shuts; with no simulator to show, so does the pane, and
+    /// one opened from the card was never more than its picker.
     fn close_picker(host: &mut dyn Host, session: &str, mut p: Pane) -> Result<(), Error> {
-        if DeviceExt::claim_of(host, session)?.is_none() {
+        if p.card || DeviceExt::claim_of(host, session)?.is_none() {
             return DeviceExt::close(host, session);
         }
         p.picker = None;
@@ -271,20 +410,33 @@ impl DeviceExt {
     }
 
     /// A simulator chosen in the picker: the pane shows it as the client
-    /// starts it, and says so if it does not.
-    fn pick(host: &mut dyn Host, session: &str, mut p: Pane, udid: &str) -> Result<(), Error> {
+    /// starts it, and says so if it does not. Chosen over the card, the
+    /// card waits for it, and a refusal is a toast with nothing opened.
+    fn pick(host: &mut dyn Host, session: &str, mut p: Pane, udid: &str) -> Result<Value, Error> {
         let old = DeviceExt::claim_of(host, session)?;
-        p.picker = None;
+        let listing = p.picker.take();
+        let refuse = |host: &mut dyn Host, mut p: Pane, message: String| -> Result<Value, Error> {
+            if p.card {
+                DeviceExt::close(host, session)?;
+                return Ok(json!({ "error": message }));
+            }
+            p.notice = Some(message);
+            DeviceExt::save(host, session, &p).map(|()| Value::Null)
+        };
+        if let Some(c) = old.as_ref().filter(|c| c.pending.is_some()) {
+            return refuse(host, p, still_starting(&c.name));
+        }
         if old.as_ref().is_some_and(|o| o.udid == udid) {
-            return DeviceExt::save(host, session, &p);
+            p.card = false;
+            return DeviceExt::save(host, session, &p).map(|()| Value::Null);
         }
         if let Some(holder) = DeviceExt::holders(host)?.get(udid) {
-            p.notice = Some(format!("{udid} is in use by session {holder}."));
-            return DeviceExt::save(host, session, &p);
+            return refuse(host, p, format!("{udid} is in use by session {holder}."));
         }
-        let name = DeviceExt::list(host, session)
-            .ok()
-            .and_then(|all| all.into_iter().find(|d| d.udid == udid))
+        let name = listing
+            .into_iter()
+            .flat_map(|l| l.devices)
+            .find(|d| d.udid == udid)
             .map_or_else(|| udid.to_owned(), |d| d.name);
         p.notice = None;
         DeviceExt::save(host, session, &p)?;
@@ -297,38 +449,56 @@ impl DeviceExt {
                 booted_here: false,
                 // A claim still starting stands in for what it replaced.
                 pending: Some(Pending {
-                    previous: old.map(|o| Box::new(Claim { pending: None, ..o })),
+                    previous: old.map(Box::new),
+                    agent: false,
                 }),
             }),
-        )
+        )?;
+        Ok(Value::Null)
     }
 
-    /// The client says how starting a picked simulator went.
-    fn started(host: &mut dyn Host, session: &str, said: &Value) -> Result<(), Error> {
+    /// The client says how starting a picked simulator went. Picked over
+    /// the card, the pane opens now, or the toast says why it did not.
+    fn started(host: &mut dyn Host, session: &str, said: &Value) -> Result<Value, Error> {
         let Some(mut claim) = DeviceExt::claim_of(host, session)? else {
-            return Ok(());
+            return Ok(Value::Null);
         };
-        let Some(pending) = claim.pending.take() else {
-            return Ok(());
+        let Some(pending) = claim.pending.take_if(|p| !p.agent) else {
+            return Ok(Value::Null);
         };
         let previous = pending.previous.map(|b| *b);
+        let pane = DeviceExt::pane(host, session)?;
         match said["type"].as_str() {
             Some("booted") => {
                 claim.booted_here = said["bootedHere"].as_bool().unwrap_or(false);
+                if let Some(p) = pane.filter(|p| p.card) {
+                    DeviceExt::save(host, session, &Pane { card: false, ..p })?;
+                }
                 DeviceExt::put_claim(host, session, Some(claim))?;
                 if let Some(old) = previous {
                     DeviceExt::let_go(host, session, &old);
                 }
+                Ok(Value::Null)
             }
             _ => {
+                let message = said["message"]
+                    .as_str()
+                    .unwrap_or("The simulator did not start.")
+                    .to_owned();
                 DeviceExt::put_claim(host, session, previous)?;
-                if let Some(mut p) = DeviceExt::pane(host, session)? {
-                    p.notice = said["message"].as_str().map(str::to_owned);
-                    DeviceExt::save(host, session, &p)?;
+                match pane {
+                    Some(p) if p.card => {
+                        DeviceExt::close(host, session)?;
+                        Ok(json!({ "error": message }))
+                    }
+                    Some(mut p) => {
+                        p.notice = Some(message);
+                        DeviceExt::save(host, session, &p).map(|()| Value::Null)
+                    }
+                    None => Ok(Value::Null),
                 }
             }
         }
-        Ok(())
     }
 
     /// An agent's `device:*` call, `method` without its group.
@@ -347,9 +517,8 @@ impl DeviceExt {
         match method {
             "list" => Ok(json!(DeviceExt::list(host, session)?)),
             "claim" => Ok(match DeviceExt::claim(host, session, &text("udid"))? {
-                Claimed::Held(c) => {
-                    json!({ "ok": true, "udid": c.udid, "name": c.name, "booted": true })
-                }
+                Claimed::Held(c) => held(&c),
+                Claimed::Booting(c) => json!({ "booting": c.udid }),
                 Claimed::Refused(answer) => answer,
             }),
             "release" => {
@@ -358,22 +527,33 @@ impl DeviceExt {
                 Ok(json!({ "released": released }))
             }
             "openPane" => {
-                let udid = match args["udid"].as_str() {
+                let (udid, booting) = match args["udid"].as_str() {
                     Some(udid) => match DeviceExt::claim(host, session, udid)? {
-                        Claimed::Held(c) => c.udid,
+                        Claimed::Held(c) => (c.udid, false),
+                        // The pane opens now, its title saying the simulator starts.
+                        Claimed::Booting(c) => (c.udid, true),
                         Claimed::Refused(answer) => {
                             return Err(failed(answer["message"].as_str().unwrap_or_default()))
                         }
                     },
                     None => DeviceExt::claim_of(host, session)?
-                        .map(|c| c.udid)
+                        .map(|c| (c.udid, false))
                         .ok_or_else(|| {
                             failed("No device is claimed for this session. Call device_claim first, or pass a udid.")
                         })?,
                 };
                 let p = DeviceExt::pane(host, session)?.unwrap_or_default();
-                DeviceExt::save(host, session, &Pane { picker: None, ..p })?;
-                Ok(json!({ "udid": udid }))
+                let p = Pane {
+                    picker: None,
+                    card: false,
+                    ..p
+                };
+                DeviceExt::save(host, session, &p)?;
+                Ok(if booting {
+                    json!({ "booting": udid })
+                } else {
+                    json!({ "udid": udid })
+                })
             }
             "launch" | "terminate" | "openUrl" | "install" => {
                 let udid = DeviceExt::claimed(host, session)?;
@@ -405,11 +585,14 @@ impl DeviceExt {
         }
     }
 
-    /// The session's simulator, or the agent told to claim one.
+    /// The session's running simulator, or the agent told to claim one or
+    /// to wait for it.
     fn claimed(host: &mut dyn Host, session: &str) -> Result<String, Error> {
-        DeviceExt::claim_of(host, session)?
-            .map(|c| c.udid)
-            .ok_or_else(|| failed(NO_CLAIM))
+        match DeviceExt::claim_of(host, session)? {
+            Some(c) if c.pending.is_some() => Err(failed(still_starting(&c.name))),
+            Some(c) => Ok(c.udid),
+            None => Err(failed(NO_CLAIM)),
+        }
     }
 
     /// The pane's tree: the simulator's screen, its header and its controls.
@@ -418,32 +601,65 @@ impl DeviceExt {
             return Ok(tree::sdk::col([]));
         };
         let claim = DeviceExt::claim_of(host, session)?;
-        let pending = claim.as_ref().is_some_and(|c| c.pending.is_some());
-        let picker = p.picker.map(|l| picker(&l, session));
+        let pending = claim.as_ref().and_then(|c| c.pending.as_ref());
+        let holders = if p.picker.is_some() {
+            DeviceExt::holders(host)?
+        } else {
+            HashMap::new()
+        };
+        let picker = p.picker.map(|l| picker(l, session, &holders));
+        let saving = p.saving && claim.as_ref().is_some_and(|c| c.pending.is_none());
         let video = tree::Video {
             view: session.to_owned(),
             device: claim.as_ref().map(|c| c.udid.clone()),
             title: claim
                 .as_ref()
                 .map_or_else(|| "Simulator".to_owned(), |c| c.name.clone()),
-            busy: pending,
-            boot: pending,
+            busy: pending.is_some(),
+            // An agent's claim is vornd's to start.
+            boot: pending.is_some_and(|p| !p.agent),
+            save: saving,
             zoom: p.zoom,
             notice: p.notice,
+            // The words and dividers are 0.8's pane's, kept as they were.
             tools: vec![
-                tool(
-                    "pick",
-                    "Point at an element for the agent",
-                    "mouse-pointer-click",
-                ),
-                tool("draw", "Draw on the screen for the agent", "pencil"),
+                Tool {
+                    tip: Some(
+                        "Point at an element to describe it to this session's agent".to_owned(),
+                    ),
+                    ..tool(
+                        "pick",
+                        "Point at an element for the agent",
+                        "mouse-pointer-click",
+                    )
+                },
+                Tool {
+                    tip: Some(
+                        "Draw over the screen, then click again to send it to this session's agent"
+                            .to_owned(),
+                    ),
+                    ..tool("draw", "Draw on the screen for the agent", "pencil")
+                },
             ],
             controls: vec![
-                tool("home", "Press Home", "house"),
-                tool("lock", "Press Lock", "lock"),
-                tool("save", "Save a screenshot", "image-down"),
+                Tool {
+                    tip: Some("Home".to_owned()),
+                    ..tool("home", "Press Home", "house")
+                },
+                Tool {
+                    tip: Some("Lock".to_owned()),
+                    ..tool("lock", "Press Lock", "lock")
+                },
+                Tool {
+                    busy: saving,
+                    divider: true,
+                    ..tool("save", "Save a screenshot", "image-down")
+                },
                 tool("keyboard", "Type on the device", "keyboard"),
-                tool("rotate", "Rotate the device", "rotate-cw"),
+                Tool {
+                    tip: Some("Rotate".to_owned()),
+                    ..tool("rotate", "Rotate the device", "rotate-cw")
+                },
             ],
             picker,
         };
@@ -461,27 +677,15 @@ impl DeviceExt {
             ));
         }
         match &e.kind {
-            EventKind::Select => DeviceExt::pick(host, session, p, &e.value)?,
+            EventKind::Select => return DeviceExt::pick(host, session, p, &e.value),
             EventKind::Click => match e.value.as_str() {
+                "save" if p.saving => return Ok(json!({ "same": true })),
                 "save" => {
-                    let Some(c) = DeviceExt::claim_of(host, session)? else {
-                        p.notice = Some(NO_CLAIM.to_owned());
-                        DeviceExt::save(host, session, &p)?;
-                        return Ok(Value::Null);
-                    };
-                    let saved = DeviceExt::video(
-                        host,
-                        session,
-                        "save",
-                        json!({ "udid": c.udid, "name": c.name }),
-                    );
-                    return match saved {
-                        Ok(_) => Ok(json!({ "same": true, "toast": "Screenshot saved" })),
-                        Err(e) => {
-                            p.notice = Some(e.message);
-                            DeviceExt::save(host, session, &p).map(|()| Value::Null)
-                        }
-                    };
+                    match DeviceExt::claimed(host, session) {
+                        Ok(_) => p.saving = true,
+                        Err(e) => p.notice = Some(e.message),
+                    }
+                    DeviceExt::save(host, session, &p)?;
                 }
                 // Each of these needs the companion; the pane says so.
                 _ => {
@@ -495,8 +699,28 @@ impl DeviceExt {
                 match said["type"].as_str().unwrap_or_default() {
                     "switch" if p.picker.is_some() => DeviceExt::close_picker(host, session, p)?,
                     "switch" => {
-                        p.picker = Some(DeviceExt::listing(host, session));
+                        p.picker = Some(Listing::loading());
                         DeviceExt::save(host, session, &p)?;
+                    }
+                    "listed" => {
+                        let Some(l) = p.picker.as_mut().filter(|l| l.loading) else {
+                            return Ok(json!({ "same": true }));
+                        };
+                        *l = Listing::from_event(&said);
+                        DeviceExt::save(host, session, &p)?;
+                    }
+                    "saved" => {
+                        p.saving = false;
+                        let answer = match said["path"].as_str() {
+                            Some(_) => json!({ "toast": "Screenshot saved" }),
+                            None => {
+                                let e = said["error"].as_str().unwrap_or("Saving failed.");
+                                p.notice = Some(e.to_owned());
+                                Value::Null
+                            }
+                        };
+                        DeviceExt::save(host, session, &p)?;
+                        return Ok(answer);
                     }
                     "dismiss" => {
                         p.notice = None;
@@ -510,7 +734,7 @@ impl DeviceExt {
                         p.zoom = zoom;
                         DeviceExt::save(host, session, &p)?;
                     }
-                    "booted" | "failed" => DeviceExt::started(host, session, &said)?,
+                    "booted" | "failed" => return DeviceExt::started(host, session, &said),
                     other => return Err(Error::bad_args(format!("no page event {other}"))),
                 }
             }
@@ -528,12 +752,13 @@ impl DeviceExt {
                 DeviceExt::button(host, arg(args, "session", action)?)?;
                 Ok(json!({}))
             }
+            BOOTED => DeviceExt::agent_booted(host, args),
             // The pane's own ✕: it goes, and the simulator stays held.
             "close" => {
                 DeviceExt::close(host, arg(args, "session", action)?)?;
                 Ok(json!({}))
             }
-            // Escape over the pane: the picker shuts, as a click outside it does.
+            // Escape: the picker shuts, and over the card nothing is left.
             "closePicker" => {
                 let session = arg(args, "session", action)?;
                 if let Some(p) = DeviceExt::pane(host, session)?.filter(|p| p.picker.is_some()) {
@@ -570,6 +795,16 @@ impl DeviceExt {
     }
 }
 
+/// `device:claim`'s answer for a simulator held.
+fn held(c: &Claim) -> Value {
+    json!({ "ok": true, "udid": c.udid, "name": c.name, "booted": true })
+}
+
+/// What a call on a simulator still starting is told.
+fn still_starting(name: &str) -> String {
+    format!("{name} is still starting; it is this session's once it is up.")
+}
+
 /// A failed claim, by what went wrong.
 fn claim_failure(message: &str) -> Value {
     let reason = if message.starts_with("No simulator") {
@@ -578,6 +813,15 @@ fn claim_failure(message: &str) -> Value {
         "boot-failed"
     };
     json!({ "ok": false, "reason": reason, "message": message })
+}
+
+/// A failed claim as `method` answers it: `device:claim` with the failure,
+/// `device:openPane` with an error.
+fn answer_failure(method: &str, failure: Value) -> Result<Value, Error> {
+    match method {
+        "openPane" => Err(failed(failure["message"].as_str().unwrap_or_default())),
+        _ => Ok(failure),
+    }
 }
 
 /// Whether `simctl launch` failed for want of the app.
@@ -593,14 +837,15 @@ fn tool(id: &str, label: &str, icon: &str) -> Tool {
         id: id.to_owned(),
         label: label.to_owned(),
         icon: icon.to_owned(),
-        on: false,
+        ..Tool::default()
     }
 }
 
 /// The simulators under the title: this session's to take first, a dot
 /// on the running ones, and the ones another session holds shown but shut.
-fn picker(listing: &Listing, session: &str) -> tree::Picker {
-    let choices = devices::order_devices(&listing.devices, session)
+fn picker(listing: Listing, session: &str, holders: &HashMap<String, String>) -> tree::Picker {
+    let all = devices::held(listing.devices, holders);
+    let choices = devices::order_devices(&all, session)
         .into_iter()
         .map(|l| {
             let held = !l.selectable;
@@ -626,8 +871,8 @@ fn picker(listing: &Listing, session: &str) -> tree::Picker {
         .collect();
     tree::Picker {
         heading: "Simulators".to_owned(),
-        loading: false,
-        error: listing.error.clone(),
+        loading: listing.loading,
+        error: listing.error,
         empty: Some("No simulators found".to_owned()),
         choices,
     }

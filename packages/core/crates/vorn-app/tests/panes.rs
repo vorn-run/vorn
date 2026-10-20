@@ -413,8 +413,17 @@ fn mobile_agent(shot: &mut Shot, app: &mut App, v: &TestVornd) -> String {
     sid
 }
 
+/// Tells the Device's screen `kind` with `value`, as the pane would.
+fn tell_screen(app: &mut App, sid: &str, kind: vorn_tree::EventKind, value: &str) {
+    let key = device_key(&app.st.points, sid).expect("the Device's tree");
+    let mut e = vorn_tree::Event::new("screen", kind, value);
+    e.scope = Some(sid.to_owned());
+    let params = app.st.points.tell(&key, &e).expect("told");
+    app.rpc().call("extension:call", params).expect("answered");
+}
+
 #[test]
-fn the_device_button_opens_the_picker_and_the_pane() {
+fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -422,7 +431,8 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     let mut shot = Shot::new();
     let sid = mobile_agent(&mut shot, &mut app, &v);
 
-    // The phone opens the pane with its picker listing the simulators.
+    // The phone opens the picker over the card, listing the simulators;
+    // no pane opens until one is up.
     shot.hover(&mut app, term_id(&sid));
     let phone = shot
         .labelled(&mut app, "Button", "Open device")
@@ -431,7 +441,8 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     let open = until_video(&mut shot, &mut app, &sid, "the picker", |v| {
         v.picker.as_ref().is_some_and(|p| !p.loading)
     });
-    assert_eq!(app.st.bench.kinds(&sid), [PaneKind::Device]);
+    assert!(app.st.bench.kinds(&sid).is_empty(), "no pane yet");
+    assert!(app.st.bench.device_cards.contains(&sid));
     assert_eq!(
         (open.title.as_str(), open.device.as_deref()),
         ("Simulator", None)
@@ -439,7 +450,7 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     let picker = open.picker.expect("picker");
     assert_eq!(picker.heading, "Simulators");
     assert!(
-        !picker.choices.is_empty() || picker.empty.as_deref() == Some("No simulators found"),
+        !picker.choices.is_empty() || picker.empty.is_some() || picker.error.is_some(),
         "{picker:?}"
     );
     assert!(
@@ -449,45 +460,107 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     assert_eq!(app.st.bench.video_picker.as_deref(), Some(sid.as_str()));
     shot.save(&mut app, "device-picker");
 
-    // Escape with nothing picked shuts the picker and the pane with it.
+    // Escape shuts the picker, and nothing is left over the card.
     shot.send(&mut app, key("Escape", 0, None));
     shot.until(&mut app, "the picker shut", |app, _| {
         app.pump();
-        app.st.bench.kinds(&sid).is_empty().then_some(())
+        (!app.st.bench.device_cards.contains(&sid)).then_some(())
     });
+    assert!(app.st.bench.kinds(&sid).is_empty());
     assert!(app.st.bench.video_picker.is_none());
+
+    // Picked over the card, the button waits while it starts, and a
+    // simulator that does not start is a toast with nothing opened.
     shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
     until_video(&mut shot, &mut app, &sid, "the picker again", |v| {
         v.picker.as_ref().is_some_and(|p| !p.loading)
     });
-
-    // A simulator that is not there: the app's start fails into the pane's notice.
-    let key = device_key(&app.st.points, &sid).expect("the pane's tree");
-    let mut pick = vorn_tree::Event::new("screen", vorn_tree::EventKind::Select, "TEST-UDID");
-    pick.scope = Some(sid.clone());
-    let params = app.st.points.tell(&key, &pick).expect("told");
-    let pending = app.rpc().request("extension:call", params);
-    shot.until(&mut app, "the pick", |app, _| {
-        app.pump();
-        pending.poll()
-    })
-    .expect("picked");
-    let failed = until_video(&mut shot, &mut app, &sid, "the failed start", |v| {
-        v.notice.is_some()
+    tell_screen(&mut app, &sid, vorn_tree::EventKind::Select, "TEST-UDID");
+    until_video(&mut shot, &mut app, &sid, "the pick", |v| {
+        v.picker.is_none() && v.busy
     });
+    shot.hover(&mut app, term_id(&sid));
     assert!(
-        failed
-            .notice
-            .as_deref()
-            .is_some_and(|n| n.starts_with("No simulator with udid TEST-UDID")),
-        "{failed:?}"
+        shot.labelled(&mut app, "Button", "Opening device")
+            .is_some(),
+        "the card's phone, waiting"
     );
-    assert!(!failed.boot && failed.device.is_none(), "{failed:?}");
-    shot.save(&mut app, "device-pane");
+    assert!(
+        app.st.bench.kinds(&sid).is_empty(),
+        "no pane while it starts"
+    );
+    shot.save(&mut app, "device-opening");
+    shot.until(&mut app, "the failed start", |app, _| {
+        app.pump();
+        (!app.st.bench.device_cards.contains(&sid)).then_some(())
+    });
+    assert!(app.st.bench.kinds(&sid).is_empty());
+    assert!(
+        app.st.toasts.iter().any(|t| t.error),
+        "the failure is a toast: {:?}",
+        app.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+
+    // Started, the pane opens on it with 0.8's controls.
+    shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
+    until_video(&mut shot, &mut app, &sid, "the picker a third time", |v| {
+        v.picker.as_ref().is_some_and(|p| !p.loading)
+    });
+    tell_screen(&mut app, &sid, vorn_tree::EventKind::Select, "TEST-UDID");
+    let booted = json!({ "type": "booted", "bootedHere": false }).to_string();
+    tell_screen(&mut app, &sid, vorn_tree::EventKind::Page, &booted);
+    let shown = until_video(&mut shot, &mut app, &sid, "the pane", |v| {
+        !v.busy && v.device.is_some()
+    });
+    shot.until(&mut app, "the pane open", |app, _| {
+        app.pump();
+        (app.st.bench.kinds(&sid) == [PaneKind::Device]).then_some(())
+    });
+    assert_eq!(shown.device.as_deref(), Some("TEST-UDID"));
     assert!(
         shot.labelled(&mut app, "Toolbar", "Device controls")
             .is_some(),
         "the control bar"
+    );
+    let tips: Vec<_> = shown
+        .controls
+        .iter()
+        .map(|t| t.tip.as_deref().unwrap_or(&t.label))
+        .collect();
+    assert_eq!(
+        tips,
+        [
+            "Home",
+            "Lock",
+            "Save a screenshot",
+            "Type on the device",
+            "Rotate"
+        ]
+    );
+    assert_eq!(
+        shown
+            .controls
+            .iter()
+            .filter(|t| t.divider)
+            .map(|t| t.id.as_str())
+            .collect::<Vec<_>>(),
+        ["save"],
+        "the second divider, before Save; the first is between the groups"
+    );
+    shot.save(&mut app, "device-pane");
+
+    // Saving spins until the client says how it went; here, that it failed.
+    let save = shot
+        .labelled(&mut app, "Button", "Save a screenshot")
+        .expect("save");
+    shot.click(&mut app, save);
+    let saved = until_video(&mut shot, &mut app, &sid, "the save over", |v| {
+        v.notice.is_some()
+    });
+    assert!(!saved.save, "{saved:?}");
+    assert!(
+        !saved.controls.iter().any(|t| t.busy),
+        "no spinner once it is over: {saved:?}"
     );
     let dismiss = shot
         .labelled(&mut app, "Button", "Dismiss error")
@@ -511,7 +584,7 @@ fn the_device_button_opens_the_picker_and_the_pane() {
 
     // The pane's ✕ closes it.
     let close = shot
-        .labelled(&mut app, "Button", "Close Simulator")
+        .labelled(&mut app, "Button", "Close TEST-UDID")
         .expect("the pane's close");
     shot.click(&mut app, close);
     shot.until(&mut app, "the pane closed", |app, _| {

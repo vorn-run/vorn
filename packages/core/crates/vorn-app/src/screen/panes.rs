@@ -1742,17 +1742,53 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
             "Open browser",
         ));
     }
-    let device_on = device_key(&s.st.points, sid).is_some();
+    let key = device_key(&s.st.points, sid);
     let has = bench.devices.contains(sid);
     let mobile = bench.mobile.get(&session.info.project_path).copied();
-    if device_on && should_show_button(mobile, has, session.is_shell()) {
-        let label = if has { "Hide device" } else { "Open device" };
-        out.push(button(
+    let showing = has || bench.device_cards.contains(sid);
+    if let Some(key) = key.filter(|_| should_show_button(mobile, showing, session.is_shell())) {
+        // Before the pane opens the button holds the picker, then waits
+        // while what was picked there starts, as in 0.8.
+        let card = bench
+            .device_cards
+            .contains(sid)
+            .then(|| s.st.points.tree(&key).and_then(|t| video_part(t, sid)))
+            .flatten();
+        let picker = card.and_then(|(node, v)| v.picker.as_ref().map(|p| (node, p)));
+        let opening = card.is_some() && picker.is_none();
+        let (label, tip) = match (has, opening) {
+            (true, _) => ("Hide device", "Hide device"),
+            (false, true) => ("Opening device", "Booting the simulator\u{2026}"),
+            (false, false) => ("Open device", "Open device"),
+        };
+        let icon = if opening {
+            "loader-circle"
+        } else {
+            "smartphone"
+        };
+        let mut b = button(
             Act::Pane(PaneAct::DeviceButton(sid.to_owned())),
-            "smartphone",
+            icon,
             label,
-            label,
-        ));
+            tip,
+        );
+        if opening {
+            b = b.disabled(true).opacity(0.5);
+        }
+        if let Some((node, p)) = picker {
+            let bind = super::points::ScopedBinder {
+                s,
+                key: &key,
+                chrome: None,
+                label: std::cell::RefCell::new(None),
+            };
+            b = b.overlay(
+                super::video::card_picker(&bind, node, p),
+                Place::BelowStart,
+                4.0,
+            );
+        }
+        out.push(b);
     }
     out
 }

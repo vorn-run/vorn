@@ -277,7 +277,7 @@ impl Browser {
                 id: NEW_TAB.to_owned(),
                 label: "New tab".to_owned(),
                 icon: "plus".to_owned(),
-                on: false,
+                ..Tool::default()
             }],
             ..Tabs::default()
         };

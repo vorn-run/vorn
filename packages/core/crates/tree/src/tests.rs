@@ -270,6 +270,7 @@ fn the_parts_a_pane_draws_travel_and_check() {
                     label: "Hide file tree".into(),
                     icon: "list-tree".into(),
                     on: true,
+                    ..Tool::default()
                 }],
                 ..Tabs::default()
             },
@@ -398,7 +399,9 @@ fn a_video_travels_with_its_picker_and_names_its_view() {
             id: "draw".into(),
             label: "Draw".into(),
             icon: "pencil".into(),
-            on: false,
+            tip: Some("Draw for the agent".into()),
+            divider: true,
+            ..Tool::default()
         }],
         ..Video::default()
     };
@@ -409,6 +412,9 @@ fn a_video_travels_with_its_picker_and_names_its_view() {
     assert_eq!(part["view"], "s1");
     assert_eq!(part["device"], "UDID");
     assert_eq!(part["tools"][0]["id"], "draw");
+    assert_eq!(part["tools"][0]["tip"], "Draw for the agent");
+    assert_eq!(part["tools"][0]["divider"], true);
+    assert!(part["tools"][0].get("busy").is_none());
     assert!(part.get("boot").is_none(), "false flags stay off the wire");
     assert_eq!(part["picker"]["choices"][0]["status"], "good");
     let back: Rendered = serde_json::from_value(v).unwrap();

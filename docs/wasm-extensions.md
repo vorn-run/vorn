@@ -233,22 +233,30 @@ few times a second, inside its bezel, with the header's `tools`, a bar of
 `controls` and the zoom under it; no frame passes through the extension.
 `device` names the simulator shown; with `boot` set the client starts it
 first and reports how that went, and `busy` spins the title meanwhile.
-`zoom` is screen points per pixel, none fitting the screen to the pane;
+With `save` set it saves a screenshot of `device` to Downloads and reports
+that too. Each tool and control has an `id`, `label` and `icon`, and may
+add a shorter `tip`, `on`, `busy` (it spins) and `divider` (a line before
+it). `zoom` is screen points per pixel, none fitting the screen to the pane;
 `notice` is a line over the screen, and `picker` a list under the title
 (`heading`, `loading`, `error`, `empty`, `choices` with `id`, `title`,
-`detail`, a `status` tone and a `badge`). Its `page` events carry:
+`detail`, a `status` tone and a `badge`); while it is `loading` the client
+lists the simulators and reports them. Its `page` events carry:
 
-| `type`    | fields       | when                                                   |
-| --------- | ------------ | ------------------------------------------------------ |
-| `switch`  |              | the title was clicked, to open or shut the picker      |
-| `dismiss` |              | the notice's ✕                                         |
-| `zoom`    | `zoom`       | a zoom button; without `zoom`, fit to the pane         |
-| `booted`  | `bootedHere` | the client started `device`; whether it was off before |
-| `failed`  | `message`    | it could not                                           |
+| `type`    | fields               | when                                                   |
+| --------- | -------------------- | ------------------------------------------------------ |
+| `switch`  |                      | the title was clicked, to open or shut the picker      |
+| `dismiss` |                      | the notice's ✕                                         |
+| `zoom`    | `zoom`               | a zoom button; without `zoom`, fit to the pane         |
+| `booted`  | `bootedHere`         | the client started `device`; whether it was off before |
+| `failed`  | `message`            | it could not                                           |
+| `listed`  | `devices` or `error` | the simulators a `loading` picker asked for            |
+| `saved`   | `path` or `error`    | how the screenshot `save` asked for went               |
 
 Only the extensions Vorn ships may hold a `video` part (the `video`
 permission); Vorn's own Device (`packages/core/extensions/device`) draws
-the device pane with one.
+the device pane with one. A Device row with `card` set is drawn over the
+session card's phone button instead of in a pane: its picker, then the
+button waiting while what was picked there starts.
 
 A board holds columns, each holding its cards. A board of thousands cannot
 travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list

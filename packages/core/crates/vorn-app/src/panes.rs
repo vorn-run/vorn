@@ -240,7 +240,11 @@ pub struct Workbench {
     pub artifacts: HashMap<String, artifact::State>,
     /// The sessions whose Device pane is open.
     pub devices: HashSet<String>,
-    /// The session whose simulator picker is open, over the web views.
+    /// The sessions whose card's phone button shows the Device's picker
+    /// over it, or the simulator picked there starting; no pane yet.
+    pub device_cards: HashSet<String>,
+    /// The session whose simulator picker is open, in its pane or over its
+    /// card, over the web views.
     pub video_picker: Option<String>,
     /// `project:detectMobile` answers, by project path.
     pub mobile: HashMap<String, bool>,

@@ -56,12 +56,23 @@ pub struct Tab {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Tool {
     pub id: String,
+    /// What it is read out as; the tooltip too, unless `tip` says otherwise.
     pub label: String,
     /// A kit icon by name; a list line may go without.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub icon: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub on: bool,
+    /// The tooltip, when it should read other than the label: shorter, or
+    /// saying what a click goes on to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
+    /// Working on its last click: a spinner instead of the icon, and no click.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub busy: bool,
+    /// A divider before it, setting it apart from the tools before.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub divider: bool,
 }
 
 /// Rows in a tree of folders, as a file tree: a row `select`s on a click (a
@@ -218,9 +229,12 @@ pub struct Web {
 /// JSON object with a `type`: `switch` (the title was clicked, or the open
 /// picker dismissed), `dismiss`
 /// (the notice's ✕), `zoom` (`zoom`, the scale chosen, absent to fit the
-/// pane) and, for a part with `boot` set, `booted` (`bootedHere` when the
+/// pane); for a part with `boot` set, `booted` (`bootedHere` when the
 /// client started the device) or `failed` (`message`) once the client has
-/// started `device` or could not.
+/// started `device` or could not; for a `loading` picker, `listed`
+/// (`devices`, as `video:list` answers them, or `error`) once the client
+/// has listed them; and for a part with `save` set, `saved` (`path`, or
+/// `error`) once the client has saved a screenshot of `device`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Video {
     pub view: String,
@@ -234,6 +248,9 @@ pub struct Video {
     /// The client starts `device` before it draws it, and reports how that went.
     #[serde(default, skip_serializing_if = "is_false")]
     pub boot: bool,
+    /// The client saves a screenshot of `device`, and reports where it went.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub save: bool,
     /// Screen points per logical pixel; none fits the screen to the pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<f64>,
@@ -256,6 +273,8 @@ pub struct Video {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Picker {
     pub heading: String,
+    /// A spinner while the client lists the devices, which it reports as
+    /// `listed` on the part: listing takes a while, and the picker shows at once.
     #[serde(default, skip_serializing_if = "is_false")]
     pub loading: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -251,6 +251,20 @@ pub fn outer_radius(drawn: (f64, f64), points: (f64, f64)) -> f64 {
     (drawn.0.min(drawn.1) * k).round()
 }
 
+/// The frame around a screen drawn `drawn` in a stage `area` (unmeasured
+/// at first, when the frame is 8 wide): its width, its outer corner radius,
+/// and the screen's own corner radius inside it, which the screen's picture
+/// is cut to as the 0.8 pane's web view rounded it.
+pub fn frame_metrics(
+    drawn: (f64, f64),
+    area: Option<(f64, f64)>,
+    points: (f64, f64),
+) -> (f64, f64, f64) {
+    let inset = area.map_or(8.0, |a| bezel_thickness(a, points));
+    let outer = outer_radius(drawn, points);
+    (inset, outer, (outer - inset).max(2.0))
+}
+
 /// The device's name made safe for a file, and when, as
 /// `iso` (`toISOString`) gives it.
 pub fn screenshot_name(name: &str, iso: &str) -> String {

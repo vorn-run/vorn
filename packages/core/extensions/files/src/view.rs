@@ -25,7 +25,7 @@ fn tool(id: &str, label: &str, icon: &str) -> Tool {
         id: id.to_owned(),
         label: label.to_owned(),
         icon: icon.to_owned(),
-        on: false,
+        ..Tool::default()
     }
 }
 

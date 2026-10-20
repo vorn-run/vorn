@@ -12,7 +12,7 @@ use super::{c, ico, white, Screen};
 use crate::look;
 use crate::panes::stage_id;
 use crate::ui::{custom, div, text, tooltip, Action, El, Id, Place, Rgba, Role, Sense};
-use crate::video::{bezel_thickness, outer_radius, stepped_zoom, ZOOM_MAX, ZOOM_MIN};
+use crate::video::{frame_metrics, stepped_zoom, ZOOM_MAX, ZOOM_MIN};
 
 /// What the part's controls tell its extension, all as events on `node`.
 struct Tell<'a, 'b, 'c> {
@@ -32,8 +32,17 @@ impl Tell<'_, '_, '_> {
     }
 }
 
-/// `p-1 rounded hover:bg-white/10`: a tool's or control's button.
-fn icon_button(s: &Screen<'_>, id: Id, icon: &str, label: &str, on: bool, dim: bool) -> El {
+/// `p-1 rounded hover:bg-white/10`: a tool's or control's button, read
+/// out as `label`, its tooltip `tip`.
+fn icon_button(
+    s: &Screen<'_>,
+    id: Id,
+    icon: &str,
+    label: &str,
+    tip: &str,
+    on: bool,
+    dim: bool,
+) -> El {
     let hot = s.ui.hover(id);
     let bg = if on {
         white(0.06)
@@ -51,12 +60,25 @@ fn icon_button(s: &Screen<'_>, id: Id, icon: &str, label: &str, on: bool, dim: b
         .child(ico(icon, 14.0, 2.0, c(look::INK)))
         .toggled(on);
     let b = if dim { b.opacity(0.4) } else { b };
-    tooltip(s.ui, b, id, label, None)
+    tooltip(s.ui, b, id, tip, None)
 }
 
-fn tool_button(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, t: &Tool) -> El {
+/// A tool, after its divider if it has one; busy, it spins and is dimmed.
+fn tool_button(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, t: &Tool) -> [Option<El>; 2] {
     let id = tell.send(EventKind::Click, t.id.as_str());
-    icon_button(s, id, &t.icon, &t.label, t.on, false)
+    let icon = if t.busy {
+        "loader-circle"
+    } else {
+        t.icon.as_str()
+    };
+    let tip = t.tip.as_deref().unwrap_or(&t.label);
+    let b = icon_button(s, id, icon, &t.label, tip, t.on, t.busy);
+    [t.divider.then(divider), Some(b)]
+}
+
+/// The line between groups of controls.
+fn divider() -> El {
+    div().w(1.0).h(14.0).mx(4.0).bg(white(0.08))
 }
 
 /// Video part `v` of the tree, drawn for the session it names.
@@ -100,7 +122,12 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
         title = title.overlay(picker(s, &tell, p), Place::BelowStart, 4.0);
     }
     let title = tooltip(s.ui, title, tid, "Switch simulator", None);
-    let tools = v.tools.iter().map(|t| tool_button(s, &tell, t)).collect();
+    let tools = v
+        .tools
+        .iter()
+        .flat_map(|t| tool_button(s, &tell, t))
+        .flatten()
+        .collect();
     let header = div()
         .row()
         .items_center()
@@ -161,18 +188,16 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
         .bg(c(look::SURFACE_PANEL));
     let shown = bench
         .video_id(sid)
-        .filter(|_| !v.boot && v.device.is_some());
+        .filter(|_| !v.boot && !v.busy && v.device.is_some());
     stage = match shown {
         Some(cid) if points.0 > 0.0 => {
             let (w, h) = (
                 (points.0 * scale).round() as f32,
                 (points.1 * scale).round() as f32,
             );
-            let inset = area.map_or(8.0, |(aw, ah)| {
-                bezel_thickness((f64::from(aw), f64::from(ah)), points) as f32
-            });
-            let outer = outer_radius((f64::from(w), f64::from(h)), points) as f32;
-            let inner = (outer - inset).max(2.0);
+            let area = area.map(|(aw, ah)| (f64::from(aw), f64::from(ah)));
+            let (inset, outer, inner) = frame_metrics((f64::from(w), f64::from(h)), area, points);
+            let (inset, outer, inner) = (inset as f32, outer as f32, inner as f32);
             stage.child(
                 div()
                     .p(inset)
@@ -192,10 +217,11 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
             )
         }
         _ => {
-            let words = if v.device.is_some() {
-                "Waiting for the device\u{2026}"
-            } else {
-                "Choose a simulator"
+            // 0.8's words: a pane that went wrong says so over its screen.
+            let words = match (&v.device, &v.notice) {
+                (None, _) => "Choose a simulator",
+                (Some(_), Some(_)) => "No frame",
+                (Some(_), None) => "Waiting for the device\u{2026}",
             };
             stage.child(text(words, 11.0, c(look::GRAY_500)).wrapping().min_w0())
         }
@@ -216,7 +242,6 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
 
 /// The extension's controls, then the zoom.
 fn control_bar(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, v: &Video, scale: f64) -> El {
-    let divider = || div().w(1.0).h(14.0).mx(4.0).bg(white(0.08));
     let zoom = |z: f64| tell.page(json!({ "type": "zoom", "zoom": z }));
     let out = zoom(stepped_zoom(scale, false));
     let into = zoom(stepped_zoom(scale, true));
@@ -246,12 +271,18 @@ fn control_bar(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, v: &Video, scale: f64) -
         .shrink0()
         .border_top(1.0, white(0.06))
         .role(Role::Toolbar, "Device controls")
-        .children(v.controls.iter().map(|t| tool_button(s, tell, t)))
+        .children(
+            v.controls
+                .iter()
+                .flat_map(|t| tool_button(s, tell, t))
+                .flatten(),
+        )
         .child_if((!v.controls.is_empty()).then(divider))
         .child(icon_button(
             s,
             out,
             "minus",
+            "Zoom out",
             "Zoom out",
             false,
             scale <= ZOOM_MIN,
@@ -271,6 +302,7 @@ fn control_bar(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, v: &Video, scale: f64) -
             into,
             "plus",
             "Zoom in",
+            "Zoom in",
             false,
             scale >= ZOOM_MAX,
         ))
@@ -279,10 +311,17 @@ fn control_bar(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, v: &Video, scale: f64) -
             fit,
             "scan",
             "Fit the device to the pane",
+            "Fit the device to the pane",
             v.zoom.is_none(),
             false,
         ))
         .child(tooltip(s.ui, one, actual, "One pixel per point", None))
+}
+
+/// The picker of video part `node`, drawn over the card's button that
+/// opened it, as 0.8 did: the pane opens only once a simulator is up.
+pub(crate) fn card_picker(b: &ScopedBinder<'_, '_>, node: &str, p: &Picker) -> El {
+    picker(b.s, &Tell { b, node }, p)
 }
 
 /// The devices the title offers.
