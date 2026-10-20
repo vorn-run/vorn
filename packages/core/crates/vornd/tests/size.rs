@@ -254,7 +254,7 @@ impl Desktop {
         });
     }
 
-    /// Every `Resized` received: size, owner, reason.
+    /// Every `Resized` a rule decided (a redraw nudge's have no owner or reason).
     fn resized(&self) -> Vec<Named> {
         self.got
             .iter()
@@ -265,7 +265,9 @@ impl Desktop {
                     owner,
                     reason,
                     ..
-                }) => Some(((*cols, *rows), *owner, *reason)),
+                }) if owner.is_some() || reason.is_some() => {
+                    Some(((*cols, *rows), *owner, *reason))
+                }
                 _ => None,
             })
             .collect()
@@ -372,7 +374,9 @@ impl Phone {
                                 &mut Vec::new(),
                             )
                             .unwrap();
-                        self.resized.push(p.clone());
+                        if !p["reason"].is_null() {
+                            self.resized.push(p.clone());
+                        }
                     }
                 }
                 _ => {}

@@ -271,6 +271,8 @@ enum Call {
     Models(String, String),
     /// A `config:save`; the next one waits for it.
     Saved(Box<Call>),
+    /// `config:load` after the app's saves, for a change they held back.
+    Config,
     Task(tasks::TaskCall),
     Workflow(workflows::WfCall),
     Set(settings::SetCall),
@@ -362,6 +364,9 @@ pub struct App {
     /// one could land first.
     saves: VecDeque<(Value, Call)>,
     saving: bool,
+    /// A `config:changed` came while saves were on their way: it may predate
+    /// them, so the configuration is read again once they are done.
+    config_stale: bool,
     logo: Option<u32>,
     /// The agents' marks, registered as images.
     agents: crate::components::AgentMarks,
@@ -536,6 +541,7 @@ impl App {
             calls: Vec::new(),
             saves: VecDeque::new(),
             saving: false,
+            config_stale: false,
             logo: None,
             agents: Default::default(),
             closed: false,
@@ -876,7 +882,16 @@ impl App {
                         self.layout_opened(&params);
                     }
                     let before = self.store.workspace().to_owned();
-                    if self.store.apply(&method, params) == crate::client::Change::TasksStale {
+                    // A read running may predate these rows, and rows may predate the app's
+                    // own writes: either way the list is read again once both have landed.
+                    let rows = method == "task:rows";
+                    self.st.tasks.reload_stale |= rows && self.st.tasks.reloading;
+                    if rows && self.st.tasks.writing > 0 {
+                        self.reload_tasks();
+                    } else if method == "config:changed" && self.saving {
+                        self.config_stale = true;
+                    } else if self.store.apply(&method, params) == crate::client::Change::TasksStale
+                    {
                         self.reload_tasks();
                     }
                     if self.store.workspace() != before {
@@ -1010,6 +1025,16 @@ impl App {
                 self.saving = false;
                 self.answered(*call, answer);
                 self.next_save();
+                if !self.saving && std::mem::take(&mut self.config_stale) {
+                    self.call(Call::Config, "config:load", Value::Null);
+                }
+            }
+            Call::Config => {
+                if self.saving {
+                    self.config_stale = true;
+                } else if let Ok(config) = answer {
+                    self.config_changed(config);
+                }
             }
             Call::Toast(text) => match answer {
                 Ok(_) => self.st.toast(text, false),
@@ -1133,7 +1158,8 @@ impl App {
                 return;
             }
             if v.get("reason").and_then(Value::as_str) == Some("gone") {
-                self.store.remove(old);
+                // Resumed elsewhere under the same id, so its updates must still bring it back.
+                self.store.forget(old);
                 self.views.remove(old);
                 self.st
                     .toast("That session was resumed somewhere else", false);
@@ -1871,7 +1897,6 @@ impl App {
     }
 
     fn save_config(&mut self, config: Value, call: Call) {
-        let before = self.store.workspace().to_owned();
         // Tasks and workflows are not vornd's configuration: their changes go as calls of their own.
         let mut calls =
             crate::client::sync::tasks(self.store.config.get("tasks"), config.get("tasks"));
@@ -1882,11 +1907,17 @@ impl App {
         for (method, params) in calls {
             self.call(Call::Quiet, method, params);
         }
-        self.store.apply("config:changed", config.clone());
+        self.config_changed(config.clone());
+        self.queue_save(config, call);
+    }
+
+    /// vornd's configuration, read again: taken as a `config:changed`.
+    fn config_changed(&mut self, config: Value) {
+        let before = self.store.workspace().to_owned();
+        self.store.apply("config:changed", config);
         if self.store.workspace() != before {
             self.workspace_switched();
         }
-        self.queue_save(config, call);
     }
 
     /// Sends `config` to vornd once the saves before it are done.

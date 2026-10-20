@@ -10,7 +10,7 @@
 mod support;
 
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use support::{add_project, connect, key, seed_workflows, Shot, TestVornd};
@@ -266,10 +266,10 @@ fn drag_frames(shot: &mut Shot, app: &mut App, id: &str, fit: bool) -> (Duration
     let mut frames: Vec<Duration> = Vec::new();
     for i in 1..=40 {
         shot.ui.pointer_move(x + i as f32 * 3.0, y + i as f32);
-        let at = Instant::now();
+        let at = thread_time();
         app.events(&mut shot.ui);
         shot.frame(app);
-        frames.push(at.elapsed());
+        frames.push(thread_time().saturating_sub(at));
     }
     shot.ui.pointer_up();
     app.events(&mut shot.ui);
@@ -281,6 +281,19 @@ fn drag_frames(shot: &mut Shot, app: &mut App, id: &str, fit: bool) -> (Duration
     );
     frames.sort();
     (frames[frames.len() / 2], frames[frames.len() * 99 / 100])
+}
+
+/// CPU time this thread has used: the frame's own work, not the turns a
+/// busy test runner gives the other tests.
+fn thread_time() -> Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `t` is a valid, writable timespec for the call's duration.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
 }
 
 fn steps(count: usize) -> Vec<Value> {

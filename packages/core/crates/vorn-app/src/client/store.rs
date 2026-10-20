@@ -6,7 +6,7 @@
 //! them beside its copy of it, under `tasks` and `workflows`, so the screens
 //! read one value, and [`super::sync`] carries a change to them back.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -139,6 +139,9 @@ pub struct Store {
     pub sessions_known: bool,
     /// The agents a session can start, from their adapters.
     pub agents: crate::agents::Agents,
+    /// Sessions taken off the screen, whose updates still on their way are
+    /// not to bring them back: vornd says nothing once one is gone.
+    gone: HashSet<String>,
 }
 
 fn subscription() -> Value {
@@ -347,6 +350,12 @@ impl Store {
     /// Takes the session with `id` off the screen.
     pub fn remove(&mut self, id: &str) {
         self.sessions.retain(|s| s.info.id != id);
+        self.gone.insert(id.to_owned());
+    }
+
+    /// Takes the session with `id` off the screen while it may still live: its next update brings it back.
+    pub fn forget(&mut self, id: &str) {
+        self.sessions.retain(|s| s.info.id != id);
     }
 
     /// Folds one notification in.
@@ -354,11 +363,13 @@ impl Store {
         match method {
             "session:created" | "session:updated" => {
                 match serde_json::from_value::<TerminalSession>(params) {
-                    Ok(info) => {
+                    // Created again (resumed under its id) is back; updated is not.
+                    Ok(info) if method == "session:created" || !self.gone.contains(&info.id) => {
+                        self.gone.remove(&info.id);
                         self.upsert(info);
                         Change::Sessions
                     }
-                    Err(_) => Change::Nothing,
+                    Ok(_) | Err(_) => Change::Nothing,
                 }
             }
             "session:reordered" => {
@@ -640,6 +651,24 @@ mod tests {
         assert_eq!(ids(&s), ["a", "b"]);
         assert_eq!(s.sessions[0].title(), "Shell 1");
         assert_eq!(s.sessions[0].status(), "waiting");
+    }
+
+    #[test]
+    fn a_removed_session_is_not_brought_back_by_a_late_update() {
+        let mut s = store(&["a", "b"]);
+        s.remove("a");
+        assert_eq!(
+            s.apply("session:updated", session("a", "exited")),
+            Change::Nothing
+        );
+        assert_eq!(ids(&s), ["b"]);
+        s.apply("session:created", session("a", "running"));
+        s.apply("session:updated", session("a", "waiting"));
+        assert_eq!(ids(&s), ["b", "a"]);
+        assert_eq!(s.sessions[1].status(), "waiting");
+        s.forget("b");
+        s.apply("session:updated", session("b", "running"));
+        assert_eq!(ids(&s), ["a", "b"]);
     }
 
     #[test]
