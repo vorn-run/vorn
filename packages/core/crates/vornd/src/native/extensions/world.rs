@@ -383,14 +383,6 @@ impl World for Wired {
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
             let m = method.as_str();
-            if vorn_extensions::gate::BUILTIN_ONLY.contains(&m)
-                && !super::builtin::SHIPPED.contains(&extension.as_str())
-            {
-                return Err(ExtError::new(
-                    "denied",
-                    format!("{m} is open only to the extensions Vorn ships"),
-                ));
-            }
             // What runs is read once vornd knows it, as a client's reads are.
             if matches!(m, "sessions.list" | "sessions.get") {
                 if let Some(registry) = native.registry.get().cloned() {

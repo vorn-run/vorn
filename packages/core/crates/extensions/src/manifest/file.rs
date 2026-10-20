@@ -2006,7 +2006,7 @@ header = "Authorization: Bearer {token}"
         let err = parse(&SERVICE.replace("api.example.com", "API.example.com/x")).unwrap_err();
         assert_eq!(err.line, 16);
         assert_eq!(err.field, "declares.network[0]");
-        let err = parse(&SERVICE.replace("@0.9\"", "@2.0\"")).unwrap_err();
+        let err = parse(&SERVICE.replace("@1.0\"", "@2.0\"")).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (4, "api"));
         let err = parse(&SERVICE.replace("{token}", "{tok}")).unwrap_err();
         assert_eq!((err.line, err.field.as_str()), (21, "credential.header"));

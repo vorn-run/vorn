@@ -34,18 +34,6 @@ use vorn_extensions::router::Router;
 
 use super::guard;
 
-/// The ids of the extensions Vorn ships, which alone may call the core
-/// methods open only to them ([`vorn_extensions::gate::BUILTIN_ONLY`]).
-pub const SHIPPED: &[&str] = &[
-    vorn_connectors::builtin::ID,
-    tasks::ID,
-    vorn_workflows::ID,
-    wasm::EDITOR,
-    browser::ID,
-    device::ID,
-    ssh::ID,
-];
-
 /// What a built-in reaches Vorn through: the gate a package's program goes through.
 pub struct Api {
     manifest: Arc<Manifest>,

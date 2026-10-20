@@ -24,6 +24,7 @@ pub mod compat;
 pub mod component;
 pub mod connector;
 pub mod events;
+pub mod freeze;
 pub mod footer;
 pub mod gate;
 pub mod grants;

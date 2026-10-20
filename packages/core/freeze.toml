@@ -1,0 +1,121 @@
+# The frozen core: every workspace member, classed once, and every feature
+# left in a core or host crate, listed by name with the reason it stays.
+# `cargo test -p vorn-extensions --test freeze` checks this file against the
+# tree; the built-ins under extensions/ are checked against the public API.
+
+# The core crates, each with its area: projects, worktrees, sessions,
+# terminals, git, settings, palette, mcp, tasks, workflows, bridge, support.
+[core]
+"crates/screen" = "terminals"
+"crates/pipeline" = "terminals"
+"crates/term-proto" = "terminals"
+"crates/term-mirror" = "terminals"
+"crates/grid" = "terminals"
+"crates/grid-client" = "terminals"
+"crates/size" = "terminals"
+"crates/analysis" = "sessions"
+"crates/sessiond" = "sessions"
+"crates/sessiond-wire" = "sessions"
+"crates/engine" = "sessions"
+"crates/hooks" = "sessions"
+"crates/agents" = "sessions"
+"crates/layout" = "settings"
+"crates/vault" = "settings"
+"crates/store" = "projects"
+"crates/remote" = "projects"
+"crates/vorn-git" = "git"
+"crates/worktrees" = "worktrees"
+"crates/mcp" = "mcp"
+"crates/work" = "workflows"
+"crates/workflow" = "workflows"
+"crates/workflow-file" = "workflows"
+"crates/extensions" = "bridge"
+"crates/extension-sdk" = "bridge"
+"crates/tree" = "bridge"
+"crates/protocol" = "support"
+"crates/reach" = "support"
+"crates/logfile" = "support"
+"crates/spawn" = "support"
+
+# The hosts: they wire crates together and draw, and hold no feature.
+[hosts]
+"crates/vornd" = "the server every client uses"
+"crates/cli" = "the vorn command"
+"crates/vorn-app" = "the desktop app"
+"crates/vorn-web" = "the app's screens in a browser"
+"crates/phone" = "the phone screens behind the iOS host's C API"
+"crates/vornui" = "the UI layer the app's screens are drawn with"
+"crates/vorn-components" = "the app's composed components, from vornui's primitives"
+
+# Not shipped in Vorn: test harnesses, examples and benchmarks.
+[tooling]
+"crates/recovery" = "session recovery test harness"
+"crates/guest-build" = "builds the built-ins and test components for wasm32-wasip2"
+"crates/extensions/tests/probe" = "the component the Wasm tests load"
+"../../examples/extensions/turns" = "an example extension for authors"
+"../../examples/extensions/agent-footer" = "an example extension for authors"
+"bench/scale" = "benchmark"
+"bench/workflows" = "benchmark"
+"bench/ext-tiers" = "benchmark"
+
+# Feature crates still in the workspace, each to move to the extensions repo.
+[exceptions.crates]
+"crates/connectors" = "the Connectors built-in on the public API; it starts before the extension host and serves the app from the first moment"
+"crates/workflows" = "the Workflows built-in's node and trigger types; its steps run in vornd by the engine"
+"crates/adapters" = "the agent adapter packages, data only, read by vornd's adapters"
+
+# Modules a host keeps for a built-in: its registry entry and route.
+[exceptions.modules]
+"crates/vornd/src/native/extensions/builtin/agents.rs" = "the agent adapters' switches"
+"crates/vornd/src/native/extensions/builtin/artifacts.rs" = "Artifacts' switch; its calls and pages are answered by the work model"
+"crates/vornd/src/native/extensions/builtin/browser.rs" = "the Browser component's route for agents' browser calls and MCP tools"
+"crates/vornd/src/native/extensions/builtin/connectors.rs" = "the Connectors built-in's host and switch"
+"crates/vornd/src/native/extensions/builtin/device.rs" = "the Device component's route for agents' device calls and MCP tools"
+"crates/vornd/src/native/extensions/builtin/ssh.rs" = "the SSH component's route; hosts and keys stay the core's"
+"crates/vornd/src/native/extensions/builtin/tasks.rs" = "the Tasks component's routes for clients' writes, MCP tools and its workflow step"
+"crates/vornd/src/native/extensions/builtin/wasm.rs" = "the shipped components compiled into vornd"
+"crates/vornd/src/native/extensions/builtin/workflows.rs" = "the Workflows built-in's switch over the engine's registry"
+"crates/vornd/src/native/extensions/builtin/widget_tiers.rs" = "a measurement of the Widget built-in, ignored by default"
+
+# Built-ins whose Cargo.toml reaches past the SDK.
+[exceptions.dependencies]
+"extensions/tasks -> crates/mcp" = "the task tools are worded and run by the MCP server's own toolkit, as agents have always read them"
+
+# Places a core or host crate names a built-in, as "file#name".
+[exceptions.hooks]
+"crates/extensions/src/install.rs#vorn_adapters" = "a manifest's agent rules may name every shipped adapter's agent"
+"crates/cli/src/session.rs#vorn_adapters" = "the vorn command starts the agents Vorn ships without a server"
+"crates/vorn-app/src/app/side.rs#vorn.files" = "the side pane opens Files' pane and cards by its id"
+"crates/vorn-app/src/headless.rs#vorn.workflows" = "a workflow's sessions name the Workflows built-in as their origin"
+"crates/vorn-app/src/panes.rs#vorn.browser" = "the app draws the Browser's tabs over the web views it owns"
+"crates/vorn-app/src/panes.rs#vorn.device" = "the app draws the Device's pane over the simulator screens it takes"
+"crates/vorn-app/src/plugins.rs#vorn.connectors" = "Settings shows the Connectors built-in's page in its place"
+"crates/vorn-app/src/plugins.rs#vorn.worktrees" = "switching Worktrees off says the worktrees stay"
+"crates/vorn-app/src/prompt.rs#vorn.blocks" = "the prompt's menu is answered by Shell blocks"
+"crates/vorn-app/src/screen/tasks/board.rs#vorn.tasks" = "the board is the Tasks built-in's main view"
+"crates/vorn-app/src/workflows.rs#vorn.workflow-editor" = "the editor's view, menu items and waiting gates are drawn here"
+"crates/vornd/src/endpoint.rs#builtin::tasks" = "Tasks' switch decides whether its images are served before the host starts"
+"crates/vornd/src/endpoint.rs#vorn_connectors" = "Connectors starts before the extension host, so its switch is read first"
+"crates/vornd/src/native/credential.rs#vorn_connectors" = "credentials kept in the vault are marked as Connectors marks them"
+"crates/vornd/src/native/extensions/mod.rs#builtin::connectors" = "the registry starts the Connectors built-in"
+"crates/vornd/src/native/extensions/mod.rs#builtin::tasks" = "the registry starts the Tasks built-in"
+"crates/vornd/src/native/extensions/mod.rs#builtin::wasm" = "the registry starts the Workflow editor in its Settings place"
+"crates/vornd/src/native/extensions/mod.rs#builtin::agents" = "the registry starts the agent adapters' switches"
+"crates/vornd/src/native/extensions/world.rs#vorn_connectors" = "the bridge's HTTP fetch is Connectors' client"
+"crates/vornd/src/native/extensions/world.rs#builtin::tasks" = "Tasks is lent the board's own tables"
+"crates/vornd/src/native/mod.rs#builtin::tasks" = "clients' task writes route to the Tasks component"
+"crates/vornd/src/native/mod.rs#builtin::browser" = "agents' browser calls route to the Browser component"
+"crates/vornd/src/native/mod.rs#builtin::device" = "agents' device calls route to the Device component"
+"crates/vornd/src/native/mod.rs#builtin::ssh" = "the SSH settings page's calls route to the SSH component"
+"crates/vornd/src/native/mod.rs#vorn_connectors" = "clients' connection calls route to the Connectors built-in"
+"crates/vornd/src/native/mod.rs#builtin::connectors" = "vornd holds the Connectors built-in once it has a database"
+"crates/vornd/src/native/work/host.rs#vorn_workflows" = "workflow steps call the bridge as the Workflows built-in"
+"crates/vornd/src/native/work/host.rs#builtin::artifacts" = "a gate keeps a review page only while Artifacts is on"
+"crates/vornd/src/native/work/mod.rs#builtin::artifacts" = "artifact calls and pages are refused while Artifacts is off"
+"crates/vornd/src/native/work/schedule.rs#vorn_connectors" = "a scheduled poll of a connection runs in Connectors"
+"crates/vornd/src/native/work/types.rs#vorn_workflows" = "the engine's registry holds the Workflows built-in's node types"
+"crates/vornd/src/native/work/types.rs#builtin::tasks" = "the engine's registry holds Tasks' workflow step"
+"crates/vornd/src/native/work/types.rs#vorn_connectors" = "the engine's registry holds Connectors' node types"
+"crates/vornd/src/registry.rs#vorn.workflows" = "a workflow's sessions name the Workflows built-in as their origin"
+"crates/vornd/src/serve/http.rs#builtin::tasks" = "task images are served from the Tasks built-in's folder"
+"crates/vornd/src/serve/mod.rs#vorn_workflows" = "the workflows Vorn ships are seeded from the Workflows built-in"

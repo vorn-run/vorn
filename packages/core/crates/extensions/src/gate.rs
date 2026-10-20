@@ -119,6 +119,9 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 /// pages go to the inbox with their cursor, and a window signed in again
 /// wakes the steps waiting on it. `workflow.fire` fires a trigger type the
 /// caller declares.
+///
+/// This is the whole bridge: the extensions Vorn ships call nothing an
+/// installed one could not, each held to the same declared permission.
 pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
     ("sessions.get", Permission::SessionsRead),
@@ -179,51 +182,6 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("remote.importKey", Permission::Remote),
     ("remote.deleteKey", Permission::Remote),
     ("remote.vault", Permission::Remote),
-];
-
-/// The core methods open only to the extensions Vorn ships: they write the
-/// board, the workflows, their inbox and the sign-in windows of every
-/// connection, which no one installed extension owns. `task.take` and
-/// `task.handBack` are Tasks', and `connection.itemImport` and
-/// `connection.synced` Connectors',
-/// called by the other built-ins; `task.changed` is Tasks' own, which tells
-/// clients the rows a write changed and emits the events it fires.
-/// `web.call` drives the client's web views, which are named by session and
-/// shared, so only the Browser that Vorn ships drives them; `video.call`
-/// drives the machine's simulators the same way, for the Device it ships.
-/// The `remote.*` methods hold the hosts every remote session runs on and
-/// the keys those sessions log in with, which only the SSH built-in edits.
-pub const BUILTIN_ONLY: &[&str] = &[
-    "task.importItems",
-    "task.changed",
-    "task.take",
-    "task.handBack",
-    "connection.itemImport",
-    "connection.synced",
-    "task.sourceLink",
-    "workflow.get",
-    "workflow.list",
-    "workflow.gates",
-    "workflow.run",
-    "workflow.resolveGate",
-    "workflow.seed",
-    "workflow.unseed",
-    "inbox.cursor",
-    "inbox.recordPage",
-    "inbox.recordError",
-    "signin.check",
-    "signin.forget",
-    "signin.completed",
-    "web.call",
-    "video.call",
-    "remote.hosts",
-    "remote.saveHosts",
-    "remote.test",
-    "remote.keys",
-    "remote.storeKey",
-    "remote.importKey",
-    "remote.deleteKey",
-    "remote.vault",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.
@@ -488,15 +446,17 @@ header = "Authorization: Bearer {token}"
     }
 
     #[test]
-    fn running_a_workflow_and_answering_a_gate_are_the_shipped_editors_alone() {
-        for m in [
-            "workflow.run",
-            "workflow.resolveGate",
-            "workflow.gates",
-            "task.changed",
+    fn what_the_shipped_editors_call_is_held_to_a_declared_permission() {
+        let mut m = manifest();
+        for (method, needs) in [
+            ("workflow.run", Permission::WorkflowsWrite),
+            ("workflow.gates", Permission::WorkflowsRead),
+            ("task.changed", Permission::TasksWrite),
+            ("remote.hosts", Permission::Remote),
         ] {
-            assert!(BUILTIN_ONLY.contains(&m), "{m}");
-            assert!(CORE_METHODS.iter().any(|(c, _)| *c == m), "{m}");
+            assert_eq!(admit_call(&m, method).unwrap_err().code, "denied", "{method}");
+            m.permissions.get_or_insert_with(Vec::new).push(needs);
+            assert_eq!(admit_call(&m, method), Ok(needs), "{method}");
         }
     }
 

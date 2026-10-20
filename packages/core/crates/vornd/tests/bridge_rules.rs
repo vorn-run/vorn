@@ -162,16 +162,23 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
         "test.rules does not declare the host evil.example"
     );
 
-    // The board's and the workflows' own calls are the built-ins' alone.
-    let refused = c
+    // The calls the shipped editors make are public, held to the same declared permissions.
+    let listed = c
         .relay(
             "host.call",
             json!({ "method": "workflow.list", "args": {} }),
         )
         .await;
+    assert!(listed.get("error").is_none(), "{listed}");
+    let refused = c
+        .relay(
+            "host.call",
+            json!({ "method": "workflow.unseed", "args": {} }),
+        )
+        .await;
     assert_eq!(
         refused["error"]["message"],
-        "workflow.list is open only to the extensions Vorn ships"
+        "test.rules does not declare workflows.write, which workflow.unseed needs"
     );
 
     // Its own tables, made by its migration, and nobody else's.
