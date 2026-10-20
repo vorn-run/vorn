@@ -205,7 +205,9 @@ every key or pointer move (hover, typing, a drag) to itself:
 
 A `code`'s text is typed, coloured and searched in the client, which takes
 `draft`, else `text`, whenever `rev` changes, and tells the extension the
-edit when it starts or stops differing from `text` and once typing settles.
+edit when it starts or stops differing from `text`, once typing settles, and
+before any other event from its tree, so a tab switch never overtakes it. A
+`code` whose tree shows several files gives each its own node id.
 A `log` is cut into blocks by the client, from the shell's screen, pairing
 the newest command with the newest prompt. A field with `live` reports
 `change` as it is typed.
