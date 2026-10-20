@@ -386,6 +386,8 @@ impl Browser {
             return self.agent(host, method, args);
         }
         match action {
+            // vornd starts it ahead of its first pane; there is nothing to do.
+            "start" => Ok(Value::Null),
             "toggle" => {
                 let session = arg(args, "session", action)?;
                 Browser::toggle(host, session)?;

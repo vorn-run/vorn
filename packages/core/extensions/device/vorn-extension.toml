@@ -10,6 +10,7 @@ uses = ["video", "sessions.read", "storage"]
 
 [service]
 component = "device.wasm"
+events = ["session.exited"]
 
 [[contributes.panes]]
 id = "device"

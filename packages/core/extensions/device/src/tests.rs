@@ -1,6 +1,6 @@
 use vorn_extension_sdk::testing::FakeHost;
 use vorn_extension_sdk::tree::{self, Event, EventKind, Kind, Node};
-use vorn_extension_sdk::{dispatch, json, Ctx, Value};
+use vorn_extension_sdk::{dispatch, json, Ctx, Event as Told, Value};
 
 use super::*;
 
@@ -486,4 +486,120 @@ fn the_panes_close_keeps_the_claim() {
         .collect();
     assert_eq!(held.len(), 1, "still held: {claim}");
     assert!(shutdowns(&h).is_empty(), "nothing shut down");
+}
+
+/// The client's simulators once `u2` is up too.
+fn both_up(h: FakeHost) -> FakeHost {
+    h.answer("video.call", |a| {
+        Ok(match a["op"].as_str().unwrap_or_default() {
+            "list" => json!([
+                { "udid": "u1", "name": "iPhone 16", "runtime": "iOS 18.0", "booted": true },
+                { "udid": "u2", "name": "iPad", "runtime": "iOS 18.0", "booted": true },
+            ]),
+            _ => json!({}),
+        })
+    })
+}
+
+/// vornd running only `live`.
+fn running(h: FakeHost, live: &'static [&'static str]) -> FakeHost {
+    h.answer("sessions.list", move |_| {
+        Ok(json!(live
+            .iter()
+            .map(|s| json!({ "id": s }))
+            .collect::<Vec<_>>()))
+    })
+}
+
+fn holder_of(h: &mut FakeHost, udid: &str) -> Value {
+    let listed = agent(h, T, "list", json!({})).unwrap();
+    listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["udid"] == udid)
+        .map_or(Value::Null, |d| d["claimedBy"].clone())
+}
+
+#[test]
+fn a_session_that_ends_lets_its_simulator_go() {
+    let mut h = host();
+    agent(&mut h, S, "openPane", json!({ "udid": "u2" })).unwrap();
+    booted(&mut h, S, "u2", "openPane").unwrap();
+    agent(&mut h, T, "claim", json!({ "udid": "u1" })).unwrap();
+
+    let ended = Told {
+        name: SESSION_EXITED.into(),
+        data: json!({ "sessionId": S, "kind": "terminal" }),
+    };
+    DeviceExt.on_events(&mut h, vec![ended]);
+    assert_eq!(shutdowns(&h), ["u2"], "Vorn started it, so it shuts down");
+    assert!(open_rows(&mut h).is_empty(), "its pane went");
+    assert_eq!(holder_of(&mut h, "u2"), Value::Null, "free to claim");
+    assert_eq!(holder_of(&mut h, "u1"), T, "the live session keeps its own");
+}
+
+#[test]
+fn starting_drops_the_claims_of_sessions_that_ended_meanwhile() {
+    let mut h = host();
+    agent(&mut h, S, "openPane", json!({ "udid": "u2" })).unwrap();
+    booted(&mut h, S, "u2", "openPane").unwrap();
+    agent(&mut h, T, "claim", json!({ "udid": "u1" })).unwrap();
+
+    // Without the sessions, nothing is taken for gone.
+    call(&mut DeviceExt, &mut h, START, Value::Null).unwrap();
+    assert_eq!(holder_of(&mut h, "u2"), S);
+
+    let mut h = running(h, &[T]);
+    call(&mut DeviceExt, &mut h, START, Value::Null).unwrap();
+    assert_eq!(shutdowns(&h), ["u2"]);
+    assert!(open_rows(&mut h).is_empty());
+    assert_eq!(holder_of(&mut h, "u2"), Value::Null);
+    assert_eq!(holder_of(&mut h, "u1"), T);
+}
+
+#[test]
+fn starting_holds_a_claim_vornd_was_starting_once_it_is_up() {
+    let mut h = running(host(), &[S, T]);
+    let asked = agent(&mut h, S, "claim", json!({ "udid": "u2" })).unwrap();
+    assert_eq!(asked["booting"], "u2");
+    // vornd stopped before it said how the start went; the simulator came up.
+    let mut h = both_up(h);
+    call(&mut DeviceExt, &mut h, START, Value::Null).unwrap();
+    assert_eq!(holder_of(&mut h, "u2"), S);
+    let shot = agent(&mut h, S, "screenshot", json!({}));
+    assert!(shot.is_ok(), "held, no longer starting: {shot:?}");
+    agent(&mut h, S, "release", json!({})).unwrap();
+    assert_eq!(shutdowns(&h), ["u2"], "Vorn started it");
+}
+
+#[test]
+fn starting_gives_back_what_a_claim_that_never_came_up_replaced() {
+    let mut h = running(host(), &[S, T]);
+    agent(&mut h, S, "claim", json!({ "udid": "u1" })).unwrap();
+    agent(&mut h, S, "openPane", json!({ "udid": "u2" })).unwrap();
+    // vornd stopped while u2 started, and it never came up.
+    call(&mut DeviceExt, &mut h, START, Value::Null).unwrap();
+    assert_eq!(holder_of(&mut h, "u1"), S, "the claim it replaced is back");
+    assert_eq!(holder_of(&mut h, "u2"), Value::Null);
+    let v = video(&mut h, S).expect("the pane shows what it holds");
+    assert_eq!(
+        (v.device.as_deref(), v.busy, v.notice.as_deref()),
+        (Some("u1"), false, Some("iPad did not start."))
+    );
+    assert!(shutdowns(&h).is_empty());
+}
+
+#[test]
+fn switched_off_it_lets_every_simulator_go() {
+    let mut h = host();
+    agent(&mut h, S, "openPane", json!({ "udid": "u2" })).unwrap();
+    booted(&mut h, S, "u2", "openPane").unwrap();
+    agent(&mut h, T, "claim", json!({ "udid": "u1" })).unwrap();
+    call(&mut DeviceExt, &mut h, STOP, Value::Null).unwrap();
+    assert_eq!(shutdowns(&h), ["u2"], "only what Vorn started shuts down");
+    assert!(open_rows(&mut h).is_empty());
+    assert!(video(&mut h, S).is_none());
+    assert_eq!(holder_of(&mut h, "u1"), Value::Null);
+    assert_eq!(holder_of(&mut h, "u2"), Value::Null);
 }

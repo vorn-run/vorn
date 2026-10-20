@@ -7,7 +7,9 @@
 //! picker, zoom and notice, in its storage, and draws the pane as a tree
 //! around a `video` part. The simulator itself is the client's: `video.call`
 //! asks it to list and drive one, and it draws the screen's frames itself,
-//! so no frame ever passes through here.
+//! so no frame ever passes through here. A claim outlives vornd, so a
+//! session that ends lets its simulator go, and vornd's start ([`START`])
+//! drops the claims of sessions that ended while it was down.
 //!
 //! Nothing here waits on `simctl` for long. The component answers one call
 //! at a time, so a simulator starting (tens of seconds) is never awaited
@@ -19,7 +21,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use vorn_extension_sdk::tree::{self, EventKind, Surface, Tool};
-use vorn_extension_sdk::{arg, json, serde_json, Ctx, Error, Extension, Host, Init, Op, Value};
+use vorn_extension_sdk::{
+    arg, json, serde_json, Ctx, Error, Event, Extension, Host, Init, Op, Value,
+};
 
 pub mod devices;
 
@@ -40,6 +44,13 @@ pub const NO_CLAIM: &str =
     "No device is claimed for this session. Call device_list to see what is available, then device_claim.";
 /// What a call that needs more than `simctl` says.
 pub const NO_COMPANION: &str = "This needs the simulator companion, which the native app does not run yet. Use device_screenshot to see the screen.";
+/// What vornd calls as it starts it: claims kept from before are checked.
+pub const START: &str = "start";
+/// What vornd calls as it is switched off: every claim goes, and the
+/// simulators Vorn started shut down.
+pub const STOP: &str = "stop";
+/// The event that a session ended, which lets its simulator go.
+pub const SESSION_EXITED: &str = "session.exited";
 /// The screen's node.
 const SCREEN: &str = "screen";
 /// Every session's simulator, by session.
@@ -775,23 +786,107 @@ impl DeviceExt {
                     .flatten()
                     .filter_map(Value::as_str)
                     .collect();
-                let mut gone: Vec<String> = host
+                let gone: Vec<String> = host
                     .rows(OPEN)?
                     .iter()
                     .filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_owned))
                     .chain(DeviceExt::claims(host)?.into_keys())
                     .filter(|s| !live.contains(&s.as_str()))
                     .collect();
-                gone.sort();
-                gone.dedup();
-                for session in &gone {
-                    DeviceExt::release(host, session)?;
-                    DeviceExt::close(host, session)?;
-                }
+                DeviceExt::forget(host, gone)?;
+                Ok(Value::Null)
+            }
+            START => DeviceExt::start(host).map(|()| Value::Null),
+            STOP => {
+                let held: Vec<String> = DeviceExt::claims(host)?.into_keys().collect();
+                DeviceExt::forget(host, held)?;
                 Ok(Value::Null)
             }
             other => Err(Error::unknown(other)),
         }
+    }
+
+    /// Lets go of what each of `sessions` holds and closes its pane.
+    fn forget(host: &mut dyn Host, sessions: Vec<String>) -> Result<(), Error> {
+        let mut sessions = sessions;
+        sessions.sort();
+        sessions.dedup();
+        for session in &sessions {
+            // The pane first, so letting go does not draw it again.
+            DeviceExt::close(host, session)?;
+            DeviceExt::release(host, session)?;
+        }
+        Ok(())
+    }
+
+    /// Claims kept from before vornd started: those of sessions that ended
+    /// meanwhile go, and one still starting is held if its simulator came
+    /// up, else the claim it replaced comes back. Nothing reports on a
+    /// start vornd stopped waiting for.
+    fn start(host: &mut dyn Host) -> Result<(), Error> {
+        let claims = DeviceExt::claims(host)?;
+        if claims.is_empty() {
+            return Ok(());
+        }
+        // Without the sessions, no claim is taken for gone.
+        let live: Option<Vec<String>> = host.call("sessions.list", json!({})).ok().and_then(|v| {
+            v.as_array().map(|all| {
+                all.iter()
+                    .filter_map(|s| s["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+        });
+        let (gone, kept): (Vec<_>, Vec<_>) = claims
+            .into_iter()
+            .partition(|(s, _)| live.as_ref().is_some_and(|l| !l.contains(s)));
+        DeviceExt::forget(host, gone.into_iter().map(|(s, _)| s).collect())?;
+        let mut running: Option<Vec<Device>> = None;
+        for (session, mut claim) in kept {
+            let Some(pending) = claim.pending.take() else {
+                continue;
+            };
+            if running.is_none() {
+                running = Some(DeviceExt::listed(host, &session).unwrap_or_default());
+            }
+            let up = running
+                .iter()
+                .flatten()
+                .any(|d| d.udid == claim.udid && d.booted);
+            let previous = pending.previous.map(|b| *b);
+            let pane = DeviceExt::pane(host, &session)?;
+            if up {
+                // It was down when claimed, so Vorn started it.
+                claim.booted_here = true;
+                if let Some(p) = pane.filter(|p| p.card) {
+                    DeviceExt::save(host, &session, &Pane { card: false, ..p })?;
+                }
+                let udid = claim.udid.clone();
+                DeviceExt::put_claim(host, &session, Some(claim))?;
+                if let Some(old) = previous.filter(|o| o.udid != udid) {
+                    DeviceExt::let_go(host, &session, &old);
+                }
+                continue;
+            }
+            match pane {
+                Some(p) if p.card || previous.is_none() => DeviceExt::close(host, &session)?,
+                Some(mut p) => {
+                    p.notice = Some(format!("{} did not start.", claim.name));
+                    DeviceExt::save(host, &session, &p)?;
+                }
+                None => {}
+            }
+            DeviceExt::put_claim(host, &session, previous)?;
+        }
+        Ok(())
+    }
+
+    /// The sessions in `batch` that ended.
+    fn ended(batch: &[Event]) -> Vec<String> {
+        batch
+            .iter()
+            .filter(|e| e.name == SESSION_EXITED)
+            .filter_map(|e| e.data["sessionId"].as_str().map(str::to_owned))
+            .collect()
     }
 }
 
@@ -891,6 +986,16 @@ impl Extension for DeviceExt {
         _: &Ctx,
     ) -> Result<Value, Error> {
         DeviceExt::act(host, method, &args)
+    }
+
+    /// A session that ended lets its simulator go, as its agent's `device_release` would.
+    fn on_events(&mut self, host: &mut dyn Host, batch: Vec<Event>) {
+        if let Err(e) = DeviceExt::forget(host, DeviceExt::ended(&batch)) {
+            host.log(
+                vorn_extension_sdk::Level::Warn,
+                &format!("an ended session's simulator was not let go: {}", e.message),
+            );
+        }
     }
 
     fn render(
