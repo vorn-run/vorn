@@ -1,6 +1,7 @@
 //! A running app outlives a vornd restart: once the new vornd answers, the
-//! app's grid link opens again by itself, the cards it showed attach again,
-//! and their terminals move and resize as before, with no app restart.
+//! app's links open again by themselves, the cards it showed attach again,
+//! their terminals move and resize as before, and what the app took from
+//! the old endpoint follows the new one, with no app restart.
 
 #![cfg(unix)]
 
@@ -69,8 +70,9 @@ fn the_grid_link_opens_again_after_vornd_restarts() {
         |app, _| painted(app, &id).filter(|(size, serial)| *serial > before.1 && *size != before.0),
     );
     assert!(after.1 > before.1, "{before:?} then {after:?}");
-    // And calls reach the new vornd.
+    // And calls reach the new vornd, whose web address the app now offers.
     app.rpc()
         .call("config:load", Value::Null)
         .expect("calls reach the new vornd");
+    assert_eq!(app.web_url, format!("http://127.0.0.1:{}/app/", v.port()));
 }

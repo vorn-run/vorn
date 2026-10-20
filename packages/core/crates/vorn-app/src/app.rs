@@ -391,7 +391,7 @@ pub struct App {
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
     /// New links on their way after vornd went away.
     #[cfg(not(target_arch = "wasm32"))]
-    relinking: Option<Receiver<relink::Relinked>>,
+    relinking: relink::Relinking,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
     /// A discard the person agreed to is being run.
@@ -551,7 +551,7 @@ impl App {
             data_dir: None,
             health: None,
             #[cfg(not(target_arch = "wasm32"))]
-            relinking: None,
+            relinking: Default::default(),
             last_focus: None,
             discarding: false,
             web,
@@ -811,8 +811,6 @@ impl App {
 
     pub fn pump(&mut self) {
         self.sync_update();
-        #[cfg(not(target_arch = "wasm32"))]
-        self.relink();
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Notification { method, params } => {
@@ -887,6 +885,9 @@ impl App {
                 Event::Closed => self.closed = true,
             }
         }
+        // After the events, so a vornd gone takes both its links in one dial.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.relink();
         self.see_projects();
         let calls = std::mem::take(&mut self.calls);
         for (kind, pending) in calls {

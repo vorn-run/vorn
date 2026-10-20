@@ -760,7 +760,10 @@ mod tests {
         let end = p.due().expect("the last size waits");
         let last = p.poll(end).expect("and goes out");
         assert_eq!(last.size, Size::new(200, 24));
-        assert!(end <= at(t0, 960 + 25), "{end:?}: within a coalesce of the end");
+        assert!(
+            end <= at(t0, 960 + 25),
+            "{end:?}: within a coalesce of the end"
+        );
         let gaps: Vec<u128> = sent.windows(2).map(|w| w[1].0 - w[0].0).collect();
         assert!(gaps.iter().all(|&g| g >= 25), "{gaps:?}");
         assert!(sent.len() >= 20, "the program follows the drag: {sent:?}");

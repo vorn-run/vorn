@@ -17,7 +17,6 @@ use vorn_term_proto::msg::{
     KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 use vorn_term_proto::screen::Screen;
-use web_time::{Duration, Instant};
 
 use vorn_term_proto::screen::{row_flags, Row, Screen as TermScreen};
 
@@ -71,6 +70,8 @@ struct State {
     /// The id of the next history fetch.
     req: u32,
     errors: Vec<String>,
+    /// Why vornd will not serve this client: dialing it again cannot help.
+    refused: Option<String>,
     closed: bool,
     /// Recent pastes by input sequence, kept until vornd may ask to confirm one.
     pastes: VecDeque<(u64, String, String)>,
@@ -89,6 +90,9 @@ fn measured(cols: u16, rows: u16, (w, h): (u32, u32)) -> Size {
         px_h: u32::from(rows).saturating_mul(h),
     }
 }
+
+/// vornd's error for a grid protocol it does not serve.
+const UPGRADE: u16 = 426;
 
 /// History fetched ahead of a scrolled view, above it.
 const AHEAD: u64 = 200;
@@ -210,6 +214,7 @@ impl Grid {
                 panes: Vec::new(),
                 req: 0,
                 errors: Vec::new(),
+                refused: None,
                 closed: false,
                 pastes: VecDeque::new(),
                 asks: Vec::new(),
@@ -314,6 +319,11 @@ impl Grid {
     /// Whether the connection has ended.
     pub fn closed(&self) -> bool {
         self.lock().closed
+    }
+
+    /// Why vornd refused this client, when it did.
+    pub fn refused(&self) -> Option<String> {
+        self.lock().refused.clone()
     }
 
     /// What went wrong on the connection, oldest first.
@@ -715,6 +725,9 @@ impl Grid {
                         st.panes.retain(|p| p.session != session || p.sid.is_some());
                         changed = true;
                     } else {
+                        if code == UPGRADE {
+                            st.refused = Some(message.clone());
+                        }
                         st.errors.push(format!("error {code}: {message}"));
                     }
                 }

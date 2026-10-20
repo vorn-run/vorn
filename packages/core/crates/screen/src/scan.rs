@@ -1,5 +1,9 @@
 //! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks
-//! and scrollback clears, in one pass over each feed's `ESC`s.
+//! and scrollback clears, in two vectorised passes over each feed.
+
+use std::sync::LazyLock;
+
+use memchr::memmem::Finder;
 
 /// Starts vorn's own reports: `OSC 5522 ; cwd ; <path> ST` and the like.
 const PRIVATE: &[u8] = b"\x1b]5522;";
@@ -7,6 +11,8 @@ const PRIVATE: &[u8] = b"\x1b]5522;";
 const MARK: &[u8] = b"\x1b]133;";
 /// ED 3, DECSED 3 and RIS, as programs write them.
 const CLEARS: [&[u8]; 3] = [b"\x1b[3J", b"\x1b[?3J", b"\x1bc"];
+/// RIS, the one clear no `J` ends.
+static RIS: LazyLock<Finder<'static>> = LazyLock::new(|| Finder::new(CLEARS[2]));
 /// The longest pattern, which bounds the bytes held between feeds.
 const LONGEST: usize = PRIVATE.len();
 /// How much of one OSC payload is kept; the rest is dropped.
@@ -100,25 +106,34 @@ impl Scan {
                 Seen::Other => {}
             }
         }
+        let rest = &bytes[from..];
+        // Most ESCs start an SGR no pattern starts, so the scan looks for the
+        // rarer bytes that end or follow one: `J` and `]`, and `ESC c` whole.
+        self.clears += RIS.find_iter(rest).count() as u64;
         let mut at = from;
-        while let Some(n) = memchr::memchr(0x1b, &bytes[at..]) {
-            let esc = at + n;
-            at = esc + 1;
-            match seen(&bytes[esc..]) {
-                Seen::Clear => self.clears += 1,
-                Seen::Osc(kind) => {
-                    let begin = esc + kind.pattern().len();
-                    match self.payload(bytes, begin, kind, Vec::new(), &mut report) {
-                        Some(end) => at = end,
-                        None => return,
-                    }
+        for i in memchr::memchr2_iter(b'J', b']', rest).map(|n| from + n) {
+            if bytes[i] == b'J' {
+                let clear = |pat: &[u8]| i + 1 >= from + pat.len() && bytes[..=i].ends_with(pat);
+                self.clears += u64::from(clear(b"\x1b[3J") || clear(b"\x1b[?3J"));
+                continue;
+            }
+            // Inside an OSC payload this scan already took, or not after an ESC.
+            if i < at + 1 || bytes[i - 1] != 0x1b {
+                continue;
+            }
+            if let Seen::Osc(kind) = seen(&bytes[i - 1..]) {
+                let begin = i - 1 + kind.pattern().len();
+                match self.payload(bytes, begin, kind, Vec::new(), &mut report) {
+                    Some(end) => at = end,
+                    None => return,
                 }
-                // Only the feed's last bytes can be too short to tell.
-                Seen::Prefix => {
-                    self.tail.extend_from_slice(&bytes[esc..]);
-                    return;
-                }
-                Seen::Other => {}
+            }
+        }
+        // Only the feed's last bytes can be too short to tell.
+        let last = bytes.len().saturating_sub(LONGEST - 1).max(from);
+        if let Some(esc) = memchr::memrchr(0x1b, &bytes[last..]).map(|n| last + n) {
+            if matches!(seen(&bytes[esc..]), Seen::Prefix) {
+                self.tail.extend_from_slice(&bytes[esc..]);
             }
         }
     }
@@ -219,6 +234,9 @@ mod tests {
         let (_, n) =
             split_everywhere(b"\x1b[3J\x1b[?3J\x1b[2J\x1b[13J\x1b[>3J\x1bc\x1b(c\x1b]5522;\x1b[3J");
         assert_eq!(n, 4);
+        let (seen, n) = split_everywhere(b"3J ?3J c ] [3J \x1b[33J\x1b[38;5;3J\x1b]c");
+        assert!(seen.is_empty(), "{seen:?}");
+        assert_eq!(n, 0);
     }
 
     #[test]

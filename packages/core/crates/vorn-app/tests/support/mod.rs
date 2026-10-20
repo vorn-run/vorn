@@ -174,6 +174,11 @@ impl TestVornd {
         std::thread::sleep(Duration::from_millis(200));
     }
 
+    /// The HTTP port vornd serves on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
     pub fn log(&self) -> String {
         std::fs::read_to_string(self.home.join("vornd.log")).unwrap_or_default()
     }

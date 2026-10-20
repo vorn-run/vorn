@@ -53,7 +53,9 @@ fn bench(c: &mut Criterion) {
     let mut g = c.benchmark_group("scan");
     g.sample_size(20).measurement_time(Duration::from_secs(3));
     for (name, reads) in &corpora {
-        g.throughput(Throughput::Bytes(reads.iter().map(|r| r.len() as u64).sum()));
+        g.throughput(Throughput::Bytes(
+            reads.iter().map(|r| r.len() as u64).sum(),
+        ));
         g.bench_with_input(BenchmarkId::from_parameter(name), reads, |b, reads| {
             b.iter(|| {
                 let mut s = scan::Scan::default();
