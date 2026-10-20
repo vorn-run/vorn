@@ -35,9 +35,9 @@ pub fn instance(tree: &str, node: &str) -> String {
     format!("{tree}|{node}")
 }
 
-/// The tree and node of instance `key`.
+/// The tree and node of instance `key`; a node may name a file, `|` and all.
 pub fn parts(key: &str) -> (&str, &str) {
-    key.rsplit_once('|').unwrap_or((key, ""))
+    key.split_once('|').unwrap_or((key, ""))
 }
 
 /// The session a code's tree draws for, when it is a pane's.
@@ -143,6 +143,14 @@ pub fn to_tell(view: &View, text: &str, on_disk: &str, now: Instant) -> Option<S
     (settled && dirty && !told).then(|| text.to_owned())
 }
 
+/// What an edit still settling would tell, said now: before anything that
+/// changes which file the code shows, so no keystroke is left behind.
+pub fn unsaid(view: &View, text: &str, on_disk: &str) -> Option<String> {
+    let told_dirty = view.told.as_ref().is_some_and(|(_, d)| *d);
+    let told = view.told.as_ref().is_some_and(|(t, _)| t == text);
+    (!told && (text != on_disk || told_dirty)).then(|| text.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,8 +209,22 @@ mod tests {
 
     #[test]
     fn an_instance_names_its_tree_and_node() {
-        let k = instance("vorn.files/panes/files#s1", "code");
-        assert_eq!(parts(&k), ("vorn.files/panes/files#s1", "code"));
+        let k = instance("vorn.files/panes/files#s1", "code:/p/a|b.ts");
+        assert_eq!(parts(&k), ("vorn.files/panes/files#s1", "code:/p/a|b.ts"));
         assert_eq!(scope(&k), Some("s1"));
+    }
+
+    #[test]
+    fn an_edit_still_settling_is_said_at_once_when_asked() {
+        let mut v = View {
+            typed: Some(Instant::now()),
+            ..View::default()
+        };
+        assert_eq!(unsaid(&v, "disk", "disk"), None);
+        assert_eq!(unsaid(&v, "disk!", "disk").as_deref(), Some("disk!"));
+        v.told = Some(("disk!".into(), true));
+        assert_eq!(unsaid(&v, "disk!", "disk"), None);
+        assert_eq!(unsaid(&v, "disk!!", "disk").as_deref(), Some("disk!!"));
+        assert_eq!(unsaid(&v, "disk", "disk").as_deref(), Some("disk"));
     }
 }

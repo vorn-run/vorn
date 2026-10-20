@@ -406,7 +406,7 @@ fn the_desktops_own_panes_and_drafts_come_in_once() {
     .unwrap();
     assert_eq!(
         (n["imported"].clone(), n["skipped"].clone()),
-        (json!(3), json!(0))
+        (json!(3), json!([]))
     );
     let pane = render(&mut f, &mut h, PANE, "s", 900.0);
     assert_eq!(code_of(&pane).unwrap().draft.as_deref(), Some("# Kept\n"));
@@ -495,7 +495,7 @@ fn each_sessions_card_takes_its_own_draft_and_a_homeless_one_is_counted() {
         &Ctx::default(),
     )
     .unwrap();
-    assert_eq!(n["skipped"], 1);
+    assert_eq!(n["skipped"], json!(["card:gone"]));
     let mut cards = f.cards(&mut h).unwrap();
     assert_eq!(cards.all.len(), 2);
     for (session, text) in [("s", "from s"), ("t", "from t")] {

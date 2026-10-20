@@ -147,6 +147,12 @@ pub struct Saved {
     pub panels: BTreeMap<String, Panel>,
     pub splits: BTreeMap<String, Split>,
     pub maximized: Option<String>,
+    /// The desktop's own Files panes and cards, as it wrote them, kept
+    /// through every save until the Files extension has taken them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cards: Option<serde_json::Value>,
 }
 
 /// Every pane, panel and card, with what is being dragged.
@@ -424,6 +430,28 @@ mod tests {
         p.save();
         let back = Side::load(Some(file));
         assert_eq!(back.saved, p.saved);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_desktops_own_files_state_outlives_saves_until_taken() {
+        let dir = std::env::temp_dir().join(format!("vorn-files-keep-{}", std::process::id()));
+        let file = view_file(&dir);
+        std::fs::create_dir_all(dir.join("desktop")).expect("dir");
+        let old = r#"{"files":{"s":{"tabs":["/a"]}},"cards":{"card:a":{"sessionId":"s","filePath":"/a"}}}"#;
+        std::fs::write(&file, old).expect("view");
+        let mut p = Side::load(Some(file.clone()));
+        p.set_terminal_ratio("s", 0.6);
+        p.save();
+        let back = Side::load(Some(file.clone()));
+        let tabs = serde_json::json!({ "s": { "tabs": ["/a"] } });
+        assert_eq!(back.saved.files, Some(tabs));
+        assert!(back.saved.cards.is_some());
+        p.saved.files = None;
+        p.saved.cards = None;
+        p.save();
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        assert!(!text.contains("files") && !text.contains("cards"), "{text}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

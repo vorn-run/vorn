@@ -31,8 +31,9 @@ pub(super) enum SideCall {
     Shell(String),
     /// What the Files extension answered opening or closing `owner`'s pane.
     Toggled(String),
-    /// The desktop's own Files state handed over: the drafts file goes once it is.
-    Imported(std::path::PathBuf),
+    /// The desktop's own Files state handed over, with its drafts file and
+    /// what it held: only the drafts Files could not take stay in it.
+    Imported(std::path::PathBuf, Option<Value>),
 }
 
 /// Every code node in `tree`, depth first, with its node id.
@@ -222,6 +223,30 @@ impl App {
         }
     }
 
+    /// Tells tree `key`'s extension each edit its codes hold back while
+    /// typing settles, so a tab switch, close or pop never overtakes it.
+    pub(super) fn flush_codes(&mut self, key: &str) {
+        let Some(tree) = self.st.points.tree(key) else {
+            return;
+        };
+        let mut tell = Vec::new();
+        for (node, c) in codes(tree) {
+            let Some(v) = self.st.codes.views.get_mut(&code::instance(key, node)) else {
+                continue;
+            };
+            if c.state != CodeState::Edit || v.rev != Some(c.rev) {
+                continue;
+            }
+            if let Some(t) = code::unsaid(v, &v.text, &c.text) {
+                v.told = Some((t.clone(), t != c.text));
+                tell.push(Event::new(node, EventKind::Change, t));
+            }
+        }
+        for e in tell {
+            self.send_told(key, &e);
+        }
+    }
+
     pub(super) fn side_answered(&mut self, call: SideCall, answer: Result<Value, RpcError>) {
         match call {
             SideCall::Shell(owner) => match answer.and_then(decode::<TerminalSession>) {
@@ -236,14 +261,30 @@ impl App {
                     .st
                     .toast(format!("Failed to start terminal: {e}"), true),
             },
-            SideCall::Imported(drafts) => {
-                if answer.is_ok() {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let _ = std::fs::remove_file(drafts);
-                    #[cfg(target_arch = "wasm32")]
-                    let _ = drafts;
-                    self.st.side.save();
+            SideCall::Imported(file, drafts) => {
+                let Ok(v) = answer else {
+                    return;
+                };
+                let skipped: HashSet<&str> = v
+                    .get("skipped")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                let mut left = drafts.unwrap_or_default();
+                if let Some(m) = left.as_object_mut() {
+                    m.retain(|k, _| skipped.contains(k.as_str()));
                 }
+                if left.as_object().is_none_or(|m| m.is_empty()) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let _ = std::fs::remove_file(&file);
+                } else {
+                    let _ = crate::keep::write(&file, &left.to_string());
+                }
+                self.st.side.saved.files = None;
+                self.st.side.saved.cards = None;
+                self.st.side.save();
             }
             SideCall::Toggled(owner) => match answer {
                 Ok(v) => {
@@ -663,14 +704,14 @@ impl App {
             crate::keep::read(p).and_then(|s| serde_json::from_str::<Value>(&s).ok())
         };
         let drafts = read(&drafts_file);
-        let view = read(&crate::side::view_file(&dir));
-        let had = |k: &str| view.as_ref().and_then(|v| v.get(k)).is_some();
-        if drafts.is_none() && !had("files") && !had("cards") {
+        let saved = &self.st.side.saved;
+        if drafts.is_none() && saved.files.is_none() && saved.cards.is_none() {
             return;
         }
+        let view = json!({ "files": saved.files, "cards": saved.cards });
         let args = json!({ "drafts": drafts, "view": view });
         self.call(
-            Call::Side(SideCall::Imported(drafts_file)),
+            Call::Side(SideCall::Imported(drafts_file, drafts)),
             "extension:call",
             json!({ "id": FILES, "action": "import", "args": args }),
         );

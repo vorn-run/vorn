@@ -580,10 +580,10 @@ impl Files {
     }
 
     /// Takes what the desktop kept: answers how many things came over, and
-    /// how many drafts found no home, so their file is kept until they do.
+    /// the drafts that found no home, which the desktop keeps.
     fn import(&mut self, host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
         let mut n = 0;
-        let mut skipped = 0;
+        let mut skipped = Vec::new();
         if let Some(panes) = args.pointer("/view/files").and_then(Value::as_object) {
             for (owner, p) in panes {
                 if self.pane(host, owner)?.is_none() {
@@ -610,14 +610,14 @@ impl Files {
         if let Some(drafts) = args.get("drafts").and_then(Value::as_object) {
             for (key, d) in drafts {
                 let Ok(d) = serde_json::from_value::<Draft>(d.clone()) else {
-                    skipped += 1;
+                    skipped.push(key.clone());
                     continue;
                 };
                 let key = if key.starts_with("card:") {
                     match became.get(key.as_str()) {
                         Some(id) => id.clone(),
                         None => {
-                            skipped += 1;
+                            skipped.push(key.clone());
                             continue;
                         }
                     }

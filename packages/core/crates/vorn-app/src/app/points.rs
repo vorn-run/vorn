@@ -187,8 +187,14 @@ impl App {
         }
     }
 
-    /// Tells tree point `key`'s extension what happened; a bulk button's checks go with it.
+    /// Tells tree point `key`'s extension what happened, after any edit its
+    /// codes still hold back; a bulk button's checks go with it.
     pub(super) fn tell(&mut self, key: &str, event: &vorn_tree::Event) {
+        self.flush_codes(key);
+        self.send_told(key, event);
+    }
+
+    pub(super) fn send_told(&mut self, key: &str, event: &vorn_tree::Event) {
         let Some(params) = self.st.points.tell(key, event) else {
             return;
         };

@@ -156,12 +156,87 @@ fn the_files_pane_browses_edits_finds_saves_and_pops_out() {
     shot.click(&mut app, back);
     wait(&mut shot, &mut app, "Tab", "README.md");
 
+    // Typing still settling goes with its own file when the tab changes at once.
+    let readme = wait(&mut shot, &mut app, "MultilineTextInput", "Edit README.md");
+    shot.click(&mut app, readme);
+    shot.type_text(&mut app, "a");
+    wait(&mut shot, &mut app, "Button", "Save");
+    shot.type_text(&mut app, "late");
+    let ts = wait(&mut shot, &mut app, "Tab", "app.ts");
+    shot.click(&mut app, ts);
+    wait(&mut shot, &mut app, "MultilineTextInput", "Edit app.ts");
+    let md = wait(&mut shot, &mut app, "Tab", "README.md");
+    shot.click(&mut app, md);
+    let readme = wait(&mut shot, &mut app, "MultilineTextInput", "Edit README.md");
+    wait_for("the late typing in README.md", || {
+        app.pump();
+        shot.frame(&mut app);
+        shot.ui.edit_text(readme).contains("alate").then_some(())
+    });
+
     // A new app finds the pane, its tabs and the unsaved edit.
     drop(app);
     let mut again = support::connect(&v);
     let mut shot = Shot::new();
     wait(&mut shot, &mut again, "Tab", "app.ts");
     wait(&mut shot, &mut again, "Image", "Unsaved changes");
+}
+
+#[test]
+fn the_desktops_own_files_state_comes_over_and_its_drafts_go_only_once_all_are_taken() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = support::connect(&v);
+    let repo = seed_acme(&mut app, &v);
+    let sid = agent(&mut app, &repo);
+    drop(app);
+    let readme = repo.join("README.md").display().to_string();
+    let ts = repo.join("src/app.ts").display().to_string();
+    let desktop = v.home.join("desktop");
+    std::fs::create_dir_all(&desktop).expect("desktop");
+    let view = json!({
+        "files": { &sid: { "tabs": [&readme], "active": &readme } },
+        "cards": { "card:x": { "sessionId": &sid, "filePath": &ts } },
+    });
+    std::fs::write(desktop.join("view.json"), view.to_string()).expect("view");
+    let draft = |p: &str, t: &str| json!({ "filePath": p, "text": t, "base": null });
+    let mut drafts = json!({
+        format!("files:{sid}:{readme}"): draft(&readme, "# Kept\n"),
+        "card:x": draft(&ts, "// kept\n"),
+        "card:gone": draft(&ts, "// nowhere\n"),
+    });
+    std::fs::write(desktop.join("drafts.json"), drafts.to_string()).expect("drafts");
+
+    // A draft with no card to follow keeps the drafts file; the panes and cards are taken.
+    let mut app = support::connect(&v);
+    let mut shot = Shot::new();
+    wait(&mut shot, &mut app, "Tab", "README.md");
+    wait(&mut shot, &mut app, "Image", "Unsaved changes");
+    wait_for("the view without the desktop's Files state", || {
+        app.pump();
+        shot.frame(&mut app);
+        let text = std::fs::read_to_string(desktop.join("view.json")).ok()?;
+        (!text.contains("\"files\"") && !text.contains("\"cards\"")).then_some(())
+    });
+    assert!(desktop.join("drafts.json").is_file());
+    drop(app);
+
+    // Only the draft with no home is kept; once none is left, the file goes.
+    let left: Value =
+        serde_json::from_str(&std::fs::read_to_string(desktop.join("drafts.json")).expect("left"))
+            .expect("json");
+    assert_eq!(left.as_object().map(|m| m.len()), Some(1), "{left}");
+    assert!(left.get("card:gone").is_some());
+    drafts = json!({ format!("files:{sid}:{readme}"): draft(&readme, "# Kept\n") });
+    std::fs::write(desktop.join("drafts.json"), drafts.to_string()).expect("drafts");
+    let mut app = support::connect(&v);
+    let mut shot = Shot::new();
+    wait_for("the drafts file gone", || {
+        app.pump();
+        shot.frame(&mut app);
+        (!desktop.join("drafts.json").exists()).then_some(())
+    });
 }
 
 /// A shell with Vorn's integration on this machine.
