@@ -61,3 +61,13 @@ Version 1.1; the full text ships beside the fonts.
 
 - Inter: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter), `fonts/Inter-LICENSE.txt`
 - JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono), `fonts/JetBrainsMono-OFL.txt`
+
+## Bundled colour themes (`packages/core/crates/theme/themes/`)
+
+The colour values of these themes are taken from their projects, each under
+the MIT licence (the text of the idb section above, with the holder below):
+
+- Solarized (`solarized-dark.toml`, `solarized-light.toml`): Copyright (c) 2011 Ethan Schoonover.
+- Nord (`nord.toml`): Copyright (c) 2016-present Sven Greb.
+- Catppuccin (`catppuccin-mocha.toml`, `catppuccin-latte.toml`): Copyright (c) 2021 Catppuccin.
+- Dracula (`dracula.toml`): Copyright (c) 2023 Dracula Theme.

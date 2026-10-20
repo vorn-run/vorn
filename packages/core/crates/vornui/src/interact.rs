@@ -267,6 +267,8 @@ pub(crate) struct State {
     pub system_dark: bool,
     /// The system asks for less transparency.
     pub reduced_transparency: bool,
+    /// The window shows an OS material wherever the frame is see-through.
+    pub see_through: bool,
 }
 
 impl State {
@@ -309,6 +311,7 @@ impl State {
             window_focused: true,
             system_dark: true,
             reduced_transparency: crate::palette::system_reduced_transparency(),
+            see_through: false,
         }
     }
 
@@ -1059,6 +1062,16 @@ impl Ui {
 
     pub fn set_reduced_transparency(&mut self, reduced: bool) {
         self.st.reduced_transparency = reduced;
+    }
+
+    /// Whether the system's material shows through the window: the app
+    /// then clears to transparent and leaves its sidebar translucent.
+    pub fn see_through(&self) -> bool {
+        self.st.see_through
+    }
+
+    pub fn set_see_through(&mut self, on: bool) {
+        self.st.see_through = on;
     }
 
     pub fn set_maximized(&mut self, m: bool) {

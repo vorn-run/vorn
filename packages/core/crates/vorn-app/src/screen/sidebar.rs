@@ -1709,7 +1709,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
         .w(s.sidebar_w())
         .h_full()
         .shrink0()
-        .bg(c(look::SURFACE_PANEL))
+        .bg(crate::ui::theme::material::sidebar(s.ui.see_through()))
         .role(Role::Navigation, "Project sidebar")
         .child(
             div()

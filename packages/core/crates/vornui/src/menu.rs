@@ -823,7 +823,7 @@ pub fn panel<T>(
         .col()
         .w(w)
         .py(pad)
-        .bg(crate::theme::color::SURFACE_OVERLAY.rgba())
+        .floating()
         .border(1.0, crate::theme::bright(edge))
         .rounded(8.0)
         .opacity(p)
@@ -872,7 +872,7 @@ fn panel_inner<T>(ui: &Ui, group: Id, w: f32, items: Vec<Item<T>>) -> El {
         .col()
         .w(w)
         .py(4.0)
-        .bg(crate::theme::color::SURFACE_OVERLAY.rgba())
+        .floating()
         .border(1.0, crate::theme::bright(0.10))
         .rounded(8.0)
         .role(Role::Menu, "Submenu");

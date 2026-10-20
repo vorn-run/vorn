@@ -262,7 +262,7 @@ impl WindowApp for Web {
     }
 
     fn background(&self) -> Rgba {
-        Rgba::hex(look::SURFACE_BASE)
+        look::SURFACE_BASE.rgba()
     }
 
     fn wants_ime(&self) -> bool {
@@ -325,13 +325,13 @@ impl WindowApp for Web {
 /// A quiet screen with one line and an optional detail, while there is no app.
 fn status(ui: &Ui, line: &str, detail: Option<&str>) -> El {
     let (w, h) = ui.viewport();
-    let ink = |a| Rgba::hexa(look::INK, a);
+    let ink = |a| look::INK.alpha(a);
     div()
         .size(w, h)
         .col()
         .center()
         .gap(8.0)
-        .bg(Rgba::hex(look::SURFACE_BASE))
+        .bg(look::SURFACE_BASE.rgba())
         .child(text(line, 13.0, ink(look::INK_SECONDARY)))
         .child_if(detail.map(|d| text(d, 12.0, ink(look::INK_FAINT))))
 }

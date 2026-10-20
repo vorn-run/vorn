@@ -3266,7 +3266,12 @@ impl App {
     /// Builds, lays out and paints a frame into `ui.scene`, attaching and
     /// sizing each card's terminal to the box it got.
     pub fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        ui.begin(look::SURFACE_BASE.rgba());
+        let clear = if ui.see_through() {
+            crate::ui::theme::shadow(0.0)
+        } else {
+            look::SURFACE_BASE.rgba()
+        };
+        ui.begin(clear);
         let root = self.view(ui, size);
         let laid = ui.layout(root, size);
         self.paint(ui, &laid);

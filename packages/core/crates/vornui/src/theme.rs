@@ -278,6 +278,50 @@ pub mod blur {
     pub const GLASS: f32 = 16.0;
 }
 
+/// How floating surfaces blur what is under them when materials are on.
+pub mod material {
+    /// A backdrop blur and how opaque the surface over it stays.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct Tuning {
+        /// Standard deviation of the blur, logical pixels.
+        pub sigma: f32,
+        /// Alpha of the surface drawn over the blur.
+        pub opacity: f32,
+    }
+
+    /// Close to the macOS menu material: a light frost, mostly surface.
+    pub const APPLE: Tuning = Tuning {
+        sigma: 20.0,
+        opacity: 0.78,
+    };
+    /// Close to Acrylic: a wider blur under a thinner tint.
+    pub const ACRYLIC: Tuning = Tuning {
+        sigma: 30.0,
+        opacity: 0.65,
+    };
+
+    /// The sidebar's fill: its panel colour, or over the system's material
+    /// none at all (Native) or the theme's panel thinned (Themed).
+    pub fn sidebar(see_through: bool) -> crate::scene::Rgba {
+        use vorn_theme::{Materials, Token};
+        let panel = crate::palette::get(Token::SurfacePanel);
+        match crate::palette::materials() {
+            _ if !see_through => panel,
+            Materials::Themed => panel.alpha(0.6),
+            Materials::Native | Materials::Solid => panel.alpha(0.0),
+        }
+    }
+
+    /// This platform's tuning.
+    pub fn tuning() -> Tuning {
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
+            APPLE
+        } else {
+            ACRYLIC
+        }
+    }
+}
+
 /// `:focus-visible` from `global.css`: a 1px outline, 1px out, and the
 /// element's corners forced to 4px.
 pub mod focus {

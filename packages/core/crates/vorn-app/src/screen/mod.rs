@@ -135,12 +135,18 @@ impl Screen<'_> {
         if self.st.sidebar {
             row = row.child(sidebar::sidebar(self));
         }
+        // Over the system's material only the sidebar is see-through.
+        let (root_bg, main_bg) = if self.ui.see_through() {
+            (crate::ui::theme::shadow(0.0), c(look::SURFACE_BASE))
+        } else {
+            (c(look::SURFACE_BASE), crate::ui::theme::shadow(0.0))
+        };
         let mut root = div()
             .col()
             .w_full()
             .h_full()
-            .bg(c(look::SURFACE_BASE))
-            .child(row.child(main));
+            .bg(root_bg)
+            .child(row.child(main.bg(main_bg)));
         if self.st.view == MainView::Tasks {
             root = root.child_if(tasks::ghost(self));
         }

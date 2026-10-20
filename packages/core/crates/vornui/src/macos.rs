@@ -285,3 +285,81 @@ pub(crate) fn flush() {
         }
     }
 }
+
+thread_local! {
+    /// The material view behind this thread's window while it is on.
+    static MATERIAL: std::cell::RefCell<Option<Retained<NSView>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Puts the system's sidebar material behind the window's content, in the
+/// dark or light appearance, or takes it away and paints `solid` again.
+/// `false` when AppKit has no material view to give.
+pub(crate) fn set_material(window: &Window, dark: Option<bool>, solid: (f64, f64, f64)) -> bool {
+    let Some(content) = content_view(window) else {
+        return false;
+    };
+    let (Some(win), Some(frame)) = (content.window(), unsafe { content.superview() }) else {
+        return false;
+    };
+    MATERIAL.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(old) = m.take() {
+            // SAFETY: a view this module added, removed on the main thread.
+            unsafe { old.removeFromSuperview() };
+        }
+        let Some(dark) = dark else {
+            // SAFETY: plain setters on the live window, on the main thread.
+            unsafe {
+                win.setOpaque(true);
+                let (r, g, b) = solid;
+                let color = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+                win.setBackgroundColor(Some(&color));
+            }
+            return true;
+        };
+        let Some(cls) = objc2::runtime::AnyClass::get("NSVisualEffectView") else {
+            return false;
+        };
+        // NSVisualEffectMaterialSidebar, NSVisualEffectBlendingModeBehindWindow,
+        // NSVisualEffectStateFollowsWindowActiveState, width and height sizable.
+        const SIDEBAR: isize = 7;
+        const BEHIND_WINDOW: isize = 0;
+        const FOLLOWS_WINDOW: isize = 0;
+        const SIZABLE: usize = 2 | 16;
+        // NSWindowBelow.
+        const BELOW: isize = -1;
+        // SAFETY: AppKit's own view class made, configured and inserted on
+        // the main thread; the selectors and argument types are AppKit's.
+        unsafe {
+            let bounds = frame.bounds();
+            let view: *mut AnyObject = objc2::msg_send![cls, alloc];
+            let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: bounds];
+            let Some(view) = Retained::from_raw(view.cast::<NSView>()) else {
+                return false;
+            };
+            let _: () = objc2::msg_send![&*view, setMaterial: SIDEBAR];
+            let _: () = objc2::msg_send![&*view, setBlendingMode: BEHIND_WINDOW];
+            let _: () = objc2::msg_send![&*view, setState: FOLLOWS_WINDOW];
+            let _: () = objc2::msg_send![&*view, setAutoresizingMask: SIZABLE];
+            if let Some(appearance) = objc2::runtime::AnyClass::get("NSAppearance") {
+                let name = NSString::from_str(if dark {
+                    "NSAppearanceNameDarkAqua"
+                } else {
+                    "NSAppearanceNameAqua"
+                });
+                let a: *mut AnyObject = objc2::msg_send![appearance, appearanceNamed: &*name];
+                let _: () = objc2::msg_send![&*view, setAppearance: a];
+            }
+            let _: () = objc2::msg_send![
+                &*frame,
+                addSubview: &*view,
+                positioned: BELOW,
+                relativeTo: content
+            ];
+            win.setOpaque(false);
+            win.setBackgroundColor(Some(&objc2_app_kit::NSColor::clearColor()));
+            *m = Some(view);
+        }
+        true
+    })
+}

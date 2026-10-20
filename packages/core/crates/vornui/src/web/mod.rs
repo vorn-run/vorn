@@ -695,8 +695,35 @@ where
         clip,
     }));
     listen(&shared, &canvas, &input, &a11y_root, &doc)?;
+    follow_system_look(&shared, &win)?;
     let _ = input.focus();
     event_loop.spawn_app(Runner(shared));
+    Ok(())
+}
+
+/// Keeps the UI's idea of the system's dark appearance and Reduce
+/// transparency in step with the browser's media queries, live.
+fn follow_system_look<A: App>(
+    shared: &Rc<RefCell<Live<A>>>,
+    win: &web_sys::Window,
+) -> Result<(), JsValue> {
+    let queries: [(&str, fn(&mut Ui, bool)); 2] = [
+        ("(prefers-color-scheme: dark)", Ui::set_system_dark),
+        (
+            "(prefers-reduced-transparency: reduce)",
+            Ui::set_reduced_transparency,
+        ),
+    ];
+    for (query, set) in queries {
+        let Some(list) = win.match_media(query)? else {
+            continue;
+        };
+        set(&mut shared.borrow_mut().ui, list.matches());
+        on(&list, "change", shared, move |s, e: web_sys::MediaQueryListEvent| {
+            set(&mut s.ui, e.matches());
+            s.redraw_later();
+        })?;
+    }
     Ok(())
 }
 

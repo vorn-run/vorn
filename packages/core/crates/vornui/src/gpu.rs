@@ -342,7 +342,7 @@ impl GpuRenderer {
             r: f64::from(c[0]),
             g: f64::from(c[1]),
             b: f64::from(c[2]),
-            a: 1.0,
+            a: f64::from(c[3]),
         });
         let mut offsets = (0u32, 0u32);
         let mut start = 0;
