@@ -125,10 +125,12 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     main.ws.close()
     await closed
     const next = await openMain(server.vornd)
+    let claimed: { ok?: boolean } | undefined
     await until('main to be let go', async () => {
-      const claimed = (await identify(next.ws)).result as { ok?: boolean } | undefined
+      claimed = (await identify(next.ws)).result as { ok?: boolean } | undefined
       return claimed?.ok === true
     })
+    expect(claimed).toEqual({ ok: true })
     next.ws.close()
   })
 })
